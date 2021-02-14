@@ -1,0 +1,71 @@
+# Build APKs for Kiwi Browser
+name: automatic build of apk
+
+# Controls when the action will run. Triggers the workflow on push or pull request events
+on:
+  workflow_dispatch:
+  push:
+    paths-ignore:
+      - '*.md'
+      - '*.yml'
+    branches: [ master ]
+  pull_request:
+    paths-ignore:
+      - '*.md'
+      - '*.yml'
+    branches: [ master ]
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        platform: [arm, arm64, x86, x64]
+
+    # The GitHub Actions machines have a "slow disk", and a SSD "fast" disk.
+    # However, there is not enough space to do all the processing on the SSD.
+    
+    # We refer to the disks based on their name in /dev/disk
+    # /dev/disk/azure/root-part1 is / ("slow disk")
+    # /dev/disk/azure/resource-part1 is a 14 GB ephemeral SSD disk mounted in /mnt
+
+    # We store the source-code repository (kiwibrowser/src) on /dev/disk/azure/root-part1
+    # We store cache, dependencies and output on /dev/disk/azure/resource-part1 (SSD)
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - name: Initializing build
+        run: echo Initializing build for platform ${{ matrix.platform }}
+
+      - name: Reclaiming disk space on / by disabling swap partition
+        run: |
+          sudo swapoff -av
+          sudo rm -f /swapfile
+      - name: Reclaiming disk space on / by removing .NET framework
+        run: sudo rm -rf /usr/share/dotnet
+
+      - name: Checking-out source-code in $GITHUB_WORKSPACE
+        uses: actions/checkout@v2
+
+      - name: Creating secondary disk folder on /dev/disk/azure/resource-part1 (SSD)
+        run: |
+          sudo mkdir -p /extended_data
+          sudo chown -R runner:docker /extended_data
+      
+      # If you want to use only the SSD, you can use:
+      - name: On SSD - Creating symlink on /dev/disk/azure/root-part1 pointing to /dev/disk/azure/resource-part1
+        run: |
+          sudo ln -s /extended_data /mnt/secondary_disk
+          sudo ln -s /mnt/secondary_disk $GITHUB_WORKSPACE/
+      # or alternatively, to work on the main partition
+      # - name: On HDD - Creating symlink on /dev/disk/azure/root-part1 pointing to /dev/disk/azure/resource-part1
+      #  run: |
+      #    sudo ln -s /extended_data /mnt/secondary_disk
+      #    sudo ln -s /mnt/secondary_disk $GITHUB_WORKSPACE/
+
+      # We cannot checkout outside of $GITHUB_WORKSPACE, but we want to checkout to the SSD
