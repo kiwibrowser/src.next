@@ -9,12 +9,15 @@ is_component_build = false
 is_chrome_branded = false
 is_clang = true
 symbol_level = 1
+exclude_unwind_tables = false
+
 use_unofficial_version_number = false
 android_default_version_code = "1"
 android_keystore_name = "dev"
 android_keystore_password = "public_password"
 android_keystore_path = "../../keystore.jks"
 android_default_version_name = "Git"
+
 fieldtrial_testing_like_official_build = true
 icu_use_data_file = false
 enable_iterator_debugging = false
@@ -26,25 +29,18 @@ use_official_google_api_keys = true
 
 ffmpeg_branding = "Chrome"
 proprietary_codecs = true
-enable_hevc_demuxing = true
 enable_nacl = false
-enable_wifi_display = false
 enable_widevine = false
-enable_google_now = true
-enable_ac3_eac3_audio_demuxing = true
-enable_iterator_debugging = false
 enable_mse_mpeg2ts_stream_parser = true
 enable_remoting = false
 rtc_use_h264 = false
-rtc_use_lto = false
-use_openh264 = false
 
 v8_use_external_startup_data = true
 update_android_aar_prebuilts = true
 
-use_thin_lto = true
-
 enable_extensions = true
+enable_pdf = false
 enable_plugins = true
 
-cc_wrapper = "ccache"
+disable_android_lint = true
+treat_warnings_as_errors = false
