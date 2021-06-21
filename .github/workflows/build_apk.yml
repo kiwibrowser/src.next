@@ -69,3 +69,35 @@ jobs:
       #    sudo ln -s /mnt/secondary_disk $GITHUB_WORKSPACE/
 
       # We cannot checkout outside of $GITHUB_WORKSPACE, but we want to checkout to the SSD
+
+      - name: Creating output folder
+        run: mkdir -p secondary_disk/out/android_${{ matrix.platform }}
+
+      - name: Generating one-time APK signature key
+        run: keytool -genkey -v -keystore keystore.jks -alias dev -keyalg RSA -keysize 2048 -validity 10000 -storepass public_password -keypass public_password -dname "cn=Kiwi Browser (unverified), ou=Actions, o=Kiwi Browser, c=GitHub"
+
+
+      - name: Copying args.gn to target folder
+        run: cat .build/android_arm/args.gn | sed "s#target_cpu = \"arm\"#target_cpu = \"${{ matrix.platform }}\"#" | sed "s#android_default_version_name = \"Git\"#android_default_version_name = \"Git$(date '+%y%m%d')Gen${{ github.run_id }}\"#" > secondary_disk/out/android_${{ matrix.platform }}/args.gn
+
+      - name: Modifying args.gn (arm)
+        if: matrix.platform == 'arm'
+        run: sed -i "s#android_default_version_code = \"1\"#android_default_version_code = \"$(date '+%y%m%d')1\"#" secondary_disk/out/android_${{ matrix.platform }}/args.gn
+
+      - name: Modifying args.gn (arm64)
+        if: matrix.platform == 'arm64'
+        run: sed -i "s#android_default_version_code = \"1\"#android_default_version_code = \"$(date '+%y%m%d')2\"#" secondary_disk/out/android_${{ matrix.platform }}/args.gn
+
+      - name: Modifying args.gn (x86)
+        if: matrix.platform == 'x86'
+        run: sed -i "s#android_default_version_code = \"1\"#android_default_version_code = \"$(date '+%y%m%d')3\"#" secondary_disk/out/android_${{ matrix.platform }}/args.gn
+
+      - name: Modifying args.gn (x64)
+        if: matrix.platform == 'x64'
+        run: sed -i "s#android_default_version_code = \"1\"#android_default_version_code = \"$(date '+%y%m%d')4\"#" secondary_disk/out/android_${{ matrix.platform }}/args.gn
+
+      - name: Displaying args.gn
+        run: cat secondary_disk/out/android_${{ matrix.platform }}/args.gn
+
+      - name: Checking available disk-space
+        run: df -h
