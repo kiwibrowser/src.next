@@ -130,7 +130,7 @@ jobs:
         run: rclone copy --fast-list --transfers=128 cache:kiwibrowser-next-builds-${{ matrix.platform }}/ $HOME/kiwibrowser-next-builds-${{ matrix.platform }}
 
       - name: Listing files
-        run: ls -la $HOME
+        run: ls -la $HOME/kiwibrowser-next-builds-${{ matrix.platform }}
 
   sign_and_upload:
     runs-on: ubuntu-latest
