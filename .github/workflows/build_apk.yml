@@ -35,6 +35,7 @@ jobs:
         if: github.event_name != 'pull_request'
         run: wget -q 'https://build.find.kiwi/apks/${{ github.run_id }}/out.apk'
 
+    steps:
       - name: Creating release
         if: github.event_name != 'pull_request'
         id: create_release
