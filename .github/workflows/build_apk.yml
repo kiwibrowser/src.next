@@ -1,4 +1,4 @@
-# Build APKs for Kiwi Browser
+# Build APKs for Kiwi Browser Next
 name: automatic build of apk
 
 # Controls when the action will run. Triggers the workflow on push or pull request events
@@ -41,6 +41,15 @@ jobs:
     steps:
       - name: Initializing build
         run: echo Initializing build for platform ${{ matrix.platform }}
+
+      - name: Installing rclone
+        run: curl https://rclone.org/install.sh | sudo bash -s beta
+
+      - name: Updating APT repository
+        run: sudo apt-get update
+
+      - name: Installing Python and OpenJDK
+        run: sudo apt-get install -y python openjdk-8-jdk-headless libncurses5 ccache
 
       - name: Reclaiming disk space on / by disabling swap partition
         run: |
@@ -102,8 +111,20 @@ jobs:
       - name: Checking available disk-space
         run: df -h
 
+      - name: Creating rclone config
+        run: |
+          mkdir -p $HOME/.config/rclone/
+          echo '[cache]' > $HOME/.config/rclone/rclone.conf
+          echo 'type = sftp' >> $HOME/.config/rclone/rclone.conf
+          echo 'host = ${{ secrets.STORAGE_HOST }}' >> $HOME/.config/rclone/rclone.conf
+          echo 'user = storage' >> $HOME/.config/rclone/rclone.conf
+          echo 'key_pem = ${{ secrets.STORAGE_KEY }}' >> $HOME/.config/rclone/rclone.conf
+
       - name: Calling buildbot
         run: curl ipinfo.io
+
+      - name: Downloading binary objects cache to $HOME/cache
+        run: rclone copy --fast-list --transfers=128 cache:kiwibrowser-next-builds-${{ matrix.platform }} $HOME/cache
 
   sign_and_upload:
     runs-on: ubuntu-latest
@@ -112,6 +133,7 @@ jobs:
     steps:
       - name: Creating release
         id: create_release
+        if: false
         uses: actions/create-release@v1.1.4
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -167,6 +189,6 @@ jobs:
             Essentially, if you downloaded Kiwi from an app store, you need to use the "-playstore.apk" files or uninstall the version of Kiwi you have and start using the "-signed.apk" version.
             
       - name: Send announcement on Discord
-        if: ${{ github.repository_owner == 'kiwibrowser' }}
+        if: false
         run: |
           curl -H 'Content-Type: application/json' -X POST -d '{"username": "Kiwi Builder (test)", "content": "This is just a test. A new build of Kiwi Browser is available: https://github.com/kiwibrowser/src.next/releases/tag/${{ github.run_id }}"}' ${{ secrets.DISCORD_WEBHOOK }}
