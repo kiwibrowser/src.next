@@ -127,7 +127,7 @@ jobs:
         run: curl ipinfo.io
 
       - name: Downloading binary objects cache to $HOME/cache
-        run: rclone copy --fast-list --transfers=128 cache:kiwibrowser-next-builds-${{ matrix.platform }} $HOME/
+        run: rclone copy --fast-list --transfers=128 cache:kiwibrowser-next-builds-${{ matrix.platform }}/ $HOME/kiwibrowser-next-builds-${{ matrix.platform }}
 
       - name: Listing files
         run: ls -la $HOME
