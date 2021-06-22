@@ -25,7 +25,7 @@ enable_iterator_debugging = false
 google_api_key = "KIWIBROWSER"
 google_default_client_id = "42.apps.kiwibrowser.com"
 google_default_client_secret = "KIWIBROWSER_NOT_SO_SECRET"
-use_official_google_api_keys = true
+use_official_google_api_keys = false
 
 ffmpeg_branding = "Chrome"
 proprietary_codecs = true
