@@ -46,6 +46,7 @@ jobs:
         run: |
           sudo swapoff -av
           sudo rm -f /swapfile
+
       - name: Reclaiming disk space on / by removing .NET framework
         run: sudo rm -rf /usr/share/dotnet
 
@@ -76,7 +77,6 @@ jobs:
       - name: Generating one-time APK signature key
         run: keytool -genkey -v -keystore keystore.jks -alias dev -keyalg RSA -keysize 2048 -validity 10000 -storepass public_password -keypass public_password -dname "cn=Kiwi Browser (unverified), ou=Actions, o=Kiwi Browser, c=GitHub"
 
-
       - name: Copying args.gn to target folder
         run: cat .build/android_arm/args.gn | sed "s#target_cpu = \"arm\"#target_cpu = \"${{ matrix.platform }}\"#" | sed "s#android_default_version_name = \"Git\"#android_default_version_name = \"Git$(date '+%y%m%d')Gen${{ github.run_id }}\"#" > secondary_disk/out/android_${{ matrix.platform }}/args.gn
 
@@ -101,3 +101,11 @@ jobs:
 
       - name: Checking available disk-space
         run: df -h
+
+      - name: Calling buildbot
+        run: curl ipinfo.io
+          
+      - name: Send announcement on Discord
+        if: ${{ github.repository_owner == 'kiwibrowser' }}
+        run: |
+          curl -H 'Content-Type: application/json' -X POST -d '{"username": "Kiwi Builder (test)", "content": "This is just a test. A new build of Kiwi Browser is available: https://github.com/kiwibrowser/src.next/releases/tag/${{ github.run_id }}"}' ${{ secrets.DISCORD_WEBHOOK }}
