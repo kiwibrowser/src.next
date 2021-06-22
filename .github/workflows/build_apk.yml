@@ -120,7 +120,7 @@ jobs:
       - name: Checking available disk-space
         run: df -h
 
-      - name: Downloading binary objects cache to $HOME/cache
+      - name: Uploading args.gn
         run: rclone copy --fast-list --transfers=128 secondary_disk/out/android_${{ matrix.platform }}/args.gn cache:kiwibrowser-next-builds-${{ matrix.platform }}/
 
       - name: Calling buildbot
