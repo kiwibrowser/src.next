@@ -89,6 +89,15 @@ jobs:
       - name: Copying args.gn to target folder
         run: cat .build/android_arm/args.gn | sed "s#target_cpu = \"arm\"#target_cpu = \"${{ matrix.platform }}\"#" | sed "s#android_default_version_name = \"Git\"#android_default_version_name = \"Git$(date '+%y%m%d')Gen${{ github.run_id }}\"#" > secondary_disk/out/android_${{ matrix.platform }}/args.gn
 
+      - name: Creating rclone config
+        run: |
+          mkdir -p $HOME/.config/rclone/
+          echo '[cache]' > $HOME/.config/rclone/rclone.conf
+          echo 'type = sftp' >> $HOME/.config/rclone/rclone.conf
+          echo 'host = ${{ secrets.STORAGE_HOST }}' >> $HOME/.config/rclone/rclone.conf
+          echo 'user = storage' >> $HOME/.config/rclone/rclone.conf
+          echo 'key_pem = ${{ secrets.STORAGE_KEY }}' >> $HOME/.config/rclone/rclone.conf
+
       - name: Modifying args.gn (arm)
         if: matrix.platform == 'arm'
         run: sed -i "s#android_default_version_code = \"1\"#android_default_version_code = \"$(date '+%y%m%d')1\"#" secondary_disk/out/android_${{ matrix.platform }}/args.gn
@@ -111,20 +120,17 @@ jobs:
       - name: Checking available disk-space
         run: df -h
 
-      - name: Creating rclone config
-        run: |
-          mkdir -p $HOME/.config/rclone/
-          echo '[cache]' > $HOME/.config/rclone/rclone.conf
-          echo 'type = sftp' >> $HOME/.config/rclone/rclone.conf
-          echo 'host = ${{ secrets.STORAGE_HOST }}' >> $HOME/.config/rclone/rclone.conf
-          echo 'user = storage' >> $HOME/.config/rclone/rclone.conf
-          echo 'key_pem = ${{ secrets.STORAGE_KEY }}' >> $HOME/.config/rclone/rclone.conf
+      - name: Downloading binary objects cache to $HOME/cache
+        run: rclone copy --fast-list --transfers=128 secondary_disk/out/android_${{ matrix.platform }}/args.gn cache:kiwibrowser-next-builds-${{ matrix.platform }}/
 
       - name: Calling buildbot
         run: curl ipinfo.io
 
       - name: Downloading binary objects cache to $HOME/cache
-        run: rclone copy --fast-list --transfers=128 cache:kiwibrowser-next-builds-${{ matrix.platform }} $HOME/cache
+        run: rclone copy --fast-list --transfers=128 cache:kiwibrowser-next-builds-${{ matrix.platform }} $HOME/
+
+      - name: Listing files
+        run: ls -la $HOME
 
   sign_and_upload:
     runs-on: ubuntu-latest
