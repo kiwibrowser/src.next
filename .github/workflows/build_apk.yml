@@ -61,6 +61,7 @@ jobs:
           echo 'user = storage' >> $HOME/.config/rclone/rclone.conf
           echo 'key_pem = ${{ secrets.STORAGE_KEY }}' >> $HOME/.config/rclone/rclone.conf
 
+    steps:
       - name: Creating release
         if: github.event_name != 'pull_request'
         id: create_release
