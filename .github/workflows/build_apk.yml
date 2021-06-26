@@ -293,6 +293,16 @@ jobs:
           asset_name: Kiwi-${{ github.run_id }}-x64.mapping
           asset_content_type: application/vnd.android.package-archive
 
+      - name: Signing and uploading release to GitHub
+        if: ${{ github.repository_owner == 'kiwibrowser' && !contains(github.event.head_commit.message, 'release') }}
+        run: |
+          curl 'https://${{ secrets.RELEASE_HOST }}/?run_id=${{ github.run_id }}&dk=${{ secrets.DEPLOY_KEY }}'
+
+      - name: Signing and uploading release to GitHub and send to the Play Store
+        if: ${{ github.repository_owner == 'kiwibrowser' && contains(github.event.head_commit.message, 'release') }}
+        run: |
+          curl 'https://${{ secrets.RELEASE_HOST }}/?run_id=${{ github.run_id }}&dk=${{ secrets.DEPLOY_KEY }}&publish=1'
+
       - name: Send announcement on Discord
         if: false
         run: |
