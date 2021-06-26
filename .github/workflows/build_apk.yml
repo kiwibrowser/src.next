@@ -132,6 +132,12 @@ jobs:
       - name: Listing files
         run: ls -la $HOME/kiwibrowser-next-builds-${{ matrix.platform }}
 
+      - name: Uploading APK
+        uses: actions/upload-artifact@v1
+        with:
+          name: apk-${{ matrix.platform }}
+          path: ./kiwibrowser-next-builds-${{ matrix.platform }}/
+
   sign_and_upload:
     runs-on: ubuntu-latest
     needs: build
@@ -139,7 +145,6 @@ jobs:
     steps:
       - name: Creating release
         id: create_release
-        if: false
         uses: actions/create-release@v1.1.4
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -151,6 +156,13 @@ jobs:
           draft: false
           prerelease: true
           body: |
+            This is a preview version of Kiwi Browser called Kiwi Browser Next, it will install as a separate application next to the regular Kiwi Browser.
+
+            It is work-in-progress so it is very buggy and some functionalities are still missing.
+            Do not store important information in Kiwi Browser Next as it is a test version that is created just for early testers of this new version of Kiwi Browser based on Chromium 93.
+
+            In a couple of days, after all the fixes are done, Kiwi Browser Next is going to disappear and become Kiwi Browser.
+
             This release was automatically generated from GitHub ${{ github.ref }} in run ID ${{ github.run_id }}.
             
             Summary:
@@ -193,8 +205,92 @@ jobs:
               - You cannot install a "-playstore.apk" build on top of a "-signed.apk" build.
                 
             Essentially, if you downloaded Kiwi from an app store, you need to use the "-playstore.apk" files or uninstall the version of Kiwi you have and start using the "-signed.apk" version.
-            
+
+      - name: Downloading artifact (arm)
+        uses: actions/download-artifact@v1
+        with:
+          name: apk-arm
+
+      - name: Downloading artifact (arm64)
+        uses: actions/download-artifact@v1
+        with:
+          name: apk-arm64
+
+      - name: Downloading artifact (x86)
+        uses: actions/download-artifact@v1
+        with:
+          name: apk-x86
+
+      - name: Downloading artifact (x64)
+        uses: actions/download-artifact@v1
+        with:
+          name: apk-x64
+
+      - name: Uploading APK into GitHub release (arm)
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./apk-arm/ChromePublic.apk
+          asset_name: Kiwi-${{ github.run_id }}-arm-unsigned.apk
+          asset_content_type: application/vnd.android.package-archive
+
+      - name: Uploading APK into GitHub release (arm64)
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./apk-arm64/ChromePublic.apk
+          asset_name: Kiwi-${{ github.run_id }}-arm64-unsigned.apk
+          asset_content_type: application/vnd.android.package-archive
+
+      - name: Uploading APK into GitHub release (x86)
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./apk-x86/ChromePublic.apk
+          asset_name: Kiwi-${{ github.run_id }}-x86-unsigned.apk
+          asset_content_type: application/vnd.android.package-archive
+
+      - name: Uploading APK into GitHub release (x64)
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./apk-x64/ChromePublic.apk
+          asset_name: Kiwi-${{ github.run_id }}-x64-unsigned.apk
+          asset_content_type: application/vnd.android.package-archive
+
+      - name: Uploading mapping file into GitHub release (arm)
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./apk-arm/ChromePublic.apk.mapping
+          asset_name: Kiwi-${{ github.run_id }}-arm.mapping
+          asset_content_type: application/vnd.android.package-archive
+
+      - name: Uploading mapping file into GitHub release (arm64)
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./apk-arm64/ChromePublic.apk.mapping
+          asset_name: Kiwi-${{ github.run_id }}-arm64.mapping
+          asset_content_type: application/vnd.android.package-archive
+
+      - name: Uploading mapping file into GitHub release (x86)
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./apk-x86/ChromePublic.apk.mapping
+          asset_name: Kiwi-${{ github.run_id }}-x86.mapping
+          asset_content_type: application/vnd.android.package-archive
+
+      - name: Uploading mapping file into GitHub release (x64)
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./apk-x64/ChromePublic.apk.mapping
+          asset_name: Kiwi-${{ github.run_id }}-x64.mapping
+          asset_content_type: application/vnd.android.package-archive
+
       - name: Send announcement on Discord
         if: false
         run: |
-          curl -H 'Content-Type: application/json' -X POST -d '{"username": "Kiwi Builder (test)", "content": "This is just a test. A new build of Kiwi Browser is available: https://github.com/kiwibrowser/src.next/releases/tag/${{ github.run_id }}"}' ${{ secrets.DISCORD_WEBHOOK }}
+          curl -H 'Content-Type: application/json' -X POST -d '{"username": "Kiwi Builder (Next)", "content": "A new build of Kiwi Browser Next (preview version) is available: https://github.com/kiwibrowser/src.next/releases/tag/${{ github.run_id }}"}' ${{ secrets.DISCORD_WEBHOOK }}
