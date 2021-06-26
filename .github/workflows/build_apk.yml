@@ -136,7 +136,7 @@ jobs:
         uses: actions/upload-artifact@v1
         with:
           name: apk-${{ matrix.platform }}
-          path: ./kiwibrowser-next-builds-${{ matrix.platform }}/
+          path: $HOME/kiwibrowser-next-builds-${{ matrix.platform }}/
 
   sign_and_upload:
     runs-on: ubuntu-latest
