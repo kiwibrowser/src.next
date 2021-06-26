@@ -124,19 +124,22 @@ jobs:
         run: rclone copy --fast-list --transfers=128 secondary_disk/out/android_${{ matrix.platform }}/args.gn cache:kiwibrowser-next-builds-${{ matrix.platform }}/
 
       - name: Calling buildbot
+        if: false
         run: curl ipinfo.io
 
       - name: Downloading binary objects cache to $HOME/cache
         run: rclone copy --fast-list --transfers=128 cache:kiwibrowser-next-builds-${{ matrix.platform }}/ $HOME/kiwibrowser-next-builds-${{ matrix.platform }}
 
       - name: Listing files
-        run: ls -la $HOME/kiwibrowser-next-builds-${{ matrix.platform }}
+        run: |
+          echo $HOME
+          ls -la $HOME/kiwibrowser-next-builds-${{ matrix.platform }}
 
       - name: Uploading APK
         uses: actions/upload-artifact@v1
         with:
           name: apk-${{ matrix.platform }}
-          path: $HOME/kiwibrowser-next-builds-${{ matrix.platform }}/
+          path: ../kiwibrowser-next-builds-${{ matrix.platform }}/
 
   sign_and_upload:
     runs-on: ubuntu-latest
