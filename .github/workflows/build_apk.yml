@@ -139,6 +139,18 @@ jobs:
     needs: build
 
     steps:
+      - name: Installing rclone
+        run: curl https://rclone.org/install.sh | sudo bash -s beta
+    
+      - name: Creating rclone config
+        run: |
+          mkdir -p $HOME/.config/rclone/
+          echo '[cache]' > $HOME/.config/rclone/rclone.conf
+          echo 'type = sftp' >> $HOME/.config/rclone/rclone.conf
+          echo 'host = ${{ secrets.STORAGE_HOST }}' >> $HOME/.config/rclone/rclone.conf
+          echo 'user = storage' >> $HOME/.config/rclone/rclone.conf
+          echo 'key_pem = ${{ secrets.STORAGE_KEY }}' >> $HOME/.config/rclone/rclone.conf
+
       - name: Creating release
         id: create_release
         uses: actions/create-release@v1.1.4
