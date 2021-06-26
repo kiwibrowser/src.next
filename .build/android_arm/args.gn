@@ -40,7 +40,7 @@ update_android_aar_prebuilts = true
 
 enable_extensions = true
 enable_pdf = false
-enable_plugins = true
+enable_plugins = false
 
 disable_android_lint = true
 treat_warnings_as_errors = false
