@@ -130,6 +130,9 @@ jobs:
       - name: Downloading binary objects cache to $HOME/cache
         run: rclone copy --fast-list --transfers=128 cache:kiwibrowser-next-builds-${{ matrix.platform }}/ $HOME/kiwibrowser-next-builds-${{ matrix.platform }}
 
+      - name: Transferring build to the standard Kiwi Browser run ID
+        run: rclone copy --fast-list --transfers=128 cache:kiwibrowser-next-builds-${{ matrix.platform }}/ cache:kiwibrowser-builds/${{ github.run_id }}/${{ matrix.platform }}
+
       - name: Listing files
         run: |
           echo $HOME
