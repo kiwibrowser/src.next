@@ -111,17 +111,17 @@ jobs:
         run: df -h
 
       - name: Uploading args.gn
-        run: rclone copy --fast-list --transfers=128 secondary_disk/out/android_${{ matrix.platform }}/args.gn cache:kiwibrowser-next-builds-${{ matrix.platform }}/
+        run: rclone copy --fast-list --transfers=128 --retries=10 secondary_disk/out/android_${{ matrix.platform }}/args.gn cache:kiwibrowser-next-builds-${{ matrix.platform }}/
 
       - name: Calling buildbot
         if: false
         run: curl ipinfo.io
 
       - name: Downloading binary objects cache to $HOME/cache
-        run: rclone copy --fast-list --transfers=128 cache:kiwibrowser-next-builds-${{ matrix.platform }}/ $HOME/kiwibrowser-next-builds-${{ matrix.platform }}
+        run: rclone copy --fast-list --transfers=128 --retries=10 cache:kiwibrowser-next-builds-${{ matrix.platform }}/ $HOME/kiwibrowser-next-builds-${{ matrix.platform }}
 
       - name: Transferring build to the standard Kiwi Browser run ID
-        run: rclone copy --fast-list --transfers=128 cache:kiwibrowser-next-builds-${{ matrix.platform }}/ cache:kiwibrowser-builds/${{ github.run_id }}/${{ matrix.platform }}
+        run: rclone copy --fast-list --transfers=128 --retries=10 cache:kiwibrowser-next-builds-${{ matrix.platform }}/ cache:kiwibrowser-builds/${{ github.run_id }}/${{ matrix.platform }}
 
       - name: Listing files
         run: |
@@ -327,10 +327,10 @@ jobs:
       - name: Downloading artifacts from storage
         if: ${{ github.repository_owner == 'kiwibrowser' }}
         run: |
-          rclone copy --fast-list --transfers=128 cache:kiwibrowser-builds/${{ github.run_id }}/arm/ ./apk-arm 
-          rclone copy --fast-list --transfers=128 cache:kiwibrowser-builds/${{ github.run_id }}/arm64/ ./apk-arm64
-          rclone copy --fast-list --transfers=128 cache:kiwibrowser-builds/${{ github.run_id }}/x86/ ./apk-x86
-          rclone copy --fast-list --transfers=128 cache:kiwibrowser-builds/${{ github.run_id }}/x64/ ./apk-x64
+          rclone copy --fast-list --transfers=128 --retries=10 cache:kiwibrowser-builds/${{ github.run_id }}/arm/ ./apk-arm 
+          rclone copy --fast-list --transfers=128 --retries=10 cache:kiwibrowser-builds/${{ github.run_id }}/arm64/ ./apk-arm64
+          rclone copy --fast-list --transfers=128 --retries=10 cache:kiwibrowser-builds/${{ github.run_id }}/x86/ ./apk-x86
+          rclone copy --fast-list --transfers=128 --retries=10 cache:kiwibrowser-builds/${{ github.run_id }}/x64/ ./apk-x64
 
       - name: Uploading release asset (arm-signed)
         if: ${{ github.repository_owner == 'kiwibrowser' }}
