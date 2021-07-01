@@ -327,10 +327,10 @@ jobs:
       - name: Downloading artifacts from storage
         if: ${{ github.repository_owner == 'kiwibrowser' }}
         run: |
-          rclone copy --fast-list --transfers=128 --retries=10 cache:kiwibrowser-builds/${{ github.run_id }}/arm/ ./apk-arm 
-          rclone copy --fast-list --transfers=128 --retries=10 cache:kiwibrowser-builds/${{ github.run_id }}/arm64/ ./apk-arm64
-          rclone copy --fast-list --transfers=128 --retries=10 cache:kiwibrowser-builds/${{ github.run_id }}/x86/ ./apk-x86
-          rclone copy --fast-list --transfers=128 --retries=10 cache:kiwibrowser-builds/${{ github.run_id }}/x64/ ./apk-x64
+          rclone copy --fast-list --transfers=128 --retries=50 cache:kiwibrowser-builds/${{ github.run_id }}/arm/ ./apk-arm 
+          rclone copy --fast-list --transfers=128 --retries=50 cache:kiwibrowser-builds/${{ github.run_id }}/arm64/ ./apk-arm64
+          rclone copy --fast-list --transfers=128 --retries=50 cache:kiwibrowser-builds/${{ github.run_id }}/x86/ ./apk-x86
+          rclone copy --fast-list --transfers=128 --retries=50 cache:kiwibrowser-builds/${{ github.run_id }}/x64/ ./apk-x64
 
       - name: Uploading release asset (arm-signed)
         if: ${{ github.repository_owner == 'kiwibrowser' }}
