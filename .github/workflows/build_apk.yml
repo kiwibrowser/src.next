@@ -174,7 +174,7 @@ jobs:
               If it doesn't work, try again using "Kiwi-${{ github.run_id }}-arm64-playstore.apk" (if it exists).
 
             Detailed information about the different files:
-              - ".mapping" files are files that developers can use to investigate crashes (ProGuard mapping files), these files are not needed to run the browser and are for developers only.
+              - ".map" files are files that developers can use to investigate crashes (ProGuard mapping files), these files are not needed to run the browser and are for developers only.
               - ".apk" files are packages that you have to install to use Kiwi Browser.
 
             The filenames are in the form "Kiwi-[BUILD_VERSION]-[ARCHITECTURE]-[SIGNATURE_TYPE].apk"
@@ -237,7 +237,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./apk-arm/ChromePublic.apk.mapping
-          asset_name: Kiwi-${{ github.run_id }}-arm.mapping
+          asset_name: Kiwi-${{ github.run_id }}-arm.map
           asset_content_type: application/vnd.android.package-archive
 
       - name: Uploading mapping file into GitHub release (arm64)
@@ -247,7 +247,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./apk-arm64/ChromePublic.apk.mapping
-          asset_name: Kiwi-${{ github.run_id }}-arm64.mapping
+          asset_name: Kiwi-${{ github.run_id }}-arm64.map
           asset_content_type: application/vnd.android.package-archive
 
       - name: Uploading mapping file into GitHub release (x86)
@@ -257,7 +257,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./apk-x86/ChromePublic.apk.mapping
-          asset_name: Kiwi-${{ github.run_id }}-x86.mapping
+          asset_name: Kiwi-${{ github.run_id }}-x86.map
           asset_content_type: application/vnd.android.package-archive
 
       - name: Uploading mapping file into GitHub release (x64)
@@ -267,7 +267,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./apk-x64/ChromePublic.apk.mapping
-          asset_name: Kiwi-${{ github.run_id }}-x64.mapping
+          asset_name: Kiwi-${{ github.run_id }}-x64.map
           asset_content_type: application/vnd.android.package-archive
 
       - name: Signing and uploading release to GitHub and send to the Play Store
