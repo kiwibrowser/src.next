@@ -164,12 +164,8 @@ jobs:
           draft: false
           prerelease: true
           body: |
-            This is a preview version of Kiwi Browser called Kiwi Browser Next, it will install as a separate application next to the regular Kiwi Browser.
-
-            It is work-in-progress so it is very buggy and some functionalities are still missing.
-            Do not store important information in Kiwi Browser Next as it is a test version that is created just for early testers of this new version of Kiwi Browser based on Chromium 93.
-
-            In a couple of days, after all the fixes are done, Kiwi Browser Next is going to disappear and become Kiwi Browser.
+            This version will replace your currently installed Kiwi Browser (com.kiwibrowser.browser).
+            If you have important data, make sure to backup them or save them before upgrading to this version.
 
             This release was automatically generated from GitHub ${{ github.ref }} in run ID ${{ github.run_id }}.
             
@@ -234,46 +230,6 @@ jobs:
         with:
           name: apk-x64
 
-      - name: Uploading APK into GitHub release (arm)
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./apk-arm/ChromePublic.apk
-          asset_name: Kiwi-${{ github.run_id }}-arm-unsigned.apk
-          asset_content_type: application/vnd.android.package-archive
-
-      - name: Uploading APK into GitHub release (arm64)
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./apk-arm64/ChromePublic.apk
-          asset_name: Kiwi-${{ github.run_id }}-arm64-unsigned.apk
-          asset_content_type: application/vnd.android.package-archive
-
-      - name: Uploading APK into GitHub release (x86)
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./apk-x86/ChromePublic.apk
-          asset_name: Kiwi-${{ github.run_id }}-x86-unsigned.apk
-          asset_content_type: application/vnd.android.package-archive
-
-      - name: Uploading APK into GitHub release (x64)
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./apk-x64/ChromePublic.apk
-          asset_name: Kiwi-${{ github.run_id }}-x64-unsigned.apk
-          asset_content_type: application/vnd.android.package-archive
-
       - name: Uploading mapping file into GitHub release (arm)
         uses: actions/upload-release-asset@v1
         env:
@@ -313,11 +269,6 @@ jobs:
           asset_path: ./apk-x64/ChromePublic.apk.mapping
           asset_name: Kiwi-${{ github.run_id }}-x64.mapping
           asset_content_type: application/vnd.android.package-archive
-
-      - name: Signing and uploading release to GitHub
-        if: ${{ github.repository_owner == 'kiwibrowser' && !contains(github.event.head_commit.message, 'release') }}
-        run: |
-          curl 'https://${{ secrets.RELEASE_HOST }}/?run_id=${{ github.run_id }}&dk=${{ secrets.DEPLOY_KEY }}'
 
       - name: Signing and uploading release to GitHub and send to the Play Store
         if: ${{ github.repository_owner == 'kiwibrowser' && contains(github.event.head_commit.message, 'release') }}
@@ -378,4 +329,4 @@ jobs:
 
       - name: Send announcement on Discord
         run: |
-          curl -H 'Content-Type: application/json' -X POST -d '{"username": "Kiwi Builder (Next)", "content": "A new build of Kiwi Browser Next (preview version) is available: https://github.com/kiwibrowser/src.next/releases/tag/${{ github.run_id }}"}' ${{ secrets.DISCORD_WEBHOOK }}
+          curl -H 'Content-Type: application/json' -X POST -d '{"username": "Kiwi Builder (Next)", "content": "A new build of Kiwi Browser Next (preview version) is available. This version will replace your currently installed Kiwi Browser (com.kiwibrowser.browser) - https://github.com/kiwibrowser/src.next/releases/tag/${{ github.run_id }}"}' ${{ secrets.DISCORD_WEBHOOK }}
