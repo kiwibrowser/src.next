@@ -3,7 +3,7 @@ target_cpu = "arm"
 is_debug = false
 is_java_debug = false
 
-android_channel = "dev"
+android_channel = "default"
 is_official_build = true
 is_component_build = false
 is_chrome_branded = false
