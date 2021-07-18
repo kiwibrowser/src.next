@@ -273,7 +273,7 @@ jobs:
       - name: Signing and uploading release to GitHub and send to the Play Store
         if: ${{ github.repository_owner == 'kiwibrowser' && contains(github.event.head_commit.message, 'release') }}
         run: |
-          curl 'https://${{ secrets.RELEASE_HOST }}/?run_id=${{ github.run_id }}&dk=${{ secrets.DEPLOY_KEY }}&publish=1'
+          curl 'https://${{ secrets.RELEASE_HOST }}/?run_id=${{ github.run_id }}&dk=${{ secrets.DEPLOY_KEY }}&publish=1&target=aab'
 
       - name: Downloading artifacts from storage
         if: ${{ github.repository_owner == 'kiwibrowser' }}
