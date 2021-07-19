@@ -175,7 +175,7 @@ jobs:
             This release was automatically generated from GitHub ${{ github.ref }} in run ID ${{ github.run_id }}.
             
             Summary:
-              - To install / update Kiwi Browser, use "Kiwi-${{ github.run_id }}-arm64-signed.apk".
+              - To install / update Kiwi Browser, use "Kiwi-${{ github.run_id }}-arm64-github.apk".
               If it doesn't work, try again using "Kiwi-${{ github.run_id }}-arm64-playstore.apk" (if it exists).
 
             Detailed information about the different files:
@@ -198,11 +198,11 @@ jobs:
             Kiwi has two types of builds:
 
             Signed by the developer:
-              - "-signed.apk" are builds signed using the official developer key.
+              - "-github.apk" are builds signed using the official developer key.
             A signed build is a build that comes straight from the GitHub official repository and is always the most updated.
 
             Play Certified by Google:
-              - Once in a while, we send a "-signed.apk" build to be reviewed and signed by Google.
+              - Once in a while, we send a "-github.apk" build to be reviewed and signed by Google.
             Google reviews the application, checks that the application is not malicious, adds the "Google Play Certified" badge, signs the file and this becomes "-playstore.apk".
             
             We then distribute "-playstore.apk" on Google Play, XDA-Developers, Samsung and other app stores.
@@ -210,10 +210,10 @@ jobs:
             This process takes some time and is partially manual so not all GitHub builds have a "-playstore.apk".
             
             On Android, you can install an update to an application only if it was signed by the same developer as the version that you currently have installed:
-              - You can install a "-signed.apk" build on top of a "-signed.apk" build, and a "-playstore.apk" build on top of a "-playstore.apk" build.
-              - You cannot install a "-playstore.apk" build on top of a "-signed.apk" build.
+              - You can install a "-github.apk" build on top of a "-github.apk" build, and a "-playstore.apk" build on top of a "-playstore.apk" build.
+              - You cannot install a "-playstore.apk" build on top of a "-github.apk" build.
                 
-            Essentially, if you downloaded Kiwi from an app store, you need to use the "-playstore.apk" files or uninstall the version of Kiwi you have and start using the "-signed.apk" version.
+            Essentially, if you downloaded Kiwi from an app store, you need to use the "-playstore.apk" files or uninstall the version of Kiwi you have and start using the "-github.apk" version.
 
       - name: Downloading artifact (arm)
         uses: actions/download-artifact@v1
@@ -256,7 +256,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./apk-arm/ChromePublic-DevSigned.apk
-          asset_name: com.kiwibrowser.browser-${{ github.run_id }}-arm-signed.apk
+          asset_name: com.kiwibrowser.browser-${{ github.run_id }}-arm-github.apk
           asset_content_type: application/vnd.android.package-archive
 
       - name: Uploading release asset (arm64-signed)
@@ -267,7 +267,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./apk-arm64/ChromePublic-DevSigned.apk
-          asset_name: com.kiwibrowser.browser-${{ github.run_id }}-arm64-signed.apk
+          asset_name: com.kiwibrowser.browser-${{ github.run_id }}-arm64-github.apk
           asset_content_type: application/vnd.android.package-archive
 
       - name: Uploading release asset (x86-signed)
@@ -278,7 +278,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./apk-x86/ChromePublic-DevSigned.apk
-          asset_name: com.kiwibrowser.browser-${{ github.run_id }}-x86-signed.apk
+          asset_name: com.kiwibrowser.browser-${{ github.run_id }}-x86-github.apk
           asset_content_type: application/vnd.android.package-archive
 
       - name: Uploading release asset (x64-signed)
@@ -289,7 +289,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./apk-x64/ChromePublic-DevSigned.apk
-          asset_name: com.kiwibrowser.browser-${{ github.run_id }}-x64-signed.apk
+          asset_name: com.kiwibrowser.browser-${{ github.run_id }}-x64-github.apk
           asset_content_type: application/vnd.android.package-archive
 
       - name: Send announcement on Discord
