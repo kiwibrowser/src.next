@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<!-- Copyright 2014 The Chromium Authors. All rights reserved.
+
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file.
+-->
+
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:drawable="@color/distilled_page_prefs_selected"
+        android:state_checked="true" />
+    <item
+        android:drawable="@color/distilled_page_prefs_unselected"
+        android:state_checked="false" />
+</selector>
