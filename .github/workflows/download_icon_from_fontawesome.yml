@@ -1,0 +1,18 @@
+name: Download icon from fontawesome
+
+on:
+  workflow_dispatch:
+    inputs:
+      iconNameInFontawesome:
+        description: 'Name of the icon in Fontawesome'     
+        required: true
+      iconNameInChromium:
+        description: 'Name of the icon in Chromium'     
+        required: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Initializing build
+        run: echo Initializing build for platform
