@@ -43,12 +43,12 @@ jobs:
       - name: Install ImageMagick
         run: sudo apt-get install imagemagick
         
-      - name: Execute Script - Replace match icons with new FA
+      - name: Execute Script - Replace icons with new FA ones
         run: bash iconUpdateScript.sh "./node_modules/@fortawesome/fontawesome-pro/svgs/${{ github.event.inputs.iconTypeFA }}/${{ github.event.inputs.iconNameFA }}.svg" "${{ github.event.inputs.fileNameInChromium }}" "${{ github.event.inputs.fillColor }}"
       
       - name: Git Auto Commit
         uses: stefanzweifel/git-auto-commit-action@v4.11.0
         with:
           # Commit message
-          commit_message: Update ${{ github.event.inputs.iconNameFA }} icon
+          commit_message: Update ${{ github.event.inputs.fileNameInChromium }} with ${{ github.event.inputs.iconTypeFA }}/${{ github.event.inputs.iconNameFA }} icon
           file_pattern: chrome/*/*.png
