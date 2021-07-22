@@ -3,16 +3,52 @@ name: Download icon from fontawesome
 on:
   workflow_dispatch:
     inputs:
-      iconNameInFontawesome:
+      iconNameFA:
         description: 'Name of the icon in Fontawesome'     
         required: true
-      iconNameInChromium:
+      iconTypeFA:
+        description: 'Type of the icon in Fontawesome'     
+        required: true
+      fillColor:
+        description: 'Edit fill/stroke color of the icon'   
+        required: false 
+      fileNameInChromium:
         description: 'Name of the icon in Chromium'     
         required: true
+      
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Initializing build
-        run: echo Initializing build for platform
+      - name: Checkout Repo
+        uses: actions/checkout@v2.3.4
+          
+      - name: Setup Node
+        uses: actions/setup-node@v1
+        with:
+          node-version: '10.x'
+
+      - name: npm config registry
+        env:
+          FONTAWESOME_NPM_AUTH_TOKEN: ${{ secrets.FONTAWESOME_NPM_AUTH_TOKEN }}
+        run: |
+          npm config set "@fortawesome:registry" https://npm.fontawesome.com/
+          npm config set "//npm.fontawesome.com/:_authToken" "$FONTAWESOME_NPM_AUTH_TOKEN"
+      - name: npm install FA package
+        run: npm install --save @fortawesome/fontawesome-pro@next
+        
+      - name: Install librsvg2
+        run: sudo apt install librsvg2-bin
+      
+      - name: Install ImageMagick
+        run: sudo apt-get install imagemagick
+        
+      - name: Execute Script - Replace match icons with new FA
+        run: bash iconUpdateScript.sh "./node_modules/@fortawesome/fontawesome-pro/svgs/${{ github.event.inputs.iconTypeFA }}/${{ github.event.inputs.iconNameFA }}.svg" "${{ github.event.inputs.fileNameInChromium }}" "${{ github.event.inputs.fillColor }}"
+      
+      - name: Git Auto Commit
+        uses: stefanzweifel/git-auto-commit-action@v4.11.0
+        with:
+          # Commit message
+          commit_message: Update ${{ github.event.inputs.iconNameFA }} icon
+          file_pattern: chrome/*/*.png
