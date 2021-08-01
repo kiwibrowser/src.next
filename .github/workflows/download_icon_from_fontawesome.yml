@@ -44,7 +44,7 @@ jobs:
         run: sudo apt-get install imagemagick
         
       - name: Execute Script - Replace icons with new FA ones
-        run: bash iconUpdateScript.sh "./node_modules/@fortawesome/fontawesome-pro/svgs/${{ github.event.inputs.iconTypeFA }}/${{ github.event.inputs.iconNameFA }}.svg" "${{ github.event.inputs.fileNameInChromium }}" "${{ github.event.inputs.fillColor }}"
+        run: bash ./toolbox/icon_update_script.sh "./node_modules/@fortawesome/fontawesome-pro/svgs/${{ github.event.inputs.iconTypeFA }}/${{ github.event.inputs.iconNameFA }}.svg" "${{ github.event.inputs.fileNameInChromium }}" "${{ github.event.inputs.fillColor }}"
       
       - name: Git Auto Commit
         uses: stefanzweifel/git-auto-commit-action@v4.11.0
