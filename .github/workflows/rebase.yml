@@ -28,4 +28,4 @@ jobs:
       - uses: actions/checkout@v2
         with:
           repository: 'chromium/chromium'
-          ref: 'tags/${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}'
+          ref: '${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}'
