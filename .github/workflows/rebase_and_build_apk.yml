@@ -2,8 +2,6 @@ name: rebase and build APK
 
 on:
   workflow_dispatch:
-
-on:
   push:
     paths:
       - 'upstream'
