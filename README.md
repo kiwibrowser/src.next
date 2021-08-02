@@ -260,6 +260,20 @@ it's slightly more convenient if you write:
 
 This way, when adding a new domain, or a new exception in general, the developer only needs to copy-paste the line, and this is very convenient (especially for the contributors on mobile).
 
+## Navigating the source-code
+
+Android:
+ - Main menu is in: chrome/android/java/src/org/chromium/chrome/browser/app/appmenu
+ - Settings screen is in: chrome/android/java/src/org/chromium/chrome/browser/settings and chrome/android/java/res/xml
+
+HTML:
+ - kiwi://extensions is in: chrome/browser/resources/extensions
+ - kiwi://chrome-search (new tab page) is in: chrome/browser/resources/new_tab_page_instant
+
+Translations:
+ - To add a new translation string in English: chrome/android/java/res/values/strings.xml
+ - To translate strings in other languages, go to https://crowdin.com/project/kiwibrowser and once you have updated the translations, run GitHub Action "Download translations from Crowdin" to download them back to the repository
+
 ## Adding a new setting
 
 In Kiwi it's much better to add Settings directly in the user interface, rather than add flags in kiwi://flags.
