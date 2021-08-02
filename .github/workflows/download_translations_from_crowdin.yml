@@ -9,7 +9,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2.3.4
-          
+      
+      - name: Downloading translations
+        run: php toolbox/download_translations_from_crowdin.php ${{ secrets.CROWDIN_APIKEY }}
+
       - name: Git auto-commit
         uses: stefanzweifel/git-auto-commit-action@v4.11.0
         with:
