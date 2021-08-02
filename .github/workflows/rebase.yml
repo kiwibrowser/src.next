@@ -14,6 +14,10 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
+      # For some reasons Git thinks it is a good idea to compact the Chromium repository
+      - name: Disable Git auto-packing
+        run: git config --global gc.auto 0
+
       - name: Loading settings from CHROMIUM_VERSION
         run: |
           source CHROMIUM_VERSION; export $(cut -d= -f1 CHROMIUM_VERSION | grep -vF '#')
