@@ -1,4 +1,4 @@
-name: Rebase on new Chromium VERSION
+name: Rebase on new Chromium version
 
 on:
   workflow_dispatch:
@@ -14,8 +14,11 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
+      - name: Loading settings from CHROMIUM_VERSION
+        run: source CHROMIUM_VERSION; export $(cut -d= -f1 CHROMIUM_VERSION)
+        
       - name: Downloading files
-        run: source CHROMIUM_VERSION; wget "https://chromium.googlesource.com/chromium/src/+/refs/tags/${CHROMIUM_MAJOR}.${CHROMIUM_MINOR}.${CHROMIUM_BUILD}.${CHROMIUM_PATCH}/chrome/browser/resources/extensions/extensions.html?format=TEXT' -O chrome/browser/resources/extensions/extensions.html
+        run: wget "https://chromium.googlesource.com/chromium/src/+/refs/tags/${CHROMIUM_MAJOR}.${CHROMIUM_MINOR}.${CHROMIUM_BUILD}.${CHROMIUM_PATCH}/chrome/browser/resources/extensions/extensions.html?format=TEXT' -O chrome/browser/resources/extensions/extensions.html
         
       - name: Outputting file
         run: cat chrome/browser/resources/extensions/extensions.html | base64 --decode
