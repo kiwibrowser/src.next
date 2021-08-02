@@ -9,9 +9,9 @@ function rglob($pattern, $flags = 0) {
 }
 
 $url = 'https://api.crowdin.com/api/project/kiwibrowser/export?key=' . $argv[1];
-passthru('curl ' . escapeshellarg($url));
+passthru('curl -s ' . escapeshellarg($url));
 $zip_url = 'https://api.crowdin.com/api/project/kiwibrowser/download/all.zip?key=' . $argv[1];
-passthru('rm ../translations.zip ; wget ' . escapeshellarg($zip_url) . ' -O ../translations.zip');
+passthru('rm ../translations.zip ; wget -q ' . escapeshellarg($zip_url) . ' -O ../translations.zip');
 passthru('rm -rf ../translations_tmp/*');
 passthru('unzip -q -o -d ../translations_tmp/ ../translations.zip');
 passthru('chmod -R 744 ../translations_tmp/');
