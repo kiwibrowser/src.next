@@ -18,7 +18,7 @@ jobs:
         run: echo Rebasing files
 
       - name: Downloading files
-        run: wget 'https://chromium.googlesource.com/chromium/src/+blame/93.0.4577.20/chrome/browser/resources/extensions/extensions.html?format=TEXT' -O chrome/browser/resources/extensions/extensions.html
+        run: wget 'https://chromium.googlesource.com/chromium/src/+/refs/tags/93.0.4577.20/chrome/browser/resources/extensions/extensions.html?format=TEXT' -O chrome/browser/resources/extensions/extensions.html
         
       - name: Outputing file
         run: cat chrome/browser/resources/extensions/extensions.html
