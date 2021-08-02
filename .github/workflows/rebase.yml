@@ -30,7 +30,7 @@ jobs:
         run: git clone --filter=tree:0 --no-checkout https://github.com/chromium/chromium.git chromium
 
       - name: Limiting the list of files to checkout
-        run: cd chromium && find . | git sparse-checkout set --stdin
+        run: cd chromium && git sparse-checkout set chrome/browser/resources/extensions
 
       - name: Switching Chromium base branch
         run: cd chromium && git read-tree -mu ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}
