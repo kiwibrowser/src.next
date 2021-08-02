@@ -38,6 +38,7 @@ foreach ($files as $file)
   passthru("sed -i '/homepage_preferences_enable_news_title/d' " . $file);
   passthru("sed -i '/homepage_preferences_enable_news_summary/d' " . $file);
 }
+passthru('mkdir -p chrome/android/java/res/');
 passthru('cp -rf ../translations_tmp/* chrome/android/java/res/');
 passthru('mkdir -p chrome/android/java/res/values-es-rUS');
 passthru('cp -rf chrome/android/java/res/values-es-rES/* chrome/android/java/res/values-es-rUS/');
