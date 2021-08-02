@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'upstream'
+      - 'CHROMIUM_VERSION'
 
 jobs:
   build:
