@@ -20,7 +20,7 @@ jobs:
           env | grep -F CHROMIUM_ >> $GITHUB_ENV
         
       - name: Downloading files
-        run: wget "https://chromium.googlesource.com/chromium/src/+/refs/tags/${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}/chrome/browser/resources/extensions/extensions.html?format=TEXT' -O chrome/browser/resources/extensions/extensions.html
+        run: wget "https://chromium.googlesource.com/chromium/src/+/refs/tags/${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}/chrome/browser/resources/extensions/extensions.html?format=TEXT" -O chrome/browser/resources/extensions/extensions.html
         
       - name: Outputting file
         run: cat chrome/browser/resources/extensions/extensions.html | base64 --decode
