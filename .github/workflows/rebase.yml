@@ -29,3 +29,9 @@ jobs:
         with:
           repository: 'chromium/chromium'
           ref: '${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}'
+
+          # Number of commits to fetch. 0 indicates all history for all branches and tags.
+          fetch-depth: '0'
+          
+      - name: Listing files
+        run: ls -la
