@@ -35,11 +35,14 @@ jobs:
       - name: Switching Chromium base branch
         run: cd chromium && git read-tree -mu ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}
 
+      - name: Checking-out one file
+        run: cd chromium && git checkout -- chrome/browser/resources/extensions/extensions.html
+
 #      - name: Showing history for one file
 #        run: cd chromium && git --no-pager log --decorate=short --pretty=oneline -n1 chrome/browser/resources/extensions/extensions.html
 
-#      - name: Displaying one file
-#        run: cat chromium/chrome/browser/resources/extensions/extensions.html
+      - name: Displaying one file
+        run: cat chromium/chrome/browser/resources/extensions/extensions.html
 
       - name: Listing files
         run: ls -laR
