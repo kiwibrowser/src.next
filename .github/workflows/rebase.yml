@@ -30,7 +30,7 @@ jobs:
         run: git clone --filter=tree:0 --no-checkout https://github.com/chromium/chromium.git chromium
 
       - name: Listing folders
-        run: find . -type d | tr "\n" ' ' | sed 's#./##g' > folders.txt ; cat folders.txt
+        run: find . -type d | tr "\n" ' ' | sed 's#\./##g' > folders.txt ; cat folders.txt
 
       - name: Limiting the list of files to checkout
         run: cd chromium && cat ../folders.txt | git sparse-checkout set --stdin
