@@ -22,6 +22,10 @@ The reference build machine is using Ubuntu 20.04.2 with 64 cores.
 
 ## Navigating the source-code
 
+Kiwi is based on Chromium, to find code, use https://source.chromium.org/chromium/chromium/src
+
+The most important to know is:
+
 Android:
  - Main menu is in: chrome/android/java/src/org/chromium/chrome/browser/app/appmenu
  - Settings screen is in: chrome/android/java/src/org/chromium/chrome/browser/settings and chrome/android/java/res/xml
@@ -33,6 +37,28 @@ HTML:
 Translations:
  - To add a new translation string in English: chrome/android/java/res/values/strings.xml
  - To translate strings in other languages, go to https://crowdin.com/project/kiwibrowser and once you have updated the translations, run GitHub Action "Download translations from Crowdin" to download them back to the repository
+
+## Code style
+
+Follow the Chromium code style with one exception:
+
+This may sound counter-intuitive, but as much as possible, do not delete code from Chromium and keep the original code of Chromium as much as possible even if it will become unused code.
+
+For example, in the C++ code, if a segment of the code doesn't make sense on Android, wrap the whole block of code with #if 0 and #endif.
+
+In the Java code, add, if (false) in front of code segments that are unused.
+
+If you rewrite a small function, no need to worry about this. You can overwrite it but try to stick as close as possible to the original.
+
+The reason: We want a script to manages the rebase and upgrading the Chromium version, we do not want a human to fix it.
+
+When Chromium refactors significant amount of code, they delete significant portions of code, or rewrite the inner-working of functions (e.g. extension APIs) and then we end up with a conflict.
+
+If you keep all the code, and just put it in a #if 0, then the changes are done by Chromium team, but you don't have to worry about conflicts.
+
+The code is not conceptually correct, but it's easier to maintain.
+
+This also makes it easier for your fellow developers to spot where Kiwi specific modification exists.
 
 ## Adding a new setting
 
