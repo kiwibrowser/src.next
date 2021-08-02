@@ -23,11 +23,16 @@ jobs:
       # git clone --filter=tree:0 <url> creates a treeless clone.
       # These clones download all reachable commits while fetching trees and blobs on-demand. These clones are best for build environments where the repository will be deleted after a single build, but you still need access to commit history
       - name: Checking out Chromium
-        run: |
-          git clone --filter=tree:0 --no-checkout https://github.com/chromium/chromium.git chromium
-          cd chromium
-          git checkout ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}
-          git sparse-checkout set chrome/android
+        run: git clone --filter=tree:0 https://github.com/chromium/chromium.git chromium
+
+      - name: Switching Chromium base branch
+        run: cd chromium && git checkout ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}
+
+      - name: Showing history for one file
+        run: cd chromium && git log --no-pager log --decorate=short --pretty=oneline -n1 chrome/browser/resources/extensions/extensions.html
+
+      - name: Displaying one file
+        run: cd chromium && cat chrome/browser/resources/extensions/extensions.html
 
       - name: Listing files
         run: ls -laR
