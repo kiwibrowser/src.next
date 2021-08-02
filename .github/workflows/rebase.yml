@@ -38,8 +38,8 @@ jobs:
 #      - name: Showing history for one file
 #        run: cd chromium && git --no-pager log --decorate=short --pretty=oneline -n1 chrome/browser/resources/extensions/extensions.html
 
-      - name: Displaying one file
-        run: cat chromium/chrome/browser/resources/extensions/extensions.html
+#      - name: Displaying one file
+#        run: cat chromium/chrome/browser/resources/extensions/extensions.html
 
       - name: Listing files
         run: ls -laR
