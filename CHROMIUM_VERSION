@@ -1,0 +1,6 @@
+# The version on which to base Kiwi Browser
+
+MAJOR=93
+MINOR=0
+BUILD=4577
+PATCH=20
