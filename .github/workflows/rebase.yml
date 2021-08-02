@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v2
 
       - name: Loading settings from CHROMIUM_VERSION
-        run: source CHROMIUM_VERSION; export $(cut -d= -f1 CHROMIUM_VERSION)
+        run: source CHROMIUM_VERSION; export $(cut -d= -f1 CHROMIUM_VERSION | grep -vF '#')
         
       - name: Downloading files
         run: wget "https://chromium.googlesource.com/chromium/src/+/refs/tags/${CHROMIUM_MAJOR}.${CHROMIUM_MINOR}.${CHROMIUM_BUILD}.${CHROMIUM_PATCH}/chrome/browser/resources/extensions/extensions.html?format=TEXT' -O chrome/browser/resources/extensions/extensions.html
