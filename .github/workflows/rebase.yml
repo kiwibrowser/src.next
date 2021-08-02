@@ -50,10 +50,10 @@ jobs:
         run: cat chromium/chrome/browser/resources/extensions/extensions.html
 
       - name: Updating one file
-        run: cp chrome/browser/resources/extensions/extensions.html chromium/chrome/browser/resources/extensions/extensions.html
+        run: diff -Naur chrome/browser/resources/extensions/extensions.html chromium/chrome/browser/resources/extensions/extensions.html > patch.txt
 
       - name: Displaying one file
-        run: cat chromium/chrome/browser/resources/extensions/extensions.html
+        run: cat patch.txt
 
-      - name: Displaying log
-        run: cd chromium && git log -- chrome/browser/resources/extensions/extensions.html
+      - name: Switching Chromium base branch
+        run: cd chromium && git read-tree -mu ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.21
