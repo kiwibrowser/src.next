@@ -52,11 +52,5 @@ jobs:
       - name: Displaying one file
         run: cat chromium/chrome/browser/resources/extensions/extensions.html
 
-      - name: Committing change
-        run: cd chromium && git commit -m "[Kiwi] [GitHub] Snapshotting ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}" chrome/browser/resources/extensions/extensions.html
-
-      - name: Rebasing
-        run: cd chromium && git rebase 93.0.4577.21
-
-      - name: Displaying one file
-        run: cat chromium/chrome/browser/resources/extensions/extensions.html
+      - name: Displaying log
+        run: cd chromium && git --no-pager log chrome/browser/resources/extensions/extensions.html
