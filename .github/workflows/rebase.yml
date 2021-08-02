@@ -21,11 +21,10 @@ jobs:
 
       - name: Checking out Chromium
         run: |
-          git clone https://github.com/chromium/chromium.git --no-checkout chromium
+          git clone --filter=blob:none --no-checkout https://github.com/chromium/chromium.git chromium
           cd chromium
-          git sparse-checkout init --cone
-          git sparse-checkout set chrome/android
           git checkout ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}
+          git sparse-checkout set chrome/android
           
       - name: Listing files
         run: ls -laR
