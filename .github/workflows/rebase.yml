@@ -18,7 +18,7 @@ jobs:
       - name: Disable Git auto-packing
         run: git config --global gc.auto 0
         
-      - name: Set GitHub username
+      - name: Setting-up GitHub username
         run: |
           git config --global user.email "github@geometry.ee"
           git config --global user.name "Repository manager"
@@ -53,7 +53,7 @@ jobs:
         run: cat chromium/chrome/browser/resources/extensions/extensions.html
 
       - name: Committing change
-        run: cd chromium && git commit -a -m "[Kiwi] [GitHub] Snapshotting ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}"
+        run: cd chromium && git commit -m "[Kiwi] [GitHub] Snapshotting ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}" chromium/chrome/browser/resources/extensions/extensions.html
 
       - name: Rebasing
         run: cd chromium && git rebase 93.0.4577.21
