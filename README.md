@@ -185,9 +185,7 @@ All the code in these builds has been reviewed by a trusted Kiwi Browser contrib
 
  4) Contributors builds (.unofficial-<contributor>.apk).
 These builds contain code that has been added by contributors (or modders) working to do a modified version of Kiwi.
-None of the code in these builds has been reviewed by anyone.
-
-Use at your own risk.
+None of the code in these builds has been reviewed by anyone. Use at your own risk.
 
 ## Additional help
 
