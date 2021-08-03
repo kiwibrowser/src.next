@@ -37,11 +37,11 @@ jobs:
       - name: Initializing build
         run: echo Initializing build for platform ${{ matrix.platform }}
 
-      - name: Installing rclone
-        run: curl https://rclone.org/install.sh | sudo bash -s beta
-
       - name: Updating APT repository
         run: sudo apt-get update
+
+      - name: Installing rclone
+        run: sudo apt-get install rclone
 
       - name: Installing Python and OpenJDK
         run: sudo apt-get install -y python openjdk-8-jdk-headless libncurses5 ccache
