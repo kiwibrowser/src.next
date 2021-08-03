@@ -60,11 +60,114 @@ The code is not conceptually correct, but it's easier to maintain.
 
 This also makes it easier for your fellow developers to spot where Kiwi specific modification exists.
 
+Do not modify indentation of existing Chromium code. The code merger/rebase cannot handle these well.
+For example, if the original code is
+```
+  do_Chromium_Original_feature();
+```
+
+and you want to put this feature behind flag, it's ok to do:
+```
+  if (kiwi_setting_enabled)
+  do_Kiwi();
+  else
+  do_Chromium_Original_feature();
+```
+
+Regarding imports:
+
+If you have:
+```
+import org.chromium.base.CommandLine;
+import org.chromium.base.IntentUtils;
+import org.chromium.base.Log;
+import org.chromium.base.PackageManagerUtils;
+import org.chromium.base.PathUtils;
+```
+
+and need ContextUtils to be imported.
+Do not do:
+```
+import org.chromium.base.CommandLine;
+import org.chromium.base.ContextUtils;
+import org.chromium.base.IntentUtils;
+import org.chromium.base.Log;
+import org.chromium.base.PackageManagerUtils;
+import org.chromium.base.PathUtils;
+```
+
+instead append the newly added classes at the very end:
+```
+import org.chromium.base.CommandLine;
+import org.chromium.base.IntentUtils;
+import org.chromium.base.Log;
+import org.chromium.base.PackageManagerUtils;
+import org.chromium.base.PathUtils;
+
+import org.chromium.base.ContextUtils;
+```
+
+This is because it's a script / robot taking care of the rebase, and if you put your new imports between other imports, this can easily confuse the script during the merge process when Chromium refactors code.
+
 ## Adding a new setting
 
-chrome/android/java/res/xml/accessibility_preferences.xml
+In Kiwi it's much better to add Settings directly in the user interface, rather than add flags in kiwi://flags.
+Users are often confused by flags. Prefer doing Settings.
+
+To add a boolean setting in Kiwi is easy:
+
+Step 1)
+ - Go to the xml file for the screen (example: chrome/android/java/res/xml/accessibility_preferences.xml), add a new checkbox.
+
+```
+    <org.chromium.components.browser_ui.settings.ChromeBaseCheckBoxPreference
+        android:key="enable_bottom_toolbar"
+        android:summary="@string/accessibility_preferences_enable_bottom_toolbar_summary"
+        android:title="@string/accessibility_preferences_enable_bottom_toolbar_title" />
+```
+
+android:key is the setting key, it's the identifier where the setting will be stored.
+android:title is 3 or 4 words about the feature.
+android:summary is an explanation of what the preference does (2nd line that appears in the UI).
+
+Step 2)
+ - Add a new english translation in chrome/android/java/res/values/strings.xml
+```
+    <string name="accessibility_preferences_enable_bottom_toolbar_title">Bottom toolbar</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_summary">Move address bar to the bottom</string>
+```
+
+The format is `"<screen_where_the_setting_is_integrated>_<setting_key>_<summary/title>"`
+
+Step 3)
+ - Use the setting.
+
+In any files where you want to use the setting, you need to import ContextUtils class:
+
+```import org.chromium.base.ContextUtils;```
+
+Very conveniently, this class works at any place, and any time in the Java code (and soon in the C++ code) so you don't need to worry
+(note, if you are the maintainer of this class, you have to worry and make sure it works everywhere and faster, but consider the developer as your user and provide to the developer a functional and efficient interface)
+
+To check if a setting is enabled or not:
+```
+if (ContextUtils.getAppSharedPreferences().getBoolean("enable_bottom_toolbar", false))
+```
+where "enable_bottom_toolbar" is your setting key, and "false" the default value to return when the setting is not set yet by the user.
+
+This code, for example, corresponds to "if bottom toolbar is enabled".
+
+## User scripts (script injection)
+
+Kiwi Browser can execute scripts on page load, this is equivalent to user scripts. For example, you can remove AMP links, to redress (correct) some web pages, or to auto-accept cookie / GDPR windows, change the meta-theme of the current page, download a video, and so on.
+
+```
 chrome/android/java/src/org/chromium/chrome/browser/PersonalizeResults.java
-chrome/android/java/src/org/chromium/chrome/browser/accessibility/settings/AccessibilitySettings.java
+```
+
+In this file you have access to the current tab URL and can execute JavaScript in the webpage.
+
+You can of course, use this script in conjunction 
 
 ## Additional help
 
