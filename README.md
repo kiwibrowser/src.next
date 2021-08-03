@@ -184,6 +184,17 @@ See `restricted` in https://opensource.google/docs/thirdparty/licenses/
 
 Verify before proposing code to Kiwi Browser that the code doesn't come from such restricted projects.
 
+## License
+
+This repository is licensed under the same license as Chromium.
+Chromium uses a very permissive and advantageous license. To keep this freedom we don't want to include code from much more restrictive licenses (for example GPL, or CC-NC).
+
+Google has established a list of licenses that shouldn't be included in Chromium, we follow this list, and you can find the list below.
+
+See `restricted` in https://opensource.google/docs/thirdparty/licenses/
+
+Verify before proposing code to Kiwi Browser that the code doesn't come from such restricted projects.
+
 ## Code style
 
 Follow the Chromium code style with one exception:
