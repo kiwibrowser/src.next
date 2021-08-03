@@ -183,7 +183,7 @@ All the code in these builds has been reviewed by the Kiwi Browser project's lea
  3) GitHub dev builds (.dev-github.apk)
 All the code in these builds has been reviewed by a trusted Kiwi Browser contributor.
 
- 4) Contributors builds (.unofficial-<contributor>.apk).
+ 4) Contributors builds (.unofficial-`<contributor>`.apk).
 These builds contain code that has been added by contributors (or modders) working to do a modified version of Kiwi.
 None of the code in these builds has been reviewed by anyone. Use at your own risk.
 
