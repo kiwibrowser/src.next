@@ -1,8 +1,8 @@
-# src.next
+# Kiwi Browser Next
 
 Source-code for Kiwi Next, a Kiwi Browser auto-rebased with latest Chromium.
 
-In this repository is the control center for development, testing and deployment of new releases.
+This repository is the control center for development, testing and deployment of new releases.
 
 If you are looking into modifying or improving Kiwi Browser, you are at the right place.
 
