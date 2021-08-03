@@ -38,6 +38,17 @@ Translations:
  - To add a new translation string in English: chrome/android/java/res/values/strings.xml
  - To translate strings in other languages, go to https://crowdin.com/project/kiwibrowser and once you have updated the translations, run GitHub Action "Download translations from Crowdin" to download them back to the repository
 
+## License
+
+This repository is licensed under the same license as Chromium.
+Chromium uses a very permissive and advantageous license. To keep this freedom we don't want to include code from much more restrictive licenses (for example GPL, or CC-NC).
+
+Google has established a list of licenses that shouldn't be included in Chromium, we follow this list, and you can find the list below.
+
+See `restricted` in https://opensource.google/docs/thirdparty/licenses/
+
+Verify before proposing code to Kiwi Browser that the code doesn't come from such restricted projects.
+
 ## Code style
 
 Follow the Chromium code style with one exception:
@@ -60,7 +71,7 @@ The code is not conceptually correct, but it's easier to maintain.
 
 This also makes it easier for your fellow developers to spot where Kiwi specific modification exists.
 
-Do not modify indentation of existing Chromium code. The code merger/rebase cannot handle these well.
+Do not modify indentation of existing Chromium code. The code merger/rebaser cannot handle these well.
 For example, if the original code is
 ```
   do_Chromium_Original_feature();
