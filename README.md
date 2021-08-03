@@ -44,7 +44,7 @@ Follow the Chromium code style with one exception:
 
 This may sound counter-intuitive, but as much as possible, do not delete code from Chromium and keep the original code of Chromium as much as possible even if it will become unused code.
 
-For example, in the C++ code, if a segment of the code doesn't make sense on Android, wrap the whole block of code with #if 0 and #endif.
+For example, in the C++ code, if a segment of the code doesn't make sense on Android, wrap the whole block of code with `#if 0` and `#endif`.
 
 In the Java code, add, if (false) in front of code segments that are unused.
 
