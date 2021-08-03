@@ -169,6 +169,28 @@ In this file you have access to the current tab URL and can execute JavaScript i
 
 You can of course, use this script in conjunction 
 
+## Code review and safety
+
+There are 4 stages of Kiwi Browser builds review:
+
+ - Play Store builds (-playstore.apk)
+These builds have been reviewed by a member of Google and by the Kiwi Browser project's lead.
+Google is the company that ultimately signs and approves the builds.
+
+This is also the builds that we show to our partners (Microsoft, Yahoo, etc) for validation.
+
+ - GitHub builds (-github.apk)
+All the code in these builds has been reviewed by the Kiwi Browser project's lead.
+
+ - GitHub dev builds (.dev-github.apk)
+All the code in these builds has been reviewed by a trusted Kiwi Browser contributor.
+
+ - Contributors builds (.unofficial-<contributor>.apk).
+These builds contain code that has been added by contributors (or modders) working to do a modified version of Kiwi.
+None of the code in these builds has been reviewed by anyone.
+
+Use at your own risk.
+
 ## Additional help
 
 You can ask for extra help in our Discord server, or by [filing an issue](https://github.com/kiwibrowser/src.next/issues).
