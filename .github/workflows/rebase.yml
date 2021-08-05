@@ -78,7 +78,7 @@ jobs:
         run: git switch master
 
       - name: Rebasing on top of Chromium
-        run: git rebase chromium
+        run: git rebase chromium || cat chrome/browser/resources/extensions/extensions.html && false
 
       - name: Displaying Kiwi's variant file
         run: cat chrome/browser/resources/extensions/extensions.html
