@@ -86,7 +86,7 @@ jobs:
           base: chromium
           delete-branch: true
           signoff: true
-          commit-message: "[Chromium] Updated Chromium VERSION from ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }} to ${{ github.event.inputs.NEW_CHROMIUM_MAJOR }}.${{ github.event.inputs.NEW_CHROMIUM_MINOR }}.${{ github.event.inputs.NEW_CHROMIUM_BUILD }}.${{ github.event.inputs.NEW_CHROMIUM_PATCH }}"
+          title: "[Chromium] Update Chromium VERSION from ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }} to ${{ github.event.inputs.NEW_CHROMIUM_MAJOR }}.${{ github.event.inputs.NEW_CHROMIUM_MINOR }}.${{ github.event.inputs.NEW_CHROMIUM_BUILD }}.${{ github.event.inputs.NEW_CHROMIUM_PATCH }}"
         
       - name: Getting pull request URL
         run: |
