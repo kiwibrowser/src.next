@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="main_menu_ads_and_trackers_blocked" tools:ignore="PluralsCandidate">"已阻止 %1$d 個廣告 &amp; 追蹤器"</string>
+    <string name="main_menu_ads_blocked_since">"自從 %1$s"</string>
+    <string name="main_menu_adblock">隱藏煩人的廣告</string>
+    <string name="main_menu_clear_data">清除資料</string>
+    <string name="main_menu_translate">網頁翻譯</string>
+    <string name="main_menu_translate_undo">停止翻譯</string>
+    <string name="main_menu_turn_on_night_mode">開啟夜間模式</string>
+    <string name="main_menu_turn_off_night_mode">關閉夜間模式</string>
+    <string name="main_menu_exit">結束</string>
+    <string name="main_menu_extensions">擴充功能</string>
+    <string name="menu_import_bookmarks">匯入書籤</string>
+    <string name="menu_export_bookmarks">匯出書籤</string>
+    <string name="appearance_preferences">外觀</string>
+    <string name="appearance_preferences_themes">主題</string>
+    <string name="accessibility_preferences_text_rewrap_title">文字環繞 / 自動重排</string>
+    <string name="accessibility_preferences_text_rewrap_summary">縮放頁面時將文字調整為適中大小</string>
+    <string name="accessibility_preferences_open_in_external_application_title">使用外部應用程式開啟連結</string>
+    <string name="accessibility_preferences_open_in_external_application_summary">在可能的情況下使用外部應用程式開啟連結(例如 Maps、 YouTube、 Vimeo)</string>
+    <string name="accessibility_preferences_nightmode_grayscale_title">灰階夜間模式</string>
+    <string name="accessibility_preferences_nightmode_grayscale_summary">夜間模式使用灰階色調</string>
+    <string name="accessibility_preferences_night_scale">夜間模式對比度(灰色: 97, 預設: 99, 黑色: 100)</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_title">底部工具列</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_summary">將網址列移動到底部</string>
+    <string name="accessibility_preferences_enable_overscroll_button_title">手形按鈕 (開啟底部工具列時生效)</string>
+    <string name="accessibility_preferences_enable_overscroll_button_summary">新增一個手形按鈕以前往畫面頂端</string>
+    <string name="accessibility_preferences_enable_side_swipe_title">邊緣滑動</string>
+    <string name="accessibility_preferences_enable_side_swipe_summary">在網頁邊緣啟用左/右滑的手勢以切換下/上一頁</string>
+    <string name="accessibility_preferences_enable_up_swipe_title">上滑以開啟分頁切換頁面</string>
+    <string name="accessibility_preferences_enable_up_swipe_summary">在工具列向上滑以開啟分頁切換頁面</string>
+    <string name="accessibility_preferences_show_extensions_first_title">擴充功能置頂顯示</string>
+    <string name="accessibility_preferences_show_extensions_first_summary">將擴充功能顯示在主選單中最高的位置</string>
+    <string name="contextual_menu_open_in_external_application">在外部應用程式中開啟</string>
+    <string name="preferences_restart_is_needed">您的變更將在重新啟動 Kiwi 瀏覽器的時候生效</string>
+    <string name="preferences_restart_now">現在重新啟動</string>
+    <string name="preferences_restart_later">稍後</string>
+    <string name="preferences_translator">翻譯工具</string>
+    <string name="download_preferences_enable_external_download_manager_title">外部下載工具</string>
+    <string name="download_preferences_enable_external_download_manager_summary">使用外部下載工具 (例如: ADM )</string>
+    <string name="privacy_preferences_accept_cookie_consent_title">接受 Cookies</string>
+    <string name="privacy_preferences_accept_cookie_consent_summary">當網站請求時接受 Cookies</string>
+    <string name="privacy_preferences_avoid_amp_websites_title">不使用 AMP</string>
+    <string name="privacy_preferences_avoid_amp_websites_summary">直接造訪原始網站而不經過由 AMP 所開啟的轉換頁面</string>
+    <string name="privacy_preferences_hide_incognito_window_content_title">保護無痕模式</string>
+    <string name="privacy_preferences_hide_incognito_window_content_summary">在無痕模式中隱藏内容並禁止截圖</string>
+    <string name="privacy_preferences_close_tabs_on_exit_title">關閉所有分頁</string>
+    <string name="privacy_preferences_close_tabs_on_exit_summary">關閉兩個瀏覽階段之間的所有分頁</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_title">當無分頁開啟時關閉瀏覽器</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_summary">當最後一個分頁關閉後結束瀏覽器</string>
+    <string name="search_engines_preferences_howto_add">最近造訪\n若要新增搜尋引擎, 請造訪該搜尋引擎並進行搜尋 (例如: bing.com) 。幾秒鐘後, 搜尋引擎將被新增至清單中。</string>
+    <string name="suggest_adblock">點選此處開啟/關閉廣告與追蹤保護</string>
+    <string name="website_settings_add_site_description_ads">允許特定網站顯示廣告</string>
+</resources>

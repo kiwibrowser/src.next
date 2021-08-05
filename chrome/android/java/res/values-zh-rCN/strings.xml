@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="main_menu_ads_and_trackers_blocked" tools:ignore="PluralsCandidate">"%1$d 个广告和追踪器已屏蔽"</string>
+    <string name="main_menu_ads_blocked_since">"自从 %1$s"</string>
+    <string name="main_menu_adblock">屏蔽烦人的广告</string>
+    <string name="main_menu_clear_data">清除数据</string>
+    <string name="main_menu_translate">翻译</string>
+    <string name="main_menu_translate_undo">停止翻译</string>
+    <string name="main_menu_turn_on_night_mode">打开夜间模式</string>
+    <string name="main_menu_turn_off_night_mode">关闭夜间模式</string>
+    <string name="main_menu_exit">退出</string>
+    <string name="main_menu_extensions">扩展程序</string>
+    <string name="menu_import_bookmarks">导入书签</string>
+    <string name="menu_export_bookmarks">导出书签</string>
+    <string name="appearance_preferences">外观</string>
+    <string name="appearance_preferences_themes">主题</string>
+    <string name="accessibility_preferences_text_rewrap_title">文本环绕 / 重整</string>
+    <string name="accessibility_preferences_text_rewrap_summary">缩放时适应文本</string>
+    <string name="accessibility_preferences_open_in_external_application_title">用外部程序打开</string>
+    <string name="accessibility_preferences_open_in_external_application_summary">在可能的情况下用外部程序打开链接 (比如 Maps、Youtube 和 Vimeo)</string>
+    <string name="accessibility_preferences_nightmode_grayscale_title">灰色阅读模式</string>
+    <string name="accessibility_preferences_nightmode_grayscale_summary">开启夜间模式的同时开启灰色阅读模式</string>
+    <string name="accessibility_preferences_night_scale">夜间模式对比度 (灰色: 97, 默认: 99, 黑色: 100)</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_title">底部工具栏</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_summary">移动地址栏到底部</string>
+    <string name="accessibility_preferences_enable_overscroll_button_title">手形图标 (打开底部工具栏时生效)</string>
+    <string name="accessibility_preferences_enable_overscroll_button_summary">添加一个手形图标来返回页面顶部</string>
+    <string name="accessibility_preferences_enable_side_swipe_title">边缘手势</string>
+    <string name="accessibility_preferences_enable_side_swipe_summary">启用左右滑动手势来切换历史页面</string>
+    <string name="accessibility_preferences_enable_up_swipe_title">向上滑动以打开标签切换页</string>
+    <string name="accessibility_preferences_enable_up_swipe_summary">在工具栏向上滑动打开标签切换页</string>
+    <string name="accessibility_preferences_show_extensions_first_title">扩展程序置顶显示</string>
+    <string name="accessibility_preferences_show_extensions_first_summary">将扩展程序显示在菜单中更高的位置</string>
+    <string name="contextual_menu_open_in_external_application">用外部程序打开</string>
+    <string name="preferences_restart_is_needed">重启 Kiwi Browser 时修改生效</string>
+    <string name="preferences_restart_now">现在重启</string>
+    <string name="preferences_restart_later">稍后</string>
+    <string name="preferences_translator">翻译器</string>
+    <string name="download_preferences_enable_external_download_manager_title">外部下载器</string>
+    <string name="download_preferences_enable_external_download_manager_summary">使用外部下载器 (如: ADM )</string>
+    <string name="privacy_preferences_accept_cookie_consent_title">接受 Cookies</string>
+    <string name="privacy_preferences_accept_cookie_consent_summary">当网站请求时接受 Cookies</string>
+    <string name="privacy_preferences_avoid_amp_websites_title">不使用 AMP</string>
+    <string name="privacy_preferences_avoid_amp_websites_summary">首选打开原网页而不是经 AMP 转换的网页</string>
+    <string name="privacy_preferences_hide_incognito_window_content_title">保护隐身窗口</string>
+    <string name="privacy_preferences_hide_incognito_window_content_summary">在无痕模式中隐藏内容并阻止屏幕截图</string>
+    <string name="privacy_preferences_close_tabs_on_exit_title">关闭所有选项卡</string>
+    <string name="privacy_preferences_close_tabs_on_exit_summary">关闭两个浏览会话之间的所有选项卡</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_title">当无标签页开启时关闭浏览器</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_summary">当最后一个标签页关闭后关闭浏览器</string>
+    <string name="search_engines_preferences_howto_add">最近访问\n若要添加新的搜索引擎，访问一个搜索引擎(比如 Bing.com)并搜索。几秒后，该搜索引擎将被添加到列表中。</string>
+    <string name="suggest_adblock">点击此处开启/关闭广告和跟踪保护</string>
+    <string name="website_settings_add_site_description_ads">允许特定站点显示广告</string>
+</resources>
