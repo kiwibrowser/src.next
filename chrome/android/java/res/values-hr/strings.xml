@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="main_menu_ads_and_trackers_blocked" tools:ignore="PluralsCandidate">"%1$d oglasa i trakera blokirano"</string>
+    <string name="main_menu_ads_blocked_since">"Od %1$s"</string>
+    <string name="main_menu_adblock">Sakrij oglase</string>
+    <string name="main_menu_clear_data">Očisti podatke</string>
+    <string name="main_menu_translate">Prevedi</string>
+    <string name="main_menu_translate_undo">Zaustavi prevođenje</string>
+    <string name="main_menu_turn_on_night_mode">Uključi noćni način</string>
+    <string name="main_menu_turn_off_night_mode">Isključi noćni način</string>
+    <string name="main_menu_exit">Izlaz</string>
+    <string name="main_menu_extensions">Proširenja</string>
+    <string name="menu_import_bookmarks">Uvezi oznake</string>
+    <string name="menu_export_bookmarks">Izvezi oznake</string>
+    <string name="appearance_preferences">Izgled</string>
+    <string name="appearance_preferences_themes">Teme</string>
+    <string name="accessibility_preferences_text_rewrap_title">Prelomljavanje teksta</string>
+    <string name="accessibility_preferences_text_rewrap_summary">Prilagodite tekst tijekom zumiranja</string>
+    <string name="accessibility_preferences_open_in_external_application_title">Omogući vanjske aplikacije</string>
+    <string name="accessibility_preferences_open_in_external_application_summary">Otvarajte poveznice sa vanjskim aplikacijama (Karte, YouTube, Vimeo) kada je to moguće</string>
+    <string name="accessibility_preferences_nightmode_grayscale_title">Sivi tonovi u noćnom načinu</string>
+    <string name="accessibility_preferences_nightmode_grayscale_summary">Preferirajte sive tonove u noćnom načinu</string>
+    <string name="accessibility_preferences_night_scale">Kontrast u noćnom načinu (sivo: 97, zadano: 99, crno: 100)</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_title">Alatna traka pri dnu zaslona</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_summary">Premjestite adresnu traku na dno zaslona</string>
+    <string name="accessibility_preferences_enable_overscroll_button_title">Gumb ruke (samo kod alatne trake na dnu)</string>
+    <string name="accessibility_preferences_enable_overscroll_button_summary">Dodajte gumb ruke kako bi dohvatili vrh ekrana</string>
+    <string name="accessibility_preferences_enable_side_swipe_title">Rubno klizanje</string>
+    <string name="accessibility_preferences_enable_side_swipe_summary">Omogućite geste klizanja s lijevog ili desnog ruba stranice za navigaciju kroz povijest</string>
+    <string name="accessibility_preferences_enable_up_swipe_title">Povlačenje za otvaranje odabira kartica</string>
+    <string name="accessibility_preferences_enable_up_swipe_summary">Povucite alatnu traku kako bi otvorili odabir kartica</string>
+    <string name="accessibility_preferences_show_extensions_first_title">Prvo prikaži proširenja</string>
+    <string name="accessibility_preferences_show_extensions_first_summary">Prikaži proširenja višlje u glavnom izborniku</string>
+    <string name="contextual_menu_open_in_external_application">Otvori u eksternoj aplikaciji</string>
+    <string name="preferences_restart_is_needed">Vaše promjene če stupiti u snagu kada ponovno pokrenete Kiwi</string>
+    <string name="preferences_restart_now">ODMAH PONOVNO POKRENI</string>
+    <string name="preferences_restart_later">Kasnije</string>
+    <string name="preferences_translator">Prevoditelj</string>
+    <string name="download_preferences_enable_external_download_manager_title">Eksterni upravitelj preuzimanja</string>
+    <string name="download_preferences_enable_external_download_manager_summary">Koristite eksterni upravitelj preuzimanja (npr: Advanced Download Manager)</string>
+    <string name="privacy_preferences_accept_cookie_consent_title">Prihvati kolačiće</string>
+    <string name="privacy_preferences_accept_cookie_consent_summary">Prihvatite kolačiće prilikom upita web stranice</string>
+    <string name="privacy_preferences_avoid_amp_websites_title">Ukloni AMP</string>
+    <string name="privacy_preferences_avoid_amp_websites_summary">Preferirajte izravne web stranice umjesto AMP verzija</string>
+    <string name="privacy_preferences_hide_incognito_window_content_title">Zaštiti incognito prozore</string>
+    <string name="privacy_preferences_hide_incognito_window_content_summary">Sakrijte sadržaj i spriječite snimke zaslona u incognito načinu</string>
+    <string name="privacy_preferences_close_tabs_on_exit_title">Zatvori sve kartice</string>
+    <string name="privacy_preferences_close_tabs_on_exit_summary">Zatvori sve kartice između pregledavanja</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_title">Zatvori preglednik kada nema otvorenih kartica</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_summary">Zatvori preglednik nakon što je zadnja kartica zatvorena</string>
+    <string name="search_engines_preferences_howto_add">Nedavno posjećeno\nKako bi dodali novi pretraživač, idite na Pretraživače (npr: Bing.com) i postavite ju kao pretraživač. Nakon par sekundi, pretraživač će biti dodan na popis.</string>
+    <string name="suggest_adblock">Dodirnite ovdje za omogućavanje zaštite od oglasa i praćenja</string>
+    <string name="website_settings_add_site_description_ads">Dopustite prikaz oglasa za specifične stranice</string>
+</resources>

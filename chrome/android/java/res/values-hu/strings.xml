@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="main_menu_ads_and_trackers_blocked" tools:ignore="PluralsCandidate">"%1$d hirdetés &amp; követő blokkolva"</string>
+    <string name="main_menu_ads_blocked_since">"%1$s óta"</string>
+    <string name="main_menu_adblock">Zavaró hirdetések elrejtése</string>
+    <string name="main_menu_clear_data">Adatok törlése</string>
+    <string name="main_menu_translate">Fordítás</string>
+    <string name="main_menu_translate_undo">Fordítás leállítása</string>
+    <string name="main_menu_turn_on_night_mode">Éjszakai mód bekapcsolása</string>
+    <string name="main_menu_turn_off_night_mode">Éjszakai mód kikapcsolása</string>
+    <string name="main_menu_exit">Kilépés</string>
+    <string name="main_menu_extensions">Bővítmények</string>
+    <string name="menu_import_bookmarks">Könyvjelzők importálása</string>
+    <string name="menu_export_bookmarks">Könyvjelzők exportlása</string>
+    <string name="appearance_preferences">Kinézet</string>
+    <string name="appearance_preferences_themes">Témák</string>
+    <string name="accessibility_preferences_text_rewrap_title">Szöveg újraigazítása / újratördelése</string>
+    <string name="accessibility_preferences_text_rewrap_summary">Szöveg igazítása a nagyításhoz</string>
+    <string name="accessibility_preferences_open_in_external_application_title">Külső alkalmazások engedélyezése</string>
+    <string name="accessibility_preferences_open_in_external_application_summary">Linkek megnyitása külső alkalmazásokkal (Maps, YouTube, Vimeo) amikor lehetséges</string>
+    <string name="accessibility_preferences_nightmode_grayscale_title">Szürkeárnyalatos éjszakai mód</string>
+    <string name="accessibility_preferences_nightmode_grayscale_summary">Az éjszakai mód szürkeárnyalatos változatát részesíti előnyben</string>
+    <string name="accessibility_preferences_night_scale">Éjszakai mód kontraszt (szürke: 97, alap: 99, fekete: 100)</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_title">Alsó eszköztár</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_summary">A címsor mozgatása alulra</string>
+    <string name="accessibility_preferences_enable_overscroll_button_title">Kéz gomb (csak alsó eszköztáron)</string>
+    <string name="accessibility_preferences_enable_overscroll_button_summary">Hozzáad egy kéz gombot, hogy elérje a kijelző felső részét</string>
+    <string name="accessibility_preferences_enable_side_swipe_title">Edge navigálás</string>
+    <string name="accessibility_preferences_enable_side_swipe_summary">Az előzmények közötti navigálást engedélyezi az ujjad balra és jobbra húzásával a kijelző szélén</string>
+    <string name="accessibility_preferences_enable_up_swipe_title">Felfelé húzás a lapváltó megnyitásához</string>
+    <string name="accessibility_preferences_enable_up_swipe_summary">Felfelé húzás az eszköztáron a lapváltó megnyitásához</string>
+    <string name="accessibility_preferences_show_extensions_first_title">Bővítmények elsőként mutatása</string>
+    <string name="accessibility_preferences_show_extensions_first_summary">A bővítmények megjelenítése a főmenüben magasabban</string>
+    <string name="contextual_menu_open_in_external_application">Megnyitás külső alkalmazásban</string>
+    <string name="preferences_restart_is_needed">A változtatások a Kiwi újraindításakor lépnek életbe</string>
+    <string name="preferences_restart_now">ÚJRAINDÍTÁS MOST</string>
+    <string name="preferences_restart_later">Később</string>
+    <string name="preferences_translator">Fordító</string>
+    <string name="download_preferences_enable_external_download_manager_title">Külső letöltéskezelő</string>
+    <string name="download_preferences_enable_external_download_manager_summary">Használj külső letöltéskezelőt (pl.: Advanced Download Manager)</string>
+    <string name="privacy_preferences_accept_cookie_consent_title">Sütik elfogadása</string>
+    <string name="privacy_preferences_accept_cookie_consent_summary">Fogadja el a sütiket, amikor egy weboldal kéri</string>
+    <string name="privacy_preferences_avoid_amp_websites_title">AMP eltávolítása</string>
+    <string name="privacy_preferences_avoid_amp_websites_summary">Az AMP verzió helyett inkább a közvetlen webhelyeket részesítse előnyben</string>
+    <string name="privacy_preferences_hide_incognito_window_content_title">Az inkognitóablakok védelme</string>
+    <string name="privacy_preferences_hide_incognito_window_content_summary">Tartalom elrejtése és a képernyőképek megakadályozása inkognitómódban</string>
+    <string name="privacy_preferences_close_tabs_on_exit_title">Összes lap bezárása</string>
+    <string name="privacy_preferences_close_tabs_on_exit_summary">Zárjon be minden lapot két böngészési munkamenet között</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_title">Zárja be a böngészőt, amikor nincsenek lapok megnyitva</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_summary">Az utolsó lap bezárása után zárja be a böngészőt</string>
+    <string name="search_engines_preferences_howto_add">Nemrégiben látogatott\nÚj keresőmotor felvételéhez lépjen a Keresőmotorra (pl.: Bing.com), és készítsen egy keresést. Néhány másodperc múlva a keresőmotor felkerül a listára.</string>
+    <string name="suggest_adblock">Kattints ide a hirdetés és a követés elleni védelem átállításához</string>
+    <string name="website_settings_add_site_description_ads">Egy adott webhely hirdetéseinek engedélyezése</string>
+</resources>
