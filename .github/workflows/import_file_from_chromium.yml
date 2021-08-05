@@ -58,4 +58,4 @@ jobs:
         run: git rebase chromium
 
       - name: Pushing repository
-        run: git push --all
+        run: git push --all --force
