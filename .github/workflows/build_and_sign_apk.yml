@@ -1,5 +1,5 @@
 # Build APKs for Kiwi Browser Next
-name: Build and sign apk
+name: 'Kiwi: Build and sign apk'
 
 # Controls when the action will run. Triggers the workflow on push or pull request events
 on:
