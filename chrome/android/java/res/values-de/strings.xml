@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="main_menu_ads_and_trackers_blocked" tools:ignore="PluralsCandidate">"%1$d Anzeigen &amp; Tracker blockiert"</string>
+    <string name="main_menu_ads_blocked_since">"Seit %1$s"</string>
+    <string name="main_menu_adblock">Lästige Werbung blockieren</string>
+    <string name="main_menu_clear_data">Daten löschen</string>
+    <string name="main_menu_translate">Übersetzen</string>
+    <string name="main_menu_translate_undo">Übersetzen stoppen</string>
+    <string name="main_menu_turn_on_night_mode">Nachtmodus aktivieren</string>
+    <string name="main_menu_turn_off_night_mode">Nachtmodus deaktivieren</string>
+    <string name="main_menu_exit">Beenden</string>
+    <string name="main_menu_extensions">Erweiterungen</string>
+    <string name="menu_import_bookmarks">Lesezeichen importieren</string>
+    <string name="menu_export_bookmarks">Lesezeichen exportieren</string>
+    <string name="appearance_preferences">Erscheinungsbild</string>
+    <string name="appearance_preferences_themes">Themes</string>
+    <string name="accessibility_preferences_text_rewrap_title">Textumbruch</string>
+    <string name="accessibility_preferences_text_rewrap_summary">Text beim Zoomen anpassen</string>
+    <string name="accessibility_preferences_open_in_external_application_title">Externe Anwendungen aktivieren</string>
+    <string name="accessibility_preferences_open_in_external_application_summary">Wenn möglich, Links mit externen Anwendungen (Maps, YouTube, Vimeo) öffnen</string>
+    <string name="accessibility_preferences_nightmode_grayscale_title">Graustufen Nachtmodus</string>
+    <string name="accessibility_preferences_nightmode_grayscale_summary">Graustufenversion des Nachtmodus bevorzugen</string>
+    <string name="accessibility_preferences_night_scale">Nachtmodus Kontrast (grau: 97, Standard: 99, schwarz: 100)</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_title">Adressleiste unten</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_summary">Adressleiste nach unten verschieben</string>
+    <string name="accessibility_preferences_enable_overscroll_button_title">Hand-Taste (nur untere Adressleiste)</string>
+    <string name="accessibility_preferences_enable_overscroll_button_summary">Füge eine Hand-Taste hinzu, um den oberen Bildschirmrand zu erreichen</string>
+    <string name="accessibility_preferences_enable_side_swipe_title">Randgeste</string>
+    <string name="accessibility_preferences_enable_side_swipe_summary">Nach links und rechts wischen aktivieren, um durch den Verlauf zu navigieren</string>
+    <string name="accessibility_preferences_enable_up_swipe_title">Nach oben wischen, um den Tabwechsler zu öffnen</string>
+    <string name="accessibility_preferences_enable_up_swipe_summary">Auf der Adressleiste nach oben wischen, um den Tabwechsler zu öffnen</string>
+    <string name="accessibility_preferences_show_extensions_first_title">Add-ons zuerst anzeigen</string>
+    <string name="accessibility_preferences_show_extensions_first_summary">Add-ons im Hauptmenü höher anzeigen</string>
+    <string name="contextual_menu_open_in_external_application">In externer Anwendung öffnen</string>
+    <string name="preferences_restart_is_needed">Die Änderungen werden nach dem Neustart von Kiwi wirksam</string>
+    <string name="preferences_restart_now">JETZT NEU STARTEN</string>
+    <string name="preferences_restart_later">Später</string>
+    <string name="preferences_translator">Übersetzer</string>
+    <string name="download_preferences_enable_external_download_manager_title">Externer Download-Manager</string>
+    <string name="download_preferences_enable_external_download_manager_summary">Externen Download-Manager benutzen (z.B. Advanced Download Manager)</string>
+    <string name="privacy_preferences_accept_cookie_consent_title">Cookies akzeptieren</string>
+    <string name="privacy_preferences_accept_cookie_consent_summary">Cookies akzeptieren, wenn eine Webseite es anfordert</string>
+    <string name="privacy_preferences_avoid_amp_websites_title">AMP entfernen</string>
+    <string name="privacy_preferences_avoid_amp_websites_summary">Normale Webseite gegenüber AMP-Version bevorzugen</string>
+    <string name="privacy_preferences_hide_incognito_window_content_title">Inkognito-Fenster schützen</string>
+    <string name="privacy_preferences_hide_incognito_window_content_summary">Inhalte ausblenden und Screenshots im Inkognito-Modus verhindern</string>
+    <string name="privacy_preferences_close_tabs_on_exit_title">Alle Tabs schließen</string>
+    <string name="privacy_preferences_close_tabs_on_exit_summary">Alle Tabs zwischen zwei Browsersitzungen schließen</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_title">Browser schließen, wenn keine Tabs mehr geöffnet sind</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_summary">Browser schließen, wenn der letzte Tab geschlossen wurde</string>
+    <string name="search_engines_preferences_howto_add">Kürzlich besucht\nUm eine neue Suchmaschine hinzuzufügen, gehen Sie zur Suchmaschine (z.B. Bing.com) und machen Sie eine Suche. Nach wenigen Sekunden wird die Suchmaschine in die Liste aufgenommen.</string>
+    <string name="suggest_adblock">Hier klicken, um den Schutz für Werbung und Tracking einzuschalten</string>
+    <string name="website_settings_add_site_description_ads">Werbung für bestimmte Seiten erlauben</string>
+</resources>

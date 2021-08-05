@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="main_menu_ads_and_trackers_blocked" tools:ignore="PluralsCandidate">"%1$d reklam &amp; izleyici engellendi"</string>
+    <string name="main_menu_ads_blocked_since">"%1$s tarihinden beri"</string>
+    <string name="main_menu_adblock">Reklamları gizle</string>
+    <string name="main_menu_clear_data">Verileri temizle</string>
+    <string name="main_menu_translate">Çeviri</string>
+    <string name="main_menu_translate_undo">Çeviriyi durdur</string>
+    <string name="main_menu_turn_on_night_mode">Gece modunu aç</string>
+    <string name="main_menu_turn_off_night_mode">Gece modunu kapat</string>
+    <string name="main_menu_exit">Çıkış</string>
+    <string name="main_menu_extensions">Eklentiler</string>
+    <string name="menu_import_bookmarks">Yer işaretlerini içe aktar</string>
+    <string name="menu_export_bookmarks">Yer işaretlerini dışa aktar</string>
+    <string name="appearance_preferences">Görünüş</string>
+    <string name="appearance_preferences_themes">Temalar</string>
+    <string name="accessibility_preferences_text_rewrap_title">Metnin yeniden konumlandırılması</string>
+    <string name="accessibility_preferences_text_rewrap_summary">Yakınlaştırırken metni sığdır</string>
+    <string name="accessibility_preferences_open_in_external_application_title">Harici uygulamaları etkinleştir</string>
+    <string name="accessibility_preferences_open_in_external_application_summary">Mümkün olduğunda harici uygulamalarla bağlantıları (Haritalar, YouTube, Vimeo) açın</string>
+    <string name="accessibility_preferences_nightmode_grayscale_title">Gri tonlama gece modu</string>
+    <string name="accessibility_preferences_nightmode_grayscale_summary">Gece modunun gri tonlamalı sürümünü tercih edin</string>
+    <string name="accessibility_preferences_night_scale">Gece modu ayarı (gri: 97, varsayılan: 99, siyah: 100)</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_title">Alt araç çubuğu</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_summary">Adres çubuğunu en alta taşı</string>
+    <string name="accessibility_preferences_enable_overscroll_button_title">El düğmesi (yalnızca alt araç çubuğu)</string>
+    <string name="accessibility_preferences_enable_overscroll_button_summary">Ekranın üst kısmına yetişmek için bir el düğmesi ekleyin</string>
+    <string name="accessibility_preferences_enable_side_swipe_title">Kenar kaydırma</string>
+    <string name="accessibility_preferences_enable_side_swipe_summary">Geriye gitmek için sayfanın kenarlarında sola ve sağa kaydırma hareketlerini etkinleştirir</string>
+    <string name="accessibility_preferences_enable_up_swipe_title">Sekme değiştiriciyi açmak için yukarı kaydırmayı etkinleştirir</string>
+    <string name="accessibility_preferences_enable_up_swipe_summary">Sekme değiştiriciyi açmak için araç çubuğunda yukarı kaydırmayı etkinleştirir</string>
+    <string name="accessibility_preferences_show_extensions_first_title">Eklentileri başta göster</string>
+    <string name="accessibility_preferences_show_extensions_first_summary">Ana menüde uzantıları daha yüksekte göster</string>
+    <string name="contextual_menu_open_in_external_application">Harici uygulamada aç</string>
+    <string name="preferences_restart_is_needed">Yaptığınız değişiklikler Kiwi\'nin yeniden başlatılmasından sonra etkili olacak</string>
+    <string name="preferences_restart_now">ŞİMDİ YENİDEN BAŞLAT</string>
+    <string name="preferences_restart_later">Sonra</string>
+    <string name="preferences_translator">Çevirmen</string>
+    <string name="download_preferences_enable_external_download_manager_title">Harici indirme yöneticisi</string>
+    <string name="download_preferences_enable_external_download_manager_summary">Harici indirme yöneticisini kullan (ör: Gelişmiş İndirme Yöneticisi)</string>
+    <string name="privacy_preferences_accept_cookie_consent_title">Çerezleri kabul et</string>
+    <string name="privacy_preferences_accept_cookie_consent_summary">Bir web sitesi tarafından istendiğinde çerezleri kabul et</string>
+    <string name="privacy_preferences_avoid_amp_websites_title">AMP\'yi kaldır</string>
+    <string name="privacy_preferences_avoid_amp_websites_summary">AMP sürümü yerine doğrudan web sitelerini tercih edin</string>
+    <string name="privacy_preferences_hide_incognito_window_content_title">Gizli pencereleri koru</string>
+    <string name="privacy_preferences_hide_incognito_window_content_summary">Gizli modda içeriği gizle ve ekran görüntülerini engelle</string>
+    <string name="privacy_preferences_close_tabs_on_exit_title">Tüm sekmeleri kapat</string>
+    <string name="privacy_preferences_close_tabs_on_exit_summary">İki göz atma oturumu arasındaki tüm sekmeleri kapatın</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_title">Hiçbir sekme açılmadığında tarayıcıyı kapat</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_summary">Son sekme kapatıldıktan sonra tarayıcıyı kapat</string>
+    <string name="search_engines_preferences_howto_add">Son ziyaret edilenler\nYeni bir Arama Motoru eklemek için Arama Motoruna (ör: Bing.com) gidin ve bir Arama yapın. Birkaç saniye sonra, Arama Motoru listeye eklenecektir.</string>
+    <string name="suggest_adblock">Reklamı ve izleme korumasını değiştirmek için burayı tıklayın</string>
+    <string name="website_settings_add_site_description_ads">Belirli bir site için reklam gösterilmesine izin ver</string>
+</resources>
