@@ -50,6 +50,9 @@ jobs:
             env | grep -F CHROMIUM_ >> $GITHUB_ENV
           fi; 
 
+      - name: Preparing local Chromium branch
+        run: git switch chromium
+
       - name: Listing source files
         run: find . -type f | sed 's#\./##g' | grep -vFi README | grep -vFi LICENSE | grep -vFi '.gitignore' > /tmp/source_files.txt
         
@@ -64,9 +67,6 @@ jobs:
 
       - name: Switching Chromium to new version
         run: cd /tmp/chromium_new && git read-tree -mu ${{ github.event.inputs.NEW_CHROMIUM_MAJOR }}.${{ github.event.inputs.NEW_CHROMIUM_MINOR }}.${{ github.event.inputs.NEW_CHROMIUM_BUILD }}.${{ github.event.inputs.NEW_CHROMIUM_PATCH }}
-
-      - name: Preparing local Chromium branch
-        run: git switch chromium
 
       - name: Copying files to local Chromium branch
         run: rsync -avz --progress --exclude=".git" /tmp/chromium_new/* .
