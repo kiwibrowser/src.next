@@ -48,7 +48,7 @@ jobs:
           env | grep -F CHROMIUM_ >> $GITHUB_ENV
 
       - name: Listing source files
-        run: find . -type f | sed 's#\./##g' | grep -vFi README | grep -vFi LICENSE > /tmp/source_files.txt
+        run: find . -type f | sed 's#\./##g' | grep -vFi README | grep -vFi LICENSE | grep -vFi '.gitignore' > /tmp/source_files.txt
         
       # https://github.blog/2020-12-21-get-up-to-speed-with-partial-clone-and-shallow-clone/
       # git clone --filter=tree:0 <url> creates a treeless clone.
