@@ -140,6 +140,21 @@ When you accept a pull request:
 
  - If the source repository has multiple commits for the fix or the commit names are not very explicit or messy, use `Squash and merge`.
 
+## Workflow
+
+This repository is using GitHub Actions workflows.
+
+Workflows can be accessed in the "Actions" tab on top of the page.
+Workflows starting with "Kiwi:" are executed on the branch "kiwi".
+Workflows starting with "Chromium:" are executed on the branch "chromium".
+
+In "kiwi" branch you can find the source-code, assets and tools that are used to build Kiwi Browser.
+
+In "chromium" branch you can find a replica of the Chromium repository.
+To keep the size of the repository small, we replicate only the files that are changed in Kiwi Browser.
+Use workflow "Chromium: Import" to add a new file to be replicated.
+Use workflow "Chromium: Update files from upstream" to update the replica.
+
 ## Navigating the source-code
 
 Kiwi is based on Chromium, to find code, use https://source.chromium.org/chromium/chromium/src
