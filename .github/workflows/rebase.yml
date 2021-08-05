@@ -74,11 +74,17 @@ jobs:
       - name: Committing files to local Chromium branch
         run: git commit --allow-empty -a -m '[Import] Importing files from ${{ github.event.inputs.NEW_CHROMIUM_MAJOR }}.${{ github.event.inputs.NEW_CHROMIUM_MINOR }}.${{ github.event.inputs.NEW_CHROMIUM_BUILD }}.${{ github.event.inputs.NEW_CHROMIUM_PATCH }}'
 
+      - name: Creating pull request
+        id: pullrequest
+        uses: peter-evans/create-pull-request@v3
+        
+      - name: Getting pull request URL
+        run: |
+          echo "Pull request number - ${{ steps.pullrequest.outputs.pull-request-number }}"
+          echo "Pull request URL - ${{ steps.pullrequest.outputs.pull-request-url }}"
+
       - name: Going back to master
         run: git switch master
-
-      - name: Rebasing on top of Chromium
-        run: git rebase chromium || cat chrome/browser/resources/extensions/extensions.html && false
 
       - name: Displaying Kiwi's variant file
         run: cat chrome/browser/resources/extensions/extensions.html
@@ -96,4 +102,4 @@ jobs:
         run: git commit --allow-empty -a -m "[Rebase] Rebased from ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }} to ${{ github.event.inputs.NEW_CHROMIUM_MAJOR }}.${{ github.event.inputs.NEW_CHROMIUM_MINOR }}.${{ github.event.inputs.NEW_CHROMIUM_BUILD }}.${{ github.event.inputs.NEW_CHROMIUM_PATCH }}"
 
       - name: Pushing repository
-        run: git push --all --force
+        run: git push --all
