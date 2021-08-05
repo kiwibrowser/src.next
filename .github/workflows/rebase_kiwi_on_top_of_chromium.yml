@@ -30,3 +30,6 @@ jobs:
 
       - name: Rebasing on top of Chromium
         run: git rebase origin/chromium
+
+      - name: Pushing branch
+        run: git push origin kiwi
