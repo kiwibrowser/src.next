@@ -1,5 +1,5 @@
 # Import a file from Chromium, relative path to https://source.chromium.org/chromium/chromium/src
-name: Import file from Chromium
+name: 'Chromium: Import file'
 
 on:
   workflow_dispatch:
