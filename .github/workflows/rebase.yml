@@ -51,27 +51,6 @@ jobs:
       # https://github.blog/2020-12-21-get-up-to-speed-with-partial-clone-and-shallow-clone/
       # git clone --filter=tree:0 <url> creates a treeless clone.
       # These clones download all reachable commits while fetching trees and blobs on-demand. These clones are best for build environments where the repository will be deleted after a single build, but you still need access to commit history
-      - name: Checking out Chromium Current version
-        run: git clone --filter=tree:0 --no-checkout https://github.com/chromium/chromium.git /tmp/chromium_current
-
-      - name: Limiting the list of files to checkout
-        run: cd /tmp/chromium_current && cat ../source_files.txt | git sparse-checkout set --stdin
-
-      - name: Switching Chromium to current reference version
-        run: cd /tmp/chromium_current && git read-tree -mu ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}
-
-      - name: Preparing local Chromium branch
-        run: git switch --orphan upstream_${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}
-
-      - name: Copying files to local Chromium branch
-        run: rsync -avz --progress --exclude=".git" /tmp/chromium_current/* .
-
-      - name: Adding files to local Chromium branch
-        run: git add .
-
-      - name: Committing files to local Chromium branch
-        run: git commit --allow-empty -a -m '[Import] Importing files from ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}'
-
       - name: Checking out Chromium
         run: git clone --filter=tree:0 --no-checkout https://github.com/chromium/chromium.git /tmp/chromium_new
 
@@ -82,7 +61,7 @@ jobs:
         run: cd /tmp/chromium_new && git read-tree -mu ${{ github.event.inputs.NEW_CHROMIUM_MAJOR }}.${{ github.event.inputs.NEW_CHROMIUM_MINOR }}.${{ github.event.inputs.NEW_CHROMIUM_BUILD }}.${{ github.event.inputs.NEW_CHROMIUM_PATCH }}
 
       - name: Preparing local Chromium branch
-        run: git switch --orphan upstream_${{ github.event.inputs.NEW_CHROMIUM_MAJOR }}.${{ github.event.inputs.NEW_CHROMIUM_MINOR }}.${{ github.event.inputs.NEW_CHROMIUM_BUILD }}.${{ github.event.inputs.NEW_CHROMIUM_PATCH }}
+        run: git switch -c chromium || git switch chromium
 
       - name: Copying files to local Chromium branch
         run: rsync -avz --progress --exclude=".git" /tmp/chromium_new/* .
@@ -93,14 +72,11 @@ jobs:
       - name: Committing files to local Chromium branch
         run: git commit --allow-empty -a -m '[Import] Importing files from ${{ github.event.inputs.NEW_CHROMIUM_MAJOR }}.${{ github.event.inputs.NEW_CHROMIUM_MINOR }}.${{ github.event.inputs.NEW_CHROMIUM_BUILD }}.${{ github.event.inputs.NEW_CHROMIUM_PATCH }}'
 
-      - name: Displaying source Chromium file
-        run: cat /tmp/chromium_current/chrome/browser/resources/extensions/extensions.html
-
       - name: Going back to master
         run: git switch master
 
       - name: Going back to master
-        run: git rebase upstream_${{ github.event.inputs.NEW_CHROMIUM_MAJOR }}.${{ github.event.inputs.NEW_CHROMIUM_MINOR }}.${{ github.event.inputs.NEW_CHROMIUM_BUILD }}.${{ github.event.inputs.NEW_CHROMIUM_PATCH }}
+        run: git rebase chromium
 
       - name: Displaying Kiwi's variant file
         run: cat chrome/browser/resources/extensions/extensions.html
