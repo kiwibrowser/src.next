@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="main_menu_ads_and_trackers_blocked" tools:ignore="PluralsCandidate">"%1$d 광고 &amp; 추적 차단"</string>
+    <string name="main_menu_ads_blocked_since">"%1$s 이후"</string>
+    <string name="main_menu_adblock">짜증나는 광고를 숨기기</string>
+    <string name="main_menu_clear_data">기록 지우기</string>
+    <string name="main_menu_translate">번역</string>
+    <string name="main_menu_translate_undo">번역 멈추기</string>
+    <string name="main_menu_turn_on_night_mode">야간 모드 켜기</string>
+    <string name="main_menu_turn_off_night_mode">야간 모드 끄기</string>
+    <string name="main_menu_exit">나가기</string>
+    <string name="main_menu_extensions">확장 프로그램</string>
+    <string name="menu_import_bookmarks">북마크 가져오기</string>
+    <string name="menu_export_bookmarks">북마크 내보내기</string>
+    <string name="appearance_preferences">모양</string>
+    <string name="appearance_preferences_themes">테마</string>
+    <string name="accessibility_preferences_text_rewrap_title">화면 너비에 맞춰 글자 정렬</string>
+    <string name="accessibility_preferences_text_rewrap_summary">확대하면서 텍스트 맞추기</string>
+    <string name="accessibility_preferences_open_in_external_application_title">다른 앱으로 열기 허용</string>
+    <string name="accessibility_preferences_open_in_external_application_summary">가능하면 링크를 앱으로 열기 (지도, 유튜브 등)</string>
+    <string name="accessibility_preferences_nightmode_grayscale_title">다크 모드를 회색으로</string>
+    <string name="accessibility_preferences_nightmode_grayscale_summary">다크 모드를 회색 바탕으로 하기</string>
+    <string name="accessibility_preferences_night_scale">야간 모드 대비 (회색: 97, 기본: 99, 검정색: 100)</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_title">툴바를 아래로</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_summary">주소표시줄과 툴바를 아래쪽으로 보냅니다.</string>
+    <string name="accessibility_preferences_enable_overscroll_button_title">맨 위를 끌어오기 버튼 (툴바를 아래로 했을 때만 가능)</string>
+    <string name="accessibility_preferences_enable_overscroll_button_summary">페이지 맨 위를 아래로 내려 한 손으로도 터치할 수 있게 하는 버튼을 추가합니다.</string>
+    <string name="accessibility_preferences_enable_side_swipe_title">옆으로 밀기</string>
+    <string name="accessibility_preferences_enable_side_swipe_summary">왼쪽/오른쪽으로 밀기 제스처로 뒤로/앞으로 갈 수 있게 합니다.</string>
+    <string name="accessibility_preferences_enable_up_swipe_title">위로 밀어 탭 모음 열기</string>
+    <string name="accessibility_preferences_enable_up_swipe_summary">툴바를 위로 밀어 탭 모음을 엽니다,</string>
+    <string name="accessibility_preferences_show_extensions_first_title">확장기능 먼저 보기</string>
+    <string name="accessibility_preferences_show_extensions_first_summary">확장기능을 메뉴의 맨 위에 뜨게 합니다.</string>
+    <string name="contextual_menu_open_in_external_application">다른 앱으로 열기</string>
+    <string name="preferences_restart_is_needed">키위 브라우저를 다시 열면 변경사항이 적용됩니다.</string>
+    <string name="preferences_restart_now">재시작</string>
+    <string name="preferences_restart_later">나중에</string>
+    <string name="preferences_translator">번역기</string>
+    <string name="download_preferences_enable_external_download_manager_title">다른 다운로드 관리자</string>
+    <string name="download_preferences_enable_external_download_manager_summary">다른 다운로더 쓰기 (Advanced Download Manager와 같은)</string>
+    <string name="privacy_preferences_accept_cookie_consent_title">쿠키 허용하기</string>
+    <string name="privacy_preferences_accept_cookie_consent_summary">페이지에서 물어볼 때 쿠키 허용하기</string>
+    <string name="privacy_preferences_avoid_amp_websites_title">모바일 맞춤 페이지 없애기</string>
+    <string name="privacy_preferences_avoid_amp_websites_summary">모바일 맞춤 페이지 말고 원래 페이지로 가기</string>
+    <string name="privacy_preferences_hide_incognito_window_content_title">시크릿 탭 보호</string>
+    <string name="privacy_preferences_hide_incognito_window_content_summary">시크릿 탭의 컨텐츠 숨기기 및 캡처 방지</string>
+    <string name="privacy_preferences_close_tabs_on_exit_title">모든 탭 닫기</string>
+    <string name="privacy_preferences_close_tabs_on_exit_summary">종료 시 모든 탭 닫기</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_title">열려 있는 탭이 없을 때 브라우저 닫기</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_summary">마지막 탭을 닫은 후 브라우저도 닫기</string>
+    <string name="search_engines_preferences_howto_add">최근 방문\n새로운 검색 엔진을 추가하려면 검색 엔진 (예: Bing.com) 으로 이동하여 검색하세요. 몇 초 후에 검색 엔진이 목록에 추가됩니다.</string>
+    <string name="suggest_adblock">광고 차단 및 추적 차단</string>
+    <string name="website_settings_add_site_description_ads">광고 차단 예외</string>
+</resources>

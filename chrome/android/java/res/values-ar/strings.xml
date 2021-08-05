@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="main_menu_ads_and_trackers_blocked" tools:ignore="PluralsCandidate">"%1$dالإعلانات &amp; مُقتفيات الأثر تم منعها"</string>
+    <string name="main_menu_ads_blocked_since">"مُنذ %1$s"</string>
+    <string name="main_menu_adblock">قُم بإخفاء الإعلانات المُزعجة</string>
+    <string name="main_menu_clear_data">قُم بمسح البيانات</string>
+    <string name="main_menu_translate">قُم بالترجمة</string>
+    <string name="main_menu_translate_undo">توقف عن الترجمة</string>
+    <string name="main_menu_turn_on_night_mode">قُم بتشغيل الوضع الليلي</string>
+    <string name="main_menu_turn_off_night_mode">قُم بإيقاف الوضع الليلي</string>
+    <string name="main_menu_exit">الخروج</string>
+    <string name="main_menu_extensions">المُلحقات</string>
+    <string name="menu_import_bookmarks">قُم استيراد الإشارات المرجعية</string>
+    <string name="menu_export_bookmarks">قُم بتصدير الإشارات المرجعية</string>
+    <string name="appearance_preferences">المظهر</string>
+    <string name="appearance_preferences_themes">السمات</string>
+    <string name="accessibility_preferences_text_rewrap_title">إعادة إلتفاف النص / إعادة تدفق</string>
+    <string name="accessibility_preferences_text_rewrap_summary">احتواء النص اثناء التكبير</string>
+    <string name="accessibility_preferences_open_in_external_application_title">تفعيل التطبيقات الخارجية</string>
+    <string name="accessibility_preferences_open_in_external_application_summary">قُم بفتح الروابط عن طريق البرامج الخارجية مثل(الخرائط، اليوتيوب، فيميو) عندما يكون ذلك مُتاحاً</string>
+    <string name="accessibility_preferences_nightmode_grayscale_title">الوضع الليلي الرمادي</string>
+    <string name="accessibility_preferences_nightmode_grayscale_summary">تفضيل نسخة التدريج الرمادي في الوضع الليلي</string>
+    <string name="accessibility_preferences_night_scale">تباين الوضع الليلي (الرمادي: 97، الإفتراضي: 99، الأسود: 100)</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_title">شريط الأدوات السُفلي</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_summary">قُم بتحريك شريط العنوان للأسفل</string>
+    <string name="accessibility_preferences_enable_overscroll_button_title">زر اليد (شريط الأدوات فقط)</string>
+    <string name="accessibility_preferences_enable_overscroll_button_summary">ضِف زر اليد لكي تصل إلى الجزء العُلوي من الشاشة</string>
+    <string name="accessibility_preferences_enable_side_swipe_title">التمرير من الحافة</string>
+    <string name="accessibility_preferences_enable_side_swipe_summary">تفعيل إيماءات التمرير من يمين ويسار حافة الصفحة لكي تتنقل في تاريخ التصفح</string>
+    <string name="accessibility_preferences_enable_up_swipe_title">اسحب للأعلى لكي تفتح نافذة التنقل بين التبويبات</string>
+    <string name="accessibility_preferences_enable_up_swipe_summary">اسحب شريط الأدوات للأعلى لكي تفتح نافذة التنقل بين التبويبات</string>
+    <string name="accessibility_preferences_show_extensions_first_title">إظهار الإضافات أولا</string>
+    <string name="accessibility_preferences_show_extensions_first_summary">إظهار الإضافات في أعلى القائمة الرئيسية</string>
+    <string name="contextual_menu_open_in_external_application">قُم بالفتح في تطبيق خارجي</string>
+    <string name="preferences_restart_is_needed">التغييرات التي قُمت بها سوف تدخل حيز التنفيذ بعد إعادة تشغيل المُتصفح</string>
+    <string name="preferences_restart_now">قُم بإعادة التشغيل الآن</string>
+    <string name="preferences_restart_later">لاحقاً</string>
+    <string name="preferences_translator">ترجمة الصفحة</string>
+    <string name="download_preferences_enable_external_download_manager_title">مدير التحميل الخارجي</string>
+    <string name="download_preferences_enable_external_download_manager_summary">استخدام مدير تحميلات خارجي (مثال: مدير التحميلات المتقدم)</string>
+    <string name="privacy_preferences_accept_cookie_consent_title">قبول ملفات تعريف الارتباط</string>
+    <string name="privacy_preferences_accept_cookie_consent_summary">قبول ملفات تعريف الارتباط عند الطلب بواسطة موقع الكتروني</string>
+    <string name="privacy_preferences_avoid_amp_websites_title">إزالة صفحات الجوال المُسرعة AMP</string>
+    <string name="privacy_preferences_avoid_amp_websites_summary">تفضيل المواقع المُباشرة بدلاً من نسخة صفحات الجوال المُسرعة AMP</string>
+    <string name="privacy_preferences_hide_incognito_window_content_title">حماية نوافذ التصفح المخفي</string>
+    <string name="privacy_preferences_hide_incognito_window_content_summary">إخفاء المحتوى و منع لقطات الشاشة في وضع التصفح المخفي</string>
+    <string name="privacy_preferences_close_tabs_on_exit_title">قُم بإغلاق كُل التبويبات</string>
+    <string name="privacy_preferences_close_tabs_on_exit_summary">إغلاق كل التبويبات بين أي جلستين تصفُح</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_title">إغلاق المتصفح في حالة عدم وجود علامات تبويب مفتوحة</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_summary">إغلاق المتصفح بعد إغلاق آخر علامة تبويب</string>
+    <string name="search_engines_preferences_howto_add">مواقع تمت زيارُتها مؤخراً \n لكي تُضيف مُحرك بحثي جديد، إذهب إلى المُحرك البحثي (على سبيل المثال Bing.com) ثُم قُم بأي بحث. بعد بِضع ثوانِِ، المُحرك البحثي سوف يتم إضافته إلى القائمة.</string>
+    <string name="suggest_adblock">اضغط هنا لتفعيل الحماية ضد الإعلانات و التتبع</string>
+    <string name="website_settings_add_site_description_ads">السماح بإظهار الإعلانات لموقع معين</string>
+</resources>

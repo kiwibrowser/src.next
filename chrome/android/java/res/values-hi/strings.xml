@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="main_menu_ads_and_trackers_blocked" tools:ignore="PluralsCandidate">"%1$d विज्ञापन &amp; ब्लॉक कर दिए गए हैं"</string>
+    <string name="main_menu_ads_blocked_since">"कबसे %1$s"</string>
+    <string name="main_menu_adblock">परेशान करने वाले विज्ञापन छिपाएँ</string>
+    <string name="main_menu_clear_data">डेटा साफ़ करें</string>
+    <string name="main_menu_translate">अनुवाद करें</string>
+    <string name="main_menu_translate_undo">अनुवाद रोकें</string>
+    <string name="main_menu_turn_on_night_mode">रात्रि मोड शूरू करें</string>
+    <string name="main_menu_turn_off_night_mode">रात्रि मोड बंद करें</string>
+    <string name="main_menu_exit">बाहर निकलें</string>
+    <string name="main_menu_extensions">एक्सटेंशन</string>
+    <string name="menu_import_bookmarks">बुकमार्क आयात करें</string>
+    <string name="menu_export_bookmarks">बुकमार्क एक्सपोर्ट करें</string>
+    <string name="appearance_preferences">रंगरूप</string>
+    <string name="appearance_preferences_themes">थीम्स</string>
+    <string name="accessibility_preferences_text_rewrap_title">Text rewrap / reflow</string>
+    <string name="accessibility_preferences_text_rewrap_summary">जूम करते समय शब्दों को फिट करें</string>
+    <string name="accessibility_preferences_open_in_external_application_title">बाह्य एप्लिकेशन का इस्तेमाल करें</string>
+    <string name="accessibility_preferences_open_in_external_application_summary">जब संभव हो बाहरी एप्लिकेशन (maps, YouTube, vimeo) के साथ ओपन लिंक</string>
+    <string name="accessibility_preferences_nightmode_grayscale_title">ग्रेस्केल नाइट मोड</string>
+    <string name="accessibility_preferences_nightmode_grayscale_summary">रात मोड के ग्रेस्केल वर्जन को पसंद करते हैं</string>
+    <string name="accessibility_preferences_night_scale">रात्री मोड कंट्रास्ट (ग्रे: ९७, डिफ़ॉल्ट: ९९, काला: १००)</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_title">निचला टूलबार</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_summary">एड्रेसबार को नीचे ले जाएं</string>
+    <string name="accessibility_preferences_enable_overscroll_button_title">हाथ बटन (केवल निचला टूलबार)</string>
+    <string name="accessibility_preferences_enable_overscroll_button_summary">स्क्रीन के शीर्ष तक पहुँचने के लिए एक हाथ का बटन जोड़ें</string>
+    <string name="accessibility_preferences_enable_side_swipe_title">किनारे से स्वाइप</string>
+    <string name="accessibility_preferences_enable_side_swipe_summary">इतिहास नेविगेट करने के लिए पेज के किनारों पर स्वाइप-बाएं और स्वाइप-दाय इशारे को सक्षम करें</string>
+    <string name="accessibility_preferences_enable_up_swipe_title">टैब स्विचर खोलने के लिए स्वाइप-अप करें</string>
+    <string name="accessibility_preferences_enable_up_swipe_summary">टैब स्विचर खोलने के लिए टूलबार पर स्वाइप-अप करें</string>
+    <string name="accessibility_preferences_show_extensions_first_title">एक्सटेंशन पहले दिखाएं</string>
+    <string name="accessibility_preferences_show_extensions_first_summary">मुख्य मेनू में एक्सटेंशन ऊपर दिखाएं</string>
+    <string name="contextual_menu_open_in_external_application">बाहरी एप्लिकेशन में खोलें</string>
+    <string name="preferences_restart_is_needed">आपके परिवर्तन कीवी के पुनरारंभ पर शुरू होंगे</string>
+    <string name="preferences_restart_now">अभी पुनरारंभ करें</string>
+    <string name="preferences_restart_later">बाद में</string>
+    <string name="preferences_translator">अनुवादक</string>
+    <string name="download_preferences_enable_external_download_manager_title">बाहरी डाउनलोड संचालक</string>
+    <string name="download_preferences_enable_external_download_manager_summary">बाहरी डाउनलोड संचालक का उपयोग करें (उदाहरण: Advanced Download Manager)</string>
+    <string name="privacy_preferences_accept_cookie_consent_title">कुकीज़ स्वीकार करें</string>
+    <string name="privacy_preferences_accept_cookie_consent_summary">वेबसाइट द्वारा पूछे जाने पर कुकीज़ स्वीकार करें</string>
+    <string name="privacy_preferences_avoid_amp_websites_title">AMP निकालें</string>
+    <string name="privacy_preferences_avoid_amp_websites_summary">AMP के बजाय ओरिजिनल वेबसाइटों को पसंद करते हैं</string>
+    <string name="privacy_preferences_hide_incognito_window_content_title">गुप्त खिड़कियों को सुरक्षित रखें</string>
+    <string name="privacy_preferences_hide_incognito_window_content_summary">सामग्री छिपाएँ और स्क्रीनशॉट लेना गुप्त मोड में रोकें</string>
+    <string name="privacy_preferences_close_tabs_on_exit_title">सभी टैब्स बंद करें</string>
+    <string name="privacy_preferences_close_tabs_on_exit_summary">दो ब्राउज़िंग सत्रों के बीच सभी टैब्स बंद करें</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_title">ब्राउज़र बंद करें जब कोई टैब खुला ना हो</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_summary">आखिरी टैब बंद होने के बाद ब्राउज़र को बंद करें</string>
+    <string name="search_engines_preferences_howto_add">हाल ही में देखे गए \n एक नया सर्च इंजन जोड़ने के लिए, सर्च इंजन (उदा.: Bing.com) पर जाएं और सर्च करें । कुछ सेकंड के बाद, सर्च इंजन सूची में जोड़ दिया जाएगा ।</string>
+    <string name="suggest_adblock">विज्ञापन और ट्रैकिंग सुरक्षा को टॉगल करने के लिए यहां क्लिक करें</string>
+    <string name="website_settings_add_site_description_ads">किसी विशिष्ट साइट के लिए विज्ञापन प्रदर्शित करने की अनुमति दें</string>
+</resources>
