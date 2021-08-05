@@ -41,7 +41,8 @@ To keep the size of the repository small, we replicate only the files that are c
 ## Resolving issues
 
 If you need to add or remove commits where you have done mistake, `git rebase -i 3eb71bb7cae580107938f6394513462e67033f8a --committer-date-is-author-date`
-3eb71bb7cae580107938f6394513462e67033f8a is the root commit from which both Kiwi and Chromium branch are born from.
+
+`3eb71bb7cae580107938f6394513462e67033f8a` is the root commit from which both Kiwi and Chromium branch are born from.
 
 ## Navigating the source-code
 
