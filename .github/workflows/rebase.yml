@@ -77,7 +77,7 @@ jobs:
       - name: Going back to master
         run: git switch master
 
-      - name: Going back to master
+      - name: Rebasing on top of Chromium
         run: git rebase chromium
 
       - name: Displaying Kiwi's variant file
