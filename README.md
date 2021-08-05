@@ -27,6 +27,7 @@ This repository is using GitHub Actions workflows.
 Workflows can be accessed in the "Actions" tab on top of the page.
 
 In "kiwi" branch you can find the source-code, assets and tools that are used to build Kiwi Browser.
+
 In "chromium" branch you can find a replica of the Chromium repository.
 
   - Workflows starting with "Kiwi:" are executed on the branch "kiwi".
