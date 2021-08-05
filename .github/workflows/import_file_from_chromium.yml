@@ -41,7 +41,7 @@ jobs:
         run: cat /tmp/file.txt | base64 --decode > ${{ github.event.inputs.path }}
 
       - name: Preparing local Chromium branch
-        run: git switch --orphan upstream_${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}
+        run: git switch -c chromium || git switch chromium
 
       - name: Adding file to Git repository
         run: git add ${{ github.event.inputs.path }}
@@ -53,7 +53,7 @@ jobs:
         run: git switch master
 
       - name: Going back to master
-        run: git rebase upstream_${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}
+        run: git rebase chromium
 
       - name: Pushing repository
         run: git push --all
