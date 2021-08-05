@@ -1,4 +1,4 @@
-name: Update Chromium files in Chromium branch
+name: 'Chromium: Update files from upstream'
 
 on:
   workflow_dispatch:
