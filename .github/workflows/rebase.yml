@@ -78,8 +78,10 @@ jobs:
         id: pullrequest
         uses: peter-evans/create-pull-request@v3
         with:
-          branch: chromium
+          branch: chromium_${{ github.event.inputs.NEW_CHROMIUM_MAJOR }}.${{ github.event.inputs.NEW_CHROMIUM_MINOR }}.${{ github.event.inputs.NEW_CHROMIUM_BUILD }}.${{ github.event.inputs.NEW_CHROMIUM_PATCH }}
           base: master
+          delete-branch: true
+          signoff: true
         
       - name: Getting pull request URL
         run: |
