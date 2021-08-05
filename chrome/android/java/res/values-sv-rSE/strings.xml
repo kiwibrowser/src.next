@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="main_menu_ads_and_trackers_blocked" tools:ignore="PluralsCandidate">"%1$d annonser &amp; spårning blockerade"</string>
+    <string name="main_menu_ads_blocked_since">"Sedan %1$s"</string>
+    <string name="main_menu_adblock">Dölj irriterande annonser</string>
+    <string name="main_menu_clear_data">Rensa data</string>
+    <string name="main_menu_translate">Översätt</string>
+    <string name="main_menu_translate_undo">Sluta översätta</string>
+    <string name="main_menu_turn_on_night_mode">Aktivera nattläge</string>
+    <string name="main_menu_turn_off_night_mode">Avaktivera nattläge</string>
+    <string name="main_menu_exit">Avsluta</string>
+    <string name="main_menu_extensions">Tillägg</string>
+    <string name="menu_import_bookmarks">Importera bokmärken</string>
+    <string name="menu_export_bookmarks">Exportera bokmärken</string>
+    <string name="appearance_preferences">Utseende</string>
+    <string name="appearance_preferences_themes">Teman</string>
+    <string name="accessibility_preferences_text_rewrap_title">Radbryt text</string>
+    <string name="accessibility_preferences_text_rewrap_summary">Avpassa texten vid zoomning</string>
+    <string name="accessibility_preferences_open_in_external_application_title">Aktivera externa program</string>
+    <string name="accessibility_preferences_open_in_external_application_summary">Öppna länkar med externa applikationer (Maps, YouTube, Vimeo) när möjligt</string>
+    <string name="accessibility_preferences_nightmode_grayscale_title">Nattläge i gråskala</string>
+    <string name="accessibility_preferences_nightmode_grayscale_summary">Föredra nattläge i gråskala</string>
+    <string name="accessibility_preferences_night_scale">Konstrast för nattläge (grå: 97, standard: 99, svart: 100)</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_title">Nedre verktygsfält</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_summary">Flytta adressfältet till botten</string>
+    <string name="accessibility_preferences_enable_overscroll_button_title">Handknapp (bara för nedre verktygsfält)</string>
+    <string name="accessibility_preferences_enable_overscroll_button_summary">Lägg till en handknapp för att nå toppen av skärmen</string>
+    <string name="accessibility_preferences_enable_side_swipe_title">Kantsvep</string>
+    <string name="accessibility_preferences_enable_side_swipe_summary">Aktivera vänster- och högersvepgester för att navigera i historiken</string>
+    <string name="accessibility_preferences_enable_up_swipe_title">Svep upp för att öppna flikar</string>
+    <string name="accessibility_preferences_enable_up_swipe_summary">Svep upp på verktygsfältet för att öppna flikar</string>
+    <string name="accessibility_preferences_show_extensions_first_title">Visa tilläggen först</string>
+    <string name="accessibility_preferences_show_extensions_first_summary">Visa tilläggen högre upp i huvudmenyn</string>
+    <string name="contextual_menu_open_in_external_application">Öppna i extern program</string>
+    <string name="preferences_restart_is_needed">Dina ändringar aktiveras efter omstart av Kiwi</string>
+    <string name="preferences_restart_now">STARTA OM NU</string>
+    <string name="preferences_restart_later">Senare</string>
+    <string name="preferences_translator">Översättare</string>
+    <string name="download_preferences_enable_external_download_manager_title">Extern nerladdningshanterare</string>
+    <string name="download_preferences_enable_external_download_manager_summary">Använd extern nerladdningshanterare (t.ex. Advanced Download Manager)</string>
+    <string name="privacy_preferences_accept_cookie_consent_title">Godta kakor</string>
+    <string name="privacy_preferences_accept_cookie_consent_summary">Godta kakor när tillfrågat av en webbsajt</string>
+    <string name="privacy_preferences_avoid_amp_websites_title">Ta bort AMP</string>
+    <string name="privacy_preferences_avoid_amp_websites_summary">Föredra riktiga webbsidor istället för AMP-versioner</string>
+    <string name="privacy_preferences_hide_incognito_window_content_title">Skydda inkognitofönster</string>
+    <string name="privacy_preferences_hide_incognito_window_content_summary">Dölj innehåll och förhindra skärmdumpning i privatläge</string>
+    <string name="privacy_preferences_close_tabs_on_exit_title">Stäng alla flikar</string>
+    <string name="privacy_preferences_close_tabs_on_exit_summary">Stäng alla flikar mellan två sessioner</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_title">Stäng webbläsaren när inga flikar är öppna</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_summary">Stäng webbläsaren när den sista fliken stängs</string>
+    <string name="search_engines_preferences_howto_add">Nyligen besökta\nFör att lägga till en ny sökmotor, gå till sökmotorn (t.ex. Bing.com) och gör en sökning. Efter några sekunder kommer sökmotorn att läggas till i listan.</string>
+    <string name="suggest_adblock">Klicka här för att aktivera/avaktivera skydd mot reklam och spårning</string>
+    <string name="website_settings_add_site_description_ads">Tillåt visning av annonser för en specifik sajt</string>
+</resources>

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="main_menu_ads_and_trackers_blocked" tools:ignore="PluralsCandidate">"%1$d mainosta &amp; seurainta estetty"</string>
+    <string name="main_menu_ads_blocked_since">"%1$s lähtien"</string>
+    <string name="main_menu_adblock">Piilota ärsyttävät mainokset</string>
+    <string name="main_menu_clear_data">Tyhjennä data</string>
+    <string name="main_menu_translate">Käännä</string>
+    <string name="main_menu_translate_undo">Pysäytä kääntäjä</string>
+    <string name="main_menu_turn_on_night_mode">Kytke yötila päälle</string>
+    <string name="main_menu_turn_off_night_mode">Kytke yötila pois päältä</string>
+    <string name="main_menu_exit">Poistu</string>
+    <string name="main_menu_extensions">Laajennukset</string>
+    <string name="menu_import_bookmarks">Tuo kirjanmerkit</string>
+    <string name="menu_export_bookmarks">Vie kirjanmerkit</string>
+    <string name="appearance_preferences">Ulkoasu</string>
+    <string name="appearance_preferences_themes">Teemat</string>
+    <string name="accessibility_preferences_text_rewrap_title">Text rewrap / reflow</string>
+    <string name="accessibility_preferences_text_rewrap_summary">Mahduta teksti zoomauksen aikana</string>
+    <string name="accessibility_preferences_open_in_external_application_title">Salli ulkoiset sovellukset</string>
+    <string name="accessibility_preferences_open_in_external_application_summary">Avaa linkit ulkopuolisilla sovelluksilla (Maps, Youtube, Vimeo) mikäli mahdollista</string>
+    <string name="accessibility_preferences_nightmode_grayscale_title">Harmaasävy yötila</string>
+    <string name="accessibility_preferences_nightmode_grayscale_summary">Käytä mieluummin harmaasävyjä yötilassa</string>
+    <string name="accessibility_preferences_night_scale">Yötilan kontrasti (harmaa: 97, vakio: 99, musta: 100)</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_title">Alareunan työkalurivi</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_summary">Siirrä osoiterivi alaosaan</string>
+    <string name="accessibility_preferences_enable_overscroll_button_title">Käsi-painike (alareunan työkalurivillä)</string>
+    <string name="accessibility_preferences_enable_overscroll_button_summary">Lisää käsi-painike päästäksesi näytön yläreunaan</string>
+    <string name="accessibility_preferences_enable_side_swipe_title">Reunapyyhkäisy</string>
+    <string name="accessibility_preferences_enable_side_swipe_summary">Käytä vasemman ja oikean reunan pyyhkäisyä liikkuaksesi edellisille ja seuraaville sivuille</string>
+    <string name="accessibility_preferences_enable_up_swipe_title">Pyyhkäise ylös avataksesi välilehdet sivun</string>
+    <string name="accessibility_preferences_enable_up_swipe_summary">Pyyhkäise ylös työkalurivillä avataksesi välilehdet sivun</string>
+    <string name="accessibility_preferences_show_extensions_first_title">Näytä laajennukset ensin</string>
+    <string name="accessibility_preferences_show_extensions_first_summary">Naytä laajennukset ylempänä päävalikossa</string>
+    <string name="contextual_menu_open_in_external_application">Avaa ulkoisessa sovelluksessa</string>
+    <string name="preferences_restart_is_needed">Muutokset tulevat voimaan Kiwin uudelleen käynnistyksen jälkeen</string>
+    <string name="preferences_restart_now">KÄYNNISTÄ UUDELLEEN NYT</string>
+    <string name="preferences_restart_later">Myöhemmin</string>
+    <string name="preferences_translator">Kääntäjä</string>
+    <string name="download_preferences_enable_external_download_manager_title">Ulkoinen lataushallinta</string>
+    <string name="download_preferences_enable_external_download_manager_summary">Käytä ulkoista lataushallintaa (esim. Advanced Download Manager)</string>
+    <string name="privacy_preferences_accept_cookie_consent_title">Hyväksy evästeet</string>
+    <string name="privacy_preferences_accept_cookie_consent_summary">Hyväksy evästeet, kun verkkosivu kysyy niitä</string>
+    <string name="privacy_preferences_avoid_amp_websites_title">Poista AMP</string>
+    <string name="privacy_preferences_avoid_amp_websites_summary">Näytä mieluummin notmaalit sivustot AMP version sijaan</string>
+    <string name="privacy_preferences_hide_incognito_window_content_title">Suojaa inkognito-ikkunat</string>
+    <string name="privacy_preferences_hide_incognito_window_content_summary">Piilota sisältö ja estä kuvakaappaukset inkognito-tilassa</string>
+    <string name="privacy_preferences_close_tabs_on_exit_title">Sulje kaikki välilehdet</string>
+    <string name="privacy_preferences_close_tabs_on_exit_summary">Sulje kaikki välilehdet kahden eri selailun välillä</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_title">Sulje selain, kun välilehtiä ei ole auki</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_summary">Sulje selain sen jälkeen, kun viimeinen välilehti on suljettu</string>
+    <string name="search_engines_preferences_howto_add">Äskettäin vieraillut\nLisätäksesi uuden hakukoneen, mene hakukoneeseen (esim. Bing.com) ja tee haku. Muutaman sekunnin kuluttua hakukone lisätään listalle.</string>
+    <string name="suggest_adblock">Klikkaa tästä kytkeäksesi mainosten eston ja seurannan suojauksen</string>
+    <string name="website_settings_add_site_description_ads">Salli mainosten näyttäminen tietyillä sivustoilla</string>
+</resources>
