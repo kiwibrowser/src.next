@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="main_menu_ads_and_trackers_blocked" tools:ignore="PluralsCandidate">"%1$d quảng cáo &amp; trackers bị chặn"</string>
+    <string name="main_menu_ads_blocked_since">"Từ %1$s"</string>
+    <string name="main_menu_adblock">Ẩn quảng cáo</string>
+    <string name="main_menu_clear_data">Xóa dữ liệu</string>
+    <string name="main_menu_translate">Phiên dịch</string>
+    <string name="main_menu_translate_undo">Ngưng phiên dịch</string>
+    <string name="main_menu_turn_on_night_mode">Bật chế độ ban đêm</string>
+    <string name="main_menu_turn_off_night_mode">Tắt chế độ ban đêm</string>
+    <string name="main_menu_exit">Thoát</string>
+    <string name="main_menu_extensions">Tiện ích mở rộng</string>
+    <string name="menu_import_bookmarks">Nhập dấu trang</string>
+    <string name="menu_export_bookmarks">Xuất dấu trang</string>
+    <string name="appearance_preferences">Giao diện</string>
+    <string name="appearance_preferences_themes">Gói giao diện</string>
+    <string name="accessibility_preferences_text_rewrap_title">Tự động chỉnh kí tự</string>
+    <string name="accessibility_preferences_text_rewrap_summary">Căn chỉnh kí tự khi phóng to</string>
+    <string name="accessibility_preferences_open_in_external_application_title">Sử dụng ứng dụng bên ngoài</string>
+    <string name="accessibility_preferences_open_in_external_application_summary">Mở các liên kết bằng ứng dụng bên ngoài (Maps, YouTube, Vimeo) khi có thể</string>
+    <string name="accessibility_preferences_nightmode_grayscale_title">Chế độ ban đêm màu xám</string>
+    <string name="accessibility_preferences_nightmode_grayscale_summary">Ưu tiên chế độ ban đêm màu xám</string>
+    <string name="accessibility_preferences_night_scale">Độ tương phản của chế độ ban đêm (xám: 97, mặc định: 99, đen: 100)</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_title">Đặt thanh công cụ xuống dưới cùng</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_summary">Đặt thanh địa chỉ xuống dưới cùng</string>
+    <string name="accessibility_preferences_enable_overscroll_button_title">Nút bàn tay (khi thanh công cụ ở dưới)</string>
+    <string name="accessibility_preferences_enable_overscroll_button_summary">Add a hand button to reach the top of the screen</string>
+    <string name="accessibility_preferences_enable_side_swipe_title">Thao tác với viền</string>
+    <string name="accessibility_preferences_enable_side_swipe_summary">Cho phép cử chỉ trượt ngang từ 2 cạnh bên để điều hướng theo lịch sử truy cập</string>
+    <string name="accessibility_preferences_enable_up_swipe_title">Trượt lên để xem các thẻ đang lưu</string>
+    <string name="accessibility_preferences_enable_up_swipe_summary">Trượt lên từ thanh công cụ để chuyển giữa các trang từng truy cập</string>
+    <string name="accessibility_preferences_show_extensions_first_title">Tiện ích lên trước</string>
+    <string name="accessibility_preferences_show_extensions_first_summary">Tiện ích mở rộng ở trên cùng khi ấn</string>
+    <string name="contextual_menu_open_in_external_application">Mở bằng ứng dụng bên ngoài</string>
+    <string name="preferences_restart_is_needed">Các thay đổi sẽ có hiệu lực sau khi khởi động lại Kiwi</string>
+    <string name="preferences_restart_now">KHỞI ĐỘNG LẠI NGAY</string>
+    <string name="preferences_restart_later">Để sau</string>
+    <string name="preferences_translator">Công cụ dịch thuật</string>
+    <string name="download_preferences_enable_external_download_manager_title">Trình tải về bên ngoài</string>
+    <string name="download_preferences_enable_external_download_manager_summary">Tải về qua ứng dụng ngoài (ví dụ: Advanced Download Manager)</string>
+    <string name="privacy_preferences_accept_cookie_consent_title">Cho phép cookie</string>
+    <string name="privacy_preferences_accept_cookie_consent_summary">Chấp nhận cookies khi được yêu cầu</string>
+    <string name="privacy_preferences_avoid_amp_websites_title">Loại bỏ các AMP</string>
+    <string name="privacy_preferences_avoid_amp_websites_summary">Ưu tiên các trang web trực tiếp thay vì phiên bản AMP</string>
+    <string name="privacy_preferences_hide_incognito_window_content_title">Bảo vệ trang ẩn danh</string>
+    <string name="privacy_preferences_hide_incognito_window_content_summary">Ẩn nội dung &amp; chống chụp màn hình tại chế độ ẩn danh</string>
+    <string name="privacy_preferences_close_tabs_on_exit_title">Đóng tất cả các thẻ</string>
+    <string name="privacy_preferences_close_tabs_on_exit_summary">Đóng tất cả các thẻ khi thoát</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_title">Đóng ứng dụng khi không thẻ nào mở</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_summary">Ứng dụng tự đóng ngay khi thẻ cuối cùng vừa được xóa</string>
+    <string name="search_engines_preferences_howto_add">Các trang vừa xem\nĐể thêm một công cụ tìm kiếm mới, vào trang web của công cụ tìm kiếm (ví dụ: Bing.com) và thực hiện một tìm kiếm. Sau vài giây, công cụ tìm kiếm sẽ được thêm vào danh sách.</string>
+    <string name="suggest_adblock">Ấn để bật/ tắt chế độ chặn quảng cáo &amp; theo dõi</string>
+    <string name="website_settings_add_site_description_ads">Hiện quảng cáo với các trang cho trước</string>
+</resources>
