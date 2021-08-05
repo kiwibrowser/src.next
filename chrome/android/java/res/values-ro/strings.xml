@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="main_menu_ads_and_trackers_blocked" tools:ignore="PluralsCandidate">"%1$d anunţuri &amp; trackere blocat"</string>
+    <string name="main_menu_ads_blocked_since">"Începând cu %1$s"</string>
+    <string name="main_menu_adblock">Blochează reclamele enervante</string>
+    <string name="main_menu_clear_data">Ștergeți datele</string>
+    <string name="main_menu_translate">Traduceți</string>
+    <string name="main_menu_translate_undo">Oprire traducere</string>
+    <string name="main_menu_turn_on_night_mode">Activați modul nocturn</string>
+    <string name="main_menu_turn_off_night_mode">Dezactivați modul nocturn</string>
+    <string name="main_menu_exit">Ieşire</string>
+    <string name="main_menu_extensions">Extensii</string>
+    <string name="menu_import_bookmarks">Importă favoritele din</string>
+    <string name="menu_export_bookmarks">Export marcaje</string>
+    <string name="appearance_preferences">Aspect</string>
+    <string name="appearance_preferences_themes">Teme</string>
+    <string name="accessibility_preferences_text_rewrap_title">Despărțirea / Aranjarea textului</string>
+    <string name="accessibility_preferences_text_rewrap_summary">Ajustați textul când faceți zoom</string>
+    <string name="accessibility_preferences_open_in_external_application_title">Deschide în aplicaţie externă</string>
+    <string name="accessibility_preferences_open_in_external_application_summary">Deschide link-uri cu aplicatii externe (Maps, YouTube, Vimeo) atunci când este posibil</string>
+    <string name="accessibility_preferences_nightmode_grayscale_title">Tonuri de gri în modalitatea nocturnă</string>
+    <string name="accessibility_preferences_nightmode_grayscale_summary">Preferă tonuri gri în modalitatea nocturnă</string>
+    <string name="accessibility_preferences_night_scale">Contrast modul de noapte (gri: 97, implicit: 99, negru: 100)</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_title">Bara de instrumente de jos</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_summary">Mutați bara de adrese in partea de jos</string>
+    <string name="accessibility_preferences_enable_overscroll_button_title">Buton de mână (doar pe bara de instrumente de jos)</string>
+    <string name="accessibility_preferences_enable_overscroll_button_summary">Adăugați un buton pentru a ajunge în partea de sus a ecranului</string>
+    <string name="accessibility_preferences_enable_side_swipe_title">Glisare pe margine</string>
+    <string name="accessibility_preferences_enable_side_swipe_summary">Activați gesturile de glisare-stanga și glisare-dreapta pe marginile paginii pentru a naviga istoricul</string>
+    <string name="accessibility_preferences_enable_up_swipe_title">Glisați-l pentru a deschide comutatorul ferestrelor</string>
+    <string name="accessibility_preferences_enable_up_swipe_summary">Glisați în sus pe bara de instrumente pentru a deschide comutatorul de ferestre</string>
+    <string name="accessibility_preferences_show_extensions_first_title">Afișați mai întâi extensiile</string>
+    <string name="accessibility_preferences_show_extensions_first_summary">Afișați extensiile mai sus în meniul principal</string>
+    <string name="contextual_menu_open_in_external_application">Deschide în aplicaţie externă</string>
+    <string name="preferences_restart_is_needed">Noile setări vor fi aplicate când veți restarta Kiwi</string>
+    <string name="preferences_restart_now">REPORNIŢI ACUM</string>
+    <string name="preferences_restart_later">Mai târziu</string>
+    <string name="preferences_translator">Traducător</string>
+    <string name="download_preferences_enable_external_download_manager_title">Manager extern de descărcare</string>
+    <string name="download_preferences_enable_external_download_manager_summary">Utilizați managerul extern de descărcări (ex: Advanced Download Manager)</string>
+    <string name="privacy_preferences_accept_cookie_consent_title">Acceptă cookie-uri</string>
+    <string name="privacy_preferences_accept_cookie_consent_summary">Acceptați cookie-urile când vi se solicită de la un site web</string>
+    <string name="privacy_preferences_avoid_amp_websites_title">Elimina AMP</string>
+    <string name="privacy_preferences_avoid_amp_websites_summary">Prefera direct site-uri web în loc de AMP traducere</string>
+    <string name="privacy_preferences_hide_incognito_window_content_title">Protejați ferestrele incognito</string>
+    <string name="privacy_preferences_hide_incognito_window_content_summary">Ascundeți conținutul și preveniți capturile de ecran în modul incognito</string>
+    <string name="privacy_preferences_close_tabs_on_exit_title">Închideți toate tab-urile</string>
+    <string name="privacy_preferences_close_tabs_on_exit_summary">Închideți toate filele între două sesiuni de navigare</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_title">Închideți browserul atunci când nu sunt deschise ferestre</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_summary">Închideți browserul după ce ultima fereastră a fost închisă</string>
+    <string name="search_engines_preferences_howto_add">Vizitate recent\nPentru a adăuga un nou motor de căutare, accesați Motorul de căutare (ex: Bing.com) și efectuați o căutare. După câteva secunde, motorul de căutare va fi adăugat în listă.</string>
+    <string name="suggest_adblock">Faceți clic aici pentru a activa protecția și urmărirea</string>
+    <string name="website_settings_add_site_description_ads">Permiteți reclame pentru anumite site-uri</string>
+</resources>
