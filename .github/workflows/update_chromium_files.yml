@@ -1,4 +1,4 @@
-name: Download a new version of Chromium to chromium branch
+name: Update Chromium files in chromium branch
 
 on:
   workflow_dispatch:
