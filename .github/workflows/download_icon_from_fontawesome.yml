@@ -1,4 +1,4 @@
-name: Download icon from fontawesome
+name: 'Kiwi: Download icon from fontawesome'
 
 on:
   workflow_dispatch:
