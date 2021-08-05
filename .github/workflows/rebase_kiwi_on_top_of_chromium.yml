@@ -26,7 +26,7 @@ jobs:
         run: git switch kiwi
         
       - name: Fetching Chromium branch
-        run: git fetch chromium
+        run: git fetch origin chromium
 
       - name: Rebasing on top of Chromium
         run: git rebase chromium
