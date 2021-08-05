@@ -27,7 +27,10 @@ jobs:
         run: |
           git config --global user.email "github@actions"
           git config --global user.name "Repository manager"
-          
+
+      - name: Preparing local Chromium branch
+        run: git git switch chromium
+
       - name: Loading settings from CHROMIUM_VERSION
         run: |
           source CHROMIUM_VERSION; export $(cut -d= -f1 CHROMIUM_VERSION | grep -vF '#')
@@ -41,9 +44,6 @@ jobs:
 
       - name: Decoding file
         run: cat /tmp/file.txt | base64 --decode > ${{ github.event.inputs.path }}
-
-      - name: Preparing local Chromium branch
-        run: git switch -c chromium f5d797deec3b570e0e4a8b77caaf6d51520dfbfa || git switch chromium
 
       - name: Adding file to Git repository
         run: git add ${{ github.event.inputs.path }}
