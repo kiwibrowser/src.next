@@ -52,4 +52,4 @@ jobs:
         run: git commit -a -m '[Chromium] Importing ${{ github.event.inputs.path }} from version ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}'
 
       - name: Pushing repository
-        run: git push chromium
+        run: git push origin chromium
