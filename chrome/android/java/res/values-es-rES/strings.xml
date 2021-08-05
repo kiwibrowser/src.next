@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="main_menu_ads_and_trackers_blocked" tools:ignore="PluralsCandidate">"%1$d peticiones bloqueadas"</string>
+    <string name="main_menu_ads_blocked_since">"Desde %1$s"</string>
+    <string name="main_menu_adblock">Ocultar anuncios molestos</string>
+    <string name="main_menu_clear_data">Borrar datos</string>
+    <string name="main_menu_translate">Traducir</string>
+    <string name="main_menu_translate_undo">Detener traducción</string>
+    <string name="main_menu_turn_on_night_mode">Activar modo Nocturno</string>
+    <string name="main_menu_turn_off_night_mode">Desactivar modo Nocturno</string>
+    <string name="main_menu_exit">Salir</string>
+    <string name="main_menu_extensions">Extensiones</string>
+    <string name="menu_import_bookmarks">Importar marcadores</string>
+    <string name="menu_export_bookmarks">Exportar marcadores</string>
+    <string name="appearance_preferences">Apariencia</string>
+    <string name="appearance_preferences_themes">Temas</string>
+    <string name="accessibility_preferences_text_rewrap_title">Ajuste de texto y línea</string>
+    <string name="accessibility_preferences_text_rewrap_summary">Ajustar el texto al hacer zoom</string>
+    <string name="accessibility_preferences_open_in_external_application_title">Habilitar aplicaciones externas</string>
+    <string name="accessibility_preferences_open_in_external_application_summary">Abrir enlaces con aplicaciones externas (Maps, YouTube, Vimeo) cuando sea posible</string>
+    <string name="accessibility_preferences_nightmode_grayscale_title">Escala de grises modo nocturno</string>
+    <string name="accessibility_preferences_nightmode_grayscale_summary">Preferir la versión de escala de grises del modo nocturno</string>
+    <string name="accessibility_preferences_night_scale">Contraste modo Nocturno (gris: 97, por defecto: 99, negro: 100)</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_title">Barra de navegación inferior</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_summary">Mover la barra de direcciones a la parte inferior</string>
+    <string name="accessibility_preferences_enable_overscroll_button_title">Botón Mano (Sólo en barra inferior)</string>
+    <string name="accessibility_preferences_enable_overscroll_button_summary">Añada el botón Mano para alcanzar la parte superior de la página para trabajar con una sola mano</string>
+    <string name="accessibility_preferences_enable_side_swipe_title">Deslizamiento de Bordes</string>
+    <string name="accessibility_preferences_enable_side_swipe_summary">Habilite los gestos de deslizamiento-izquierdo y deslizamiento-derecho en los bordes de la página web para navegar en el historial de la pestaña</string>
+    <string name="accessibility_preferences_enable_up_swipe_title">Deslizamiento hacia arriba</string>
+    <string name="accessibility_preferences_enable_up_swipe_summary">Deslice hacia arriba sobre la barra de navegación para abrir el selector de pestañas</string>
+    <string name="accessibility_preferences_show_extensions_first_title">Mostrar extensiones primero</string>
+    <string name="accessibility_preferences_show_extensions_first_summary">Mostrar extensiones primero en el menú principal</string>
+    <string name="contextual_menu_open_in_external_application">Abrir en aplicación externa</string>
+    <string name="preferences_restart_is_needed">Los cambios se actualizarán después de reiniciar Kiwi</string>
+    <string name="preferences_restart_now">REINICIAR AHORA</string>
+    <string name="preferences_restart_later">Después</string>
+    <string name="preferences_translator">Traductor</string>
+    <string name="download_preferences_enable_external_download_manager_title">Administrador de descargas externo</string>
+    <string name="download_preferences_enable_external_download_manager_summary">Usar un administrador de descargas externas (ej: Advanced Download Manager)</string>
+    <string name="privacy_preferences_accept_cookie_consent_title">Aceptar cookies</string>
+    <string name="privacy_preferences_accept_cookie_consent_summary">Aceptar cookies cuando un sitio web lo pregunte</string>
+    <string name="privacy_preferences_avoid_amp_websites_title">Retirar AMP</string>
+    <string name="privacy_preferences_avoid_amp_websites_summary">Preferir páginas web normales en lugar de la versión AMP</string>
+    <string name="privacy_preferences_hide_incognito_window_content_title">Proteger ventanas incógnitas</string>
+    <string name="privacy_preferences_hide_incognito_window_content_summary">Ocultar contenido y prevenir capturas de pantalla en modo incógnito</string>
+    <string name="privacy_preferences_close_tabs_on_exit_title">Cerrar todas las pestañas</string>
+    <string name="privacy_preferences_close_tabs_on_exit_summary">Cerrar todas las pestañas entre dos sesiones de navegación</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_title">Cerrar navegador cuando no hay pestañas abiertas</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_summary">Cerrar el navegador después de que se haya cerrado la última pestaña</string>
+    <string name="search_engines_preferences_howto_add">Recientemente visitado\nPara añadir un nuevo motor de búsqueda, vaya al motor de búsqueda (ej: Bing.com) y hacer una búsqueda. Después de pocos segundos, el motor de búsqueda se añadirá a la lista.</string>
+    <string name="suggest_adblock">Haga clic aquí para cambiar la protección de rastreo y anuncios</string>
+    <string name="website_settings_add_site_description_ads">Permitir mostrar anuncios para un sitio específico</string>
+</resources>
