@@ -1,4 +1,4 @@
-name: Download translations from Crowdin
+name: 'Kiwi: Download translations from Crowdin'
 
 on:
   workflow_dispatch
