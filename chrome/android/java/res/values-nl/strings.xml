@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="main_menu_ads_and_trackers_blocked" tools:ignore="PluralsCandidate">"%1$d ads &amp; trackers blocked"</string>
+    <string name="main_menu_ads_blocked_since">"Since %1$s"</string>
+    <string name="main_menu_adblock">Hide annoying ads</string>
+    <string name="main_menu_clear_data">Clear data</string>
+    <string name="main_menu_translate">Translate</string>
+    <string name="main_menu_translate_undo">Stop translate</string>
+    <string name="main_menu_turn_on_night_mode">Turn on night mode</string>
+    <string name="main_menu_turn_off_night_mode">Turn off night mode</string>
+    <string name="main_menu_exit">Exit</string>
+    <string name="main_menu_extensions">Extensions</string>
+    <string name="menu_import_bookmarks">Import bookmarks</string>
+    <string name="menu_export_bookmarks">Export bookmarks</string>
+    <string name="appearance_preferences">Appearance</string>
+    <string name="appearance_preferences_themes">Themes</string>
+    <string name="accessibility_preferences_text_rewrap_title">Text rewrap / reflow</string>
+    <string name="accessibility_preferences_text_rewrap_summary">Fit the text while zooming</string>
+    <string name="accessibility_preferences_open_in_external_application_title">Enable external applications</string>
+    <string name="accessibility_preferences_open_in_external_application_summary">Open links with external applications (Maps, YouTube, Vimeo) when possible</string>
+    <string name="accessibility_preferences_nightmode_grayscale_title">Grayscale night mode</string>
+    <string name="accessibility_preferences_nightmode_grayscale_summary">Prefer grayscale version of night mode</string>
+    <string name="accessibility_preferences_night_scale">Night mode contrast (gray: 97, default: 99, black: 100)</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_title">Bottom toolbar</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_summary">Move address bar to the bottom</string>
+    <string name="accessibility_preferences_enable_overscroll_button_title">Hand button (bottom toolbar only)</string>
+    <string name="accessibility_preferences_enable_overscroll_button_summary">Add a hand button to reach the top of the screen</string>
+    <string name="accessibility_preferences_enable_side_swipe_title">Edge swipe</string>
+    <string name="accessibility_preferences_enable_side_swipe_summary">Enable swipe-left and swipe-right gestures on the edges of the page to navigate history</string>
+    <string name="accessibility_preferences_enable_up_swipe_title">Swipe-up to open tab switcher</string>
+    <string name="accessibility_preferences_enable_up_swipe_summary">Swipe-up on the toolbar to open the tab switcher</string>
+    <string name="accessibility_preferences_show_extensions_first_title">Show extensions first</string>
+    <string name="accessibility_preferences_show_extensions_first_summary">Show extensions higher in the main menu</string>
+    <string name="contextual_menu_open_in_external_application">Open in external application</string>
+    <string name="preferences_restart_is_needed">Your changes will take effect on restart of Kiwi</string>
+    <string name="preferences_restart_now">RESTART NOW</string>
+    <string name="preferences_restart_later">Later</string>
+    <string name="preferences_translator">Translator</string>
+    <string name="download_preferences_enable_external_download_manager_title">External download manager</string>
+    <string name="download_preferences_enable_external_download_manager_summary">Use external download manager (ex: Advanced Download Manager)</string>
+    <string name="privacy_preferences_accept_cookie_consent_title">Accept cookies</string>
+    <string name="privacy_preferences_accept_cookie_consent_summary">Accept cookies when asked by a website</string>
+    <string name="privacy_preferences_avoid_amp_websites_title">Remove AMP</string>
+    <string name="privacy_preferences_avoid_amp_websites_summary">Prefer direct websites instead of AMP version</string>
+    <string name="privacy_preferences_hide_incognito_window_content_title">Protect incognito windows</string>
+    <string name="privacy_preferences_hide_incognito_window_content_summary">Hide content and prevent screenshots in incognito mode</string>
+    <string name="privacy_preferences_close_tabs_on_exit_title">Close all tabs</string>
+    <string name="privacy_preferences_close_tabs_on_exit_summary">Close all tabs between two browsing sessions</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_title">Close browser when no tabs are open</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_summary">Close the browser after the last tab has been closed</string>
+    <string name="search_engines_preferences_howto_add">Recently visited\nTo add a new Search Engine, go to the Search Engine (ex: Bing.com) and make a Search. After few seconds, the Search Engine will be added to the list.</string>
+    <string name="suggest_adblock">Click here to toggle ad and tracking protection</string>
+    <string name="website_settings_add_site_description_ads">Allow displaying ads for a specific site</string>
+</resources>
