@@ -29,4 +29,4 @@ jobs:
         run: git fetch origin chromium
 
       - name: Rebasing on top of Chromium
-        run: git rebase chromium
+        run: git rebase origin/chromium
