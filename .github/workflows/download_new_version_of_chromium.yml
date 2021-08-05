@@ -63,7 +63,7 @@ jobs:
         run: cd /tmp/chromium_new && git read-tree -mu ${{ github.event.inputs.NEW_CHROMIUM_MAJOR }}.${{ github.event.inputs.NEW_CHROMIUM_MINOR }}.${{ github.event.inputs.NEW_CHROMIUM_BUILD }}.${{ github.event.inputs.NEW_CHROMIUM_PATCH }}
 
       - name: Preparing local Chromium branch
-        run: git switch -c chromium f5d797deec3b570e0e4a8b77caaf6d51520dfbfa || git switch chromium
+        run: git switch chromium
 
       - name: Copying files to local Chromium branch
         run: rsync -avz --progress --exclude=".git" /tmp/chromium_new/* .
@@ -71,8 +71,12 @@ jobs:
       - name: Adding files to local Chromium branch
         run: git add .
 
-      - name: Committing files to local Chromium branch
-        run: git commit --allow-empty -a -m '[Import] Importing files from ${{ github.event.inputs.NEW_CHROMIUM_MAJOR }}.${{ github.event.inputs.NEW_CHROMIUM_MINOR }}.${{ github.event.inputs.NEW_CHROMIUM_BUILD }}.${{ github.event.inputs.NEW_CHROMIUM_PATCH }}'
+      - name: Updating CHROMIUM_VERSION file
+        run: |
+          echo "CHROMIUM_MAJOR=${{ github.event.inputs.NEW_CHROMIUM_MAJOR }}" > CHROMIUM_VERSION
+          echo "CHROMIUM_MINOR=${{ github.event.inputs.NEW_CHROMIUM_MINOR }}" >> CHROMIUM_VERSION
+          echo "CHROMIUM_BUILD=${{ github.event.inputs.NEW_CHROMIUM_BUILD }}" >> CHROMIUM_VERSION
+          echo "CHROMIUM_PATCH=${{ github.event.inputs.NEW_CHROMIUM_PATCH }}" >> CHROMIUM_VERSION
 
       - name: Creating pull request
         id: pullrequest
@@ -82,29 +86,9 @@ jobs:
           base: chromium
           delete-branch: true
           signoff: true
+          commit-message: "[Chromium] Updated Chromium VERSION from ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }} to ${{ github.event.inputs.NEW_CHROMIUM_MAJOR }}.${{ github.event.inputs.NEW_CHROMIUM_MINOR }}.${{ github.event.inputs.NEW_CHROMIUM_BUILD }}.${{ github.event.inputs.NEW_CHROMIUM_PATCH }}"
         
       - name: Getting pull request URL
         run: |
           echo "Pull request number - ${{ steps.pullrequest.outputs.pull-request-number }}"
           echo "Pull request URL - ${{ steps.pullrequest.outputs.pull-request-url }}"
-
-      - name: Going back to master
-        run: git switch master
-
-      - name: Displaying Kiwi's variant file
-        run: cat chrome/browser/resources/extensions/extensions.html
-
-      - name: Updating CHROMIUM_VERSION file
-        run: |
-          echo "# The version on which to base Kiwi Browser" > CHROMIUM_VERSION
-          echo "" >> CHROMIUM_VERSION
-          echo "CHROMIUM_MAJOR=${{ github.event.inputs.NEW_CHROMIUM_MAJOR }}" >> CHROMIUM_VERSION
-          echo "CHROMIUM_MINOR=${{ github.event.inputs.NEW_CHROMIUM_MINOR }}" >> CHROMIUM_VERSION
-          echo "CHROMIUM_BUILD=${{ github.event.inputs.NEW_CHROMIUM_BUILD }}" >> CHROMIUM_VERSION
-          echo "CHROMIUM_PATCH=${{ github.event.inputs.NEW_CHROMIUM_PATCH }}" >> CHROMIUM_VERSION
-
-      - name: Committing changes
-        run: git commit --allow-empty -a -m "[Rebase] Rebased from ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }} to ${{ github.event.inputs.NEW_CHROMIUM_MAJOR }}.${{ github.event.inputs.NEW_CHROMIUM_MINOR }}.${{ github.event.inputs.NEW_CHROMIUM_BUILD }}.${{ github.event.inputs.NEW_CHROMIUM_PATCH }}"
-
-      - name: Pushing repository
-        run: git push --all
