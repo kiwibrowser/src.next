@@ -1,0 +1,23 @@
+name: 'Kiwi: Rebase Kiwi on top of Chromium'
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      # For some reasons Git thinks it is a good idea to compact the Chromium repository
+      - name: Disable Git auto-packing
+        run: git config --global gc.auto 0
+        
+      - name: Setting-up GitHub username
+        run: |
+          git config --global user.email "github@actions"
+          git config --global user.name "Repository manager"
