@@ -22,5 +22,11 @@ jobs:
           git config --global user.email "github@actions"
           git config --global user.name "Repository manager"
 
+      - name: Switching to Kiwi
+        run: git switch kiwi
+        
+      - name: Listing branch
+        run: git branch
+
       - name: Rebasing on top of Chromium
         run: git rebase chromium
