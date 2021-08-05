@@ -44,7 +44,7 @@ jobs:
 
       - name: Loading settings from CHROMIUM_VERSION
         run: |
-          source CHROMIUM_VERSION; export $(cut -d= -f1 CHROMIUM_VERSION | grep -vF '#')
+          source CHROMIUM_VERSION || true; export $(cut -d= -f1 CHROMIUM_VERSION | grep -vF '#')
           env | grep -F CHROMIUM_ >> $GITHUB_ENV
 
       - name: Listing source files
