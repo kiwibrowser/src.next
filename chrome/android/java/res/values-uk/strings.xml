@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="main_menu_ads_and_trackers_blocked" tools:ignore="PluralsCandidate">"%1$d оголошень &amp; трекерів заблоковано"</string>
+    <string name="main_menu_ads_blocked_since">"З %1$s"</string>
+    <string name="main_menu_adblock">Приховати рекламу</string>
+    <string name="main_menu_clear_data">Очистити дані</string>
+    <string name="main_menu_translate">Перекладати</string>
+    <string name="main_menu_translate_undo">Зупинити переклад</string>
+    <string name="main_menu_turn_on_night_mode">Увімкнути нічний режим</string>
+    <string name="main_menu_turn_off_night_mode">Вимкнути нічний режим</string>
+    <string name="main_menu_exit">Вихід</string>
+    <string name="main_menu_extensions">Розширення</string>
+    <string name="menu_import_bookmarks">Імпорт закладок</string>
+    <string name="menu_export_bookmarks">Експортувати закладки</string>
+    <string name="appearance_preferences">Зовнішній вигляд</string>
+    <string name="appearance_preferences_themes">Теми</string>
+    <string name="accessibility_preferences_text_rewrap_title">Text rewrap / reflow</string>
+    <string name="accessibility_preferences_text_rewrap_summary">Пристосовувати текст під час збільшення</string>
+    <string name="accessibility_preferences_open_in_external_application_title">Дозволити зовнішні додатки</string>
+    <string name="accessibility_preferences_open_in_external_application_summary">Відкрити посилання з зовнішніх додатків (Maps, YouTube, Vimeo), коли це можливо</string>
+    <string name="accessibility_preferences_nightmode_grayscale_title">Градація сірого в нічному режимі</string>
+    <string name="accessibility_preferences_nightmode_grayscale_summary">Віддавати перевагу градації сірого в нічному режимі</string>
+    <string name="accessibility_preferences_night_scale">Контраст нічного режиму (сірий: 97, за замовчуванням: 99, чорний: 100)</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_title">Панель інструментів знизу</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_summary">Перемістити адресний рядок вниз</string>
+    <string name="accessibility_preferences_enable_overscroll_button_title">Рука кнопки (тільки нижня панель)</string>
+    <string name="accessibility_preferences_enable_overscroll_button_summary">Додавання кнопки руку для досягнення верхньої частини екрану</string>
+    <string name="accessibility_preferences_enable_side_swipe_title">Свайп по краю</string>
+    <string name="accessibility_preferences_enable_side_swipe_summary">Увімкнути свайпи ліворуч та праворуч на краях сторінки в історії</string>
+    <string name="accessibility_preferences_enable_up_swipe_title">Свайп догори, щоб відкрити перемикач вкладок</string>
+    <string name="accessibility_preferences_enable_up_swipe_summary">Проведіть пальцем вгору на панелі інструментів, щоб відкрити перемикач вкладки</string>
+    <string name="accessibility_preferences_show_extensions_first_title">Спочатку показувати розширення</string>
+    <string name="accessibility_preferences_show_extensions_first_summary">Показувати розширення угорі в головному меню</string>
+    <string name="contextual_menu_open_in_external_application">Відкрити в зовнішньому додатку</string>
+    <string name="preferences_restart_is_needed">Зміни набудуть чинності після перезавантаження Kiwi</string>
+    <string name="preferences_restart_now">ПЕРЕЗАВАНТАЖИТИ ЗАРАЗ</string>
+    <string name="preferences_restart_later">Пізніше</string>
+    <string name="preferences_translator">Перекладач</string>
+    <string name="download_preferences_enable_external_download_manager_title">Зовнішня програма для звантаження</string>
+    <string name="download_preferences_enable_external_download_manager_summary">Використовувати зовнішній менеджер завантажень (наприклад: Advanced Download Manager)</string>
+    <string name="privacy_preferences_accept_cookie_consent_title">Дозволити файли cookie</string>
+    <string name="privacy_preferences_accept_cookie_consent_summary">Дозволяти файли cookie на запит веб-сайту</string>
+    <string name="privacy_preferences_avoid_amp_websites_title">Видалити AMP</string>
+    <string name="privacy_preferences_avoid_amp_websites_summary">Віддавати перевагу звичайним веб-сайтам замість AMP версій</string>
+    <string name="privacy_preferences_hide_incognito_window_content_title">Protect incognito windows</string>
+    <string name="privacy_preferences_hide_incognito_window_content_summary">Сховати вміст і запобігти знімкам екрана в режимі анонімного перегляду</string>
+    <string name="privacy_preferences_close_tabs_on_exit_title">Закрити всі вкладки</string>
+    <string name="privacy_preferences_close_tabs_on_exit_summary">Закрити всі вкладки між двома сеансами перегляду</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_title">Закривати браузер, коли немає вкладок</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_summary">Закривати браузер після закриття останньої вкладки</string>
+    <string name="search_engines_preferences_howto_add">Нещодавно відвідані вами.\nДля додавання нової пошукової машини, перейдіть до пошукової системи (наприклад: Bing.com) і зробітьпошук. Через кілька секунд пошукова система буде додана до списку.</string>
+    <string name="suggest_adblock">Натисніть тут, щоб переключити захист від реклами і відстеження</string>
+    <string name="website_settings_add_site_description_ads">Дозволити показ оголошень для певного сайту</string>
+</resources>

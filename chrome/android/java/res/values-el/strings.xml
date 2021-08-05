@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="main_menu_ads_and_trackers_blocked" tools:ignore="PluralsCandidate">"%1$d διαφημίσεις &amp; οι ιχνηλάτες μπλοκαρίστηκαν"</string>
+    <string name="main_menu_ads_blocked_since">"Από %1$s"</string>
+    <string name="main_menu_adblock">Απόκρυψη ενοχλητικών διαφημίσεων</string>
+    <string name="main_menu_clear_data">Εκκαθάριση δεδομένων</string>
+    <string name="main_menu_translate">Μετάφραση</string>
+    <string name="main_menu_translate_undo">Διακοπή μετάφρασης</string>
+    <string name="main_menu_turn_on_night_mode">Ενεργοποίηση νυχτερινής λειτουργίας</string>
+    <string name="main_menu_turn_off_night_mode">Απενεργοποίηση νυχτερινής λειτουργίας</string>
+    <string name="main_menu_exit">Έξοδος</string>
+    <string name="main_menu_extensions">Πρόσθετα</string>
+    <string name="menu_import_bookmarks">Εισαγωγή σελιδοδεικτών</string>
+    <string name="menu_export_bookmarks">Εξαγωγή σελιδοδεικτών</string>
+    <string name="appearance_preferences">Εμφάνιση</string>
+    <string name="appearance_preferences_themes">Θέματα</string>
+    <string name="accessibility_preferences_text_rewrap_title">Αναδίπλωση κειμένου / Επαναφορά</string>
+    <string name="accessibility_preferences_text_rewrap_summary">Προσαρμογή κειμένου κατά τη μεγέθυνση</string>
+    <string name="accessibility_preferences_open_in_external_application_title">Ενεργοποίηση εξωτερικών εφαρμογών</string>
+    <string name="accessibility_preferences_open_in_external_application_summary">Άνοιγμα συνδέσμων με εξωτερικές εφαρμογές (Maps, YouTube, Vimeo) όταν είναι δυνατόν</string>
+    <string name="accessibility_preferences_nightmode_grayscale_title">Νυχτερινή λειτουργία κλίμακας του γκρι</string>
+    <string name="accessibility_preferences_nightmode_grayscale_summary">Προτίμηση κλίμακας του γκρι αντί για νυχτερινή λειτουργία</string>
+    <string name="accessibility_preferences_night_scale">Αντίθεση νυχτερινής λειτουργίας (γκρι: 97, προεπιλογή: 99, μαύρη: 100)</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_title">Κάτω γραμμή εργαλείων</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_summary">Μετακίνηση της γραμμής διευθύνσεων στο κάτω μέρος</string>
+    <string name="accessibility_preferences_enable_overscroll_button_title">Κουμπί χεριού (μόνο στη κάτω γραμμή εργαλείων)</string>
+    <string name="accessibility_preferences_enable_overscroll_button_summary">Προσθήκη ενός κουμπιού με χέρι για την έκταση στην κορυφή της οθόνης</string>
+    <string name="accessibility_preferences_enable_side_swipe_title">Ακραία σάρωση</string>
+    <string name="accessibility_preferences_enable_side_swipe_summary">Ενεργοποίηση χειρονομιών σάρωσης προς τα αριστερά και δεξιά στις άκρες της σελίδας για την περιήγηση στο ιστορικό</string>
+    <string name="accessibility_preferences_enable_up_swipe_title">Σάρωση προς τα επάνω για εναλλαγή καρτελών</string>
+    <string name="accessibility_preferences_enable_up_swipe_summary">Σάρωση προς τα επάνω για το άνοιγμα της εναλλαγής καρτελών</string>
+    <string name="accessibility_preferences_show_extensions_first_title">Εμφάνιση επεκτάσεων στην αρχή</string>
+    <string name="accessibility_preferences_show_extensions_first_summary">Εμφάνιση επεκτάσεων υψηλότερα στο κύριο μενού</string>
+    <string name="contextual_menu_open_in_external_application">Άνοιγμα σε εξωτερική εφαρμογή</string>
+    <string name="preferences_restart_is_needed">Οι αλλαγές σας θα τεθούν σε ισχύ κατά την επανεκκίνηση του Kiwi</string>
+    <string name="preferences_restart_now">ΕΠΑΝΕΚΚΙΝΗΣΗ ΤΩΡΑ</string>
+    <string name="preferences_restart_later">Αργότερα</string>
+    <string name="preferences_translator">Μεταφραστής</string>
+    <string name="download_preferences_enable_external_download_manager_title">Εξωτερικός διαχειριστής λήψεων</string>
+    <string name="download_preferences_enable_external_download_manager_summary">Χρησιμοποιήστε τον εξωτερικό διαχειριστή λήψεων (πρώην: Προηγμένος διαχειριστής λήψεων)</string>
+    <string name="privacy_preferences_accept_cookie_consent_title">Αποδοχή cookies</string>
+    <string name="privacy_preferences_accept_cookie_consent_summary">Αποδοχή cookies όταν σας ζητηθεί από έναν ιστότοπο</string>
+    <string name="privacy_preferences_avoid_amp_websites_title">Κατάργηση AMP</string>
+    <string name="privacy_preferences_avoid_amp_websites_summary">Προτίμηση άμεσων ιστοσελίδων αντί των AMP εκδόσεων</string>
+    <string name="privacy_preferences_hide_incognito_window_content_title">Προστατέψτε τα παράθυρα ανώνυμης περιήγησης</string>
+    <string name="privacy_preferences_hide_incognito_window_content_summary">Απόκρυψη περιεχομένου και αποτροπή στιγμιότυπων οθόνης σε κατάσταση ανώνυμης περιήγησης</string>
+    <string name="privacy_preferences_close_tabs_on_exit_title">Κλείσιμο όλων των καρτελών</string>
+    <string name="privacy_preferences_close_tabs_on_exit_summary">Κλείσιμο όλων των καρτελών μεταξύ δύο συνόδων</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_title">Κλείστε το πρόγραμμα περιήγησης όταν δεν υπάρχουν ανοιχτές καρτέλες</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_summary">Κλείστε το πρόγραμμα περιήγησης μετά το κλείσιμο της τελευταίας καρτέλας</string>
+    <string name="search_engines_preferences_howto_add">Πρόσφατη επίσκεψη\nΓια να προσθέσετε μια νέα μηχανή αναζήτησης, μεταβείτε στη μηχανή αναζήτησης (π.χ: Bing.com) και κάντε μια αναζήτηση. Μετά από λίγα δευτερόλεπτα, η μηχανή αναζήτησης θα προστεθεί στη λίστα.</string>
+    <string name="suggest_adblock">Κάντε κλικ εδώ για να αλλάξετε την προστασία διαφημίσεων και παρακολούθησης</string>
+    <string name="website_settings_add_site_description_ads">Να επιτρέπεται η εμφάνιση διαφημίσεων για συγκεκριμένο ιστότοπο</string>
+</resources>
