@@ -34,6 +34,14 @@ import android.widget.ImageButton;
 import android.widget.ListView;
 import android.widget.PopupWindow;
 
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.view.MenuItem;
+import android.view.View.OnTouchListener;
+import android.util.Base64;
+import android.util.Base64InputStream;
+import android.widget.AdapterView;
+
 import androidx.annotation.IdRes;
 import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
@@ -50,6 +58,38 @@ import org.chromium.ui.widget.Toast;
 
 import java.util.ArrayList;
 import java.util.List;
+
+import android.util.Log;
+import android.graphics.Bitmap;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.BitmapFactory;
+import android.graphics.Color;
+
+import android.app.Activity;
+import java.util.Hashtable;
+
+import androidx.appcompat.view.menu.MenuBuilder;
+
+import org.chromium.chrome.browser.app.ChromeActivity;
+
+import org.chromium.base.annotations.NativeMethods;
+import org.chromium.chrome.browser.tabmodel.TabCreator;
+import org.chromium.content_public.browser.LoadUrlParams;
+
+import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.ui.mojom.WindowOpenDisposition;
+import org.chromium.base.ContextUtils;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.base.ThreadUtils;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.content_public.browser.WebContents;
+
+import org.chromium.chrome.browser.AppMenuBridge;
+import org.chromium.chrome.browser.tab.TabLaunchType;
+import org.chromium.ui.base.PageTransition;
+
+import android.content.ContextWrapper;
 
 /**
  * Shows a popup of menuitems anchored to a host view. When a item is selected we call
@@ -68,6 +108,10 @@ class AppMenu implements OnItemClickListener, OnKeyListener, AppMenuClickHandler
     private final int mChipHighlightExtension;
     private final int[] mTempLocation;
     private final boolean mIconBeforeItem;
+
+    private Hashtable<Integer, String> extensionsIds;
+    private Hashtable<Integer, String> extensionsPopups;
+    private Activity mActivity;
 
     private PopupWindow mPopup;
     private ListView mListView;
@@ -227,15 +271,88 @@ class AppMenu implements OnItemClickListener, OnKeyListener, AppMenuClickHandler
         mCurrentScreenRotation = screenRotation;
         mIsByPermanentButton = isByPermanentButton;
 
+        int numItems = mMenu.size();
+        int numItemsBase = mMenu.size();
+
         // Extract visible items from the Menu.
         List<MenuItem> menuItems = new ArrayList<MenuItem>();
         List<Integer> heightList = new ArrayList<Integer>();
-        for (int i = 0; i < mMenu.size(); ++i) {
-            MenuItem item = mMenu.getItem(i);
-            if (item.isVisible()) {
+        if (!ContextUtils.getAppSharedPreferences().getBoolean("show_extensions_first", false)) {
+          for (int i = 0; i < mMenu.size(); ++i) {
+              MenuItem item = mMenu.getItem(i);
+              if (item.isVisible()) {
+                  menuItems.add(item);
+                  heightList.add(getMenuItemHeight(item, context, customViewBinders));
+              }
+          }
+        } else {
+          for (int i = 0; i < numItems && i < 1; ++i) {
+              MenuItem item = mMenu.getItem(i);
+              if (item.isVisible()) {
+                  menuItems.add(item);
+                  heightList.add(getMenuItemHeight(item, context, customViewBinders));
+              }
+          }
+        }
+
+        WebContents webContents = null;
+        try {
+          mActivity = ContextUtils.activityFromContext(anchorView.getContext());
+        } catch (Exception e) {
+        }
+
+        boolean canShowExtensions = false;
+
+        if (mActivity instanceof ChromeActivity) {
+          Tab currentTab = ((ChromeActivity)mActivity).getActivityTab();
+          if (currentTab != null)
+            canShowExtensions = true;
+          webContents = currentTab != null ? currentTab.getWebContents() : null;
+        }
+
+        extensionsIds = new Hashtable<Integer, String>();
+        extensionsPopups = new Hashtable<Integer, String>();
+
+        if (canShowExtensions) {
+          int itemIndex = numItems++;
+          String extensions = AppMenuBridge.getRunningExtensions(Profile.fromWebContents(webContents).getOriginalProfile(), webContents);
+          if (!extensions.isEmpty()) {
+            String[] extensionsArray = extensions.split("\u001f");
+            for (String extension: extensionsArray) {
+                String[] extensionsInfo = extension.split("\u001e");
+                Menu fakeMenu = new MenuBuilder(mActivity);
+                MenuItem item = fakeMenu.add(999999, itemIndex, 0, extensionsInfo[0]);
+                if (extensionsInfo.length > 1) {
+                  extensionsIds.put(itemIndex, extensionsInfo[1]);
+                }
+
+                if (extensionsInfo.length > 2 && !extensionsInfo[2].equals("")) {
+                  extensionsPopups.put(itemIndex, extensionsInfo[2]);
+                }
+
+                if (extensionsInfo.length > 3) {
+                  String cleanImage = extensionsInfo[3].replace("data:image/png;base64,", "").replace("data:image/jpeg;base64,","").replace("data:image/gif;base64,", "");
+                  byte[] decodedString = Base64.decode(cleanImage, Base64.DEFAULT);
+                  Bitmap decodedByte = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
+
+                  item.setIcon(new BitmapDrawable(context.getResources(), decodedByte));
+                  item.setTitleCondensed("Extension: " + extensionsInfo[0]);
+                }
                 menuItems.add(item);
                 heightList.add(getMenuItemHeight(item, context, customViewBinders));
+                itemIndex++;
             }
+          }
+        }
+
+        if (ContextUtils.getAppSharedPreferences().getBoolean("show_extensions_first", false)) {
+          for (int i = 1; i < numItemsBase; ++i) {
+              MenuItem item = mMenu.getItem(i);
+              if (item.isVisible()) {
+                  menuItems.add(item);
+                  heightList.add(getMenuItemHeight(item, context, customViewBinders));
+              }
+          }
         }
 
         // A List adapter for visible items in the Menu. The first row is added as a header to the
@@ -327,7 +444,7 @@ class AppMenu implements OnItemClickListener, OnKeyListener, AppMenuClickHandler
         }
 
         // Don't animate the menu items for low end devices.
-        if (!SysUtils.isLowEndDevice()) {
+        if (!SysUtils.isLowEndDevice() && false) {
             mListView.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
                 @Override
                 public void onLayoutChange(View v, int left, int top, int right, int bottom,
@@ -386,6 +503,36 @@ class AppMenu implements OnItemClickListener, OnKeyListener, AppMenuClickHandler
 
     @Override
     public void onItemClick(MenuItem menuItem) {
+        Log.i("Kiwi", "[EXTENSIONS] Item was clicked in the main menu: " + menuItem.getGroupId());
+        if (menuItem.getGroupId() == 999999 && extensionsPopups.containsKey(menuItem.getItemId())) {
+          Log.e("EXTENSIONS", "[EXTENSIONS] MenuItem clicked (popup)");
+          if (mActivity != null && mActivity instanceof ChromeActivity) {
+            Log.e("EXTENSIONS", "[EXTENSIONS] MenuItem clicked (popup) - Activity is not empty, opening tab - Step 1: " + extensionsPopups.get(menuItem.getItemId()));
+            WebContents webContents = null;
+            Tab currentTab = ((ChromeActivity)mActivity).getActivityTab();
+            if (currentTab != null) {
+              webContents = currentTab != null ? currentTab.getWebContents() : null;
+              AppMenuBridge.grantExtensionActiveTab(Profile.fromWebContents(webContents).getOriginalProfile(), webContents, extensionsIds.get(menuItem.getItemId()));
+               ((ChromeActivity)mActivity).getCurrentTabCreator().launchUrl(extensionsPopups.get(menuItem.getItemId()), TabLaunchType.FROM_CHROME_UI);
+            }
+            Log.e("EXTENSIONS", "[EXTENSIONS] MenuItem clicked (popup) - Activity is not empty, opening tab - Step 2: " + extensionsPopups.get(menuItem.getItemId()));
+          } else {
+            Log.e("EXTENSIONS", "[EXTENSIONS] MenuItem clicked but no activity");
+          }
+        }
+        else if (menuItem.getGroupId() == 999999 && extensionsIds.containsKey(menuItem.getItemId())) {
+          Log.e("EXTENSIONS", "[EXTENSIONS] MenuItem clicked (ids)");
+          if (mActivity != null && mActivity instanceof ChromeActivity) {
+            Log.e("EXTENSIONS", "[EXTENSIONS] MenuItem clicked (ids) - Activity is not empty, opening tab - Step 1: " + extensionsIds.get(menuItem.getItemId()));
+            WebContents webContents = null;
+            Tab currentTab = ((ChromeActivity)mActivity).getActivityTab();
+            webContents = currentTab != null ? currentTab.getWebContents() : null;
+            AppMenuBridge.callExtension(Profile.fromWebContents(webContents).getOriginalProfile(), webContents, extensionsIds.get(menuItem.getItemId()));
+            Log.e("EXTENSIONS", "[EXTENSIONS] MenuItem clicked (ids) - Activity is not empty, opening tab - Step 2: " + extensionsIds.get(menuItem.getItemId()));
+          } else {
+            Log.e("EXTENSIONS", "[EXTENSIONS] MenuItem clicked but no activity");
+          }
+        }
         if (menuItem.isEnabled()) {
             mSelectedItemBeforeDismiss = true;
             dismiss();
@@ -491,7 +638,7 @@ class AppMenu implements OnItemClickListener, OnKeyListener, AppMenuClickHandler
         int anchorViewImpactHeight = mIsByPermanentButton ? anchorView.getHeight() : 0;
 
         // Set appDimensions.height() for abnormal anchorViewLocation.
-        if (anchorViewY > screenHeight) {
+        if (anchorViewY > screenHeight || true) {
             anchorViewY = appDimensions.height();
         }
         int availableScreenSpace = Math.max(
@@ -503,6 +650,8 @@ class AppMenu implements OnItemClickListener, OnKeyListener, AppMenuClickHandler
         int menuHeight = calculateHeightForItems(
                 menuItems, heightList, groupDividerResourceId, availableScreenSpace);
         menuHeight += footerHeight + headerHeight + padding.top + padding.bottom;
+        if (ContextUtils.getAppSharedPreferences().getBoolean("enable_bottom_toolbar", false) && menuItems.size() >= 7)
+            menuHeight /= 1.45;
         mPopup.setHeight(menuHeight);
         return menuHeight;
     }
