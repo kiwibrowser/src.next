@@ -61,7 +61,7 @@ jobs:
         run: cd /tmp/chromium_new && git read-tree -mu ${{ github.event.inputs.NEW_CHROMIUM_MAJOR }}.${{ github.event.inputs.NEW_CHROMIUM_MINOR }}.${{ github.event.inputs.NEW_CHROMIUM_BUILD }}.${{ github.event.inputs.NEW_CHROMIUM_PATCH }}
 
       - name: Preparing local Chromium branch
-        run: git switch -c chromium || git switch chromium
+        run: git switch -c chromium f5d797deec3b570e0e4a8b77caaf6d51520dfbfa || git switch chromium
 
       - name: Copying files to local Chromium branch
         run: rsync -avz --progress --exclude=".git" /tmp/chromium_new/* .
