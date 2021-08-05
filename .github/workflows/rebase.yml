@@ -27,6 +27,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
 
       # For some reasons Git thinks it is a good idea to compact the Chromium repository
       - name: Disable Git auto-packing
