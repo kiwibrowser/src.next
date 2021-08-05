@@ -42,6 +42,9 @@ jobs:
       - name: Disabling Git pager (e.g. for git log)
         run: git config --global core.pager 'cat'
 
+      - name: Preparing local Chromium branch
+        run: git switch chromium
+
       - name: Loading settings from CHROMIUM_VERSION
         run: |
           if [ -f "CHROMIUM_VERSION" ]; then
@@ -49,9 +52,6 @@ jobs:
             export $(cut -d= -f1 CHROMIUM_VERSION | grep -vF '#');
             env | grep -F CHROMIUM_ >> $GITHUB_ENV
           fi; 
-
-      - name: Preparing local Chromium branch
-        run: git switch chromium
 
       - name: Listing source files
         run: find . -type f | sed 's#\./#/#g' | grep -vFi '.gitignore' > /tmp/source_files.txt
