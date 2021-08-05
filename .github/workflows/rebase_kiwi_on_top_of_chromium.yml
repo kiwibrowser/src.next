@@ -29,7 +29,7 @@ jobs:
         run: git fetch origin chromium
 
       - name: Rebasing on top of Chromium
-        run: git rebase origin/chromium
+        run: git rebase origin/chromium --committer-date-is-author-date
 
       # This is done on purpose
       # See: https://redfin.engineering/git-rebasing-public-branches-works-much-better-than-youd-think-ecc9a115aea9
