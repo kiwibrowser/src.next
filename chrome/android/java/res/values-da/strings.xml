@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="main_menu_ads_and_trackers_blocked" tools:ignore="PluralsCandidate">"%1$d annoncer &amp; trackere blokeret"</string>
+    <string name="main_menu_ads_blocked_since">"Siden %1$s"</string>
+    <string name="main_menu_adblock">Skjul distraherende annoncer</string>
+    <string name="main_menu_clear_data">Ryd data</string>
+    <string name="main_menu_translate">Oversæt</string>
+    <string name="main_menu_translate_undo">Stop oversættelse</string>
+    <string name="main_menu_turn_on_night_mode">Aktiver nat-tilstand</string>
+    <string name="main_menu_turn_off_night_mode">Deaktiver nat-tilstand</string>
+    <string name="main_menu_exit">Afslut</string>
+    <string name="main_menu_extensions">Udvidelser</string>
+    <string name="menu_import_bookmarks">Importer bogmærker</string>
+    <string name="menu_export_bookmarks">Eksporter bogmærker</string>
+    <string name="appearance_preferences">Udseende</string>
+    <string name="appearance_preferences_themes">Temaer</string>
+    <string name="accessibility_preferences_text_rewrap_title">Ompakning / genindflytning af tekst</string>
+    <string name="accessibility_preferences_text_rewrap_summary">Tilpas teksten ved zoom</string>
+    <string name="accessibility_preferences_open_in_external_application_title">Aktiver eksterne apps</string>
+    <string name="accessibility_preferences_open_in_external_application_summary">Åbn links med eksterne apps (Maps, YouTube, Vimeo) når det er muligt</string>
+    <string name="accessibility_preferences_nightmode_grayscale_title">Gråskala nat-tilstand</string>
+    <string name="accessibility_preferences_nightmode_grayscale_summary">Foretræk gråtoneversion af nat-tilstand</string>
+    <string name="accessibility_preferences_night_scale">Nat-tilstand kontrast (grå: 97, standard: 99, sort: 100)</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_title">Bund-værktøjslinje</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_summary">Flyt adresselinje til bunden</string>
+    <string name="accessibility_preferences_enable_overscroll_button_title">Hånd-knap (kun med bund-værktøjslinje)</string>
+    <string name="accessibility_preferences_enable_overscroll_button_summary">Tilføj en Hånd-knap, til at nå toppen af skærmen</string>
+    <string name="accessibility_preferences_enable_side_swipe_title">Stryg fra kant</string>
+    <string name="accessibility_preferences_enable_side_swipe_summary">Aktivér stryg-venstre og stryg-højre bevægelser på kanten af siden for at navigere i historikken</string>
+    <string name="accessibility_preferences_enable_up_swipe_title">Stryg opad for at åbne faneskifter</string>
+    <string name="accessibility_preferences_enable_up_swipe_summary">Stryg opad på værktøjslinjen for at åbne faneskifteren</string>
+    <string name="accessibility_preferences_show_extensions_first_title">Vis udvidelser først</string>
+    <string name="accessibility_preferences_show_extensions_first_summary">Vis udvidelser højere i hovedmenuen</string>
+    <string name="contextual_menu_open_in_external_application">Åbn i ekstern app</string>
+    <string name="preferences_restart_is_needed">Dine ændringer vil slå igennem ved genstart af Kiwi</string>
+    <string name="preferences_restart_now">GENSTART NU</string>
+    <string name="preferences_restart_later">Senere</string>
+    <string name="preferences_translator">Oversætter</string>
+    <string name="download_preferences_enable_external_download_manager_title">Ekstern download manager</string>
+    <string name="download_preferences_enable_external_download_manager_summary">Brug en ekstern download manager (fx: Advanced Download Manager)</string>
+    <string name="privacy_preferences_accept_cookie_consent_title">Accepter cookies</string>
+    <string name="privacy_preferences_accept_cookie_consent_summary">Accepter cookies, når det blive forespurgt af et websted</string>
+    <string name="privacy_preferences_avoid_amp_websites_title">Fjern AMP</string>
+    <string name="privacy_preferences_avoid_amp_websites_summary">Foretræk direkte websider i stedet for AMP-versioner</string>
+    <string name="privacy_preferences_hide_incognito_window_content_title">Beskyt inkognito-vinduer</string>
+    <string name="privacy_preferences_hide_incognito_window_content_summary">Skjuler indhold og forhindrer skærmbilleder i inkognito-tilstand</string>
+    <string name="privacy_preferences_close_tabs_on_exit_title">Luk alle faner</string>
+    <string name="privacy_preferences_close_tabs_on_exit_summary">Luk alle faner mellem to browser-sessioner</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_title">Luk browser, når ingen faner er åbne</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_summary">Luk browseren efter den sidste fane er blevet lukket</string>
+    <string name="search_engines_preferences_howto_add">For nylig besøgte\nFor at tilføje en ny søgemaskine, gå til søgemaskinen (f.eks.: Bing.com) og foretag en søgning. Efter få sekunder, vil søgemaskinen blive føjet til listen.</string>
+    <string name="suggest_adblock">Klik her for at slå annonce- og trackerbeskyttelse til/fra</string>
+    <string name="website_settings_add_site_description_ads">Tillad visning af annoncer på et bestemt websted</string>
+</resources>
