@@ -31,5 +31,7 @@ jobs:
       - name: Rebasing on top of Chromium
         run: git rebase origin/chromium
 
+      # This is done on purpose
+      # See: https://redfin.engineering/git-rebasing-public-branches-works-much-better-than-youd-think-ecc9a115aea9
       - name: Pushing branch
-        run: git push origin kiwi
+        run: git push origin kiwi --force
