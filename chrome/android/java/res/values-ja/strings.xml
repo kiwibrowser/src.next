@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="main_menu_ads_and_trackers_blocked" tools:ignore="PluralsCandidate">"%1$d 個の広告&amp;追跡をブロック"</string>
+    <string name="main_menu_ads_blocked_since">"%1$s 以降"</string>
+    <string name="main_menu_adblock">迷惑な広告の非表示</string>
+    <string name="main_menu_clear_data">データを消去</string>
+    <string name="main_menu_translate">翻訳</string>
+    <string name="main_menu_translate_undo">翻訳を終了</string>
+    <string name="main_menu_turn_on_night_mode">Nightモードをオン</string>
+    <string name="main_menu_turn_off_night_mode">Nightモードをオフ</string>
+    <string name="main_menu_exit">終了</string>
+    <string name="main_menu_extensions">拡張機能</string>
+    <string name="menu_import_bookmarks">ブックマークを読み込む</string>
+    <string name="menu_export_bookmarks">ブックマークを出力する</string>
+    <string name="appearance_preferences">外観</string>
+    <string name="appearance_preferences_themes">テーマ</string>
+    <string name="accessibility_preferences_text_rewrap_title">テキストを再度折り返し/回り込みする</string>
+    <string name="accessibility_preferences_text_rewrap_summary">ズーム中にテキストをフィットさせます</string>
+    <string name="accessibility_preferences_open_in_external_application_title">外部アプリを有効にする</string>
+    <string name="accessibility_preferences_open_in_external_application_summary">可能であれば、外部アプリ (Maps, YouTube, Vimeo) を利用してリンクを開きます</string>
+    <string name="accessibility_preferences_nightmode_grayscale_title">グレースケール Nightモード</string>
+    <string name="accessibility_preferences_nightmode_grayscale_summary">Nightモードをグレースケールにします</string>
+    <string name="accessibility_preferences_night_scale">Nightモードのコントラスト (灰色: 97, 標準: 99, 黒: 100)</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_title">ツールバーを下にする</string>
+    <string name="accessibility_preferences_enable_bottom_toolbar_summary">アドレスバーを画面下に移動します</string>
+    <string name="accessibility_preferences_enable_overscroll_button_title">ハンドボタン (ツールバーが下にある場合のみ)</string>
+    <string name="accessibility_preferences_enable_overscroll_button_summary">画面上部に届くようにハンドボタンを追加します</string>
+    <string name="accessibility_preferences_enable_side_swipe_title">エッジスワイプ</string>
+    <string name="accessibility_preferences_enable_side_swipe_summary">ページの端で左右にスワイプして、履歴を移動するジェスチャーを有効にします</string>
+    <string name="accessibility_preferences_enable_up_swipe_title">上にスワイプしてタブの切り替え画面を開く</string>
+    <string name="accessibility_preferences_enable_up_swipe_summary">ツールバーを上にスワイプして、タブの切り替え画面を開きます</string>
+    <string name="accessibility_preferences_show_extensions_first_title">拡張機能を先頭に表示</string>
+    <string name="accessibility_preferences_show_extensions_first_summary">メインメニューの先頭に拡張機能を表示します</string>
+    <string name="contextual_menu_open_in_external_application">外部アプリで開く</string>
+    <string name="preferences_restart_is_needed">Kiwiを再起動後に変更が反映されます</string>
+    <string name="preferences_restart_now">今すぐ再起動</string>
+    <string name="preferences_restart_later">あとで</string>
+    <string name="preferences_translator">翻訳</string>
+    <string name="download_preferences_enable_external_download_manager_title">外部ダウンロードマネージャー</string>
+    <string name="download_preferences_enable_external_download_manager_summary">Advanced Download Manager などの外部のダウンロードマネージャーを使用します</string>
+    <string name="privacy_preferences_accept_cookie_consent_title">クッキーの許可</string>
+    <string name="privacy_preferences_accept_cookie_consent_summary">ウェブサイトに要求されたときクッキーを許可します</string>
+    <string name="privacy_preferences_avoid_amp_websites_title">AMPを使用しない</string>
+    <string name="privacy_preferences_avoid_amp_websites_summary">AMPページの代わりに直接ウェブサイトにアクセスするようになります</string>
+    <string name="privacy_preferences_hide_incognito_window_content_title">シークレットタブの保護</string>
+    <string name="privacy_preferences_hide_incognito_window_content_summary">シークレットモードでコンテンツを隠し、スクリーンショットできないようにします</string>
+    <string name="privacy_preferences_close_tabs_on_exit_title">すべてのタブを閉じる</string>
+    <string name="privacy_preferences_close_tabs_on_exit_summary">終了時にすべてのタブが閉じられます</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_title">タブを何も開いていないときブラウザーを閉じる</string>
+    <string name="privacy_preferences_close_browser_after_last_tab_is_closed_summary">最後のタブを閉じたとき、ブラウザーを閉じます</string>
+    <string name="search_engines_preferences_howto_add">最近訪れた検索エンジン\n
+新しい検索エンジンを追加するには、検索エンジンのサイト (例: Bing.com) に行って検索してください。数秒後、検索エンジンがリストに追加されます。</string>
+    <string name="suggest_adblock">ここをタップで広告と追跡から保護します</string>
+    <string name="website_settings_add_site_description_ads">特定のサイトだけ広告の表示を許可</string>
+</resources>
