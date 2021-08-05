@@ -38,6 +38,11 @@ To keep the size of the repository small, we replicate only the files that are c
   - Use workflow "Chromium: Import" to add a new file to be replicated.
   - Use workflow "Chromium: Update files from upstream" to update the replica.
 
+## Resolving issues
+
+If you need to add or remove commits where you have done mistake, `git rebase -i 3eb71bb7cae580107938f6394513462e67033f8a --committer-date-is-author-date`
+3eb71bb7cae580107938f6394513462e67033f8a is the root commit from which both Kiwi and Chromium branch are born from.
+
 ## Navigating the source-code
 
 Kiwi is based on Chromium, to find code, use https://source.chromium.org/chromium/chromium/src
