@@ -23,7 +23,7 @@ namespace {
 
 const size_t kMaxCacheSize = 1024u;
 const int kMinImageLength = 8;
-const int kMaxImageLength = 100;
+const int kMaxImageLength = 230;
 
 // TODO(gilmanmh): If grayscaling images in dark mode proves popular among
 // users, consider experimenting with different grayscale algorithms.
@@ -109,11 +109,13 @@ SkColor DarkModeFilter::InvertColorIfNeeded(SkColor color, ElementRole role) {
 DarkModeResult DarkModeFilter::AnalyzeShouldApplyToImage(
     const SkIRect& src,
     const SkIRect& dst) const {
+#if 0
   if (immutable_.settings.image_policy == DarkModeImagePolicy::kFilterNone)
     return DarkModeResult::kDoNotApplyFilter;
 
   if (immutable_.settings.image_policy == DarkModeImagePolicy::kFilterAll)
     return DarkModeResult::kApplyFilter;
+#endif
 
   // Images being drawn from very smaller |src| rect, i.e. one of the dimensions
   // is very small, can be used for the border around the content or showing

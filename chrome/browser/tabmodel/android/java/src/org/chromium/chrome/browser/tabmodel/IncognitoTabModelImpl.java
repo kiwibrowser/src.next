@@ -186,6 +186,11 @@ class IncognitoTabModelImpl implements IncognitoTabModel {
     }
 
     @Override
+    public int getLastNonExtensionActiveIndex() {
+        return mDelegateModel.getLastNonExtensionActiveIndex();
+    }
+
+    @Override
     public void setIndex(int i, @TabSelectionType int type) {
         mDelegateModel.setIndex(i, type);
     }

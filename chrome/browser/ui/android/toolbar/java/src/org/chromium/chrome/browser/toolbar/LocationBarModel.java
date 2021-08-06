@@ -210,7 +210,7 @@ public class LocationBarModel implements ToolbarDataProvider, LocationBarDataPro
         // Surface is enabled). .
         if (isInOverviewAndShowingOmnibox()
                 || StartSurfaceConfiguration.shouldHandleAsNtp(getTab())) {
-            return UrlConstants.NTP_URL;
+            return "chrome-search://local-ntp/local-ntp.html";
         }
 
         // TODO(yusufo) : Consider using this for all calls from getTab() for accessing url.
@@ -255,6 +255,9 @@ public class LocationBarModel implements ToolbarDataProvider, LocationBarDataPro
 
         String formattedUrl = getFormattedFullUrl();
         if (mTab.isFrozen()) return buildUrlBarData(url, formattedUrl);
+
+        if (mTab.getUrl().getSpec().startsWith("devtools://"))
+            return buildUrlBarData(mTab.getUrl().getSpec(), mTab.getTitle(), "");
 
         if (DomDistillerUrlUtils.isDistilledPage(url)) {
             GURL originalUrl = DomDistillerUrlUtils.getOriginalUrlFromDistillerUrl(new GURL(url));
@@ -505,7 +508,7 @@ public class LocationBarModel implements ToolbarDataProvider, LocationBarDataPro
     @VisibleForTesting
     @ConnectionSecurityLevel
     int getSecurityLevel(Tab tab, boolean isOfflinePage, @Nullable String publisherUrl) {
-        if (tab == null || isOfflinePage) {
+        if (tab == null || isOfflinePage || (!TextUtils.isEmpty(tab.getUrl().getSpec()) && (tab.getUrl().getSpec().startsWith("chrome-extension") || tab.getUrl().getSpec().startsWith("devtools") || tab.getUrl().getSpec().startsWith("kiwi-extension")))) {
             return ConnectionSecurityLevel.NONE;
         }
 
@@ -555,6 +558,12 @@ public class LocationBarModel implements ToolbarDataProvider, LocationBarDataPro
         boolean skipIconForNeutralState =
                 !mSearchEngineLogoUtils.shouldShowSearchEngineLogo(isIncognito())
                 || mNtpDelegate.isCurrentlyVisible();
+
+        String currentUrl = getCurrentUrl();
+        if (currentUrl != null && currentUrl.startsWith("chrome-search://"))
+            skipIconForNeutralState = true;
+        if (currentUrl != null && currentUrl.startsWith("kiwi-search://"))
+            skipIconForNeutralState = true;
 
         boolean useLockIconEnabled = false;
         if (mNativeLocationBarModelAndroid != 0) {

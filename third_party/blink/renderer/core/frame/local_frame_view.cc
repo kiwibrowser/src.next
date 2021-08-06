@@ -2011,6 +2011,11 @@ Color LocalFrameView::DocumentBackgroundColor() const {
   // by ViewPainter::paintBoxDecorationBackground.
   Color result = BaseBackgroundColor();
 
+  auto* settings = frame_->GetSettings();
+  if (settings && settings->GetForceDarkModeEnabled()) {
+    return Color::kBlack;
+  }
+
   // If we have a fullscreen element grab the fullscreen color from the
   // backdrop.
   if (Document* doc = frame_->GetDocument()) {
