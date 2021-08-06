@@ -27,6 +27,29 @@ import org.chromium.components.browser_ui.settings.SettingsUtils;
 import org.chromium.components.prefs.PrefService;
 import org.chromium.components.user_prefs.UserPrefs;
 
+import android.content.ComponentName;
+import android.app.Activity;
+import android.content.SharedPreferences;
+import android.os.Bundle;
+import org.chromium.base.Log;
+import android.view.View;
+import org.chromium.base.ContextUtils;
+import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
+import android.widget.ListView;
+import android.content.Context;
+import android.widget.ListView;
+import android.content.pm.PackageManager;
+import android.content.Intent;
+import android.content.Context;
+import android.content.pm.ResolveInfo;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import android.net.Uri;
+import android.text.TextUtils;
+import org.chromium.components.browser_ui.settings.ChromeBaseCheckBoxPreference;
+
 /**
  * Fragment containing Download settings.
  */
@@ -43,6 +66,8 @@ public class DownloadSettings
     private ChromeSwitchPreference mLocationPromptEnabledPref;
     private ManagedPreferenceDelegate mLocationPromptEnabledPrefDelegate;
     private ChromeSwitchPreference mPrefetchingEnabled;
+
+    private ChromeBaseCheckBoxPreference mExternalDownloadManager;
 
     @Override
     public void onCreatePreferences(@Nullable Bundle savedInstanceState, String s) {
@@ -80,6 +105,8 @@ public class DownloadSettings
         } else {
             getPreferenceScreen().removePreference(findPreference(PREF_PREFETCHING_ENABLED));
         }
+
+        mExternalDownloadManager = (ChromeBaseCheckBoxPreference) findPreference("enable_external_download_manager");
     }
 
     @Override
@@ -129,6 +156,31 @@ public class DownloadSettings
                     ProfileKey.getLastUsedRegularProfileKey()));
             updatePrefetchSummary();
         }
+
+        if (mExternalDownloadManager != null) {
+            mExternalDownloadManager.setOnPreferenceChangeListener(this);
+            mExternalDownloadManager.setChecked(ContextUtils.getAppSharedPreferences().getBoolean("enable_external_download_manager", false));
+            if (ContextUtils.getAppSharedPreferences().getBoolean("enable_external_download_manager", false)
+                  && !TextUtils.isEmpty(ContextUtils.getAppSharedPreferences().getString("selected_external_download_manager_package_name", ""))) {
+                mExternalDownloadManager.setSummary(ContextUtils.getAppSharedPreferences().getString("selected_external_download_manager_package_name", ""));
+            }
+        }
+    }
+
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+            Log.i("Kiwi", "[DownloadPreferences] Received activity result, RQ: " + requestCode);
+            if (requestCode == 4242 && resultCode == Activity.RESULT_OK && data != null) {
+                 ComponentName componentName = data.getComponent();
+                 final String packageName = componentName.getPackageName();
+                 final String activityName = componentName.getClassName();
+                 Log.i("Kiwi", "[DownloadPreferences] Received activity result, PN: " + packageName + " - AN: " + activityName);
+                 SharedPreferences.Editor sharedPreferencesEditor = ContextUtils.getAppSharedPreferences().edit();
+                 sharedPreferencesEditor.putString("selected_external_download_manager_package_name", packageName);
+                 sharedPreferencesEditor.putString("selected_external_download_manager_activity_name", activityName);
+                 sharedPreferencesEditor.apply();
+                 updateDownloadSettings();
+            }
     }
 
     private void updatePrefetchSummary() {
@@ -184,6 +236,36 @@ public class DownloadSettings
             PrefetchConfiguration.setPrefetchingEnabledInSettings(
                     ProfileKey.getLastUsedRegularProfileKey(), (boolean) newValue);
             updatePrefetchSummary();
+        }
+        else if ("enable_external_download_manager".equals(preference.getKey())) {
+            SharedPreferences.Editor sharedPreferencesEditor = ContextUtils.getAppSharedPreferences().edit();
+            sharedPreferencesEditor.putBoolean("enable_external_download_manager", (boolean)newValue);
+            sharedPreferencesEditor.apply();
+            if ((boolean)newValue == true) {
+                    List<Intent> targetedShareIntents = new ArrayList<Intent>();
+                    Intent shareIntent = new Intent(android.content.Intent.ACTION_VIEW, Uri.parse("http://test.com/file.rar"));
+                    // Set title and text to share when the user selects an option.
+                    shareIntent.putExtra(Intent.EXTRA_TEXT, "http://test.com/file.rar");
+                    List<ResolveInfo> resInfo = getActivity().getPackageManager().queryIntentActivities(shareIntent, 0);
+                    if (!resInfo.isEmpty()) {
+                        for (ResolveInfo info : resInfo) {
+                            if (!"com.kiwibrowser.browser".equalsIgnoreCase(info.activityInfo.packageName)) {
+                                Intent targetedShare = new Intent(android.content.Intent.ACTION_VIEW);
+                                targetedShare.setPackage(info.activityInfo.packageName.toLowerCase(Locale.ROOT));
+                                targetedShareIntents.add(targetedShare);
+                            }
+                        }
+                        // Then show the ACTION_PICK_ACTIVITY to let the user select it
+                        Intent intentPick = new Intent();
+                        intentPick.setAction(Intent.ACTION_PICK_ACTIVITY);
+                        // Set the title of the dialog
+                        intentPick.putExtra(Intent.EXTRA_TITLE, "Download manager");
+                        intentPick.putExtra(Intent.EXTRA_INTENT, shareIntent);
+                        intentPick.putExtra(Intent.EXTRA_INITIAL_INTENTS, targetedShareIntents.toArray());
+                        // Call StartActivityForResult so we can get the app name selected by the user
+                        this.startActivityForResult(intentPick, /* REQUEST_CODE_MY_PICK */ 4242);
+                    }
+            }
         }
         return true;
     }

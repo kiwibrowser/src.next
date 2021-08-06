@@ -41,6 +41,22 @@
         android:key="privacy_sandbox"
         android:title="@string/prefs_privacy_sandbox"
         android:fragment="org.chromium.chrome.browser.privacy_sandbox.PrivacySandboxSettingsFragment"/>
+    <org.chromium.components.browser_ui.settings.ChromeBaseCheckBoxPreference
+        android:key="avoid_amp_websites"
+        android:title="@string/privacy_preferences_avoid_amp_websites_title"
+        android:summary="@string/privacy_preferences_avoid_amp_websites_summary"
+        android:defaultValue="true" />
+    <org.chromium.components.browser_ui.settings.ChromeBaseCheckBoxPreference
+        android:key="close_tabs_on_exit"
+        android:title="@string/privacy_preferences_close_tabs_on_exit_title"
+        android:summary="@string/privacy_preferences_close_tabs_on_exit_summary"
+        android:defaultValue="false" />
+    <org.chromium.components.browser_ui.settings.ChromeBaseCheckBoxPreference
+        android:key="close_browser_after_last_tab"
+        android:title="@string/privacy_preferences_close_browser_after_last_tab_is_closed_title"
+        android:summary="@string/privacy_preferences_close_browser_after_last_tab_is_closed_summary"
+        android:defaultValue="false" />
+
     <org.chromium.components.browser_ui.settings.TextMessagePreference
         android:key="sync_and_services_link"
         android:summary="@string/privacy_sync_and_services_link_legacy"

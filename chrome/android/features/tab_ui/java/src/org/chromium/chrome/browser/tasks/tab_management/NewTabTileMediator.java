@@ -15,6 +15,9 @@ import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorObserver;
 import org.chromium.ui.modelutil.PropertyModel;
 
+import org.chromium.chrome.browser.homepage.HomepageManager;
+import org.chromium.chrome.browser.tab.TabLaunchType;
+
 /**
  * This is mediator for NewTabTile component.
  */
@@ -34,7 +37,10 @@ public class NewTabTileMediator {
         model.set(NewTabTileViewProperties.THUMBNAIL_ASPECT_RATIO, aspectRatio);
         model.set(NewTabTileViewProperties.CARD_HEIGHT_INTERCEPT, 0);
         model.set(NewTabTileViewProperties.ON_CLICK_LISTENER, view -> {
-            tabCreatorManager.getTabCreator(tabModelSelector.isIncognitoSelected()).launchNTP();
+            if (tabModelSelector.isIncognitoSelected())
+                tabCreatorManager.getTabCreator(tabModelSelector.isIncognitoSelected()).launchNTP();
+            else
+                tabCreatorManager.getTabCreator(tabModelSelector.isIncognitoSelected()).launchUrl(HomepageManager.getInstance().getHomepageUriIgnoringEnabledState(), TabLaunchType.FROM_CHROME_UI);
             RecordUserAction.record("MobileNewTabOpened.NewTabTile");
         });
 

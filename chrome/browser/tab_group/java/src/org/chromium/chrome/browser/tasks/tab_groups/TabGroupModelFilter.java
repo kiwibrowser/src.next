@@ -816,6 +816,11 @@ public class TabGroupModelFilter extends TabModelFilter {
     }
 
     @Override
+    public int getLastNonExtensionActiveIndex() {
+        return mCurrentGroupIndex;
+    }
+
+    @Override
     public int getCount() {
         return mGroupIdToGroupMap.size();
     }

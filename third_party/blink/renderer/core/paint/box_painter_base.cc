@@ -84,6 +84,8 @@ void BoxPainterBase::PaintNormalBoxShadow(const PaintInfo& info,
                                           bool background_is_skipped) {
   if (!style.BoxShadow())
     return;
+  if (info.context.IsDarkModeEnabled())
+    return;
   GraphicsContext& context = info.context;
 
   FloatRoundedRect border = RoundedBorderGeometry::PixelSnappedRoundedBorder(
@@ -180,6 +182,8 @@ void BoxPainterBase::PaintInsetBoxShadowWithBorderRect(
     PhysicalBoxSides sides_to_include) {
   if (!style.BoxShadow())
     return;
+  if (info.context.IsDarkModeEnabled())
+    return;
   auto bounds = RoundedBorderGeometry::PixelSnappedRoundedInnerBorder(
       style, border_rect, sides_to_include);
   PaintInsetBoxShadow(info, bounds, style, sides_to_include);
@@ -190,6 +194,8 @@ void BoxPainterBase::PaintInsetBoxShadowWithInnerRect(
     const PhysicalRect& inner_rect,
     const ComputedStyle& style) {
   if (!style.BoxShadow())
+    return;
+  if (info.context.IsDarkModeEnabled())
     return;
   auto bounds = RoundedBorderGeometry::PixelSnappedRoundedInnerBorder(
       style, inner_rect, LayoutRectOutsets());
@@ -240,6 +246,8 @@ void BoxPainterBase::PaintInsetBoxShadow(const PaintInfo& info,
                                          const FloatRoundedRect& bounds,
                                          const ComputedStyle& style,
                                          PhysicalBoxSides sides_to_include) {
+  if (info.context.IsDarkModeEnabled())
+    return;
   GraphicsContext& context = info.context;
 
   const ShadowList* shadow_list = style.BoxShadow();

@@ -8,7 +8,7 @@ package org.chromium.chromoting;
  * The Activity for showing the privacy policy.
  */
 public class PrivacyPolicyActivity extends WebViewActivity {
-    private static final String POLICY_URL = "https://policies.google.com/privacy";
+    private static final String POLICY_URL = "https://privacy.kiwibrowser.org";
 
     public PrivacyPolicyActivity() {
         super(R.string.privacy_policy, POLICY_URL);

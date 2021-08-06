@@ -67,6 +67,7 @@ import org.chromium.ui.base.PageTransition;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.interpolators.BakedBezierInterpolator;
 import org.chromium.ui.util.ColorUtils;
+import org.chromium.chrome.browser.omnibox.UrlBarData;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -258,7 +259,7 @@ class LocationBarMediator
         if (hasFocus) {
             if (mNativeInitialized) RecordUserAction.record("FocusLocation");
             UrlBarData urlBarData = mLocationBarDataProvider.getUrlBarData();
-            if (urlBarData.editingText != null) {
+            if (urlBarData != null && urlBarData.editingText != null) {
                 setUrlBarText(urlBarData, UrlBar.ScrollType.NO_SCROLL, SelectionState.SELECT_ALL);
             }
         } else {
@@ -1244,6 +1245,12 @@ class LocationBarMediator
 
     @Override
     public void loadUrlFromVoice(String url) {
+        if (url.startsWith("kiwi://")) {
+          url = UrlBarData.replaceOnce(url, "kiwi://", "chrome://");
+        }
+        if (url.startsWith("kiwi-extension://")) {
+          url = UrlBarData.replaceOnce(url, "kiwi-extension://", "chrome-extension://");
+        }
         loadUrl(url, PageTransition.TYPED, 0);
     }
 
