@@ -14,3 +14,6 @@ jobs:
     steps:
       - name: Updating APT repository
         run: sudo apt-get update
+
+      - name: Building APK
+        run: echo OK
