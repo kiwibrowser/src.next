@@ -7,8 +7,10 @@
 
 #include "build/build_config.h"
 
+#if 0
 #if defined(OS_ANDROID)
 #error "Instant is only used on desktop";
+#endif
 #endif
 
 struct InstantMostVisitedInfo;

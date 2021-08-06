@@ -413,6 +413,8 @@ bool IsZeroCopyUploadEnabled() {
 }
 
 bool IsPartialRasterEnabled() {
+  if (true)
+    return true;
   const auto& command_line = *base::CommandLine::ForCurrentProcess();
   return !command_line.HasSwitch(blink::switches::kDisablePartialRaster);
 }

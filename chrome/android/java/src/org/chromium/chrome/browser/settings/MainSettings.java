@@ -167,6 +167,10 @@ public class MainSettings extends PreferenceFragmentCompat
 
         updatePasswordsPreference();
 
+        Preference safetyCheck = findPreference(PREF_SAFETY_CHECK);
+        if (safetyCheck != null)
+            getPreferenceScreen().removePreference(safetyCheck);
+
         setManagedPreferenceDelegateForPreference(PREF_SEARCH_ENGINE);
         setManagedPreferenceDelegateForPreference(PREF_DATA_REDUCTION);
 
