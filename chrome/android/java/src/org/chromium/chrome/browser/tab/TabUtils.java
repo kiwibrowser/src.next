@@ -189,6 +189,8 @@ public class TabUtils {
      * @return Whether or not the screen size is large enough for desktop sites.
      */
     public static boolean isTabLargeEnoughForDesktopSite(Tab tab) {
+        if ((ContextUtils.getAppSharedPreferences().getBoolean("desktop_mode", false)))
+            return true;
         if (!DeviceFormFactor.isNonMultiDisplayContextOnTablet(tab.getContext())) {
             // The device is a phone, do not check the tab size.
             return false;

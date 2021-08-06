@@ -3190,6 +3190,8 @@ void StyleEngine::UpdateColorSchemeBackground(bool color_scheme_changed) {
     // https://drafts.csswg.org/css-color-adjust/#color-scheme-effect
     mojom::blink::ColorScheme root_color_scheme =
         mojom::blink::ColorScheme::kLight;
+    auto* settings = GetDocument().GetSettings();
+    bool force_dark_enabled = settings && settings->GetForceDarkModeEnabled();
     if (auto* root_element = GetDocument().documentElement()) {
       if (const ComputedStyle* style = root_element->GetComputedStyle())
         root_color_scheme = style->UsedColorScheme();

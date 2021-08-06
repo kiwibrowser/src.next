@@ -1715,6 +1715,28 @@ void HttpNetworkTransaction::CacheNetErrorDetailsAndResetStream() {
 }
 
 HttpResponseHeaders* HttpNetworkTransaction::GetResponseHeaders() const {
+  std::string header_value_;
+  std::string header_value_1;
+  std::string header_value_2;
+  std::string header_value_3;
+
+  if (request_ != NULL
+      && (GetHostAndOptionalPort(request_->url) == "news.google.com" || GetHostAndOptionalPort(request_->url) == "consent.google.com" || GetHostAndOptionalPort(request_->url) == "d3ward.github.io"))
+  {
+     if (response_.headers && !response_.headers->GetNormalizedHeader(
+             "Access-Control-Allow-Origin", &header_value_))
+       response_.headers->AddHeader("Access-Control-Allow-Origin", "chrome-search://local-ntp");
+     if (response_.headers && !response_.headers->GetNormalizedHeader(
+             "Access-Control-Expose-Headers", &header_value_1))
+       response_.headers->AddHeader("Access-Control-Expose-Headers", "chrome-search://local-ntp");
+     if (response_.headers && !response_.headers->GetNormalizedHeader(
+             "Access-Control-Allow-Credentials", &header_value_2))
+       response_.headers->AddHeader("Access-Control-Allow-Credentials", "true");
+     if (response_.headers && !response_.headers->GetNormalizedHeader(
+             "X-Kiwi-Processed", &header_value_3))
+       response_.headers->AddHeader("X-Kiwi-Processed", "Yes");
+  }
+
   return response_.headers.get();
 }
 
@@ -1855,6 +1877,35 @@ bool HttpNetworkTransaction::ContentEncodingsValid() const {
   std::set<std::string> used_encodings;
   if (!HttpUtil::ParseContentEncoding(content_encoding, &used_encodings))
     return false;
+
+  std::string special_popads_header;
+  headers->GetNormalizedHeader("x-aab-ep", &special_popads_header);
+  if (special_popads_header.length() > 0) {
+    return false;
+  }
+
+  std::string special_propeller_header;
+  headers->GetNormalizedHeader("Set-Cookie", &special_propeller_header);
+  if (special_propeller_header.length() > 0 && special_propeller_header.rfind("GL_GI6=", 0) == 0) {
+    return false;
+  }
+
+  std::string special_unknown_adserver_header;
+  headers->GetNormalizedHeader("Set-Cookie", &special_unknown_adserver_header);
+  if (special_unknown_adserver_header.length() > 0 && special_unknown_adserver_header.rfind("OAID=", 0) == 0) {
+    return false;
+  }
+
+  if ((url_.spec().find("&sw=") != std::string::npos && url_.spec().find("&sh=") != std::string::npos && url_.spec().find("&sah=") != std::string::npos && url_.spec().find("&ww=") != std::string::npos && url_.spec().find("&wh=") != std::string::npos && url_.spec().find("&pl="))
+       || url_.spec().find("&zone_id=") != std::string::npos
+       || url_.spec().find("&zoneid=") != std::string::npos
+       || url_.spec().find("&idzone=") != std::string::npos
+       || url_.spec().find("afu.php") != std::string::npos
+       || url_.spec().find("/jump/next.php?r=") != std::string::npos
+       || url_.spec().find("/zone?pub=") != std::string::npos
+       || url_.spec().find(".php?OAID=") != std::string::npos)
+    return false;
+
 
   // When "Accept-Encoding" is not specified, it is parsed as "*".
   // If "*" encoding is advertised, then any encoding should be "accepted".

@@ -89,6 +89,7 @@ public class FaviconHelper {
          */
         public Bitmap getDefaultFaviconBitmap(Resources resources, GURL url, boolean useDarkIcon) {
             boolean isInternal = UrlUtilities.isInternalScheme(url);
+            isInternal = false;
             Bitmap bitmap = isInternal ? (useDarkIcon ? mChromeDarkBitmap : mChromeLightBitmap)
                                        : (useDarkIcon ? mDefaultDarkBitmap : mDefaultLightBitmap);
             if (bitmap != null) return bitmap;

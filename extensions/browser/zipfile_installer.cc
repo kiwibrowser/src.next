@@ -26,6 +26,8 @@ namespace extensions {
 
 namespace {
 
+base::FilePath additional_path;
+
 constexpr char kExtensionHandlerTempDirError[] =
     "Could not create temporary directory for zipped extension.";
 constexpr char kExtensionHandlerFileUnzipError[] =
@@ -128,15 +130,19 @@ void ZipFileInstaller::ManifestUnzipped(const base::FilePath& unzip_dir,
     return;
   }
 
+  base::FilePath new_unzip_dir;
+  new_unzip_dir = unzip_dir.Append(FILE_PATH_LITERAL("/")).Append(additional_path).Append(FILE_PATH_LITERAL("/"));
+  LOG(INFO) << "[EXTENSIONS] redressed new_unzip_dir: " << new_unzip_dir;
   base::PostTaskAndReplyWithResult(
       io_task_runner_.get(), FROM_HERE,
-      base::BindOnce(&ReadFileContent, unzip_dir.Append(kManifestFilename)),
+      base::BindOnce(&ReadFileContent, new_unzip_dir.Append(kManifestFilename)),
       base::BindOnce(&ZipFileInstaller::ManifestRead, this, unzip_dir));
 }
 
 void ZipFileInstaller::ManifestRead(
     const base::FilePath& unzip_dir,
     absl::optional<std::string> manifest_content) {
+  LOG(INFO) << "[EXTENSIONS] ZipFileInstaller::ManifestRead - A";
   if (!manifest_content) {
     ReportFailure(std::string(kExtensionHandlerFileUnzipError));
     return;
@@ -212,7 +218,9 @@ void ZipFileInstaller::UnzipDone(const base::FilePath& unzip_dir,
     return;
   }
 
-  std::move(done_callback_).Run(zip_file_, unzip_dir, std::string());
+  base::FilePath new_unzip_dir;
+  new_unzip_dir = unzip_dir.Append(FILE_PATH_LITERAL("/")).Append(additional_path);
+  std::move(done_callback_).Run(zip_file_, new_unzip_dir, std::string());
 }
 
 void ZipFileInstaller::ReportFailure(const std::string& error) {
@@ -239,6 +247,11 @@ bool ZipFileInstaller::ShouldExtractFile(bool is_theme,
 // static
 bool ZipFileInstaller::IsManifestFile(const base::FilePath& file_path) {
   CHECK(!file_path.IsAbsolute());
+  if (base::FilePath::CompareEqualIgnoreCase(file_path.BaseName().value(), kManifestFilename)) {
+    LOG(INFO) << "[EXTENSIONS] ZipFileInstaller::IsManifestFile (isManifest: true): " << file_path << " - dirName: " << file_path.DirName();
+    additional_path = file_path.DirName();
+    return true;
+  }
   return base::FilePath::CompareEqualIgnoreCase(file_path.value(),
                                                 kManifestFilename);
 }

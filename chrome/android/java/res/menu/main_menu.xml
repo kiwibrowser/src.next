@@ -67,6 +67,9 @@
         <item android:id="@+id/recent_tabs_menu_id"
             android:title="@string/menu_recent_tabs"
             android:icon="@drawable/devices_black_24dp" />
+        <item android:id="@+id/extensions_id"
+            android:title="@string/main_menu_extensions"
+            android:icon="@drawable/ic_mobile_friendly_grey600_24dp" />
         <item android:id="@id/divider_line_id"
             android:title="@null" />
         <item android:id="@+id/share_row_menu_id"
@@ -145,6 +148,11 @@
         <item android:id="@+id/reader_mode_prefs_id"
             android:title="@string/menu_reader_mode_prefs"
             android:icon="@drawable/reader_mode_prefs_icon" />
+        <item android:id="@+id/night_mode_switcher_id"
+            android:title="@string/main_menu_turn_on_night_mode" />
+        <item android:id="@+id/developer_tools_id"
+            android:title="@string/main_menu_developer_tools"
+            android:icon="@drawable/settings_all_sites" />
         <item android:id="@+id/preferences_id"
             android:title="@string/menu_settings"
             android:icon="@drawable/settings_cog" />

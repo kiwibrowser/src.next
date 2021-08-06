@@ -314,6 +314,11 @@ bool MimeUtil::GetMimeTypeFromFile(const base::FilePath& file_path,
   base::FilePath::StringType file_name_str = file_path.Extension();
   if (file_name_str.empty())
     return false;
+  if (file_path.MaybeAsASCII().find("bookmarks.html") != std::string::npos)
+  {
+    *result = "binary/octet-stream";
+    return true;
+  }
   return GetMimeTypeFromExtension(file_name_str.substr(1), result);
 }
 

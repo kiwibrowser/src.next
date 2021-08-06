@@ -24,6 +24,8 @@ import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.components.embedder_support.util.UrlUtilities;
 import org.chromium.url.GURL;
 
+import org.chromium.base.ContextUtils;
+
 /**
  * Provides information regarding homepage enabled states and URI.
  *
@@ -117,8 +119,7 @@ public class HomepageManager implements HomepagePolicyManager.HomepagePolicyStat
      * @return Whether to close the app when the user has zero tabs.
      */
     public static boolean shouldCloseAppWithZeroTabs() {
-        return HomepageManager.isHomepageEnabled()
-                && !UrlUtilities.isNTPUrl(HomepageManager.getHomepageUri());
+        return ContextUtils.getAppSharedPreferences().getBoolean("close_browser_after_last_tab", false);
     }
 
     /**
@@ -196,12 +197,9 @@ public class HomepageManager implements HomepagePolicyManager.HomepagePolicyStat
      * Get homepage URI without checking if the homepage is enabled.
      * @return Homepage URI based on policy and shared preference settings.
      */
-    private @NonNull String getHomepageUriIgnoringEnabledState() {
-        if (HomepagePolicyManager.isHomepageManagedByPolicy()) {
-            return HomepagePolicyManager.getHomepageUrl();
-        }
+    public @NonNull String getHomepageUriIgnoringEnabledState() {
         if (getPrefHomepageUseChromeNTP()) {
-            return UrlConstants.NTP_NON_NATIVE_URL;
+            return "chrome-search://local-ntp/local-ntp.html";
         }
         if (getPrefHomepageUseDefaultUri()) {
             return getDefaultHomepageUri();

@@ -22,6 +22,16 @@
             app:showAsAction="ifRoom"
             app:iconTint="@color/default_icon_color_secondary_tint_list" />
         <item
+            android:id="@+id/import_bookmarks"
+            android:title="@string/menu_import_bookmarks"
+            android:contentDescription="@string/menu_import_bookmarks"
+            app:showAsAction="never"/>
+        <item
+            android:id="@+id/export_bookmarks"
+            android:title="@string/menu_export_bookmarks"
+            android:contentDescription="@string/menu_export_bookmarks"
+            app:showAsAction="never"/>
+        <item
             android:id="@+id/close_menu_id"
             android:icon="@drawable/btn_close"
             android:title="@string/bookmark_action_bar_close"

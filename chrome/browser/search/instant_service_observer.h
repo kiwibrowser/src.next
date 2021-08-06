@@ -11,6 +11,7 @@
 #if BUILDFLAG(IS_ANDROID)
 #error "Instant is only used on desktop";
 #endif
+#endif
 
 struct InstantMostVisitedInfo;
 

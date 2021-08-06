@@ -69,6 +69,8 @@ import org.chromium.ui.touch_selection.TouchSelectionDraggableType;
 
 import java.util.List;
 
+import org.chromium.base.ContextUtils;
+
 /**
  * Implementation of the interface {@link SelectionPopupController}.
  */
@@ -981,6 +983,10 @@ public class SelectionPopupControllerImpl extends ActionModeCallbackHelper
 
         // The selection coordinates are relative to the content viewport, but we need
         // coordinates relative to the containing View.
+        if (ContextUtils.getAppSharedPreferences().getBoolean("enable_bottom_toolbar", false))
+        viewSelectionRect.offset(
+                0, (int) mWebContents.getRenderCoordinates().getContentOffsetYPix() - (int) (60 * deviceScale));
+        else
         viewSelectionRect.offset(
                 0, (int) mWebContents.getRenderCoordinates().getContentOffsetYPix());
         return viewSelectionRect;

@@ -1,7 +1,7 @@
 <style include="cr-hidden-style">
   :host {
     --border-bottom-height: 1px;
-    --button-row-height: calc(2 * var(--padding-top-bottom) +
+    --button-row-height: calc(8 * var(--padding-top-bottom) +
         var(--cr-button-height));
     --drawer-transition: 0.3s cubic-bezier(.25, .1, .25, 1);
     --padding-top-bottom: 10px;
@@ -94,10 +94,15 @@
 </template>
 <div id="devDrawer" expanded$="[[expanded_]]">
   <div id="buttonStrip">
+    <cr-button id="loadFromStore"
+        on-click="openExtensionsWebStore_">
+      + (from store)
+    </cr-button>
     <cr-button hidden$="[[!canLoadUnpacked]]" id="loadUnpacked"
         on-click="onLoadUnpackedTap_">
-      $i18n{toolbarLoadUnpacked}
+      + (from .zip/.crx/.user.js)
     </cr-button>
+    <br />&nbsp;<br />
     <cr-button id="packExtensions" on-click="onPackTap_">
       $i18n{toolbarPack}
     </cr-button>

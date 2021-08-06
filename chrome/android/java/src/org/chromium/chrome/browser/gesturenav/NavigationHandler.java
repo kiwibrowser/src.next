@@ -43,7 +43,7 @@ class NavigationHandler implements TouchEventObserver {
 
     // Weighted value to determine when to trigger an edge swipe. Initial scroll
     // vector should form 30 deg or below to initiate swipe action.
-    private static final float WEIGTHED_TRIGGER_THRESHOLD = 1.73f;
+    private static final float WEIGTHED_TRIGGER_THRESHOLD = 0.43f;
 
     // |EDGE_WIDTH_DP| in physical pixel.
     private final float mEdgeWidthPx;

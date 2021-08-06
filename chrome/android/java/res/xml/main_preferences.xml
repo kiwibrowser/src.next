@@ -10,10 +10,6 @@
     <org.chromium.chrome.browser.sync.settings.SyncPromoPreference
         android:key="sync_promo"
         android:order="0"/>
-    <PreferenceCategory
-        android:key="account_and_google_services_section"
-        android:order="1"
-        android:title="@string/prefs_section_account_and_google_services"/>
     <org.chromium.chrome.browser.sync.settings.SignInPreference
         android:key="sign_in"
         android:order="2"
@@ -25,10 +21,9 @@
         android:title="@string/sync_category_title"/>
     <org.chromium.components.browser_ui.settings.ChromeBasePreference
         android:key="google_services"
-        android:order="4"
+        android:order="7"
         android:layout="@layout/account_management_account_row"
         android:title="@string/prefs_google_services"
-        android:icon="@drawable/ic_google_services_48dp"
         android:fragment="org.chromium.chrome.browser.sync.settings.GoogleServicesSettings"/>
 
     <PreferenceCategory
@@ -104,6 +99,21 @@
         android:key="languages"
         android:order="19"
         android:title="@string/language_settings"/>
+    <Preference
+        android:fragment="org.chromium.chrome.browser.translate.settings.TranslateSettings"
+        android:key="translate"
+        android:order="20"
+        android:title="@string/main_menu_translate"/>
+    <Preference
+        android:fragment="org.chromium.chrome.browser.settings.TabSwitcherSettings"
+        android:key="tabswitcher"
+        android:order="21"
+        android:title="@string/preferences_tabswitcher"/>
+    <Preference
+        android:fragment="org.chromium.chrome.browser.settings.NightModeSettings"
+        android:key="nightmode"
+        android:order="21"
+        android:title="@string/preferences_nightmode"/>
     <org.chromium.components.browser_ui.settings.ChromeBasePreference
         android:fragment="org.chromium.chrome.browser.download.settings.DownloadSettings"
         android:key="downloads"

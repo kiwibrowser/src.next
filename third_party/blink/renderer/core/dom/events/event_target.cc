@@ -853,6 +853,29 @@ bool EventTarget::FireEventListeners(Event& event,
     // EventTarget::removeEventListener.
     ++i;
 
+/*
+    if (event.type() == event_type_names::kMousedown
+     || event.type() == event_type_names::kMouseup
+     || event.type() == event_type_names::kTouchstart
+     || event.type() == event_type_names::kTouchend
+     || event.type() == event_type_names::kClick) {
+      if (Node* node = event.currentTarget()->ToNode()) {
+         if (node->IsDocumentNode() ||
+             node->GetDocument().documentElement() == node ||
+             node->GetDocument().body() == node) {
+             if (const LocalDOMWindow* executing_window = ExecutingWindow()) {
+                  if (const Document* document = executing_window->document()) {
+                      if (event.eventPhase() == Event::kCapturingPhase) {
+                          continue;
+//                          event.SetTrusted(false);
+                      }
+                 }
+            }
+         }
+      }
+    }
+*/
+
     if (!registered_listener.ShouldFire(event))
       continue;
 

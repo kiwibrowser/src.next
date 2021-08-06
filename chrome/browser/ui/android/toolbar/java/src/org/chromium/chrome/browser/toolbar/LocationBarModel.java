@@ -661,6 +661,12 @@ public class LocationBarModel implements ToolbarDataProvider, LocationBarDataPro
                 !mSearchEngineLogoUtils.shouldShowSearchEngineLogo(isIncognito())
                 || mNtpDelegate.isCurrentlyVisible() || isInOverviewAndShowingOmnibox();
 
+        String currentUrl = getCurrentUrl();
+        if (currentUrl != null && currentUrl.startsWith("chrome-search://"))
+            skipIconForNeutralState = true;
+        if (currentUrl != null && currentUrl.startsWith("kiwi-search://"))
+            skipIconForNeutralState = true;
+
         boolean useLockIconEnabled = false;
         if (mNativeLocationBarModelAndroid != 0) {
             PrefService prefService = getPrefService();
