@@ -44,6 +44,7 @@ KeyedService* InMemoryURLIndexFactory::BuildServiceInstanceFor(
   Profile* profile = Profile::FromBrowserContext(context);
   SchemeSet chrome_schemes_to_whitelist;
   chrome_schemes_to_whitelist.insert(content::kChromeUIScheme);
+  chrome_schemes_to_whitelist.insert("kiwi");
   InMemoryURLIndex* in_memory_url_index =
       new InMemoryURLIndex(BookmarkModelFactory::GetForBrowserContext(profile),
                            HistoryServiceFactory::GetForProfile(

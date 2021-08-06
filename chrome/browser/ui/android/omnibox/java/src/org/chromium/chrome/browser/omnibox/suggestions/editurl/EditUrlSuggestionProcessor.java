@@ -30,6 +30,10 @@ import org.chromium.ui.modelutil.PropertyModel;
 
 import java.util.Arrays;
 
+import org.chromium.chrome.browser.omnibox.UrlBarData;
+
+import org.chromium.base.ContextUtils;
+
 /**
  * This class controls the interaction of the "edit url" suggestion item with the rest of the
  * suggestions list. This class also serves as a mediator, containing logic that interacts with
@@ -87,7 +91,12 @@ public class EditUrlSuggestionProcessor extends BaseSuggestionViewProcessor {
 
         if (!mHasClearedOmniboxForFocus) {
             mHasClearedOmniboxForFocus = true;
+            if (ContextUtils.getAppSharedPreferences().getBoolean("keep_address_bar_content", false)) {
+            UrlBarData parsedToolbar = UrlBarData.forUrlAndText(suggestion.getUrl().getSpec(), suggestion.getUrl().getSpec(), null);
+            mUrlBarDelegate.setOmniboxEditingText(parsedToolbar.getEditingOrDisplayText().toString());
+            } else {
             mUrlBarDelegate.setOmniboxEditingText("");
+            }
         }
         return true;
     }
@@ -177,6 +186,8 @@ public class EditUrlSuggestionProcessor extends BaseSuggestionViewProcessor {
     /** Invoked when user interacts with Edit action button. */
     private void onEditLink(AutocompleteMatch suggestion) {
         RecordUserAction.record("Omnibox.EditUrlSuggestion.Edit");
-        mUrlBarDelegate.setOmniboxEditingText(suggestion.getUrl().getSpec());
+
+        UrlBarData parsedToolbar = UrlBarData.forUrlAndText(suggestion.getUrl().getSpec(), suggestion.getUrl().getSpec(), null);
+        mUrlBarDelegate.setOmniboxEditingText(parsedToolbar.getEditingOrDisplayText().toString());
     }
 }

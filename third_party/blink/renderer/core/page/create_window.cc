@@ -316,8 +316,14 @@ Frame* CreateNewWindow(LocalFrame& opener_frame,
                     LocalFrame::HasTransientUserActivation(&opener_frame));
 
   // Sandboxed frames cannot open new auxiliary browsing contexts.
+  bool shouldBlockWindow = false;
   if (opener_window.IsSandboxed(
           network::mojom::blink::WebSandboxFlags::kPopups)) {
+    shouldBlockWindow = true;
+  }
+  if (opener_window.IsCrossSiteSubframe())
+    shouldBlockWindow = true;
+  if (shouldBlockWindow) {
     // FIXME: This message should be moved off the console once a solution to
     // https://bugs.webkit.org/show_bug.cgi?id=103274 exists.
     opener_window.AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
