@@ -35,6 +35,10 @@ import org.chromium.components.version_info.Channel;
 import org.chromium.components.version_info.VersionConstants;
 import org.chromium.url.GURL;
 
+import org.chromium.base.ContextUtils;
+import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
+import org.chromium.chrome.browser.night_mode.ThemeType;
+
 /**
  * Basic application functionality that should be shared among all browser applications that use
  * chrome layer.
@@ -53,6 +57,13 @@ public class ChromeApplicationImpl extends SplitCompatApplication.Impl {
     @Override
     public void onCreate() {
         super.onCreate();
+
+        boolean migrateToDarkTheme = ContextUtils.getAppSharedPreferences().getString("active_theme", "").equals("Diamond Black");
+        if (migrateToDarkTheme) {
+            SharedPreferencesManager.getInstance().writeIntUnchecked("previous_ui_theme_setting", ThemeType.DARK);
+            SharedPreferencesManager.getInstance().writeInt("ui_theme_setting", ThemeType.DARK);
+            SharedPreferencesManager.getInstance().writeStringUnchecked("active_theme", "");
+        }
 
         if (SplitCompatApplication.isBrowserProcess()) {
             FontPreloader.getInstance().load(getApplication());

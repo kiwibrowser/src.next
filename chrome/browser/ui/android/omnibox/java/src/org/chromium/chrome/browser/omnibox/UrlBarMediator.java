@@ -102,12 +102,12 @@ class UrlBarMediator
      */
     public boolean setUrlBarData(
             UrlBarData data, @ScrollType int scrollType, @SelectionState int selectionState) {
-        if (data.originEndIndex == data.originStartIndex) {
+        if (data != null && data.url != null && data.originEndIndex == data.originStartIndex) {
             scrollType = UrlBar.ScrollType.SCROLL_TO_BEGINNING;
         }
 
         // Do not scroll to the end of the host for URLs such as data:, javascript:, etc...
-        if (data.url != null && data.originEndIndex == data.displayText.length()) {
+        if (data != null && data.url != null && data.originEndIndex == data.displayText.length()) {
             Uri uri = Uri.parse(data.url);
             String scheme = uri.getScheme();
             if (!TextUtils.isEmpty(scheme)
@@ -129,6 +129,8 @@ class UrlBarMediator
     }
 
     private void pushTextToModel() {
+        if (mUrlBarData == null)
+          return;
         CharSequence text =
                 !mHasFocus ? mUrlBarData.displayText : mUrlBarData.getEditingOrDisplayText();
         CharSequence textForAutofillServices = text;

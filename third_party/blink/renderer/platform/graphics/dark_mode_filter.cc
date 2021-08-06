@@ -22,7 +22,7 @@ namespace {
 
 const size_t kMaxCacheSize = 1024u;
 const int kMinImageLength = 8;
-const int kMaxImageLength = 100;
+const int kMaxImageLength = 230;
 
 }  // namespace
 

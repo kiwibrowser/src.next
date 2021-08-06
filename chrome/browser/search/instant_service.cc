@@ -56,6 +56,8 @@
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/color_utils.h"
 
+#include "chrome/browser/search/new_tab_page_source.h"
+
 InstantService::InstantService(Profile* profile)
     : profile_(profile),
       most_visited_info_(std::make_unique<InstantMostVisitedInfo>()),
@@ -72,8 +74,8 @@ InstantService::InstantService(Profile* profile)
                  content::NotificationService::AllSources());
 
   most_visited_sites_ = ChromeMostVisitedSitesFactory::NewForProfile(profile_);
+  LOG(INFO) << "[Kiwi] InstantService::InstantService: " << most_visited_sites_;
   if (most_visited_sites_) {
-    most_visited_sites_->EnableCustomLinks(false);
     most_visited_sites_->AddMostVisitedURLsObserver(
         this, ntp_tiles::kMaxNumMostVisited);
   }
@@ -94,6 +96,8 @@ InstantService::InstantService(Profile* profile)
                     profile_, chrome::FaviconUrlFormat::kFaviconLegacy));
   content::URLDataSource::Add(profile_,
                               std::make_unique<MostVisitedIframeSource>());
+  content::URLDataSource::Add(profile_,
+                              std::make_unique<NewTabPageSource>());
 
   theme_observation_.Observe(native_theme_.get());
 }
@@ -117,8 +121,10 @@ void InstantService::RemoveObserver(InstantServiceObserver* observer) {
 }
 
 void InstantService::OnNewTabPageOpened() {
+  LOG(INFO) << "[Kiwi] InstantService::OnNewTabPageOpened: " << most_visited_sites_;
   if (most_visited_sites_) {
     most_visited_sites_->Refresh();
+    most_visited_sites_->RefreshTiles();
   }
 }
 
@@ -215,6 +221,7 @@ void InstantService::OnURLsAvailable(
   // Use only personalized tiles for instant service.
   const ntp_tiles::NTPTilesVector& tiles =
       sections.at(ntp_tiles::SectionType::PERSONALIZED);
+  LOG(INFO) << "[Kiwi] InstantService::OnURLsAvailable - tiles: " << tiles.size();
   for (const ntp_tiles::NTPTile& tile : tiles) {
     InstantMostVisitedItem item;
     item.url = tile.url;
@@ -229,6 +236,7 @@ void InstantService::OnURLsAvailable(
 void InstantService::OnIconMadeAvailable(const GURL& site_url) {}
 
 void InstantService::NotifyAboutMostVisitedInfo() {
+  LOG(INFO) << "[Kiwi] InstantService::NotifyAboutMostVisitedInfo";
   for (InstantServiceObserver& observer : observers_)
     observer.MostVisitedInfoChanged(*most_visited_info_);
 }

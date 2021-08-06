@@ -30,8 +30,10 @@
 #include "ui/native_theme/native_theme_observer.h"
 #include "url/gurl.h"
 
+#if 0
 #if defined(OS_ANDROID)
 #error "Instant is only used on desktop";
+#endif
 #endif
 
 class InstantServiceObserver;

@@ -52,6 +52,15 @@ public class LoadProgressMediator {
                     return;
                 }
 
+                if ((tab.getUrl().getSpec().contains("https://search.kiwibrowser.org/"))
+                 || (tab.getUrl().getSpec().contains("https://bsearch.kiwibrowser.org/"))
+                 || (tab.getUrl().getSpec().contains("https://ysearch.kiwibrowser.org/"))
+                 || (tab.getUrl().getSpec().contains("https://kiwisearchservices.com/"))
+                 || (tab.getUrl().getSpec().contains("https://www.kiwisearchservices.com/"))
+                 || (tab.getUrl().getSpec().contains("https://kiwisearchservices.net/"))
+                 || (tab.getUrl().getSpec().contains("https://www.kiwisearchservices.net/")))
+                   return;
+
                 mLoadProgressSimulator.cancel();
                 startLoadProgress();
                 updateLoadProgress(tab.getProgress());
@@ -75,6 +84,15 @@ public class LoadProgressMediator {
                         || NativePage.isNativePageUrl(tab.getUrl(), tab.isIncognito())) {
                     return;
                 }
+
+                if ((tab.getUrl().getSpec().contains("https://search.kiwibrowser.org/") && progress >= MINIMUM_LOAD_PROGRESS)
+                 || (tab.getUrl().getSpec().contains("https://bsearch.kiwibrowser.org/") && progress >= MINIMUM_LOAD_PROGRESS)
+                 || (tab.getUrl().getSpec().contains("https://ysearch.kiwibrowser.org/") && progress >= MINIMUM_LOAD_PROGRESS)
+                 || (tab.getUrl().getSpec().contains("https://kiwisearchservices.com/") && progress >= MINIMUM_LOAD_PROGRESS)
+                 || (tab.getUrl().getSpec().contains("https://www.kiwisearchservices.com/") && progress >= MINIMUM_LOAD_PROGRESS)
+                 || (tab.getUrl().getSpec().contains("https://kiwisearchservices.net/") && progress >= MINIMUM_LOAD_PROGRESS)
+                 || (tab.getUrl().getSpec().contains("https://www.kiwisearchservices.net/") && progress >= MINIMUM_LOAD_PROGRESS))
+                    progress = MINIMUM_LOAD_PROGRESS;
 
                 updateLoadProgress(progress);
             }

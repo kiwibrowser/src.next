@@ -33,6 +33,8 @@ import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.supplier.ObservableSupplier;
 import org.chromium.base.supplier.OneshotSupplier;
 import org.chromium.chrome.R;
+import org.chromium.components.content_settings.ContentSettingsType;
+import org.chromium.components.content_settings.ContentSettingValues;
 import org.chromium.chrome.browser.ActivityTabProvider;
 import org.chromium.chrome.browser.banners.AppMenuVerbiage;
 import org.chromium.chrome.browser.bookmarks.BookmarkBridge;
@@ -95,6 +97,12 @@ import java.lang.annotation.RetentionPolicy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+
+import org.chromium.components.browser_ui.site_settings.SiteSettingsCategory;
+import org.chromium.components.browser_ui.site_settings.WebsitePreferenceBridge;
+import org.chromium.components.browser_ui.site_settings.WebsitePreferenceBridgeJni;
+
+import org.chromium.chrome.browser.AppMenuBridge;
 
 /**
  * Base implementation of {@link AppMenuPropertiesDelegate} that handles hiding and showing menu
@@ -892,6 +900,59 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
     protected void prepareTranslateMenuItem(Menu menu, @Nullable Tab currentTab) {
         boolean isTranslateVisible = currentTab != null && shouldShowTranslateMenuItem(currentTab);
         menu.findItem(R.id.translate_id).setVisible(isTranslateVisible);
+        String url = currentTab.getUrl().getSpec();
+            MenuItem translate_menu = menu.findItem(R.id.translate_id);
+            if (translate_menu != null) {
+                   try {
+                       if (url != null
+                        &&
+                          (
+                            url.contains("www.microsofttranslator.com/bv.aspx")
+                        ||  url.contains("translatetheweb.com")
+                        ||  url.contains("translatetheweb.net")
+                        ||  url.contains("translatetheweb-int.net")
+                        ||  url.contains("translatoruser.com")
+                        ||  url.contains("translatoruser.net")
+                          )
+                        ) {
+                           translate_menu.setTitle(R.string.main_menu_translate_undo);
+                       } else {
+                           translate_menu.setTitle(R.string.menu_translate);
+                       }
+                       if (url != null
+                        &&
+                          (
+                            url.startsWith("https://translate.google.com/")
+                        ||  url.startsWith("https://translate.googleusercontent.com/")
+                        ||  url.startsWith("http://translate.google.com/")
+                        ||  url.startsWith("http://translate.googleusercontent.com/")
+                        ||  url.contains(".translate.goog/")
+                          )
+                        ) {
+                           translate_menu.setTitle(R.string.main_menu_translate_undo);
+                       }
+                       if (url != null
+                        &&
+                          (
+                            url.startsWith("https://fanyi.baidu.com/")
+                        ||  url.startsWith("http://fanyi.baidu.com/")
+                          )
+                        ) {
+                           translate_menu.setTitle(R.string.main_menu_translate_undo);
+                       }
+                       if (url != null
+                        &&
+                          (
+                            url.startsWith("https://translate.yandex.com/")
+                        ||  url.startsWith("http://translate.yandex.com/")
+                          )
+                        ) {
+                           translate_menu.setTitle(R.string.main_menu_translate_undo);
+                       }
+                   } catch (Exception e) {
+                       translate_menu.setTitle(R.string.menu_translate);
+                   }
+            }
     }
 
     @Override

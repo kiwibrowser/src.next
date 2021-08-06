@@ -41,7 +41,7 @@ namespace extensions {
 // The bitmask for valid user script injectable schemes used by URLPattern.
 // TODO(https://crbug.com/1257045): Remove urn: scheme support.
 enum {
-  kValidUserScriptSchemes = URLPattern::SCHEME_CHROMEUI |
+  kValidUserScriptSchemes = URLPattern::SCHEME_CHROMEUI | URLPattern::SCHEME_CHROMESEARCH |
                             URLPattern::SCHEME_HTTP | URLPattern::SCHEME_HTTPS |
                             URLPattern::SCHEME_FILE | URLPattern::SCHEME_FTP |
                             URLPattern::SCHEME_URN |
@@ -76,6 +76,7 @@ int UserScript::ValidUserScriptSchemes(bool can_execute_script_everywhere) {
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kExtensionsOnChromeURLs)) {
     valid_schemes &= ~URLPattern::SCHEME_CHROMEUI;
+    valid_schemes &= ~URLPattern::SCHEME_CHROMESEARCH;
   }
   return valid_schemes;
 }

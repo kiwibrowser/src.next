@@ -28,6 +28,8 @@ import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.display.DisplayAndroidManager;
 import org.chromium.url.GURL;
 
+import org.chromium.base.ContextUtils;
+
 /**
  * Collection of utility methods that operates on Tab.
  */
@@ -112,6 +114,8 @@ public class TabUtils {
      * @return Whether or not the screen size is large enough for desktop sites.
      */
     public static boolean isTabLargeEnoughForDesktopSite(Tab tab) {
+        if ((ContextUtils.getAppSharedPreferences().getBoolean("desktop_mode", false)))
+            return true;
         if (!DeviceFormFactor.isNonMultiDisplayContextOnTablet(tab.getContext())) {
             // The device is a phone, do not check the tab size.
             return false;

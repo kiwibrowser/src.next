@@ -173,6 +173,12 @@ void NetErrorAutoReloader::DidFinishNavigation(
     return;
   }
 
+  const int net_error_int = handle->GetNetErrorCode();
+  if (handle->IsErrorPage() && net_error_int == net::ERR_CONTENT_DECODING_FAILED) {
+    web_contents()->Close();
+    return;
+  }
+
   if (!ShouldAutoReload(handle)) {
     // We've committed something that doesn't support auto-reload. Reset
     // all auto-reload state so nothing interesting happens until another

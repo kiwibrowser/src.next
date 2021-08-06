@@ -15,6 +15,8 @@
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/native_widget_types.h"
 
+#include "components/download/public/common/download_item.h"
+
 // Contains all the user selection from download dialogs.
 struct DownloadDialogResult {
   DownloadDialogResult();
