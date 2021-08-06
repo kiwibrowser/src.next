@@ -42,6 +42,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import android.graphics.Color;
+import android.graphics.PorterDuff;
+
 /**
  * ListAdapter to customize the view of items in the list.
  *
@@ -390,6 +393,11 @@ class AppMenuAdapter extends BaseAdapter {
         Drawable icon = item.getIcon();
         holder.image.setImageDrawable(icon);
         holder.image.setVisibility(icon == null ? View.GONE : View.VISIBLE);
+        CharSequence titleCondensed = item.getTitleCondensed();
+        if (titleCondensed != null && titleCondensed.toString().contains("Extension: ")) {
+            holder.image.setColorFilter(Color.BLACK, PorterDuff.Mode.DST);
+            holder.image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        }
         holder.text.setText(item.getTitle());
         holder.text.setContentDescription(item.getTitleCondensed());
 

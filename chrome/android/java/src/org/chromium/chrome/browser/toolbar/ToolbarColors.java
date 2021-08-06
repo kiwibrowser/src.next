@@ -10,6 +10,8 @@ import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.tasks.ReturnToChromeExperimentsUtil;
 import org.chromium.chrome.browser.tasks.tab_management.TabUiFeatureUtilities;
 
+import org.chromium.base.ContextUtils;
+
 /**
  * Helpers to determine colors in toolbars.
  */
@@ -24,6 +26,10 @@ public class ToolbarColors {
         final boolean isTabGridEnabled = TabUiFeatureUtilities.isGridTabSwitcherEnabled(context);
         final boolean isStartSurfaceEnabled =
                 ReturnToChromeExperimentsUtil.isStartSurfaceHomepageEnabled();
+        if (ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("default")
+                  || ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("original")
+                  || ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("horizontal"))
+            return true;
         return (isAccessibilityEnabled || isTabGridEnabled || isStartSurfaceEnabled);
     }
 }

@@ -776,6 +776,14 @@ public class TabbedRootUiCoordinator extends RootUiCoordinator {
         mFindToolbarManager.addObserver(mContinuousSearchFindToolbarObserver);
     }
 
+    @Override
+    protected BrowserControlsManager createBrowserControlsManager() {
+        BrowserControlsManager manager = super.createBrowserControlsManager();
+        getAppBrowserControlsVisibilityDelegate().addDelegate(
+                manager.getBrowserVisibilityDelegate());
+        return manager;
+    }
+
     /**
      * @return {@link ComposedBrowserControlsVisibilityDelegate} object for tabbed activity.
      */

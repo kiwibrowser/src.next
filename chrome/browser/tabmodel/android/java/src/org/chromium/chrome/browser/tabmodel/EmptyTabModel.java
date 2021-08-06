@@ -89,6 +89,11 @@ public class EmptyTabModel implements TabModel {
     }
 
     @Override
+    public int getLastNonExtensionActiveIndex() {
+        return INVALID_TAB_INDEX;
+    }
+
+    @Override
     public void setIndex(int i, @TabSelectionType int type) {}
 
     @Override
