@@ -10,8 +10,10 @@
 #include "build/build_config.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 
+#if 0
 #if defined(OS_ANDROID)
 #error "Instant is only used on desktop";
+#endif
 #endif
 
 class InstantService;

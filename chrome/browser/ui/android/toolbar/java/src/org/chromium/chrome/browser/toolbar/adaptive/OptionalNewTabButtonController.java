@@ -122,6 +122,9 @@ public class OptionalNewTabButtonController
 
             boolean isIncognito = tabModelSelector.isIncognitoSelected();
             RecordUserAction.record("MobileTopToolbarOptionalButtonNewTab");
+            if (isIncognito)
+            tabCreatorManager.getTabCreator(isIncognito).launchIncognitoNTP();
+            else
             tabCreatorManager.getTabCreator(isIncognito).launchNTP();
 
             if (mTrackerSupplier.hasValue()) {

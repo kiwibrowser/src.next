@@ -57,6 +57,7 @@ ChromeAutocompleteSchemeClassifier::GetInputTypeForScheme(
       (ProfileIOData::IsHandledProtocol(scheme) ||
        base::LowerCaseEqualsASCII(scheme, content::kViewSourceScheme) ||
        base::LowerCaseEqualsASCII(scheme, url::kJavaScriptScheme) ||
+       base::LowerCaseEqualsASCII(scheme, "kiwi") ||
        base::LowerCaseEqualsASCII(scheme, url::kDataScheme))) {
     return metrics::OmniboxInputType::URL;
   }

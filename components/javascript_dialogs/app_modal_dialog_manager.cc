@@ -165,6 +165,14 @@ void AppModalDialogManager::RunJavaScriptDialog(
     return;
   }
 
+  GURL unwrapped_parent_frame_url = UnwrapURL(web_contents->GetURL());
+  GURL unwrapped_alerting_frame_url = UnwrapURL(render_frame_host->GetLastCommittedURL());
+
+  if (unwrapped_parent_frame_url.SchemeIs("chrome-extension") || unwrapped_alerting_frame_url.SchemeIs("chrome-extension")) {
+    *did_suppress_message = true;
+    return;
+  }
+
   std::u16string dialog_title =
       GetTitle(web_contents, render_frame_host->GetLastCommittedURL());
 
