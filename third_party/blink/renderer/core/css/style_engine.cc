@@ -129,8 +129,7 @@ StyleEngine::StyleEngine(Document& document)
   if (document.IsInMainFrame())
     viewport_resolver_ = MakeGarbageCollected<ViewportStyleResolver>(document);
   if (auto* settings = GetDocument().GetSettings()) {
-    if (!settings->GetForceDarkModeEnabled())
-      preferred_color_scheme_ = settings->GetPreferredColorScheme();
+    preferred_color_scheme_ = settings->GetPreferredColorScheme();
     UpdateColorSchemeMetrics();
   }
   if (Platform::Current() && Platform::Current()->ThemeEngine())
@@ -2314,7 +2313,7 @@ void StyleEngine::UpdateColorScheme() {
   if (!SupportsDarkColorScheme() && settings->GetForceDarkModeEnabled()) {
     // Make sure we don't match (prefers-color-scheme: dark) when forced
     // darkening is enabled.
-    preferred_color_scheme_ = mojom::blink::PreferredColorScheme::kLight;
+    preferred_color_scheme_ = mojom::blink::PreferredColorScheme::kDark;
   }
   if (GetDocument().Printing())
     preferred_color_scheme_ = mojom::blink::PreferredColorScheme::kLight;
@@ -2397,14 +2396,14 @@ void StyleEngine::UpdateColorSchemeBackground(bool color_scheme_changed) {
     // https://drafts.csswg.org/css-color-adjust/#color-scheme-effect
     mojom::blink::ColorScheme root_color_scheme =
         mojom::blink::ColorScheme::kLight;
+    auto* settings = GetDocument().GetSettings();
+    bool force_dark_enabled = settings && settings->GetForceDarkModeEnabled();
     if (auto* root_element = GetDocument().documentElement()) {
       if (const ComputedStyle* style = root_element->GetComputedStyle())
         root_color_scheme = style->UsedColorSchemeForInitialColors();
-      else if (SupportsDarkColorScheme())
+      else if (SupportsDarkColorScheme() || force_dark_enabled)
         root_color_scheme = mojom::blink::ColorScheme::kDark;
     }
-    auto* settings = GetDocument().GetSettings();
-    bool force_dark_enabled = settings && settings->GetForceDarkModeEnabled();
     color_scheme_background_ =
         root_color_scheme == mojom::blink::ColorScheme::kLight &&
                 !force_dark_enabled

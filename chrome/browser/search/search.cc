@@ -32,7 +32,7 @@
 #include "chrome/browser/supervised_user/supervised_user_url_filter.h"
 #endif
 
-#if !defined(OS_ANDROID)
+#if !defined(OS_ANDROID) || true
 #include "chrome/browser/search/instant_service.h"
 #include "chrome/browser/search/instant_service_factory.h"
 #include "chrome/browser/ui/webui/new_tab_page/new_tab_page_ui.h"
@@ -153,7 +153,7 @@ bool IsURLAllowedForSupervisedUser(const GURL& url, Profile* profile) {
 }
 
 bool ShouldShowLocalNewTab(Profile* profile) {
-#if !defined(OS_ANDROID)
+#if 0
   return DefaultSearchProviderIsGoogle(profile);
 #else
   return false;
@@ -174,13 +174,14 @@ struct NewTabURLDetails {
     if (profile->IsOffTheRecord())
       return NewTabURLDetails(GURL(), NEW_TAB_URL_INCOGNITO);
 
+#if 0
 #if defined(OS_ANDROID)
     const GURL local_url;
 #else
-    const GURL local_url(DefaultSearchProviderIsGoogle(profile)
-                             ? chrome::kChromeUINewTabPageURL
-                             : chrome::kChromeUINewTabPageThirdPartyURL);
+    const GURL local_url(chrome::kChromeUINewTabPageURL);
 #endif
+#endif
+    const GURL local_url("chrome-search://local-ntp/local-ntp.html");
 
     if (ShouldShowLocalNewTab(profile))
       return NewTabURLDetails(local_url, NEW_TAB_URL_VALID);
@@ -201,7 +202,10 @@ struct NewTabURLDetails {
     if (!IsURLAllowedForSupervisedUser(search_provider_url, profile))
       return NewTabURLDetails(local_url, NEW_TAB_URL_BLOCKED);
 
+#if 0
     return NewTabURLDetails(search_provider_url, NEW_TAB_URL_VALID);
+#endif
+    return NewTabURLDetails(local_url, NEW_TAB_URL_VALID);
   }
 
   const GURL url;
@@ -210,7 +214,7 @@ struct NewTabURLDetails {
 
 bool IsRenderedInInstantProcess(content::WebContents* contents,
                                 Profile* profile) {
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) && 0
   return false;
 #else
   content::RenderProcessHost* process_host =
@@ -239,7 +243,7 @@ bool IsNTPOrRelatedURL(const GURL& url, Profile* profile) {
     return false;
 
   if (!IsInstantExtendedAPIEnabled())
-    return url == chrome::kChromeUINewTabURL;
+    return url == chrome::kChromeUINewTabURL || url == "chrome-search://local-ntp/local-ntp.html" || url == "chrome-search://local-ntp/new-ntp.html";
 
   return profile && IsNTPOrRelatedURLHelper(url, profile);
 }
@@ -249,7 +253,11 @@ bool IsNTPURL(const GURL& url) {
       url.host_piece() == chrome::kChromeSearchRemoteNtpHost) {
     return true;
   }
-#if defined(OS_ANDROID)
+  if (url.SchemeIs(chrome::kChromeSearchScheme) &&
+      url.host_piece() == "local-ntp") {
+    return true;
+  }
+#if defined(OS_ANDROID) && 0
   return false;
 #else
   return NewTabPageUI::IsNewTabPageOrigin(url) ||
@@ -284,6 +292,13 @@ bool IsInstantNTPURL(const GURL& url, Profile* profile) {
   if (MatchesOrigin(url, GURL(chrome::kChromeUINewTabPageURL)))
     return true;
 
+  if (MatchesOrigin(url, GURL("chrome-search://local-ntp/")))
+    return true;
+
+  std::string scheme = url.scheme();
+  if (scheme == chrome::kChromeSearchScheme)
+    return true;
+
   if (!IsInstantExtendedAPIEnabled())
     return false;
 
@@ -295,7 +310,7 @@ GURL GetNewTabPageURL(Profile* profile) {
   return NewTabURLDetails::ForProfile(profile).url;
 }
 
-#if !defined(OS_ANDROID)
+#if !defined(OS_ANDROID) || true
 
 bool ShouldAssignURLToInstantRenderer(const GURL& url, Profile* profile) {
   if (!url.is_valid() || !profile || !IsInstantExtendedAPIEnabled() ||

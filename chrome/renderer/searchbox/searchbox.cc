@@ -433,6 +433,7 @@ GURL SearchBox::GetURLForMostVisitedItem(InstantRestrictedID item_id) const {
 }
 
 void SearchBox::DidCommitProvisionalLoad(ui::PageTransition transition) {
+  LOG(INFO) << "[Kiwi] SearchBox::DidCommitProvisionalLoad";
   can_run_js_in_renderframe_ = true;
 }
 
