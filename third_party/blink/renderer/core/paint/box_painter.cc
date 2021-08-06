@@ -158,7 +158,7 @@ void BoxPainter::PaintBoxDecorationBackgroundWithRect(
   // FIXME: Should eventually give the theme control over whether the box
   // shadow should paint, since controls could have custom shadows of their
   // own.
-  if (box_decoration_data.ShouldPaintShadow()) {
+  if (box_decoration_data.ShouldPaintShadow() && !paint_info.context.IsDarkModeEnabled()) {
     BoxPainterBase::PaintNormalBoxShadow(
         paint_info, paint_rect, style, PhysicalBoxSides(),
         !box_decoration_data.ShouldPaintBackground());
@@ -199,7 +199,7 @@ void BoxPainter::PaintBoxDecorationBackgroundWithRect(
     }
   }
 
-  if (box_decoration_data.ShouldPaintShadow()) {
+  if (box_decoration_data.ShouldPaintShadow() && !paint_info.context.IsDarkModeEnabled()) {
     BoxPainterBase::PaintInsetBoxShadowWithBorderRect(paint_info, paint_rect,
                                                       style);
   }
@@ -213,7 +213,7 @@ void BoxPainter::PaintBoxDecorationBackgroundWithRect(
           !theme_painter.PaintBorderOnly(layout_box_.GetNode(), style,
                                          paint_info, snapped_paint_rect);
     }
-    if (!theme_painted) {
+    if (!theme_painted && !paint_info.context.IsDarkModeEnabled()) {
       BoxPainterBase::PaintBorder(
           layout_box_, layout_box_.GetDocument(), layout_box_.GeneratingNode(),
           paint_info, paint_rect, style,

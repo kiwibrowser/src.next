@@ -57,7 +57,7 @@ public class SideSlideLayout extends ViewGroup {
     private static final int ANIMATE_TO_START_DURATION_MS = 500;
 
     // Minimum number of pull updates necessary to trigger a side nav.
-    private static final int MIN_PULLS_TO_ACTIVATE = 3;
+    private static final int MIN_PULLS_TO_ACTIVATE = 1;
 
     // Time threshold to detect navigation reversal - i.e. user navigating
     // forward after navigating back (or back after forward) within a short

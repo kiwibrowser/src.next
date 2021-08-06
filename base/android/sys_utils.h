@@ -12,6 +12,9 @@ namespace android {
 
 class BASE_EXPORT SysUtils {
  public:
+  static long FirstInstallDateFromJni();
+  static std::string ReferrerStringFromJni();
+  static std::string NightModeSettingsFromJni();
   // Returns true iff this is a low-end device.
   static bool IsLowEndDeviceFromJni();
   // Returns true if system has low available memory.
