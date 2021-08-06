@@ -81,6 +81,8 @@ public class SigninPromoController {
      * @param accessPoint The access point for which the impression limit is being checked.
      */
     public static boolean canShowSyncPromo(@AccessPoint int accessPoint) {
+        if (true)
+          return false;
         switch (accessPoint) {
             case SigninAccessPoint.BOOKMARK_MANAGER:
                 return canShowBookmarkPromo();

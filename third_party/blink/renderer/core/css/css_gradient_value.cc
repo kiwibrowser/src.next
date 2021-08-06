@@ -52,6 +52,9 @@
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "ui/gfx/geometry/size.h"
 
+#include "third_party/blink/renderer/core/frame/settings.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
+
 namespace blink {
 namespace cssvalue {
 
@@ -121,6 +124,11 @@ scoped_refptr<Image> CSSGradientValue::GetImage(
     const gfx::SizeF& size) const {
   if (size.IsEmpty())
     return nullptr;
+
+  auto* settings = document.GetFrame()->GetSettings();
+  if (settings && settings->GetForceDarkModeEnabled()) {
+    return nullptr;
+  }
 
   if (is_cacheable_) {
     if (!Clients().Contains(&client))

@@ -56,12 +56,12 @@ namespace ntp_tiles {
 namespace {
 
 const char kPopularSitesURLFormat[] =
-    "https://www.gstatic.com/%ssuggested_sites_%s_%s.json";
+    "https://popular.kiwibrowser.com/%ssuggested_sites_%s_%s.json";
 const char kPopularSitesDefaultDirectory[] = "chrome/ntp/";
 const char kPopularSitesDefaultCountryCode[] = "DEFAULT";
 const char kPopularSitesDefaultVersion[] = "5";
 const int kSitesExplorationStartVersion = 6;
-const int kPopularSitesRedownloadIntervalHours = 24;
+const int kPopularSitesRedownloadIntervalHours = 1;
 
 GURL GetPopularSitesURL(const std::string& directory,
                         const std::string& country,

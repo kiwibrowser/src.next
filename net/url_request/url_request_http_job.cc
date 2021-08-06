@@ -327,6 +327,28 @@ void URLRequestHttpJob::OnGotFirstPartySetMetadata(
       http_user_agent_settings_ ?
           http_user_agent_settings_->GetUserAgent() : std::string());
 
+  if (request_info_.url.host().find("addons.opera.com") != std::string::npos)
+  {
+     request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/73.0.3683.86 Safari/537.36 OPR/60.0.3255.27 (Edition developer)");
+  }
+  else if (request_info_.url.host().find("chrome.google.com") != std::string::npos)
+  {
+     request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.81 Safari/537.36");
+  }
+  else if (request_info_.url.host().find("news.google.com") != std::string::npos && request_info_.url.path().find("CAAqJggKIiBDQkFTRWdvSUwyMHZNRFZxYUdjU0FtVnVHZ0pWVXlnQVAB") != std::string::npos)
+  {
+     request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (Linux; Android 9; ONEPLUS A6003) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.99 Mobile Safari/537.36");
+     request_info_.extra_headers.SetHeader("Cookie", "CONSENT=YES+srp.gws-20210610-0-RC2.en+FX+320;");
+  }
+
+  if (request_info_.url.host().find("washingtonpost.com") != std::string::npos) {
+     request_info_.extra_headers.SetHeader("X-Forwarded-For", "1.1.1.1");
+  }
+
+  if (request_info_.url.host().find("amazon") != std::string::npos && request_info_.url.query().find("kbdirect") != std::string::npos) {
+     request_info_.extra_headers.RemoveHeader(HttpRequestHeaders::kReferer);
+  }
+
   AddExtraHeaders();
 
   if (ShouldAddCookieHeader()) {

@@ -34,6 +34,7 @@
 #if BUILDFLAG(IS_ANDROID)
 #error "Instant is only used on desktop";
 #endif
+#endif
 
 class InstantServiceObserver;
 class Profile;

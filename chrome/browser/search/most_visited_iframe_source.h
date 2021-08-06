@@ -11,6 +11,7 @@
 #if BUILDFLAG(IS_ANDROID)
 #error "Instant is only used on desktop";
 #endif
+#endif
 
 // Serves HTML for displaying suggestions for 3P remote NTPs using iframes
 // of chrome-search://most-visited/title.html.

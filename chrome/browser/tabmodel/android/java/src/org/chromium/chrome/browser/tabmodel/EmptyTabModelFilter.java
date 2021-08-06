@@ -46,6 +46,11 @@ public class EmptyTabModelFilter extends TabModelFilter {
     }
 
     @Override
+    public int getLastNonExtensionActiveIndex() {
+        return getTabModel().getLastNonExtensionActiveIndex();
+    }
+
+    @Override
     public int getCount() {
         return getTabModel().getCount();
     }

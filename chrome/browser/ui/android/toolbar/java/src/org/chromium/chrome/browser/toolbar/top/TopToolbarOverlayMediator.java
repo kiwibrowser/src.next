@@ -59,40 +59,35 @@ public class TopToolbarOverlayMediator {
     /** The view state for this overlay. */
     private final PropertyModel mModel;
 
-    /** Whether visibility is controlled internally or manually by the feature. */
-    private boolean mIsVisibilityManuallyControlled;
+    /** Whether the active layout has its own toolbar to display instead of this one. */
+    private boolean mLayoutHasOwnToolbar;
 
     /** Whether the android view for this overlay is visible. */
     private boolean mIsAndroidViewVisible;
-
-    /** Whether the overlay should be visible despite other signals. */
-    private boolean mManualVisibility;
-
-    /** Whether a layout that this overlay can be displayed on is showing. */
-    private boolean mIsOnValidLayout;
 
     TopToolbarOverlayMediator(PropertyModel model, Context context,
             LayoutStateProvider layoutStateProvider,
             Callback<ClipDrawableProgressBar.DrawingInfo> progressInfoCallback,
             ObservableSupplier<Tab> tabSupplier,
             BrowserControlsStateProvider browserControlsStateProvider,
-            TopUiThemeColorProvider topUiThemeColorProvider, int layoutsToShowOn,
-            boolean manualVisibilityControl) {
+            TopUiThemeColorProvider topUiThemeColorProvider, boolean isGridTabSwitcherEnabled) {
         mContext = context;
         mLayoutStateProvider = layoutStateProvider;
         mProgressInfoCallback = progressInfoCallback;
         mBrowserControlsStateProvider = browserControlsStateProvider;
         mTopUiThemeColorProvider = topUiThemeColorProvider;
         mModel = model;
-        mIsVisibilityManuallyControlled = manualVisibilityControl;
 
-        mIsOnValidLayout = (mLayoutStateProvider.getActiveLayoutType() & layoutsToShowOn) > 0;
         updateVisibility();
 
         mSceneChangeObserver = new LayoutStateObserver() {
             @Override
             public void onStartedShowing(@LayoutType int layout, boolean showToolbar) {
-                mIsOnValidLayout = (layout & layoutsToShowOn) > 0;
+                // TODO(1100332): Once ToolbarSwipeLayout uses a SceneLayer that does not include
+                //                its own toolbar, only check for the vertical tab switcher.
+                mLayoutHasOwnToolbar =
+                        (layout == LayoutType.TAB_SWITCHER && !isGridTabSwitcherEnabled)
+                        || layout == LayoutType.TOOLBAR_SWIPE;
                 updateVisibility();
             }
         };
@@ -137,8 +132,8 @@ public class TopToolbarOverlayMediator {
                 int yOffset = topOffset + mBrowserControlsStateProvider.getTopControlsMinHeight();
                 mModel.set(TopToolbarOverlayProperties.Y_OFFSET, yOffset);
 
-                updateShadowState();
                 updateVisibility();
+                updateShadowState();
             }
         };
         mBrowserControlsStateProvider.addObserver(mBrowserControlsObserver);
@@ -160,8 +155,7 @@ public class TopToolbarOverlayMediator {
     private void updateShadowState() {
         boolean drawControlsAsTexture =
                 BrowserControlsUtils.drawControlsAsTexture(mBrowserControlsStateProvider);
-        boolean showShadow = drawControlsAsTexture || !mIsAndroidViewVisible
-                || mIsVisibilityManuallyControlled;
+        boolean showShadow = drawControlsAsTexture || !mIsAndroidViewVisible;
         mModel.set(TopToolbarOverlayProperties.SHOW_SHADOW, showShadow);
     }
 
@@ -232,44 +226,14 @@ public class TopToolbarOverlayMediator {
 
     /** Update the visibility of the overlay. */
     private void updateVisibility() {
-        if (mIsVisibilityManuallyControlled) {
-            mModel.set(TopToolbarOverlayProperties.VISIBLE, mManualVisibility && mIsOnValidLayout);
-        } else {
-            mModel.set(TopToolbarOverlayProperties.VISIBLE,
-                    !BrowserControlsUtils.areBrowserControlsOffScreen(mBrowserControlsStateProvider)
-                            && mIsOnValidLayout);
-        }
+        mModel.set(TopToolbarOverlayProperties.VISIBLE,
+                !BrowserControlsUtils.areBrowserControlsOffScreen(mBrowserControlsStateProvider)
+                        && !mLayoutHasOwnToolbar);
     }
 
     /** @return Whether this overlay should be attached to the tree. */
     boolean shouldBeAttachedToTree() {
         return true;
-    }
-
-    /** @param xOffset The x offset of the toolbar. */
-    void setXOffset(float xOffset) {
-        mModel.set(TopToolbarOverlayProperties.X_OFFSET, xOffset);
-    }
-
-    /** @param anonymize Whether the URL should be hidden when the layer is rendered. */
-    void setAnonymize(boolean anonymize) {
-        mModel.set(TopToolbarOverlayProperties.ANONYMIZE, anonymize);
-    }
-
-    /** @param visible Whether the overlay and shadow should be visible despite other signals. */
-    void setManualVisibility(boolean visible) {
-        assert mIsVisibilityManuallyControlled
-                : "Manual visibility control was not set for this overlay.";
-        mManualVisibility = visible;
-        updateShadowState();
-        updateVisibility();
-    }
-
-    @VisibleForTesting
-    void setVisibilityManuallyControlledForTesting(boolean manuallyControlled) {
-        mIsVisibilityManuallyControlled = manuallyControlled;
-        updateShadowState();
-        updateVisibility();
     }
 
     @VisibleForTesting

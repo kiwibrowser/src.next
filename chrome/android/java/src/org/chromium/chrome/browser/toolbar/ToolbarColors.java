@@ -10,6 +10,8 @@ import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.tasks.ReturnToChromeUtil;
 import org.chromium.chrome.browser.tasks.tab_management.TabUiFeatureUtilities;
 
+import org.chromium.base.ContextUtils;
+
 /**
  * Helpers to determine colors in toolbars.
  */

@@ -48,6 +48,8 @@ import org.chromium.ui.modelutil.PropertyModel;
 
 import java.util.List;
 
+import org.chromium.chrome.browser.homepage.HomepageManager;
+
 /**
  * A mediator for the TabGridDialog component, responsible for communicating
  * with the components' coordinator as well as managing the business logic
@@ -514,8 +516,12 @@ public class TabGridDialogMediator implements SnackbarManager.SnackbarController
             Tab currentTab = mTabModelSelector.getTabById(mCurrentTabId);
             hideDialog(false);
             if (currentTab == null) {
-                mTabCreatorManager.getTabCreator(mTabModelSelector.isIncognitoSelected())
-                        .launchNTP();
+                if (mTabModelSelector.isIncognitoSelected())
+                    mTabCreatorManager.getTabCreator(mTabModelSelector.isIncognitoSelected())
+                            .launchNTP();
+                else
+                    mTabCreatorManager.getTabCreator(mTabModelSelector.isIncognitoSelected())
+                            .launchUrl(HomepageManager.getInstance().getHomepageUriIgnoringEnabledState(), TabLaunchType.FROM_CHROME_UI);
                 return;
             }
             List<Tab> relatedTabs = getRelatedTabs(currentTab.getId());
@@ -524,7 +530,7 @@ public class TabGridDialogMediator implements SnackbarManager.SnackbarController
 
             Tab parentTabToAttach = relatedTabs.get(relatedTabs.size() - 1);
             mTabCreatorManager.getTabCreator(currentTab.isIncognito())
-                    .createNewTab(new LoadUrlParams(UrlConstants.NTP_URL),
+                    .createNewTab(new LoadUrlParams("chrome-search://local-ntp/local-ntp.html"),
                             TabLaunchType.FROM_TAB_GROUP_UI, parentTabToAttach);
             RecordUserAction.record("MobileNewTabOpened." + mComponentName);
             if (!currentTab.isIncognito()) {

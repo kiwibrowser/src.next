@@ -27,6 +27,7 @@ import androidx.core.view.ViewCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.metrics.TimingMetric;
 import org.chromium.base.task.PostTask;
@@ -315,6 +316,8 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
         try (TraceEvent tracing = TraceEvent.scoped("OmniboxSuggestionsList.Measure");
                 TimingMetric metric = SuggestionsMetrics.recordSuggestionListMeasureTime()) {
             int anchorBottomRelativeToContent = calculateAnchorBottomRelativeToContent();
+            if (ContextUtils.getAppSharedPreferences().getBoolean("enable_bottom_toolbar", false))
+              anchorBottomRelativeToContent = 0;
             maybeUpdateLayoutParams(anchorBottomRelativeToContent);
 
             int availableViewportHeight =

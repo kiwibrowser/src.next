@@ -55,7 +55,9 @@ void BrowserInstantController::OnSearchEngineBaseURLChanged(
     GURL site_url =
         contents->GetPrimaryMainFrame()->GetSiteInstance()->GetSiteURL();
     bool is_ntp = site_url == GURL(chrome::kChromeUINewTabPageURL) ||
-                  site_url == GURL(chrome::kChromeUINewTabPageThirdPartyURL);
+                  site_url == GURL(chrome::kChromeUINewTabPageThirdPartyURL) ||
+                  site_url == GURL("chrome-search://local-ntp/local-ntp.html") ||
+                  site_url == GURL("chrome-search://local-ntp/new-ntp.html");
 
     if (!is_ntp) {
       InstantService* instant_service =
@@ -72,7 +74,7 @@ void BrowserInstantController::OnSearchEngineBaseURLChanged(
 
     // When default search engine is changed navigate to chrome://newtab which
     // will redirect to the new tab page associated with the search engine.
-    GURL url(chrome::kChromeUINewTabURL);
+    GURL url("chrome-search://local-ntp/local-ntp.html");
     content::NavigationController::LoadURLParams params(url);
     params.should_replace_current_entry = true;
     params.referrer = content::Referrer();

@@ -32,6 +32,8 @@ import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
 
 import java.util.List;
 
+import org.chromium.base.ContextUtils;
+
 /**
  * A coordinator for TabGridDialog component. Manages the communication with
  * {@link TabListCoordinator} as well as the life-cycle of shared component

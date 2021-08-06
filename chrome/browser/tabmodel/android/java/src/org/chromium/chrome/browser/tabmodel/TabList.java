@@ -26,6 +26,8 @@ public interface TabList {
      */
     int index();
 
+    int getLastNonExtensionActiveIndex();
+
     /**
      * @return the number of open tabs in this model
      */
