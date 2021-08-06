@@ -23,8 +23,8 @@ namespace {
 const constexpr DarkModeInversionAlgorithm kDefaultDarkModeInversionAlgorithm =
     DarkModeInversionAlgorithm::kInvertLightnessLAB;
 const constexpr DarkModeImagePolicy kDefaultDarkModeImagePolicy =
-    DarkModeImagePolicy::kFilterNone;
-const constexpr int kDefaultTextBrightnessThreshold = 150;
+    DarkModeImagePolicy::kFilterSmart;
+const constexpr int kDefaultTextBrightnessThreshold = 127;
 const constexpr int kDefaultBackgroundBrightnessThreshold = 205;
 const constexpr bool kDefaultDarkModeIsGrayscale = false;
 const constexpr float kDefaultDarkModeContrastPercent = 0.0f;
@@ -34,6 +34,8 @@ typedef std::unordered_map<std::string, std::string> SwitchParams;
 
 SwitchParams ParseDarkModeSettings() {
   SwitchParams switch_params;
+
+  LOG(INFO) << "[Kiwi] ParseDarkModeSettings";
 
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch("dark-mode-settings"))
     return switch_params;
@@ -47,8 +49,10 @@ SwitchParams ParseDarkModeSettings() {
     std::vector<std::string> pair = base::SplitString(
         param_value, "=", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
 
-    if (pair.size() == 2)
+    if (pair.size() == 2) {
       switch_params[base::ToLowerASCII(pair[0])] = base::ToLowerASCII(pair[1]);
+      LOG(INFO) << "[Kiwi] ParseDarkModeSettings - A: " << base::ToLowerASCII(pair[0]) << " -- " << base::ToLowerASCII(pair[1]);
+    }
   }
 
   return switch_params;
@@ -96,6 +100,8 @@ DarkModeInversionAlgorithm GetMode(const SwitchParams& switch_params) {
 }
 
 DarkModeImagePolicy GetImagePolicy(const SwitchParams& switch_params) {
+  if (true)
+    return DarkModeImagePolicy::kFilterSmart;
   switch (features::kForceDarkImageBehaviorParam.Get()) {
     case ForceDarkImageBehavior::kUseBlinkSettings:
       return GetIntegerSwitchParamValue<DarkModeImagePolicy>(
@@ -171,6 +177,10 @@ DarkModeSettings BuildDarkModeSettings() {
       0.0f, 1.0f);
 
   settings.increase_text_contrast = GetIncreaseTextContrast(switch_params);
+  if (settings.contrast > 0)
+    settings.increase_text_contrast = true;
+  else
+    settings.increase_text_contrast = false;
 
   return settings;
 }

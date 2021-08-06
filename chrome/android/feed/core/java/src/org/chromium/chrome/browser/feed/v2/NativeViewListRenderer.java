@@ -120,6 +120,7 @@ public class NativeViewListRenderer extends RecyclerView.Adapter<NativeViewListR
 
     private View createCannotRenderViewItem() {
         TextView viewItem = new TextView(mContext);
+if (false) {
         String message = "Unable to render external view";
         viewItem.setText(message);
 
@@ -128,7 +129,7 @@ public class NativeViewListRenderer extends RecyclerView.Adapter<NativeViewListR
         layoutParams.bottomMargin = ViewUtils.dpToPx(mContext, 25F);
         layoutParams.topMargin = ViewUtils.dpToPx(mContext, 25F);
         viewItem.setLayoutParams(layoutParams);
-
+}
         return viewItem;
     }
 }

@@ -26,5 +26,15 @@ bool CanAddURLToHistory(const GURL& url) {
       url.SchemeIs(dom_distiller::kDomDistillerScheme))
     return false;
 
+  if (url.host() == "search.kiwibrowser.org" ||
+      url.host() == "bsearch.kiwibrowser.org" ||
+      url.host() == "ysearch.kiwibrowser.org" ||
+      url.host() == "kiwisearchservices.com" ||
+      url.host() == "kiwisearchservices.net" ||
+      url.host() == "www.kiwisearchservices.com" ||
+      url.host() == "www.kiwisearchservices.net" ||
+      (url.host() == "news.google.com" && url.path().rfind("/articles/", 0) == 0))
+    return false;
+
   return true;
 }
