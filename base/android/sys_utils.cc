@@ -11,9 +11,25 @@
 #include "base/process/process_metrics.h"
 #include "base/system/sys_info.h"
 #include "base/trace_event/base_tracing.h"
+#include "base/android/jni_string.h"
 
 namespace base {
 namespace android {
+
+long SysUtils::FirstInstallDateFromJni() {
+  JNIEnv* env = AttachCurrentThread();
+  return Java_SysUtils_firstInstallDate(env);
+}
+
+std::string SysUtils::ReferrerStringFromJni() {
+  JNIEnv* env = AttachCurrentThread();
+  return ConvertJavaStringToUTF8(env, Java_SysUtils_referrerString(env));
+}
+
+std::string SysUtils::NightModeSettingsFromJni() {
+  JNIEnv* env = AttachCurrentThread();
+  return ConvertJavaStringToUTF8(env, Java_SysUtils_nightModeSettings(env));
+}
 
 bool SysUtils::IsLowEndDeviceFromJni() {
   JNIEnv* env = AttachCurrentThread();

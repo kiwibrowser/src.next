@@ -94,7 +94,19 @@ public abstract class TabCreator {
     public final void launchNTP() {
         try {
             TraceEvent.begin("TabCreator.launchNTP");
-            launchUrl(UrlConstants.NTP_URL, TabLaunchType.FROM_CHROME_UI);
+            launchUrl("chrome-search://local-ntp/local-ntp.html", TabLaunchType.FROM_CHROME_UI);
+        } finally {
+            TraceEvent.end("TabCreator.launchNTP");
+        }
+    }
+
+    /**
+     * Creates a new tab and loads the NTP.
+     */
+    public final void launchIncognitoNTP() {
+        try {
+            TraceEvent.begin("TabCreator.launchNTP");
+            launchUrl("chrome-search://local-ntp/incognito-ntp.html", TabLaunchType.FROM_CHROME_UI);
         } finally {
             TraceEvent.end("TabCreator.launchNTP");
         }

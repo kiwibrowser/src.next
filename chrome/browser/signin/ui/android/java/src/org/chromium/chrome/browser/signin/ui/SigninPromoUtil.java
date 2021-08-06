@@ -40,6 +40,8 @@ public final class SigninPromoUtil {
     public static boolean launchSigninPromoIfNeeded(Context context,
             SyncConsentActivityLauncher syncConsentActivityLauncher,
             final int currentMajorVersion) {
+        if (true)
+          return false;
         final SigninPreferencesManager prefManager = SigninPreferencesManager.getInstance();
         if (shouldLaunchSigninPromo(prefManager, currentMajorVersion)) {
             syncConsentActivityLauncher.launchActivityIfAllowed(

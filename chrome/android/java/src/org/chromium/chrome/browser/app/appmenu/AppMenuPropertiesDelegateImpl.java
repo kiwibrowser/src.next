@@ -31,6 +31,8 @@ import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.supplier.ObservableSupplier;
 import org.chromium.base.supplier.OneshotSupplier;
 import org.chromium.chrome.R;
+import org.chromium.components.content_settings.ContentSettingsType;
+import org.chromium.components.content_settings.ContentSettingValues;
 import org.chromium.chrome.browser.ActivityTabProvider;
 import org.chromium.chrome.browser.banners.AppMenuVerbiage;
 import org.chromium.chrome.browser.bookmarks.BookmarkBridge;
@@ -72,6 +74,12 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.util.ArrayList;
 import java.util.List;
+
+import org.chromium.components.browser_ui.site_settings.SiteSettingsCategory;
+import org.chromium.components.browser_ui.site_settings.WebsitePreferenceBridge;
+import org.chromium.components.browser_ui.site_settings.WebsitePreferenceBridgeJni;
+
+import org.chromium.chrome.browser.AppMenuBridge;
 
 /**
  * Base implementation of {@link AppMenuPropertiesDelegate} that handles hiding and showing menu
@@ -348,6 +356,24 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
                         isChromeScheme, isFileScheme, isContentScheme, isIncognito, url));
 
         updateRequestDesktopSiteMenuItem(menu, currentTab, true /* can show */);
+        updateAdblockMenuItem(menu, currentTab, true /* can show */);
+        MenuItem nightModeMenu = menu.findItem(R.id.night_mode_switcher_id);
+        if (nightModeMenu != null) {
+               nightModeMenu.setIcon(R.drawable.smartphone_black_24dp);
+               if (ContextUtils.getAppSharedPreferences().getBoolean("darken_websites_enabled", false)) {
+                   nightModeMenu.setTitle(R.string.main_menu_turn_off_night_mode);
+               } else {
+                   nightModeMenu.setTitle(R.string.main_menu_turn_on_night_mode);
+               }
+        }
+
+        MenuItem disableProxyMenu = menu.findItem(R.id.disable_proxy_id);
+        boolean isProxyEnabled = AppMenuBridge.isProxyEnabled(Profile.getLastUsedRegularProfile());
+        if (isProxyEnabled) {
+            disableProxyMenu.setVisible(true);
+        } else {
+            disableProxyMenu.setVisible(false);
+        }
 
         // Only display reader mode settings menu option if the current page is in reader mode.
         menu.findItem(R.id.reader_mode_prefs_id).setVisible(shouldShowReaderModePrefs(currentTab));
@@ -360,6 +386,7 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
         // TODO(https://crbug.com/1092175): Enable "managed by" menu item after chrome://management
         // page is added.
         managedByMenuItem.setEnabled(false);
+        menu.findItem(R.id.help_id).setVisible(false);
     }
 
     private void prepareCommonMenuItems(Menu menu, @MenuGroup int menuGroup, boolean isIncognito) {
@@ -642,6 +669,59 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
     protected void prepareTranslateMenuItem(Menu menu, Tab currentTab) {
         boolean isTranslateVisible = shouldShowTranslateMenuItem(currentTab);
         menu.findItem(R.id.translate_id).setVisible(isTranslateVisible);
+        String url = currentTab.getUrl().getSpec();
+            MenuItem translate_menu = menu.findItem(R.id.translate_id);
+            if (translate_menu != null) {
+                   try {
+                       if (url != null
+                        &&
+                          (
+                            url.contains("www.microsofttranslator.com/bv.aspx")
+                        ||  url.contains("translatetheweb.com")
+                        ||  url.contains("translatetheweb.net")
+                        ||  url.contains("translatetheweb-int.net")
+                        ||  url.contains("translatoruser.com")
+                        ||  url.contains("translatoruser.net")
+                          )
+                        ) {
+                           translate_menu.setTitle(R.string.main_menu_translate_undo);
+                       } else {
+                           translate_menu.setTitle(R.string.menu_translate);
+                       }
+                       if (url != null
+                        &&
+                          (
+                            url.startsWith("https://translate.google.com/")
+                        ||  url.startsWith("https://translate.googleusercontent.com/")
+                        ||  url.startsWith("http://translate.google.com/")
+                        ||  url.startsWith("http://translate.googleusercontent.com/")
+                        ||  url.contains(".translate.goog/")
+                          )
+                        ) {
+                           translate_menu.setTitle(R.string.main_menu_translate_undo);
+                       }
+                       if (url != null
+                        &&
+                          (
+                            url.startsWith("https://fanyi.baidu.com/")
+                        ||  url.startsWith("http://fanyi.baidu.com/")
+                          )
+                        ) {
+                           translate_menu.setTitle(R.string.main_menu_translate_undo);
+                       }
+                       if (url != null
+                        &&
+                          (
+                            url.startsWith("https://translate.yandex.com/")
+                        ||  url.startsWith("http://translate.yandex.com/")
+                          )
+                        ) {
+                           translate_menu.setTitle(R.string.main_menu_translate_undo);
+                       }
+                   } catch (Exception e) {
+                       translate_menu.setTitle(R.string.menu_translate);
+                   }
+            }
     }
 
     @Override
@@ -824,6 +904,38 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
             requestMenuLabel.setTitleCondensed(isRequestDesktopSite
                             ? mContext.getString(R.string.menu_request_desktop_site_on)
                             : mContext.getString(R.string.menu_request_desktop_site_off));
+        }
+    }
+
+    protected void updateAdblockMenuItem(
+            Menu menu, Tab currentTab, boolean canShowAdblockMenu) {
+        MenuItem adblockMenuRow = menu.findItem(R.id.adblock_row_menu_id);
+        MenuItem adblockMenuLabel = menu.findItem(R.id.adblock_id);
+        MenuItem adblockMenuCheck = menu.findItem(R.id.adblock_check_id);
+
+        String url = currentTab.getUrl().getSpec();
+        boolean isChromeScheme = url.startsWith(UrlConstants.CHROME_URL_PREFIX)
+                || url.startsWith(UrlConstants.CHROME_NATIVE_URL_PREFIX);
+        // Also hide adblock desktop site on Reader Mode.
+        boolean isDistilledPage = DomDistillerUrlUtils.isDistilledPage(url);
+
+        // adsEnabled means "adBlockingEnabled"
+        boolean itemVisible = canShowAdblockMenu
+                && !isChromeScheme && !currentTab.isNativePage() && !isDistilledPage;
+        adblockMenuRow.setVisible(itemVisible);
+        if (!itemVisible) return;
+
+        adblockMenuLabel.setIcon(R.drawable.ic_desktop_windows);
+
+        boolean adBlockIsActive = (WebsitePreferenceBridgeJni.get().getContentSetting(Profile.getLastUsedRegularProfile(), ContentSettingsType.ADS) == ContentSettingValues.BLOCK);
+        if (!adBlockIsActive) {
+          adblockMenuCheck.setChecked(false);
+        } else {
+          int adblockSettingForThisSite = WebsitePreferenceBridgeJni.get().getSettingForOrigin(Profile.getLastUsedRegularProfile(), ContentSettingsType.ADS, currentTab.getUrl().getSpec(), currentTab.getUrl().getSpec());
+          if (adblockSettingForThisSite == ContentSettingValues.DEFAULT || adblockSettingForThisSite == ContentSettingValues.BLOCK)
+            adblockMenuCheck.setChecked(true);
+          else
+            adblockMenuCheck.setChecked(false);
         }
     }
 

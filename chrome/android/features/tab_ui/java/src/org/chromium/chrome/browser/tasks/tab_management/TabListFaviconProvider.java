@@ -87,12 +87,12 @@ public class TabListFaviconProvider {
         }
         if (sRoundedChromeDrawable == null) {
             Bitmap chromeBitmap =
-                    BitmapFactory.decodeResource(mContext.getResources(), R.drawable.chromelogo16);
+                    BitmapFactory.decodeResource(mContext.getResources(), R.drawable.default_favicon);
             sRoundedChromeDrawable = processBitmap(chromeBitmap, false);
         }
         if (sRoundedChromeDrawableForStrip == null) {
             Drawable chromeDrawable =
-                    AppCompatResources.getDrawable(context, R.drawable.chromelogo16);
+                    AppCompatResources.getDrawable(context, R.drawable.default_favicon);
             sRoundedChromeDrawableForStrip = processBitmap(
                     getResizedBitmapFromDrawable(chromeDrawable, mStripFaviconSize), true);
         }

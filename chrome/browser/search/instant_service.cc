@@ -62,6 +62,8 @@
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/color_utils.h"
 
+#include "chrome/browser/search/new_tab_page_source.h"
+
 namespace {
 
 const char kNtpCustomBackgroundURL[] = "background_url";
@@ -199,7 +201,6 @@ InstantService::InstantService(Profile* profile)
 
   most_visited_sites_ = ChromeMostVisitedSitesFactory::NewForProfile(profile_);
   if (most_visited_sites_) {
-    most_visited_sites_->EnableCustomLinks(false);
     most_visited_sites_->AddMostVisitedURLsObserver(
         this, ntp_tiles::kMaxNumMostVisited);
   }
@@ -222,6 +223,8 @@ InstantService::InstantService(Profile* profile)
                     profile_, chrome::FaviconUrlFormat::kFaviconLegacy));
   content::URLDataSource::Add(profile_,
                               std::make_unique<MostVisitedIframeSource>());
+  content::URLDataSource::Add(profile_,
+                              std::make_unique<NewTabPageSource>());
 
   // Update theme info when the pref is changed via Sync.
   pref_change_registrar_.Init(pref_service_);
@@ -262,6 +265,7 @@ void InstantService::RemoveObserver(InstantServiceObserver* observer) {
 void InstantService::OnNewTabPageOpened() {
   if (most_visited_sites_) {
     most_visited_sites_->Refresh();
+    most_visited_sites_->RefreshTiles();
   }
 }
 
