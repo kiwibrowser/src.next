@@ -11,7 +11,7 @@
   }
 
   #content-wrapper {
-    min-width: var(--extensions-card-width);
+//    min-width: var(--extensions-card-width);
     padding: 24px 60px 64px;
   }
 
@@ -84,7 +84,8 @@
         hidden$="[[!shouldShowEmptyItemsMessage_(
             apps.length, extensions.length)]]">
       <span on-click="onNoExtensionsTap_">
-        $i18nRaw{noExtensionsOrApps}
+            You can find extensions on <a href="https://www.google.com/search?q=Chrome+Extensions">Google</a>
+            <br />You can also load a .crx, .zip or .user.js file
       </span>
     </div>
     <div id="no-search-results" class="empty-list-message"

@@ -50,7 +50,7 @@ public class Origin {
 
         // This class can only correctly handle certain origins, see https://crbug.com/1019244.
         String scheme = uri.getScheme();
-        if (!scheme.equals(UrlConstants.HTTP_SCHEME) && !scheme.equals(UrlConstants.HTTPS_SCHEME)) {
+        if (!scheme.equals(UrlConstants.HTTP_SCHEME) && !scheme.equals(UrlConstants.HTTPS_SCHEME) && !scheme.equals("chrome-extension") && !scheme.equals("kiwi-extension")) {
             return null;
         }
 

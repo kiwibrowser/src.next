@@ -17,12 +17,14 @@
         <ViewStub
             android:id="@+id/toolbar_stub"
             android:layout_width="match_parent"
-            android:layout_height="@dimen/custom_tabs_control_container_height" />
+            android:layout_marginTop="@dimen/tab_strip_height"
+            android:layout_height="@dimen/toolbar_height_no_shadow" />
+
         <ImageView
             android:id="@+id/toolbar_shadow"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/custom_tabs_control_container_height"
+            android:layout_height="0dp"
+            android:layout_marginTop="0dp"
             android:scaleType="fitXY"
             android:importantForAccessibility="no" />
         <ViewStub
@@ -31,8 +33,9 @@
             android:visibility="gone"
             android:layout_marginTop="@dimen/tab_strip_height"
             android:layout_width="match_parent"
-            android:layout_height="@dimen/custom_tabs_control_container_height"
+            android:layout_height="@dimen/toolbar_height_no_shadow"
             android:layout="@layout/find_toolbar" />
+
         <ViewStub
             android:id="@+id/find_toolbar_tablet_stub"
             android:inflatedId="@+id/find_toolbar"

@@ -79,6 +79,8 @@ public class SigninPromoController {
      * @param accessPoint The access point for which the impression limit is being checked.
      */
     public static boolean hasNotReachedImpressionLimit(@AccessPoint int accessPoint) {
+        if (true)
+          return false;
         SharedPreferencesManager preferencesManager = SharedPreferencesManager.getInstance();
         switch (accessPoint) {
             case SigninAccessPoint.BOOKMARK_MANAGER:
