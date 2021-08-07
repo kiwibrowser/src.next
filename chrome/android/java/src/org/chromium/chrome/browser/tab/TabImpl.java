@@ -599,6 +599,8 @@ public class TabImpl implements Tab, TabObscuringHandler.Observer {
 
     @Override
     public boolean isLoading() {
+        if (getUrl().getSpec().contains("chrome-search://"))
+           return false;
         return mIsLoading;
     }
 
@@ -609,6 +611,8 @@ public class TabImpl implements Tab, TabObscuringHandler.Observer {
 
     @Override
     public float getProgress() {
+        if (getUrl().getSpec().contains("chrome-search://"))
+           return 1.0f;
         return !isLoading() ? 1 : (int) mWebContents.getLoadProgress();
     }
 
@@ -1532,7 +1536,7 @@ public class TabImpl implements Tab, TabObscuringHandler.Observer {
 
             if (!restored) {
                 String url = CriticalPersistedTabData.from(this).getUrl().getSpec().isEmpty()
-                        ? UrlConstants.NTP_URL
+                        ? "chrome-search://local-ntp/local-ntp.html"
                         : CriticalPersistedTabData.from(this).getUrl().getSpec();
                 loadUrl(new LoadUrlParams(url, PageTransition.GENERATED));
             }
@@ -1627,6 +1631,12 @@ public class TabImpl implements Tab, TabObscuringHandler.Observer {
         boolean currentRequestDesktopSite = getWebContents() == null
                 ? false
                 : getWebContents().getNavigationController().getUseDesktopUserAgent();
+
+        if (!mUserForcedUserAgent && (ContextUtils.getAppSharedPreferences().getBoolean("desktop_mode", false))) {
+            if (currentRequestDesktopSite == true)
+                return UserAgentOverrideOption.INHERIT;
+            return UserAgentOverrideOption.TRUE;
+        }
 
         // We only calculate the user agent when users did not manually choose one.
         if (!mUserForcedUserAgent
