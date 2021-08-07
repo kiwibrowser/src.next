@@ -50,6 +50,7 @@ In order to keep the history clean, we are using rebase, and not merge, to fetch
 you can use:
 
 `git fetch`
+
 `git pull --rebase`
 
 In a normal situation, this is going to show `First, rewinding head to replay your work on top of it...`
