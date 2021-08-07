@@ -1,0 +1,62 @@
+<html>
+<head>
+  <title></title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#ffffff">
+  <meta charset="utf-8">
+  <meta name="google" value="notranslate">
+</head>
+<body>
+<script>
+function load_ntp() {
+  try {
+    if (typeof localStorage.lastRevision == "undefined" || localStorage.lastRevision != localStorage.localRevision) {
+      fetch('https://api.github.com/repos/d3ward/ntp/commits').then(function (response) {
+          return response.json();
+        })
+        .then(function (answer) {
+          localStorage.lastRevision = answer[0].sha;
+          console.log('[new_ntp.html] Downloading revision: ' + localStorage.lastRevision);
+          fetch('https://raw.githubusercontent.com/d3ward/ntp/' + localStorage.lastRevision + '/local_ntp.html').then(function (response) {
+              return response.text();
+            })
+            .then(function (answer) {
+              console.log('[new_ntp.html] Downloaded revision: ' + localStorage.lastRevision + ' of local_ntp.html');
+              localStorage.cachedRevision = answer.replace(/%%COMMIT%%/g, localStorage.lastRevision);
+              fetch('https://raw.githubusercontent.com/d3ward/ntp/' + localStorage.lastRevision + '/local_ntp.js').then(function (response) {
+                  return response.text();
+                })
+                .then(function (answer) {
+                  console.log('[new_ntp.html] Downloaded revision: ' + localStorage.lastRevision + ' of local_ntp.js');
+                  localStorage.cachedScript = answer;
+                  localStorage.cachedRevision = localStorage.cachedRevision.replace('<scr'+'ipt src="./local_ntp.js', '<scr'+'ipt>eval(localStorage.cachedScript);</scr'+'ipt><scr'+'ipt ignore="');
+                  fetch('https://raw.githubusercontent.com/d3ward/ntp/' + localStorage.lastRevision + '/local_ntp.css').then(function (response) {
+                      return response.text();
+                    })
+                    .then(function (answer) {
+                      console.log('[new_ntp.html] Downloaded revision: ' + localStorage.lastRevision + ' of local_ntp.css');
+                      localStorage.cachedRevision = localStorage.cachedRevision.replace('<li'+'nk rel="stylesheet" href="./local_ntp.css', '<st'+'yle>' + answer + '</st'+'yle><li'+'nk rel="stylesheet" ignore="');
+                      localStorage.localRevision = localStorage.lastRevision;
+                      document.write(localStorage.cachedRevision);
+                    });
+                });
+            });
+        });
+    } else if (localStorage.lastRevision == localStorage.localRevision) {
+      document.write(localStorage.cachedRevision);
+    }
+    fetch('https://api.github.com/repos/d3ward/ntp/commits').then(function (response) {
+        return response.json();
+      })
+      .then(function (answer) {
+        localStorage.lastRevision = answer[0].sha;
+        console.log('[new_ntp.html] Last online revision is: ' + localStorage.lastRevision);
+      });
+  } catch (err) {
+    console.log('[new_ntp.html] Fetch failed for: ' + err.message);
+  }
+}
+load_ntp();
+</script>
+</body>
+</html>

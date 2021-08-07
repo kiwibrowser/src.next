@@ -1,0 +1,1280 @@
+<!doctype html>
+<html>
+<!-- Copyright 2018-2021 Kiwi Browser -->
+<head>
+  <title>New Tab</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#ffffff">
+  <link rel="stylesheet" href="./local-ntp.css">
+  <meta charset="utf-8">
+  <meta name="google" value="notranslate">
+  <script>
+  if (window.chrome.embeddedSearch.newTabPage.isIncognito) document.getElementsByTagName('html')[0].style.backgroundColor='black';
+  </script>
+</head>
+<!-- Remember to update the test HTML files in chrome/test/data/local_ntp/
+   whenever making changes to this file.-->
+<body>
+<script>
+if (window.chrome.embeddedSearch.newTabPage.isIncognito) document.body.style.backgroundColor='black';
+</script>
+<style>
+.newsImage {
+  opacity: 0;
+  transition: visibility 0.15s linear, opacity 0.15s linear;
+  visibility: hidden;
+}
+
+.ntpOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 100%;
+  z-index: 9999999999;
+  background-color: rgba(255,255,255,1);
+}
+.centeredBlock {
+  position: absolute;
+  margin: auto;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 90%;
+  height: 70%;
+  background-color: #efefef;
+  border-radius: 26px;
+  text-align: center;
+  -webkit-box-shadow: 6px 23px 26px -17px rgba(219,219,219,1);
+  -moz-box-shadow: 6px 23px 26px -17px rgba(219,219,219,1);
+  box-shadow: 6px 23px 26px -17px rgba(219,219,219,1);
+  padding-top: 40px;
+}
+</style>
+<script>
+function replaceInnerHTML(oldDiv, html) {
+    var newDiv = oldDiv.cloneNode(false);
+    newDiv.innerHTML = html;
+    oldDiv.parentNode.replaceChild(newDiv, oldDiv);
+};
+
+function preconnectTo(url) {
+  // let's not fb know that we started the browser
+  if (url.includes("facebook"))
+    return ;
+  var hint = document.createElement("link");
+  hint.rel = "preconnect";
+  hint.href = url;
+  document.head.appendChild(hint);
+}
+
+function changeThemeColor(targetColor) {
+    var metaThemeColor = document.querySelector("meta[name=theme-color]");
+    metaThemeColor.setAttribute("content", targetColor);
+    document.getElementById('ntpOverlay').style.backgroundColor = targetColor;
+}
+
+function goToPage2()
+{
+    document.getElementById('ntpSlide1').style.display='none';
+    document.getElementById('ntpSlide2').style.display='block';
+    document.getElementById('centeredBlock').style.backgroundColor='#282828';
+    changeThemeColor('#000');
+}
+
+var locales = {};
+locales['English | Australia'] = '?hl=en-AU&gl=AU&ceid=AU:en';
+locales['English | Botswana'] = '?hl=en-BW&gl=BW&ceid=BW:en';
+locales['English | Canada'] = '?hl=en-CA&gl=CA&ceid=CA:en';
+locales['English | Ethiopia'] = '?hl=en-ET&gl=ET&ceid=ET:en';
+locales['English | Ghana'] = '?hl=en-GH&gl=GH&ceid=GH:en';
+locales['English | India'] = '?hl=en-IN&gl=IN&ceid=IN:en';
+locales['English | Indonesia'] = '?hl=en-ID&gl=ID&ceid=ID:en';
+locales['English | Ireland'] = '?hl=en-IE&gl=IE&ceid=IE:en';
+locales['English | Israel'] = '?hl=en-IL&gl=IL&ceid=IL:en';
+locales['English | Kenya'] = '?hl=en-KE&gl=KE&ceid=KE:en';
+locales['English | Latvia'] = '?hl=en-LV&gl=LV&ceid=LV:en';
+locales['English | Malaysia'] = '?hl=en-MY&gl=MY&ceid=MY:en';
+locales['English | Namibia'] = '?hl=en-NA&gl=NA&ceid=NA:en';
+locales['English | New Zealand'] = '?hl=en-NZ&gl=NZ&ceid=NZ:en';
+locales['English | Nigeria'] = '?hl=en-NG&gl=NG&ceid=NG:en';
+locales['English | Pakistan'] = '?hl=en-PK&gl=PK&ceid=PK:en';
+locales['English | Philippines'] = '?hl=en-PH&gl=PH&ceid=PH:en';
+locales['English | Singapore'] = '?hl=en-SG&gl=SG&ceid=SG:en';
+locales['English | South Africa'] = '?hl=en-ZA&gl=ZA&ceid=ZA:en';
+locales['English | Tanzania'] = '?hl=en-TZ&gl=TZ&ceid=TZ:en';
+locales['English | Uganda'] = '?hl=en-UG&gl=UG&ceid=UG:en';
+locales['English | United Kingdom'] = '?hl=en-GB&gl=GB&ceid=GB:en';
+locales['English | United States'] = '?hl=en-US&gl=US&ceid=US:en';
+locales['English | Zimbabwe'] = '?hl=en-ZW&gl=ZW&ceid=ZW:en';
+locales['Bahasa Indonesia | Indonesia'] = '?hl=id&gl=ID&ceid=ID%3Aid';
+locales['Čeština | Česko'] = '?hl=cs&gl=CZ&ceid=CZ%3Acs';
+locales['Deutsch | Deutschland'] = '?hl=de&gl=DE&ceid=DE%3Ade';
+locales['Deutsch | Österreich'] = '?hl=de&gl=AT&ceid=AT%3Ade';
+locales['Deutsch | Schweiz'] = '?hl=de&gl=CH&ceid=CH%3Ade';
+locales['Español | Argentina'] = '?hl=es-419&gl=AR&ceid=AR%3Aes-419';
+locales['Español | Chile'] = '?hl=es-419&gl=CL&ceid=CL%3Aes-419';
+locales['Español | Colombia'] = '?hl=es-419&gl=CO&ceid=CO%3Aes-419';
+locales['Español | Cuba'] = '?hl=es-419&gl=CU&ceid=CU%3Aes-419';
+locales['Español | Estados Unidos'] = '?hl=es-419&gl=US&ceid=US%3Aes-419';
+locales['Español | México'] = '?hl=es-419&gl=MX&ceid=MX%3Aes-419';
+locales['Español | Perú'] = '?hl=es-419&gl=PE&ceid=PE%3Aes-419';
+locales['Español | Venezuela'] = '?hl=es-419&gl=VE&ceid=VE%3Aes-419';
+locales['Français | Belgique'] = '?hl=fr&gl=BE&ceid=BE%3Afr';
+locales['Français | Canada'] = '?hl=fr-CA&gl=CA&ceid=CA:fr';
+locales['Français | France'] = '?hl=fr&gl=FR&ceid=FR%3Afr';
+locales['Français | Maroc'] = '?hl=fr&gl=MA&ceid=MA%3Afr';
+locales['Français | Sénégal'] = '?hl=fr&gl=SN&ceid=SN%3Afr';
+locales['Français | Suisse'] = '?hl=fr&gl=CH&ceid=CH%3Afr';
+locales['Italiano | Italia'] = '?hl=it&gl=IT&ceid=IT%3Ait';
+locales['Latviešu | Latvija'] = '?hl=lv&gl=LV&ceid=LV%3Alv';
+locales['Lietuvių | Lietuva'] = '?hl=lt&gl=LT&ceid=LT%3Alt';
+locales['Magyar | Magyarország'] = '?hl=hu&gl=HU&ceid=HU%3Ahu';
+locales['Nederlands | België'] = '?hl=nl&gl=BE&ceid=BE%3Anl';
+locales['Nederlands | Nederland'] = '?hl=nl&gl=NL&ceid=NL%3Anl';
+locales['Norsk | Norge'] = '?hl=no&gl=NO&ceid=NO%3Ano';
+locales['Polski | Polska'] = '?hl=pl&gl=PL&ceid=PL%3Apl';
+locales['Português | Brasil'] = '?hl=pt-BR&gl=BR&ceid=BR%3Apt-419';
+locales['Português | Portugal'] = '?hl=pt-PT&gl=PT&ceid=PT%3Apt-150';
+locales['Română | România'] = '?hl=ro&gl=RO&ceid=RO%3Aro';
+locales['Slovenčina | Slovensko'] = '?hl=sk&gl=SK&ceid=SK%3Ask';
+locales['Slovenščina | Slovenija'] = '?hl=sl&gl=SI&ceid=SI%3Asl';
+locales['Svenska | Sverige'] = '?hl=sv&gl=SE&ceid=SE%3Asv';
+locales['Tiếng Việt | Việt Nam'] = '?hl=vi&gl=VN&ceid=VN%3Avi';
+locales['Türkçe | Türkiye'] = '?hl=tr&gl=TR&ceid=TR%3Atr';
+locales['Ελληνικά | Ελλάδα'] = '?hl=el&gl=GR&ceid=GR%3Ael';
+locales['Български | България'] = '?hl=bg&gl=BG&ceid=BG%3Abg';
+locales['Русский | Россия'] = '?hl=ru&gl=RU&ceid=RU%3Aru';
+locales['Русский | Украина'] = '?hl=ru&gl=UA&ceid=UA%3Aru';
+locales['Српски | Србија'] = '?hl=sr&gl=RS&ceid=RS%3Asr';
+locales['Українська | Україна'] = '?hl=uk&gl=UA&ceid=UA%3Auk';
+locales['עברית | ישראל'] = '?hl=he&gl=IL&ceid=IL%3Ahe';
+locales['العربية | الإمارات العربية المتحدة'] = '?hl=ar&gl=AE&ceid=AE%3Aar';
+locales['العربية | المملكة العربية السعودية'] = '?hl=ar&gl=SA&ceid=SA%3Aar';
+locales['العربية | لبنان'] = '?hl=ar&gl=LB&ceid=LB%3Aar';
+locales['العربية | مصر'] = '?hl=ar&gl=EG&ceid=EG%3Aar';
+locales['मराठी | भारत'] = '?hl=mr&gl=IN&ceid=IN%3Amr';
+locales['हिन्दी | भारत'] = '?hl=hi&gl=IN&ceid=IN%3Ahi';
+locales['বাংলা | বাংলাদেশ'] = '?hl=bn&gl=BD&ceid=BD%3Abn';
+locales['தமிழ் | இந்தியா'] = '?hl=ta&gl=IN&ceid=IN%3Ata';
+locales['മലയാളം | ഇന്ത്യ'] = '?hl=ml&gl=IN&ceid=IN%3Aml';
+locales['తెలుగు | భారతదేశం'] = '?hl=te&gl=IN&ceid=IN%3Ate';
+locales['ไทย | ไทย'] = '?hl=th&gl=TH&ceid=TH%3Ath';
+locales['中文 | 中国'] = '?hl=zh-CN&gl=CN&ceid=CN:zh-Hans';
+locales['中文 | 台灣'] = '?hl=zh-TW&gl=TW&ceid=TW%3Azh-Hant';
+locales['中文 | 香港'] = '?hl=zh-HK&gl=HK&ceid=HK%3Azh-Hant';
+locales['日本語 | 日本'] = '?hl=ja&gl=JP&ceid=JP%3Aja';
+locales['한국어 | 대한민국'] = '?hl=ko&gl=KR&ceid=KR%3Ako';
+
+function locale_to_readabletext(string)
+{
+  string = string.replace('%3A', ':');
+  for (var locale in locales)
+  {
+     if (locales[locale].replace('%3A', ':') == string)
+         return locale;
+  }
+  return null;
+}
+
+</script>
+<div id="youtubePromo" style="display: none;">
+<div style="position: relative; background-color: #0096FF; color: #FFF; z-index: 2147483647">
+<table>
+<tbody><tr>
+<td>
+<div><b>Important information</b></div><div>Videos on the mobile version of YouTube.com cannot be played in the background.</div>
+    </td>
+    <td style="width: 30px"><div style="background-color: #42B1FF; padding: 10px;" id="youtubeClose"><a style="color: #fff" target="_blank:"><b>OK</b></a></div></td>
+    </tr></tbody></table>
+</div>
+</div>
+
+  <!-- Container for the OneGoogleBar HTML. -->
+  <div id="one-google" class="hidden" style="display: none;"></div>
+
+  <div id="ntp-contents">
+    <div id="logo" style="display: none;">
+      <!-- The logo that is displayed in the absence of a doodle. -->
+      <div id="logo-default" title="Google"></div>
+      <!-- Logo displayed when theme prevents doodles. Doesn't fade. -->
+      <div id="logo-non-white" title="Google"></div>
+      <!-- A doodle, if any: its link and image. -->
+      <div id="logo-doodle">
+        <button id="logo-doodle-button">
+          <img id="logo-doodle-image"></img>
+        </button>
+        <iframe id="logo-doodle-iframe" scrolling="no"></iframe>
+        <!-- A spinner, visible on dark-themed NTPs, prompting the doodle -->
+        <button id="logo-doodle-notifier">
+          <div class="outer ball0"><div class="inner"></div></div>
+          <div class="outer ball1"><div class="inner"></div></div>
+          <div class="outer ball2"><div class="inner"></div></div>
+          <div class="outer ball3"><div class="inner"></div></div>
+        </button>
+      </div>
+    </div>
+
+    <div id="fakebox-container" style="display: none;">
+      <div id="fakebox">
+        <div id="fakebox-text"></div>
+        <input id="fakebox-input" autocomplete="off" tabindex="-1" type="url"
+            aria-hidden="true">
+        <div id="fakebox-cursor"></div>
+        <button id="fakebox-microphone" hidden></button>
+      </div>
+    </div>
+
+<style>
+.full-hidden {
+  opacity: 0 !important;
+  position: absolute !important;
+  top: -9999999px;
+  left: -9999999px;
+  z-index: -99999;
+  width: 100vw !important;
+}
+
+.closeImgInvisible {
+  display: none;
+}
+</style>
+    <div style="position: absolute; top: 0px; right: 5px; z-index: 99999999">
+    <div class="plus-item" role="button" aria-label="Add new tile" title="Add new tile" id="add-button">+</div>
+    </div>
+    <div id="fake-bookmarks-grid" style="display: none">
+    </div>
+    <div id="bookmarks-grid" class="full-hidden">
+    </div>
+<span id="explore-section" style="display: none">
+<div style="clear: both;"></div>
+<div class="configure-item-explore">
+<!-- <div class="arrow-down" style="float: right;"></div>--> <span id="explore-title">Explore</span>
+</div>
+<div class="close-item" role="button" aria-label="Close explore" title="Close explore" id="close-explore-button">x</div>
+<div style="clear: both;"></div>
+    <div id="ideas-grid">
+    </div>
+<div style="clear: both; height: 1px;"></div>
+</span>
+<div id="incognito" style="display: none;width: 100%;height: 100%;background:black;">
+<div style="text-align: center;padding-top:50px;">
+<img style="width: 64px;border-radius: 50%"
+        src="data:image/png;base64,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">
+<br />
+  <span style="color: rgb(182, 182, 182);">
+<h2>Private mode</h2>
+  </span>
+</div>
+</div>
+<script>
+var news_are_already_onscreen = false;
+var instant_grid_done = false;
+function instant_grid()
+{
+  instant_grid_done = true;
+//  console.log('Calling instant grid generation');
+  if (typeof localStorage.cachedGrid != "undefined") {
+      replaceInnerHTML(document.getElementById('fake-bookmarks-grid'), localStorage.cachedGrid);
+      document.getElementById('fake-bookmarks-grid').style.cssText = localStorage.cachedGridStyle;
+      document.getElementById('fake-bookmarks-grid').style.display = 'block';
+  }
+}
+
+if (window.chrome.embeddedSearch.newTabPage.isIncognito)
+{
+  document.body.style.backgroundColor='black';
+  document.getElementById('incognito').style.display='block';
+}
+else
+{
+try {
+  instant_grid();
+  window.setTimeout(function () { if (!instant_grid_done) instant_grid(); }, 1);
+}
+catch (err) {
+  console.log("Instant init failed, retrying later");
+}
+}
+</script>
+<style>
+@-webkit-keyframes shadow-inset-center {
+  0% {
+    box-shadow: 0 0 0 0 rgba(0, 0, 0, 0);
+  }
+  100% {
+    box-shadow: 0 0 14px 0px rgba(0, 0, 0, 0.5);
+  }
+}
+@keyframes shadow-inset-center {
+  0% {
+    box-shadow: 0 0 0 0 rgba(0, 0, 0, 0);
+  }
+  100% {
+    box-shadow: 0 0 14px 0px rgba(0, 0, 0, 0.5);
+  }
+}
+</style>
+<script>
+!function(t,e){"object"==typeof exports&&"undefined"!=typeof module?module.exports=e():"function"==typeof define&&define.amd?define(e):t.timeago=e()}(this,function(){"use strict";var t="second_minute_hour_day_week_month_year".split("_"),e="秒_分钟_小时_天_周_月_年".split("_"),n=[60,60,24,7,365/7/12,12],r={en:function(e,n){if(0===n)return["just now","right now"];var r=t[parseInt(n/2)];return e>1&&(r+="s"),[e+" "+r+" ago","in "+e+" "+r]},zh_CN:function(t,n){if(0===n)return["刚刚","片刻后"];var r=e[parseInt(n/2)];return[t+" "+r+"前",t+" "+r+"后"]}},a=function(t){return parseInt(t)},i=function(t){return t instanceof Date?t:!isNaN(t)||/^\d+$/.test(t)?new Date(a(t)):(t=(t||"").trim().replace(/\.\d+/,"").replace(/-/,"/").replace(/-/,"/").replace(/(\d)T(\d)/,"$1 $2").replace(/Z/," UTC").replace(/([\+\-]\d\d)\:?(\d\d)/," $1$2"),new Date(t))},o=function(t,e,i){e=r[e]?e:r[i]?i:"en";for(var o=0,u=t<0?1:0,c=t=Math.abs(t);t>=n[o]&&o<n.length;o++)t/=n[o];return(t=a(t))>(0===(o*=2)?9:1)&&(o+=1),r[e](t,o,c)[u].replace("%s",t)},u=function(t,e){return((e=e?i(e):new Date)-i(t))/1e3},c=function(t,e){return t.getAttribute?t.getAttribute(e):t.attr?t.attr(e):void 0},f=function(t){return c(t,"data-timeago")||c(t,"datetime")},d=[],l=function(t){t&&(clearTimeout(t),delete d[t])},s=function(t){if(t)l(c(t,"data-tid"));else for(var e in d)l(e)},h=function(){function t(t,e){for(var n=0;n<e.length;n++){var r=e[n];r.enumerable=r.enumerable||!1,r.configurable=!0,"value"in r&&(r.writable=!0),Object.defineProperty(t,r.key,r)}}return function(e,n,r){return n&&t(e.prototype,n),r&&t(e,r),e}}();var p=function(){function t(e,n){!function(t,e){if(!(t instanceof e))throw new TypeError("Cannot call a class as a function")}(this,t),this.nowDate=e,this.defaultLocale=n||"en"}return h(t,[{key:"setLocale",value:function(t){this.defaultLocale=t}},{key:"doRender",value:function(t,e,r){var a=this,i=u(e,this.nowDate);t.innerHTML=o(i,r,this.defaultLocale);var c=function(t,e){var n=setTimeout(function(){l(n),t()},e);return d[n]=0,n}(function(){a.doRender(t,e,r)},Math.min(1e3*function(t){for(var e=1,r=0,a=Math.abs(t);t>=n[r]&&r<n.length;r++)t/=n[r],e*=n[r];return a=(a%=e)?e-a:e,Math.ceil(a)}(i),2147483647));!function(t,e){t.setAttribute?t.setAttribute("data-tid",e):t.attr&&t.attr("data-tid",e)}(t,c)}},{key:"render",value:function(t,e){void 0===t.length&&(t=[t]);for(var n=void 0,r=0,a=t.length;r<a;r++)n=t[r],s(n),this.doRender(n,f(n),e)}},{key:"format",value:function(t,e){return o(u(t,this.nowDate),e,this.defaultLocale)}}]),t}(),v=function(t,e){return new p(t,e)};return v.register=function(t,e){r[t]=e},v.cancel=s,v});
+
+var must_clear_news = false;
+function render_news_loading()
+{
+  must_clear_news = true;
+  document.getElementById('news').innerHTML = '<div style="clear:both;text-align:center;width: 100%"><br />&nbsp;<br /><div class="lds-dual-ring"></div></div>';
+}
+
+function add_gnews(is_primary, title, news_time, source, source_logo, link, image)
+{
+  var innerDiv = document.createElement('div');
+  var creationTime = new Date(news_time * 1000);
+  var timeagoInstance = timeago();
+  innerDiv.className = 'newsItem';
+  innerDiv.innerHTML = '<div style="float: right; height: 128px;"><img src="' + image + '" class="newsImage" onload="this.style.opacity=\'1\';this.style.visibility=\'visible\'" onerror="this.style.visibility=\'hidden\'" /></div>'
+  + '<div style="position: relative; left: 10px; font-size: medium">'
+  + '<span class="newsAttribution"><img src="' + source_logo + '" onerror="this.style.display=\'none\'" style="max-height: 12px;" />&nbsp;&nbsp;<a style="color: #333" href="' + link + '">' + source + '</a></span>'
+  + '<div class="newsTitle"><a style="color: #333" href="' + link + '">' 
+  + title + '</a></div>'
+  + '<span class="newsTime">'
+  + timeagoInstance.format(creationTime) + '</span></a></div>';
+  document.getElementById('news').appendChild(innerDiv);
+  var spacer = document.createElement('div');
+  spacer.style.clear = 'both';
+  innerDiv.appendChild(spacer);
+}
+
+var has_valid_foryou_entries = false;
+var last_offset_rendered = 0;
+function render_gnews(answer, start_offset, n)
+{
+  last_offset_rendered = start_offset + n;
+  if (must_clear_news)
+  {
+      must_clear_news = false;
+      document.getElementById('news').innerHTML = '';
+  }
+          var el = document.createElement('div');
+          el.style.display = 'none';
+          el.baseURI = 'https://news.google.com/';
+          el.innerHTML = answer.replace(new RegExp('<img', 'gi'), '<source');
+          var articles = el.getElementsByTagName('article');
+//          console.log(articles);
+          for (var i = start_offset; i < articles.length && i < (n + start_offset); i++) {
+              var article = articles[i];
+              var children = article.childNodes;
+              var title = null;
+              var link = null;
+              var image = null;
+              var source = null;
+              var source_logo = null;
+              var is_primary = false;
+              var news_time = null;
+              for (var j = 0; j < children.length; j++) {
+                  var child = children[j];
+                  if (child.tagName == 'A')
+                  {
+                      link = child.href;
+                  }
+                  else if (child.tagName == 'FIGURE')
+                  {
+                      if (child.childNodes.length >= 2 && child.childNodes[0].tagName == 'SOURCE')
+                      {
+                          image = child.childNodes[0].src;
+                          is_primary = true;
+                      }
+                      else if (child.childNodes.length >= 2 && child.childNodes[1].tagName == 'SOURCE') // video to play
+                      {
+                          image = child.childNodes[1].src;
+                          is_primary = true;
+                      }
+                      else if (child.childNodes.length == 1 && child.childNodes[0].tagName == 'SOURCE')
+                      {
+                          image = child.childNodes[0].src;
+                      }
+                  }
+                  else if (child.tagName == 'H3')
+                  {
+                      title = child.childNodes[0].innerText;
+                  }
+                  else if (child.tagName == 'DIV')
+                  {
+                      if (child.childNodes.length >= 2 && child.childNodes[0].tagName == 'DIV' && child.childNodes[1].tagName == 'MENU')
+                      {
+                          if (child.childNodes[0].childNodes[0].tagName == 'TIME')
+                              news_time = child.childNodes[0].childNodes[0].dateTime;
+                          else if (child.childNodes[0].childNodes[1].tagName == 'TIME')
+                              news_time = child.childNodes[0].childNodes[1].dateTime;
+                          if (child.childNodes[0].childNodes.length == 3 && child.childNodes[0].childNodes[2].tagName == 'TIME')
+                              news_time = child.childNodes[0].childNodes[2].dateTime;
+                      }
+                      else if (child.childNodes.length >= 2 && child.childNodes[0].tagName == 'DIV')
+                      {
+                          var subNode = child.childNodes[1];
+                          if (subNode.childNodes[0].tagName == 'DIV' && subNode.childNodes[1].tagName == 'MENU')
+                          {
+                              if (subNode.childNodes[0].tagName == 'DIV' && subNode.childNodes[1].tagName == 'MENU')
+                              {
+                                  if (subNode.childNodes[0].childNodes[0].tagName == 'TIME')
+                                      news_time = subNode.childNodes[0].childNodes[0].dateTime;
+                                  else if (subNode.childNodes[0].childNodes[1].tagName == 'TIME')
+                                      news_time = subNode.childNodes[0].childNodes[1].dateTime;
+                              }
+                          }
+                          var subNode = child.childNodes[0].childNodes[0];
+                          if (subNode.childNodes.length == 3 && subNode.childNodes[0].tagName == 'DIV')
+                          {
+                              source = subNode.childNodes[0].innerText;
+                              var sourceNode = subNode.childNodes[0].childNodes[0];
+                              if ((sourceNode.tagName == 'A' || sourceNode.tagName == 'SPAN') && sourceNode.childNodes[0].tagName == 'SOURCE')
+                                  source_logo = sourceNode.childNodes[0].src;
+                          }
+                          if (subNode.childNodes.length == 3 && subNode.childNodes[1].tagName == 'H4')
+                              title = subNode.childNodes[1].innerText;
+                      }
+                      else if (child.childNodes.length >= 2 && child.childNodes[0].tagName == 'FIGURE')
+                      {
+                          if (child.childNodes[0].childNodes[0].tagName == 'SOURCE')
+                              image = child.childNodes[0].childNodes[0].src;
+                          else if (child.childNodes[0].childNodes[1].tagName == 'SOURCE') // video to play
+                              image = child.childNodes[0].childNodes[1].src;
+                          var divSubNode = child.childNodes[1];
+                          if (divSubNode.childNodes.length == 3 && divSubNode.childNodes[0].tagName == 'DIV')
+                          {
+                              source = divSubNode.childNodes[0].innerText;
+                              var sourceNode = divSubNode.childNodes[0].childNodes[0];
+                              if ((sourceNode.tagName == 'A' || sourceNode.tagName == 'SPAN') && sourceNode.childNodes[0].tagName == 'SOURCE')
+                                  source_logo = sourceNode.childNodes[0].src;
+                          }
+                          if (divSubNode.childNodes.length == 3 && divSubNode.childNodes[1].tagName == 'H4')
+                              title = divSubNode.childNodes[1].innerText;
+                      } else if (child.childNodes.length >= 2 && child.childNodes[0].tagName == 'SOURCE') {
+                        if (child.childNodes[0].tagName == 'SOURCE' && child.childNodes[1].tagName == 'A') {
+                          source_logo = child.childNodes[0].src;
+                          if (child.childNodes[1].innerText)
+                            source = child.childNodes[1].innerText;
+                        }
+                        if (child.childNodes.length == 3) {
+                          if (child.childNodes[0].tagName == 'SOURCE' && child.childNodes[1].tagName == 'SOURCE' && child.childNodes[2].tagName == 'A') {
+                            source_logo = child.childNodes[0].src;
+                            if (child.childNodes[2].innerText)
+                              source = child.childNodes[2].innerText;
+                          }
+                        }
+                        if (child.childNodes.length == 4) {
+                          if (child.childNodes[0].tagName == 'SOURCE' && child.childNodes[1].tagName == 'SOURCE'
+                           && child.childNodes[2].tagName == 'SOURCE' && child.childNodes[3].tagName == 'A') {
+                            source_logo = child.childNodes[0].src;
+                            if (child.childNodes[3].innerText)
+                              source = child.childNodes[3].innerText;
+                          }
+                        }
+                      } else if (child.childNodes.length == 1 && child.childNodes[0].tagName == 'A')
+                      {
+                          subNode = child.childNodes[0];
+                          source = subNode.innerText;
+                          var sourceNode = subNode.childNodes[0];
+                          if (sourceNode.tagName == 'SOURCE')
+                             source_logo = sourceNode.src;
+                      }
+                      else if (child.childNodes.length >= 2 && child.childNodes[0].tagName == 'A')
+                      {
+                          source = child.childNodes[1].innerText;
+                          var sourceNode = child.childNodes[0].childNodes[0];
+                          if (sourceNode.tagName == 'SOURCE')
+                             source_logo = sourceNode.src;
+                      }
+                      else if (child.childNodes.length >= 2 && child.childNodes[0].tagName == 'SPAN')
+                      {
+                          source = child.childNodes[1].innerText;
+                          var sourceNode = child.childNodes[0].childNodes[0];
+                          if (sourceNode.tagName == 'SOURCE')
+                             source_logo = sourceNode.src;
+                       } else if (child.childNodes.length >= 2 && child.childNodes[0].tagName == 'SOURCE') {
+                         if (child.childNodes[1].innerText)
+                           source = child.childNodes[1].innerText;
+                       }
+                  }
+              }
+              try {
+                if (link == null)
+                    link = article.querySelector("a.VDXfz").href;
+              } catch {}
+              try {
+                if (title == null)
+                    title = article.querySelector("h4 a.DY5T1d").innerHTML;
+              } catch {}
+              try {
+                if (image == null)
+                    image = article.querySelector(".QwxBBf").src;
+              } catch {}
+              try {
+                if (source == null)
+                    source = article.querySelector("a.wEwyrc").innerHTML;
+              } catch {}
+              try {
+                if (source_logo == null)
+                    source_logo = article.querySelector(".wsLqz source").src;
+              } catch {}
+              try {
+                if (news_time == null || news_time == 0)
+                    news_time = article.querySelector(".WW6dff").getAttribute("datetime");
+              } catch {}
+              if (news_time && parseInt(news_time.substr(news_time.lastIndexOf(":") + 2)) > 1518000000)
+                  news_time = parseInt(news_time.substr(news_time.lastIndexOf(":") + 2));
+              else
+                  news_time = parseInt(Date.parse(news_time) / 1000);
+              if (link)
+                  link = link.replace('chrome-search://local-ntp/', 'https://news.google.com/');
+            
+              if (link && image && title) {
+//                  console.log('Title: ' + title);
+                  add_gnews(is_primary, title, news_time, source, source_logo, link, image);
+              }
+             news_are_already_onscreen = true;
+             if (articles.length > (i + 1) && i <= 29)
+             {
+                 document.getElementById('newsMore').innerHTML='<div style="color: #8AB4F8; font-size: 24px; width: 100%; text-align: center"><b>...</b></div><br />&nbsp;<br />';
+             } else {
+                 document.getElementById('newsMore').innerHTML='';
+             }
+          }
+}
+
+var closeImg = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAMAAAD04JH5AAAAA3NCSVQICAjb4U/gAAAACXBIWXMAACNvAAAjbwE1/Af7AAAAGXRFWHRTb2Z0d2FyZQB3d3cuaW5rc2NhcGUub3Jnm+48GgAAANVQTFRF////11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK11pK2F9P2WBR2WJT2mVW33pt5ZSJ5peN6J+V6KGY/PHv/PHw/PPy/PTz/fb1////fP+U/wAAADd0Uk5TAAEDBAYLDA4VHB4fNDg8PUJDR0pbc3yCg4SGiImVlqWnq661uLq/wsPFy9DT2d7m6+zt8/n6/uYUS2MAAANwSURBVHjazVvnWiJBEBwjBjwRCSfgkWHJectAUnTf/5FuDeehIhN3euv3fFu1aaa7upsxFUSiiXS+7LS6/fG432055Xw6EY0wKziI52o9bESvlosfBEq+H7tqTLAVk8bv2H5A9GfXQwhheH1mnv001YEEOqlTo/TRkgtJuKWoMfrzCpRQOTdCf1GHMuoX2vTHRWiheKxFv5ccQROj5J46/682DKD9S5F+N+PCCNzMrtLbd2AMjsKXcDmAQQwuJel3si6Mws3uSJ06BRhHQeKMOqwiAFQPRfmPmggEzSMx/pMOAkLnROj+A+P3FQg8g8MmAkST+x3sVxEoqpx/YaeAgFHYvh9kETiyW/dfN3gB7pZd+XgACxj8eDLtOrAC56fTOQNLyPwQ/7i2BLgbY6S9NqyhvSlOTMIikhv+gJFNAaPvf0IRVlH8lv/AMr7mTHXbAupf8k9Yx+fMtWJfQOVT/g8CrPsHJe7q28XsRvzad8v5PXdRac1/4W7C9yvPe5iK8k8fPW91y92Q/7s4Ke4l556PJ0EF06eX1QvuutSHAH4cvPTEFbzxezN+jPzhvwm81EdhBe/8DwKfzD8371r8tvgKhBf6+PMeiQ9hToEMP4ZvMXpM5tPiXFqKH4i9CriCMQWS/Lh6FdCAKQWy/Gi8+u8TGFIgzY/Ji7sfl9i+t1LI8wNxX0AOZhSo8CPnC6jBiAIlftR8AT2YUKDGjx5jEdljfCOVIj8QUYhFNpAp8/tRSQL6CtT5kWBpaCvQ4Eea5aGrQIcfeVaGpgItfpSZoinxQavHD4e1oKXg+VmLHy3WhZ4CPX50WR/6CtT50Wdj9dRm+vb4vWd1fozpBZC/AvKPkPw3JN+IyLdi8sOI/DgmD0jIQzLyoJQ8LKdPTMhTM/LklDw9Jzco6C0acpOK3KYjNypFrNqbB1mr9vGOv/RM3KyeyZvVS+7CjoRdv5C36+fcdSmJgsXtyn+o4gUL/4WtuCWTtYKFQMnmfr68E97gcDNbcAsm6yUb+qIVedmOvnBJXrqlL16Tl+/pGxjIWzjom1jI23joG5noW7nIm9no2/noGxrpWzrJm1rp23rpG5vpW7vpm9vp2/vpBxzoRzzoh1xCMOZDP+hEP+oVgmE3+nG/EAw8hmDkMwRDryEY+w3B4HMYRr9DMPwexPj/X+Yt8H/u7e31AAAAAElFTkSuQmCC';
+document.getElementById('add-button').addEventListener('click', create_new_item);
+
+var longpress = false;
+var presstimer = null;
+var longtarget = null;
+var iseditable = false;
+
+function load_more_news()
+{
+  localStorage.lastOffsetRendered = last_offset_rendered;
+  render_gnews(localStorage.cachedGNews, last_offset_rendered, 10);
+}
+
+function process_cancel(e) {
+    console.log('We received process_cancel');
+    console.log(e);
+    if (iseditable)
+    {
+      e.preventDefault();
+      return ;
+    }
+    if (presstimer !== null) {
+        clearTimeout(presstimer);
+        presstimer = null;
+    }
+
+    this.classList.remove("longpress");
+};
+
+function process_body_click(e) {
+  if (iseditable) {
+      toggle_edit_mode();
+      e.preventDefault();
+  }
+}
+
+function process_click(e) {
+    console.log('We received process_click');
+    console.log(e);
+    if (iseditable)
+      return ;
+    e.preventDefault();
+    if (presstimer !== null) {
+        clearTimeout(presstimer);
+        presstimer = null;
+    }
+
+    this.classList.remove("longpress");
+
+    if (longpress) {
+        return false;
+    }
+};
+
+function process_start(e) {
+    if (iseditable)
+      return ;
+//    e.preventDefault();
+
+    if (e.type === "click" && e.button !== 0) {
+        return;
+    }
+
+    longpress = false;
+
+    this.classList.add("longpress");
+
+    presstimer = setTimeout(function() {
+        toggle_edit_mode();
+        longpress = true;
+    }, 550);
+
+    return false;
+};
+
+function arrayBufferToBase64(buffer) {
+  var binary = '';
+  var bytes = [].slice.call(new Uint8Array(buffer));
+
+  bytes.forEach((b) => binary += String.fromCharCode(b));
+
+  return window.btoa(binary);
+};
+
+function invalidate_image(item)
+{
+  console.log("Invalidating item: " + item.title);
+  var parser = document.createElement('a');
+  parser.href = item.title;
+  var rootDomain = psl.get(parser.hostname);
+  console.log("Invalidating rootDomain: " + rootDomain);
+  item.src = "data:image/svg+xml;base64," + btoa(jdenticon.toSvg(parser.hostname, 64));
+  localStorage.setItem('icon-' + rootDomain, item.src);
+  localStorage.setItem('lastShown-' + rootDomain, Math.floor(Date.now() / 1000));
+}
+
+function remove_favorite(e)
+{
+  console.log("Removing favorite");
+  console.log(e);
+  item = e.target;
+  item = item.parentNode;
+  console.log("Removing item");
+  globalGrid.disconnect(item);
+}
+
+var nItemsAdded = 0;
+
+function add_favorite_idea(name, click_url, impression_url, image_url)
+{
+  var rootDomain = 'idea-' + name;
+  var innerDiv = document.createElement('div');
+  innerDiv.className = 'grid-item grid-idea';
+  var cachedImage = localStorage.getItem('icon-' + rootDomain);
+  localStorage.setItem('lastShown-' + rootDomain, Math.floor(Date.now() / 1000));
+  var imageUri = null;
+  var randomId = Math.random().toString(36).substr(2, 9) + Math.random().toString(36).substr(2, 9) + Math.random().toString(36).substr(2, 9);
+  if (cachedImage != null) {
+    imageUri = cachedImage;
+    console.log('Loading icon for ' + rootDomain + ' from cache');
+  } else {
+      console.log('Fetching icon for ' + rootDomain);
+      loadingImage = "data:image/svg+xml;base64," + btoa('<svg width="85px"  height="85px"  xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid" class="lds-tail">    <defs>      <filter id="tail-0.a4db4fdd84ecd" x="-100%" y="-100%" width="300%" height="300%" color-interpolation-filters="sRGB">        <feGaussianBlur in="SourceGraphic" stdDeviation="3"></feGaussianBlur>        <feColorMatrix mode="matrix" values="1 0 0 0 0   0 1 0 0 0   0 0 1 0 0   0 0 0 60 -40" result="cm"></feColorMatrix>      </filter>    </defs>    <g ng-attr-filter="url(#{{config.filterid}})" filter="url(#tail-0.a4db4fdd84ecd)" transform="rotate(54 50 50)">      <animateTransform attributeName="transform" type="rotate" calcMode="linear" values="0 50 50;360 50 50" keyTimes="0;1" dur="4s" begin="0s" repeatCount="indefinite"></animateTransform>      <g transform="rotate(333.474 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="19" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.13333333333333333 0 0.03333333333333333 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(331.178 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="18" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.16666666666666669 0 0.06666666666666667 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(328.576 50.0001 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="17" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.2 0 0.1 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(325.612 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="16" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.23333333333333334 0 0.13333333333333333 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(322.212 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="15" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.26666666666666666 0 0.16666666666666666 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(318.287 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="14" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.30000000000000004 0 0.2 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(314.708 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="13" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.33333333333333337 0 0.23333333333333334 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(309.018 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="12" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.3666666666666667 0 0.26666666666666666 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(302.443 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="11" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.4 0 0.3 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(294.767 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="10" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.43333333333333335 0 0.3333333333333333 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(285.715 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="9" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.4666666666666667 0 0.36666666666666664 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(274.96 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="8" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.5 0 0.4 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(263.29 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="7" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.5333333333333333 0 0.43333333333333335 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(247.243 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="6" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.5666666666666667 0 0.4666666666666667 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(233.28 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="5" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.6 0 0.5 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(210.448 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="4" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.6333333333333333 0 0.5333333333333333 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(189.723 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="3" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.6666666666666666 0 0.5666666666666667 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(167.547 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="2" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.7 0 0.6 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(151.39 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="1" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.7333333333333333 0 0.6333333333333333 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(134.242 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="0" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.7666666666666666 0 0.6666666666666666 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>    </g>  </svg>');
+      imageUri = loadingImage;
+try {
+      fetch(image_url).then(function(response) {
+        return response.arrayBuffer();
+      })
+      .then(function(answer) {
+        localStorage.setItem('icon-' + rootDomain, 'data:image/png;base64,' + arrayBufferToBase64(answer));
+        localStorage.setItem('lastShown-' + rootDomain, Math.floor(Date.now() / 1000));
+        document.getElementById('icon' + randomId).src = 'data:image/png;base64,' + arrayBufferToBase64(answer);
+        console.log('Icon for ' + rootDomain + ' is now fetched');
+      });
+} catch (err) {
+      console.log('Fetch failed for: ' + err.message);
+}
+  }
+  if (impression_url && impression_url != 'about:blank')
+    navigator.sendBeacon(impression_url);
+  innerDiv.innerHTML = '<a id="tile_target" href="' + click_url + '"><img border="0" class="grid-image" title="' + name + '" src="' + imageUri + '" id="icon' + randomId + '" onError="invalidate_image(this)" width="64" style="max-height: 64px; border-radius: 4px;" /><span style="width: 60px; line-height: 15px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; display: inline-block">' + name + '</span></a>';
+  innerDiv.style.minHeight = '64px';
+
+//  innerDiv.querySelector('#closeImg').addEventListener("touchstart", remove_favorite);
+//  innerDiv.querySelector('#tile_target').addEventListener("touchstart", process_start);
+  document.body.addEventListener("click", process_body_click);
+//  innerDiv.querySelector('#tile_target').addEventListener("touchend", process_cancel);
+  document.getElementById('ideas-grid').appendChild(innerDiv);
+}
+
+function add_favorite(item)
+{
+  var parser = document.createElement('a');
+  parser.href = item.url;
+  // Our intent is buzz.blogspot.com to stay buzz.blogspot.com
+  // and m.wikipedia.org to become wikipedia.org
+  var rootDomain = psl.get(parser.hostname);
+  var innerDiv = document.createElement('div');
+  innerDiv.className = 'grid-item';
+  var cachedImage = localStorage.getItem('icon-' + rootDomain);
+  localStorage.setItem('lastShown-' + rootDomain, Math.floor(Date.now() / 1000));
+  var imageUri = null;
+  var randomId = Math.random().toString(36).substr(2, 9) + Math.random().toString(36).substr(2, 9) + Math.random().toString(36).substr(2, 9);
+  if (nItemsAdded++ < 10) {
+    console.log('Favorite - Preconnecting to: ' + item.url);
+    preconnectTo(item.url);
+    if (item.url.startsWith('http://'))
+      preconnectTo(item.url.replace('http://', 'https://'));
+  }
+  if (cachedImage != null) {
+    imageUri = cachedImage;
+    console.log('Loading icon for ' + rootDomain + ' from cache');
+  } else {
+      console.log('Fetching icon for ' + rootDomain);
+      loadingImage = "data:image/svg+xml;base64," + btoa('<svg width="85px"  height="85px"  xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid" class="lds-tail">    <defs>      <filter id="tail-0.a4db4fdd84ecd" x="-100%" y="-100%" width="300%" height="300%" color-interpolation-filters="sRGB">        <feGaussianBlur in="SourceGraphic" stdDeviation="3"></feGaussianBlur>        <feColorMatrix mode="matrix" values="1 0 0 0 0   0 1 0 0 0   0 0 1 0 0   0 0 0 60 -40" result="cm"></feColorMatrix>      </filter>    </defs>    <g ng-attr-filter="url(#{{config.filterid}})" filter="url(#tail-0.a4db4fdd84ecd)" transform="rotate(54 50 50)">      <animateTransform attributeName="transform" type="rotate" calcMode="linear" values="0 50 50;360 50 50" keyTimes="0;1" dur="4s" begin="0s" repeatCount="indefinite"></animateTransform>      <g transform="rotate(333.474 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="19" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.13333333333333333 0 0.03333333333333333 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(331.178 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="18" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.16666666666666669 0 0.06666666666666667 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(328.576 50.0001 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="17" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.2 0 0.1 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(325.612 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="16" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.23333333333333334 0 0.13333333333333333 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(322.212 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="15" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.26666666666666666 0 0.16666666666666666 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(318.287 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="14" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.30000000000000004 0 0.2 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(314.708 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="13" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.33333333333333337 0 0.23333333333333334 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(309.018 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="12" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.3666666666666667 0 0.26666666666666666 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(302.443 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="11" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.4 0 0.3 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(294.767 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="10" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.43333333333333335 0 0.3333333333333333 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(285.715 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="9" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.4666666666666667 0 0.36666666666666664 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(274.96 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="8" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.5 0 0.4 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(263.29 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="7" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.5333333333333333 0 0.43333333333333335 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(247.243 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="6" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.5666666666666667 0 0.4666666666666667 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(233.28 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="5" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.6 0 0.5 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(210.448 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="4" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.6333333333333333 0 0.5333333333333333 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(189.723 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="3" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.6666666666666666 0 0.5666666666666667 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(167.547 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="2" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.7 0 0.6 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(151.39 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="1" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.7333333333333333 0 0.6333333333333333 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>      <g transform="rotate(134.242 50 50)">        <g ng-attr-transform="translate(50 {{config.cy}})" transform="translate(50 19.6)">          <circle cx="0" cy="0" r="0" ng-attr-fill="{{config.fill}}" ng-attr-transform="scale({{config.scale}})" fill="#ff7c81" transform="scale(0.48)"></circle>        </g>        <animateTransform attributeName="transform" calcMode="spline" type="rotate" values="0 50 50;360 50 50" keyTimes="0;1" ng-attr-dur="{{config.speed2}}" keySplines="0.7666666666666666 0 0.6666666666666666 1" repeatCount="indefinite" dur="1"></animateTransform>      </g>    </g>  </svg>');
+      imageUri = loadingImage;
+try {
+      fetch('https://logos.kiwibrowser.com/' + rootDomain).then(function(response) {
+        return response.arrayBuffer();
+      })
+      .then(function(answer) {
+        localStorage.setItem('icon-' + rootDomain, 'data:image/png;base64,' + arrayBufferToBase64(answer));
+        document.getElementById('icon' + randomId).src = 'data:image/png;base64,' + arrayBufferToBase64(answer);
+        console.log('Icon for ' + rootDomain + ' is now fetched');
+      });
+} catch (err) {
+      console.log('Fetch failed for: ' + err.message);
+}
+  }
+  innerDiv.innerHTML = '<img id="closeImg" src="' + closeImg + '" class="closeImg closeImgInvisible" height="20" width="20" style="position: absolute; right: 0px; border: 0px;" /><a id="tile_target" href="' + item.url + '"><img border="0" class="grid-image serverIdea" title="' + item.url + '" src="' + imageUri + '" id="icon' + randomId + '" onError="invalidate_image(this)" width="64" style="max-height: 64px; border-radius: 4px;" /><span style="width: 60px; line-height: 15px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; display: inline-block">' + rootDomain + '</span></a>';
+  innerDiv.style.minHeight = '64px';
+
+  innerDiv.querySelector('#closeImg').addEventListener("touchstart", remove_favorite);
+  innerDiv.querySelector('#tile_target').addEventListener("touchstart", process_start);
+  document.body.addEventListener("click", process_body_click);
+  innerDiv.querySelector('#tile_target').addEventListener("touchend", process_cancel);
+  document.getElementById('bookmarks-grid').appendChild(innerDiv);
+}
+
+var globalGrid = false;
+var bookmarksGrid = document.getElementById("bookmarks-grid");
+var ideasGrid = document.getElementById("ideas-grid");
+
+function save_grid_snapshot()
+{
+  if (!document.getElementById('bookmarks-grid').style.cssText)
+    return ;
+  // Maximum 1 update per 0.1s (100ms)
+  if ((typeof localStorage.cachedGridUpdate == "undefined") || ((Date.now() / 1000) - localStorage.cachedGridUpdate) >= 0.1) {
+    var parser = document.createElement('span');
+    parser.innerHTML = document.getElementById('bookmarks-grid').innerHTML;
+    var elementsToIgnore = parser.getElementsByClassName('grid-idea');
+    for (var i = 0; i < elementsToIgnore.length; i++)
+      elementsToIgnore[i].remove();
+    localStorage.cachedGrid = parser.innerHTML;
+    localStorage.cachedGridStyle = document.getElementById('bookmarks-grid').style.cssText;
+//    console.log("Saving grid snapshot and style is " + localStorage.cachedGridStyle);
+    localStorage.cachedGridUpdate = (Date.now() / 1000);
+  }
+}
+
+function add_to_storage(el)
+{
+  var storedItems = JSON.parse(localStorage.storedItems);
+  offset = storedItems.length;
+  var url = el.querySelector('#tile_target').href;
+  storedItems[offset] = {url: url}
+  localStorage.storedItems = JSON.stringify(storedItems);
+  console.log("Add to storage, adding to offset " + offset + " the URL: " + url);
+}
+
+function swap_if_ready()
+{
+  if (bookmarksGrid.style.cssText.includes("height"))
+  {
+    document.getElementById('fake-bookmarks-grid').style.display='none';
+    bookmarksGrid.classList.remove("full-hidden");
+  }
+}
+
+function fetch_tiles_from_most_visited()
+{
+  if (window.chrome.embeddedSearch.newTabPage.isIncognito) {
+    localStorage.triedToLoadMostVisited = 99999;
+    return;
+  }
+  if (typeof localStorage.triedToLoadMostVisited == "undefined")
+    localStorage.triedToLoadMostVisited = 0;
+  localStorage.triedToLoadMostVisited = parseInt(localStorage.triedToLoadMostVisited) + 1;
+  if ((typeof localStorage.cachedTilesUpdate == "undefined") || ((Date.now() / 1000) - localStorage.cachedTilesUpdate) > 43200) {
+  console.log("Fetching tiles from most visited because:");
+  if (typeof localStorage.cachedTilesUpdate == "undefined")
+    console.log(" it is the first time");
+  else
+    console.log(" last update is out of date");
+  if (typeof localStorage.useCustomTiles == "undefined" || localStorage.useCustomTiles == "false") {
+    if (chrome.embeddedSearch.newTabPage.mostVisitedAvailable) {
+      localStorage.storedItems = JSON.stringify([]);
+      var pages = chrome.embeddedSearch.newTabPage.mostVisited;
+      var storedItems = JSON.parse(localStorage.storedItems);
+      for (var i = 0; i < Math.min(8, pages.length); ++i) {
+         offset = storedItems.length;
+         storedItems[offset] = {url: chrome.embeddedSearch.newTabPage.getMostVisitedItemData(pages[i].rid).url}
+         add_favorite(storedItems[offset]);
+      }
+      localStorage.storedItems = JSON.stringify(storedItems);
+      localStorage.cachedTilesUpdate = (Date.now() / 1000);
+    }
+  }
+  } else {
+    console.log("Not fetching tiles from most visited, as we have to do once every day");
+    if (typeof localStorage.storedItems != "undefined") { var storedItems = JSON.parse(localStorage.storedItems); for (var i = 0; i < storedItems.length; i++) { add_favorite(storedItems[i]); } }
+  }
+}
+
+function toggle_edit_mode()
+{
+  if (globalGrid.isDragifierOn()) {
+    iseditable = false;
+    globalGrid.dragifierOff();
+    Array.prototype.forEach.call(document.getElementsByClassName("grid-item"), function (el) { if (!el.classList.contains('grid-idea')) { el.style.WebkitAnimation = 'none'; } });
+    Array.prototype.forEach.call(document.getElementsByClassName('closeImg'), function (el) { el.classList.add('closeImgInvisible'); });
+  } else {
+    iseditable = true;
+    globalGrid.dragifierOn();
+    Array.prototype.forEach.call(document.getElementsByClassName("grid-item"), function (el) { if (!el.classList.contains('grid-idea')) { el.style.WebkitAnimation = 'shadow-inset-center 0.4s cubic-bezier(0.250, 0.460, 0.450, 0.940) both'; } });
+    Array.prototype.forEach.call(document.getElementsByClassName('closeImg'), function (el) { el.classList.remove('closeImgInvisible'); });
+  }
+  window.setTimeout(function () { save_grid_snapshot(); }, 100);
+}
+
+function select_locale(locale)
+{
+  localStorage.newsLocale = locales[locale];
+  localStorage.removeItem('cachedNewsUpdate');
+  localStorage.removeItem('cachedGNews');
+  document.location = 'chrome-search://local-ntp/local-ntp.html';
+}
+
+function configure_news()
+{
+  document.getElementById("localeDropdown").classList.toggle('show');
+  var buf = '<ul class="localesList">';
+  for (var locale in locales)
+  {
+      if (locale_to_readabletext(localStorage.newsLocale) == locale)
+        buf += '<li class="localesListSelected"><b>' + locale + '</b></li>';
+      else
+        buf += '<li class="localesListUnselected"><a href="#" onClick="javascript:select_locale(\'' + locale + '\'); return false">' + locale + '</a></li>';
+  }
+  buf += '</ul>';
+  document.getElementById("localeDropdown").innerHTML = buf;
+}
+
+window.onclick = function(event) {
+  if (!event.target.matches('.dropbtn') && !event.target.matches('#locale') && !event.target.matches('.arrow-down')) {
+    var dropdowns = document.getElementsByClassName("dropdown-content");
+    var i;
+    for (i = 0; i < dropdowns.length; i++) {
+      var openDropdown = dropdowns[i];
+      if (openDropdown.classList.contains('show')) {
+        openDropdown.classList.remove('show');
+      }
+    }
+  }
+}
+
+function close_explore()
+{
+  localStorage.hideExplore = true;
+  document.getElementById('explore-section').style.display='none';
+  document.getElementById('close-explore-button').style.display='none';
+  document.getElementById('enable-explore-button').style.display='inline-block';
+  document.getElementById('enable-explore-button').addEventListener('click', enable_explore);
+}
+
+function close_news()
+{
+  localStorage.hideNews = true;
+  document.getElementById('news').style.display='none';
+  document.getElementById('newsMore').style.display='none';
+  document.getElementById('configure-button').style.display='none';
+  document.getElementById('close-button').style.display='none';
+  document.getElementById('enable-news-button').style.display='inline-block';
+  document.getElementById('enable-news-button').addEventListener('click', enable_news);
+}
+
+function close_youtube()
+{
+  localStorage.hideYoutube = true;
+  document.getElementById('youtubePromo').style.display='none';
+}
+
+function create_new_item()
+{
+  preconnectTo('https://logos.kiwibrowser.com');
+  var url = prompt("Enter website address", "http://");
+  url = url.trim();
+  url = url.replace(' ', '.');
+  var parser = document.createElement('a');
+  parser.href = url;
+  // Our intent is buzz.blogspot.com to stay buzz.blogspot.com
+  // and m.wikipedia.org to become wikipedia.org
+  var rootDomain = psl.get(parser.hostname);
+  if (!rootDomain)
+    return ;
+  if (typeof localStorage.storedItems == "undefined" || localStorage.storedItems == "")
+      localStorage.storedItems = JSON.stringify([]);
+  var storedItems = JSON.parse(localStorage.storedItems);
+  offset = storedItems.length;
+  storedItems[offset] = {url: url}
+  add_favorite(storedItems[offset]);
+  localStorage.storedItems = JSON.stringify(storedItems);
+  globalGrid.toggle("scaleWithFade");
+  globalGrid.appendNew();
+  window.setTimeout(function () { save_grid_snapshot(); }, 200);
+  window.setTimeout(function () { save_grid_snapshot(); }, 800);
+  localStorage.useCustomTiles = "true";
+}
+</script>
+
+<div style="clear: both;"></div>
+<div class="configure-item dropbtn" role="button" aria-label="Choose news region" title="Choose news region" id="configure-button"><div class="arrow-down" style="float: right;"></div> <span id="locale"></span></div>
+<div class="close-item" role="button" aria-label="Close news" title="Close news" id="close-button">x</div>
+<br />
+  <div id="localeDropdown" class="dropdown-content">
+  </div>
+<div id="newsHeader" style="display: none;"></div>
+<div id="news"></div>
+<div id="newsMore"></div>
+<script>
+if (window.chrome.embeddedSearch.newTabPage.isIncognito || typeof localStorage.hideExplore != "undefined") {
+  document.getElementById('explore-section').style.display='none';
+} else {
+  if (document.getElementById('close-explore-button'))
+    document.getElementById('close-explore-button').addEventListener('click', close_explore);
+}
+if (window.chrome.embeddedSearch.newTabPage.isIncognito || typeof localStorage.hideNews != "undefined") {
+  document.getElementById('news').style.display='none';
+  document.getElementById('newsMore').style.display='none';
+  document.getElementById('configure-button').style.display='none';
+  document.getElementById('close-button').style.display='none';
+} else {
+  if (typeof localStorage.newsLocale == "undefined") {
+      localStorage.newsLocale = '';
+  } else if (localStorage.newsLocale != '') {
+      document.getElementById('locale').innerHTML = locale_to_readabletext(localStorage.newsLocale);
+  }
+  if (document.getElementById('configure-button'))
+    document.getElementById('configure-button').addEventListener('click', configure_news);
+  if (document.getElementById('close-button'))
+    document.getElementById('close-button').addEventListener('click', close_news);
+  if (document.getElementById('newsMore'))
+    document.getElementById('newsMore').addEventListener('click', load_more_news);
+  preconnectTo('https://news.google.com');
+}
+
+async function render_news_async() {
+if (!window.chrome.embeddedSearch.newTabPage.isIncognito)
+{
+//  console.log('News locale is ' + localStorage.newsLocale);
+  if (typeof localStorage.cachedGNews != "undefined" && typeof localStorage.hideNews == "undefined")
+  {
+//    console.log('Rendering GNews from cache');
+    render_gnews(localStorage.cachedGNews, 0, 10);
+    if (typeof localStorage.lastOffsetRendered != "undefined")
+    {
+        for (var i = 10; i <= localStorage.lastOffsetRendered; i += 10)
+            render_gnews(localStorage.cachedGNews, i, 10);
+    }
+  }
+}
+}
+window.setTimeout(function () { render_news_async(); }, 1);
+
+if (!window.chrome.embeddedSearch.newTabPage.isIncognito)
+{
+  if ((typeof localStorage.cachedNewsUpdate == "undefined") || ((Date.now() / 1000) - localStorage.cachedNewsUpdate) > 3000 || (typeof localStorage.needFetch == "undefined")) {
+    if (typeof localStorage.hideNews == "undefined") {
+
+has_valid_foryou_entries = false;
+if (news_are_already_onscreen) {
+      localStorage.needFetch = false;
+} else {
+      document.getElementById('newsMore').innerHTML='';
+      last_offset_rendered = 0;
+      localStorage.lastOffsetRendered = 0;
+      render_news_loading();
+}
+
+async function get_news() {
+try {
+      await fetch('https://news.google.com/foryou' + localStorage.newsLocale, { method: 'GET', credentials: 'include' })
+        .then(function(response) {
+//          console.log('Gnews: received answer from personalized feed');
+          if (response.url.includes("&ceid=")) {
+//            console.log('Gnews: Detected ceid (personalized)');
+            localStorage.newsLocale = response.url.substr(response.url.lastIndexOf('?'));
+            document.getElementById('locale').innerHTML = locale_to_readabletext(localStorage.newsLocale);
+          }
+          console.log("We set has_valid_foryou_entries to true");
+          has_valid_foryou_entries = true;
+          return response.text();
+        })
+        .then(function(answer) {
+          if (answer != localStorage.cachedGNews && !news_are_already_onscreen)
+          {
+            render_gnews(answer, 0, 10);
+          }
+          localStorage.cachedGNews = answer;
+          localStorage.cachedNewsUpdate = (Date.now() / 1000);
+        });
+} catch (err) {
+      console.log('Fetch news failed for: ' + err.message);
+}
+
+console.log("Processing standard news feed");
+console.log(has_valid_foryou_entries);
+try {
+if (!has_valid_foryou_entries)
+{
+if (!news_are_already_onscreen) {
+      last_offset_rendered = 0;
+      localStorage.lastOffsetRendered = 0;
+      render_news_loading();
+}
+      await fetch('https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRFZxYUdjU0FtVnVHZ0pWVXlnQVAB' + localStorage.newsLocale, { method: 'GET', credentials: 'omit' })
+        .then(function(response) {
+          if (response.url.includes("&ceid=")) {
+//            console.log('Gnews: Detected ceid (standard)');
+            localStorage.newsLocale = response.url.substr(response.url.lastIndexOf('?'));
+            document.getElementById('locale').innerHTML = locale_to_readabletext(localStorage.newsLocale);
+          }
+          return response.text();
+        })
+        .then(function(answer) {
+//          console.log('Gnews: received answer from standard feed');
+          if (answer != localStorage.cachedGNews && !news_are_already_onscreen)
+          {
+            render_gnews(answer, 0, 10);
+          }
+          localStorage.cachedGNews = answer;
+          localStorage.cachedNewsUpdate = (Date.now() / 1000);
+        });
+}
+} catch (err) {
+      console.log('Fetch generic news failed for: ' + err.message);
+}
+
+
+} // async
+get_news();
+
+    }
+  }
+}
+
+</script>
+    <div id="attribution"><div id="attribution-text"></div></div>
+
+    <div id="edit-bg" tabindex="0" hidden>
+      <button id="edit-bg-gear"></button>
+    </div>
+
+    <div id="edit-bg-overlay">
+      <div id="edit-bg-dialog">
+        <div id="edit-bg-title"></div>
+        <div id="edit-bg-google-photos" class="bg-option" tabindex="0" hidden>
+          <div class="bg-option-img"></div>
+          <div id="edit-bg-google-photos-text" class="bg-option-text"></div>
+        </div>
+        <div id="edit-bg-default-wallpapers" class="bg-option" tabindex="0">
+          <div class="bg-option-img"></div>
+          <div id="edit-bg-default-wallpapers-text" class="bg-option-text">
+          </div>
+        </div>
+        <div id="edit-bg-upload-image" class="bg-option" tabindex="0" hidden>
+          <div class="bg-option-img"></div>
+          <div id="edit-bg-upload-image-text" class="bg-option-text"></div>
+        </div>
+        <div id="edit-bg-restore-default" class="bg-option" tabindex="0">
+          <div class="bg-option-img"></div>
+          <div id="edit-bg-restore-default-text" class="bg-option-text"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <dialog id="bg-sel-menu-overlay">
+    <div id="bg-sel-menu">
+      <div id="bg-sel-title-bar">
+      <div id="bg-sel-back"></div>
+      <div id="bg-sel-title"></div>
+      </div>
+      <div id="bg-sel-tiles"></div>
+      <div id="bg-sel-footer">
+        <label id="bg-daily-refresh" class="switch">
+          <input type="checkbox">
+          <span class="toggle"></span>
+        </label>
+        <div id="bg-sel-refresh-text"></div>
+        <div id="bg-sel-footer-done"></div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="voice-overlay-dialog" class="overlay-dialog">
+    <div id="voice-overlay" class="overlay-hidden">
+      <button id="voice-close-button" class="close-button">&times;</button>
+      <div id="voice-outer" class="outer">
+        <div class="inner-container">
+          <div id="voice-button-container" class="button-container">
+            <!-- The audio level animation. -->
+            <span id="voice-level" class="level"></span>
+            <!-- The microphone button. -->
+            <span id="voice-button" class="button">
+              <!-- The microphone icon (in CSS). -->
+              <div class="microphone">
+                <span class="receiver"></span>
+                <div class="wrapper">
+                  <span class="stem"></span>
+                  <span class="shell"></span>
+                </div>
+              </div>
+            </span>
+          </div>
+          <div class="text-container">
+            <!-- Low confidence text underneath high confidence text. -->
+            <span id="voice-text-i" class="voice-text"></span>
+            <!-- High confidence text on top of low confidence text. -->
+            <span id="voice-text-f" class="voice-text"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="one-google-end-of-body"></div>
+<div style="clear: both;"></div>
+<br />
+<div id="bottom_panel" style="text-align: center; width: 100%; visibility: hidden">
+<input type="file" name="import-file" id="import-file" style="opacity: 0;position: absolute;z-index: -1;">
+<span style="text-align: center; color: #cccccc; padding-right: 10px" id="enable-news-button">Show news</span>
+<span style="text-align: center; color: #cccccc; padding-right: 10px" id="enable-explore-button">Show explore</span>
+<label for="import-file"><span style="text-align: center; color: #cccccc; padding-right: 10px" id="import-button">Import</span></label>
+<span style="text-align: center; color: #cccccc; padding-right: 10px" id="export-button">Export</span>
+<span style="text-align: center; color: #cccccc; padding-right: 10px" id="reset-button">Reset</span>
+</div>
+<br />
+<script>
+function enable_news()
+{
+  localStorage.removeItem('hideNews');
+  location.reload();
+}
+function enable_explore()
+{
+  localStorage.removeItem('hideExplore');
+  location.reload();
+}
+function reset_page()
+{
+  if (confirm("This will reset all the homepage back to default, are you sure ?"))
+  {
+    var hideYoutube = false;
+    if (typeof localStorage.hideYoutube != "undefined" && localStorage.hideYoutube != false) {
+      hideYoutube = true;
+    }
+    localStorage.clear();
+    localStorage.hideYoutube = hideYoutube;
+    location.reload();
+  }
+}
+if (window.chrome.embeddedSearch.newTabPage.isIncognito)
+{
+  document.getElementById('bottom_panel').style.display='none';
+}
+else
+{
+  document.getElementById('bottom_panel').style.visibility='visible';
+  document.getElementById('enable-news-button').addEventListener('click', enable_news);
+  document.getElementById('enable-explore-button').addEventListener('click', enable_explore);
+  document.getElementById('reset-button').addEventListener('click', reset_page);
+  document.getElementById('export-button').onclick = function(){
+    var localStorageCopy = JSON.parse(JSON.stringify(localStorage));
+    var values = Object.values(localStorageCopy),
+       keys = Object.keys(localStorageCopy),
+       i = keys.length;
+    while ( i-- ) {
+      if (keys[i].startsWith('cached') || keys[i].startsWith('icon-'))
+        delete localStorageCopy[keys[i]];
+    }
+    var dataStr = JSON.stringify(localStorageCopy);
+    var dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+    var dateObj = new Date();
+    var month = dateObj.getUTCMonth() + 1; //months from 1-12
+    var day = dateObj.getUTCDate();
+    var year = dateObj.getUTCFullYear();
+    var exportFileDefaultName = 'kiwi_homepage_'+year+'-'+month+'-'+day+'.json';
+    var linkElement = document.createElement('a');
+    linkElement.setAttribute('href', dataUri);
+    linkElement.setAttribute('download', exportFileDefaultName);
+    linkElement.click();
+  }
+  document.getElementById('import-file').onchange = function(){
+    var file = this.files[0];
+    var reader = new FileReader();
+    reader.onload = function(progressEvent){
+      var content = this.result;
+      var parsedContent = JSON.parse(content);
+
+      var values = Object.values(parsedContent),
+        keys = Object.keys(parsedContent),
+        i = keys.length;
+      while ( i-- ) {
+        localStorage.setItem(keys[i], values[i]);
+      }
+      document.location.reload();
+    };
+    reader.readAsText(file);
+  };
+}
+if (typeof localStorage.hideNews == "undefined") {
+  document.getElementById('enable-news-button').style.display='none';
+}
+if (typeof localStorage.hideExplore == "undefined") {
+  document.getElementById('enable-explore-button').style.display='none';
+}
+</script>
+<br />&nbsp;<br />
+<script src="./local-ntp.js"></script>
+<script>
+function cleanUpOldTilesIdeas() {
+  var values = Object.values(localStorage),
+       keys = Object.keys(localStorage),
+       i = keys.length;
+    while ( i-- ) {
+      if (keys[i].startsWith('lastShown-idea-')) {
+        var tile_name = keys[i].substring('lastShown-idea-'.length);
+        var difference = Math.floor(Date.now() / 1000) - parseInt(localStorage[keys[i]]);
+        if (difference > (86400 * 7)) {
+          console.log('Dropping tile idea: ' + keys[i]);
+          delete localStorage[keys[i]];
+          delete localStorage['icon-idea-' + tile_name];
+        }
+      }
+    }
+}
+function cleanUpOldTiles() {
+  var values = Object.values(localStorage),
+       keys = Object.keys(localStorage),
+       i = keys.length;
+    while ( i-- ) {
+      if (keys[i].startsWith('lastShown-') && !keys[i].startsWith('lastShown-idea-')) {
+        var tile_name = keys[i].substring('lastShown-'.length);
+        var difference = Math.floor(Date.now() / 1000) - parseInt(localStorage[keys[i]]);
+        if (difference > (86400 * 7)) {
+          console.log('Dropping tile: ' + keys[i]);
+          delete localStorage[keys[i]];
+          delete localStorage['icon-' + tile_name];
+        }
+      }
+    }
+}
+window.setTimeout(function () { cleanUpOldTilesIdeas(); cleanUpOldTiles(); }, 3000);
+</script>
+<script>
+if (window.chrome.embeddedSearch.newTabPage.isIncognito)
+{
+  document.getElementById('add-button').style.display='none';
+}
+</script>
+</body>
+</html>
