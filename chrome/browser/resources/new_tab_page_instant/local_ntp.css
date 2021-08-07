@@ -1,0 +1,976 @@
+/* Copyright 2015 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file. */
+
+@keyframes fadein {
+    from {
+        opacity:0;
+    }
+    to {
+        opacity:1;
+    }
+}
+@-moz-keyframes fadein { /* Firefox */
+    from {
+        opacity:0;
+    }
+    to {
+        opacity:1;
+    }
+}
+@-webkit-keyframes fadein { /* Safari and Chrome */
+    from {
+        opacity:0;
+    }
+    to {
+        opacity:1;
+    }
+}
+@-o-keyframes fadein { /* Opera */
+    from {
+        opacity:0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+html {
+  /* Material Design constants */
+  --md-tile-height: 104px;
+  --md-tile-margin: 8px;
+
+  /* This will be overridden based on the viewport width, see below. */
+  --column-count: 2;
+
+  --content-width: calc(
+      (var(--column-count) * (var(--tile-width) + var(--tile-margin)))
+      /* We add an extra pixel because rounding errors on different zooms can
+       * make the width shorter than it should be. */
+      + 1px);
+
+  --logo-height: 200px; /* Normal height of a doodle. */
+  --logo-margin-top: 56px; /* Expected OGB height, so logo doesn't overlap. */
+  --logo-margin-bottom: 29px; /* Between logo and fakebox. */
+
+  /* Initial height determines the margin between the logo and the fakebox. If
+   * the iframe height exceeds the normal --logo-height, the difference is
+   * subtracted from the margin. The actual --logo-iframe-{width,height} can be
+   * changed later, but the initial height, and therefore the margin, remains
+   * the same.
+   */
+  --logo-iframe-initial-height: var(--logo-height);
+  --logo-iframe-height: var(--logo-height);
+  --logo-iframe-resize-duration: 150ms;
+  --logo-iframe-width: 500px;
+  --tile-height: 128px;
+  --tile-margin: 16px;
+  --tile-width: 154px;
+
+  --mv-notice-time: 10s;
+
+  /* These can be overridden by themes. */
+  --text-color: #000;
+  --text-color-light: #fff;
+  --text-color-link: rgb(17, 85, 204);
+
+  height: 100%;
+}
+
+/* width >= (3 cols * (16px + 154px) - 16px + 200px) */
+@media (min-width: 694px) {
+  html {
+    --column-count: 3;
+  }
+}
+
+/* width >= (4 cols * (16px + 154px) - 16px + 200px) */
+@media (min-width: 864px) {
+  html {
+    --column-count: 4;
+  }
+}
+
+/* TODO: Need to discuss with NTP folks before we remove font-family from the
+ * body tag. */
+body {
+  background-attachment: fixed !important;
+  position: initial!important;
+  cursor: default;
+  font-family: arial, sans-serif;
+  font-size: small;
+  margin: 0;
+  min-height: 100%;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+  background: white; /* this is to force night mode to trigger */
+}
+
+body.inited {
+  display: block;
+}
+
+/* Button defaults vary by platform. Reset CSS so that the NTP can use buttons
+ * as a kind of clickable div. */
+button {
+  background: transparent;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+#ntp-contents {
+  height: 100%;
+  position: relative;
+  z-index: 1;
+  width: 98%;
+}
+
+#logo,
+#fakebox-container {
+  flex-shrink: 0;
+}
+
+a:-webkit-any-link {
+  text-decoration: none !important;
+}
+
+a:link {
+  text-decoration: none !important;
+}
+
+.non-google-page #ntp-contents {
+  left: calc(50% - var(--content-width)/2);
+  position: absolute;
+  top: calc(50% - 155px);
+}
+
+body.hide-fakebox-logo #logo,
+body.hide-fakebox-logo #fakebox {
+  opacity: 0;
+}
+
+#logo {
+  height: calc(var(--logo-height) + var(--logo-margin-bottom));
+  margin-top: var(--logo-margin-top);
+  min-height: fit-content;
+  position: relative;
+}
+
+.non-google-page #logo {
+  display: none;
+}
+
+#logo-default,
+#logo-doodle {
+  opacity: 0;
+  visibility: hidden;
+}
+
+#logo-default.show-logo,
+#logo-doodle.show-logo {
+  opacity: 1;
+  visibility: visible;
+}
+
+#logo-doodle-button,
+#logo-doodle-iframe {
+  display: none;
+}
+
+#logo-doodle-button.show-logo,
+#logo-doodle-iframe.show-logo {
+  display: block;
+}
+
+#logo-default.fade,
+#logo-doodle.fade {
+  transition: opacity 130ms, visibility 130ms;
+}
+
+#logo-default,
+#logo-non-white {
+  background-image: url(../../../../ui/webui/resources/images/google_logo.svg);
+  background-repeat: no-repeat;
+  bottom: var(--logo-margin-bottom);
+  height: 92px;
+  left: calc(50% - 272px/2);
+  position: absolute;
+  width: 272px;
+}
+
+body.alternate-logo #logo-default,
+body.alternate-logo #logo-non-white {
+  -webkit-mask-image:
+      url(../../../../ui/webui/resources/images/google_logo.svg);
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: 100%;
+  background: #eee;
+}
+
+#logo-default,
+.non-white-bg #logo-non-white {
+  display: block;
+}
+#logo-non-white,
+.non-white-bg #logo-default {
+  display: none;
+}
+
+#logo-doodle-button {
+  /* An image logo is allowed to spill into the margin below, so it's not a
+   * real bottom margin. If the image extends further than that margin, it
+   * is cropped. */
+  margin: 0 auto;
+  max-height: calc(var(--logo-height) + var(--logo-margin-bottom));
+  overflow: hidden;
+}
+
+.non-white-bg #logo-doodle-button,
+.non-white-bg #logo-doodle-iframe {
+  display: none;
+}
+
+#logo-doodle-iframe {
+  border: 0;
+  height: var(--logo-iframe-height);
+  margin: 0 auto calc(var(--logo-height) + var(--logo-margin-bottom)
+                      - var(--logo-iframe-initial-height)) auto;
+  transition: width var(--logo-iframe-resize-duration),
+              height var(--logo-iframe-resize-duration);
+  width: var(--logo-iframe-width);
+}
+
+#logo-doodle-notifier {
+  display: none;
+}
+.non-white-bg #logo-doodle-notifier {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  display: inline-block;
+  height: 24px;
+  left: calc(50% + 148px);
+  padding: 0;
+  position: absolute;
+  top: 100px;
+  width: 24px;
+}
+@keyframes anim-pos {
+  0% { transform: translate(-98%, 0); }
+  100% { transform: translate(98%, 0); }
+}
+@keyframes anim-z-order {
+  0% { z-index: 100; }
+  100% { z-index: 1; }
+}
+.non-white-bg #logo-doodle-notifier .outer {
+  animation: anim-z-order 3520ms linear infinite;
+  height: 37.5%;
+  left: 50%;
+  margin-left: -18.75%;
+  margin-top: -18.75%;
+  position: absolute;
+  top: 50%;
+  width: 37.5%;
+}
+.non-white-bg #logo-doodle-notifier .inner {
+  animation: anim-pos 880ms cubic-bezier(0.445, 0.05, 0.55, 0.95)
+      infinite alternate;
+  border-radius: 50%;
+  height: 100%;
+  position: absolute;
+  transform: rotate(90deg);
+  width: 100%;
+}
+.non-white-bg #logo-doodle-notifier .ball0 {
+  animation-delay: 2640ms;
+  transform: rotate(45deg);
+}
+.non-white-bg #logo-doodle-notifier .ball1 {
+  animation-delay: 1760ms;
+  transform: rotate(135deg);
+}
+.non-white-bg #logo-doodle-notifier .ball2 {
+  transform: rotate(225deg);
+}
+.non-white-bg #logo-doodle-notifier .ball3 {
+  animation-delay: 880ms;
+  transform: rotate(315deg);
+}
+.non-white-bg #logo-doodle-notifier .ball0 .inner {
+  background: linear-gradient(
+      315deg, rgb(0, 85, 221), rgb(0, 119, 255), rgb(0, 119, 255));
+}
+.non-white-bg #logo-doodle-notifier .ball1 .inner {
+  background: linear-gradient(
+      225deg, rgb(221, 0, 0), rgb(238, 51, 51), rgb(255, 119, 85));
+}
+.non-white-bg #logo-doodle-notifier .ball2 .inner {
+  background: linear-gradient(
+      90deg, rgb(0, 119, 68), rgb(0, 153, 68), rgb(85, 187, 85));
+}
+.non-white-bg #logo-doodle-notifier .ball3 .inner {
+  background: linear-gradient(
+      0deg, rgb(255, 170, 51), rgb(255, 204, 0), rgb(255, 221, 102));
+}
+
+#fakebox-container {
+  margin: 0 auto 8px auto;
+  width: var(--content-width);
+}
+
+#fakebox {
+  background-color: #fff;
+  border-radius: 2px;
+  box-shadow: 0 2px 2px 0 rgba(0, 0, 0, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.08);
+  cursor: text;
+  font-size: 18px;
+  height: 44px;
+  line-height: 36px;
+  margin: 0 calc(var(--tile-margin) / 2 + 1px) 0 calc(var(--tile-margin) / 2);
+  outline: none;
+  position: relative;
+  transition: box-shadow 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.md #fakebox {
+  background-color: rgb(241, 243, 244);
+  border-radius: 22px;
+  box-shadow: none;
+  margin: 0 auto;
+  max-width: 560px;
+}
+
+.non-google-page #fakebox-container {
+  display: none;
+}
+
+#fakebox:hover,
+body.fakebox-focused #fakebox {
+  box-shadow: 0 3px 8px 0 rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+.md #fakebox:hover,
+body.md.fakebox-focused #fakebox {
+  box-shadow: none;
+}
+
+#fakebox > input {
+  bottom: 0;
+  box-sizing: border-box;
+  left: 0;
+  margin: 0;
+  opacity: 0;
+  padding-left: 8px;
+  position: absolute;
+  top: 0;
+  width: 100%;
+}
+
+.md #fakebox > input {
+  padding-left: 20px;
+}
+
+html[dir=rtl] #fakebox > input {
+  padding-left: 0;
+  padding-right: 8px;
+  right: 0;
+}
+
+.md html[dir=rtl] #fakebox > input {
+  padding-right: 20px;
+}
+
+#fakebox-text {
+  bottom: 4px;
+  color: rgba(0, 0, 0, 0.42);
+  font-family: arial, sans-serif;
+  font-size: 16px;
+  left: 13px;
+  margin-top: 1px;
+  overflow: hidden;
+  position: absolute;
+  right: 13px;
+  text-align: initial;
+  text-overflow: ellipsis;
+  top: 4px;
+  vertical-align: middle;
+  visibility: inherit;
+  white-space: nowrap;
+}
+
+.md #fakebox-text {
+  color: rgb(128, 134, 139);
+  font-family: 'Roboto', arial, sans-serif;
+  font-size: 14px;
+  left: 0;
+  padding-left: 20px;
+}
+
+html[dir=rtl] #fakebox-text {
+  left: auto;
+  right: 13px;
+}
+
+#fakebox-cursor {
+  background: #333;
+  bottom: 12px;
+  left: 13px;
+  position: absolute;
+  top: 12px;
+  visibility: hidden;
+  width: 1px;
+}
+
+.md #fakebox-cursor {
+  left: 20px;
+}
+
+html[dir=rtl] #fakebox-cursor {
+  left: auto;
+  right: 13px;
+}
+
+.md html[dir=rtl] #fakebox-cursor {
+  right: 20px;
+}
+
+#fakebox-microphone {
+  background: url(googlemic_clr_24px.svg) no-repeat center;
+  background-size: 24px 24px;
+  bottom: 0;
+  cursor: pointer;
+  padding: 22px 12px 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 41px;
+}
+
+.md #fakebox-microphone {
+  background-size: 16px 16px;
+  margin-right: 12px;
+  width: 28px;
+}
+
+html[dir=rtl] #fakebox-microphone {
+  left: 0;
+  right: auto;
+}
+
+@keyframes blink {
+  0% {
+    opacity: 1;
+  }
+  61.55% {
+    opacity: 0;
+  }
+}
+
+body.fakebox-drag-focused #fakebox-text,
+body.fakebox-focused #fakebox-text {
+  visibility: hidden;
+}
+
+body.fakebox-drag-focused #fakebox-cursor {
+  visibility: inherit;
+}
+
+body.fakebox-focused #fakebox-cursor {
+  animation: blink 1.3s step-end infinite;
+  visibility: inherit;
+}
+
+#most-visited {
+  margin-top: 56px;
+  text-align: -webkit-center;
+  user-select: none;
+}
+
+.md-icons #most-visited {
+  margin-top: 30px;
+}
+
+/* Non-Google pages have no Fakebox, so don't need top margin. */
+.non-google-page #most-visited {
+  margin-top: 0;
+}
+
+#mv-tiles {
+  /* Two rows of tiles of 128px each, 16px of spacing between the rows, and
+   * 4px/8px of margin on top and bottom respectively. If you change this, also
+   * change the corresponding values in most_visited_single.css. */
+  height: calc(4*var(--tile-height) + var(--tile-margin)  + 4px + 8px + 30px);
+  margin: 0;
+  position: relative;
+  text-align: -webkit-auto;
+  width: var(--content-width);
+}
+
+.md-icons #mv-tiles {
+  /* Two rows of tiles of 104px each, 8px of spacing after each row, and 10px of
+   * margin on top and bottom. If you change this, also change the corresponding
+   * values in most_visited_single.css. */
+  height: calc(8*(var(--md-tile-height) + var(--md-tile-margin)) + 8*10px);
+}
+
+#mv-notice-x {
+  -webkit-mask-image: -webkit-image-set(
+      url(chrome-search://local-ntp/images/close_3_mask.png) 1x,
+      url(chrome-search://local-ntp/images/close_3_mask.png@2x) 2x);
+  -webkit-mask-position: 3px 3px;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: 10px 10px;
+  background-color: rgba(90,90,90,0.7);
+  cursor: pointer;
+  display: inline-block;
+  filter: var(--theme-filter, 'none');
+  height: 16px;
+  margin-left: 20px;
+  outline: none;
+  vertical-align: middle;
+  width: 16px;
+}
+
+html[dir=rtl] #mv-notice-x {
+  margin-left: 0;
+  margin-right: 20px;
+}
+
+#mv-notice-x:hover {
+  background-color: rgba(90,90,90,1.0);
+}
+
+#mv-notice-x:active {
+  background-color: rgb(66,133,244);
+}
+
+.md-icons #mv-notice-x {
+  display: none;
+}
+
+#mv-notice-container {
+  width: 100%;
+}
+
+.md-icons #mv-notice-container {
+  bottom: -50px;
+  margin-bottom: 16px;
+  position: fixed;
+  transition: bottom 400ms;
+}
+
+.md-icons #mv-notice-container.float-up {
+  bottom: 0;
+}
+
+.md-icons #mv-notice-container.mv-notice-hide {
+  display: none;
+}
+
+/* The notification shown when a tile is blacklisted. */
+#mv-notice {
+  font-size: 12px;
+  font-weight: bold;
+  opacity: 1;
+  padding: 10px 0;
+}
+
+.md-icons #mv-notice {
+  background-color: white;
+  border: 1px solid rgb(218, 220, 224);
+  /* Necessary for a "pill" shape. Using 50% creates an oval. */
+  border-radius: 500px;
+  font-family: 'Roboto';
+  font-weight: normal;
+  height: 32px;
+  margin: 0 auto;
+  padding: 0;
+  width: fit-content;
+}
+
+#mv-notice span {
+  cursor: default;
+  display: inline-block;
+  height: 16px;
+  line-height: 16px;
+  vertical-align: top;
+}
+
+.md-icons #mv-notice span {
+  color: rgb(95,99,104);
+  height: auto;
+  line-height: 32px;
+  vertical-align: unset;
+}
+
+/* Links in the notification. */
+#mv-notice-links span {
+  -webkit-margin-start: 6px;
+  color: var(--text-color-link);
+  cursor: pointer;
+  outline: none;
+  padding: 0 4px;
+}
+
+.md-icons #mv-notice-links span {
+  -webkit-margin-start: 0;
+  /* Necessary for a "pill" shape. Using 50% creates an oval. */
+  border-radius: 500px;
+  color: rgb(26,115,232);
+  padding: 0 16px;
+}
+
+#mv-notice-links span:hover,
+#mv-notice-links span:focus {
+  text-decoration: underline;
+}
+
+.md-icons #mv-notice-links span:hover,
+.md-icons #mv-notice-links span:active {
+  background-color: rgba(26,115,232, 0.1);
+  text-decoration: none;
+  transition: background-color 200ms;
+}
+
+#mv-msg {
+  color: var(--text-color);
+}
+
+.md-icons #mv-msg {
+  padding: 0 16px;
+}
+
+.default-theme.dark #mv-msg {
+  color: #fff;
+}
+
+.default-theme.dark #mv-notice-links span {
+  color: #fff;
+}
+
+#mv-notice.mv-notice-delayed-hide:not(:focus-within) {
+  opacity: 0;
+  transition-delay: var(--mv-notice-time);
+  transition-property: opacity;
+}
+
+#mv-notice.mv-notice-hide {
+  display: none;
+}
+
+#attribution {
+  bottom: 0;
+  color: var(--text-color-light);
+  cursor: default;
+  display: inline-block;
+  font-size: 13px;
+  left: auto;
+  position: fixed;
+  right: 8px;
+  text-align: left;
+  user-select: none;
+  z-index: -1;
+}
+
+html[dir=rtl] #attribution,
+#attribution.left-align-attribution {
+  left: 8px;
+  right: auto;
+  text-align: right;
+}
+
+#mv-single {
+  border: none;
+  height: 100%;
+  width: 100%;
+}
+
+#one-google {
+  position: absolute;
+  right: 0;
+  top: 0;
+  transition: opacity 130ms;
+}
+
+#one-google.hidden {
+  opacity: 0;
+}
+
+.ripple-container {
+  height: 0;
+  left: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  width: 0;
+  z-index: 100;
+}
+
+.ripple-effect {
+  background-color: rgba(26, 115, 232, 0.1);
+  border-radius: 50%;
+  height: 1px;
+  pointer-events: none;
+  transition: width, height, margin, background-color 400ms 250ms;
+  transition-duration: 400ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  width: 1px;
+}
+
+/* The box containing the slider */
+.switch {
+  background-color: #fff;
+  border-radius: 8px;
+  display: inline-block;
+  height: 12px;
+  left: 3px;
+  position: absolute;
+  top: 2px;
+  transition: background-color linear 80ms;
+  width: 28px;
+  z-index: 0;
+}
+
+/* Hide default checkbox */
+.switch input {
+  display: none;
+}
+
+/* Rounded background element for the toggle */
+.toggle {
+  background-color: #ccc;
+  border-radius: 34px;
+  bottom: 0;
+  cursor: pointer;
+  display: block;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+  transition: transform linear 80ms, background-color linear 80ms;
+}
+
+.toggle::before {
+  background-color: #fff;
+  border-radius: 50%;
+  bottom: -2px;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4);
+  content: '';
+  display: block;
+  height: 16px;
+  left: -6px;
+  position: absolute;
+  transition: transform linear 80ms, background-color linear 80ms;
+  width: 16px;
+}
+
+input:checked + .toggle {
+  background-color: rgba(26, 115, 232, .5);
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4);
+}
+
+input:focus + .toggle {
+  box-shadow: 0 0 1px rgb(33, 150, 243);
+}
+
+input:checked + .toggle::before {
+  -webkit-transform: translateX(26px);
+  background-color: rgb(26, 115, 232);
+  transform: translateX(26px);
+}
+
+#bookmarks-grid, #fake-bookmarks-grid, #ideas-grid {
+    margin: 2%;
+    position: relative;
+}
+
+#fake-bookmarks-grid {
+    z-index: -99999;
+}
+
+.grid-item {
+    float: left;
+    width: 64px;
+    font-size: 10px;
+    overflow: hidden;
+    background: #fff;
+    margin: 10px;
+    color: #3c3c3c;
+    text-align: center;
+    z-index: 999999;
+}
+
+.grid-item a {
+    text-decoration: none;
+    color: #555;
+}
+
+.grid-image {
+    height: 64px;
+    width: 64px;
+    object-fit: contain;
+}
+
+#explore-section {
+    padding-bottom: 20px;
+}
+
+.plus-item a {
+  text-decoration: none;
+}
+
+.plus-item {
+    line-height: 30px;
+    color: #3c3c3c;
+    font-size: 25px;
+    text-align: center;
+    z-index: 999999;
+    color: #777;
+}
+
+.configure-item a, .configure-item-explore a {
+  text-decoration: none;
+}
+
+.configure-item, .configure-item-explore {
+    font-size: 21px;
+    font-weight: 450;
+    z-index: 999999;
+    color: #777;
+    float: left;
+    padding-left: 12px;
+}
+
+.close-item a {
+  text-decoration: none;
+  z-index: 9999999;
+}
+
+.close-item {
+    font-size: 21px;
+    font-weight: 450;
+    z-index: 99999999;
+    color: #777;
+    position: absolute;
+    right: 10px;
+}
+
+.newsImage {
+  width: 128px;
+  height: 128px;
+  object-fit: cover;
+  z-index: 9999999;
+  border-radius: 6px;
+}
+
+.newsItem {
+  margin: 5px;
+  border-radius: 5px;
+  border-bottom: 1px solid #efefef;
+  padding-bottom: 15px !important;
+  font-family: Roboto,RobotoDraft,Helvetica,Arial,sans-serif;
+  margin-top: 15px;
+}
+
+.newsItem a {
+  text-decoration: none;
+}
+
+.newsTitle {
+  color: #222;
+  padding-right: 148px;
+  padding-top: 5px;
+}
+
+.newsAttribution, .newsTime {
+  color: #555;
+  font-size: 70%;
+}
+
+.newsTime {
+  position: relative;
+  top: 10px;
+}
+
+#locale, #explore-title {
+  font-size: 12px;
+  position: relative;
+  top: -2px;
+  padding-right: 6px;
+}
+
+.arrow-down {
+  width: 0;
+  height: 0;
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+  border-top: 10px solid #ccc;
+  position: relative;
+  top: 7px;
+}
+
+.show {display: block !important;}
+
+.dropbtn {
+  cursor: pointer;
+}
+
+.dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.dropdown-content {
+  display: none;
+  position: absolute;
+  background-color: #f1f1f1;
+  min-width: 160px;
+  overflow: auto;
+  box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+  z-index: 1;
+  margin-top: 15px;
+  margin-left: 11px;
+  height: 300px;
+}
+
+.dropdown-content a {
+  color: black;
+  padding: 3px 1px;
+  text-decoration: none;
+  display: block;
+  font-size: 14px;
+}
+
+.dropdown a:hover {background-color: #ddd;}
+
+.localesList { line-height: 28px; }
+.localesListUnselected { list-style-type: circle; }
+
+.lds-dual-ring {
+  display: inline-block;
+  width: 64px;
+  height: 64px;
+}
+.lds-dual-ring:after {
+  content: " ";
+  display: block;
+  width: 46px;
+  height: 46px;
+  margin: 1px;
+  border-radius: 50%;
+  border: 5px solid #aaa;
+  border-color: #aaa transparent #aaa transparent;
+  animation: lds-dual-ring 1.2s linear infinite;
+}
+@keyframes lds-dual-ring {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
