@@ -5,9 +5,9 @@
 
 <resources xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- The application name displayed to the user. -->
-    <string name="app_name" translatable="false">Chromium</string>
-    <string name="bookmark_widget_title" translatable="false">Chromium bookmarks</string>
-    <string name="search_widget_title" translatable="false">Chromium search</string>
-    <string name="quick_action_search_widget_title" translatable="false">Chromium quick action search</string>
-    <string name="dino_widget_title" translatable="false">Chromium dino</string>
+    <string name="app_name" translatable="false">Kiwi Browser</string>
+    <string name="bookmark_widget_title" translatable="false">Kiwi Browser bookmarks</string>
+    <string name="search_widget_title" translatable="false">Kiwi Browser search</string>
+    <string name="quick_action_search_widget_title" translatable="false">Kiwi Browser quick action search</string>
+    <string name="dino_widget_title" translatable="false">Kiwi Browser bird</string>
 </resources>
