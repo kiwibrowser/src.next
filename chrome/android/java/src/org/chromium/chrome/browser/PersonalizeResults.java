@@ -14,7 +14,7 @@ public class PersonalizeResults {
        final boolean shouldRewrapText = ContextUtils.getAppSharedPreferences().getBoolean("text_rewrap", false);
        final boolean shouldRemoveAmp = ContextUtils.getAppSharedPreferences().getBoolean("avoid_amp_websites", true);
        if (shouldRemoveAmp && tab != null && IsSearchUrl(tab.getUrl().getSpec())) {
-          tab.getWebContents().evaluateJavaScript(SCRIPT, null);
+          tab.getWebContents().evaluateJavaScript(AMP_SCRIPT, null);
        }
        if (tab != null && shouldRewrapText) {
           tab.getWebContents().evaluateJavaScript("(function() { var pendingUpdate=false;function viewportHandler(event){if(pendingUpdate)return;pendingUpdate=true;requestAnimationFrame(()=>{pendingUpdate=false;document.getElementsByTagName('html')[0].style.maxWidth=window.visualViewport.width+'px';var miniLeft=visualViewport.offsetLeft;var miniTop = -(visualViewport.offsetTop + visualViewport.offsetTop * ((window.pageYOffset / window.innerHeight) / 2));document.getElementsByTagName('html')[0].style.transition='0s ease-in-out';if (miniLeft == 0 && miniTop == 0) { document.getElementsByTagName('html')[0].style.transform=''; } else { document.getElementsByTagName('html')[0].style.transform='translate('+miniLeft+'px, '+miniTop+'px) scale(1.0)'; } })}window.visualViewport.addEventListener('resize',viewportHandler);window.visualViewport.addEventListener('scroll', viewportHandler); })();", null);
@@ -23,7 +23,7 @@ public class PersonalizeResults {
           tab.getWebContents().evaluateJavaScript("(function() { if (!document.location.href.includes('https://chrome.google.com/webstore')) { return; } function createProperty(value){var _value=value;function _get(){return _value}function _set(v){_value=v}return{'get':_get,'set':_set}};function makePropertyWritable(objBase,objScopeName,propName,initValue){var newProp,initObj;if(objBase&&objScopeName in objBase&&propName in objBase[objScopeName]){if(typeof initValue==='undefined'){initValue=objBase[objScopeName][propName]}newProp=createProperty(initValue);try{Object.defineProperty(objBase[objScopeName],propName,newProp)}catch(e){initObj={};initObj[propName]=newProp;try{objBase[objScopeName]=Object.create(objBase[objScopeName],initObj)}catch(e){}}}}; makePropertyWritable(window, 'navigator', 'userAgent'); window.navigator.userAgent='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4548.0 Safari/537.36'; window.addEventListener('load', function() { if (document.location.pathname == '/webstore/unsupported') { document.location = '/webstore/'; } var node = document.createElement('style');    document.body.appendChild(node);    window.addStyleString = function(str) {        node.innerHTML = str;    }; addStyleString('div { visibility: visible !important; } '); var t=document.querySelector('meta[name=\"viewport\"]');t&&(t.content=\"initial-scale=0.1\",t.content=\"width=1200\") }); })();", null);
        }
        if (tab != null && tab.getUrl().getSpec().startsWith("https://microsoftedge.microsoft.com/addons")) {
-          tab.getWebContents().evaluateJavaScript("(function() { if (!document.location.href.includes('https://microsoftedge.microsoft.com/addons')) { return; } function createProperty(value){var _value=value;function _get(){return _value}function _set(v){_value=v}return{'get':_get,'set':_set}};function makePropertyWritable(objBase,objScopeName,propName,initValue){var newProp,initObj;if(objBase&&objScopeName in objBase&&propName in objBase[objScopeName]){if(typeof initValue==='undefined'){initValue=objBase[objScopeName][propName]}newProp=createProperty(initValue);try{Object.defineProperty(objBase[objScopeName],propName,newProp)}catch(e){initObj={};initObj[propName]=newProp;try{objBase[objScopeName]=Object.create(objBase[objScopeName],initObj)}catch(e){}}}}; makePropertyWritable(window, 'navigator', 'userAgent'); window.navigator.userAgent=window.navigator.userAgent + ' Edg/' + window.navigator.appVersion.match(/Chrome\\/(\\d+(:?\\.\\d+)+)/)[1]; window.addEventListener('load', function() { var xpath = function(xpathToExecute){ var result = []; var nodesSnapshot = document.evaluate(xpathToExecute, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null); for (var i=0 ; i < nodesSnapshot.snapshotLength; i++) { result.push(nodesSnapshot.snapshotItem(i)); } return result; }; xpath(\"//button[contains(@id,'getOrRemoveButton')]\").forEach(function (individualButton) { individualButton.style.opacity='1'; individualButton.style.background='rgb(0, 120, 212) !important'; individualButton.style.height='60px'; individualButton.removeAttribute('disabled'); individualButton.innerHTML = \"<a href=https://edge.microsoft.com/extensionwebstorebase/v1/crx?response=redirect&acceptformat=crx3&x=id%3D\" + individualButton.id.split('-')[1] +  \"%26installsource%3Dondemand%26uc target='_blank' style='color: white; text-decoration: none'><b>Get CRX</b><br>(Hold and tap<br>Download Link)</a>\" }); }); })();", null);
+          tab.getWebContents().evaluateJavaScript(EDGE_SCRIPT, null);
        }
        if (tab != null && tab.getUrl().getSpec().startsWith("https://translate.google.com/translate_c")) {
           tab.getWebContents().evaluateJavaScript("(function(){ if (!document.location.href.includes('https://translate.google.com/translate_c')) { return; } var b=document.getElementById(\"gt-nvframe\");if(b){b.style.position='unset';document.body.style.top='0px'}else{var child=document.createElement('iframe');child.id='gt-nvframe';child.src=document.location.href.replace('/translate_c','/translate_nv');child.style.width='100%';child.style.height='93px';document.body.insertBefore(child,document.body.firstChild);var t=document.querySelector('meta[name=\"viewport\"]');if(!t){var metaTag=document.createElement('meta');metaTag.name='viewport';metaTag.content='width=device-width, initial-scale=1.0';document.body.appendChild(metaTag)}}})();", null);
@@ -59,7 +59,46 @@ public class PersonalizeResults {
         return false;
     }
 
-    private static final String SCRIPT = ""
+    private static final String MAKE_USER_AGENT_WRITABLE = ""
++"(function() {"
++"    function createProperty(value) {"
++"        var _value = value;"
++""
++"        function _get() {"
++"            return _value"
++"        }"
++""
++"        function _set(v) {"
++"            _value = v"
++"        }"
++"        return {"
++"            'get': _get,"
++"            'set': _set"
++"        }"
++"    };"
++""
++"    function makePropertyWritable(objBase, objScopeName, propName, initValue) {"
++"        var newProp, initObj;"
++"        if (objBase && objScopeName in objBase && propName in objBase[objScopeName]) {"
++"            if (typeof initValue === 'undefined') {"
++"                initValue = objBase[objScopeName][propName]"
++"            }"
++"            newProp = createProperty(initValue);"
++"            try {"
++"                Object.defineProperty(objBase[objScopeName], propName, newProp)"
++"            } catch (e) {"
++"                initObj = {};"
++"                initObj[propName] = newProp;"
++"                try {"
++"                    objBase[objScopeName] = Object.create(objBase[objScopeName], initObj)"
++"                } catch (e) {}"
++"            }"
++"        }"
++"    };"
++"    makePropertyWritable(window, 'navigator', 'userAgent');"
++"})();";
+
+    private static final String AMP_SCRIPT = ""
 +"(function() {"
 +"function _cleanupAmp()"
 +"{"
@@ -82,5 +121,30 @@ public class PersonalizeResults {
 +""
 +"document.addEventListener('DOMNodeInserted', _cleanupAmp);"
 +"_cleanupAmp();"
++"})();";
+
+    private static final String EDGE_SCRIPT = ""
++"(function() {"
++"    if (!document.location.href.includes('https://microsoftedge.microsoft.com/addons')) {"
++"        return;"
++"    }"
++ MAKE_USER_AGENT_WRITABLE
++"    window.addEventListener('load', function() {"
++"        var xpath = function(xpathToExecute) {"
++"            var result = [];"
++"            var nodesSnapshot = document.evaluate(xpathToExecute, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);"
++"            for (var i = 0; i < nodesSnapshot.snapshotLength; i++) {"
++"                result.push(nodesSnapshot.snapshotItem(i));"
++"            }"
++"            return result;"
++"        };"
++"        xpath(\"//button[contains(@id,'getOrRemoveButton')]\").forEach(function(individualButton) {"
++"            individualButton.style.opacity = '1';"
++"            individualButton.style.background = 'rgb(0, 120, 212) !important';"
++"            individualButton.style.height = '60px';"
++"            individualButton.removeAttribute('disabled');"
++"            individualButton.innerHTML = \"<a href='https://edge.microsoft.com/extensionwebstorebase/v1/crx?response=redirect&acceptformat=crx3&x=id%3D' + individualButton.id.split('-')[1] + '%26installsource%3Dondemand%26uc' target='_blank' style='color: white; text-decoration: none'><b>Get CRX</b><br>(Hold and tap<br>Download Link)</a>\";";
++"        });"
++"    });"
 +"})();";
 }
