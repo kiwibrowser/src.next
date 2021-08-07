@@ -44,6 +44,16 @@ If you need to add or remove commits where you have done mistake, `git rebase -i
 
 `3eb71bb7cae580107938f6394513462e67033f8a` is the root commit from which both Kiwi and Chromium branch are born from.
 
+## Updating your local repository
+
+In order to keep the history clean, we are using rebase, and not merge, to fetch the latest modifications
+you can use:
+
+`git fetch`
+`git pull --rebase`
+
+In a normal situation, this is going to show `First, rewinding head to replay your work on top of it...`
+
 ## Navigating the source-code
 
 Kiwi is based on Chromium, to find code, use https://source.chromium.org/chromium/chromium/src
