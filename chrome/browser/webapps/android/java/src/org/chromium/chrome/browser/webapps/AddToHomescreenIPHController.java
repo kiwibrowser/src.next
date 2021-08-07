@@ -117,6 +117,8 @@ public class AddToHomescreenIPHController {
 
     private static boolean canShowAddToHomescreenMenuItem(Context context, Tab tab) {
         if (tab.isIncognito()) return false;
+        // Always disable can add to home screen for now, to-do add a ContextUtils check
+        if (true) return false;
 
         GURL url = tab.getUrl();
         if (url.isEmpty() || !url.isValid()) return false;
