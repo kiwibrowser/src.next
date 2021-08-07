@@ -55,6 +55,12 @@ you can use:
 
 In a normal situation, this is going to show `First, rewinding head to replay your work on top of it...`
 
+## Accepting pull requests
+
+When you accept a pull request:
+If the source repository has very clean commits description, and you want the commits to appear as-they-are in the source repository, use Rebase.
+If the source repository has too many multiple commits or the commit names are not very explicit or messy, use Merge.
+
 ## Navigating the source-code
 
 Kiwi is based on Chromium, to find code, use https://source.chromium.org/chromium/chromium/src
