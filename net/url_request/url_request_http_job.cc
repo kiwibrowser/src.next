@@ -312,6 +312,10 @@ void URLRequestHttpJob::Start() {
   {
      request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.81 Safari/537.36");
   }
+  else if (request_info_.url.host().find("facebook.com") != std::string::npos || request_info_.url.host().find("fbcdn") != std::string::npos || request_info_.url.host().find("fbcdn.net") != std::string::npos)
+  {
+     request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (Linux; Android 3.0; ONEPLUS A6003) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.25 Mobile Safari/537.36");
+  }
   else if (request_info_.url.host().find("news.google.com") != std::string::npos && request_info_.url.path().find("CAAqJggKIiBDQkFTRWdvSUwyMHZNRFZxYUdjU0FtVnVHZ0pWVXlnQVAB") != std::string::npos)
   {
      request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (Linux; Android 9; ONEPLUS A6003) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.99 Mobile Safari/537.36");
