@@ -10,12 +10,18 @@
     <string name="main_menu_turn_off_night_mode">Desactivar modo Nocturno</string>
     <string name="main_menu_exit">Salir</string>
     <string name="main_menu_extensions">Extensiones</string>
+    <string name="main_menu_disable_proxy">Disable proxy / VPN</string>
     <string name="menu_import_bookmarks">Importar marcadores</string>
     <string name="menu_export_bookmarks">Exportar marcadores</string>
+    <string name="main_menu_developer_tools">Developer tools</string>
     <string name="appearance_preferences">Apariencia</string>
     <string name="appearance_preferences_themes">Temas</string>
+    <string name="accessibility_keep_toolbar_visible_title">Toolbar always on screen</string>
+    <string name="accessibility_keep_toolbar_visible_summary">Keep toolbar always on screen while scrolling</string>
     <string name="accessibility_preferences_text_rewrap_title">Ajuste de texto y línea</string>
     <string name="accessibility_preferences_text_rewrap_summary">Ajustar el texto al hacer zoom</string>
+    <string name="accessibility_preferences_holding_tabswitcher_opens_contextual_menu_title">Tab switcher long click menu</string>
+    <string name="accessibility_preferences_holding_tabswitcher_opens_contextual_menu_summary">Holding tab switcher button opens a menu instead of opening a new tab</string>
     <string name="accessibility_preferences_open_in_external_application_title">Habilitar aplicaciones externas</string>
     <string name="accessibility_preferences_open_in_external_application_summary">Abrir enlaces con aplicaciones externas (Maps, YouTube, Vimeo) cuando sea posible</string>
     <string name="accessibility_preferences_nightmode_grayscale_title">Escala de grises modo nocturno</string>
@@ -25,6 +31,8 @@
     <string name="accessibility_preferences_enable_bottom_toolbar_summary">Mover la barra de direcciones a la parte inferior</string>
     <string name="accessibility_preferences_enable_overscroll_button_title">Botón Mano (Sólo en barra inferior)</string>
     <string name="accessibility_preferences_enable_overscroll_button_summary">Añada el botón Mano para alcanzar la parte superior de la página para trabajar con una sola mano</string>
+    <string name="accessibility_preferences_keep_address_bar_content_title">Do not delete address bar content</string>
+    <string name="accessibility_preferences_keep_address_bar_content_summary">Keep content when focusing the address bar</string>
     <string name="accessibility_preferences_enable_side_swipe_title">Deslizamiento de Bordes</string>
     <string name="accessibility_preferences_enable_side_swipe_summary">Habilite los gestos de deslizamiento-izquierdo y deslizamiento-derecho en los bordes de la página web para navegar en el historial de la pestaña</string>
     <string name="accessibility_preferences_enable_up_swipe_title">Deslizamiento hacia arriba</string>
@@ -36,6 +44,8 @@
     <string name="preferences_restart_now">REINICIAR AHORA</string>
     <string name="preferences_restart_later">Después</string>
     <string name="preferences_translator">Traductor</string>
+    <string name="preferences_tabswitcher">Tab switcher</string>
+    <string name="preferences_nightmode">Night mode</string>
     <string name="download_preferences_enable_external_download_manager_title">Administrador de descargas externo</string>
     <string name="download_preferences_enable_external_download_manager_summary">Usar un administrador de descargas externas (ej: Advanced Download Manager)</string>
     <string name="privacy_preferences_accept_cookie_consent_title">Aceptar cookies</string>
@@ -51,4 +61,9 @@
     <string name="search_engines_preferences_howto_add">Recientemente visitado\nPara añadir un nuevo motor de búsqueda, vaya al motor de búsqueda (ej: Bing.com) y hacer una búsqueda. Después de pocos segundos, el motor de búsqueda se añadirá a la lista.</string>
     <string name="suggest_adblock">Haga clic aquí para cambiar la protección de rastreo y anuncios</string>
     <string name="website_settings_add_site_description_ads">Permitir mostrar anuncios para un sitio específico</string>
+    <string name="website_settings_desktop_mode">Desktop mode by default</string>
+    <string name="website_settings_desktop_mode_enabled">Prefer desktop version of websites</string>
+    <string name="website_settings_desktop_mode_disabled">Prefer mobile-optimized version of websites</string>
+    <string name="main_menu_mobile_site">Mobile site</string>
+    <string name="data_reduction_description_lite_mode_kiwi">When Lite mode is activated, Kiwi Browser will try to save data by letting the websites know that they should serve a lighter version of the website. In this mode, Kiwi may disable certain pictures or elements on the page to speedup loading. The traffic goes directly to the website without intermediaries. To save the maximum amount of data, ticking \"Hide annoying ads\" in the main menu is recommended. Blocked ads do not count toward the data saving counter.</string>
 </resources>
