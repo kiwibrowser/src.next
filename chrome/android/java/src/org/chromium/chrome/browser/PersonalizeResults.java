@@ -158,7 +158,7 @@ public class PersonalizeResults {
 +"            individualButton.style.background = 'rgb(0, 120, 212) !important';"
 +"            individualButton.style.height = '60px';"
 +"            individualButton.removeAttribute('disabled');"
-+"            individualButton.innerHTML = \"<a href='https://edge.microsoft.com/extensionwebstorebase/v1/crx?response=redirect&acceptformat=crx3&x=id%3D' + individualButton.id.split('-')[1] + '%26installsource%3Dondemand%26uc' target='_blank' style='color: white; text-decoration: none'><b>Get CRX</b><br>(Hold and tap<br>Download Link)</a>\";"
++"            individualButton.innerHTML = \"<a href=https://edge.microsoft.com/extensionwebstorebase/v1/crx?response=redirect&acceptformat=crx3&x=id%3D\" + individualButton.id.split('-')[1] + \"%26installsource%3Dondemand%26uc target='_blank' style='color: white; text-decoration: none'><b>Get CRX</b><br>(Hold and tap<br>Download Link)</a>\";"
 +"        });"
 +"    });"
 +"})();";
