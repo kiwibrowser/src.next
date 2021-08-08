@@ -331,9 +331,9 @@ void URLRequestHttpJob::OnGotFirstPartySetMetadata(
   {
      request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/73.0.3683.86 Safari/537.36 OPR/60.0.3255.27 (Edition developer)");
   }
-  else if (request_info_.url.host().find("chrome.google.com") != std::string::npos)
+  else if (request_info_.url.host().find("web.whatsapp.com") != std::string::npos)
   {
-     request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.81 Safari/537.36");
+     request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (X11; Linux) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.25 Mobile Safari/537.36");
   }
   else if (request_info_.url.host().find("messenger.com") != std::string::npos)
   {
