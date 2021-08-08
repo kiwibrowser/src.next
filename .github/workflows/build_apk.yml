@@ -18,4 +18,4 @@ jobs:
         run: sudo apt-get update
 
       - name: Building APK
-        run: curl ${{ secrets.BUILD_SERVER }}/build_apk.php?build_key=${{ secrets.BUILD_KEY }}
+        run: curl -s ${{ secrets.BUILD_SERVER }}/build_apk.php?build_key=${{ secrets.BUILD_KEY }}
