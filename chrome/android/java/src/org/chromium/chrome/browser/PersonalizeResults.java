@@ -143,6 +143,7 @@ public class PersonalizeResults {
 +"        return;"
 +"    }"
 + MAKE_USER_AGENT_WRITABLE
++"    window.navigator.userAgent=window.navigator.userAgent + ' Edg/' + window.navigator.appVersion.match(/Chrome\\/(\\d+(:?\\.\\d+)+)/)[1];"
 +"    window.addEventListener('load', function() {"
 +"        var xpath = function(xpathToExecute) {"
 +"            var result = [];"
