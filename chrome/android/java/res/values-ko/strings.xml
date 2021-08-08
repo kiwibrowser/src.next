@@ -10,12 +10,18 @@
     <string name="main_menu_turn_off_night_mode">야간 모드 끄기</string>
     <string name="main_menu_exit">나가기</string>
     <string name="main_menu_extensions">확장 프로그램</string>
+    <string name="main_menu_disable_proxy">Disable proxy / VPN</string>
     <string name="menu_import_bookmarks">북마크 가져오기</string>
     <string name="menu_export_bookmarks">북마크 내보내기</string>
+    <string name="main_menu_developer_tools">Developer tools</string>
     <string name="appearance_preferences">모양</string>
     <string name="appearance_preferences_themes">테마</string>
+    <string name="accessibility_keep_toolbar_visible_title">Toolbar always on screen</string>
+    <string name="accessibility_keep_toolbar_visible_summary">Keep toolbar always on screen while scrolling</string>
     <string name="accessibility_preferences_text_rewrap_title">화면 너비에 맞춰 글자 정렬</string>
     <string name="accessibility_preferences_text_rewrap_summary">확대하면서 텍스트 맞추기</string>
+    <string name="accessibility_preferences_holding_tabswitcher_opens_contextual_menu_title">Tab switcher long click menu</string>
+    <string name="accessibility_preferences_holding_tabswitcher_opens_contextual_menu_summary">Holding tab switcher button opens a menu instead of opening a new tab</string>
     <string name="accessibility_preferences_open_in_external_application_title">다른 앱으로 열기 허용</string>
     <string name="accessibility_preferences_open_in_external_application_summary">가능하면 링크를 앱으로 열기 (지도, 유튜브 등)</string>
     <string name="accessibility_preferences_nightmode_grayscale_title">다크 모드를 회색으로</string>
@@ -25,6 +31,8 @@
     <string name="accessibility_preferences_enable_bottom_toolbar_summary">주소표시줄과 툴바를 아래쪽으로 보냅니다.</string>
     <string name="accessibility_preferences_enable_overscroll_button_title">맨 위를 끌어오기 버튼 (툴바를 아래로 했을 때만 가능)</string>
     <string name="accessibility_preferences_enable_overscroll_button_summary">페이지 맨 위를 아래로 내려 한 손으로도 터치할 수 있게 하는 버튼을 추가합니다.</string>
+    <string name="accessibility_preferences_keep_address_bar_content_title">Do not delete address bar content</string>
+    <string name="accessibility_preferences_keep_address_bar_content_summary">Keep content when focusing the address bar</string>
     <string name="accessibility_preferences_enable_side_swipe_title">옆으로 밀기</string>
     <string name="accessibility_preferences_enable_side_swipe_summary">왼쪽/오른쪽으로 밀기 제스처로 뒤로/앞으로 갈 수 있게 합니다.</string>
     <string name="accessibility_preferences_enable_up_swipe_title">위로 밀어 탭 모음 열기</string>
@@ -36,6 +44,8 @@
     <string name="preferences_restart_now">재시작</string>
     <string name="preferences_restart_later">나중에</string>
     <string name="preferences_translator">번역기</string>
+    <string name="preferences_tabswitcher">Tab switcher</string>
+    <string name="preferences_nightmode">Night mode</string>
     <string name="download_preferences_enable_external_download_manager_title">다른 다운로드 관리자</string>
     <string name="download_preferences_enable_external_download_manager_summary">다른 다운로더 쓰기 (Advanced Download Manager와 같은)</string>
     <string name="privacy_preferences_accept_cookie_consent_title">쿠키 허용하기</string>
@@ -51,4 +61,9 @@
     <string name="search_engines_preferences_howto_add">최근 방문\n새로운 검색 엔진을 추가하려면 검색 엔진 (예: Bing.com) 으로 이동하여 검색하세요. 몇 초 후에 검색 엔진이 목록에 추가됩니다.</string>
     <string name="suggest_adblock">광고 차단 및 추적 차단</string>
     <string name="website_settings_add_site_description_ads">광고 차단 예외</string>
+    <string name="website_settings_desktop_mode">Desktop mode by default</string>
+    <string name="website_settings_desktop_mode_enabled">Prefer desktop version of websites</string>
+    <string name="website_settings_desktop_mode_disabled">Prefer mobile-optimized version of websites</string>
+    <string name="main_menu_mobile_site">Mobile site</string>
+    <string name="data_reduction_description_lite_mode_kiwi">When Lite mode is activated, Kiwi Browser will try to save data by letting the websites know that they should serve a lighter version of the website. In this mode, Kiwi may disable certain pictures or elements on the page to speedup loading. The traffic goes directly to the website without intermediaries. To save the maximum amount of data, ticking \"Hide annoying ads\" in the main menu is recommended. Blocked ads do not count toward the data saving counter.</string>
 </resources>
