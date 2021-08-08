@@ -58,8 +58,10 @@ In a normal situation, this is going to show `First, rewinding head to replay yo
 ## Accepting pull requests
 
 When you accept a pull request:
-If the source repository has very clean commits description, and you want the commits to appear as-they-are in the source repository, use Rebase.
-If the source repository has too many multiple commits or the commit names are not very explicit or messy, use Merge.
+
+ - If the source repository has very clean commits description, and you want the commits to appear as-they-are in the source repository, use `Rebase and merge`.
+
+ - If the source repository has multiple commits for the fix or the commit names are not very explicit or messy, use `Squash and merge`.
 
 ## Navigating the source-code
 
