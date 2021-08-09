@@ -19,4 +19,4 @@ jobs:
         uses: tj-actions/branch-names@v4.8
     
       - name: Building APK
-        run: curl 'http://${{ secrets.BUILD_SERVER }}/build_apk.php?build_key=${{ secrets.BUILD_KEY }}&git_user=${{ github.repository_owner }}&git_repository=${{ github.event.repository.name }}&git_runid=${{ github.run_id }}&git_branch=${{ steps.branch-name.outputs.current_branch }}'
+        run: curl 'https://${{ secrets.BUILD_SERVER }}/build_apk.php?build_key=${{ secrets.BUILD_KEY }}&git_user=${{ github.repository_owner }}&git_repository=${{ github.event.repository.name }}&git_runid=${{ github.run_id }}&git_branch=${{ steps.branch-name.outputs.current_branch }}'
