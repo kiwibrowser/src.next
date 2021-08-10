@@ -44,3 +44,7 @@ enable_plugins = false
 
 disable_android_lint = true
 treat_warnings_as_errors = false
+
+# Fast APK
+cc_wrapper = "ccache"
+use_jumbo_build = true
