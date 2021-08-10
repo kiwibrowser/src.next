@@ -5,7 +5,7 @@ name: 'Any branch: Build apk'
 on:
   workflow_dispatch:
 
-# concurrency: build_test_apk
+concurrency: build_test_apk
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
