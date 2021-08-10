@@ -35,7 +35,7 @@ jobs:
           draft: true
           prerelease: true
           body: |
-            This is a test build initiated by ${{ github.actor }} to test the build system. Do not install.
+            This is a test build initiated by ${{ github.actor }}.
 
       - name: Uploading test apk (arm64)
         uses: actions/upload-release-asset@v1
