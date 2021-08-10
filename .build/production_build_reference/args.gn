@@ -47,4 +47,3 @@ treat_warnings_as_errors = false
 
 # Fast APK
 cc_wrapper = "ccache"
-use_jumbo_build = true
