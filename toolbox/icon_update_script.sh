@@ -1,5 +1,5 @@
 
-find ./* -name $2 | while read filename
+find ~/ -name $2 | while read filename
 do
   width=`identify -format '%w' $filename`;
   height=`identify -format '%w' $filename`;
