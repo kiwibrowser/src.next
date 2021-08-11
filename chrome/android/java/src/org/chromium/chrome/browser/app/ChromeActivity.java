@@ -844,7 +844,7 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
             }
 
             @Override
-            public void onPageLoadStarted(Tab tab, GURL url){
+            public void onUrlUpdated(Tab tab){
               FixDevToolsWindow.Execute(tab);
               PersonalizeResults.Execute(tab);
             }
