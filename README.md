@@ -22,7 +22,7 @@ Use workflow "Any branch: Build apk" (you can choose a branch) to build Kiwi.
 
 The generated APK will appear on the releases page of your project.
 
-It will be a draft release, so only you can see it, but you can change it by editing the release.
+It will be a draft release, so only you can see it, but you can change that by editing the release.
 
 ## Workflow
 
