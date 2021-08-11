@@ -49,9 +49,6 @@ jobs:
       - name: Adding file to Git repository
         run: git add ${{ github.event.inputs.path }}
 
-      - name: Committing file
-        run: git commit --allow-empty -a -m '[Chromium] Importing ${{ github.event.inputs.path }} from version ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}'
-
       - name: Importing assets from adjacent folders (if it's an image)
         if: contains('${{ github.event.inputs.path }}', 'drawable-') || contains('${{ github.event.inputs.path }}', 'mipmap-')
         continue-on-error: true
@@ -66,10 +63,13 @@ jobs:
               wget "https://chromium.googlesource.com/chromium/src/+/refs/tags/${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}/${adjacent_target_file}?format=TEXT" -O /tmp/file.txt &&
               mkdir -p $(dirname "${adjacent_target_file}") &&
               cat /tmp/file.txt | base64 --decode > ${adjacent_target_file} &&
-              git add ${adjacent_target_file} &&
-              git commit --allow-empty -a -m "[Chromium] Importing ${adjacent_target_file} from version ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }} (automatic import because we imported ${{ github.event.inputs.path }})"
+              git add ${adjacent_target_file}
             done
           done
+
+      - name: Committing file(s)
+        run: git commit --allow-empty -a -m '[Chromium] Importing ${{ github.event.inputs.path }} from version ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}'
+
 
       - name: Pushing repository
         run: git push origin chromium
