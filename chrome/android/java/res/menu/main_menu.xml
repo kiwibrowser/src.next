@@ -149,7 +149,7 @@
             android:title="@string/main_menu_turn_on_night_mode" />
         <item android:id="@+id/developer_tools_id"
             android:title="@string/main_menu_developer_tools"
-            android:icon="@drawable/settings_all_sites" />
+            android:icon="@drawable/ic_devtools" />
         <item android:id="@+id/preferences_id"
             android:title="@string/menu_settings"
             android:icon="@drawable/settings_cog" />
