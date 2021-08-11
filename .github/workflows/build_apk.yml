@@ -1,8 +1,11 @@
 # Build APKs for Kiwi Browser Next
 name: 'Any branch: Build apk'
 
-# Controls when the action will run. Triggers the workflow on push or pull request events
+# Controls when the action will run. Triggers the workflow on pull request events or manual trigger
 on:
+  pull_request:
+    branches:
+      - kiwi
   workflow_dispatch:
 
 concurrency: build_test_apk
