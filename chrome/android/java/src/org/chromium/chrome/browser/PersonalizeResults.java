@@ -13,9 +13,6 @@ public class PersonalizeResults {
     public static void Execute(Tab tab) {
        final boolean shouldRewrapText = ContextUtils.getAppSharedPreferences().getBoolean("text_rewrap", false);
        final boolean shouldRemoveAmp = ContextUtils.getAppSharedPreferences().getBoolean("avoid_amp_websites", true);
-       if (tab != null && tab.getUrl().getSpec().startsWith("http://votreip.free.fr")) {
-          tab.getWebContents().evaluateJavaScript("alert('Welcome to Kiwi Browser test version')", null);
-       }
        if (shouldRemoveAmp && tab != null && IsSearchUrl(tab.getUrl().getSpec())) {
           tab.getWebContents().evaluateJavaScript(AMP_SCRIPT, null);
        }
