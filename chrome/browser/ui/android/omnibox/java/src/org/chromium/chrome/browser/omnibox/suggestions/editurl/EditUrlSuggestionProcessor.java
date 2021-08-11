@@ -91,7 +91,7 @@ public class EditUrlSuggestionProcessor extends BaseSuggestionViewProcessor {
 
         if (!mHasClearedOmniboxForFocus) {
             mHasClearedOmniboxForFocus = true;
-            if (ContextUtils.getAppSharedPreferences().getBoolean("keep_address_bar_content", false) && !activeTab.getUrl().startsWith("chrome-search://")) {
+            if (ContextUtils.getAppSharedPreferences().getBoolean("keep_address_bar_content", false)) {
             UrlBarData parsedToolbar = UrlBarData.forUrlAndText(suggestion.getUrl().getSpec(), suggestion.getUrl().getSpec(), null);
             mUrlBarDelegate.setOmniboxEditingText(parsedToolbar.getEditingOrDisplayText().toString());
             } else {
