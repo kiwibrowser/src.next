@@ -21,11 +21,11 @@ jobs:
         id: branch-name
         uses: tj-actions/branch-names@v4.8
     
-      - name: Building APK
+      - name: Building APK (if manually triggered)
         if: github.event_name != 'pull_request'
         run: curl --http1.0 --no-buffer -s 'http://${{ secrets.BUILD_SERVER }}/build_apk.php?build_key=${{ secrets.BUILD_KEY }}&git_user=${{ github.repository_owner }}&git_repository=${{ github.event.repository.name }}&git_runid=${{ github.run_id }}&git_branch=${{ steps.branch-name.outputs.current_branch }}'
 
-      - name: Building APK (pull request)
+      - name: Building APK (if a pull request)
         if: github.event_name == 'pull_request'
         run: curl --http1.0 --no-buffer -s 'http://${{ secrets.BUILD_SERVER }}/build_apk.php?build_key=${{ secrets.BUILD_KEY }}&git_user=${{ github.repository_owner }}&git_repository=${{ github.event.repository.name }}&git_runid=${{ github.run_id }}&git_branch=${{ steps.branch-name.outputs.current_branch }}'
 
