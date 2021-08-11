@@ -113,7 +113,7 @@ The reason: We want a script to manages the rebase and upgrading the Chromium ve
 
 When Chromium refactors significant amount of code, they delete significant portions of code, or rewrite the inner-working of functions (e.g. extension APIs) and then we end up with a conflict.
 
-If you keep all the code, and just put it in a #if 0, then the changes are done by Chromium team, but you don't have to worry about conflicts.
+If you keep all the code, and just put it in a `#if 0`, then the changes are done by Chromium team, but you don't have to worry about conflicts.
 
 The code is not conceptually correct, but it's easier to maintain.
 
@@ -167,6 +167,26 @@ import org.chromium.base.ContextUtils;
 ```
 
 This is because it's a script / robot taking care of the rebase, and if you put your new imports between other imports, this can easily confuse the script during the merge process when Chromium refactors code.
+
+## Code style in the case of exceptions with a list that can grow in the future
+
+If you write code that depends on a list of domains, or protocols, or IDs, or classes, and you think that someone else may want to add a domain to the list (for example here with `[kiwi://|chrome-search://|chrome://]`:
+```
+       if (tab != null && (tab.getUrl().getSpec().startsWith("kiwi://") || tab.getUrl().getSpec().startsWith("chrome-search://") || tab.getUrl().getSpec().startsWith("chrome://"))) {
+          tab.getWebContents().evaluateJavaScript("(function() {" + ADAPT_TO_MOBILE_VIEWPORT + "})();", null);
+       }
+```
+
+it's slightly more convenient if you write:
+```
+       if (tab != null && (tab.getUrl().getSpec().startsWith("kiwi://")
+                       || tab.getUrl().getSpec().startsWith("chrome-search://"))
+                       || tab.getUrl().getSpec().startsWith("chrome://"))) {
+          tab.getWebContents().evaluateJavaScript("(function() {" + ADAPT_TO_MOBILE_VIEWPORT + "})();", null);
+       }
+```
+
+This way, when adding a new domain, or a new exception in general, the developer only needs to copy-paste the line, and this is very convenient (especially for the contributors on mobile).
 
 ## Adding a new setting
 
