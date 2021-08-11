@@ -43,6 +43,8 @@ To keep the size of the repository small, we replicate only the files that are c
   - Use workflow "Chromium: Import" to add a new file to be replicated.
   - Use workflow "Chromium: Update files from upstream" to update the replica.
 
+Except with the "Any branch" workflows, you don't need to pick the correct branch, the workflow does it for you.
+
 ## Resolving issues
 
 If you need to add or remove commits where you have done mistake, `git rebase -i 3eb71bb7cae580107938f6394513462e67033f8a --committer-date-is-author-date`
