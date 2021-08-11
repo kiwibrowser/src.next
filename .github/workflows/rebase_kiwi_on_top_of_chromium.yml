@@ -22,16 +22,48 @@ jobs:
           git config --global user.email "github@actions"
           git config --global user.name "Repository manager"
 
-      - name: Switching to Kiwi
-        run: git switch kiwi
-        
       - name: Fetching Chromium branch
         run: git fetch origin chromium
 
-      - name: Rebasing on top of Chromium
-        run: git rebase origin/chromium --committer-date-is-author-date
+      - name: Disabling Git pager (e.g. for git log)
+        run: git config --global core.pager 'cat'
 
-      # This is done on purpose
-      # See: https://redfin.engineering/git-rebasing-public-branches-works-much-better-than-youd-think-ecc9a115aea9
-      - name: Pushing branch
-        run: git push origin kiwi --force
+      - name: Preparing local Chromium branch
+        run: git switch chromium
+
+      - name: Loading settings from CHROMIUM_VERSION
+        run: |
+          if [ -f "CHROMIUM_VERSION" ]; then
+            source CHROMIUM_VERSION;
+            export $(cut -d= -f1 CHROMIUM_VERSION | grep -vF '#');
+            env | grep -F CHROMIUM_ >> $GITHUB_ENV
+          fi;
+
+      - name: Switching to Kiwi
+        run: git switch kiwi
+
+      - name: Generating Kiwi version
+        run: |
+          echo "# The version to use for Kiwi Browser" > KIWI_VERSION
+          echo "" >> KIWI_VERSION
+          echo "MAJOR=${{ env.CHROMIUM_MAJOR }}" >> KIWI_VERSION
+          echo "MINOR=${{ env.CHROMIUM_MINOR }}" >> KIWI_VERSION
+          echo "BUILD=${{ env.CHROMIUM_BUILD }}" >> KIWI_VERSION
+          echo "PATCH=${{ env.CHROMIUM_PATCH }}" >> KIWI_VERSION
+
+      - name: Creating pull request
+        id: pullrequest
+        uses: peter-evans/create-pull-request@v3
+        with:
+          branch: chromium
+          base: kiwi
+          delete-branch: false
+          signoff: true
+          title: "Rebase Kiwi to Chromium version ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}"
+          commit-message: "Rebase Kiwi to Chromium version ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}"
+          body: Version update initiated by ${{ github.actor }}
+
+      - name: Getting pull request URL
+        run: |
+          echo "Pull request number - ${{ steps.pullrequest.outputs.pull-request-number }}"
+          echo "Pull request URL - ${{ steps.pullrequest.outputs.pull-request-url }}"
