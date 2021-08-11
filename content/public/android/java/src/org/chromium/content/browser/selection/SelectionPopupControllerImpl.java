@@ -78,7 +78,7 @@ public class SelectionPopupControllerImpl extends ActionModeCallbackHelper
                    ContainerViewObserver, UserData {
     private static final String TAG = "SelectionPopupCtlr"; // 20 char limit
     private static final boolean DEBUG = false;
-
+INTENTIONAL_ERROR
     /**
      * Android Intent size limitations prevent sending over a megabyte of data. Limit
      * query lengths to 100kB because other things may be added to the Intent.
