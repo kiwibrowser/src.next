@@ -41,4 +41,5 @@ jobs:
           VALIDATE_ALL_CODEBASE: false
           DEFAULT_BRANCH: kiwi
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LINTER_RULES_PATH: ./.github/linters/
           JAVA_FILE_NAME: google_checks.xml
