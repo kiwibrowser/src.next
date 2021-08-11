@@ -18,7 +18,7 @@ Be kind.
 
 ## Building
 
-Use workflow "Any branch: Build apk" (you can choose a branch) to build Kiwi.
+Use workflow "Any branch: Build apk" to build Kiwi.
 
 The generated APK will appear on the releases page of your project.
 
@@ -34,8 +34,9 @@ In "kiwi" branch you can find the source-code, assets and tools that are used to
 
 In "chromium" branch you can find a replica of the Chromium repository.
 
-  - Workflows starting with "Kiwi:" are executed on the branch "kiwi".
-  - Workflows starting with "Chromium:" are executed on the branch "chromium".
+  - Workflows starting with "Any branch:" can be used on any branch of your choice.
+  - Workflows starting with "Kiwi:" are meant to be used on the branch "kiwi".
+  - Workflows starting with "Chromium:" are meant to be used on the branch "chromium".
 
 To keep the size of the repository small, we replicate only the files that are changed in Kiwi Browser.
 
