@@ -41,3 +41,4 @@ jobs:
           VALIDATE_ALL_CODEBASE: false
           DEFAULT_BRANCH: kiwi
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JAVA_FILE_NAME: java_kiwi.xml
