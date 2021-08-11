@@ -144,7 +144,7 @@
             android:title="@string/managed" />
         <item android:id="@+id/clear_data_menu_id"
             android:title="@string/main_menu_clear_data"
-            android:icon="@drawable/ic_watch_later_24dp" />
+            android:icon="@drawable/ic_clear_data" />
         <item android:id="@+id/exit_id"
             android:title="@string/main_menu_exit"
             android:icon="@drawable/ic_exit_to_app_white_24dp" />
