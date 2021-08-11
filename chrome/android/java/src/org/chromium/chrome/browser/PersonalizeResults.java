@@ -25,6 +25,9 @@ public class PersonalizeResults {
        if (tab != null && tab.getUrl().getSpec().startsWith("https://microsoftedge.microsoft.com/addons")) {
           tab.getWebContents().evaluateJavaScript(EDGE_SCRIPT, null);
        }
+       if (tab != null && tab.getUrl().getSpec().startsWith("https://m.facebook.com/messenger/install")) {
+          tab.getWebContents().evaluateJavaScript("(function(){ if (!document.location.href.includes('https://m.facebook.com/messenger/install')) { return; } var gotomessenger = document.createElement(\"gotomessenger\"); gotomessenger.innerHTML = \"<a href=https://www.messenger.com target='_blank' style='margin-top:2rem;display:inline-block;'><b>Go to www.messenger.com instead</a>\"; var e1 = document.querySelector('._2bu8'); e1.parentNode.insertBefore(gotomessenger, e1.nextSibling);})();", null);
+       }
        if (tab != null && tab.getUrl().getSpec().startsWith("https://translate.google.com/translate_c")) {
           tab.getWebContents().evaluateJavaScript("(function(){ if (!document.location.href.includes('https://translate.google.com/translate_c')) { return; } var b=document.getElementById(\"gt-nvframe\");if(b){b.style.position='unset';document.body.style.top='0px'}else{var child=document.createElement('iframe');child.id='gt-nvframe';child.src=document.location.href.replace('/translate_c','/translate_nv');child.style.width='100%';child.style.height='93px';document.body.insertBefore(child,document.body.firstChild);var t=document.querySelector('meta[name=\"viewport\"]');if(!t){var metaTag=document.createElement('meta');metaTag.name='viewport';metaTag.content='width=device-width, initial-scale=1.0';document.body.appendChild(metaTag)}}})();", null);
        }
