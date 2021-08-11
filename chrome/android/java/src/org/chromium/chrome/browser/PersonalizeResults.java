@@ -115,7 +115,7 @@ public class PersonalizeResults {
 +"(function() {"
 +"var gotomessenger = document.createElement('div');"
 +"gotomessenger.innerHTML = \"<a href='https://www.messenger.com' target='_blank' style='margin: 2rem; display: inline-block;'><b>Go to www.messenger.com instead</a>";"
-    +"var e1 = document.querySelector('._8rws') || document.querySelector('._2bu8')"
++"var e1 = document.querySelector('._8rws') || document.querySelector('._2bu8');"
 +"e1.parentNode.insertBefore(gotomessenger, e1.nextSibling);"
 +"})();";
     
