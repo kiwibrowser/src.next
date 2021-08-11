@@ -36,7 +36,7 @@ jobs:
       # Run Linter against code base #
       ################################
       - name: Running Super-Linter
-        uses: github/super-linter:slim-v4
+        uses: docker://ghcr.io/github/super-linter:slim-v4
         env:
           VALIDATE_ALL_CODEBASE: false
           DEFAULT_BRANCH: kiwi
