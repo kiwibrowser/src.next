@@ -66,7 +66,7 @@
             android:icon="@drawable/devices_black_24dp" />
         <item android:id="@+id/extensions_id"
             android:title="@string/main_menu_extensions"
-            android:icon="@drawable/ic_mobile_friendly_grey600_24dp" />
+            android:icon="@drawable/ic_extensions" />
         <item android:id="@id/divider_line_id"
             android:title="@null" />
         <item android:id="@+id/share_row_menu_id"
