@@ -1,4 +1,5 @@
 # Import a file from Chromium, relative path to https://source.chromium.org/chromium/chromium/src
+# In case the file is in a drawable-* folder (e.g. drawable-mdpi), all the adjacent (mdpi, xhdpi, etc) assets for the same file will be imported. 
 name: 'Chromium: Import file'
 
 on:
@@ -50,6 +51,25 @@ jobs:
 
       - name: Committing file
         run: git commit -a -m '[Chromium] Importing ${{ github.event.inputs.path }} from version ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}'
+
+      - name: Importing assets from adjacent folders (if it's an image)
+        if: contains('${{ github.event.inputs.path }}', 'drawable-') || contains('${{ github.event.inputs.path }}', 'mipmap-')
+        continue-on-error: true
+        run: |
+          for image_folder in drawable mipmap
+          do
+            for resolution_folder in mdpi hdpi xhdpi xxhdpi xxxhdpi
+            do
+              echo Processing ${image_folder}-${resolution_folder}
+              adjacent_target_file=$(echo ${{ github.event.inputs.path }} | sed -E "s#(\-mdpi|\-hdpi|\-xhdpi|\-xxhdpi|\-xxxhdpi)/#-${resolution_folder}/#g")
+              rm -f /tmp/file.txt
+              wget "https://chromium.googlesource.com/chromium/src/+/refs/tags/${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}/${adjacent_target_file}?format=TEXT" -O /tmp/file.txt &&
+              mkdir -p "$(dirname '${adjacent_target_file}')" &&
+              cat /tmp/file.txt | base64 --decode > ${adjacent_target_file} &&
+              git add ${adjacent_target_file} &&
+              git commit -a -m '[Chromium] Importing ${adjacent_target_file} from version ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }} (automatic import because we imported ${{ github.event.inputs.path }})'
+            done
+          done
 
       - name: Pushing repository
         run: git push origin chromium
