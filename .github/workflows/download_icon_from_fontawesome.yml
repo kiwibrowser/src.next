@@ -51,4 +51,4 @@ jobs:
         with:
           # Commit message
           commit_message: Update ${{ github.event.inputs.fileNameInChromium }} with ${{ github.event.inputs.iconTypeFA }}/${{ github.event.inputs.iconNameFA }} icon
-          file_pattern: */*/*.png
+          file_pattern: ./*.png
