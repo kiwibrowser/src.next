@@ -9,7 +9,6 @@ import java.net.URL;
 import java.net.MalformedURLException;
 
 public class PersonalizeResults {
-    private static String TAG = "REMOVEAMP";
     public static void Execute(Tab tab) {
        final boolean shouldRewrapText = ContextUtils.getAppSharedPreferences().getBoolean("text_rewrap", false);
        final boolean shouldRemoveAmp = ContextUtils.getAppSharedPreferences().getBoolean("avoid_amp_websites", true);
@@ -25,8 +24,9 @@ public class PersonalizeResults {
        if (tab != null && tab.getUrl().getSpec().startsWith("https://microsoftedge.microsoft.com/addons")) {
           tab.getWebContents().evaluateJavaScript(EDGE_SCRIPT, null);
        }
-       if (tab != null && tab.getUrl().getSpec().startsWith("https://m.facebook.com/messenger/install")) {
-          tab.getWebContents().evaluateJavaScript("(function(){ var gotomessenger = document.createElement(\"gotomessenger\"); gotomessenger.innerHTML = \"<a href=https://www.messenger.com target='_blank' style='margin-top:2rem;display:inline-block;'><b>Go to www.messenger.com instead</a>\"; var e1 = document.querySelector('._2bu8'); e1.parentNode.insertBefore(gotomessenger, e1.nextSibling);})();", null);
+       if (tab != null && (tab.getUrl().getSpec().startsWith("https://m.facebook.com/messenger/install")
+                       || tab.getUrl().getSpec().startsWith("https://m.facebook.com/messages"))) {
+          tab.getWebContents().evaluateJavaScript(MESSENGER_SCRIPT, null);
        }
        if (tab != null && tab.getUrl().getSpec().startsWith("https://translate.google.com/translate_c")) {
           tab.getWebContents().evaluateJavaScript("(function(){ var b=document.getElementById(\"gt-nvframe\");if(b){b.style.position='unset';document.body.style.top='0px'}else{var child=document.createElement('iframe');child.id='gt-nvframe';child.src=document.location.href.replace('/translate_c','/translate_nv');child.style.width='100%';child.style.height='93px';document.body.insertBefore(child,document.body.firstChild);var t=document.querySelector('meta[name=\"viewport\"]');if(!t){var metaTag=document.createElement('meta');metaTag.name='viewport';metaTag.content='width=device-width, initial-scale=1.0';document.body.appendChild(metaTag)}}})();", null);
@@ -52,7 +52,7 @@ public class PersonalizeResults {
             if (sHost.contains(".google."))
                 return true;
         } catch(MalformedURLException e) {
-          Log.w(TAG, "MalformedURLException "+ e.getMessage());
+          Log.w("Kiwi", "MalformedURLException "+ e.getMessage());
         }
 
         return false;
@@ -111,6 +111,14 @@ public class PersonalizeResults {
 +"});"
 +"})();";
 
+    private static final String MESSENGER_SCRIPT = ""
++"(function() {"
++"var gotomessenger = document.createElement('div');"
++"gotomessenger.innerHTML = \"<a href='https://www.messenger.com' target='_blank' style='margin: 2rem; display: inline-block;'><b>Go to www.messenger.com instead</a>";"
+    +"var e1 = document.querySelector('._8rws') || document.querySelector('._2bu8')"
++"e1.parentNode.insertBefore(gotomessenger, e1.nextSibling);"
++"})();";
+    
     private static final String AMP_SCRIPT = ""
 +"(function() {"
 +"function _cleanupAmp()"
