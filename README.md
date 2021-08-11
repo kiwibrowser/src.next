@@ -18,32 +18,102 @@ Be kind.
 
 ## Building
 
-Use workflow "Any branch: Build apk" to build Kiwi.
+Use workflow `"Any branch: Build apk"` to build Kiwi.
 
 The generated APK will appear on the releases page of your project.
 
 It will be a draft release, so only you can see it, but you can change that by editing the release.
 
-## Workflow
+An APK is automatically generated as well if you open a pull request to `kiwibrowser/src.next:kiwi`.
 
-This repository is using GitHub Actions workflows.
+The APK that you will receive is named `Wiki Browser` (not `Kiwi Browser`).
 
-Workflows can be accessed in the "Actions" tab on top of the page.
+This is intentional. Dev builds are called `Wiki Browser`, and become `Kiwi Browser` once they pass review.
+
+## How to contribute
+
+1) Press Fork on the top right.
+2) In your fork, edit the file you want from the branch called `kiwi`.
+3) In your fork, go to `Actions`, run the workflow `"Any branch: Build apk"` on the branch you want to test.
+4) You will get an APK you can test on your phone.
+5) If you are happy with the result, open a Pull request from your branch to branch `kiwibrowser/src.next:kiwi`.
+
+To improve Kiwi, you don't need to download anything to your computer.
+All you need is a browser, and you know which one is good to use ;)
+
+## About workflows
+
+This repository is managed using GitHub Actions workflows.
+
+Workflows can be accessed in the `Actions` tab on top of the page.
 
 In "kiwi" branch you can find the source-code, assets and tools that are used to build Kiwi Browser.
 
 In "chromium" branch you can find a replica of the Chromium repository.
 
-  - Workflows starting with "Any branch:" can be used on any branch of your choice.
-  - Workflows starting with "Kiwi:" are meant to be used on the branch "kiwi".
-  - Workflows starting with "Chromium:" are meant to be used on the branch "chromium".
+  - Workflows starting with `"Any branch:"` can be used on any branch of your choice.
+  - Workflows starting with `"Kiwi:"` are meant to be used on the branch "kiwi".
+  - Workflows starting with `"Chromium:"` are meant to be used on the branch "chromium".
 
 To keep the size of the repository small, we replicate only the files that are changed in Kiwi Browser.
 
-  - Use workflow "Chromium: Import" to add a new file to be replicated.
-  - Use workflow "Chromium: Update files from upstream" to update the replica.
+  - Use workflow `"Chromium: Import"` to add a new file to be replicated.
+  - Use workflow `"Chromium: Update files from upstream"` to update the replica.
 
 Except with the "Any branch" workflows, you don't need to pick the correct branch, the workflow does it for you.
+
+## Improving Kiwi Browser
+
+Kiwi Browser is technically a re-based fork of Chromium. This means that the code of Chromium is taken, and
+modifications are applied on top. Once the modifications are live, this is Kiwi.
+
+When we mean rebase, in the context of this project, we mean that we take a bunch of code, and we
+apply modification on top.
+
+The repository of Chromium is huge. You need 100 GB of disk space, and a lot of computing power.
+
+If you want to make Kiwi better, stay in this repository, you need only the files from Kiwi.
+
+It will make your life easier.
+
+If you want to work on a full repository (e.g. to make a completely different fork of Kiwi or to experiment very
+advanced changes, use http://github.com/kiwibrowser/src ) but this is going to be very difficult as you have to handle
+all the Chromium version changes by hand.
+
+## Importing new files from Chromium
+
+Instead of importing 50 GB of files, we import only the files that we need from Chromium
+or that we intend to modify.
+
+This is done using the `"Chromium: Import file"` workflow.
+
+```
+[real chromium repository] -------> [kiwibrowser/src.next:chromium]
+                 workflow "Chromium: Import file"
+```
+
+In the `chromium` branch, you have untouched, and unmodified files of Chromium.
+
+Once you are done importing files from Chromium you need to adapt the code of Kiwi on top of the code in the Chromium `Kiwi: Rebase on top of Chromium branch`
+
+```
+                                    [kiwibrowser/src.next:kiwi]
+                                               /|\
+                                                |
+                                                | workflow "Kiwi: Rebase on top of Chromium branch"
+                                                |
+[real chromium repository] -------> [kiwibrowser/src.next:chromium]
+                 workflow "Chromium: Import file"
+`
+
+If you import an image (a reource in a `drawable` or a `mipmap` folder), for example `chrome/android/java/res/drawable-hdpi/btn_left.png` then the workflow will automatically import `chrome/android/java/res/drawable-*/btn_left.png` so you don't need to run the workflow for each resolution folder.
+
+## Changing Chromium version (advanced)
+
+To change to another Chromium version, use workflow `"Chromium: Update files from upstream"`.
+The workflow is going to ask you to which version number you want to upgrade or downgrade.
+
+Changing the Chromium version is going to work, but the build system doesn't support it yet, so you will not be able to get an APK if you change the version (for now).
 
 ## Resolving issues
 
@@ -74,19 +144,19 @@ When you accept a pull request:
 
 Kiwi is based on Chromium, to find code, use https://source.chromium.org/chromium/chromium/src
 
-The most important to know is:
+The most commonly asked files are:
 
 Android:
- - Main menu is in: chrome/android/java/src/org/chromium/chrome/browser/app/appmenu
- - Settings screen is in: chrome/android/java/src/org/chromium/chrome/browser/settings and chrome/android/java/res/xml
+ - Main menu is in: `chrome/android/java/src/org/chromium/chrome/browser/app/appmenu`
+ - Settings screen is in: `chrome/android/java/src/org/chromium/chrome/browser/settings` and `chrome/android/java/res/xml`
 
 HTML:
- - kiwi://extensions is in: chrome/browser/resources/extensions
- - kiwi://chrome-search (new tab page) is in: chrome/browser/resources/new_tab_page_instant
+ - kiwi://extensions is in: `chrome/browser/resources/extensions`
+ - kiwi://chrome-search (new tab page) is in: `chrome/browser/resources/new_tab_page_instant`
 
 Translations:
- - To add a new translation string in English: chrome/android/java/res/values/strings.xml
- - To translate strings in other languages, go to https://crowdin.com/project/kiwibrowser and once you have updated the translations, run GitHub Action "Download translations from Crowdin" to download them back to the repository
+ - To add a new translation string in English: `chrome/android/java/res/values/strings.xml`
+ - To translate strings in other languages, go to https://crowdin.com/project/kiwibrowser and once you have updated the translations, run workflow `"Kiwi: Download translations from Crowdin"` to download them back to the repository
 
 ## License
 
