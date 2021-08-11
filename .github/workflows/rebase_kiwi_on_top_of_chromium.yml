@@ -1,4 +1,4 @@
-name: 'Kiwi: Rebase on top of Chromium'
+name: 'Kiwi: Rebase on top of Chromium branch'
 
 on:
   workflow_dispatch:
