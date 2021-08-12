@@ -60,7 +60,7 @@
             android:icon="@drawable/ic_history_googblue_24dp" />
         <item android:id="@+id/downloads_menu_id"
             android:title="@string/menu_downloads"
-            android:icon="@drawable/infobar_download_complete" />
+            android:icon="@drawable/ic_downloads" />
         <item android:id="@+id/all_bookmarks_menu_id"
             android:title="@string/menu_bookmarks"
             android:icon="@drawable/ic_bookmarks" />
@@ -195,7 +195,7 @@
             android:icon="@drawable/ic_history_googblue_24dp" />
         <item android:id="@id/downloads_menu_id"
             android:title="@string/menu_downloads"
-            android:icon="@drawable/infobar_download_complete" />
+            android:icon="@drawable/ic_downloads" />
         <item android:id="@id/all_bookmarks_menu_id"
             android:title="@string/menu_bookmarks"
             android:icon="@drawable/ic_bookmarks" />
