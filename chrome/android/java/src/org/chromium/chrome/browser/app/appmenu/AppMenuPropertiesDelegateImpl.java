@@ -927,17 +927,23 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
         adblockMenuRow.setVisible(itemVisible);
         if (!itemVisible) return;
 
-        adblockMenuLabel.setIcon(R.drawable.ic_desktop_windows);
+        
 
         boolean adBlockIsActive = (WebsitePreferenceBridgeJni.get().getContentSetting(Profile.getLastUsedRegularProfile(), ContentSettingsType.ADS) == ContentSettingValues.BLOCK);
         if (!adBlockIsActive) {
           adblockMenuCheck.setChecked(false);
+            adblockMenuLabel.setIcon(R.drawable.ic_adblock_off);
         } else {
           int adblockSettingForThisSite = WebsitePreferenceBridgeJni.get().getSettingForOrigin(Profile.getLastUsedRegularProfile(), ContentSettingsType.ADS, currentTab.getUrl().getSpec(), currentTab.getUrl().getSpec());
-          if (adblockSettingForThisSite == ContentSettingValues.DEFAULT || adblockSettingForThisSite == ContentSettingValues.BLOCK)
-            adblockMenuCheck.setChecked(true);
-          else
-            adblockMenuCheck.setChecked(false);
+          if (adblockSettingForThisSite == ContentSettingValues.DEFAULT || adblockSettingForThisSite == ContentSettingValues.BLOCK){
+              adblockMenuCheck.setChecked(true);
+              adblockMenuLabel.setIcon(R.drawable.ic_adblock_on);
+          }
+          else{
+            adblockMenuCheck.setChecked(false);  
+            adblockMenuLabel.setIcon(R.drawable.ic_adblock_off);
+          }
+            
         }
     }
 
