@@ -74,7 +74,7 @@
           <menu>
               <item android:id="@+id/share_menu_id"
                 android:title="@string/menu_share_page"
-                android:icon="@drawable/ic_share_white_24dp" />
+                android:icon="@drawable/ic_share" />
               <item android:id="@+id/direct_share_menu_id"
                 android:title="@null" />
           </menu>
