@@ -366,11 +366,13 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
         updateAdblockMenuItem(menu, currentTab, true /* can show */);
         MenuItem nightModeMenu = menu.findItem(R.id.night_mode_switcher_id);
         if (nightModeMenu != null) {
-               nightModeMenu.setIcon(R.drawable.ic_night_mode);
+               
                if (ContextUtils.getAppSharedPreferences().getBoolean("darken_websites_enabled", false)) {
                    nightModeMenu.setTitle(R.string.main_menu_turn_off_night_mode);
+                   nightModeMenu.setIcon(R.drawable.ic_night_mode_off);
                } else {
                    nightModeMenu.setTitle(R.string.main_menu_turn_on_night_mode);
+                   nightModeMenu.setIcon(R.drawable.ic_night_mode_on);
                }
         }
 
