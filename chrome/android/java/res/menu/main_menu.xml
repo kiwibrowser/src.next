@@ -60,7 +60,7 @@
             android:icon="@drawable/infobar_download_complete" />
         <item android:id="@+id/all_bookmarks_menu_id"
             android:title="@string/menu_bookmarks"
-            android:icon="@drawable/ic_bookmakrs" />
+            android:icon="@drawable/ic_bookmarks" />
         <item android:id="@+id/recent_tabs_menu_id"
             android:title="@string/menu_recent_tabs"
             android:icon="@drawable/devices_black_24dp" />
