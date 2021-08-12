@@ -140,7 +140,7 @@ public class PersonalizeResults {
 +"     a.style.display='none';"
 +"  });"
 +"  if (document.getElementsByClassName('amp-cantxt').length >= 1 && document.location.href.match(/\/amp[\/|\.]/)) { document.location.replace(document.getElementsByClassName('amp-cantxt')[0].innerText); }"
-+"  if (document.location.href.match(/\/amp[\/|\.]/) && document.querySelector('head > link[rel=\"canonical\"]') != null && document.querySelector('head > link[rel=\"canonical\"]').href != document.location.href) { document.location.replace(document.querySelector('head > link[rel=\"canonical\"]').href); };"
++"  if (document.location.href.match(/\\/amp[\\/|\\.]/) && document.querySelector('head > link[rel=\"canonical\"]') != null && document.querySelector('head > link[rel=\"canonical\"]').href != document.location.href) { document.location.replace(document.querySelector('head > link[rel=\"canonical\"]').href); };"
 +"}"
 +""
 +"document.addEventListener('DOMNodeInserted', _cleanupAmp);"
