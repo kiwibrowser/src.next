@@ -19,7 +19,7 @@ public class PersonalizeResults {
           tab.getWebContents().evaluateJavaScript("(function() { var pendingUpdate=false;function viewportHandler(event){if(pendingUpdate)return;pendingUpdate=true;requestAnimationFrame(()=>{pendingUpdate=false;document.getElementsByTagName('html')[0].style.maxWidth=window.visualViewport.width+'px';var miniLeft=visualViewport.offsetLeft;var miniTop = -(visualViewport.offsetTop + visualViewport.offsetTop * ((window.pageYOffset / window.innerHeight) / 2));document.getElementsByTagName('html')[0].style.transition='0s ease-in-out';if (miniLeft == 0 && miniTop == 0) { document.getElementsByTagName('html')[0].style.transform=''; } else { document.getElementsByTagName('html')[0].style.transform='translate('+miniLeft+'px, '+miniTop+'px) scale(1.0)'; } })}window.visualViewport.addEventListener('resize',viewportHandler);window.visualViewport.addEventListener('scroll', viewportHandler); })();", null);
        }
        if (tab != null && tab.getUrl().getSpec().startsWith("https://chrome.google.com/webstore")) {
-          tab.getWebContents().evaluateJavaScript("(function() { " + MAKE_USER_AGENT_WRITABLE + " window.navigator.userAgent='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.25 Safari/537.36'; window.addEventListener('load', function() { if (document.location.pathname == '/webstore/unsupported') { document.location = '/webstore/'; } var node = document.createElement('style');    document.body.appendChild(node);    window.addStyleString = function(str) {        node.innerHTML = str;    }; addStyleString('div { visibility: visible !important; } '); var t=document.querySelector('meta[name=\"viewport\"]');t&&(t.content=\"initial-scale=0.1\",t.content=\"width=1200\") }); })();", null);
+          tab.getWebContents().evaluateJavaScript("(function() { if (!document.location.href.includes('https://chrome.google.com/webstore')) { return; } " + MAKE_USER_AGENT_WRITABLE + " window.navigator.userAgent='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.25 Safari/537.36'; window.addEventListener('load', function() { if (document.location.pathname == '/webstore/unsupported') { document.location = '/webstore/'; } var node = document.createElement('style');    document.body.appendChild(node);    window.addStyleString = function(str) {        node.innerHTML = str;    }; addStyleString('div { visibility: visible !important; } '); var t=document.querySelector('meta[name=\"viewport\"]');t&&(t.content=\"initial-scale=0.1\",t.content=\"width=1200\") }); })();", null);
        }
        if (tab != null && tab.getUrl().getSpec().startsWith("https://microsoftedge.microsoft.com/addons")) {
           tab.getWebContents().evaluateJavaScript(EDGE_SCRIPT, null);
@@ -29,15 +29,15 @@ public class PersonalizeResults {
           tab.getWebContents().evaluateJavaScript(MESSENGER_SCRIPT, null);
        }
        if (tab != null && tab.getUrl().getSpec().startsWith("https://m.facebook.com/")) {
-          tab.getWebContents().evaluateJavaScript("(function(){ document.querySelector('body.touch').style = \"cursor:default\";})();", null);
+          tab.getWebContents().evaluateJavaScript("(function(){ if (!document.location.href.includes('https://m.facebook.com/')) { return; } document.querySelector('body.touch').style = \"cursor:default\";})();", null);
        }
        if (tab != null && tab.getUrl().getSpec().startsWith("https://translate.google.com/translate_c")) {
-          tab.getWebContents().evaluateJavaScript("(function(){ var b=document.getElementById(\"gt-nvframe\");if(b){b.style.position='unset';document.body.style.top='0px'}else{var child=document.createElement('iframe');child.id='gt-nvframe';child.src=document.location.href.replace('/translate_c','/translate_nv');child.style.width='100%';child.style.height='93px';document.body.insertBefore(child,document.body.firstChild);var t=document.querySelector('meta[name=\"viewport\"]');if(!t){var metaTag=document.createElement('meta');metaTag.name='viewport';metaTag.content='width=device-width, initial-scale=1.0';document.body.appendChild(metaTag)}}})();", null);
+          tab.getWebContents().evaluateJavaScript("(function(){ if (!document.location.href.includes('https://translate.google.com/translate_c')) { return; } var b=document.getElementById(\"gt-nvframe\");if(b){b.style.position='unset';document.body.style.top='0px'}else{var child=document.createElement('iframe');child.id='gt-nvframe';child.src=document.location.href.replace('/translate_c','/translate_nv');child.style.width='100%';child.style.height='93px';document.body.insertBefore(child,document.body.firstChild);var t=document.querySelector('meta[name=\"viewport\"]');if(!t){var metaTag=document.createElement('meta');metaTag.name='viewport';metaTag.content='width=device-width, initial-scale=1.0';document.body.appendChild(metaTag)}}})();", null);
        }
        if (tab != null && (tab.getUrl().getSpec().startsWith("chrome://")
                        || tab.getUrl().getSpec().startsWith("chrome-extension://")
                        || tab.getUrl().getSpec().startsWith("kiwi://"))) {
-          tab.getWebContents().evaluateJavaScript("(function() {" + ADAPT_TO_MOBILE_VIEWPORT + "})();", null);
+          tab.getWebContents().evaluateJavaScript("(function() { if (!document.location.href.includes('chrome://') && !document.location.href.includes('chrome-extension://') && !document.location.href.includes('kiwi://')) { return; } " + ADAPT_TO_MOBILE_VIEWPORT + "})();", null);
        }
        if (tab != null && ContextUtils.getAppSharedPreferences().getBoolean("accept_cookie_consent", true) && (tab.getUrl().getSpec().startsWith("http://") || tab.getUrl().getSpec().startsWith("https://"))) {
           tab.getWebContents().evaluateJavaScript("(function(){function clickItem(elem) { elem.click(); } function acceptViaAPIs(){typeof window.__cmpui=='function'&&window.__cmpui('setAndSaveAllConsent',!0);typeof window.Didomi=='object'&&window.Didomi.setUserAgreeToAll()}window.globalObserver=null;function setupObserver(){if(!window.globalObserver){var newelem=document.createElement('style');newelem.innerHTML='.qc-cmp-showing { visibility: hidden !important; } body.didomi-popup-open { overflow: auto !important; } #didomi-host { visibility: hidden !important; }';document.body.appendChild(newelem);var MutationObserver=window.MutationObserver||window.WebKitMutationObserver;window.globalObserver=new MutationObserver(check);window.globalObserver.observe(window.document.documentElement,{childList:true,subtree:true});window.setTimeout(function(){window.globalObserver.disconnect();window.globalObserver=null},15000)}check()}function check(){window.setTimeout(function(){var listeners=[];listeners.push({selector:'#qcCmpUi',fn:acceptViaAPIs});listeners.push({selector:'#didomi-popup',fn:acceptViaAPIs});listeners.push({selector: '.accept-cookies-button,#purch-gdpr-banner__accept-button,#bbccookies-continue-button,.user-action--accept,.consent-accept,.bcpConsentOKButton,.button.accept,#footer_tc_privacy_button,button[aria-label=\"Button to collapse the message\"],.gdpr-form>.btn[value=\"Continue\"],button[on^=\"tap:\"][on$=\".accept\"],button[on^=\"tap:\"][on$=\".dismiss\"],.js-cookies-button,.app-offer__close_js,.lg-cc__button_type_action',fn: clickItem});for(var i=0,len=listeners.length,listener,elements;i<len;i++){listener=listeners[i];elements=window.document.querySelectorAll(listener.selector);for(var j=0,jLen=elements.length,element;j<jLen;j++){element=elements[j];if(!element.ready){element.ready=true;listener.fn.call(element, element)}}}},5)}window.addEventListener('DOMContentLoaded',setupObserver);check()})();", null);
@@ -116,12 +116,13 @@ public class PersonalizeResults {
 
     private static final String MESSENGER_SCRIPT = ""
 +"(function() {"
++"if (!document.location.href.includes('https://m.facebook.com/messenger/install') && !document.location.href.includes('https://m.facebook.com/messages')) { return; } "
 +"var gotomessenger = document.createElement('div');"
 +"gotomessenger.innerHTML = \"<a href='https://www.messenger.com' target='_blank' style='margin: 2rem; display: inline-block;'><b>Go to www.messenger.com instead</a>\";"
 +"var e1 = document.querySelector('._8rws') || document.querySelector('._2bu8');"
 +"e1.parentNode.insertBefore(gotomessenger, e1.nextSibling);"
 +"})();";
-    
+
     private static final String AMP_SCRIPT = ""
 +"(function() {"
 +"function _cleanupAmp()"
@@ -139,8 +140,8 @@ public class PersonalizeResults {
 +"  document.querySelectorAll('span[aria-label=\"AMP logo\"]').forEach(function(a) {"
 +"     a.style.display='none';"
 +"  });"
-+"  if (document.getElementsByClassName('amp-cantxt').length >= 1 && (document.location.href.indexOf('/amp/') != -1 || document.location.href.indexOf('/amp.') != -1)) { document.location.replace(document.getElementsByClassName('amp-cantxt')[0].innerText); }"
-+"  if ((document.location.href.indexOf('/amp/') != -1 || document.location.href.indexOf('/amp.') != -1) && document.querySelector('head > link[rel=\"canonical\"]') != null && document.querySelector('head > link[rel=\"canonical\"]').href != document.location.href) { document.location.replace(document.querySelector('head > link[rel=\"canonical\"]').href); };"
++"  if (document.getElementsByClassName('amp-cantxt').length >= 1 && document.location.href.match(/\\/amp[\\/|\\.]/)) { document.location.replace(document.getElementsByClassName('amp-cantxt')[0].innerText); }"
++"  if (document.location.href.match(/\\/amp[\\/|\\.]/) && document.querySelector('head > link[rel=\"canonical\"]') != null && document.querySelector('head > link[rel=\"canonical\"]').href != document.location.href) { document.location.replace(document.querySelector('head > link[rel=\"canonical\"]').href); };"
 +"}"
 +""
 +"document.addEventListener('DOMNodeInserted', _cleanupAmp);"
@@ -154,7 +155,8 @@ public class PersonalizeResults {
 +"    }"
 + MAKE_USER_AGENT_WRITABLE
 +"    window.navigator.userAgent=window.navigator.userAgent + ' Edg/' + window.navigator.appVersion.match(/Chrome\\/(\\d+(:?\\.\\d+)+)/)[1];"
-+"    window.addEventListener('load', function() {"
++"    var _kb_setIntervalCnt = 0;"
++"    var _kb_setInterval = window.setInterval(function() {"
 +"        var xpath = function(xpathToExecute) {"
 +"            var result = [];"
 +"            var nodesSnapshot = document.evaluate(xpathToExecute, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);"
@@ -168,6 +170,7 @@ public class PersonalizeResults {
 +"            individualButton.removeAttribute('disabled');"
 +"            individualButton.innerHTML = \"<a href=https://edge.microsoft.com/extensionwebstorebase/v1/crx?response=redirect&acceptformat=crx3&x=id%3D\" + individualButton.id.split('-')[1] + \"%26installsource%3Dondemand%26uc target='_blank' style='color: white; text-decoration: none'><b>Get CRX</b><br>(Hold and tap<br>Download Link)</a>\";"
 +"        });"
-+"    });"
++"        if (_kb_setIntervalCnt++ >= 10) { window.clearInterval(_kb_setInterval); }"
++"    }, 1000);"
 +"})();";
 }
