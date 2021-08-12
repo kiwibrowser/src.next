@@ -40,8 +40,8 @@ import("java_sources.gni")
 import("static_initializers.gni")
 import("trichrome.gni")
 
-_default_package = "org.chromium.chrome"
-if (android_channel != "default") {
+_default_package = "com.kiwibrowser.browser"
+if (android_channel != "default" && android_channel != "stable") {
   # android-binary-size trybot may checks if an internal Chrome variant's
   # AndroidManifest is as expected by ensuring the differences between its
   # AndroidManifest and its upstream target's .AndroidManifest.expected file
@@ -169,11 +169,31 @@ android_resources("chrome_base_module_resources") {
     "java/res_base/values/ic_launcher_round_alias.xml",
     "java/res_base/values/values.xml",
     "java/res_base/xml/network_security_config.xml",
+    "java/res_chromium_base/mipmap-anydpi-v26/ic_launcher.xml",
     "java/res_chromium_base/mipmap-hdpi/app_icon.png",
     "java/res_chromium_base/mipmap-mdpi/app_icon.png",
     "java/res_chromium_base/mipmap-xhdpi/app_icon.png",
     "java/res_chromium_base/mipmap-xxhdpi/app_icon.png",
     "java/res_chromium_base/mipmap-xxxhdpi/app_icon.png",
+    "java/res_chromium_base/mipmap-hdpi/ic_launcher.xml",
+    "java/res_chromium_base/mipmap-mdpi/ic_launcher.xml",
+    "java/res_chromium_base/mipmap-xhdpi/ic_launcher.xml",
+    "java/res_chromium_base/mipmap-xxhdpi/ic_launcher.xml",
+    "java/res_chromium_base/mipmap-xxxhdpi/ic_launcher.xml",
+    "java/res_chromium_base/mipmap-hdpi/ic_foreground.png",
+    "java/res_chromium_base/mipmap-mdpi/ic_foreground.png",
+    "java/res_chromium_base/mipmap-xhdpi/ic_foreground.png",
+    "java/res_chromium_base/mipmap-xxhdpi/ic_foreground.png",
+    "java/res_chromium_base/mipmap-xxxhdpi/ic_foreground.png",
+    "java/res_chromium_base/mipmap-hdpi/ic_background.png",
+    "java/res_chromium_base/mipmap-mdpi/ic_background.png",
+    "java/res_chromium_base/mipmap-xhdpi/ic_background.png",
+    "java/res_chromium_base/mipmap-xxhdpi/ic_background.png",
+    "java/res_chromium_base/mipmap-xxxhdpi/ic_background.png",
+    "java/res_chromium_base/mipmap-hdpi/incognito_app_icon.png",
+    "java/res_chromium_base/mipmap-mdpi/incognito_app_icon.png",
+    "java/res_chromium_base/mipmap-xhdpi/incognito_app_icon.png",
+    "java/res_chromium_base/mipmap-xxhdpi/incognito_app_icon.png",
     "java/res_chromium_base/values/channel_constants.xml",
   ]
 }
@@ -182,6 +202,7 @@ android_resources("chrome_app_java_resources") {
   sources = chrome_java_resources
   sources += [
     "//chrome/android/java/res_app/layout/main.xml",
+    "//chrome/android/java/res_app/layout/main_bottombar.xml",
     "//chrome/android/java/res_chromium/drawable-hdpi/fre_product_logo.png",
     "//chrome/android/java/res_chromium/drawable-hdpi/product_logo_name.png",
     "//chrome/android/java/res_chromium/drawable-mdpi/fre_product_logo.png",
@@ -192,6 +213,35 @@ android_resources("chrome_app_java_resources") {
     "//chrome/android/java/res_chromium/drawable-xxhdpi/product_logo_name.png",
     "//chrome/android/java/res_chromium/drawable-xxxhdpi/fre_product_logo.png",
     "//chrome/android/java/res_chromium/drawable-xxxhdpi/product_logo_name.png",
+    "//chrome/android/java/res/values-ar/strings.xml",
+    "//chrome/android/java/res/values-ca/strings.xml",
+    "//chrome/android/java/res/values-cs/strings.xml",
+    "//chrome/android/java/res/values-da/strings.xml",
+    "//chrome/android/java/res/values-de/strings.xml",
+    "//chrome/android/java/res/values-el/strings.xml",
+    "//chrome/android/java/res/values-es-rES/strings.xml",
+    "//chrome/android/java/res/values-es-rUS/strings.xml",
+    "//chrome/android/java/res/values-fi/strings.xml",
+    "//chrome/android/java/res/values-fr/strings.xml",
+    "//chrome/android/java/res/values-hi/strings.xml",
+    "//chrome/android/java/res/values-hr/strings.xml",
+    "//chrome/android/java/res/values-hu/strings.xml",
+    "//chrome/android/java/res/values-it/strings.xml",
+    "//chrome/android/java/res/values-ja/strings.xml",
+    "//chrome/android/java/res/values-ko/strings.xml",
+    "//chrome/android/java/res/values-nl/strings.xml",
+    "//chrome/android/java/res/values-pl/strings.xml",
+    "//chrome/android/java/res/values-pt-rBR/strings.xml",
+    "//chrome/android/java/res/values-pt-rPT/strings.xml",
+    "//chrome/android/java/res/values-ro/strings.xml",
+    "//chrome/android/java/res/values-ru/strings.xml",
+    "//chrome/android/java/res/values-sr/strings.xml",
+    "//chrome/android/java/res/values-sv-rSE/strings.xml",
+    "//chrome/android/java/res/values-tr/strings.xml",
+    "//chrome/android/java/res/values-uk/strings.xml",
+    "//chrome/android/java/res/values-vi/strings.xml",
+    "//chrome/android/java/res/values-zh-rCN/strings.xml",
+    "//chrome/android/java/res/values-zh-rTW/strings.xml"
   ]
 
   deps = [
@@ -1726,11 +1776,31 @@ android_resources("chrome_public_apk_resources") {
 android_resources("chrome_public_apk_base_module_resources") {
   resource_overlay = true
   sources = [
+    "java/res_chromium_base/mipmap-anydpi-v26/ic_launcher.xml",
     "java/res_chromium_base/mipmap-hdpi/app_icon.png",
     "java/res_chromium_base/mipmap-mdpi/app_icon.png",
     "java/res_chromium_base/mipmap-xhdpi/app_icon.png",
     "java/res_chromium_base/mipmap-xxhdpi/app_icon.png",
     "java/res_chromium_base/mipmap-xxxhdpi/app_icon.png",
+    "java/res_chromium_base/mipmap-hdpi/ic_launcher.xml",
+    "java/res_chromium_base/mipmap-mdpi/ic_launcher.xml",
+    "java/res_chromium_base/mipmap-xhdpi/ic_launcher.xml",
+    "java/res_chromium_base/mipmap-xxhdpi/ic_launcher.xml",
+    "java/res_chromium_base/mipmap-xxxhdpi/ic_launcher.xml",
+    "java/res_chromium_base/mipmap-hdpi/ic_foreground.png",
+    "java/res_chromium_base/mipmap-mdpi/ic_foreground.png",
+    "java/res_chromium_base/mipmap-xhdpi/ic_foreground.png",
+    "java/res_chromium_base/mipmap-xxhdpi/ic_foreground.png",
+    "java/res_chromium_base/mipmap-xxxhdpi/ic_foreground.png",
+    "java/res_chromium_base/mipmap-hdpi/ic_background.png",
+    "java/res_chromium_base/mipmap-mdpi/ic_background.png",
+    "java/res_chromium_base/mipmap-xhdpi/ic_background.png",
+    "java/res_chromium_base/mipmap-xxhdpi/ic_background.png",
+    "java/res_chromium_base/mipmap-xxxhdpi/ic_background.png",
+    "java/res_chromium_base/mipmap-hdpi/incognito_app_icon.png",
+    "java/res_chromium_base/mipmap-mdpi/incognito_app_icon.png",
+    "java/res_chromium_base/mipmap-xhdpi/incognito_app_icon.png",
+    "java/res_chromium_base/mipmap-xxhdpi/incognito_app_icon.png",
     "java/res_chromium_base/values/channel_constants.xml",
   ]
 
@@ -2016,7 +2086,7 @@ if (current_toolchain == default_toolchain) {
         }
       }
       if (!dfmify_dev_ui || !_is_bundle_module) {
-        additional_extra_paks += [ "$root_gen_dir/chrome/dev_ui_resources.pak" ]
+#        additional_extra_paks += [ "$root_gen_dir/chrome/dev_ui_resources.pak" ]
         deps += [ "//chrome/browser/resources:dev_ui_paks" ]
       }
 
@@ -3441,6 +3511,7 @@ generate_jni("chrome_jni_headers") {
     "feed/core/java/src/org/chromium/chrome/browser/feed/v2/FeedPersistentKeyValueCache.java",
     "feed/core/java/src/org/chromium/chrome/browser/feed/v2/FeedStream.java",
     "java/src/org/chromium/chrome/browser/AfterStartupTaskUtils.java",
+    "java/src/org/chromium/chrome/browser/AppMenuBridge.java",
     "java/src/org/chromium/chrome/browser/AppHooks.java",
     "java/src/org/chromium/chrome/browser/ApplicationLifetime.java",
     "java/src/org/chromium/chrome/browser/ChromeBackupAgentImpl.java",
@@ -3499,7 +3570,6 @@ generate_jni("chrome_jni_headers") {
     "java/src/org/chromium/chrome/browser/compositor/scene_layer/StaticTabSceneLayer.java",
     "java/src/org/chromium/chrome/browser/compositor/scene_layer/TabListSceneLayer.java",
     "java/src/org/chromium/chrome/browser/compositor/scene_layer/TabStripSceneLayer.java",
-    "java/src/org/chromium/chrome/browser/compositor/scene_layer/ToolbarSwipeSceneLayer.java",
     "java/src/org/chromium/chrome/browser/content/ContentUtils.java",
     "java/src/org/chromium/chrome/browser/contextmenu/ContextMenuHelper.java",
     "java/src/org/chromium/chrome/browser/contextualsearch/ContextualSearchContext.java",
