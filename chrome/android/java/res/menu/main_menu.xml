@@ -96,7 +96,7 @@
           <menu>
               <item android:id="@+id/request_desktop_site_id"
                 android:title="@string/menu_request_desktop_site"
-                android:icon="@drawable/ic_desktop_windows" />
+                android:icon="@drawable/ic_desktop_mode" />
               <item android:id="@+id/request_desktop_site_check_id"
                 android:title="@null"
                 android:checkable="true" />
