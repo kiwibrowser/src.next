@@ -66,7 +66,7 @@
             android:icon="@drawable/ic_bookmarks" />
         <item android:id="@+id/recent_tabs_menu_id"
             android:title="@string/menu_recent_tabs"
-            android:icon="@drawable/devices_black_24dp" />
+            android:icon="@drawable/ic_recent_tabs" />
         <item android:id="@+id/extensions_id"
             android:title="@string/main_menu_extensions"
             android:icon="@drawable/ic_extensions" />
