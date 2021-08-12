@@ -50,7 +50,7 @@ jobs:
         run: git add ${{ github.event.inputs.path }}
 
       - name: Importing assets from adjacent folders (if it's an image)
-        if: contains('${{ github.event.inputs.path }}', 'drawable-') || contains('${{ github.event.inputs.path }}', 'mipmap-')
+        if: contains(github.event.inputs.path, 'drawable-') || contains(github.event.inputs.path, 'mipmap-')
         continue-on-error: true
         run: |
           for image_folder in drawable mipmap
