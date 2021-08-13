@@ -1,4 +1,4 @@
-name: "Any: Lint codebase"
+name: "Any branch: Lint codebase"
 
 #############################
 # Start the job on all push #
