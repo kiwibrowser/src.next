@@ -1,4 +1,4 @@
-name: 'Kiwi: Rebase on top of Chromium branch'
+name: 'Kiwi: Rebase on top of kiwibrowser:chromium branch'
 
 on:
   workflow_dispatch:
@@ -39,8 +39,8 @@ jobs:
       - name: Switching to Kiwi
         run: git checkout origin/kiwi
 
-      - name: Rebasing on top of Chromium
-        run: git rebase origin/chromium --committer-date-is-author-date
+      - name: Rebasing on top of kiwibrowser:Chromium
+        run: git rebase upstream/chromium --committer-date-is-author-date
 
       - name: Preparing new branch
         run: git checkout -b new_kiwi
