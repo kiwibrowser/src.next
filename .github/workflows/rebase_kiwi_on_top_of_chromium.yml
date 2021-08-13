@@ -33,11 +33,11 @@ jobs:
       - name: Pushing Chromium branch
         run: git push origin origin/chromium HEAD:chromium --force
 
-      - name: Switching to Kiwi
-        run: git checkout origin/kiwi
-
       - name: Fetching Kiwi branch
         run: git fetch origin kiwi
+
+      - name: Switching to Kiwi
+        run: git checkout origin/kiwi
 
       - name: Rebasing on top of Chromium
         run: git rebase origin/chromium --committer-date-is-author-date
