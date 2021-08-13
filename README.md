@@ -106,7 +106,7 @@ Once you are done importing files from Chromium you need to adapt the code of Ki
                  workflow "Chromium: Import file"
 ```
 
-If you import an image (a reource in a `drawable` or a `mipmap` folder), for example `chrome/android/java/res/drawable-hdpi/btn_left.png` then the workflow will automatically import `chrome/android/java/res/drawable-*/btn_left.png` so you don't need to run the workflow for each resolution folder.
+If you import an image (a resource in a `drawable` or a `mipmap` folder), for example `chrome/android/java/res/drawable-hdpi/btn_left.png` then the workflow will automatically import `chrome/android/java/res/drawable-*/btn_left.png` so you don't need to run the workflow for each resolution folder.
 
 ## Changing Chromium version (advanced)
 
