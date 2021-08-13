@@ -1,5 +1,5 @@
 # Build APKs for Kiwi Browser Next
-name: 'Any branch: Build apk'
+name: 'Any branch: Build APK'
 
 # Controls when the action will run. Triggers the workflow on pull request events or manual trigger
 on:
