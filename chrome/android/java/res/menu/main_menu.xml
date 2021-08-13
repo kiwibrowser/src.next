@@ -43,7 +43,7 @@
             android:icon="@drawable/ic_add_box_rounded_corner" />
         <item android:id="@+id/new_incognito_tab_menu_id"
             android:title="@string/menu_new_incognito_tab"
-            android:icon="@drawable/incognito_simple" />
+            android:icon="@drawable/ic_incognito" />
         <item android:id="@+id/new_window_menu_id"
             android:title="@string/menu_new_window"
             android:icon="@drawable/ic_new_window" />
@@ -177,7 +177,7 @@
             android:icon="@drawable/ic_add_box_rounded_corner" />
         <item android:id="@id/new_incognito_tab_menu_id"
             android:title="@string/menu_new_incognito_tab"
-            android:icon="@drawable/incognito_simple" />
+            android:icon="@drawable/ic_incognito" />
         <item android:id="@+id/close_all_tabs_menu_id"
             android:title="@string/menu_close_all_tabs"
             android:icon="@drawable/btn_close_white" />
@@ -203,7 +203,7 @@
             android:icon="@drawable/ic_add_box_rounded_corner" />
         <item android:id="@id/new_incognito_tab_menu_id"
             android:title="@string/menu_new_incognito_tab"
-            android:icon="@drawable/incognito_simple" />
+            android:icon="@drawable/ic_incognito" />
         <item android:id="@id/preferences_id"
             android:title="@string/menu_settings"
             android:icon="@drawable/settings_cog" />
