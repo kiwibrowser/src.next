@@ -25,7 +25,7 @@ jobs:
         run: git fetch upstream
 
       - name: Switching to Chromium
-        run: git switch origin/chromium
+        run: git checkout origin/chromium
 
       - name: Rebasing on top of kiwibrowser Chromium
         run: git rebase upstream/chromium --committer-date-is-author-date
@@ -34,7 +34,7 @@ jobs:
         run: git push origin chromium
 
       - name: Switching to Kiwi
-        run: git switch origin/kiwi
+        run: git checkout origin/kiwi
 
       - name: Fetching Kiwi branch
         run: git fetch origin kiwi
