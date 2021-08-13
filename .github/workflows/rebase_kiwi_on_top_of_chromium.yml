@@ -27,7 +27,7 @@ jobs:
       - name: Switching to Chromium
         run: git switch chromium
 
-      - name Rebasing on top of kiwibrowser Chromium
+      - name: Rebasing on top of kiwibrowser Chromium
         run: git rebase upstream/chromium --committer-date-is-author-date
 
       - name: Pushing Chromium branch
