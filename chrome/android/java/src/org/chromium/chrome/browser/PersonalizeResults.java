@@ -28,6 +28,9 @@ public class PersonalizeResults {
                        || tab.getUrl().getSpec().startsWith("https://m.facebook.com/messages"))) {
           tab.getWebContents().evaluateJavaScript(MESSENGER_SCRIPT, null);
        }
+       if (tab != null && tab.getUrl().getSpec().contains("messenger.com/")) {
+          tab.getWebContents().evaluateJavaScript(MESSENGER_VIEWPORT_SCRIPT, null);
+       }
        if (tab != null && tab.getUrl().getSpec().startsWith("https://m.facebook.com/")) {
           tab.getWebContents().evaluateJavaScript("(function(){ if (!document.location.href.includes('https://m.facebook.com/')) { return; } document.querySelector('body.touch').style = \"cursor:default\";})();", null);
        }
@@ -116,11 +119,23 @@ public class PersonalizeResults {
 
     private static final String MESSENGER_SCRIPT = ""
 +"(function() {"
++"window.addEventListener('load', function() {"
 +"if (!document.location.href.includes('https://m.facebook.com/messenger/install') && !document.location.href.includes('https://m.facebook.com/messages')) { return; } "
 +"var gotomessenger = document.createElement('div');"
 +"gotomessenger.innerHTML = \"<a href='https://www.messenger.com' target='_blank' style='margin: 2rem; display: inline-block;'><b>Go to www.messenger.com instead</a>\";"
++"gotomessenger.id = '_kb_gotomessenger';"
 +"var e1 = document.querySelector('._8rws') || document.querySelector('._2bu8');"
++"if (!document.getElementById('_kb_gotomessenger'))"
 +"e1.parentNode.insertBefore(gotomessenger, e1.nextSibling);"
++"});"
++"})();";
+
+    private static final String MESSENGER_VIEWPORT_SCRIPT = ""
++"(function() {"
++"if (!document.location.href.includes('messenger.com/')) { return; } "
++"var sheet = document.createElement('style');"
++"sheet.innerHTML = '.jgljxmt5 { min-height: calc(93vh - var(--header-height)); } .g0mhvs5p.g0mhvs5p { width: 150px; }';"
++"document.body.appendChild(sheet);"
 +"})();";
 
     private static final String AMP_SCRIPT = ""
