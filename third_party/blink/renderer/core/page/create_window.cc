@@ -331,7 +331,17 @@ Frame* CreateNewWindow(LocalFrame& opener_frame,
           network::mojom::blink::WebSandboxFlags::kPopups)) {
     shouldBlockWindow = true;
   }
-  if (opener_window.IsCrossSiteSubframe() && !(url.Host().Contains("google")) && !(url.Host().Contains("paypal")) && !(url.Host().Contains("pay")) && !(url.Host().Contains("bank")) && !(url.Host().Contains("id")) && !(url.Host().Contains("ikano")) && !(url.Host().Contains("klarna")) && !(url.Host().Contains("pank")) && !(url.Host().Contains("facebook")) && !(url.Host().Contains("disqus")))
+  if (opener_window.IsCrossSiteSubframe() && !(url.Host().Contains("google"))
+      && !(url.Host().Contains("paypal"))
+      && !(url.Host().Contains("pay"))
+      && !(url.Host().Contains("bank"))
+      && !(url.Host().Contains("id"))
+      && !(url.Host().Contains("ikano"))
+      && !(url.Host().Contains("klarna"))
+      && !(url.Host().Contains("pank"))
+      && !(url.Host().Contains("twitter"))
+      && !(url.Host().Contains("facebook"))
+      && !(url.Host().Contains("disqus")))
     shouldBlockWindow = true;
   if (shouldBlockWindow) {
     // FIXME: This message should be moved off the console once a solution to
