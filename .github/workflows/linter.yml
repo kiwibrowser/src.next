@@ -1,4 +1,4 @@
-name: Lint codebase
+name: Automatic: Lint codebase
 
 #############################
 # Start the job on all push #
