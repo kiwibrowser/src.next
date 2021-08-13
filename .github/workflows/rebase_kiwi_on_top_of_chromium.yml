@@ -18,16 +18,28 @@ jobs:
           git config --global user.email "github@actions"
           git config --global user.name "Repository manager"
 
+      - name: Adding kiwibrowser repository as upstream
+        run: git remote add upstream https://github.com/kiwibrowser/src.next.git
+
+      - name: Fetching kiwibrowser repository
+        run: git fetch upstream
+
+      - name: Switching to Chromium
+        run: git rebase upstream/chromium --committer-date-is-author-date
+
+      - name: Pushing Chromium branch
+        run: git push origin chromium
+
       - name: Switching to Kiwi
         run: git switch kiwi
-        
-      - name: Fetching Chromium branch
-        run: git fetch origin chromium
+
+      - name: Fetching Kiwi branch
+        run: git fetch origin kiwi
 
       - name: Rebasing on top of Chromium
         run: git rebase origin/chromium --committer-date-is-author-date
 
       # This is done on purpose
       # See: https://redfin.engineering/git-rebasing-public-branches-works-much-better-than-youd-think-ecc9a115aea9
-      - name: Pushing branch
-        run: git push origin kiwi --force
+      - name: Pushing Kiwi branch
+        run: git push origin kiwi
