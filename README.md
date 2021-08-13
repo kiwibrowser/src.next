@@ -163,6 +163,9 @@ Translations:
 This repository is licensed under the same license as Chromium.
 Chromium uses a very permissive and advantageous license. To keep this freedom we don't want to include code from much more restrictive licenses (for example GPL, or CC-NC).
 
+It is very important to keep attribution to Kiwi Browser.
+You can use the exact wording written in LICENSE, or use "Based on Kiwi Browser".
+
 Google has established a list of licenses that shouldn't be included in Chromium, we follow this list, and you can find the list below.
 
 See `restricted` in https://opensource.google/docs/thirdparty/licenses/
