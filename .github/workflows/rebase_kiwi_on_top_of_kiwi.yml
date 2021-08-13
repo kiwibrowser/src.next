@@ -1,4 +1,4 @@
-name: '_ Forked kiwi: Rebase on top of kiwibrowser:kiwi branch'
+name: '\_ Forked kiwi: Rebase on top of kiwibrowser:kiwi branch'
 
 on:
   workflow_dispatch:
