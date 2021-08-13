@@ -46,7 +46,7 @@
             android:icon="@drawable/ic_incognito" />
         <item android:id="@+id/new_window_menu_id"
             android:title="@string/menu_new_window"
-            android:icon="@drawable/ic_new_window" />
+            android:icon="@drawable/ic_new_window_r" />
         <item android:id="@+id/move_to_other_window_menu_id"
             android:title="@string/menu_move_to_other_window"
             android:icon="@drawable/ic_open_in_browser" />
