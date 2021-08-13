@@ -1,0 +1,39 @@
+name: 'Kiwi: Rebase on top of kiwibrowser:kiwi branch'
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+        
+      - name: Setting-up GitHub username
+        run: |
+          git config --global user.email "github@actions"
+          git config --global user.name "Repository manager"
+
+      - name: Adding kiwibrowser repository as upstream
+        run: git remote add upstream https://github.com/kiwibrowser/src.next.git
+
+      - name: Fetching kiwibrowser repository
+        run: git fetch upstream
+
+      - name: Switching to Chromium
+        run: git checkout origin/kiwi
+
+      - name: Rebasing on top of kiwibrowser Chromium
+        run: git rebase upstream/kiwi --committer-date-is-author-date
+
+      - name: Preparing new branch
+        run: git checkout -b new_kiwi
+
+      # This is done on purpose
+      # See: https://redfin.engineering/git-rebasing-public-branches-works-much-better-than-youd-think-ecc9a115aea9
+      - name: Pushing Kiwi branch
+        run: git push origin new_kiwi:kiwi --force
