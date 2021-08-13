@@ -31,7 +31,7 @@ jobs:
         run: git rebase upstream/chromium --committer-date-is-author-date
 
       - name: Pushing Chromium branch
-        run: git push origin --all
+        run: git push origin origin/chromium
 
       - name: Switching to Kiwi
         run: git checkout origin/kiwi
@@ -45,4 +45,4 @@ jobs:
       # This is done on purpose
       # See: https://redfin.engineering/git-rebasing-public-branches-works-much-better-than-youd-think-ecc9a115aea9
       - name: Pushing Kiwi branch
-        run: git push origin --all
+        run: git push origin/kiwi
