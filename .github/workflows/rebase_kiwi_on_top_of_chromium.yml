@@ -36,22 +36,14 @@ jobs:
           fi;
 
       - name: Creating pull request
-        id: pullrequest
-        uses: peter-evans/create-pull-request@v3
-        with:
-          branch: kiwi
-          base: upstream/chromium
-          delete-branch: false
-          signoff: true
-          draft: true
-          title: "[Rebase] Rebase Kiwi to Chromium version ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }} "
-          commit-message: "[Rebase] Rebase Kiwi version ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}"
-          body: |
+        uses: vsoch/pull-request-action@1.0.18
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PULL_REQUEST_BRANCH: "kiwi"
+          PULL_REQUEST_FROM_BRANCH: "upstream/chromium"
+          PULL_REQUEST_DRAFT: true
+          PULL_REQUEST_TITLE: "[Rebase] Rebase Kiwi to Chromium version ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}"
+          PULL_REQUEST_BODY: |
             Version update initiated by ${{ github.actor }}
             
             This is a rebase. It is *very important* to use "Rebase and merge" to merge this PR.
-
-      - name: Getting pull request URL
-        run: |
-          echo "Pull request number - ${{ steps.pullrequest.outputs.pull-request-number }}"
-          echo "Pull request URL - ${{ steps.pullrequest.outputs.pull-request-url }}"
