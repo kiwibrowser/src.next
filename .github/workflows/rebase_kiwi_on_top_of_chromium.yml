@@ -39,8 +39,8 @@ jobs:
         id: pullrequest
         uses: peter-evans/create-pull-request@v3
         with:
-          branch: upstream/chromium
-          base: kiwi
+          branch: kiwi
+          base: upstream/chromium
           delete-branch: false
           signoff: true
           draft: true
