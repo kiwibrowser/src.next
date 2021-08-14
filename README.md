@@ -284,6 +284,11 @@ android:key is the setting key, it's the identifier where the setting will be st
 android:title is 3 or 4 words about the feature.
 android:summary is an explanation of what the preference does (2nd line that appears in the UI).
 
+As ChromeBaseCheckBoxPreference is an extension to androidx.preference.Preference,
+the standard Android UI properties and customization can be applied:
+https://developer.android.com/guide/topics/ui/settings
+https://developer.android.com/guide/topics/ui/settings/components-and-attributes
+
 Step 2)
  - Add a new english translation in chrome/android/java/res/values/strings.xml
 ```
