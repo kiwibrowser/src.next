@@ -40,7 +40,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PULL_REQUEST_BRANCH: "kiwi"
-          PULL_REQUEST_FROM_BRANCH: "upstream/chromium"
+          PULL_REQUEST_FROM_BRANCH: "chromium"
           PULL_REQUEST_DRAFT: true
           PULL_REQUEST_TITLE: "[Rebase] Rebase Kiwi to Chromium version ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}"
           PULL_REQUEST_BODY: |
