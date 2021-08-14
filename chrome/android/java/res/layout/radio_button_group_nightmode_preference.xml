@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2020 The Chromium Authors. All rights reserved.
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file. -->
+
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+  <!-- TODO(crbug.com/1048859): Change to the exact style TextMessagePreference is using. -->
+  <TextView
+      android:id="@+id/title"
+      style="@style/PreferenceTitle"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:paddingStart="@dimen/homepage_preference_title_lateral_padding"
+      android:paddingTop="@dimen/homepage_preference_title_vertical_padding"
+      android:paddingEnd="@dimen/homepage_preference_title_lateral_padding"
+      android:paddingBottom="@dimen/homepage_preference_title_vertical_padding"
+      android:text="@string/preferences_nightmode" />
+
+  <org.chromium.components.browser_ui.widget.RadioButtonWithDescriptionLayout
+      android:id="@+id/radio_button_group"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:focusableInTouchMode="true">
+
+    <!-- TODO(crbug.com/1048863): Remove android:background for radio buttons here and below after enhancement. -->
+    <org.chromium.components.browser_ui.widget.RadioButtonWithDescription
+        android:id="@+id/radio_button_default"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:primaryText="@string/main_menu_translate" />
+
+    <org.chromium.components.browser_ui.widget.RadioButtonWithDescription
+        android:id="@+id/radio_button_amoled"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:primaryText="@string/main_menu_translate" />
+
+    <org.chromium.components.browser_ui.widget.RadioButtonWithDescription
+        android:id="@+id/radio_button_amoled_grayscale"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:primaryText="@string/main_menu_translate" />
+
+    <org.chromium.components.browser_ui.widget.RadioButtonWithDescription
+        android:id="@+id/radio_button_gray"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:primaryText="@string/main_menu_translate" />
+
+    <org.chromium.components.browser_ui.widget.RadioButtonWithDescription
+        android:id="@+id/radio_button_gray_grayscale"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:primaryText="@string/main_menu_translate" />
+
+    <org.chromium.components.browser_ui.widget.RadioButtonWithDescription
+        android:id="@+id/radio_button_high_contrast"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:primaryText="@string/main_menu_translate" />
+
+  </org.chromium.components.browser_ui.widget.RadioButtonWithDescriptionLayout>
+</LinearLayout>
