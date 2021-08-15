@@ -398,7 +398,11 @@ public class TopToolbarCoordinator implements Toolbar {
         mToolbarLayout.updateForwardButtonVisibility(canGoForward);
     }
 
-    @Override
+    /**
+     * Gives inheriting classes the chance to update the visibility of the
+     * reload button.
+     * @param isReloading Whether or not the current tab is loading.
+     */
     public void updateReloadButtonVisibility(boolean isReloading) {
         mToolbarLayout.updateReloadButtonVisibility(isReloading);
     }

@@ -78,8 +78,7 @@ import java.util.List;
 class LocationBarMediator
         implements LocationBarDataProvider.Observer, OmniboxStub, VoiceRecognitionHandler.Delegate,
                    VoiceRecognitionHandler.Observer, AssistantVoiceSearchService.Observer,
-                   UrlBarDelegate, OnKeyListener, ComponentCallbacks,
-                   TemplateUrlService.TemplateUrlServiceObserver {
+                   UrlBarDelegate, OnKeyListener, ComponentCallbacks {
     private static final int ICON_FADE_ANIMATION_DURATION_MS = 150;
     private static final int ICON_FADE_ANIMATION_DELAY_MS = 75;
     private static final long NTP_KEYBOARD_FOCUS_DURATION_MS = 200;
@@ -238,9 +237,6 @@ class LocationBarMediator
         if (mAssistantVoiceSearchServiceSupplier.get() != null) {
             mAssistantVoiceSearchServiceSupplier.get().destroy();
         }
-        if (mTemplateUrlServiceSupplier.hasValue()) {
-            mTemplateUrlServiceSupplier.get().removeObserver(this);
-        }
         mStatusCoordinator = null;
         mAutocompleteCoordinator = null;
         mUrlCoordinator = null;
@@ -297,13 +293,9 @@ class LocationBarMediator
     /*package */ void onFinishNativeInitialization() {
         mNativeInitialized = true;
         mOmniboxPrerender = new OmniboxPrerender();
-        TemplateUrlService templateUrlService = mTemplateUrlServiceSupplier.get();
-        if (templateUrlService != null) {
-            templateUrlService.addObserver(this);
-        }
         mAssistantVoiceSearchServiceSupplier.set(new AssistantVoiceSearchService(mContext,
-                ExternalAuthUtils.getInstance(), templateUrlService, GSAState.getInstance(mContext),
-                this, SharedPreferencesManager.getInstance(),
+                ExternalAuthUtils.getInstance(), mTemplateUrlServiceSupplier.get(),
+                GSAState.getInstance(mContext), this, SharedPreferencesManager.getInstance(),
                 IdentityServicesProvider.get().getIdentityManager(
                         Profile.getLastUsedRegularProfile()),
                 AccountManagerFacadeProvider.getInstance()));
@@ -1152,12 +1144,6 @@ class LocationBarMediator
     @Override
     public void hintZeroSuggestRefresh() {
         mAutocompleteCoordinator.prefetchZeroSuggestResults();
-    }
-
-    // TemplateUrlService.TemplateUrlServiceObserver implementation
-    @Override
-    public void onTemplateURLServiceChanged() {
-        sLastCachedIsLensOnOmniboxEnabled = Boolean.valueOf(isLensEnabled(LensEntryPoint.OMNIBOX));
     }
 
     // OmniboxStub implementation.

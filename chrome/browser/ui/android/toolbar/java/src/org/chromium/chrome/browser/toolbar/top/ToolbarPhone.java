@@ -698,7 +698,6 @@ public class ToolbarPhone extends ToolbarLayout implements OnClickListener, TabC
     private void updateToolbarBackground(int color) {
         if (mToolbarBackground.getColor() == color) return;
         mToolbarBackground.setColor(color);
-        setToolbarHairlineColor(color);
         invalidate();
     }
 
