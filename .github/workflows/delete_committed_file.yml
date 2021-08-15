@@ -23,6 +23,6 @@ jobs:
           git config --global user.email "github@actions"
           git config --global user.name "Repository manager"
             
-      - run: java -ar bfg-1.14.0.jar --delete-files ${{ github.event.inputs.filename }} .
+      - run: java -jar bfg-1.14.0.jar --delete-files ${{ github.event.inputs.filename }} .
       
       - run: git push
