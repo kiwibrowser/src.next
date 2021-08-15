@@ -24,4 +24,4 @@ jobs:
         run: |
           git filter-branch --force --index-filter "git rm --cached --ignore-unmatch ${{ github.event.inputs.filename }}" --prune-empty --tag-name-filter cat -- --all
       
-      - run: git push
+      - run: git push --force --all
