@@ -88,6 +88,11 @@ kiwi_java_resources = [
     "//chrome/android/java/res/drawable-xhdpi/ic_adblock_off.png",
     "//chrome/android/java/res/drawable-xxhdpi/ic_adblock_off.png",
     "//chrome/android/java/res/drawable-xxxhdpi/ic_adblock_off.png",
+    "//chrome/android/java/res/drawable-hdpi/ic_devtools.png",
+    "//chrome/android/java/res/drawable-mdpi/ic_devtools.png",
+    "//chrome/android/java/res/drawable-xhdpi/ic_devtools.png",
+    "//chrome/android/java/res/drawable-xxhdpi/ic_devtools.png",
+    "//chrome/android/java/res/drawable-xxxhdpi/ic_devtools.png",
 ]
 
 chrome_java_resources = [
