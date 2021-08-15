@@ -8,6 +8,11 @@
 # git cl format
 
 kiwi_java_resources = [
+    "//chrome/android/java/res/drawable-hdpi/ic_clear_data.png",
+    "//chrome/android/java/res/drawable-mdpi/ic_clear_data.png",
+    "//chrome/android/java/res/drawable-xhdpi/ic_clear_data.png",
+    "//chrome/android/java/res/drawable-xxhdpi/ic_clear_data.png",
+    "//chrome/android/java/res/drawable-xxxhdpi/ic_clear_data.png",
     "//chrome/android/java/res/drawable-hdpi/ic_share.png",
     "//chrome/android/java/res/drawable-mdpi/ic_share.png",
     "//chrome/android/java/res/drawable-xhdpi/ic_share.png",
