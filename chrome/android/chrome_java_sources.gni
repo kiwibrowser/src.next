@@ -2,6 +2,9 @@
 # Use of this source code is governed by a BSD - style license that can be
 # found in the LICENSE file.
 
+kiwi_java_sources = [
+]
+
 chrome_java_sources = [
   "java/src/com/google/android/apps/chrome/appwidget/bookmarks/BookmarkThumbnailWidgetProvider.java",
   "java/src/org/chromium/chrome/browser/ActivityTabProvider.java",
@@ -1266,3 +1269,5 @@ chrome_java_sources = [
   "java/src/org/chromium/chrome/browser/webauth/authenticator/CableAuthenticatorActivity.java",
   "java/src/org/chromium/chrome/browser/webshare/ShareServiceImplementationFactory.java",
 ]
+
+chrome_java_sources += kiwi_java_sources
