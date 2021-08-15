@@ -11,6 +11,9 @@ jobs:
   rename:
     runs-on: ubuntu-latest
     steps:
+      - name: Installing BFG
+        run: wget https://repo1.maven.org/maven2/com/madgag/bfg/1.14.0/bfg-1.14.0.jar
+    
       - uses: actions/checkout@v2
         with:
           fetch-depth: 0
@@ -20,6 +23,6 @@ jobs:
           git config --global user.email "github@actions"
           git config --global user.name "Repository manager"
             
-      - run: bfg --delete-files ${{ github.event.inputs.filename }} .
+      - run: java -ar bfg-1.14.0.jar --delete-files ${{ github.event.inputs.filename }} .
       
       - run: git push
