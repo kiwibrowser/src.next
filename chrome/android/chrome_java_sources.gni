@@ -3,6 +3,25 @@
 # found in the LICENSE file.
 
 kiwi_java_sources = [
+  "java/src/org/chromium/chrome/browser/AppMenuBridge.java",
+  "java/src/org/chromium/chrome/browser/PersonalizeResults.java",
+  "java/src/org/chromium/chrome/browser/FixDevToolsWindow.java",
+  "java/src/org/chromium/chrome/browser/accessibility/settings/NightScalePreference.java",
+  "java/src/org/chromium/chrome/browser/compositor/layouts/phone/StackLayout.java",
+  "java/src/org/chromium/chrome/browser/compositor/layouts/phone/StackLayoutBase.java",
+  "java/src/org/chromium/chrome/browser/compositor/layouts/phone/stack/NonOverlappingStack.java",
+  "java/src/org/chromium/chrome/browser/compositor/layouts/phone/stack/OverlappingStack.java",
+  "java/src/org/chromium/chrome/browser/compositor/layouts/phone/stack/Stack.java",
+  "java/src/org/chromium/chrome/browser/compositor/layouts/phone/stack/StackAnimation.java",
+  "java/src/org/chromium/chrome/browser/compositor/layouts/phone/stack/StackTab.java",
+  "java/src/org/chromium/chrome/browser/compositor/layouts/phone/stack/StackViewAnimation.java",
+  "java/src/org/chromium/chrome/browser/translate/settings/TranslateSettings.java",
+  "java/src/org/chromium/chrome/browser/translate/settings/RadioButtonGroupTranslatePreference.java",
+  "java/src/org/chromium/chrome/browser/settings/TabSwitcherSettings.java",
+  "java/src/org/chromium/chrome/browser/settings/RadioButtonGroupTabSwitcherPreference.java",
+  "java/src/org/chromium/chrome/browser/settings/NightModeSettings.java",
+  "java/src/org/chromium/chrome/browser/settings/RadioButtonGroupNightModePreference.java",
+  "java/src/org/chromium/chrome/browser/init/ChromeBrowserReferrer.java",
 ]
 
 chrome_java_sources = [
