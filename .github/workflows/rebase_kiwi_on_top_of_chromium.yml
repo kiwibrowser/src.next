@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v2
         with:
           fetch-depth: 0
-
+        
       - name: Setting-up GitHub username
         run: |
           git config --global user.email "github@actions"
@@ -25,25 +25,27 @@ jobs:
         run: git fetch upstream
 
       - name: Switching to Chromium
-        run: git checkout upstream/chromium
+        run: git checkout origin/chromium
 
-      - name: Loading settings from CHROMIUM_VERSION
-        run: |
-          if [ -f "CHROMIUM_VERSION" ]; then
-            source CHROMIUM_VERSION;
-            export $(cut -d= -f1 CHROMIUM_VERSION | grep -vF '#');
-            env | grep -F CHROMIUM_ >> $GITHUB_ENV
-          fi;
+      - name: Rebasing on top of kiwibrowser Chromium
+        run: git rebase upstream/chromium --committer-date-is-author-date
 
-      - name: Creating pull request
-        uses: vsoch/pull-request-action@1.0.18
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PULL_REQUEST_BRANCH: "kiwi"
-          PULL_REQUEST_FROM_BRANCH: "chromium"
-          PULL_REQUEST_DRAFT: true
-          PULL_REQUEST_TITLE: "[Rebase] Rebase Kiwi to Chromium version ${{ env.CHROMIUM_MAJOR }}.${{ env.CHROMIUM_MINOR }}.${{ env.CHROMIUM_BUILD }}.${{ env.CHROMIUM_PATCH }}"
-          PULL_REQUEST_BODY: |
-            Version update initiated by ${{ github.actor }}
-            
-            This is a rebase. It is *very important* to use "Rebase and merge" to merge this PR.
+      - name: Pushing Chromium branch
+        run: git push origin origin/chromium HEAD:chromium --force
+
+      - name: Fetching Kiwi branch
+        run: git fetch origin kiwi
+
+      - name: Switching to Kiwi
+        run: git checkout origin/kiwi
+
+      - name: Rebasing on top of kiwibrowser:Chromium
+        run: git rebase upstream/chromium --committer-date-is-author-date
+
+      - name: Preparing new branch
+        run: git checkout -b new_kiwi
+
+      # This is done on purpose
+      # See: https://redfin.engineering/git-rebasing-public-branches-works-much-better-than-youd-think-ecc9a115aea9
+      - name: Pushing Kiwi branch
+        run: git push origin new_kiwi:kiwi --force
