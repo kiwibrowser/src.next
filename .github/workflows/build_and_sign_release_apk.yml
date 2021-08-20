@@ -339,3 +339,15 @@ jobs:
       - name: Send announcement on Discord
         run: |
           curl -H 'Content-Type: application/json' -X POST -d '{"username": "Kiwi Builder (Next)", "content": "A new build of Kiwi Browser Next (preview version) is available. This version will replace your currently installed Kiwi Browser (com.kiwibrowser.browser) - https://github.com/kiwibrowser/src.next/releases/tag/${{ github.run_id }}"}' ${{ secrets.DISCORD_WEBHOOK }}
+      
+      - name: Send announcement on Telegram
+        run: |
+          curl -d '{"text":"A new build of Kiwi Browser Next (preview version) is available. \n Version :[${{ github.run_id }}](https://github.com/kiwibrowser/src.next/releases/tag/${{ github.run_id }})", "chat_id":${{ secrets.TELEGRAM_CHAT }}, \
+          "parse_mode" : "markdown","reply_markup" : { \
+          "inline_keyboard": [ \
+            [{"text": "x86", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser-${{ github.run_id }}-x86-github.apk"},{"text": "x64", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser-${{ github.run_id }}-x64-github.apk"}], \
+            [{"text": "arm", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser-${{ github.run_id }}-arm-github.apk"},{"text": "arm64", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser-${{ github.run_id }}-arm64-github.apk"}], \
+            [{"text": ".DEV x86", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser.dev-${{ github.run_id }}-x86-github.apk"},{"text": ".DEV x64", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser.dev-${{ github.run_id }}-x64-github.apk"}], \
+            [{"text": ".DEV arm", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser.dev-${{ github.run_id }}-arm-github.apk"},{"text": ".DEV arm64", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser.dev-${{ github.run_id }}-arm64-github.apk"}]]}}' \
+            -H "Content-Type: application/json" -X POST https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage
+
