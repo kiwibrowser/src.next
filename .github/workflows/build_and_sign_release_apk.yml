@@ -9,6 +9,10 @@ on:
         description: 'Create a draft release in Google Play Store'     
         required: true
         default: 'no'
+      announceOnDiscord:
+        description: 'Announce new release on Discord channel'     
+        required: true
+        default: 'yes'
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
@@ -338,6 +342,7 @@ jobs:
 
       - name: Send announcement on Discord
         continue-on-error: true
+        if: contains(github.event.inputs.announceOnDiscord, 'yes')
         run: |
           curl -H 'Content-Type: application/json' -X POST -d '{"username": "Kiwi Builder (Next)", "content": "A new build of Kiwi Browser Next (preview version) is available. This version will replace your currently installed Kiwi Browser (com.kiwibrowser.browser) - https://github.com/kiwibrowser/src.next/releases/tag/${{ github.run_id }}"}' ${{ secrets.DISCORD_WEBHOOK }}
       
