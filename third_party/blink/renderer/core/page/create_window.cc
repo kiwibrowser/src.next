@@ -329,6 +329,7 @@ Frame* CreateNewWindow(LocalFrame& opener_frame,
       && !(url.Host().Contains("ikano"))
       && !(url.Host().Contains("klarna"))
       && !(url.Host().Contains("pank"))
+      && !(url.Host().Contains("oauth"))
       && !(url.Host().Contains("twitter"))
       && !(url.Host().Contains("facebook"))
       && !(url.Host().Contains("disqus")))
