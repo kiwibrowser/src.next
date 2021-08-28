@@ -117,7 +117,8 @@ Changing the Chromium version is going to work, but the build system doesn't sup
 
 ## Resolving issues
 
-If you need to add or remove commits where you have done mistake, `git rebase -i 3eb71bb7cae580107938f6394513462e67033f8a --committer-date-is-author-date`
+If you need to add or remove commits where you have done mistake, `git rebase -i 3eb71bb7cae580107938f6394513462e67033f8a`
+After rebasing, you need to fix the date and time of the commits by running `git rebase 3eb71bb7cae580107938f6394513462e67033f8a --committer-date-is-author-date`
 
 `3eb71bb7cae580107938f6394513462e67033f8a` is the root commit from which both Kiwi and Chromium branch are born from.
 
