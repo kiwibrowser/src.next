@@ -129,7 +129,7 @@ you can use:
 
 `git fetch`
 
-`git pull --rebase origin`
+`git rebase origin/kiwi --committer-date-is-author-date`
 
 In a normal situation, this is going to show `First, rewinding head to replay your work on top of it...`
 
