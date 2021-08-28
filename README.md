@@ -129,7 +129,7 @@ you can use:
 
 `git fetch`
 
-`git pull --rebase`
+`git pull --rebase origin`
 
 In a normal situation, this is going to show `First, rewinding head to replay your work on top of it...`
 
