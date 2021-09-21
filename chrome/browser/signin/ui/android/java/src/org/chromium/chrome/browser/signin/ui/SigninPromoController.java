@@ -25,6 +25,7 @@ import org.chromium.chrome.browser.signin.services.DisplayableProfileData;
 import org.chromium.chrome.browser.signin.services.IdentityServicesProvider;
 import org.chromium.chrome.browser.signin.services.ProfileDataCache;
 import org.chromium.chrome.browser.signin.ui.SyncConsentActivityLauncher.AccessPoint;
+import org.chromium.chrome.features.start_surface.StartSurfaceConfiguration;
 import org.chromium.components.browser_ui.widget.impression.ImpressionTracker;
 import org.chromium.components.browser_ui.widget.impression.OneShotImpressionListener;
 import org.chromium.components.signin.AccountManagerFacade;
@@ -65,6 +66,7 @@ public class SigninPromoController {
     private final String mSigninWithDefaultUserActionName;
     private final String mSigninNotDefaultUserActionName;
     private final String mSigninNewAccountUserActionName;
+    private final @Nullable String mSyncPromoDismissedPreferenceTracker;
     private final @Nullable String mImpressionsTilDismissHistogramName;
     private final @Nullable String mImpressionsTilSigninButtonsHistogramName;
     private final @Nullable String mImpressionsTilXButtonHistogramName;
@@ -75,54 +77,88 @@ public class SigninPromoController {
     private boolean mWasUsed;
 
     /**
-     * Determines whether the impression limit has been reached for the given access point.
+     * Determines whether the Sync promo can be shown.
      * @param accessPoint The access point for which the impression limit is being checked.
      */
-    public static boolean hasNotReachedImpressionLimit(@AccessPoint int accessPoint) {
-        SharedPreferencesManager preferencesManager = SharedPreferencesManager.getInstance();
+    public static boolean canShowSyncPromo(@AccessPoint int accessPoint) {
         switch (accessPoint) {
             case SigninAccessPoint.BOOKMARK_MANAGER:
-                return getSigninPromoImpressionsCountBookmarks() < MAX_IMPRESSIONS_BOOKMARKS;
+                return canShowBookmarkPromo();
             case SigninAccessPoint.NTP_CONTENT_SUGGESTIONS:
-                int maxImpressions = ChromeFeatureList.getFieldTrialParamByFeatureAsInt(
-                        ChromeFeatureList.ENHANCED_PROTECTION_PROMO_CARD,
-                        "MaxSigninPromoImpressions", Integer.MAX_VALUE);
-                return SharedPreferencesManager.getInstance().readInt(
-                               ChromePreferenceKeys.SIGNIN_PROMO_IMPRESSIONS_COUNT_NTP)
-                        < maxImpressions;
+                return canShowNTPPromo();
             case SigninAccessPoint.RECENT_TABS:
-                // There is no impression limit for Recent Tabs.
+                // There is no impression limit or dismiss button in Recent Tabs promo.
                 return true;
             case SigninAccessPoint.SETTINGS:
-                return preferencesManager.readInt(
-                               ChromePreferenceKeys.SIGNIN_PROMO_IMPRESSIONS_COUNT_SETTINGS)
-                        < MAX_IMPRESSIONS_SETTINGS;
+                return canShowSettingsPromo();
             default:
                 assert false : "Unexpected value for access point: " + accessPoint;
                 return false;
         }
     }
 
-    /**
-     * Determines whether sync promo can be shown for NTP.
-     */
-    public static boolean shouldHideSyncPromoForNTP(@AccessPoint int accessPoint) {
-        assert accessPoint
-                == SigninAccessPoint.NTP_CONTENT_SUGGESTIONS : "Unexpected value for access point: "
-                        + accessPoint;
+    private static boolean canShowBookmarkPromo() {
+        boolean isPromoDismissed = SharedPreferencesManager.getInstance().readBoolean(
+                ChromePreferenceKeys.SIGNIN_PROMO_BOOKMARKS_DECLINED, false);
+        return getSigninPromoImpressionsCountBookmarks() < MAX_IMPRESSIONS_BOOKMARKS
+                && !isPromoDismissed;
+    }
 
+    /**
+     * Expires the promo card if Chrome has been in the background long enough. We're using the
+     * "Start Surface" concept of session here which is if the app has been in the background for X
+     * amount of time. Called from #onStartWithNative, after which the time stored in {@link
+     * ChromeInactivityTracker} is expired.
+     *
+     * @param timeSinceLastBackgroundedMs The time since Chrome has sent into the background.
+     */
+    public static void maybeExpireNTPPromo(long timeSinceLastBackgroundedMs) {
+        long timeSinceLastBackgroundedLimitMs =
+                StartSurfaceConfiguration.SIGN_IN_PROMO_SHOW_SINCE_LAST_BACKGROUNDED_LIMIT_MS
+                        .getValue();
+        // If |timeSinceLastBackgroundedLimitMs| is not -1, which means we have a limit on last
+        // background time, check and record whether the current time is expired.
+        if (timeSinceLastBackgroundedLimitMs > 0
+                && timeSinceLastBackgroundedMs > timeSinceLastBackgroundedLimitMs) {
+            SharedPreferencesManager.getInstance().writeBoolean(
+                    ChromePreferenceKeys.SIGNIN_PROMO_NTP_PROMO_EXPIRED, true);
+        }
+    }
+
+    private static boolean canShowNTPPromo() {
+        int maxImpressions = ChromeFeatureList.getFieldTrialParamByFeatureAsInt(
+                ChromeFeatureList.ENHANCED_PROTECTION_PROMO_CARD, "MaxSigninPromoImpressions",
+                Integer.MAX_VALUE);
+        if (SharedPreferencesManager.getInstance().readInt(
+                    ChromePreferenceKeys.SIGNIN_PROMO_IMPRESSIONS_COUNT_NTP)
+                >= maxImpressions) {
+            return false;
+        }
+
+        if (SharedPreferencesManager.getInstance().readBoolean(
+                    ChromePreferenceKeys.SIGNIN_PROMO_NTP_PROMO_EXPIRED, false)) {
+            return false;
+        }
+
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.FORCE_DISABLE_EXTENDED_SYNC_PROMOS)) {
+            return false;
+        }
         final @Nullable Account visibleAccount = getVisibleAccount();
         final AccountManagerFacade accountManagerFacade =
                 AccountManagerFacadeProvider.getInstance();
-        if (visibleAccount == null) {
-            return false;
-        }
-        final boolean canNotOfferPromoForMinorAccount =
-                ChromeFeatureList.isEnabled(ChromeFeatureList.MINOR_MODE_SUPPORT)
-                && !accountManagerFacade.canOfferExtendedSyncPromos(visibleAccount).or(false);
-        return canNotOfferPromoForMinorAccount
-                || ChromeFeatureList.isEnabled(
-                        ChromeFeatureList.FORCE_DISABLE_EXTENDED_SYNC_PROMOS);
+        return visibleAccount == null
+                || !ChromeFeatureList.isEnabled(ChromeFeatureList.MINOR_MODE_SUPPORT)
+                || accountManagerFacade.canOfferExtendedSyncPromos(visibleAccount).or(false);
+    }
+
+    private static boolean canShowSettingsPromo() {
+        SharedPreferencesManager preferencesManager = SharedPreferencesManager.getInstance();
+        boolean isPromoDismissed = preferencesManager.readBoolean(
+                ChromePreferenceKeys.SIGNIN_PROMO_SETTINGS_PERSONALIZED_DISMISSED, false);
+        return preferencesManager.readInt(
+                       ChromePreferenceKeys.SIGNIN_PROMO_IMPRESSIONS_COUNT_SETTINGS)
+                < MAX_IMPRESSIONS_SETTINGS
+                && !isPromoDismissed;
     }
 
     // Find the visible account for sync promos
@@ -165,6 +201,8 @@ public class SigninPromoController {
                 // already an account on the device. Always use the NoExistingAccount variant.
                 mSigninNewAccountUserActionName =
                         "Signin_SigninNewAccountNoExistingAccount_FromBookmarkManager";
+                mSyncPromoDismissedPreferenceTracker =
+                        ChromePreferenceKeys.SIGNIN_PROMO_BOOKMARKS_DECLINED;
                 mImpressionsTilDismissHistogramName =
                         "MobileSignInPromo.BookmarkManager.ImpressionsTilDismiss";
                 mImpressionsTilSigninButtonsHistogramName =
@@ -190,6 +228,7 @@ public class SigninPromoController {
                 // already an account on the device. Always use the NoExistingAccount variant.
                 mSigninNewAccountUserActionName =
                         "Signin_SigninNewAccountNoExistingAccount_FromNTPContentSuggestions";
+                mSyncPromoDismissedPreferenceTracker = null;
                 mImpressionsTilDismissHistogramName = null;
                 mImpressionsTilSigninButtonsHistogramName = null;
                 mImpressionsTilXButtonHistogramName = null;
@@ -211,6 +250,7 @@ public class SigninPromoController {
                 // already an account on the device. Always use the NoExistingAccount variant.
                 mSigninNewAccountUserActionName =
                         "Signin_SigninNewAccountNoExistingAccount_FromRecentTabs";
+                mSyncPromoDismissedPreferenceTracker = null;
                 mImpressionsTilDismissHistogramName = null;
                 mImpressionsTilSigninButtonsHistogramName = null;
                 mImpressionsTilXButtonHistogramName = null;
@@ -230,6 +270,8 @@ public class SigninPromoController {
                         "Signin_SigninNewAccountNoExistingAccount_FromSettings";
                 mImpressionWithNoAccountUserActionName =
                         "Signin_ImpressionWithNoAccount_FromSettings";
+                mSyncPromoDismissedPreferenceTracker =
+                        ChromePreferenceKeys.SIGNIN_PROMO_SETTINGS_PERSONALIZED_DISMISSED;
                 mImpressionsTilDismissHistogramName =
                         "MobileSignInPromo.SettingsManager.ImpressionsTilDismiss";
                 mImpressionsTilSigninButtonsHistogramName =
@@ -248,7 +290,6 @@ public class SigninPromoController {
 
     /**
      * Sets up the sync promo view.
-     *
      * @param profileDataCache The {@link ProfileDataCache} that stores profile data.
      * @param view The {@link PersonalizedSigninPromoView} that should be set up.
      * @param listener The {@link SigninPromoController.OnDismissListener} to be set to the view.
@@ -257,8 +298,7 @@ public class SigninPromoController {
             PersonalizedSigninPromoView view, SigninPromoController.OnDismissListener listener) {
         final IdentityManager identityManager = IdentityServicesProvider.get().getIdentityManager(
                 Profile.getLastUsedRegularProfile());
-        assert identityManager.getPrimaryAccountInfo(ConsentLevel.SYNC)
-                == null : "Sync is already enabled!";
+        assert !identityManager.hasPrimaryAccount(ConsentLevel.SYNC) : "Sync is already enabled!";
 
         final @Nullable Account visibleAccount = getVisibleAccount();
         // Set up the sync promo
@@ -315,9 +355,12 @@ public class SigninPromoController {
             view.getDismissButton().setVisibility(View.VISIBLE);
             view.getDismissButton().setOnClickListener(promoView -> {
                 assert mImpressionsTilXButtonHistogramName != null;
+                assert mSyncPromoDismissedPreferenceTracker != null;
                 mWasUsed = true;
                 RecordHistogram.recordCount100Histogram(
                         mImpressionsTilXButtonHistogramName, getNumImpressions());
+                SharedPreferencesManager.getInstance().writeBoolean(
+                        mSyncPromoDismissedPreferenceTracker, true);
                 onDismissListener.onDismiss();
             });
         } else {
@@ -357,12 +400,9 @@ public class SigninPromoController {
         view.getDescription().setText(mDescriptionStringId);
 
         view.getPrimaryButton().setOnClickListener(v -> signinWithDefaultAccount(context));
-        final boolean hasPrimaryAccount =
-                IdentityServicesProvider.get()
+        if (IdentityServicesProvider.get()
                         .getIdentityManager(Profile.getLastUsedRegularProfile())
-                        .getPrimaryAccountInfo(ConsentLevel.SIGNIN)
-                != null;
-        if (hasPrimaryAccount) {
+                        .hasPrimaryAccount(ConsentLevel.SIGNIN)) {
             view.getPrimaryButton().setText(R.string.sync_promo_turn_on_sync);
             view.getSecondaryButton().setVisibility(View.GONE);
         } else {
@@ -438,6 +478,12 @@ public class SigninPromoController {
     public static void setSigninPromoImpressionsCountBookmarksForTests(int count) {
         SharedPreferencesManager.getInstance().writeInt(
                 ChromePreferenceKeys.SIGNIN_PROMO_IMPRESSIONS_COUNT_BOOKMARKS, count);
+    }
+
+    @VisibleForTesting
+    public static void setPrefSigninPromoDeclinedBookmarksForTests(boolean isDeclined) {
+        SharedPreferencesManager.getInstance().writeBoolean(
+                ChromePreferenceKeys.SIGNIN_PROMO_BOOKMARKS_DECLINED, isDeclined);
     }
 
     @VisibleForTesting
