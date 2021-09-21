@@ -1266,8 +1266,6 @@ void TextAutosizer::ApplyMultiplier(LayoutObject* layout_object,
 
   if (multiplier != 1)
     page_info_.has_autosized_ = true;
-
-  layout_object->ClearBaseComputedStyle();
 }
 
 bool TextAutosizer::IsWiderOrNarrowerDescendant(Cluster* cluster) {
@@ -1398,13 +1396,15 @@ bool TextAutosizer::FingerprintMapper::Remove(LayoutObject* layout_object) {
 
 TextAutosizer::Fingerprint TextAutosizer::FingerprintMapper::Get(
     const LayoutObject* layout_object) {
-  return fingerprints_.at(layout_object);
+  auto it = fingerprints_.find(layout_object);
+  return it != fingerprints_.end() ? it->value : TextAutosizer::Fingerprint();
 }
 
 TextAutosizer::BlockSet*
 TextAutosizer::FingerprintMapper::GetTentativeClusterRoots(
     Fingerprint fingerprint) {
-  return blocks_for_fingerprint_.at(fingerprint);
+  auto it = blocks_for_fingerprint_.find(fingerprint);
+  return it != blocks_for_fingerprint_.end() ? &*it->value : nullptr;
 }
 
 TextAutosizer::LayoutScope::LayoutScope(LayoutBlock* block,

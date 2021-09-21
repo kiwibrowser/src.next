@@ -502,6 +502,30 @@ void HistoryBackend::AddContentModelAnnotationsForVisit(
   }
 }
 
+void HistoryBackend::AddRelatedSearchesForVisit(
+    VisitID visit_id,
+    const std::vector<std::string>& related_searches) {
+  TRACE_EVENT0("browser", "HistoryBackend::AddRelatedSearchesForVisit");
+
+  if (!db_)
+    return;
+
+  // Only add to the annotations table if the visit_id exists in the visits
+  // table.
+  VisitRow visit_row;
+  if (db_->GetRowForVisit(visit_id, &visit_row)) {
+    VisitContentAnnotations annotations;
+    if (db_->GetContentAnnotationsForVisit(visit_id, &annotations)) {
+      annotations.related_searches = related_searches;
+      db_->UpdateContentAnnotationsForVisit(visit_id, annotations);
+    } else {
+      annotations.related_searches = related_searches;
+      db_->AddContentAnnotationsForVisit(visit_id, annotations);
+    }
+    ScheduleCommit();
+  }
+}
+
 void HistoryBackend::UpdateVisitDuration(VisitID visit_id, const Time end_ts) {
   if (!db_)
     return;
@@ -1302,13 +1326,24 @@ DomainDiversityResults HistoryBackend::GetDomainDiversity(
   return result;
 }
 
-HistoryLastVisitResult HistoryBackend::GetLastVisitToHost(const GURL& host,
-                                                          base::Time begin_time,
-                                                          base::Time end_time) {
+HistoryLastVisitResult HistoryBackend::GetLastVisitToHost(
+    const std::string& host,
+    base::Time begin_time,
+    base::Time end_time) {
   base::Time last_visit;
   return {
       db_ && db_->GetLastVisitToHost(host, begin_time, end_time, &last_visit),
       last_visit};
+}
+
+HistoryLastVisitResult HistoryBackend::GetLastVisitToOrigin(
+    const url::Origin& origin,
+    base::Time begin_time,
+    base::Time end_time) {
+  base::Time last_visit;
+  return {db_ && db_->GetLastVisitToOrigin(origin, begin_time, end_time,
+                                           &last_visit),
+          last_visit};
 }
 
 HistoryLastVisitResult HistoryBackend::GetLastVisitToURL(const GURL& url,
@@ -1422,39 +1457,44 @@ std::vector<AnnotatedVisit> HistoryBackend::GetAnnotatedVisits(
   //  and even returns a similar structure. We should investigate combining the
   //  two, while somehow still avoiding fetching unnecessary fields, such as
   //  `VisitContextAnnotations`. Probably we need to expand `QueryOptions`.
-  VisitVector visits;
+  VisitVector visit_rows;
   // Ignore the return value, as we don't care if we have more visits.
-  db_->GetVisibleVisitsInRange(options, &visits);
-  DCHECK_LE(static_cast<int>(visits.size()), options.EffectiveMaxCount());
+  db_->GetVisibleVisitsInRange(options, &visit_rows);
+  DCHECK_LE(static_cast<int>(visit_rows.size()), options.EffectiveMaxCount());
 
   std::vector<AnnotatedVisit> annotated_visits;
-  for (const auto& visit : visits) {
+  for (const auto& visit_row : visit_rows) {
     // Add a result row for this visit, get the URL info from the DB.
     URLRow url_row;
-    if (!db_->GetURLRow(visit.url_id, &url_row)) {
-      DVLOG(0) << "Failed to get id " << visit.url_id << " from history.urls.";
+    if (!db_->GetURLRow(visit_row.url_id, &url_row)) {
+      DVLOG(0) << "Failed to get id " << visit_row.url_id
+               << " from history.urls.";
       continue;  // DB out of sync and URL doesn't exist, try to recover.
     }
 
     VisitContextAnnotations context_annotations;
-    if (!db_->GetContextAnnotationsForVisit(visit.visit_id,
+    if (!db_->GetContextAnnotationsForVisit(visit_row.visit_id,
                                             &context_annotations)) {
-      // Redirects don't have context annotations. That's not an execeptional
+      // Redirects don't have context annotations. That's not an exceptional
       // case. We just skip these as normal.
       continue;
     }
-
-    VisitContentAnnotations content_annotations;
 
     // The return value of GetContentAnnotationsForVisit() is not checked for
     // failures, because the feature flag may be legitimately switched off.
     // Moreover, some visits may legitimately not have any content annotations.
     // In those cases, `content_annotations` is left unchanged, and this is
     // the intended behavior.
-    db_->GetContentAnnotationsForVisit(visit.visit_id, &content_annotations);
+    VisitContentAnnotations content_annotations;
+    db_->GetContentAnnotationsForVisit(visit_row.visit_id,
+                                       &content_annotations);
 
-    annotated_visits.emplace_back(url_row, visit, context_annotations,
-                                  content_annotations);
+    VisitID referring_visit_of_redirect_chain_start =
+        GetRedirectChainStart(visit_row).referring_visit;
+
+    annotated_visits.emplace_back(url_row, visit_row, context_annotations,
+                                  content_annotations,
+                                  referring_visit_of_redirect_chain_start);
   }
 
   return annotated_visits;
@@ -1553,7 +1593,11 @@ std::vector<AnnotatedVisit> HistoryBackend::AnnotatedVisitsFromRows(
     if (db_->GetRowForVisit(annotated_visit_row.visit_id, &visit_row) &&
         db_->GetURLRow(visit_row.url_id, &url_row)) {
       annotated_visits.push_back(
-          {url_row, visit_row, annotated_visit_row.context_annotations, {}});
+          {url_row,
+           visit_row,
+           annotated_visit_row.context_annotations,
+           {},
+           GetRedirectChainStart(visit_row).referring_visit});
     } else {
       // Ignore corrupt data but do not crash, as user DBs can be in bad states.
       DVLOG(0) << "HistoryBackend: AnnotatedVisit found with missing associated"
@@ -1562,6 +1606,24 @@ std::vector<AnnotatedVisit> HistoryBackend::AnnotatedVisitsFromRows(
     }
   }
   return annotated_visits;
+}
+
+VisitRow HistoryBackend::GetRedirectChainStart(VisitRow visit) {
+  // Iterate up `visit.referring_visit` while `visit.transition` is a redirect.
+  if (db_) {
+    base::flat_set<VisitID> visit_set;
+    while (!(visit.transition & ui::PAGE_TRANSITION_CHAIN_START)) {
+      visit_set.insert(visit.visit_id);
+      // `GetRowForVisit()` should not return false if the DB is correct.
+      if (!db_->GetRowForVisit(visit.referring_visit, &visit))
+        return {};
+      if (visit_set.count(visit.visit_id)) {
+        NOTREACHED() << "Loop in visit redirect chain, giving up";
+        break;
+      }
+    }
+  }
+  return visit;
 }
 
 // Observers -------------------------------------------------------------------
@@ -1704,9 +1766,12 @@ void HistoryBackend::QueryHistoryBasic(const QueryOptions& options,
 void HistoryBackend::QueryHistoryText(const std::u16string& text_query,
                                       const QueryOptions& options,
                                       QueryResults* result) {
-  URLRows text_matches;
-  db_->GetTextMatchesWithAlgorithm(text_query, options.matching_algorithm,
-                                   &text_matches);
+  URLRows text_matches =
+      options.host_only
+          ? GetMatchesForHost(text_query)
+          : db_->GetTextMatchesWithAlgorithm(
+                text_query, options.matching_algorithm.value_or(
+                                query_parser::MatchingAlgorithm::DEFAULT));
 
   std::vector<URLResult> matching_visits;
   VisitVector visits;  // Declare outside loop to prevent re-construction.
@@ -1740,6 +1805,23 @@ void HistoryBackend::QueryHistoryText(const std::u16string& text_query,
 
   if (!has_more_results && options.begin_time <= first_recorded_time_)
     result->set_reached_beginning(true);
+}
+
+URLRows HistoryBackend::GetMatchesForHost(const std::u16string& host_name) {
+  URLRows results;
+  URLDatabase::URLEnumerator iter;
+
+  if (db_ && db_->InitURLEnumeratorForEverything(&iter)) {
+    URLRow row;
+    std::string host_name_utf8 = base::UTF16ToUTF8(host_name);
+    while (iter.GetNextURL(&row)) {
+      if (row.url().is_valid() && row.url().host() == host_name_utf8) {
+        results.push_back(std::move(row));
+      }
+    }
+  }
+
+  return results;
 }
 
 RedirectList HistoryBackend::QueryRedirectsFrom(const GURL& from_url) {

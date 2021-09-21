@@ -1980,7 +1980,7 @@ void StyleEngine::UpdateTimelines() {
 
 CSSScrollTimeline* StyleEngine::FindScrollTimeline(const AtomicString& name) {
   DCHECK(!timelines_need_update_);
-  return scroll_timeline_map_.at(name);
+  return scroll_timeline_map_.DeprecatedAtOrEmptyValue(name);
 }
 
 void StyleEngine::ScrollTimelineInvalidated(CSSScrollTimeline& timeline) {
@@ -2051,6 +2051,11 @@ void StyleEngine::UpdateStyleAndLayoutTreeForContainer(
 
   NthIndexCache nth_index_cache(GetDocument());
   style_recalc_root_.Update(nullptr, &container);
+
+  // No need to initialize container for the StyleRecalcContext with
+  // FromAncestors because style will not be recalculated for "container, and
+  // Element::RecalcStyle for the "container" will initialize StyleRecalcContext
+  // with itself for its children.
   RecalcStyle(change, StyleRecalcContext());
 
   // Nodes are marked for whitespace reattachment for DOM removal only. This set
