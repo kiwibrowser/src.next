@@ -78,7 +78,8 @@ import java.util.List;
 class LocationBarMediator
         implements LocationBarDataProvider.Observer, OmniboxStub, VoiceRecognitionHandler.Delegate,
                    VoiceRecognitionHandler.Observer, AssistantVoiceSearchService.Observer,
-                   UrlBarDelegate, OnKeyListener, ComponentCallbacks {
+                   UrlBarDelegate, OnKeyListener, ComponentCallbacks,
+                   TemplateUrlService.TemplateUrlServiceObserver {
     private static final int ICON_FADE_ANIMATION_DURATION_MS = 150;
     private static final int ICON_FADE_ANIMATION_DELAY_MS = 75;
     private static final long NTP_KEYBOARD_FOCUS_DURATION_MS = 200;
@@ -237,6 +238,9 @@ class LocationBarMediator
         if (mAssistantVoiceSearchServiceSupplier.get() != null) {
             mAssistantVoiceSearchServiceSupplier.get().destroy();
         }
+        if (mTemplateUrlServiceSupplier.hasValue()) {
+            mTemplateUrlServiceSupplier.get().removeObserver(this);
+        }
         mStatusCoordinator = null;
         mAutocompleteCoordinator = null;
         mUrlCoordinator = null;
@@ -293,9 +297,13 @@ class LocationBarMediator
     /*package */ void onFinishNativeInitialization() {
         mNativeInitialized = true;
         mOmniboxPrerender = new OmniboxPrerender();
+        TemplateUrlService templateUrlService = mTemplateUrlServiceSupplier.get();
+        if (templateUrlService != null) {
+            templateUrlService.addObserver(this);
+        }
         mAssistantVoiceSearchServiceSupplier.set(new AssistantVoiceSearchService(mContext,
-                ExternalAuthUtils.getInstance(), mTemplateUrlServiceSupplier.get(),
-                GSAState.getInstance(mContext), this, SharedPreferencesManager.getInstance(),
+                ExternalAuthUtils.getInstance(), templateUrlService, GSAState.getInstance(mContext),
+                this, SharedPreferencesManager.getInstance(),
                 IdentityServicesProvider.get().getIdentityManager(
                         Profile.getLastUsedRegularProfile()),
                 AccountManagerFacadeProvider.getInstance()));
@@ -931,7 +939,7 @@ class LocationBarMediator
         // of whether it is branded or not.
         if (isUrlBarFocused()) {
             return ChromeColors.getDefaultThemeColor(
-                    mContext.getResources(), mLocationBarDataProvider.isIncognito());
+                    mContext, mLocationBarDataProvider.isIncognito());
         } else {
             return mLocationBarDataProvider.getPrimaryColor();
         }
@@ -1006,9 +1014,14 @@ class LocationBarMediator
     }
 
     private boolean shouldShowLensButton() {
+        // When this method is called on UI inflation, return false as the native is not ready.
+        if (!mNativeInitialized) {
+            return false;
+        }
+        // When this method is called after native initialized, check omnibox conditions and Lens
+        // eligibility.
         if (mIsTablet && mShouldShowButtonsWhenUnfocused) {
-            return mNativeInitialized && (mUrlHasFocus || mIsUrlFocusChangeInProgress)
-                    && isLensOnOmniboxEnabled();
+            return (mUrlHasFocus || mIsUrlFocusChangeInProgress) && isLensOnOmniboxEnabled();
         }
         return !shouldShowDeleteButton()
                 && (mUrlHasFocus || mIsUrlFocusChangeInProgress || mUrlFocusChangeFraction > 0f
@@ -1120,6 +1133,8 @@ class LocationBarMediator
         sLastCachedIsLensOnOmniboxEnabled = Boolean.valueOf(isLensEnabled(LensEntryPoint.OMNIBOX));
         updateButtonVisibility();
         updateSearchEngineStatusIconShownState();
+        // Update the visuals to use correct incognito colors.
+        mUrlCoordinator.setIncognitoColorsEnabled(mLocationBarDataProvider.isIncognito());
     }
 
     @Override
@@ -1144,6 +1159,12 @@ class LocationBarMediator
     @Override
     public void hintZeroSuggestRefresh() {
         mAutocompleteCoordinator.prefetchZeroSuggestResults();
+    }
+
+    // TemplateUrlService.TemplateUrlServiceObserver implementation
+    @Override
+    public void onTemplateURLServiceChanged() {
+        sLastCachedIsLensOnOmniboxEnabled = Boolean.valueOf(isLensEnabled(LensEntryPoint.OMNIBOX));
     }
 
     // OmniboxStub implementation.

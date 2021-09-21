@@ -2373,7 +2373,6 @@ bool LocalFrameView::UpdateLifecyclePhases(
 
 void LocalFrameView::UpdateLifecyclePhasesInternal(
     DocumentLifecycle::LifecycleState target_state) {
-  ScriptForbiddenScope forbid_script;
   // RunScrollTimelineSteps must not run more than once.
   bool should_run_scroll_timeline_steps = true;
 
@@ -2474,10 +2473,6 @@ void LocalFrameView::UpdateLifecyclePhasesInternal(
       if (needs_to_repeat_lifecycle)
         continue;
     }
-
-    // At this point in time, script is allowed to run as we will repeat the
-    // lifecycle update if anything is invalidated.
-    ScriptForbiddenScope::AllowUserAgentScript allow_script;
 
     // ResizeObserver and post-layout IntersectionObserver observation
     // deliveries may dirty style and layout. RunResizeObserverSteps will return
@@ -2730,7 +2725,6 @@ bool LocalFrameView::AnyFrameIsPrintingOrPaintingPreview() {
 }
 
 void LocalFrameView::RunPaintLifecyclePhase(PaintBenchmarkMode benchmark_mode) {
-  DCHECK(ScriptForbiddenScope::IsScriptForbidden());
   DCHECK(LocalFrameTreeAllowsThrottling());
   TRACE_EVENT0("blink,benchmark", "LocalFrameView::RunPaintLifecyclePhase");
   // While printing or capturing a paint preview of a document, the paint walk
@@ -2739,25 +2733,33 @@ void LocalFrameView::RunPaintLifecyclePhase(PaintBenchmarkMode benchmark_mode) {
   if (AnyFrameIsPrintingOrPaintingPreview())
     return;
 
-  if (LocalDOMWindow* window = GetFrame().DomWindow()) {
-    if (HighlightRegistry* highlight_registry =
-            window->Supplementable<LocalDOMWindow>::RequireSupplement<
-                HighlightRegistry>()) {
-      highlight_registry->ValidateHighlightMarkers();
+  // Validate all HighlightMarkers of all non-throttled LocalFrameViews before
+  // the call to PaintTree() so they're updated during this lifecycle.
+  ForAllNonThrottledLocalFrameViews([](LocalFrameView& frame_view) {
+    if (LocalDOMWindow* window = frame_view.GetFrame().DomWindow()) {
+      if (HighlightRegistry* highlight_registry =
+              window->Supplementable<LocalDOMWindow>::RequireSupplement<
+                  HighlightRegistry>()) {
+        highlight_registry->ValidateHighlightMarkers();
+      }
     }
+  });
+
+  bool needed_update;
+  {
+    PaintController::CycleScope cycle_scope;
+    bool repainted = PaintTree(benchmark_mode, cycle_scope);
+
+    if (paint_artifact_compositor_ &&
+        benchmark_mode ==
+            PaintBenchmarkMode::kForcePaintArtifactCompositorUpdate) {
+      paint_artifact_compositor_->SetNeedsUpdate();
+    }
+    needed_update = !paint_artifact_compositor_ ||
+                    paint_artifact_compositor_->NeedsUpdate();
+    PushPaintArtifactToCompositor(repainted);
   }
 
-  bool repainted = PaintTree(benchmark_mode);
-
-  if (paint_artifact_compositor_ &&
-      benchmark_mode ==
-          PaintBenchmarkMode::kForcePaintArtifactCompositorUpdate) {
-    paint_artifact_compositor_->SetNeedsUpdate();
-  }
-
-  bool needed_update =
-      !paint_artifact_compositor_ || paint_artifact_compositor_->NeedsUpdate();
-  PushPaintArtifactToCompositor(repainted);
   size_t total_animations_count = 0;
   ForAllNonThrottledLocalFrameViews(
       [this, &needed_update,
@@ -2770,9 +2772,15 @@ void LocalFrameView::RunPaintLifecyclePhase(PaintBenchmarkMode benchmark_mode) {
             area->UpdateCompositorScrollAnimations();
         }
         Document& document = frame_view.GetLayoutView()->GetDocument();
-        document.GetDocumentAnimations().UpdateAnimations(
-            DocumentLifecycle::kPaintClean, paint_artifact_compositor_.get(),
-            needed_update);
+        {
+          // Updating animations can notify ready promises which could mutate
+          // the DOM. We should delay these until we have finished the lifecycle
+          // update. https://crbug.com/1196781
+          ScriptForbiddenScope forbid_script;
+          document.GetDocumentAnimations().UpdateAnimations(
+              DocumentLifecycle::kPaintClean, paint_artifact_compositor_.get(),
+              needed_update);
+        }
         total_animations_count +=
             document.GetDocumentAnimations().GetAnimationsCount();
       });
@@ -2789,22 +2797,6 @@ void LocalFrameView::RunPaintLifecyclePhase(PaintBenchmarkMode benchmark_mode) {
     auto* root_layer = RootCcLayer();
     if (root_layer && root_layer->layer_tree_host()) {
       root_layer->layer_tree_host()->mutator_host()->InitClientAnimationState();
-    }
-  }
-
-  // Notify the controller that the artifact has been pushed and some
-  // lifecycle state can be freed (such as raster invalidations).
-  if (paint_controller_)
-    paint_controller_->FinishCycle();
-
-  if (!RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
-    auto* root = GetLayoutView()->Compositor()->PaintRootGraphicsLayer();
-    if (root) {
-      ForAllPaintingGraphicsLayers(*root, [](GraphicsLayer& layer) {
-        // Notify the paint controller that the artifact has been pushed and
-        // some lifecycle state can be freed (such as raster invalidations).
-        layer.GetPaintController().FinishCycle();
-      });
     }
   }
 
@@ -2873,7 +2865,8 @@ void LocalFrameView::EnqueueScrollEvents() {
   });
 }
 
-bool LocalFrameView::PaintTree(PaintBenchmarkMode benchmark_mode) {
+bool LocalFrameView::PaintTree(PaintBenchmarkMode benchmark_mode,
+                               PaintController::CycleScope& cycle_scope) {
   SCOPED_UMA_AND_UKM_TIMER(EnsureUkmAggregator(),
                            LocalFrameUkmAggregator::kPaint);
 
@@ -2921,7 +2914,11 @@ bool LocalFrameView::PaintTree(PaintBenchmarkMode benchmark_mode) {
   bool needs_clear_repaint_flags = false;
 
   if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
+    // TODO(paint-dev): We should be able to get rid of AddController entirely
+    // after non-CAP code is removed. The call to EnsurePaintController() will
+    // need to be moved up the call stack.
     EnsurePaintController();
+    cycle_scope.AddController(*paint_controller_);
 
     PaintChunkSubset previous_chunks(
         paint_controller_->GetPaintArtifactShared());
@@ -2933,6 +2930,7 @@ bool LocalFrameView::PaintTree(PaintBenchmarkMode benchmark_mode) {
         GetLayoutView()->Layer()->SelfOrDescendantNeedsRepaint() ||
         visual_viewport_or_overlay_needs_repaint_) {
       GraphicsContext graphics_context(*paint_controller_);
+
       if (Settings* settings = frame_->GetSettings()) {
         graphics_context.SetDarkModeEnabled(
             settings->GetForceDarkModeEnabled() &&
@@ -2991,6 +2989,8 @@ bool LocalFrameView::PaintTree(PaintBenchmarkMode benchmark_mode) {
     // parented into the main frame tree, or when the LocalFrameView is the main
     // frame view of a page overlay. The page overlay is in the layer tree of
     // the host page and will be painted during painting of the host page.
+    // Note that paint_controller_ is not added to cycle_scope, because it is
+    // transient and may be deleted before cycle_scope.
     paint_controller_ =
         std::make_unique<PaintController>(PaintController::kTransient);
     pre_composited_layers_.clear();
@@ -2998,8 +2998,9 @@ bool LocalFrameView::PaintTree(PaintBenchmarkMode benchmark_mode) {
 
     if (GraphicsLayer* root =
             layout_view->Compositor()->PaintRootGraphicsLayer()) {
-      repainted = root->PaintRecursively(
-          graphics_context, pre_composited_layers_, benchmark_mode);
+      repainted =
+          root->PaintRecursively(graphics_context, pre_composited_layers_,
+                                 cycle_scope, benchmark_mode);
       if (visual_viewport_or_overlay_needs_repaint_ &&
           paint_artifact_compositor_)
         paint_artifact_compositor_->SetNeedsUpdate();
@@ -3662,34 +3663,38 @@ void LocalFrameView::SetTracksRasterInvalidations(
 }
 
 void LocalFrameView::ServiceScriptedAnimations(base::TimeTicks start_time) {
+  bool can_throttle = CanThrottleRendering();
   // Disallow throttling in case any script needs to do a synchronous
   // lifecycle update in other frames which are throttled.
   DisallowThrottlingScope disallow_throttling(*this);
-  if (ScrollableArea* scrollable_area = GetScrollableArea()) {
-    scrollable_area->ServiceScrollAnimations(
-        start_time.since_origin().InSecondsF());
-  }
-  if (const ScrollableAreaSet* animating_scrollable_areas =
-          AnimatingScrollableAreas()) {
-    // Iterate over a copy, since ScrollableAreas may deregister
-    // themselves during the iteration.
-    HeapVector<Member<PaintLayerScrollableArea>>
-        animating_scrollable_areas_copy;
-    CopyToVector(*animating_scrollable_areas, animating_scrollable_areas_copy);
-    for (PaintLayerScrollableArea* scrollable_area :
-         animating_scrollable_areas_copy) {
+  Document* document = GetFrame().GetDocument();
+  DCHECK(document);
+  if (!can_throttle) {
+    if (ScrollableArea* scrollable_area = GetScrollableArea()) {
       scrollable_area->ServiceScrollAnimations(
           start_time.since_origin().InSecondsF());
     }
+    if (const ScrollableAreaSet* animating_scrollable_areas =
+            AnimatingScrollableAreas()) {
+      // Iterate over a copy, since ScrollableAreas may deregister
+      // themselves during the iteration.
+      HeapVector<Member<PaintLayerScrollableArea>>
+          animating_scrollable_areas_copy;
+      CopyToVector(*animating_scrollable_areas,
+                   animating_scrollable_areas_copy);
+      for (PaintLayerScrollableArea* scrollable_area :
+           animating_scrollable_areas_copy) {
+        scrollable_area->ServiceScrollAnimations(
+            start_time.since_origin().InSecondsF());
+      }
+    }
+    GetFrame().AnimateSnapFling(start_time);
+    if (SVGDocumentExtensions::ServiceSmilOnAnimationFrame(*document))
+      GetPage()->Animator().SetHasSmilAnimation();
+    SVGDocumentExtensions::ServiceWebAnimationsOnAnimationFrame(*document);
+    document->GetDocumentAnimations().UpdateAnimationTimingForAnimationFrame();
   }
-  GetFrame().AnimateSnapFling(start_time);
-  Document* document = GetFrame().GetDocument();
-  DCHECK(document);
-  if (SVGDocumentExtensions::ServiceSmilOnAnimationFrame(*document))
-    GetPage()->Animator().SetHasSmilAnimation();
-  SVGDocumentExtensions::ServiceWebAnimationsOnAnimationFrame(*document);
-  document->GetDocumentAnimations().UpdateAnimationTimingForAnimationFrame();
-  document->ServiceScriptedAnimations(start_time);
+  document->ServiceScriptedAnimations(start_time, can_throttle);
 }
 
 void LocalFrameView::ScheduleAnimation(base::TimeDelta delay) {
@@ -4120,16 +4125,15 @@ void LocalFrameView::PaintContentsForTest(const CullRect& cull_rect) {
   if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
     PaintController& paint_controller = EnsurePaintController();
     if (GetLayoutView()->Layer()->SelfOrDescendantNeedsRepaint()) {
+      PaintController::CycleScope cycle_scope(paint_controller);
       GraphicsContext graphics_context(paint_controller);
       Paint(graphics_context, kGlobalPaintNormalPhase, cull_rect);
       paint_controller.CommitNewDisplayItems();
     }
-    paint_controller.FinishCycle();
   } else {
     GraphicsLayer* graphics_layer =
         GetLayoutView()->Layer()->GraphicsLayerBacking();
     graphics_layer->PaintForTesting(cull_rect.Rect());
-    graphics_layer->GetPaintController().FinishCycle();
   }
   Lifecycle().AdvanceTo(DocumentLifecycle::kPaintClean);
 }
@@ -4413,18 +4417,24 @@ void LocalFrameView::RenderThrottlingStatusChanged() {
     // Ensure we'll recompute viewport intersection for the frame subtree during
     // the scheduled visual update.
     SetIntersectionObservationState(kRequired);
-    // When a frame is throttled, we typically delete its previous painted
-    // output, so it will need to be repainted, even if nothing else has
-    // changed.
-    if (LayoutView* layout_view = GetLayoutView())
-      layout_view->Layer()->SetNeedsRepaint();
   } else if (GetFrame().IsLocalRoot()) {
     // By this point, every frame in the local frame tree has become throttled,
     // so painting the tree should just clear the previous painted output.
     DCHECK(!IsUpdatingLifecycle());
     AllowThrottlingScope allow_throtting(*this);
-    ScriptForbiddenScope forbid_script;
     RunPaintLifecyclePhase(PaintBenchmarkMode::kNormal);
+  }
+
+  // When a frame is throttled, we typically delete its previous painted
+  // output, so it will need to be repainted, even if nothing else has
+  // changed.
+  if (LayoutView* layout_view = GetLayoutView())
+    layout_view->Layer()->SetNeedsRepaint();
+  // The painted output of the frame may be included in a cached subsequence
+  // associated with the embedding document, so invalidate the owner.
+  if (auto* owner = GetFrame().OwnerLayoutObject()) {
+    if (PaintLayer* owner_layer = owner->Layer())
+      owner_layer->SetNeedsRepaint();
   }
 
 #if DCHECK_IS_ON()
@@ -4763,6 +4773,9 @@ void LocalFrameView::OnFirstContentfulPaint() {
                         FontPerformance::PrimaryFontTime());
     UMA_HISTOGRAM_TIMES("Renderer.Font.PrimaryFont.FCP.Style",
                         FontPerformance::PrimaryFontTimeInStyle());
+    UMA_HISTOGRAM_TIMES("Renderer.Font.SystemFallback.FCP",
+                        FontPerformance::SystemFallbackFontTime());
+    FontPerformance::DidReachFirstContentfulPaint();
   }
   EnsureUkmAggregator().DidReachFirstContentfulPaint(is_main_frame);
 }
@@ -4957,7 +4970,6 @@ void LocalFrameView::RunPaintBenchmark(int repeat_count,
       // quantization when the time is very small.
       base::LapTimer timer(kWarmupRuns, kTimeLimit, kTimeCheckInterval);
       do {
-        ScriptForbiddenScope forbid_script;
         // Force a paint with everything cached before a small invalidation
         // test to better simulate real-world scenarios.
         if (mode == PaintBenchmarkMode::kSmallInvalidation)

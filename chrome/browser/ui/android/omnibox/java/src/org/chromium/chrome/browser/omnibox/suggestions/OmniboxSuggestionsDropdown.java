@@ -157,13 +157,26 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
                 resources.getDimensionPixelOffset(R.dimen.omnibox_suggestion_list_padding_bottom);
         ViewCompat.setPaddingRelative(this, 0, 0, 0, paddingBottom);
 
-        mStandardBgColor = ChromeColors.getDefaultThemeColor(resources, false);
-        mIncognitoBgColor = ChromeColors.getDefaultThemeColor(resources, true);
+        mStandardBgColor = ChromeColors.getDefaultThemeColor(context, false);
+        mIncognitoBgColor = ChromeColors.getDefaultThemeColor(context, true);
     }
 
     /** Get the Android View implementing suggestion list. */
     public @NonNull ViewGroup getViewGroup() {
         return this;
+    }
+
+    /** Clean up resources and remove observers installed by this class. */
+    public void destroy() {
+        getRecycledViewPool().clear();
+        mObserver = null;
+
+        mAnchorView.getViewTreeObserver().removeOnGlobalLayoutListener(mAnchorViewLayoutListener);
+        if (mAlignmentView != null) {
+            mAlignmentView.removeOnLayoutChangeListener(mAlignmentViewLayoutListener);
+        }
+        mAlignmentView = null;
+        mAlignmentViewLayoutListener = null;
     }
 
     /**

@@ -48,6 +48,7 @@
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
+#include "third_party/blink/renderer/core/editing/ime/input_method_controller.h"
 #include "third_party/blink/renderer/core/editing/layout_selection.h"
 #include "third_party/blink/renderer/core/editing/position_with_affinity.h"
 #include "third_party/blink/renderer/core/editing/text_affinity.h"
@@ -1114,6 +1115,13 @@ static inline bool ObjectIsRelayoutBoundary(const LayoutObject* object) {
     // not only is the result incorrect due to the override size that's set, it
     // also messes with the cached main size on the flexbox.
     if (layout_box->IsFlexItemIncludingNG())
+      return false;
+
+    // Similarly to flex items, we can't relayout a grid item independently of
+    // its container. This also applies to out of flow items of the grid, as we
+    // need the cached information of the grid to recompute the out of flow
+    // item's containing block rect.
+    if (layout_box->ContainingBlock()->IsLayoutGridIncludingNG())
       return false;
 
     // In LayoutNG, if box has any OOF descendants, they are propagated to
@@ -2739,6 +2747,8 @@ void LayoutObject::StyleWillChange(StyleDifference diff,
         layer->DirtyVisibleContentStatus();
       if (AXObjectCache* cache = GetDocument().ExistingAXObjectCache())
         cache->ChildrenChanged(this);
+      GetDocument().GetFrame()->GetInputMethodController().DidChangeVisibility(
+          *this);
     }
 
     if (IsFloating() &&
@@ -2805,16 +2815,6 @@ void LayoutObject::StyleWillChange(StyleDifference diff,
     if (LocalFrameView* frame_view = GetFrameView())
       frame_view->GetPaintTimingDetector().ReportIgnoredContent();
   }
-}
-
-void LayoutObject::ClearBaseComputedStyle() {
-  NOT_DESTROYED();
-  auto* element = DynamicTo<Element>(GetNode());
-  if (!element)
-    return;
-
-  if (ElementAnimations* animations = element->GetElementAnimations())
-    animations->ClearBaseComputedStyle();
 }
 
 static bool AreNonIdenticalCursorListsEqual(const ComputedStyle* a,
