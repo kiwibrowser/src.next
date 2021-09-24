@@ -120,6 +120,8 @@ import org.chromium.ui.base.IntentRequestTracker;
 import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.util.TokenHolder;
 
+import org.chromium.base.ContextUtils;
+
 /**
  * A {@link RootUiCoordinator} variant that controls tabbed-mode specific UI.
  */
@@ -676,6 +678,8 @@ public class TabbedRootUiCoordinator extends RootUiCoordinator {
     }
 
     private void initStatusIndicatorCoordinator(LayoutManagerImpl layoutManager) {
+        if (ContextUtils.getAppSharedPreferences().getBoolean("enable_bottom_toolbar", false))
+            return;
         // TODO(crbug.com/1035584): Disable on tablets for now as we need to do one or two extra
         // things for tablets.
         if (DeviceFormFactor.isNonMultiDisplayContextOnTablet(mActivity)
@@ -774,14 +778,6 @@ public class TabbedRootUiCoordinator extends RootUiCoordinator {
             }
         };
         mFindToolbarManager.addObserver(mContinuousSearchFindToolbarObserver);
-    }
-
-    @Override
-    protected BrowserControlsManager createBrowserControlsManager() {
-        BrowserControlsManager manager = super.createBrowserControlsManager();
-        getAppBrowserControlsVisibilityDelegate().addDelegate(
-                manager.getBrowserVisibilityDelegate());
-        return manager;
     }
 
     /**
