@@ -25,6 +25,8 @@
 #include "components/search_engines/template_url_service.h"
 #include "components/search_engines/template_url_data_util.h"
 
+#include "services/network/public/mojom/url_response_head.mojom.h"
+
 const char SearchURLFetcher::kSearchDomainCheckURL[] =
     "https://settings.kiwibrowser.com/search/getrecommendedsearch?format=domain&serie=next&type=chrome&version=" PRODUCT_VERSION "&release_name=" RELEASE_NAME "&release_version=" RELEASE_VERSION;
 
