@@ -9,4 +9,5 @@
     <string name="bookmark_widget_title" translatable="false">Wiki Browser bookmarks</string>
     <string name="search_widget_title" translatable="false">Wiki Browser search</string>
     <string name="quick_action_search_widget_title" translatable="false">Wiki Browser quick action search</string>
+    <string name="dino_widget_title" translatable="false">Wiki Browser bird</string>
 </resources>
