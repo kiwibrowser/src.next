@@ -11,10 +11,20 @@ The mindset behind this project is that you should be able to modify and create 
 Keep it in mind, if you need a computer to do a change, it means it's too complicated. Even rebasing should be doable from the GitHub user interface.
 
 Servers are paid-for and sponsored by Geometry OU (the company behind Kiwi Browser), and additional computing hours for contributors are provided for free by Microsoft Azure via GitHub Actions.
+Исходный код для Kiwi Next, браузера Kiwi, автоматически основанного на последней версии Chromium.
 
+Этот репозиторий является центром управления разработкой, тестированием и развертыванием новых релизов.
+
+Если вы хотите изменить или улучшить Kiwi Browser, вы попали по адресу.
+
+Смысл этого проекта заключается в том, что вы должны иметь возможность изменять и создавать модификации Kiwi Browser непосредственно из самого Kiwi Browser (без необходимости использования компьютера).
+
+Имейте в виду, если для внесения изменений нужен компьютер, это значит, что они слишком сложны. Даже ребазинг должен быть доступен из пользовательского интерфейса GitHub.
+
+Серверы оплачиваются и спонсируются Geometry OU (компанией, стоящей за Kiwi Browser), а дополнительные вычислительные часы для участников предоставляются бесплатно Microsoft Azure через GitHub Actions.
 ## Code of conduct
 
-Be kind.
+
 
 ## Building
 
