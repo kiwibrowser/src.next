@@ -37,11 +37,13 @@ const char kChromeUIMediaInternalsHost[] = "media-internals";
 const char kChromeUIMemoryExhaustHost[] = "memory-exhaust";
 const char kChromeUINetworkErrorHost[] = "network-error";
 const char kChromeUINetworkErrorsListingHost[] = "network-errors";
+const char kChromeUIPrerenderInternalsHost[] = "prerender-internals";
 const char kChromeUIProcessInternalsHost[] = "process-internals";
 const char kChromeUIResourcesHost[] = "resources";
 const char kChromeUIServiceWorkerInternalsHost[] = "serviceworker-internals";
 const char kChromeUITracingHost[] = "tracing";
 const char kChromeUIUkmHost[] = "ukm";
+const char kChromeUIUntrustedResourcesURL[] = "chrome-untrusted://resources/";
 const char kChromeUIWebRTCInternalsHost[] = "webrtc-internals";
 
 // This error URL is loaded in normal web renderer processes, so it should not
