@@ -77,6 +77,9 @@ public class UrlConstants {
     public static final String GOOGLE_ACCOUNT_ACTIVITY_CONTROLS_URL =
             "https://myaccount.google.com/activitycontrols/search";
 
+    public static final String GOOGLE_ACCOUNT_DEVICE_ACTIVITY_URL =
+            "https://myaccount.google.com/device-activity?utm_source=chrome";
+
     public static final String GOOGLE_SEARCH_HISTORY_URL_IN_CBD =
             "https://myactivity.google.com/product/search?utm_source=chrome_cbd";
 
@@ -92,4 +95,7 @@ public class UrlConstants {
     public static final String EXPLORE_HOST = "explore";
     public static final String EXPLORE_URL = "chrome-native://explore/";
     public static final String CHROME_DINO_URL = "chrome://dino";
+
+    public static final String MANAGEMENT_HOST = "management";
+    public static final String MANAGEMENT_URL = "chrome://management/";
 }
