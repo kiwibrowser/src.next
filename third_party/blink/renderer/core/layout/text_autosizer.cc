@@ -343,7 +343,7 @@ void TextAutosizer::PrepareClusterStack(LayoutObject* layout_object) {
     blocks_that_have_begun_layout_.insert(block);
 #endif
     if (Cluster* cluster = MaybeCreateCluster(block))
-      cluster_stack_.push_back(base::WrapUnique(cluster));
+      cluster_stack_.push_back(cluster);
   }
 }
 
@@ -363,7 +363,7 @@ void TextAutosizer::BeginLayout(LayoutBlock* block,
     did_check_cross_site_use_count_ = false;
 
   if (Cluster* cluster = MaybeCreateCluster(block))
-    cluster_stack_.push_back(base::WrapUnique(cluster));
+    cluster_stack_.push_back(cluster);
 
   DCHECK(!cluster_stack_.IsEmpty());
 
@@ -662,8 +662,12 @@ void TextAutosizer::UpdatePageInfo() {
     }
     // TODO(pdr): Accessibility should be moved out of the text autosizer.
     // See: crbug.com/645717.
-    page_info_.accessibility_font_scale_factor_ =
-        document_->GetSettings()->GetAccessibilityFontScaleFactor();
+    // On Android, rely on the accessibility font scale factor when the
+    // AccessibilityPageZoom feature is not enabled.
+    if (!RuntimeEnabledFeatures::AccessibilityPageZoomEnabled()) {
+      page_info_.accessibility_font_scale_factor_ =
+          document_->GetSettings()->GetAccessibilityFontScaleFactor();
+    }
 
     // TODO(pdr): pageNeedsAutosizing should take into account whether
     // text-size-adjust is used anywhere on the page because that also needs to
@@ -897,7 +901,7 @@ TextAutosizer::Cluster* TextAutosizer::MaybeCreateCluster(LayoutBlock* block) {
     return nullptr;
 
   bool is_new_entry = false;
-  Cluster* cluster = new Cluster(
+  Cluster* cluster = MakeGarbageCollected<Cluster>(
       block, flags, parent_cluster,
       fingerprint_mapper_.CreateSuperclusterIfNeeded(block, is_new_entry));
   return cluster;
@@ -916,13 +920,13 @@ TextAutosizer::FingerprintMapper::CreateSuperclusterIfNeeded(
     return nullptr;
 
   SuperclusterMap::AddResult add_result =
-      superclusters_.insert(fingerprint, std::unique_ptr<Supercluster>());
+      superclusters_.insert(fingerprint, nullptr);
   is_new_entry = add_result.is_new_entry;
   if (!add_result.is_new_entry)
-    return add_result.stored_value->value.get();
+    return add_result.stored_value->value;
 
-  Supercluster* supercluster = new Supercluster(roots);
-  add_result.stored_value->value = base::WrapUnique(supercluster);
+  Supercluster* supercluster = MakeGarbageCollected<Supercluster>(roots);
+  add_result.stored_value->value = supercluster;
   return supercluster;
 }
 
@@ -963,7 +967,7 @@ bool TextAutosizer::SuperclusterHasEnoughTextToAutosize(
   if (supercluster->has_enough_text_to_autosize_ != kUnknownAmountOfText)
     return supercluster->has_enough_text_to_autosize_ == kHasEnoughText;
 
-  for (auto* root : *supercluster->roots_) {
+  for (const auto& root : *supercluster->roots_) {
     if (skip_layouted_nodes && !root->NormalChildNeedsLayout())
       continue;
     if (ClusterWouldHaveEnoughTextToAutosize(root, width_provider)) {
@@ -1010,7 +1014,7 @@ const LayoutBlock* TextAutosizer::MaxClusterWidthProvider(
     max_width = WidthFromBlock(result);
 
   const BlockSet* roots = supercluster->roots_;
-  for (const auto* root : *roots) {
+  for (const auto& root : *roots) {
     const LayoutBlock* width_provider = ClusterWidthProvider(root);
     if (width_provider->NeedsLayout())
       continue;
@@ -1301,9 +1305,13 @@ bool TextAutosizer::IsWiderOrNarrowerDescendant(Cluster* cluster) {
   return false;
 }
 
+void TextAutosizer::Supercluster::Trace(Visitor* visitor) const {
+  visitor->Trace(roots_);
+}
+
 TextAutosizer::Cluster* TextAutosizer::CurrentCluster() const {
   SECURITY_DCHECK(!cluster_stack_.IsEmpty());
-  return cluster_stack_.back().get();
+  return cluster_stack_.back();
 }
 
 TextAutosizer::Cluster::Cluster(const LayoutBlock* root,
@@ -1320,6 +1328,13 @@ TextAutosizer::Cluster::Cluster(const LayoutBlock* root,
       has_table_ancestor_(root->IsTableCell() ||
                           (parent_ && parent_->has_table_ancestor_)) {}
 
+void TextAutosizer::Cluster::Trace(Visitor* visitor) const {
+  visitor->Trace(root_);
+  visitor->Trace(deepest_block_containing_all_text_);
+  visitor->Trace(parent_);
+  visitor->Trace(supercluster_);
+}
+
 #if DCHECK_IS_ON()
 void TextAutosizer::FingerprintMapper::AssertMapsAreConsistent() {
   // For each fingerprint -> block mapping in m_blocksForFingerprint we should
@@ -1329,12 +1344,9 @@ void TextAutosizer::FingerprintMapper::AssertMapsAreConsistent() {
            blocks_for_fingerprint_.begin();
        fingerprint_it != end; ++fingerprint_it) {
     Fingerprint fingerprint = fingerprint_it->key;
-    BlockSet* blocks = fingerprint_it->value.get();
-    for (BlockSet::iterator block_it = blocks->begin();
-         block_it != blocks->end(); ++block_it) {
-      const LayoutBlock* block = (*block_it);
+    BlockSet* blocks = fingerprint_it->value;
+    for (auto& block : *blocks)
       DCHECK_EQ(fingerprints_.at(block), fingerprint);
-    }
   }
 }
 #endif
@@ -1355,9 +1367,9 @@ void TextAutosizer::FingerprintMapper::AddTentativeClusterRoot(
   Add(block, fingerprint);
 
   ReverseFingerprintMap::AddResult add_result =
-      blocks_for_fingerprint_.insert(fingerprint, std::unique_ptr<BlockSet>());
+      blocks_for_fingerprint_.insert(fingerprint, nullptr);
   if (add_result.is_new_entry)
-    add_result.stored_value->value = std::make_unique<BlockSet>();
+    add_result.stored_value->value = MakeGarbageCollected<BlockSet>();
   add_result.stored_value->value->insert(block);
 #if DCHECK_IS_ON()
   AssertMapsAreConsistent();
@@ -1383,7 +1395,7 @@ bool TextAutosizer::FingerprintMapper::Remove(LayoutObject* layout_object) {
         superclusters_.find(fingerprint);
 
     if (supercluster_iter != superclusters_.end()) {
-      Supercluster* supercluster = supercluster_iter->value.get();
+      Supercluster* supercluster = supercluster_iter->value;
       potentially_inconsistent_superclusters_.erase(supercluster);
       superclusters_.erase(supercluster_iter);
     }
@@ -1520,7 +1532,7 @@ float TextAutosizer::ComputeAutosizedFontSize(float computed_size,
 }
 
 void TextAutosizer::CheckSuperclusterConsistency() {
-  HashSet<Supercluster*>& potentially_inconsistent_superclusters =
+  HeapHashSet<Member<Supercluster>>& potentially_inconsistent_superclusters =
       fingerprint_mapper_.GetPotentiallyInconsistentSuperclusters();
   if (potentially_inconsistent_superclusters.IsEmpty())
     return;
@@ -1539,7 +1551,7 @@ void TextAutosizer::CheckSuperclusterConsistency() {
 
     if (SuperclusterHasEnoughTextToAutosize(supercluster, width_provider,
                                             true) == kHasEnoughText) {
-      for (auto* root : *supercluster->roots_) {
+      for (const auto& root : *supercluster->roots_) {
         if (!root->EverHadLayout())
           continue;
 
@@ -1555,6 +1567,19 @@ void TextAutosizer::CheckSuperclusterConsistency() {
 
 void TextAutosizer::Trace(Visitor* visitor) const {
   visitor->Trace(document_);
+  visitor->Trace(first_block_to_begin_layout_);
+#if DCHECK_IS_ON()
+  visitor->Trace(blocks_that_have_begun_layout_);
+#endif
+  visitor->Trace(cluster_stack_);
+  visitor->Trace(fingerprint_mapper_);
+}
+
+void TextAutosizer::FingerprintMapper::Trace(Visitor* visitor) const {
+  visitor->Trace(fingerprints_);
+  visitor->Trace(blocks_for_fingerprint_);
+  visitor->Trace(superclusters_);
+  visitor->Trace(potentially_inconsistent_superclusters_);
 }
 
 }  // namespace blink
