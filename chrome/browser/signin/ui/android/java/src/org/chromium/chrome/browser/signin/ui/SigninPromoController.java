@@ -7,6 +7,7 @@ package org.chromium.chrome.browser.signin.ui;
 import android.accounts.Account;
 import android.content.Context;
 import android.graphics.drawable.Drawable;
+import android.text.format.DateUtils;
 import android.view.View;
 import android.view.ViewGroup;
 
@@ -56,9 +57,16 @@ public class SigninPromoController {
     private static final int MAX_IMPRESSIONS_BOOKMARKS = 20;
     private static final int MAX_IMPRESSIONS_SETTINGS = 20;
 
+    /** Suffix strings for promo shown count preference. */
+    private static final String BOOKMARKS = "Bookmarks";
+    private static final String NTP = "Ntp";
+    private static final String RECENT_TABS = "RecentTabs";
+    private static final String SETTINGS = "Settings";
+
     private @Nullable DisplayableProfileData mProfileData;
     private @Nullable ImpressionTracker mImpressionTracker;
     private final @AccessPoint int mAccessPoint;
+    // TODO(https://crbug.com/1254399): Remove this field. This is over counted.
     private final @Nullable String mImpressionCountName;
     private final String mImpressionUserActionName;
     private final String mImpressionWithAccountUserActionName;
@@ -97,32 +105,51 @@ public class SigninPromoController {
         }
     }
 
+    /**
+     * If the signin promo card has been hidden for longer than the {@link
+     * StartSurfaceConfiguration#SIGNIN_PROMO_NTP_RESET_AFTER_HOURS}, resets the impression counts,
+     * {@link ChromePreferenceKeys#SIGNIN_PROMO_NTP_FIRST_SHOWN_TIME} and {@link
+     * ChromePreferenceKeys#SIGNIN_PROMO_NTP_LAST_SHOWN_TIME} to allow the promo card to show again.
+     */
+    public static void resetNTPSyncPromoLimitsIfHiddenForTooLong() {
+        final long currentTime = System.currentTimeMillis();
+        final long resetAfterMs =
+                StartSurfaceConfiguration.SIGNIN_PROMO_NTP_RESET_AFTER_HOURS.getValue()
+                * DateUtils.HOUR_IN_MILLIS;
+        final long lastShownTime = SharedPreferencesManager.getInstance().readLong(
+                ChromePreferenceKeys.SIGNIN_PROMO_NTP_LAST_SHOWN_TIME, 0L);
+        if (resetAfterMs <= 0 || lastShownTime <= 0) return;
+
+        if (currentTime - lastShownTime >= resetAfterMs) {
+            SharedPreferencesManager.getInstance().writeInt(
+                    getPromoShowCountPreferenceName(SigninAccessPoint.NTP_CONTENT_SUGGESTIONS), 0);
+            SharedPreferencesManager.getInstance().removeKey(
+                    ChromePreferenceKeys.SIGNIN_PROMO_NTP_FIRST_SHOWN_TIME);
+            SharedPreferencesManager.getInstance().removeKey(
+                    ChromePreferenceKeys.SIGNIN_PROMO_NTP_LAST_SHOWN_TIME);
+        }
+    }
+
     private static boolean canShowBookmarkPromo() {
         boolean isPromoDismissed = SharedPreferencesManager.getInstance().readBoolean(
                 ChromePreferenceKeys.SIGNIN_PROMO_BOOKMARKS_DECLINED, false);
-        return getSigninPromoImpressionsCountBookmarks() < MAX_IMPRESSIONS_BOOKMARKS
+        return SharedPreferencesManager.getInstance().readInt(
+                       getPromoShowCountPreferenceName(SigninAccessPoint.BOOKMARK_MANAGER))
+                < MAX_IMPRESSIONS_BOOKMARKS
                 && !isPromoDismissed;
     }
 
-    /**
-     * Expires the promo card if Chrome has been in the background long enough. We're using the
-     * "Start Surface" concept of session here which is if the app has been in the background for X
-     * amount of time. Called from #onStartWithNative, after which the time stored in {@link
-     * ChromeInactivityTracker} is expired.
-     *
-     * @param timeSinceLastBackgroundedMs The time since Chrome has sent into the background.
-     */
-    public static void maybeExpireNTPPromo(long timeSinceLastBackgroundedMs) {
-        long timeSinceLastBackgroundedLimitMs =
-                StartSurfaceConfiguration.SIGN_IN_PROMO_SHOW_SINCE_LAST_BACKGROUNDED_LIMIT_MS
-                        .getValue();
-        // If |timeSinceLastBackgroundedLimitMs| is not -1, which means we have a limit on last
-        // background time, check and record whether the current time is expired.
-        if (timeSinceLastBackgroundedLimitMs > 0
-                && timeSinceLastBackgroundedMs > timeSinceLastBackgroundedLimitMs) {
-            SharedPreferencesManager.getInstance().writeBoolean(
-                    ChromePreferenceKeys.SIGNIN_PROMO_NTP_PROMO_EXPIRED, true);
-        }
+    private static boolean timeElapsedSinceFirstShownExceedsLimit() {
+        final long timeSinceFirstShownLimitMs =
+                StartSurfaceConfiguration.SIGNIN_PROMO_NTP_SINCE_FIRST_TIME_SHOWN_LIMIT_HOURS
+                        .getValue()
+                * DateUtils.HOUR_IN_MILLIS;
+        if (timeSinceFirstShownLimitMs <= 0) return false;
+
+        final long currentTime = System.currentTimeMillis();
+        final long firstShownTime = SharedPreferencesManager.getInstance().readLong(
+                ChromePreferenceKeys.SIGNIN_PROMO_NTP_FIRST_SHOWN_TIME, 0L);
+        return firstShownTime > 0 && currentTime - firstShownTime >= timeSinceFirstShownLimitMs;
     }
 
     private static boolean canShowNTPPromo() {
@@ -130,13 +157,14 @@ public class SigninPromoController {
                 ChromeFeatureList.ENHANCED_PROTECTION_PROMO_CARD, "MaxSigninPromoImpressions",
                 Integer.MAX_VALUE);
         if (SharedPreferencesManager.getInstance().readInt(
-                    ChromePreferenceKeys.SIGNIN_PROMO_IMPRESSIONS_COUNT_NTP)
-                >= maxImpressions) {
+                    getPromoShowCountPreferenceName(SigninAccessPoint.NTP_CONTENT_SUGGESTIONS))
+                        >= maxImpressions
+                || timeElapsedSinceFirstShownExceedsLimit()) {
             return false;
         }
 
         if (SharedPreferencesManager.getInstance().readBoolean(
-                    ChromePreferenceKeys.SIGNIN_PROMO_NTP_PROMO_EXPIRED, false)) {
+                    ChromePreferenceKeys.SIGNIN_PROMO_NTP_PROMO_DISMISSED, false)) {
             return false;
         }
 
@@ -147,7 +175,6 @@ public class SigninPromoController {
         final AccountManagerFacade accountManagerFacade =
                 AccountManagerFacadeProvider.getInstance();
         return visibleAccount == null
-                || !ChromeFeatureList.isEnabled(ChromeFeatureList.MINOR_MODE_SUPPORT)
                 || accountManagerFacade.canOfferExtendedSyncPromos(visibleAccount).or(false);
     }
 
@@ -156,7 +183,7 @@ public class SigninPromoController {
         boolean isPromoDismissed = preferencesManager.readBoolean(
                 ChromePreferenceKeys.SIGNIN_PROMO_SETTINGS_PERSONALIZED_DISMISSED, false);
         return preferencesManager.readInt(
-                       ChromePreferenceKeys.SIGNIN_PROMO_IMPRESSIONS_COUNT_SETTINGS)
+                       getPromoShowCountPreferenceName(SigninAccessPoint.SETTINGS))
                 < MAX_IMPRESSIONS_SETTINGS
                 && !isPromoDismissed;
     }
@@ -175,6 +202,21 @@ public class SigninPromoController {
                     AccountUtils.getDefaultAccountIfFulfilled(accountManagerFacade.getAccounts());
         }
         return visibleAccount;
+    }
+
+    @VisibleForTesting
+    public static String getPromoShowCountPreferenceName(@AccessPoint int accessPoint) {
+        switch (accessPoint) {
+            case SigninAccessPoint.BOOKMARK_MANAGER:
+                return ChromePreferenceKeys.SYNC_PROMO_SHOW_COUNT.createKey(BOOKMARKS);
+            case SigninAccessPoint.NTP_CONTENT_SUGGESTIONS:
+                return ChromePreferenceKeys.SYNC_PROMO_SHOW_COUNT.createKey(NTP);
+            case SigninAccessPoint.SETTINGS:
+                return ChromePreferenceKeys.SYNC_PROMO_SHOW_COUNT.createKey(SETTINGS);
+            default:
+                throw new IllegalArgumentException(
+                        "Unexpected value for access point: " + accessPoint);
+        }
     }
 
     /**
@@ -228,10 +270,12 @@ public class SigninPromoController {
                 // already an account on the device. Always use the NoExistingAccount variant.
                 mSigninNewAccountUserActionName =
                         "Signin_SigninNewAccountNoExistingAccount_FromNTPContentSuggestions";
-                mSyncPromoDismissedPreferenceTracker = null;
+                mSyncPromoDismissedPreferenceTracker =
+                        ChromePreferenceKeys.SIGNIN_PROMO_NTP_PROMO_DISMISSED;
                 mImpressionsTilDismissHistogramName = null;
                 mImpressionsTilSigninButtonsHistogramName = null;
-                mImpressionsTilXButtonHistogramName = null;
+                mImpressionsTilXButtonHistogramName =
+                        "MobileSignInPromo.NTPContentSuggestions.ImpressionsTilXButton";
                 mDescriptionStringId = R.string.signin_promo_description_ntp_content_suggestions;
                 mDescriptionStringIdNoAccount =
                         R.string.signin_promo_description_ntp_content_suggestions_no_account;
@@ -378,6 +422,28 @@ public class SigninPromoController {
         }
     }
 
+    /** Increases promo show count by one. */
+    public void increasePromoShowCount() {
+        if (mAccessPoint != SigninAccessPoint.RECENT_TABS) {
+            SharedPreferencesManager.getInstance().incrementInt(
+                    getPromoShowCountPreferenceName(mAccessPoint));
+        }
+        SharedPreferencesManager.getInstance().incrementInt(
+                ChromePreferenceKeys.SYNC_PROMO_TOTAL_SHOW_COUNT);
+
+        if (mAccessPoint == SigninAccessPoint.NTP_CONTENT_SUGGESTIONS) {
+            final long currentTime = System.currentTimeMillis();
+            if (SharedPreferencesManager.getInstance().readLong(
+                        ChromePreferenceKeys.SIGNIN_PROMO_NTP_FIRST_SHOWN_TIME)
+                    == 0) {
+                SharedPreferencesManager.getInstance().writeLong(
+                        ChromePreferenceKeys.SIGNIN_PROMO_NTP_FIRST_SHOWN_TIME, currentTime);
+            }
+            SharedPreferencesManager.getInstance().writeLong(
+                    ChromePreferenceKeys.SIGNIN_PROMO_NTP_LAST_SHOWN_TIME, currentTime);
+        }
+    }
+
     private void setupColdState(PersonalizedSigninPromoView view) {
         final Context context = view.getContext();
         view.getImage().setImageResource(R.drawable.chrome_sync_logo);
@@ -475,21 +541,9 @@ public class SigninPromoController {
     }
 
     @VisibleForTesting
-    public static void setSigninPromoImpressionsCountBookmarksForTests(int count) {
-        SharedPreferencesManager.getInstance().writeInt(
-                ChromePreferenceKeys.SIGNIN_PROMO_IMPRESSIONS_COUNT_BOOKMARKS, count);
-    }
-
-    @VisibleForTesting
     public static void setPrefSigninPromoDeclinedBookmarksForTests(boolean isDeclined) {
         SharedPreferencesManager.getInstance().writeBoolean(
                 ChromePreferenceKeys.SIGNIN_PROMO_BOOKMARKS_DECLINED, isDeclined);
-    }
-
-    @VisibleForTesting
-    public static int getSigninPromoImpressionsCountBookmarks() {
-        return SharedPreferencesManager.getInstance().readInt(
-                ChromePreferenceKeys.SIGNIN_PROMO_IMPRESSIONS_COUNT_BOOKMARKS);
     }
 
     @VisibleForTesting

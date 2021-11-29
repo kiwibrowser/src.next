@@ -27,11 +27,13 @@ import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.Supplier;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ActivityUtils;
 import org.chromium.chrome.browser.WarmupManager;
 import org.chromium.chrome.browser.WebContentsFactory;
 import org.chromium.chrome.browser.app.ChromeActivity;
+import org.chromium.chrome.browser.compositor.CompositorViewHolder;
 import org.chromium.chrome.browser.content.ContentUtils;
 import org.chromium.chrome.browser.contextmenu.ContextMenuPopulatorFactory;
 import org.chromium.chrome.browser.flags.CachedFeatureFlags;
@@ -56,6 +58,7 @@ import org.chromium.components.security_state.ConnectionSecurityLevel;
 import org.chromium.components.security_state.SecurityStateModel;
 import org.chromium.components.url_formatter.UrlFormatter;
 import org.chromium.content_public.browser.ChildProcessImportance;
+import org.chromium.content_public.browser.ContentFeatureList;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsAccessibility;
@@ -1528,7 +1531,9 @@ public class TabImpl implements Tab, TabObscuringHandler.Observer {
                 for (TabObserver observer : mObservers) observer.onRestoreFailed(this);
                 restored = false;
             }
-            View compositorView = getActivity().getCompositorViewHolder();
+            Supplier<CompositorViewHolder> compositorViewHolderSupplier =
+                    getActivity().getCompositorViewHolderSupplier();
+            View compositorView = compositorViewHolderSupplier.get();
             webContents.setSize(compositorView.getWidth(), compositorView.getHeight());
 
             CriticalPersistedTabData.from(this).setWebContentsState(null);
@@ -1633,17 +1638,18 @@ public class TabImpl implements Tab, TabObscuringHandler.Observer {
                 : getWebContents().getNavigationController().getUseDesktopUserAgent();
 
         // We only calculate the user agent when users did not manually choose one.
+        // TODO(crbug.com/1251794): Desktop site setting in app menu does not persist after restart.
         if (!mUserForcedUserAgent
-                && ChromeFeatureList.isEnabled(ChromeFeatureList.REQUEST_DESKTOP_SITE_FOR_TABLETS)
-                && ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
-                        ChromeFeatureList.REQUEST_DESKTOP_SITE_FOR_TABLETS,
-                        REQUEST_DESKTOP_ENABLED_PARAM, false)) {
+                && ContentFeatureList.isEnabled(ContentFeatureList.REQUEST_DESKTOP_SITE_GLOBAL)) {
             // We only do the following logic to choose the desktop/mobile user agent if
             // 1. User never manually made a choice in app menu for requesting desktop site.
-            // 2. The browser is running in tablets.
-            boolean shouldRequestDesktopSite = TabUtils.isTabLargeEnoughForDesktopSite(this);
+            // 2. User enabled request desktop site in site settings.
+            Profile profile =
+                    IncognitoUtils.getProfileFromWindowAndroid(mWindowAndroid, isIncognito());
+            boolean shouldRequestDesktopSite = TabUtils.isDesktopSiteGlobalEnabled(profile);
 
             if (shouldRequestDesktopSite != currentRequestDesktopSite) {
+                // TODO(crbug.com/1243758): Confirm if a new histogram should be used.
                 RecordHistogram.recordBooleanHistogram(
                         "Android.RequestDesktopSite.UseDesktopUserAgent", shouldRequestDesktopSite);
 
