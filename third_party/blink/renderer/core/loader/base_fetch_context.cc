@@ -574,6 +574,10 @@ BaseFetchContext::CanRequestInternal(
   if (url.GetString().Contains("serve.popads.net/c") || url.GetPath().Contains("watch.xml") || url.Query().Contains("&vastref=") || (url.Host().Contains("flashx") && url.GetPath().length() == 45 && url.GetPath().Contains(".js")))
       return ResourceRequestBlockedReason::kInspector;
 
+  if (!(url.IsNull()) && !(url.Host().IsNull()) && !(url.GetPath()).IsNull() && !(url.GetString().IsNull()))
+  if (url.GetPath().Contains("ds2/js/1.min.js")) // anti-adblock
+      return ResourceRequestBlockedReason::kInspector;
+
   if (!(url.IsNull()) && !(url.Host().IsNull()))
   if (url.Host().Contains("dev-nano.com"))
       return ResourceRequestBlockedReason::kInspector;
@@ -583,6 +587,10 @@ BaseFetchContext::CanRequestInternal(
     if (!(url.IsNull()) && !(url.GetPath()).IsNull())
     {
     if (url.GetPath().Contains("cast_sender.js"))
+    {
+       return absl::nullopt;
+    }
+    if (url.GetPath().Contains(".ico"))
     {
        return absl::nullopt;
     }
@@ -606,7 +614,7 @@ BaseFetchContext::CanRequestInternal(
      return absl::nullopt;
   }
 
-  if (!(url.IsNull()) && !(url.Host().IsNull()))
+  if (!(url.IsNull()) && !(url.Host().IsNull()) && !(url.GetPath()).IsNull())
   if (url.Host() == "zoover.adnetasia.com"
 /*
    || url.Host() == "zoover.adtrackers.net"
@@ -648,7 +656,7 @@ BaseFetchContext::CanRequestInternal(
      return absl::nullopt;
   }
 
-  if (url.Host().Contains("www.google-analytics.com")) {
+  if (url.Host().Contains(".google-analytics.com")) {
      return absl::nullopt;
   }
   }
@@ -658,6 +666,31 @@ BaseFetchContext::CanRequestInternal(
     if (!(url.IsNull()) && !(url.Host().IsNull())) {
     if (url.Host().Contains(".cloudfront.net")
      || url.Host().Contains("push"))
+     return absl::nullopt;
+    }
+  }
+
+  // Anti-Anti-Adblock
+  if (type == ResourceType::kImage)
+  {
+    if (!(url.IsNull()) && !(url.Host().IsNull())) {
+    if (url.Host().Contains("adn.ebay.com")
+     || url.Host().Contains("ad.mail.ru")
+     || url.Host().Contains("juicyads.com")
+     || url.Host().Contains("ad.foxnetworks.com")
+     || url.Host().Contains("partnerads.ysm.yahoo.com")
+     || url.Host().Contains("a.livesportmedia.eu")
+     || url.Host().Contains("agoda.net")
+     || url.Host().Contains("advertising.aol.com")
+     || url.Host().Contains("cas.clickability.com")
+     || url.Host().Contains("promote.pair.com")
+     || url.Host().Contains("ads.yahoo.com")
+     || url.Host().Contains("ads.zynga.com")
+     || url.Host().Contains("adsatt.abcnews.starwave.com")
+     || url.Host().Contains("adsatt.espn.starwave.com")
+     || url.Host().Contains("as.inbox.com")
+     || url.Host().Contains("partnerads.ysm.yahoo.com")
+     )
      return absl::nullopt;
     }
   }
