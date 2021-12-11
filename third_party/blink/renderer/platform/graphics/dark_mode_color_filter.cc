@@ -28,7 +28,7 @@ class SkColorFilterWrapper : public DarkModeColorFilter {
       const DarkModeSettings& settings) {
     SkHighContrastConfig config;
     config.fInvertStyle = invert_style;
-    config.fGrayscale = false;
+    config.fGrayscale = settings.grayscale;
     config.fContrast = settings.contrast;
 
     return std::unique_ptr<SkColorFilterWrapper>(
@@ -58,7 +58,7 @@ class LABColorFilter : public DarkModeColorFilter {
     SkHighContrastConfig config;
     config.fInvertStyle = SkHighContrastConfig::InvertStyle::kInvertLightness;
     config.fGrayscale = settings.grayscale;
-    config.fContrast = 0.0;
+    config.fContrast = settings.contrast;
     filter_ = SkHighContrastFilter::Make(config);
     settings_ = settings;
   }
@@ -96,7 +96,7 @@ class LABColorFilter : public DarkModeColorFilter {
   // TODO(gilmanmh): Consider adding a more general way to adjust colors after
   // applying the main filter.
   SkColor AdjustGray(SkColor color) const {
-    static const uint8_t kBrightnessThreshold = 32;
+    static const uint8_t kBrightnessThreshold = 0;
     static const uint8_t kAdjustedBrightness = 0;
 
     uint8_t r = SkColorGetR(color);

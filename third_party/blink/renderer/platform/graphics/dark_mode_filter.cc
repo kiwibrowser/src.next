@@ -21,6 +21,8 @@
 #include "third_party/blink/renderer/platform/wtf/hash_functions.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
 
+#include "third_party/skia/include/effects/SkColorMatrix.h"
+
 namespace blink {
 
 namespace {
@@ -121,8 +123,10 @@ DarkModeFilter::ImmutableData::ImmutableData(const DarkModeSettings& settings)
   if (!color_filter)
     return;
 
-  image_filter = color_filter->ToSkColorFilter();
-
+  if (settings.image_grayscale_percent > 0.0f)
+    image_filter = MakeGrayscaleFilter(settings.image_grayscale_percent);
+  else
+    image_filter = color_filter->ToSkColorFilter();
   foreground_classifier =
       DarkModeColorClassifier::MakeForegroundColorClassifier(settings);
   background_classifier =

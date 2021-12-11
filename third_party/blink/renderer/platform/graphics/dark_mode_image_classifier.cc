@@ -15,7 +15,7 @@ namespace blink {
 namespace {
 
 // Decision tree lower and upper thresholds for grayscale and color images.
-const float kLowColorCountThreshold[2] = {0.3125, 0.015137};
+const float kLowColorCountThreshold[2] = {0.8125, 0.015137};
 const float kHighColorCountThreshold[2] = {1, 0.025635};
 
 bool IsColorGray(const SkColor& color) {
