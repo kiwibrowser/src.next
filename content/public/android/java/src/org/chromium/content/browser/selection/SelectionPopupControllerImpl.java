@@ -1399,6 +1399,8 @@ public class SelectionPopupControllerImpl extends ActionModeCallbackHelper
             // The selection coordinates are relative to the content viewport, but we need
             // coordinates relative to the containing View, so adding getContentOffsetYPix().
             y = y * deviceScale + mWebContents.getRenderCoordinates().getContentOffsetYPix();
+            if (ContextUtils.getAppSharedPreferences().getBoolean("enable_bottom_toolbar", false))
+              y = y - (int) (60 * deviceScale);
             mHandleObserver.handleDragStartedOrMoved(x, y);
         }
     }
