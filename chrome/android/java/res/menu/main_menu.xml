@@ -123,13 +123,12 @@
                 android:checkable="true" />
           </menu>
         </item>
-        <item android:id="@+id/auto_dark_web_contents_row_menu_id"
+        <item android:id="@+id/adblock_row_menu_id"
             android:title="@null">
           <menu>
-              <item android:id="@+id/auto_dark_web_contents_id"
-                android:title="@string/menu_auto_dark_web_contents"
-                android:icon="@drawable/ic_brightness_medium_24dp" />
-              <item android:id="@+id/auto_dark_web_contents_check_id"
+              <item android:id="@+id/adblock_id"
+                android:title="@string/main_menu_adblock" />
+              <item android:id="@+id/adblock_check_id"
                 android:title="@null"
                 android:checkable="true" />
           </menu>
@@ -150,6 +149,17 @@
             android:icon="@drawable/reader_mode_prefs_icon" />
         <item android:id="@+id/night_mode_switcher_id"
             android:title="@string/main_menu_turn_on_night_mode" />
+        <item android:id="@+id/auto_dark_web_contents_row_menu_id"
+            android:title="@null">
+          <menu>
+              <item android:id="@+id/auto_dark_web_contents_id"
+                android:title="@string/menu_auto_dark_web_contents"
+                android:icon="@drawable/ic_brightness_medium_24dp" />
+              <item android:id="@+id/auto_dark_web_contents_check_id"
+                android:title="@null"
+                android:checkable="true" />
+          </menu>
+        </item>
         <item android:id="@+id/developer_tools_id"
             android:title="@string/main_menu_developer_tools"
             android:icon="@drawable/ic_devtools" />
