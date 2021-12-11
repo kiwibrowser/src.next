@@ -89,7 +89,7 @@
     <dimen name="sheet_tab_toolbar_height">70dp</dimen>
 
     <!-- Autofill keyboard accessory dimensions -->
-    <dimen name="keyboard_accessory_height_with_shadow">56dp</dimen>
+    <dimen name="keyboard_accessory_height_with_shadow">48dp</dimen>
     <dimen name="keyboard_accessory_sheet_height">330dp</dimen>
 
     <!-- Password entry editor dimensions -->
