@@ -165,7 +165,7 @@ public class HomepageManager implements HomepagePolicyManager.HomepagePolicyStat
         }
         if (!homepagePartnerDefaultUri.equals("")) return homepagePartnerDefaultUri;
 
-        return UrlConstants.NTP_NON_NATIVE_URL;
+        return "chrome-search://local-ntp/local-ntp.html";
     }
 
     /**
