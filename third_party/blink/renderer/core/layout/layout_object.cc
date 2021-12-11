@@ -375,6 +375,8 @@ LayoutObject* LayoutObject::CreateObject(Element* element,
          shouldBlockElement = false;
     if (shouldBlockElement && element->getAttribute(html_names::kIdAttr) == "adbdetect")
          shouldBlockElement = false;
+    if (shouldBlockElement && element->getAttribute(html_names::kIdAttr) == "banner_ad")
+         shouldBlockElement = false;
     if (shouldBlockElement && (
      element->getAttribute(html_names::kClassAttr).Contains("cc_banner")
      || element->getAttribute(html_names::kClassAttr).Contains("cc-banner")
