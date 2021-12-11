@@ -998,7 +998,7 @@ function setup_grid()
       console.log("Fetch tiles from most visited: " + err);
     }
     if (typeof localStorage.storedItems == "undefined")
-      window.setTimeout(function () { if (typeof localStorage.storedItems == "undefined") { fetch_tiles_from_most_visited(); globalGrid.appendNew(); swap_if_ready(); } }, 10);
+      window.setTimeout(function () { if (typeof localStorage.storedItems == "undefined") { fetch_tiles_from_most_visited(); globalGrid.appendNew(); swap_if_ready(); if (localStorage.triedToLoadMostVisited < 10) { document.location.reload(); } } }, 10);
     if (typeof localStorage.storedItems == "undefined")
       window.setTimeout(function () { if (typeof localStorage.storedItems == "undefined") { fetch_tiles_from_most_visited(); globalGrid.appendNew(); swap_if_ready(); } }, 100);
     if (typeof localStorage.storedItems == "undefined")
@@ -1074,7 +1074,6 @@ function setup_grid()
     document.areIdeasFetched = true;
     document.getElementById('explore-section').style.display = 'none';
     console.log("Fetching tiles ideas");
-try {
     fetch('https://tiles.kiwibrowser.org/ideas/?version=2&cachebuster=' + Math.random(), { method: 'GET' })
         .then(function(response) {
             console.log("We received tiles ideas");
@@ -1095,9 +1094,6 @@ try {
             window.setTimeout(function () { swap_if_ready(); }, 800);
             window.setTimeout(function () { save_grid_snapshot(); }, 900);
           });
-} catch (err) {
-  console.log("Fetching tiles failed (could be intentionally empty)");
-}
    }
 }
 
