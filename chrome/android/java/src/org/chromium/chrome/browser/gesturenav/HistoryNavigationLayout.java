@@ -16,8 +16,6 @@ import org.chromium.base.Callback;
 import org.chromium.base.supplier.Supplier;
 import org.chromium.chrome.browser.gesturenav.NavigationBubble.CloseTarget;
 
-import org.chromium.base.ContextUtils;
-
 /**
  * FrameLayout that supports side-wise slide gesture for history navigation.
  */

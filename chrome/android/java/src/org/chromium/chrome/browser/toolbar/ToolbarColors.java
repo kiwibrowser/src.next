@@ -26,6 +26,10 @@ public class ToolbarColors {
         final boolean isTabGridEnabled = TabUiFeatureUtilities.isGridTabSwitcherEnabled(context);
         final boolean isStartSurfaceEnabled =
                 ReturnToChromeExperimentsUtil.isStartSurfaceEnabled(context);
+        if (ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("default")
+                  || ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("original")
+                  || ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("horizontal"))
+            return true;
         return (isAccessibilityEnabled || isTabGridEnabled || isStartSurfaceEnabled);
     }
 }
