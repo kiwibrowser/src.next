@@ -26,34 +26,9 @@
         android:title="@string/reader_for_accessibility_title" />
 
     <org.chromium.components.browser_ui.settings.ChromeBaseCheckBoxPreference
-        android:key="keep_address_bar_content"
-        android:summary="@string/accessibility_preferences_keep_address_bar_content_summary"
-        android:title="@string/accessibility_preferences_keep_address_bar_content_title" />
-
-    <org.chromium.components.browser_ui.settings.ChromeBaseCheckBoxPreference
-        android:key="keep_toolbar_visible"
-        android:summary="@string/accessibility_keep_toolbar_visible_summary"
-        android:title="@string/accessibility_keep_toolbar_visible_title" />
-
-    <org.chromium.components.browser_ui.settings.ChromeBaseCheckBoxPreference
-        android:key="enable_bottom_toolbar"
-        android:summary="@string/accessibility_preferences_enable_bottom_toolbar_summary"
-        android:title="@string/accessibility_preferences_enable_bottom_toolbar_title" />
-
-    <org.chromium.components.browser_ui.settings.ChromeBaseCheckBoxPreference
-        android:key="enable_overscroll_button"
-        android:summary="@string/accessibility_preferences_enable_overscroll_button_summary"
-        android:title="@string/accessibility_preferences_enable_overscroll_button_title" />
-
-    <org.chromium.components.browser_ui.settings.ChromeBaseCheckBoxPreference
         android:key="open_in_external_app"
         android:summary="@string/accessibility_preferences_open_in_external_application_summary"
         android:title="@string/accessibility_preferences_open_in_external_application_title" />
-
-    <org.chromium.components.browser_ui.settings.ChromeBaseCheckBoxPreference
-        android:key="tabswitcher_opens_contextual_menu"
-        android:summary="@string/accessibility_preferences_holding_tabswitcher_opens_contextual_menu_summary"
-        android:title="@string/accessibility_preferences_holding_tabswitcher_opens_contextual_menu_summary" />
 
     <org.chromium.components.browser_ui.settings.ChromeBaseCheckBoxPreference
         android:key="side_swipe_mode_enabled"
@@ -61,19 +36,24 @@
         android:title="@string/accessibility_preferences_enable_side_swipe_title" />
 
     <org.chromium.components.browser_ui.settings.ChromeBaseCheckBoxPreference
-        android:key="up_swipe_mode_enabled"
-        android:summary="@string/accessibility_preferences_enable_up_swipe_summary"
-        android:title="@string/accessibility_preferences_enable_up_swipe_title" />
-
-    <org.chromium.components.browser_ui.settings.ChromeBaseCheckBoxPreference
         android:key="show_extensions_first"
         android:summary="@string/accessibility_preferences_show_extensions_first_summary"
         android:title="@string/accessibility_preferences_show_extensions_first_title" />
 
     <org.chromium.components.browser_ui.settings.ChromeBaseCheckBoxPreference
+        android:key="accessibility_tab_switcher"
+        android:summary="@string/accessibility_tab_switcher_summary"
+        android:title="@string/accessibility_tab_switcher_title" />
+
+    <org.chromium.components.browser_ui.settings.ChromeBaseCheckBoxPreference
         android:key="desktop_mode"
         android:summary="@string/website_settings_desktop_mode_enabled"
         android:title="@string/website_settings_desktop_mode" />
+
+     <org.chromium.components.browser_ui.settings.ChromeBaseCheckBoxPreference
+        android:key="cws_mobile_friendly"
+        android:summary="@string/accessibility_preferences_cws_mobile_friendly_summary"
+        android:title="@string/accessibility_preferences_cws_mobile_friendly_title" />
 
     <Preference
         android:key="captions"
