@@ -38,9 +38,6 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
-import org.chromium.chrome.browser.browsing_data.ClearBrowsingDataTabsFragment;
-import org.chromium.chrome.browser.settings.SettingsLauncherImpl;
-import org.chromium.components.browser_ui.settings.SettingsLauncher;
 import org.chromium.base.ActivityState;
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ApplicationStatus;
@@ -64,7 +61,6 @@ import org.chromium.base.supplier.OneshotSupplier;
 import org.chromium.base.supplier.OneshotSupplierImpl;
 import org.chromium.base.supplier.Supplier;
 import org.chromium.base.supplier.UnownedUserDataSupplier;
-import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ActivityTabProvider;
 import org.chromium.chrome.browser.ActivityUtils;
@@ -73,7 +69,6 @@ import org.chromium.chrome.browser.ChromeActivitySessionTracker;
 import org.chromium.chrome.browser.ChromeApplicationImpl;
 import org.chromium.chrome.browser.ChromeKeyboardVisibilityDelegate;
 import org.chromium.chrome.browser.ChromeWindow;
-import org.chromium.components.content_settings.ContentSettingValues;
 import org.chromium.chrome.browser.DeferredStartupHandler;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.IntentHandler.IntentHandlerDelegate;
@@ -117,7 +112,6 @@ import org.chromium.chrome.browser.download.items.OfflineContentAggregatorNotifi
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
 import org.chromium.chrome.browser.feedback.HelpAndFeedbackLauncherImpl;
 import org.chromium.chrome.browser.firstrun.ForcedSigninProcessor;
-import org.chromium.chrome.browser.ApplicationLifetime;
 import org.chromium.chrome.browser.flags.ActivityType;
 import org.chromium.chrome.browser.flags.CachedFeatureFlags;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
@@ -255,23 +249,26 @@ import org.chromium.ui.widget.Toast;
 import org.chromium.url.GURL;
 import org.chromium.webapk.lib.client.WebApkNavigationClient;
 
-import org.chromium.chrome.browser.night_mode.ThemeType;
-import org.chromium.components.content_settings.ContentSettingsType;
-import org.chromium.components.browser_ui.site_settings.SiteSettingsCategory;
-import org.chromium.components.browser_ui.site_settings.WebsitePreferenceBridge;
-import org.chromium.components.browser_ui.site_settings.WebsitePreferenceBridgeJni;
-import org.chromium.base.IntentUtils;
-
-import org.chromium.ui.widget.Toast;
-import org.chromium.chrome.browser.AppMenuBridge;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
-import org.chromium.chrome.browser.night_mode.WebContentsDarkModeController;
 import org.chromium.base.ContextUtils;
+import org.chromium.chrome.browser.ApplicationLifetime;
+import org.chromium.chrome.browser.AppMenuBridge;
+import org.chromium.chrome.browser.browsing_data.ClearBrowsingDataTabsFragment;
+import org.chromium.chrome.browser.night_mode.WebContentsDarkModeController;
+import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
 import org.chromium.chrome.browser.night_mode.ThemeType;
+import org.chromium.chrome.browser.settings.SettingsLauncherImpl;
+import org.chromium.components.browser_ui.settings.SettingsLauncher;
+import org.chromium.components.content_settings.ContentSettingValues;
+import org.chromium.components.content_settings.ContentSettingsType;
+import org.chromium.components.browser_ui.site_settings.WebsitePreferenceBridge;
+import org.chromium.components.browser_ui.site_settings.WebsitePreferenceBridgeJni;
+import org.chromium.ui.widget.Toast;
+
+import org.chromium.chrome.browser.AppMenuBridge;
 
 /**
  * A {@link AsyncInitializationActivity} that builds and manages a {@link CompositorViewHolder}
@@ -366,6 +363,8 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
     /** The data associated with the most recently selected menu item. */
     @Nullable
     private Bundle mMenuItemData;
+
+    private String mMenuTitleCondensed;
 
     /**
      * The current configuration, used to for diffing when the configuration is changed.
@@ -493,6 +492,8 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
         // if Chrome is killed and you refocus a previous activity from Android recents, which does
         // not go through ChromeLauncherActivity that would have normally triggered this.
         mPartnerBrowserRefreshNeeded = !PartnerBrowserCustomizations.getInstance().isInitialized();
+
+        WebContentsDarkModeController.updateDarkModeStringSettings();
 
         CommandLine commandLine = CommandLine.getInstance();
         if (!commandLine.hasSwitch(ChromeSwitches.DISABLE_FULLSCREEN)) {
@@ -789,6 +790,8 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
     }
 
     private void initializeToolbarShadow() {
+        if (true)
+            return;
         ImageView shadowImage = findViewById(R.id.toolbar_shadow);
         if (shadowImage == null) return;
 
@@ -1714,9 +1717,6 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
         // multi-window mode. See crbug.com/602366.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             changeBackgroundColorForResizing();
-            if (ContextUtils.getAppSharedPreferences().getBoolean("darken_websites_enabled", false) || ContextUtils.getAppSharedPreferences().getInt("ui_theme_setting", 0) == ThemeType.DARK)
-              getWindow().setBackgroundDrawable(new ColorDrawable(ApiCompatibilityUtils.getColor(
-                      getResources(), R.color.media_viewer_bg)));
         } else {
             // Post the removeWindowBackground() call as a separate task, as doing it synchronously
             // here can cause redrawing glitches. See crbug.com/686662 for an example problem.
@@ -1751,8 +1751,6 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
         }
 
         super.finishNativeInitialization();
-
-        AppMenuBridge.getRunningExtensions(Profile.getLastUsedRegularProfile(), null);
 
         mManualFillingComponentSupplier.get().initialize(getWindowAndroid(),
                 mRootUiCoordinator.getBottomSheetController(),
@@ -1798,6 +1796,11 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
         // cold-starts).
         // TODO(crbug.com/1151391): Remove after analysis is complete.
         ChromeFeatureList.isEnabled(ChromeFeatureList.INTEREST_FEED_SPINNER_ALWAYS_ANIMATE);
+
+        WebsitePreferenceBridge.setContentSettingEnabled(
+                Profile.getLastUsedRegularProfile(), ContentSettingsType.AUTO_DARK_WEB_CONTENT, ContextUtils.getAppSharedPreferences().getBoolean("darken_websites_enabled", false));
+
+        WebContentsDarkModeController.updateDarkModeStringSettings();
     }
 
     /**
@@ -1823,6 +1826,11 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
      */
     public boolean didFinishNativeInitialization() {
         return mNativeInitialized;
+    }
+
+    @Override
+    public void setLastItemTitle(String itemTitle) {
+        mMenuTitleCondensed = itemTitle;
     }
 
     @Override
@@ -2500,6 +2508,27 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
         @BrowserProfileType
         int type = Profile.getBrowserProfileTypeFromProfile(getCurrentTabModel().getProfile());
 
+        if (mMenuTitleCondensed != null && !mMenuTitleCondensed.equals("") && mMenuTitleCondensed.contains("Extension: ")) {
+            String[] extensionInfo = mMenuTitleCondensed.split(": ");
+            String extensionId = extensionInfo[1];
+            String extensionUrl = "";
+            if (extensionInfo.length > 2)
+                extensionUrl = extensionInfo[2];
+            Log.d("Kiwi", "Pressed extension menu: " + extensionId + " - url: " + extensionUrl);
+            Tab tab = getActivityTab();
+            if (tab != null) {
+                WebContents webContents = tab.getWebContents();
+                LaunchMetrics.commitLaunchMetrics(webContents);
+                AppMenuBridge.grantExtensionActiveTab(Profile.fromWebContents(webContents).getOriginalProfile(), webContents, extensionId);
+                if (!extensionUrl.equals(""))
+                  getCurrentTabCreator().launchUrl(extensionUrl, TabLaunchType.FROM_CHROME_UI);
+                else
+                  AppMenuBridge.callExtension(Profile.fromWebContents(webContents).getOriginalProfile(), webContents, extensionId);
+                return true;
+            }
+            return false;
+        }
+
         if (id == R.id.preferences_id) {
             SettingsLauncher settingsLauncher = new SettingsLauncherImpl();
             settingsLauncher.launchSettingsActivity(this);
@@ -2799,6 +2828,30 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
             return true;
         }
 
+        if (id == R.id.adblock_id || id == R.id.adblock_check_id) {
+            boolean adBlockIsActive = (WebsitePreferenceBridgeJni.get().isContentSettingEnabled(Profile.getLastUsedRegularProfile(), ContentSettingsType.ADS) == false);
+            if (!adBlockIsActive) {
+              WebsitePreferenceBridgeJni.get().setContentSettingEnabled(Profile.getLastUsedRegularProfile(), ContentSettingsType.ADS, false); // BLOCK
+            } else {
+              int adblockSettingForThisSite = WebsitePreferenceBridgeJni.get().getPermissionSettingForOrigin(Profile.getLastUsedRegularProfile(), ContentSettingsType.ADS, currentTab.getUrl().getSpec(), currentTab.getUrl().getSpec());
+              if (adblockSettingForThisSite == ContentSettingValues.DEFAULT || adblockSettingForThisSite == ContentSettingValues.BLOCK)
+                WebsitePreferenceBridgeJni.get().setPermissionSettingForOrigin(Profile.getLastUsedRegularProfile(), ContentSettingsType.ADS, currentTab.getUrl().getSpec(), currentTab.getUrl().getSpec(), ContentSettingValues.ALLOW);
+              else
+                WebsitePreferenceBridgeJni.get().setPermissionSettingForOrigin(Profile.getLastUsedRegularProfile(), ContentSettingsType.ADS, currentTab.getUrl().getSpec(), currentTab.getUrl().getSpec(), ContentSettingValues.DEFAULT);
+            }
+            currentTab.stopLoading();
+            currentTab.reload();
+            RecordUserAction.record("MobileMenuSwitchAdblock");
+        }
+
+        if (id == R.id.developer_tools_id) {
+            AppMenuBridge.openDevTools(currentTab.getWebContents());
+        }
+
+        if (id == R.id.disable_proxy_id) {
+            AppMenuBridge.disableProxy(Profile.fromWebContents(currentTab.getWebContents()).getOriginalProfile());
+        }
+
         if (id == R.id.auto_dark_web_contents_id || id == R.id.auto_dark_web_contents_check_id) {
             // Get values needed to check/enable auto dark for the current site.
             Profile profile = getCurrentTabModel().getProfile();
@@ -2814,6 +2867,7 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
 
             // Show dialog informing user how to disable the feature globally and give feedback if
             // disabling through the app menu for the nth time (determined by feature engagement).
+            if (false)
             if (isEnabled) {
                 WebContentsDarkModeMessageController.attemptToShowDialog(this, profile,
                         url.getSpec(), getModalDialogManager(), new SettingsLauncherImpl(),
@@ -2833,6 +2887,53 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
 
             openChromeManagementPage();
             return true;
+        }
+
+        if (id == R.id.night_mode_switcher_id) {
+            Log.d("Kiwi", "Initializing night mode with mode: " + ContextUtils.getAppSharedPreferences().getString("active_nightmode", "default"));
+            WebContentsDarkModeController.updateDarkModeStringSettings();
+            boolean isDarkModeEnabled = ContextUtils.getAppSharedPreferences().getBoolean("darken_websites_enabled", false);
+            if (!isDarkModeEnabled) {
+              getWindow().setBackgroundDrawable(new ColorDrawable(
+                          ApiCompatibilityUtils.getColor(getResources(),
+                          R.color.media_viewer_bg)));
+              int currentTheme = ContextUtils.getAppSharedPreferences().getInt("ui_theme_setting", 0);
+              SharedPreferencesManager.getInstance().writeBooleanSync("darken_websites_enabled", true);
+              SharedPreferencesManager.getInstance().writeIntUnchecked("previous_ui_theme_setting", currentTheme);
+              SharedPreferencesManager.getInstance().writeInt("ui_theme_setting", ThemeType.DARK);
+            } else {
+              getWindow().setBackgroundDrawable(new ColorDrawable(
+                          ApiCompatibilityUtils.getColor(getResources(),
+                          R.color.resizing_background_color)));
+              int previousTheme = ContextUtils.getAppSharedPreferences().getInt("previous_ui_theme_setting", 0);
+              SharedPreferencesManager.getInstance().writeBooleanSync("darken_websites_enabled", false);
+              SharedPreferencesManager.getInstance().writeInt("ui_theme_setting", previousTheme);
+            }
+            WebsitePreferenceBridge.setContentSettingEnabled(
+                    Profile.getLastUsedRegularProfile(), ContentSettingsType.AUTO_DARK_WEB_CONTENT, ContextUtils.getAppSharedPreferences().getBoolean("darken_websites_enabled", false));
+            currentTab.getWebContents().notifyRendererPreferenceUpdate();
+        }
+
+        if (id == R.id.extensions_id) {
+            RecordUserAction.record("MobileMenuExtensions");
+            TabCreator tabCreator = getTabCreator(currentTab.isIncognito());
+            if (currentTab != null && tabCreator != null) {
+              tabCreator.createNewTab(
+                      new LoadUrlParams("chrome://extensions", PageTransition.LINK),
+                      TabLaunchType.FROM_CHROME_UI, getActivityTab());
+            }
+        }
+
+        if (id == R.id.clear_data_menu_id) {
+            RecordUserAction.record("ClearBrowsingDataFromMainMenu");
+            SettingsLauncher settingsLauncher = new SettingsLauncherImpl();
+            settingsLauncher.launchSettingsActivity(this, ClearBrowsingDataTabsFragment.class);
+        }
+
+        if (id == R.id.exit_id) {
+            RecordUserAction.record("MobileMenuExit");
+            getTabModelSelector().closeAllTabs();
+            ApplicationLifetime.terminate(false);
         }
 
         return false;
