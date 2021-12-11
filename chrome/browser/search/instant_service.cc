@@ -25,6 +25,7 @@
 #include "chrome/browser/search/instant_service_factory.h"
 #include "chrome/browser/search/instant_service_observer.h"
 #include "chrome/browser/search/most_visited_iframe_source.h"
+#include "chrome/browser/search/new_tab_page_source.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/themes/theme_service.h"
@@ -56,8 +57,6 @@
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/color_utils.h"
 
-#include "chrome/browser/search/new_tab_page_source.h"
-
 InstantService::InstantService(Profile* profile)
     : profile_(profile),
       most_visited_info_(std::make_unique<InstantMostVisitedInfo>()),
@@ -74,8 +73,8 @@ InstantService::InstantService(Profile* profile)
                  content::NotificationService::AllSources());
 
   most_visited_sites_ = ChromeMostVisitedSitesFactory::NewForProfile(profile_);
-  LOG(INFO) << "[Kiwi] InstantService::InstantService: " << most_visited_sites_;
   if (most_visited_sites_) {
+    most_visited_sites_->EnableCustomLinks(false);
     most_visited_sites_->AddMostVisitedURLsObserver(
         this, ntp_tiles::kMaxNumMostVisited);
   }
@@ -121,8 +120,9 @@ void InstantService::RemoveObserver(InstantServiceObserver* observer) {
 }
 
 void InstantService::OnNewTabPageOpened() {
-  LOG(INFO) << "[Kiwi] InstantService::OnNewTabPageOpened: " << most_visited_sites_;
+  LOG(INFO) << "[Kiwi] InstantService::OnNewTabPageOpened";
   if (most_visited_sites_) {
+    LOG(INFO) << "[Kiwi] InstantService::OnNewTabPageOpened - most_visited_sites_";
     most_visited_sites_->Refresh();
     most_visited_sites_->RefreshTiles();
   }

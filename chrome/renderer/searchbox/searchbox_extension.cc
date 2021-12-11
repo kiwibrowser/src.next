@@ -291,9 +291,12 @@ content::RenderFrame* GetMainRenderFrameForCurrentContext() {
 }
 
 SearchBox* GetSearchBoxForCurrentContext() {
+  LOG(INFO) << "[Kiwi] SearchBox* GetSearchBoxForCurrentContext";
   content::RenderFrame* main_frame = GetMainRenderFrameForCurrentContext();
+  LOG(INFO) << "[Kiwi] SearchBox* GetSearchBoxForCurrentContext - main_frame: " << main_frame;
   if (!main_frame)
     return nullptr;
+  LOG(INFO) << "[Kiwi] SearchBox* GetSearchBoxForCurrentContext - searchbox: " << SearchBox::Get(main_frame);
   return SearchBox::Get(main_frame);
 }
 
@@ -560,6 +563,10 @@ v8::Local<v8::Value> NewTabPageBindings::GetMostVisited(v8::Isolate* isolate) {
 // static
 bool NewTabPageBindings::GetMostVisitedAvailable(v8::Isolate* isolate) {
   const SearchBox* search_box = GetSearchBoxForCurrentContext();
+  if (search_box)
+    LOG(INFO) << "[Kiwi] NewTabPageBindings::GetMostVisitedAvailable - search_box available";
+  else
+    LOG(INFO) << "[Kiwi] NewTabPageBindings::GetMostVisitedAvailable - search_box NOT available";
   if (!search_box)
     return false;
 
@@ -623,7 +630,14 @@ v8::Local<v8::Value> NewTabPageBindings::GetMostVisitedItemData(
     v8::Isolate* isolate,
     int rid) {
   const SearchBox* search_box = GetSearchBoxForCurrentContext();
-  if (!search_box || (!HasOrigin(GURL(chrome::kChromeSearchMostVisitedUrl)) && !HasOrigin(GURL("chrome-search://local-ntp/"))))
+  if (!search_box || 
+(
+!HasOrigin(GURL(chrome::kChromeSearchMostVisitedUrl))
+&&
+!HasOrigin(GURL("chrome-search://local-ntp/"))
+)
+
+)
     return v8::Null(isolate);
 
   InstantMostVisitedItem item;
