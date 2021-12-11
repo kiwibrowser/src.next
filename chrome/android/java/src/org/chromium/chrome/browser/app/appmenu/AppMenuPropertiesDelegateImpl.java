@@ -33,8 +33,6 @@ import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.supplier.ObservableSupplier;
 import org.chromium.base.supplier.OneshotSupplier;
 import org.chromium.chrome.R;
-import org.chromium.components.content_settings.ContentSettingsType;
-import org.chromium.components.content_settings.ContentSettingValues;
 import org.chromium.chrome.browser.ActivityTabProvider;
 import org.chromium.chrome.browser.banners.AppMenuVerbiage;
 import org.chromium.chrome.browser.bookmarks.BookmarkBridge;
@@ -100,11 +98,26 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import java.util.Hashtable;
+
+import android.graphics.Bitmap;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.BitmapFactory;
+import android.util.Base64;
+import android.util.Base64InputStream;
+import androidx.appcompat.view.menu.MenuBuilder;
+import org.chromium.chrome.browser.AppMenuBridge;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.content_public.browser.WebContents;
+
 import org.chromium.components.browser_ui.site_settings.SiteSettingsCategory;
 import org.chromium.components.browser_ui.site_settings.WebsitePreferenceBridge;
 import org.chromium.components.browser_ui.site_settings.WebsitePreferenceBridgeJni;
+import org.chromium.components.content_settings.ContentSettingsType;
+import org.chromium.components.content_settings.ContentSettingValues;
 
 import org.chromium.chrome.browser.AppMenuBridge;
+import org.chromium.base.Log;
 
 /**
  * Base implementation of {@link AppMenuPropertiesDelegate} that handles hiding and showing menu
@@ -338,6 +351,45 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
 
         prepareMenu(menu, handler);
 
+        Tab currentTab = mActivityTabProvider.get();
+        WebContents webContents = null;
+
+        boolean canShowExtensions = false;
+
+        if (currentTab != null)
+          canShowExtensions = true;
+        webContents = currentTab != null ? currentTab.getWebContents() : null;
+
+        int numItems = menu.size();
+
+        if (canShowExtensions) {
+          int itemIndex = numItems++;
+          String extensions = AppMenuBridge.getRunningExtensions(Profile.fromWebContents(webContents).getOriginalProfile(), webContents);
+          if (!extensions.isEmpty()) {
+            String[] extensionsArray = extensions.split("\u001f");
+            for (String extension: extensionsArray) {
+              String[] extensionsInfo = extension.split("\u001e");
+              MenuItem newlyAdded = menu.add(999999, 999999 + itemIndex, Menu.NONE, extensionsInfo[0]);
+              if (extensionsInfo.length > 1) {
+                newlyAdded.setTitleCondensed("Extension: " + extensionsInfo[1]);
+              }
+
+              if (extensionsInfo.length > 2 && !extensionsInfo[2].equals("")) {
+                newlyAdded.setTitleCondensed("Extension: " + extensionsInfo[1] + ": " + extensionsInfo[2]);
+              }
+
+              if (extensionsInfo.length > 3) {
+                String cleanImage = extensionsInfo[3].replace("data:image/png;base64,", "").replace("data:image/jpeg;base64,","").replace("data:image/gif;base64,", "");
+                byte[] decodedString = Base64.decode(cleanImage, Base64.DEFAULT);
+                Bitmap decodedByte = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
+
+                newlyAdded.setIcon(new BitmapDrawable(mContext.getResources(), decodedByte));
+              }
+              itemIndex++;
+           }
+         }
+       }
+
         // TODO(crbug.com/1119550): Programmatically create menu item's PropertyModel instead of
         // converting from MenuItems.
         for (int i = 0; i < menu.size(); ++i) {
@@ -362,7 +414,6 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
                     subList.add(new MVCListAdapter.ListItem(0, subModel));
                     if (subitem.getItemId() == R.id.reload_menu_id) {
                         mReloadPropertyModel = subModel;
-                        Tab currentTab = mActivityTabProvider.get();
                         loadingStateChanged(currentTab == null ? false : currentTab.isLoading());
                     }
                 }
@@ -371,7 +422,8 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
             int menutype = AppMenuItemType.STANDARD;
             if (item.getItemId() == R.id.request_desktop_site_row_menu_id
                     || item.getItemId() == R.id.share_row_menu_id
-                    || item.getItemId() == R.id.auto_dark_web_contents_row_menu_id) {
+                    || item.getItemId() == R.id.auto_dark_web_contents_row_menu_id
+                    || item.getItemId() == R.id.adblock_row_menu_id) {
                 menutype = AppMenuItemType.TITLE_BUTTON;
             } else if (item.getItemId() == R.id.icon_row_menu_id) {
                 int viewCount = item.getSubMenu().size();
@@ -538,6 +590,26 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
 
         updateAutoDarkMenuItem(menu, currentTab, isChromeScheme);
 
+        updateAdblockMenuItem(menu, currentTab, true /* can show */);
+        MenuItem nightModeMenu = menu.findItem(R.id.night_mode_switcher_id);
+        if (nightModeMenu != null) {
+               if (ContextUtils.getAppSharedPreferences().getBoolean("darken_websites_enabled", false)) {
+                   nightModeMenu.setTitle(R.string.main_menu_turn_off_night_mode);
+                   nightModeMenu.setIcon(R.drawable.ic_night_mode_off);
+               } else {
+                   nightModeMenu.setTitle(R.string.main_menu_turn_on_night_mode);
+                   nightModeMenu.setIcon(R.drawable.ic_night_mode_on);
+               }
+        }
+
+        MenuItem disableProxyMenu = menu.findItem(R.id.disable_proxy_id);
+        boolean isProxyEnabled = AppMenuBridge.isProxyEnabled(Profile.getLastUsedRegularProfile());
+        if (isProxyEnabled) {
+            disableProxyMenu.setVisible(true);
+        } else {
+            disableProxyMenu.setVisible(false);
+        }
+
         // Only display reader mode settings menu option if the current page is in reader mode.
         menu.findItem(R.id.reader_mode_prefs_id)
                 .setVisible(isCurrentTabNotNull && shouldShowReaderModePrefs(currentTab));
@@ -546,6 +618,7 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
         menu.findItem(R.id.enter_vr_id).setVisible(isCurrentTabNotNull && shouldShowEnterVr());
 
         updateManagedByMenuItem(menu, currentTab);
+        menu.findItem(R.id.help_id).setVisible(false);
     }
 
     /**
@@ -658,6 +731,41 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
                 hasItemBetweenDividers = true;
             }
         }
+    }
+
+    protected void updateAdblockMenuItem(
+            Menu menu, Tab currentTab, boolean canShowAdblockMenu) {
+        MenuItem adblockMenuRow = menu.findItem(R.id.adblock_row_menu_id);
+        MenuItem adblockMenuLabel = menu.findItem(R.id.adblock_id);
+        MenuItem adblockMenuCheck = menu.findItem(R.id.adblock_check_id);
+
+        String url = currentTab.getUrl().getSpec();
+        boolean isChromeScheme = url.startsWith(UrlConstants.CHROME_URL_PREFIX)
+                || url.startsWith(UrlConstants.CHROME_NATIVE_URL_PREFIX);
+        // Also hide adblock desktop site on Reader Mode.
+        boolean isDistilledPage = DomDistillerUrlUtils.isDistilledPage(url);
+
+        // adsEnabled means "adBlockingEnabled"
+        boolean itemVisible = canShowAdblockMenu
+                && !isChromeScheme && !currentTab.isNativePage() && !isDistilledPage;
+        adblockMenuRow.setVisible(itemVisible);
+        if (!itemVisible) return;
+
+        boolean adBlockIsActive = (WebsitePreferenceBridgeJni.get().isContentSettingEnabled(Profile.getLastUsedRegularProfile(), ContentSettingsType.ADS) == false);
+        if (!adBlockIsActive) {
+            adblockMenuCheck.setChecked(false);
+            adblockMenuLabel.setIcon(R.drawable.ic_adblock_off);
+        } else {
+            int adblockSettingForThisSite = WebsitePreferenceBridgeJni.get().getPermissionSettingForOrigin(Profile.getLastUsedRegularProfile(), ContentSettingsType.ADS, currentTab.getUrl().getSpec(), currentTab.getUrl().getSpec());
+            if (adblockSettingForThisSite == ContentSettingValues.DEFAULT || adblockSettingForThisSite == ContentSettingValues.BLOCK){
+                adblockMenuCheck.setChecked(true);
+                adblockMenuLabel.setIcon(R.drawable.ic_adblock_on);
+            }
+            else {
+                adblockMenuCheck.setChecked(false);
+                adblockMenuLabel.setIcon(R.drawable.ic_adblock_off);
+            }
+       }
     }
 
     /**
@@ -1290,6 +1398,7 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
         // Hide app menu item if on non-NTP chrome:// page or auto dark not enabled.
         boolean isAutoDarkEnabled = isAutoDarkWebContentsEnabled();
         boolean itemVisible = currentTab != null && !isChromeScheme && isAutoDarkEnabled;
+        itemVisible = false;
         autoDarkMenuRow.setVisible(itemVisible);
         if (!itemVisible) return;
 
