@@ -103,7 +103,7 @@ body {
   min-height: 100%;
   overflow-x: hidden;
   -webkit-text-size-adjust: 100%;
-  background: white; /* this is to force night mode to trigger */
+  background: white;
 }
 
 body.inited {
@@ -784,7 +784,20 @@ input:checked + .toggle::before {
 
 #bookmarks-grid, #fake-bookmarks-grid, #ideas-grid {
     margin: 2%;
+    margin-top: 0px;
     position: relative;
+}
+
+@media (max-width: 450px) {
+  #bookmarks-grid, #fake-bookmarks-grid, #ideas-grid {
+    min-height: 208px;
+  }
+}
+
+@media (min-width: 450px) {
+  #bookmarks-grid, #fake-bookmarks-grid, #ideas-grid {
+    min-height: 104px;
+  }
 }
 
 #fake-bookmarks-grid {
