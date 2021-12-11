@@ -2021,6 +2021,11 @@ Color LocalFrameView::DocumentBackgroundColor() {
   bool blend_with_base = true;
   LayoutObject* background_source = GetLayoutView();
 
+  auto* settings = frame_->GetSettings();
+  if (settings && settings->GetForceDarkModeEnabled()) {
+    return Color::kBlack;
+  }
+
   // If we have a fullscreen element grab the fullscreen color from the
   // backdrop.
   if (Document* doc = frame_->GetDocument()) {
