@@ -26,6 +26,7 @@ import org.chromium.chrome.browser.util.ChromeAccessibilityUtil;
 import org.chromium.components.browser_ui.settings.ChromeBaseCheckBoxPreference;
 import org.chromium.components.browser_ui.settings.SettingsUtils;
 import org.chromium.components.user_prefs.UserPrefs;
+import org.chromium.content_public.browser.ContentFeatureList;
 
 import android.app.Activity;
 import org.chromium.base.ContextUtils;
@@ -53,9 +54,7 @@ public class AccessibilitySettings
 
     private TextScalePreference mTextScalePref;
     private ChromeBaseCheckBoxPreference mForceEnableZoomPref;
-    private ChromeBaseCheckBoxPreference mKeepToolbar;
     private ChromeBaseCheckBoxPreference mSideSwipePref;
-    private ChromeBaseCheckBoxPreference mTabSwitcherButtonPref;
     private boolean mRecordFontSizeChangeOnStop;
     private Timer mTimer;
     private Activity mActivity;
@@ -90,8 +89,6 @@ public class AccessibilitySettings
         mTextScalePref.updateFontScaleFactors(mFontSizePrefs.getFontScaleFactor(),
                 mFontSizePrefs.getUserFontScaleFactor(), false);
 
-        mTabSwitcherButtonPref = (ChromeBaseCheckBoxPreference) findPreference("tabswitcher_opens_contextual_menu");
-        mTabSwitcherButtonPref.setOnPreferenceChangeListener(this);
 
         mSideSwipePref = (ChromeBaseCheckBoxPreference) findPreference("side_swipe_mode_enabled");
         mSideSwipePref.setOnPreferenceChangeListener(this);
@@ -108,6 +105,17 @@ public class AccessibilitySettings
                                                       .getBoolean(Pref.READER_FOR_ACCESSIBILITY));
         readerForAccessibilityPref.setOnPreferenceChangeListener(this);
 
+        ChromeBaseCheckBoxPreference mAccessibilityTabSwitcherPref =
+                (ChromeBaseCheckBoxPreference) findPreference(
+                        ChromePreferenceKeys.ACCESSIBILITY_TAB_SWITCHER);
+        if (ChromeAccessibilityUtil.get().isAccessibilityEnabled()) {
+            mAccessibilityTabSwitcherPref.setChecked(
+                    SharedPreferencesManager.getInstance().readBoolean(
+                            ChromePreferenceKeys.ACCESSIBILITY_TAB_SWITCHER, true));
+        } else {
+            getPreferenceScreen().removePreference(mAccessibilityTabSwitcherPref);
+        }
+
         Preference captions = findPreference(PREF_CAPTIONS);
         captions.setOnPreferenceClickListener(preference -> {
             Intent intent = new Intent(Settings.ACTION_CAPTIONING_SETTINGS);
@@ -123,6 +131,9 @@ public class AccessibilitySettings
         Preference imageDescriptionsPreference = findPreference(PREF_IMAGE_DESCRIPTIONS);
         imageDescriptionsPreference.setVisible(
                 ImageDescriptionsController.getInstance().shouldShowImageDescriptionsMenuItem());
+
+        ((ChromeBaseCheckBoxPreference) findPreference("text_rewrap")).setOnPreferenceChangeListener(this);
+        ((ChromeBaseCheckBoxPreference) findPreference("show_extensions_first")).setOnPreferenceChangeListener(this);
     }
 
     @Override
@@ -155,18 +166,7 @@ public class AccessibilitySettings
             AskForRelaunch(getActivity());
         } else if ("enable_overscroll_button".equals(preference.getKey())) {
             AskForRelaunch(getActivity());
-        } else if ("tabswitcher_opens_contextual_menu".equals(preference.getKey())) {
-            AskForRelaunch(getActivity());
-        } else if ("keep_toolbar_visible".equals(preference.getKey())) {
-            SharedPreferences.Editor sharedPreferencesEditor = ContextUtils.getAppSharedPreferences().edit();
-            if ((boolean)newValue)
-              sharedPreferencesEditor.putString("keep_toolbar_visible_configuration", "on");
-            else
-              sharedPreferencesEditor.putString("keep_toolbar_visible_configuration", "off");
-            sharedPreferencesEditor.apply();
         } else if ("text_rewrap".equals(preference.getKey())) {
-            AskForRelaunch(getActivity());
-        } else if ("enable_bottom_toolbar".equals(preference.getKey())) {
             AskForRelaunch(getActivity());
         }
 
