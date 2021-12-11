@@ -320,9 +320,12 @@ void URLRequestHttpJob::Start() {
   {
      request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:57.0) Gecko/20100101 Firefox/57.0");
   }
-  else if (request_info_.url.host().find("facebook.com") != std::string::npos)
+  else if (request_info_.url.host().find("roninchain.com") != std::string::npos || request_info_.url.host().find("marketplace.axieinfinity.com") != std::string::npos)
   {
-     request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (Mobile; rv:48.0; A405DL) Gecko/48.0 Firefox/48.0 KAIOS/2.5");
+     request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.45 Safari/537.36");
+     request_info_.extra_headers.SetHeader("Sec-CH-UA", "\" Not A;Brand\";v=\"99\", \"Chromium\";v=\"96\", \"Google Chrome\";v=\"96\"");
+     request_info_.extra_headers.SetHeader("Sec-CH-UA-Mobile", "?0");
+     request_info_.extra_headers.SetHeader("Sec-CH-UA-Platform", "Windows");
   }
   else if (request_info_.url.host().find("news.google.com") != std::string::npos && request_info_.url.path().find("CAAqJggKIiBDQkFTRWdvSUwyMHZNRFZxYUdjU0FtVnVHZ0pWVXlnQVAB") != std::string::npos)
   {
