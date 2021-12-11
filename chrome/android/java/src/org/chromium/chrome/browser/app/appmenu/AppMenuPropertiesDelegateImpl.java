@@ -353,42 +353,14 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
 
         Tab currentTab = mActivityTabProvider.get();
         WebContents webContents = null;
-
-        boolean canShowExtensions = false;
-
-        if (currentTab != null)
-          canShowExtensions = true;
         webContents = currentTab != null ? currentTab.getWebContents() : null;
 
-        int numItems = menu.size();
-
-        if (canShowExtensions) {
-          int itemIndex = numItems++;
-          String extensions = AppMenuBridge.getRunningExtensions(Profile.fromWebContents(webContents).getOriginalProfile(), webContents);
-          if (!extensions.isEmpty()) {
-            String[] extensionsArray = extensions.split("\u001f");
-            for (String extension: extensionsArray) {
-              String[] extensionsInfo = extension.split("\u001e");
-              MenuItem newlyAdded = menu.add(999999, 999999 + itemIndex, Menu.NONE, extensionsInfo[0]);
-              if (extensionsInfo.length > 1) {
-                newlyAdded.setTitleCondensed("Extension: " + extensionsInfo[1]);
-              }
-
-              if (extensionsInfo.length > 2 && !extensionsInfo[2].equals("")) {
-                newlyAdded.setTitleCondensed("Extension: " + extensionsInfo[1] + ": " + extensionsInfo[2]);
-              }
-
-              if (extensionsInfo.length > 3) {
-                String cleanImage = extensionsInfo[3].replace("data:image/png;base64,", "").replace("data:image/jpeg;base64,","").replace("data:image/gif;base64,", "");
-                byte[] decodedString = Base64.decode(cleanImage, Base64.DEFAULT);
-                Bitmap decodedByte = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
-
-                newlyAdded.setIcon(new BitmapDrawable(mContext.getResources(), decodedByte));
-              }
-              itemIndex++;
-           }
-         }
-       }
+        Menu extensionMenu = new PopupMenu(mContext, mDecorView).getMenu();
+        // If we are not showing extensions first, we append the extensions to the existing menu
+        if (!ContextUtils.getAppSharedPreferences().getBoolean("show_extensions_first", false))
+            extensionMenu = menu;
+        prepareExtensionMenu(
+                    extensionMenu, isInStartSurfaceHomepage() ? null : currentTab, handler, mTabModelSelector.getCurrentModel().isIncognito());
 
         // TODO(crbug.com/1119550): Programmatically create menu item's PropertyModel instead of
         // converting from MenuItems.
@@ -442,6 +414,21 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
                 }
             }
             modelList.add(new MVCListAdapter.ListItem(menutype, propertyModel));
+
+            // If we gave to show extensions first, we append them after the first row that has 5 action buttons
+            if (ContextUtils.getAppSharedPreferences().getBoolean("show_extensions_first", false)
+                && item.getItemId() == R.id.icon_row_menu_id
+                && menutype == AppMenuItemType.FIVE_BUTTON_ROW) {
+                    for (int j = 0; j < extensionMenu.size(); ++j) {
+                        MenuItem extensionItem = extensionMenu.getItem(j);
+                        if (!extensionItem.isVisible()) continue;
+                        PropertyModel extensionPropertyModel = AppMenuUtil.menuItemToPropertyModel(extensionItem);
+                        extensionPropertyModel.set(AppMenuItemProperties.ICON_COLOR_RES, getMenuItemIconColorRes(extensionItem));
+                        extensionPropertyModel.set(AppMenuItemProperties.SUPPORT_ENTER_ANIMATION, true);
+
+                        modelList.add(new MVCListAdapter.ListItem(AppMenuItemType.STANDARD, extensionPropertyModel));
+                    }
+               }
         }
 
         return modelList;
@@ -460,6 +447,47 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
                     menu, isInStartSurfaceHomepage() ? null : currentTab, handler, isIncognito);
         }
         prepareCommonMenuItems(menu, menuGroup, isIncognito);
+    }
+
+    private void prepareExtensionMenu(
+            Menu menu, @Nullable Tab currentTab, AppMenuHandler handler, boolean isIncognito) {
+
+        WebContents webContents = null;
+        webContents = currentTab != null ? currentTab.getWebContents() : null;
+
+        boolean canShowExtensions = false;
+        if (currentTab != null)
+          canShowExtensions = true;
+
+        int numItems = menu.size();
+
+        if (canShowExtensions) {
+          int itemIndex = numItems++;
+          String extensions = AppMenuBridge.getRunningExtensions(Profile.fromWebContents(webContents).getOriginalProfile(), webContents);
+          if (!extensions.isEmpty()) {
+            String[] extensionsArray = extensions.split("\u001f");
+            for (String extension: extensionsArray) {
+              String[] extensionsInfo = extension.split("\u001e");
+              MenuItem newlyAdded = menu.add(999999, 999999 + itemIndex, Menu.NONE, extensionsInfo[0]);
+              if (extensionsInfo.length > 1) {
+                newlyAdded.setTitleCondensed("Extension: " + extensionsInfo[1]);
+              }
+
+              if (extensionsInfo.length > 2 && !extensionsInfo[2].equals("")) {
+                newlyAdded.setTitleCondensed("Extension: " + extensionsInfo[1] + ": " + extensionsInfo[2]);
+              }
+
+              if (extensionsInfo.length > 3) {
+                String cleanImage = extensionsInfo[3].replace("data:image/png;base64,", "").replace("data:image/jpeg;base64,","").replace("data:image/gif;base64,", "");
+                byte[] decodedString = Base64.decode(cleanImage, Base64.DEFAULT);
+                Bitmap decodedByte = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
+
+                newlyAdded.setIcon(new BitmapDrawable(mContext.getResources(), decodedByte));
+              }
+              itemIndex++;
+           }
+         }
+       }
     }
 
     /**
