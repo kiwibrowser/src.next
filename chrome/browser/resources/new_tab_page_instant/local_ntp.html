@@ -1,6 +1,6 @@
 <!doctype html>
 <html>
-<!-- Copyright 2018-2021 Kiwi Browser -->
+<!-- Copyright 2018-2022 Kiwi Browser -->
 <head>
   <title>New Tab</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -329,6 +329,9 @@ function render_news_loading()
 function add_gnews(is_primary, title, news_time, source, source_logo, link, image)
 {
   var innerDiv = document.createElement('div');
+  // never display images
+  if (!image)
+    image = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   var creationTime = new Date(news_time * 1000);
   var timeagoInstance = timeago();
   innerDiv.className = 'newsItem';
@@ -358,10 +361,12 @@ function render_gnews(answer, start_offset, n)
           var el = document.createElement('div');
           el.style.display = 'none';
           el.baseURI = 'https://news.google.com/';
-          el.innerHTML = answer.replace(new RegExp('<img', 'gi'), '<source');
+          simplifiedAnswer = '<article' + answer.split('<article').slice(1).join('<article').split('<\/script>')[0];
+          el.innerHTML = simplifiedAnswer.replace(new RegExp('<img', 'gi'), '<source');
           var articles = el.getElementsByTagName('article');
 //          console.log(articles);
-          for (var i = start_offset; i < articles.length && i < (n + start_offset); i++) {
+          var added = start_offset;
+          for (var i = start_offset; i < articles.length && added < (n + start_offset); i++) {
               var article = articles[i];
               var children = article.childNodes;
               var title = null;
@@ -531,8 +536,10 @@ function render_gnews(answer, start_offset, n)
               if (link && image && title) {
 //                  console.log('Title: ' + title);
                   add_gnews(is_primary, title, news_time, source, source_logo, link, image);
+                  added++;
+                  news_are_already_onscreen = true;
+                  localStorage.needFetch = false;
               }
-             news_are_already_onscreen = true;
              if (articles.length > (i + 1) && i <= 29)
              {
                  document.getElementById('newsMore').innerHTML='<div style="color: #8AB4F8; font-size: 24px; width: 100%; text-align: center"><b>...</b></div><br />&nbsp;<br />';
