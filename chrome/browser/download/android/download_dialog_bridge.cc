@@ -52,7 +52,8 @@ void DownloadDialogBridge::ShowDialog(
     DownloadLocationDialogType dialog_type,
     const base::FilePath& suggested_path,
     bool is_incognito,
-    DialogCallback dialog_callback) {
+    DialogCallback dialog_callback,
+    download::DownloadItem* download) {
   if (!native_window)
     return;
 
