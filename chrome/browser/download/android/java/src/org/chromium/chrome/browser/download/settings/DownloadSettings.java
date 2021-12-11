@@ -79,6 +79,8 @@ public class DownloadSettings
         };
         mLocationPromptEnabledPref.setManagedPreferenceDelegate(mLocationPromptEnabledPrefDelegate);
         mLocationChangePref = (DownloadLocationPreference) findPreference(PREF_LOCATION_CHANGE);
+
+        mExternalDownloadManager = (ChromeBaseCheckBoxPreference) findPreference("enable_external_download_manager");
     }
 
     @Override
@@ -114,6 +116,31 @@ public class DownloadSettings
             mLocationPromptEnabledPref.setChecked(isLocationPromptEnabled);
             mLocationPromptEnabledPref.setEnabled(true);
         }
+
+        if (mExternalDownloadManager != null) {
+            mExternalDownloadManager.setOnPreferenceChangeListener(this);
+            mExternalDownloadManager.setChecked(ContextUtils.getAppSharedPreferences().getBoolean("enable_external_download_manager", false));
+            if (ContextUtils.getAppSharedPreferences().getBoolean("enable_external_download_manager", false)
+                  && !TextUtils.isEmpty(ContextUtils.getAppSharedPreferences().getString("selected_external_download_manager_package_name", ""))) {
+                mExternalDownloadManager.setSummary(ContextUtils.getAppSharedPreferences().getString("selected_external_download_manager_package_name", ""));
+            }
+        }
+    }
+
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+            Log.i("Kiwi", "[DownloadPreferences] Received activity result, RQ: " + requestCode);
+            if (requestCode == 4242 && resultCode == Activity.RESULT_OK && data != null) {
+                 ComponentName componentName = data.getComponent();
+                 final String packageName = componentName.getPackageName();
+                 final String activityName = componentName.getClassName();
+                 Log.i("Kiwi", "[DownloadPreferences] Received activity result, PN: " + packageName + " - AN: " + activityName);
+                 SharedPreferences.Editor sharedPreferencesEditor = ContextUtils.getAppSharedPreferences().edit();
+                 sharedPreferencesEditor.putString("selected_external_download_manager_package_name", packageName);
+                 sharedPreferencesEditor.putString("selected_external_download_manager_activity_name", activityName);
+                 sharedPreferencesEditor.apply();
+                 updateDownloadSettings();
+            }
     }
 
     // Preference.OnPreferenceChangeListener implementation.
