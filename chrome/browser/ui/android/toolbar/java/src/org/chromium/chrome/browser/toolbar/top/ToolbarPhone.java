@@ -279,7 +279,8 @@ public class ToolbarPhone extends ToolbarLayout implements OnClickListener, TabC
      * A global layout listener used to capture a new texture when the experimental toolbar button
      * is added or removed.
      */
-    private ViewTreeObserver.OnGlobalLayoutListener mOptionalButtonLayoutListener;
+    private ViewTreeObserver.OnGlobalLayoutListener mOptionalButtonLayoutListener =
+            () -> requestLayoutHostUpdateForOptionalButton();
 
     // The following are some properties used during animation.  We use explicit property classes
     // to avoid the cost of reflection for each animation setup.
@@ -1765,7 +1766,7 @@ public class ToolbarPhone extends ToolbarLayout implements OnClickListener, TabC
     }
 
     private void updateViewsForTabSwitcherMode() {
-        setVisibility(mTabSwitcherState == STATIC_TAB ? View.VISIBLE : View.INVISIBLE);
+        setVisibility(mTabSwitcherState == STATIC_TAB ? View.VISIBLE : View.GONE);
 
         updateProgressBarVisibility();
         updateShadowVisibility();
@@ -1879,10 +1880,8 @@ public class ToolbarPhone extends ToolbarLayout implements OnClickListener, TabC
     void onStartSurfaceStateChanged(boolean shouldBeVisible, boolean isShowingStartSurface) {
         super.onStartSurfaceStateChanged(shouldBeVisible, isShowingStartSurface);
 
-        // Update visibilities of toolbar layout, progress bar and shadow. When |shouldBeVisible| is
-        // false, set INVISIBLE instead of Gone here because of re-inflation issue. See
-        // https://crbug.com/1226970 for more information.
-        setVisibility(shouldBeVisible ? VISIBLE : INVISIBLE);
+        // Update visibilities of toolbar layout, progress bar and shadow.
+        setVisibility(shouldBeVisible ? VISIBLE : GONE);
         updateProgressBarVisibility();
         updateShadowVisibility();
         // Url bar should be focusable. This will be set in UrlBar#onDraw but there's a delay which
@@ -1894,8 +1893,8 @@ public class ToolbarPhone extends ToolbarLayout implements OnClickListener, TabC
         if (mStartSurfaceScrollFraction != startSurfaceScrollFraction) {
             mStartSurfaceScrollFraction = startSurfaceScrollFraction;
             updateUrlExpansionFraction();
-            updateVisualsForLocationBarState();
         }
+        updateVisualsForLocationBarState();
     }
 
     @Override
@@ -2523,7 +2522,6 @@ public class ToolbarPhone extends ToolbarLayout implements OnClickListener, TabC
         } else {
             ApiCompatibilityUtils.setImageTintList(mOptionalButton, null);
         }
-        mOptionalButtonLayoutListener = () -> requestLayoutHostUpdateForOptionalButton();
         if (mTabSwitcherState == STATIC_TAB) {
             if (!mUrlFocusChangeInProgress && !urlHasFocus()
                     && mOptionalButton.getVisibility() == View.GONE) {

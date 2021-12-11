@@ -6,26 +6,27 @@
 
 #include <algorithm>
 #include <iterator>
+#include <memory>
 #include <utility>
 #include <vector>
 
 #include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/file_version_info.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/rand_util.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
@@ -55,6 +56,7 @@
 #include "net/filter/gzip_source_stream.h"
 #include "net/filter/source_stream.h"
 #include "net/http/http_content_disposition.h"
+#include "net/http/http_log_util.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
@@ -63,6 +65,7 @@
 #include "net/http/http_transaction.h"
 #include "net/http/http_transaction_factory.h"
 #include "net/http/http_util.h"
+#include "net/http/transport_security_state.h"
 #include "net/log/net_log.h"
 #include "net/log/net_log_event_type.h"
 #include "net/log/net_log_values.h"
@@ -74,6 +77,7 @@
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_config_service.h"
 #include "net/ssl/ssl_connection_status_flags.h"
+#include "net/url_request/redirect_util.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_error_job.h"
@@ -82,7 +86,9 @@
 #include "net/url_request/url_request_throttler_manager.h"
 #include "net/url_request/websocket_handshake_userdata_key.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+#include "url/gurl.h"
 #include "url/origin.h"
+#include "url/url_constants.h"
 
 #if defined(OS_ANDROID)
 #include "net/android/network_library.h"
@@ -131,33 +137,6 @@ void LogTrustAnchor(const net::HashValueVector& spki_hashes) {
   base::UmaHistogramSparse("Net.Certificate.TrustAnchor.Request", id);
 }
 
-// Records per-request histograms relating to Certificate Transparency
-// compliance.
-void RecordCTHistograms(const net::SSLInfo& ssl_info) {
-  if (ssl_info.ct_policy_compliance ==
-      net::ct::CTPolicyCompliance::CT_POLICY_COMPLIANCE_DETAILS_NOT_AVAILABLE) {
-    return;
-  }
-  if (!ssl_info.is_issued_by_known_root)
-    return;
-
-  // Connections with major errors other than CERTIFICATE_TRANSPARENCY_REQUIRED
-  // would have failed anyway, so do not record these histograms for such
-  // requests.
-  net::CertStatus other_errors =
-      ssl_info.cert_status &
-      ~net::CERT_STATUS_CERTIFICATE_TRANSPARENCY_REQUIRED;
-  if (net::IsCertStatusError(other_errors))
-    return;
-
-  // Record the CT compliance of each request, to give a picture of the
-  // percentage of overall requests that are CT-compliant.
-  UMA_HISTOGRAM_ENUMERATION(
-      "Net.CertificateTransparency.RequestComplianceStatus",
-      ssl_info.ct_policy_compliance,
-      net::ct::CTPolicyCompliance::CT_POLICY_COUNT);
-}
-
 net::CookieOptions CreateCookieOptions(
     net::CookieOptions::SameSiteCookieContext same_site_context,
     const net::SamePartyContext& same_party_context,
@@ -186,6 +165,22 @@ bool IsTLS13OverTCP(const net::HttpResponseInfo& response_info) {
          net::SSL_CONNECTION_VERSION_TLS1_3;
 }
 
+GURL UpgradeSchemeToCryptographic(const GURL& insecure_url) {
+  DCHECK(!insecure_url.SchemeIsCryptographic());
+  DCHECK(insecure_url.SchemeIs(url::kHttpScheme) ||
+         insecure_url.SchemeIs(url::kWsScheme));
+
+  GURL::Replacements replacements;
+  replacements.SetSchemeStr(insecure_url.SchemeIs(url::kHttpScheme)
+                                ? url::kHttpsScheme
+                                : url::kWssScheme);
+
+  GURL secure_url = insecure_url.ReplaceComponents(replacements);
+  DCHECK(secure_url.SchemeIsCryptographic());
+
+  return secure_url;
+}
+
 }  // namespace
 
 namespace net {
@@ -204,13 +199,10 @@ std::unique_ptr<URLRequestJob> URLRequestHttpJob::Create(URLRequest* request) {
     TransportSecurityState* hsts =
         request->context()->transport_security_state();
     if (hsts && hsts->ShouldUpgradeToSSL(url.host())) {
-      GURL::Replacements replacements;
-      replacements.SetSchemeStr(
-          url.SchemeIs(url::kHttpScheme) ? url::kHttpsScheme : url::kWssScheme);
       return std::make_unique<URLRequestRedirectJob>(
-          request, url.ReplaceComponents(replacements),
+          request, UpgradeSchemeToCryptographic(url),
           // Use status code 307 to preserve the method, so POST requests work.
-          URLRequestRedirectJob::REDIRECT_307_TEMPORARY_REDIRECT, "HSTS");
+          RedirectUtil::ResponseCode::REDIRECT_307_TEMPORARY_REDIRECT, "HSTS");
     }
 
 #if defined(OS_ANDROID)
@@ -292,7 +284,7 @@ void URLRequestHttpJob::Start() {
 
   // Privacy mode could still be disabled in SetCookieHeaderAndStart if we are
   // going to send previously saved cookies.
-  request_info_.privacy_mode = privacy_mode();
+  request_info_.privacy_mode = request_->privacy_mode();
 
   // Strip Referer from request_info_.extra_headers to prevent, e.g., plugins
   // from overriding headers that are controlled using other means. Otherwise a
@@ -346,7 +338,12 @@ void URLRequestHttpJob::NotifyHeadersComplete() {
   DCHECK_EQ(0, num_cookie_lines_left_);
   DCHECK(request_->maybe_stored_cookies().empty());
 
-  response_info_ = transaction_->GetResponseInfo();
+  if (override_response_info_) {
+    DCHECK(!transaction_);
+    response_info_ = override_response_info_.get();
+  } else {
+    response_info_ = transaction_->GetResponseInfo();
+  }
 
   if (!response_info_->was_cached && throttling_entry_.get())
     throttling_entry_->UpdateWithResponse(GetResponseCode());
@@ -362,7 +359,7 @@ void URLRequestHttpJob::NotifyHeadersComplete() {
   // The HTTP transaction may be restarted several times for the purposes
   // of sending authorization information. Each time it restarts, we get
   // notified of the headers completion so that we can update the cookie store.
-  if (transaction_->IsReadyToRestartForAuth()) {
+  if (transaction_ && transaction_->IsReadyToRestartForAuth()) {
     // TODO(battre): This breaks the webrequest API for
     // URLRequestTestHTTP.BasicAuthWithCookies
     // where OnBeforeStartTransaction -> OnStartTransaction ->
@@ -390,6 +387,8 @@ void URLRequestHttpJob::DestroyTransaction() {
 }
 
 void URLRequestHttpJob::StartTransaction() {
+  DCHECK(!override_response_info_);
+
   NetworkDelegate* network_delegate = request()->network_delegate();
   if (network_delegate) {
     OnCallToDelegate(
@@ -570,8 +569,10 @@ void URLRequestHttpJob::AddCookieHeaderAndStart() {
                                                request_->site_for_cookies())) {
       force_ignore_site_for_cookies = true;
     }
-    bool is_main_frame_navigation = IsolationInfo::RequestType::kMainFrame ==
-                                    request_->isolation_info().request_type();
+    bool is_main_frame_navigation =
+        IsolationInfo::RequestType::kMainFrame ==
+            request_->isolation_info().request_type() ||
+        request_->force_main_frame_for_same_site_cookies();
     CookieOptions::SameSiteCookieContext same_site_context =
         net::cookie_util::ComputeSameSiteContextForRequest(
             request_->method(), request_->url_chain(),
@@ -594,8 +595,13 @@ void URLRequestHttpJob::AddCookieHeaderAndStart() {
             request_site, request_->isolation_info(), delegate,
             request_->force_ignore_top_frame_party_for_cookies()));
 
+    absl::optional<CookiePartitionKey> cookie_partition_key =
+        CookiePartitionKey::FromNetworkIsolationKey(
+            request_->isolation_info().network_isolation_key());
+
     cookie_store->GetCookieListWithOptionsAsync(
         request_->url(), options,
+        CookiePartitionKeychain::FromOptional(cookie_partition_key),
         base::BindOnce(&URLRequestHttpJob::SetCookieHeaderAndStart,
                        weak_factory_.GetWeakPtr(), options));
   } else {
@@ -909,8 +915,6 @@ void URLRequestHttpJob::OnStartCompleted(int result) {
     if (!IsCertificateError(result)) {
       LogTrustAnchor(ssl_info.public_key_hashes);
     }
-
-    RecordCTHistograms(ssl_info);
   }
 
   if (transaction_ && transaction_->GetResponseInfo()) {
@@ -965,6 +969,30 @@ void URLRequestHttpJob::OnStartCompleted(int result) {
   } else if (result == ERR_SSL_CLIENT_AUTH_CERT_NEEDED) {
     NotifyCertificateRequested(
         transaction_->GetResponseInfo()->cert_request_info.get());
+  } else if (result == ERR_DNS_NAME_HTTPS_ONLY) {
+    // If DNS indicated the name is HTTPS-only, synthesize a redirect to either
+    // HTTPS or WSS.
+    DCHECK(features::kUseDnsHttpsSvcbHttpUpgrade.Get());
+    DCHECK(!request_->url().SchemeIsCryptographic());
+
+    base::Time request_time =
+        transaction_ && transaction_->GetResponseInfo()
+            ? transaction_->GetResponseInfo()->request_time
+            : base::Time::Now();
+    DestroyTransaction();
+    override_response_info_ = std::make_unique<HttpResponseInfo>();
+    override_response_info_->request_time = request_time;
+
+    override_response_info_->headers = RedirectUtil::SynthesizeRedirectHeaders(
+        UpgradeSchemeToCryptographic(request_->url()),
+        RedirectUtil::ResponseCode::REDIRECT_307_TEMPORARY_REDIRECT, "DNS",
+        request_->extra_request_headers());
+    NetLogResponseHeaders(
+        request_->net_log(),
+        NetLogEventType::URL_REQUEST_FAKE_RESPONSE_HEADERS_CREATED,
+        override_response_info_->headers.get());
+
+    NotifyHeadersComplete();
   } else {
     // Even on an error, there may be useful information in the response
     // info (e.g. whether there's a cached copy).
@@ -1001,6 +1029,8 @@ void URLRequestHttpJob::OnReadCompleted(int result) {
 
 void URLRequestHttpJob::RestartTransactionWithAuth(
     const AuthCredentials& credentials) {
+  DCHECK(!override_response_info_);
+
   auth_credentials_ = credentials;
 
   // These will be reset in OnStartCompleted.
@@ -1025,13 +1055,15 @@ void URLRequestHttpJob::RestartTransactionWithAuth(
 }
 
 void URLRequestHttpJob::SetUpload(UploadDataStream* upload) {
-  DCHECK(!transaction_.get()) << "cannot change once started";
+  DCHECK(!transaction_.get() && !override_response_info_)
+      << "cannot change once started";
   request_info_.upload_data_stream = upload;
 }
 
 void URLRequestHttpJob::SetExtraRequestHeaders(
     const HttpRequestHeaders& headers) {
-  DCHECK(!transaction_.get()) << "cannot change once started";
+  DCHECK(!transaction_.get() && !override_response_info_)
+      << "cannot change once started";
   request_info_.extra_headers.CopyFrom(headers);
 }
 
@@ -1041,7 +1073,7 @@ LoadState URLRequestHttpJob::GetLoadState() const {
 }
 
 bool URLRequestHttpJob::GetMimeType(std::string* mime_type) const {
-  DCHECK(transaction_.get());
+  DCHECK(transaction_.get() || override_response_info_);
 
   if (!response_info_)
     return false;
@@ -1053,7 +1085,7 @@ bool URLRequestHttpJob::GetMimeType(std::string* mime_type) const {
 }
 
 bool URLRequestHttpJob::GetCharset(std::string* charset) {
-  DCHECK(transaction_.get());
+  DCHECK(transaction_.get() || override_response_info_);
 
   if (!response_info_)
     return false;
@@ -1062,6 +1094,12 @@ bool URLRequestHttpJob::GetCharset(std::string* charset) {
 }
 
 void URLRequestHttpJob::GetResponseInfo(HttpResponseInfo* info) {
+  if (override_response_info_) {
+    DCHECK(!transaction_.get());
+    *info = *override_response_info_;
+    return;
+  }
+
   if (response_info_) {
     DCHECK(transaction_.get());
 
@@ -1112,10 +1150,10 @@ std::unique_ptr<SourceStream> URLRequestHttpJob::SetUpSourceStream() {
 
   std::unique_ptr<SourceStream> upstream = URLRequestJob::SetUpSourceStream();
   HttpResponseHeaders* headers = GetResponseHeaders();
-  std::string type;
   std::vector<SourceStream::SourceType> types;
   size_t iter = 0;
-  while (headers->EnumerateHeader(&iter, "Content-Encoding", &type)) {
+  for (std::string type;
+       headers->EnumerateHeader(&iter, "Content-Encoding", &type);) {
     SourceStream::SourceType source_type =
         FilterSourceStream::ParseEncodingType(type);
     switch (source_type) {
@@ -1376,6 +1414,7 @@ void URLRequestHttpJob::DoneReading() {
 
 void URLRequestHttpJob::DoneReadingRedirectResponse() {
   if (transaction_) {
+    DCHECK(!override_response_info_);
     if (transaction_->GetResponseInfo()->headers->IsRedirect(nullptr)) {
       // If the original headers indicate a redirect, go ahead and cache the
       // response, even if the |override_response_headers_| are a redirect to
@@ -1554,8 +1593,14 @@ void URLRequestHttpJob::DoneWithRequest(CompletionCause reason) {
 }
 
 HttpResponseHeaders* URLRequestHttpJob::GetResponseHeaders() const {
+  if (override_response_info_) {
+    DCHECK(!transaction_.get());
+    return override_response_info_->headers.get();
+  }
+
   DCHECK(transaction_.get());
   DCHECK(transaction_->GetResponseInfo());
+
   return override_response_headers_.get() ?
              override_response_headers_.get() :
              transaction_->GetResponseInfo()->headers.get();

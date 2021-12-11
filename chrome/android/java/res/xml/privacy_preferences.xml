@@ -12,6 +12,10 @@
         android:summary="@string/clear_browsing_data_summary"
         android:fragment="org.chromium.chrome.browser.browsing_data.ClearBrowsingDataTabsFragment"/>
     <Preference
+        android:key="privacy_review"
+        android:title="@string/prefs_privacy_review_title"
+        android:summary="@string/prefs_privacy_review_summary"/>
+    <Preference
         android:key="safe_browsing"
         android:title="@string/prefs_safe_browsing_title"
         android:summary="@string/prefs_safe_browsing_summary"
@@ -20,15 +24,20 @@
         android:key="https_first_mode"
         android:title="@string/settings_https_first_mode_title"
         android:summary="@string/settings_https_first_mode_summary"/>
+     <org.chromium.chrome.browser.incognito.reauth.IncognitoReauthSettingSwitchPreference
+        android:key="incognito_lock"
+        android:title="@string/settings_incognito_tab_lock_title"
+        android:summary="@string/settings_incognito_tab_lock_summary_android_setting_off"
+        android:persistent="false"/>
     <org.chromium.components.browser_ui.settings.ChromeSwitchPreference
         android:key="can_make_payment"
         android:title="@string/can_make_payment_title"
         android:summary="@string/settings_can_make_payment_toggle_label"/>
-    <org.chromium.components.browser_ui.settings.ChromeSwitchPreference
+    <Preference
         android:key="preload_pages"
         android:title="@string/preload_pages_title"
         android:summary="@string/preload_pages_summary"
-        android:persistent="false"/>
+        android:fragment="org.chromium.chrome.browser.prefetch.settings.PreloadPagesSettingsFragment"/>
     <org.chromium.components.browser_ui.settings.ChromeBasePreference
         android:key="usage_stats_reporting"
         android:title="@string/usage_stats_setting_title"

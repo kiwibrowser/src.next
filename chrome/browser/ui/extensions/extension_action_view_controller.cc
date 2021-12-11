@@ -67,6 +67,19 @@ ExtensionActionViewController::Create(
       extensions_container));
 }
 
+// static
+bool ExtensionActionViewController::AnyActionHasCurrentSiteAccess(
+    const std::vector<std::unique_ptr<ToolbarActionViewController>>& actions,
+    content::WebContents* web_contents) {
+  for (const auto& action : actions) {
+    if (action->GetPageInteractionStatus(web_contents) ==
+        PageInteractionStatus::kActive) {
+      return true;
+    }
+  }
+  return false;
+}
+
 ExtensionActionViewController::ExtensionActionViewController(
     scoped_refptr<const extensions::Extension> extension,
     Browser* browser,
@@ -405,7 +418,7 @@ bool ExtensionActionViewController::TriggerPopupWithUrl(
     return false;
 
   popup_host_ = host.get();
-  popup_host_observation_.Observe(popup_host_);
+  popup_host_observation_.Observe(popup_host_.get());
   extensions_container_->SetPopupOwner(this);
 
   extensions_container_->CloseOverflowMenuIfOpen();
@@ -432,7 +445,7 @@ void ExtensionActionViewController::ShowPopup(
 }
 
 void ExtensionActionViewController::OnPopupClosed() {
-  DCHECK(popup_host_observation_.IsObservingSource(popup_host_));
+  DCHECK(popup_host_observation_.IsObservingSource(popup_host_.get()));
   popup_host_observation_.Reset();
   popup_host_ = nullptr;
   extensions_container_->SetPopupOwner(nullptr);

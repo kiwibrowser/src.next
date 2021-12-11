@@ -48,7 +48,7 @@
 #include "third_party/blink/renderer/platform/graphics/gradient_generated_image.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
 #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -117,7 +117,7 @@ scoped_refptr<Image> CSSGradientValue::GetImage(
     const ImageResourceObserver& client,
     const Document& document,
     const ComputedStyle& style,
-    const FloatSize& size) const {
+    const gfx::SizeF& size) const {
   if (size.IsEmpty())
     return nullptr;
 
@@ -184,19 +184,19 @@ struct CSSGradientValue::GradientDesc {
   STACK_ALLOCATED();
 
  public:
-  GradientDesc(const FloatPoint& p0,
-               const FloatPoint& p1,
+  GradientDesc(const gfx::PointF& p0,
+               const gfx::PointF& p1,
                GradientSpreadMethod spread_method)
       : p0(p0), p1(p1), spread_method(spread_method) {}
-  GradientDesc(const FloatPoint& p0,
-               const FloatPoint& p1,
+  GradientDesc(const gfx::PointF& p0,
+               const gfx::PointF& p1,
                float r0,
                float r1,
                GradientSpreadMethod spread_method)
       : p0(p0), p1(p1), r0(r0), r1(r1), spread_method(spread_method) {}
 
   Vector<Gradient::ColorStop> stops;
-  FloatPoint p0, p1;
+  gfx::PointF p0, p1;
   float r0 = 0, r1 = 0;
   float start_angle = 0, end_angle = 360;
   GradientSpreadMethod spread_method;
@@ -456,6 +456,12 @@ void ClampNegativeOffsets(Vector<GradientStop>& stops) {
   }
 }
 
+// Used in AdjustedGradientDomainForOffsetRange when the type of v1 - v0 is
+// gfx::Vector2dF.
+gfx::Vector2dF operator*(const gfx::Vector2dF& v, float scale) {
+  return gfx::ScaleVector2d(v, scale);
+}
+
 template <typename T>
 std::tuple<T, T> AdjustedGradientDomainForOffsetRange(const T& v0,
                                                       const T& v1,
@@ -524,7 +530,7 @@ void CSSGradientValue::AddStops(
   float gradient_length;
   switch (GetClassType()) {
     case kLinearGradientClass:
-      gradient_length = FloatSize(desc.p1 - desc.p0).DiagonalLength();
+      gradient_length = (desc.p1 - desc.p0).Length();
       break;
     case kRadialGradientClass:
       gradient_length = desc.r1;
@@ -680,11 +686,11 @@ void CSSGradientValue::AddStops(
 
 static float PositionFromValue(const CSSValue* value,
                                const CSSToLengthConversionData& conversion_data,
-                               const FloatSize& size,
+                               const gfx::SizeF& size,
                                bool is_horizontal) {
   float origin = 0;
   int sign = 1;
-  float edge_distance = is_horizontal ? size.Width() : size.Height();
+  float edge_distance = is_horizontal ? size.width() : size.height();
 
   // In this case the center of the gradient is given relative to an edge in the
   // form of: [ top | bottom | right | left ] [ <percentage> | <length> ].
@@ -709,10 +715,10 @@ static float PositionFromValue(const CSSValue* value,
         return 0;
       case CSSValueID::kBottom:
         DCHECK(!is_horizontal);
-        return size.Height();
+        return size.height();
       case CSSValueID::kRight:
         DCHECK(is_horizontal);
-        return size.Width();
+        return size.width();
       case CSSValueID::kCenter:
         return origin + sign * .5f * edge_distance;
       default:
@@ -740,18 +746,18 @@ static float PositionFromValue(const CSSValue* value,
 }
 
 // Resolve points/radii to front end values.
-static FloatPoint ComputeEndPoint(
+static gfx::PointF ComputeEndPoint(
     const CSSValue* horizontal,
     const CSSValue* vertical,
     const CSSToLengthConversionData& conversion_data,
-    const FloatSize& size) {
-  FloatPoint result;
+    const gfx::SizeF& size) {
+  gfx::PointF result;
 
   if (horizontal)
-    result.SetX(PositionFromValue(horizontal, conversion_data, size, true));
+    result.set_x(PositionFromValue(horizontal, conversion_data, size, true));
 
   if (vertical)
-    result.SetY(PositionFromValue(vertical, conversion_data, size, false));
+    result.set_y(PositionFromValue(vertical, conversion_data, size, false));
 
   return result;
 }
@@ -868,15 +874,15 @@ String CSSLinearGradientValue::CustomCSSText() const {
   }
 
   result.Append(')');
-  return result.ToString();
+  return result.ReleaseString();
 }
 
 // Compute the endpoints so that a gradient of the given angle covers a box of
 // the given size.
 static void EndPointsFromAngle(float angle_deg,
-                               const FloatSize& size,
-                               FloatPoint& first_point,
-                               FloatPoint& second_point,
+                               const gfx::SizeF& size,
+                               gfx::PointF& first_point,
+                               gfx::PointF& second_point,
                                CSSGradientType type) {
   // Prefixed gradients use "polar coordinate" angles, rather than "bearing"
   // angles.
@@ -888,71 +894,71 @@ static void EndPointsFromAngle(float angle_deg,
     angle_deg += 360;
 
   if (!angle_deg) {
-    first_point.Set(0, size.Height());
-    second_point.Set(0, 0);
+    first_point.SetPoint(0, size.height());
+    second_point.SetPoint(0, 0);
     return;
   }
 
   if (angle_deg == 90) {
-    first_point.Set(0, 0);
-    second_point.Set(size.Width(), 0);
+    first_point.SetPoint(0, 0);
+    second_point.SetPoint(size.width(), 0);
     return;
   }
 
   if (angle_deg == 180) {
-    first_point.Set(0, 0);
-    second_point.Set(0, size.Height());
+    first_point.SetPoint(0, 0);
+    second_point.SetPoint(0, size.height());
     return;
   }
 
   if (angle_deg == 270) {
-    first_point.Set(size.Width(), 0);
-    second_point.Set(0, 0);
+    first_point.SetPoint(size.width(), 0);
+    second_point.SetPoint(0, 0);
     return;
   }
 
   // angleDeg is a "bearing angle" (0deg = N, 90deg = E),
   // but tan expects 0deg = E, 90deg = N.
-  float slope = tan(deg2rad(90 - angle_deg));
+  float slope = tan(Deg2rad(90 - angle_deg));
 
   // We find the endpoint by computing the intersection of the line formed by
   // the slope, and a line perpendicular to it that intersects the corner.
   float perpendicular_slope = -1 / slope;
 
   // Compute start corner relative to center, in Cartesian space (+y = up).
-  float half_height = size.Height() / 2;
-  float half_width = size.Width() / 2;
-  FloatPoint end_corner;
+  float half_height = size.height() / 2;
+  float half_width = size.width() / 2;
+  gfx::PointF end_corner;
   if (angle_deg < 90)
-    end_corner.Set(half_width, half_height);
+    end_corner.SetPoint(half_width, half_height);
   else if (angle_deg < 180)
-    end_corner.Set(half_width, -half_height);
+    end_corner.SetPoint(half_width, -half_height);
   else if (angle_deg < 270)
-    end_corner.Set(-half_width, -half_height);
+    end_corner.SetPoint(-half_width, -half_height);
   else
-    end_corner.Set(-half_width, half_height);
+    end_corner.SetPoint(-half_width, half_height);
 
   // Compute c (of y = mx + c) using the corner point.
-  float c = end_corner.Y() - perpendicular_slope * end_corner.X();
+  float c = end_corner.y() - perpendicular_slope * end_corner.x();
   float end_x = c / (slope - perpendicular_slope);
   float end_y = perpendicular_slope * end_x + c;
 
   // We computed the end point, so set the second point, taking into account the
   // moved origin and the fact that we're in drawing space (+y = down).
-  second_point.Set(half_width + end_x, half_height - end_y);
+  second_point.SetPoint(half_width + end_x, half_height - end_y);
   // Reflect around the center for the start point.
-  first_point.Set(half_width - end_x, half_height + end_y);
+  first_point.SetPoint(half_width - end_x, half_height + end_y);
 }
 
 scoped_refptr<Gradient> CSSLinearGradientValue::CreateGradient(
     const CSSToLengthConversionData& conversion_data,
-    const FloatSize& size,
+    const gfx::SizeF& size,
     const Document& document,
     const ComputedStyle& style) const {
   DCHECK(!size.IsEmpty());
 
-  FloatPoint first_point;
-  FloatPoint second_point;
+  gfx::PointF first_point;
+  gfx::PointF second_point;
   if (angle_) {
     float angle = angle_->ComputeDegrees();
     EndPointsFromAngle(angle, size, first_point, second_point, gradient_type_);
@@ -966,24 +972,24 @@ scoped_refptr<Gradient> CSSLinearGradientValue::CreateGradient(
                                          conversion_data, size);
         else {
           if (first_x_)
-            second_point.SetX(size.Width() - first_point.X());
+            second_point.set_x(size.width() - first_point.x());
           if (first_y_)
-            second_point.SetY(size.Height() - first_point.Y());
+            second_point.set_y(size.height() - first_point.y());
         }
         break;
       case kCSSPrefixedLinearGradient:
         first_point = ComputeEndPoint(first_x_.Get(), first_y_.Get(),
                                       conversion_data, size);
         if (first_x_)
-          second_point.SetX(size.Width() - first_point.X());
+          second_point.set_x(size.width() - first_point.x());
         if (first_y_)
-          second_point.SetY(size.Height() - first_point.Y());
+          second_point.set_y(size.height() - first_point.y());
         break;
       case kCSSLinearGradient:
         if (first_x_ && first_y_) {
           // "Magic" corners, so the 50% line touches two corners.
-          float rise = size.Width();
-          float run = size.Height();
+          float rise = size.width();
+          float run = size.height();
           auto* first_x_identifier_value =
               DynamicTo<CSSIdentifierValue>(first_x_.Get());
           if (first_x_identifier_value &&
@@ -995,18 +1001,19 @@ scoped_refptr<Gradient> CSSLinearGradientValue::CreateGradient(
               first_y_identifier_value->GetValueID() == CSSValueID::kBottom)
             rise *= -1;
           // Compute angle, and flip it back to "bearing angle" degrees.
-          float angle = 90 - rad2deg(atan2(rise, run));
+          float angle = 90 - Rad2deg(atan2(rise, run));
           EndPointsFromAngle(angle, size, first_point, second_point,
                              gradient_type_);
         } else if (first_x_ || first_y_) {
           second_point = ComputeEndPoint(first_x_.Get(), first_y_.Get(),
                                          conversion_data, size);
           if (first_x_)
-            first_point.SetX(size.Width() - second_point.X());
+            first_point.set_x(size.width() - second_point.x());
           if (first_y_)
-            first_point.SetY(size.Height() - second_point.Y());
-        } else
-          second_point.SetY(size.Height());
+            first_point.set_y(size.height() - second_point.y());
+        } else {
+          second_point.set_y(size.height());
+        }
         break;
       default:
         NOTREACHED();
@@ -1220,7 +1227,7 @@ String CSSRadialGradientValue::CustomCSSText() const {
   }
 
   result.Append(')');
-  return result.ToString();
+  return result.ReleaseString();
 }
 
 namespace {
@@ -1237,61 +1244,64 @@ float ResolveRadius(const CSSPrimitiveValue* radius,
   else
     result = radius->ComputeLength<float>(conversion_data);
 
-  return clampTo<float>(std::max(result, 0.0f));
+  return ClampTo<float>(std::max(result, 0.0f));
 }
 
 enum EndShapeType { kCircleEndShape, kEllipseEndShape };
 
 // Compute the radius to the closest/farthest side (depending on the compare
 // functor).
-FloatSize RadiusToSide(const FloatPoint& point,
-                       const FloatSize& size,
-                       EndShapeType shape,
-                       bool (*compare)(float, float)) {
-  float dx1 = clampTo<float>(fabs(point.X()));
-  float dy1 = clampTo<float>(fabs(point.Y()));
-  float dx2 = clampTo<float>(fabs(point.X() - size.Width()));
-  float dy2 = clampTo<float>(fabs(point.Y() - size.Height()));
+gfx::SizeF RadiusToSide(const gfx::PointF& point,
+                        const gfx::SizeF& size,
+                        EndShapeType shape,
+                        bool (*compare)(float, float)) {
+  float dx1 = ClampTo<float>(fabs(point.x()));
+  float dy1 = ClampTo<float>(fabs(point.y()));
+  float dx2 = ClampTo<float>(fabs(point.x() - size.width()));
+  float dy2 = ClampTo<float>(fabs(point.y() - size.height()));
 
   float dx = compare(dx1, dx2) ? dx1 : dx2;
   float dy = compare(dy1, dy2) ? dy1 : dy2;
 
   if (shape == kCircleEndShape)
-    return compare(dx, dy) ? FloatSize(dx, dx) : FloatSize(dy, dy);
+    return compare(dx, dy) ? gfx::SizeF(dx, dx) : gfx::SizeF(dy, dy);
 
   DCHECK_EQ(shape, kEllipseEndShape);
-  return FloatSize(dx, dy);
+  return gfx::SizeF(dx, dy);
 }
 
-// Compute the radius of an ellipse with center at 0,0 which passes through p,
-// and has width/height given by aspectRatio.
-inline FloatSize EllipseRadius(const FloatPoint& p, float aspect_ratio) {
+// Compute the radius of an ellipse which passes through a point at
+// |offset_from_center|, and has width/height given by aspectRatio.
+inline gfx::SizeF EllipseRadius(const gfx::Vector2dF& offset_from_center,
+                                float aspect_ratio) {
   // If the aspectRatio is 0 or infinite, the ellipse is completely flat.
   // TODO(sashab): Implement Degenerate Radial Gradients, see crbug.com/635727.
   if (aspect_ratio == 0 || std::isinf(aspect_ratio))
-    return FloatSize(0, 0);
+    return gfx::SizeF(0, 0);
 
   // x^2/a^2 + y^2/b^2 = 1
   // a/b = aspectRatio, b = a/aspectRatio
-  // a = sqrt(x^2 + y^2/(1/r^2))
-  float a = sqrtf(p.X() * p.X() + p.Y() * p.Y() * aspect_ratio * aspect_ratio);
-  return FloatSize(clampTo<float>(a), clampTo<float>(a / aspect_ratio));
+  // a = sqrt(x^2 + y^2/(1/aspect_ratio^2))
+  float a = sqrtf(offset_from_center.x() * offset_from_center.x() +
+                  offset_from_center.y() * offset_from_center.y() *
+                      aspect_ratio * aspect_ratio);
+  return gfx::SizeF(ClampTo<float>(a), ClampTo<float>(a / aspect_ratio));
 }
 
 // Compute the radius to the closest/farthest corner (depending on the compare
 // functor).
-FloatSize RadiusToCorner(const FloatPoint& point,
-                         const FloatSize& size,
-                         EndShapeType shape,
-                         bool (*compare)(float, float)) {
-  const FloatRect rect(FloatPoint(), size);
-  const FloatPoint corners[] = {rect.MinXMinYCorner(), rect.MaxXMinYCorner(),
-                                rect.MaxXMaxYCorner(), rect.MinXMaxYCorner()};
+gfx::SizeF RadiusToCorner(const gfx::PointF& point,
+                          const gfx::SizeF& size,
+                          EndShapeType shape,
+                          bool (*compare)(float, float)) {
+  const gfx::RectF rect(size);
+  const gfx::PointF corners[] = {rect.origin(), rect.top_right(),
+                                 rect.bottom_right(), rect.bottom_left()};
 
   unsigned corner_index = 0;
-  float distance = (point - corners[corner_index]).DiagonalLength();
+  float distance = (point - corners[corner_index]).Length();
   for (unsigned i = 1; i < base::size(corners); ++i) {
-    float new_distance = (point - corners[i]).DiagonalLength();
+    float new_distance = (point - corners[i]).Length();
     if (compare(new_distance, distance)) {
       corner_index = i;
       distance = new_distance;
@@ -1299,18 +1309,18 @@ FloatSize RadiusToCorner(const FloatPoint& point,
   }
 
   if (shape == kCircleEndShape) {
-    distance = clampTo<float>(distance);
-    return FloatSize(distance, distance);
+    distance = ClampTo<float>(distance);
+    return gfx::SizeF(distance, distance);
   }
 
   DCHECK_EQ(shape, kEllipseEndShape);
   // If the end shape is an ellipse, the gradient-shape has the same ratio of
   // width to height that it would if closest-side or farthest-side were
   // specified, as appropriate.
-  const FloatSize side_radius =
+  const gfx::SizeF side_radius =
       RadiusToSide(point, size, kEllipseEndShape, compare);
 
-  return EllipseRadius(FloatPoint(corners[corner_index] - point),
+  return EllipseRadius(corners[corner_index] - point,
                        side_radius.AspectRatio());
 }
 
@@ -1318,43 +1328,43 @@ FloatSize RadiusToCorner(const FloatPoint& point,
 
 scoped_refptr<Gradient> CSSRadialGradientValue::CreateGradient(
     const CSSToLengthConversionData& conversion_data,
-    const FloatSize& size,
+    const gfx::SizeF& size,
     const Document& document,
     const ComputedStyle& style) const {
   DCHECK(!size.IsEmpty());
 
-  FloatPoint first_point =
+  gfx::PointF first_point =
       ComputeEndPoint(first_x_.Get(), first_y_.Get(), conversion_data, size);
   if (!first_x_)
-    first_point.SetX(size.Width() / 2);
+    first_point.set_x(size.width() / 2);
   if (!first_y_)
-    first_point.SetY(size.Height() / 2);
+    first_point.set_y(size.height() / 2);
 
-  FloatPoint second_point =
+  gfx::PointF second_point =
       ComputeEndPoint(second_x_.Get(), second_y_.Get(), conversion_data, size);
   if (!second_x_)
-    second_point.SetX(size.Width() / 2);
+    second_point.set_x(size.width() / 2);
   if (!second_y_)
-    second_point.SetY(size.Height() / 2);
+    second_point.set_y(size.height() / 2);
 
   float first_radius = 0;
   if (first_radius_)
     first_radius = ResolveRadius(first_radius_.Get(), conversion_data);
 
-  FloatSize second_radius(0, 0);
+  gfx::SizeF second_radius(0, 0);
   if (second_radius_) {
-    second_radius.SetWidth(
+    second_radius.set_width(
         ResolveRadius(second_radius_.Get(), conversion_data));
-    second_radius.SetHeight(second_radius.Width());
+    second_radius.set_height(second_radius.width());
   } else if (end_horizontal_size_) {
-    float width = size.Width();
-    float height = size.Height();
-    second_radius.SetWidth(
+    float width = size.width();
+    float height = size.height();
+    second_radius.set_width(
         ResolveRadius(end_horizontal_size_.Get(), conversion_data, &width));
-    second_radius.SetHeight(
+    second_radius.set_height(
         end_vertical_size_
             ? ResolveRadius(end_vertical_size_.Get(), conversion_data, &height)
-            : second_radius.Width());
+            : second_radius.width());
   } else {
     EndShapeType shape =
         (shape_ && shape_->GetValueID() == CSSValueID::kCircle) ||
@@ -1386,12 +1396,12 @@ scoped_refptr<Gradient> CSSRadialGradientValue::CreateGradient(
   }
 
   DCHECK(std::isfinite(first_radius));
-  DCHECK(std::isfinite(second_radius.Width()));
-  DCHECK(std::isfinite(second_radius.Height()));
+  DCHECK(std::isfinite(second_radius.width()));
+  DCHECK(std::isfinite(second_radius.height()));
 
-  bool is_degenerate = !second_radius.Width() || !second_radius.Height();
+  bool is_degenerate = !second_radius.width() || !second_radius.height();
   GradientDesc desc(first_point, second_point, first_radius,
-                    is_degenerate ? 0 : second_radius.Width(),
+                    is_degenerate ? 0 : second_radius.width(),
                     repeating_ ? kSpreadMethodRepeat : kSpreadMethodPad);
   AddStops(desc, conversion_data, document, style);
 
@@ -1503,23 +1513,23 @@ String CSSConicGradientValue::CustomCSSText() const {
   AppendCSSTextForColorStops(result, wrote_something);
 
   result.Append(')');
-  return result.ToString();
+  return result.ReleaseString();
 }
 
 scoped_refptr<Gradient> CSSConicGradientValue::CreateGradient(
     const CSSToLengthConversionData& conversion_data,
-    const FloatSize& size,
+    const gfx::SizeF& size,
     const Document& document,
     const ComputedStyle& style) const {
   DCHECK(!size.IsEmpty());
 
   const float angle = from_angle_ ? from_angle_->ComputeDegrees() : 0;
 
-  const FloatPoint position(
+  const gfx::PointF position(
       x_ ? PositionFromValue(x_, conversion_data, size, true)
-         : size.Width() / 2,
+         : size.width() / 2,
       y_ ? PositionFromValue(y_, conversion_data, size, false)
-         : size.Height() / 2);
+         : size.height() / 2);
 
   GradientDesc desc(position, position,
                     repeating_ ? kSpreadMethodRepeat : kSpreadMethodPad);
