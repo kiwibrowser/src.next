@@ -260,6 +260,8 @@ class TabbedNavigationBarColorController implements VrModeObserver {
     }
 
     private @ColorInt int getNavigationBarDividerColor(boolean forceDarkNavigationBar) {
+        if (ContextUtils.getAppSharedPreferences().getBoolean("darken_websites_enabled", false) || ContextUtils.getAppSharedPreferences().getInt("ui_theme_setting", 0) == 2)
+            return Color.parseColor("#FF000000");
         return forceDarkNavigationBar
                 ? ApiCompatibilityUtils.getColor(
                         mResources, R.color.bottom_system_nav_divider_color_light)
