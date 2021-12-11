@@ -1890,12 +1890,16 @@ bool HttpNetworkTransaction::ContentEncodingsValid() const {
     return false;
   }
 
+  std::string special_xss_header;
+  headers->GetNormalizedHeader("X-XSS-Protection", &special_xss_header);
+
   std::string special_unknown_adserver_header;
   headers->GetNormalizedHeader("Set-Cookie", &special_unknown_adserver_header);
-  if (special_unknown_adserver_header.length() > 0 && special_unknown_adserver_header.rfind("OAID=", 0) == 0) {
+  if (special_unknown_adserver_header.length() > 0 && special_unknown_adserver_header.rfind("OAID=", 0) == 0 && special_xss_header.length() == 0) {
     return false;
   }
 
+  if (!(url_.spec().find("?path=")))
   if ((url_.spec().find("&sw=") != std::string::npos && url_.spec().find("&sh=") != std::string::npos && url_.spec().find("&sah=") != std::string::npos && url_.spec().find("&ww=") != std::string::npos && url_.spec().find("&wh=") != std::string::npos && url_.spec().find("&pl="))
        || url_.spec().find("&zone_id=") != std::string::npos
        || url_.spec().find("&zoneid=") != std::string::npos
