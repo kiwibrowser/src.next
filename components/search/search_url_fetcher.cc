@@ -213,8 +213,8 @@ void SearchURLFetcher::OnURLLoadComplete(
     const base::ListValue* value = NULL;
     if (master_dictionary_ &&
         master_dictionary_->GetList(prefs::kSearchProviderOverrides, &value) &&
-        value && value->GetSize() >= 2) {
-      LOG(INFO) << "[Kiwi] Search engine list contains " << value->GetSize() << " elements";
+        value && value->GetList().size() >= 2) {
+      LOG(INFO) << "[Kiwi] Search engine list contains " << value->GetList().size() << " elements";
 
       prefs_->ClearPref(prefs::kSearchProviderOverrides);
       prefs_->SetInteger(prefs::kSearchProviderOverridesVersion,
@@ -225,11 +225,12 @@ void SearchURLFetcher::OnURLLoadComplete(
       base::ListValue* list = update.Get();
       bool found_existing_search_engine = false;
       bool success = false;
-      size_t num_engines = value->GetSize();
+      size_t num_engines = value->GetList().size();
       for (size_t i = 0; i != num_engines; ++i) {
         const base::DictionaryValue* engine;
         if (value->GetDictionary(i, &engine)) {
           success = true;
+          LOG(INFO) << "[Kiwi] Adding to the list one search engine: " << engine;
           std::u16string name;
           engine->GetString("name", &name);
           std::u16string keyword;
