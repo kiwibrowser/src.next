@@ -28,7 +28,7 @@ class SkColorFilterWrapper : public DarkModeColorFilter {
       const DarkModeSettings& settings) {
     SkHighContrastConfig config;
     config.fInvertStyle = invert_style;
-    config.fGrayscale = settings.grayscale;
+    config.fGrayscale = false;
     config.fContrast = settings.contrast;
 
     return std::unique_ptr<SkColorFilterWrapper>(
@@ -92,8 +92,8 @@ class LABColorFilter : public DarkModeColorFilter {
 
     if (r == b && r == g && r < kBrightnessThreshold &&
         r > kAdjustedBrightness) {
-      return SkColorSetRGB(kAdjustedBrightness, kAdjustedBrightness,
-                           kAdjustedBrightness);
+      return SkColorSetARGB(SkColorGetA(color), kAdjustedBrightness,
+                            kAdjustedBrightness, kAdjustedBrightness);
     }
 
     return color;

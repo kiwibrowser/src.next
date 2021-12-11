@@ -16,10 +16,17 @@ import androidx.annotation.Nullable;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.tab.state.CriticalPersistedTabData;
+import org.chromium.components.browser_ui.site_settings.WebsitePreferenceBridge;
+import org.chromium.components.content_settings.ContentSettingValues;
+import org.chromium.components.content_settings.ContentSettingsType;
+import org.chromium.content_public.browser.ContentFeatureList;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.display.DisplayAndroidManager;
+import org.chromium.url.GURL;
 
 /**
  * Collection of utility methods that operates on Tab.
@@ -86,7 +93,16 @@ public class TabUtils {
         final boolean reloadOnChange = !tab.isNativePage();
         tab.getWebContents().getNavigationController().setUseDesktopUserAgent(
                 switchToDesktop, reloadOnChange);
-        if (forcedByUser) ((TabImpl) tab).setUserForcedUserAgent();
+        if (forcedByUser) {
+            @TabUserAgent
+            int tabUserAgent = switchToDesktop ? TabUserAgent.DESKTOP : TabUserAgent.MOBILE;
+            if (ContentFeatureList.isEnabled(ContentFeatureList.REQUEST_DESKTOP_SITE_GLOBAL)
+                    && isDesktopSiteGlobalEnabled(Profile.fromWebContents(tab.getWebContents()))
+                            == switchToDesktop) {
+                tabUserAgent = TabUserAgent.DEFAULT;
+            }
+            CriticalPersistedTabData.from(tab).setUserAgent(tabUserAgent);
+        }
     }
 
     /**
@@ -114,5 +130,31 @@ public class TabUtils {
                 /* Set a very large size as default to serve as a disabled screen width. */ 4096);
 
         return minWidthForDesktopSite <= windowWidth;
+    }
+
+    /**
+     * Check if Request Desktop Site global setting is enabled.
+     * @param profile The profile of the tab.
+     *        Content settings have separate storage for incognito profiles.
+     *        For site-specific exceptions the actual profile is needed.
+     * @return Whether the desktop site should be requested.
+     */
+    public static boolean isDesktopSiteGlobalEnabled(Profile profile) {
+        return WebsitePreferenceBridge.isCategoryEnabled(
+                profile, ContentSettingsType.REQUEST_DESKTOP_SITE);
+    }
+
+    /**
+     * Check if Request Desktop Site global setting is enabled.
+     * @param profile The profile of the tab.
+     *        Content settings have separate storage for incognito profiles.
+     *        For site-specific exceptions the actual profile is needed.
+     * @param url The URL for the current web content.
+     * @return Whether the desktop site should be requested.
+     */
+    public static boolean isDesktopSiteEnabled(Profile profile, GURL url) {
+        return WebsitePreferenceBridge.getContentSetting(
+                       profile, ContentSettingsType.REQUEST_DESKTOP_SITE, url, url)
+                == ContentSettingValues.ALLOW;
     }
 }
