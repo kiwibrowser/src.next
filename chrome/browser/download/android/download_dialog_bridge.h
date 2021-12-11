@@ -58,7 +58,8 @@ class DownloadDialogBridge {
       bool supports_later_dialog,
       bool show_date_time_picker,
       bool is_incognito,
-      DialogCallback dialog_callback);
+      DialogCallback dialog_callback,
+      download::DownloadItem* download);
 
   void OnComplete(JNIEnv* env,
                   const base::android::JavaParamRef<jobject>& obj,

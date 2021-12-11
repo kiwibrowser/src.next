@@ -164,7 +164,7 @@ public class DownloadDialogBridge
     @CalledByNative
     private void showDialog(WindowAndroid windowAndroid, long totalBytes,
             @ConnectionType int connectionType, @DownloadLocationDialogType int dialogType,
-            String suggestedPath, boolean supportsLaterDialog, boolean isIncognito) {
+            String suggestedPath, boolean supportsLaterDialog, boolean isIncognito, String urlToDownload) {
         Activity activity = windowAndroid.getActivity().get();
         if (activity == null) {
             onCancel();

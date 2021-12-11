@@ -56,7 +56,8 @@ void DownloadDialogBridge::ShowDialog(
     bool supports_later_dialog,
     bool show_date_time_picker,
     bool is_incognito,
-    DialogCallback dialog_callback) {
+    DialogCallback dialog_callback,
+    download::DownloadItem* download) {
   if (!native_window)
     return;
 
@@ -96,7 +97,10 @@ void DownloadDialogBridge::ShowDialog(
       static_cast<int>(dialog_type),
       base::android::ConvertUTF8ToJavaString(env,
                                              suggested_path.AsUTF8Unsafe()),
-      supports_later_dialog, is_incognito);
+      supports_later_dialog, is_incognito,
+      base::android::ConvertUTF8ToJavaString(env,
+                                             url_to_download)
+  );
 }
 
 void DownloadDialogBridge::OnComplete(
