@@ -322,6 +322,8 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
 
             int availableViewportHeight =
                     calculateAvailableViewportHeight(anchorBottomRelativeToContent);
+            if (ContextUtils.getAppSharedPreferences().getBoolean("enable_bottom_toolbar", false))
+                availableViewportHeight = availableViewportHeight / 2;
             int desiredWidth = mAnchorView.getMeasuredWidth();
             // Suppress the initial requests to shrink the viewport of the omnibox suggestion
             // dropdown. The viewport will decrease when the keyboard is triggered, but the request
