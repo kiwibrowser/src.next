@@ -37,6 +37,7 @@ const char* const kValidSchemes[] = {
     url::kFileSystemScheme,   url::kWsScheme,
     url::kWssScheme,          url::kDataScheme,
     url::kUrnScheme,          url::kUuidInPackageScheme,
+    content::kChromeSearchScheme
 };
 
 // TODO(https://crbug.com/1257045): Remove urn: scheme support.
@@ -47,6 +48,7 @@ const int kValidSchemeMasks[] = {
     URLPattern::SCHEME_FILESYSTEM, URLPattern::SCHEME_WS,
     URLPattern::SCHEME_WSS,        URLPattern::SCHEME_DATA,
     URLPattern::SCHEME_URN,        URLPattern::SCHEME_UUID_IN_PACKAGE,
+    URLPattern::SCHEME_CHROMESEARCH
 };
 
 static_assert(base::size(kValidSchemes) == base::size(kValidSchemeMasks),
