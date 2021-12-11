@@ -1438,6 +1438,7 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
                 // Migrate legacy NTP URLs (chrome://newtab) to the newer format
                 // (chrome-native://newtab)
                 if (UrlUtilities.isNTPUrl(url)) {
+                    if (false)
                     url = "chrome-search://local-ntp/local-ntp.html";
                 }
             }
