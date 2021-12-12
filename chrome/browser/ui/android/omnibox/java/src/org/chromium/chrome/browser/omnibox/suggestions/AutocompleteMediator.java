@@ -939,6 +939,8 @@ class AutocompleteMediator implements OnSuggestionsReceivedListener,
 
     @Override
     public void onSuggestionDropdownScroll() {
+        if (true)
+            return;
         if (mEnableAdaptiveSuggestionsCount
                 && mDropdownViewInfoListBuilder.hasFullyConcealedElements()) {
             mDelegate.setKeyboardVisibility(false, false);
