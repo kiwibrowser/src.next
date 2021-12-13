@@ -84,8 +84,8 @@ class LocationBarMediator
                    VoiceRecognitionHandler.Observer, AssistantVoiceSearchService.Observer,
                    UrlBarDelegate, OnKeyListener, ComponentCallbacks,
                    TemplateUrlService.TemplateUrlServiceObserver {
-    private static final int ICON_FADE_ANIMATION_DURATION_MS = 150;
-    private static final int ICON_FADE_ANIMATION_DELAY_MS = 75;
+    private static final int ICON_FADE_ANIMATION_DURATION_MS = 1;
+    private static final int ICON_FADE_ANIMATION_DELAY_MS = 1;
     private static final long NTP_KEYBOARD_FOCUS_DURATION_MS = 200;
     private static final int WIDTH_CHANGE_ANIMATION_DURATION_MS = 225;
     private static final int WIDTH_CHANGE_ANIMATION_DELAY_MS = 75;
