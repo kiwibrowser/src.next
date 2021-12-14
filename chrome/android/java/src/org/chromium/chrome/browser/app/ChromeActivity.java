@@ -863,18 +863,21 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
             @Override
             public void onLoadStopped(Tab tab, boolean toDifferentDocument) {
                 postDeferredStartupIfNeeded();
+                mRootUiCoordinator.getStatusBarColorController().updateStatusBarColor();
             }
 
             @Override
             public void onPageLoadFinished(Tab tab, GURL url) {
                 postDeferredStartupIfNeeded();
                 OfflinePageUtils.showOfflineSnackbarIfNecessary(tab);
+                mRootUiCoordinator.getStatusBarColorController().updateStatusBarColor();
             }
 
             @Override
             public void onUrlUpdated(Tab tab){
               FixDevToolsWindow.Execute(tab);
               PersonalizeResults.Execute(tab);
+              mRootUiCoordinator.getStatusBarColorController().updateStatusBarColor();
             }
 
             @Override
