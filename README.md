@@ -327,7 +327,12 @@ chrome/android/java/src/org/chromium/chrome/browser/PersonalizeResults.java
 
 In this file you have access to the current tab URL and can execute JavaScript in the webpage.
 
-You can of course, use this script in conjunction 
+## Investigate a crash
+
+To decode a stack trace you can use:
+```
+cat <STACKTRACE> | sed 's#!lib/arm64-v8a/crazy.libchrome.so#!libchrome.so#' | third_party/android_platform/development/scripts/stack --output-directory out/production_build_arm64 -
+```
 
 ## Code review and safety
 
