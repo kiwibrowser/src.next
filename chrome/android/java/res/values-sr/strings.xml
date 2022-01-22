@@ -6,16 +6,16 @@
     <string name="main_menu_clear_data">Clear data</string>
     <string name="main_menu_translate">Translate</string>
     <string name="main_menu_translate_undo">Stop translate</string>
-    <string name="main_menu_turn_on_night_mode">Turn on night mode</string>
-    <string name="main_menu_turn_off_night_mode">Turn off night mode</string>
-    <string name="main_menu_exit">Exit</string>
-    <string name="main_menu_extensions">Extensions</string>
-    <string name="main_menu_disable_proxy">Disable proxy / VPN</string>
-    <string name="menu_import_bookmarks">Import bookmarks</string>
-    <string name="menu_export_bookmarks">Export bookmarks</string>
-    <string name="main_menu_developer_tools">Developer tools</string>
-    <string name="appearance_preferences">Appearance</string>
-    <string name="appearance_preferences_themes">Themes</string>
+    <string name="main_menu_turn_on_night_mode">Вклучить ночној режим</string>
+    <string name="main_menu_turn_off_night_mode">Виклучить ночној режим</string>
+    <string name="main_menu_exit">Изађи</string>
+    <string name="main_menu_extensions">Екстензије</string>
+    <string name="main_menu_disable_proxy">Онемогућите прокси / ВПН</string>
+    <string name="menu_import_bookmarks">Увези обележивача</string>
+    <string name="menu_export_bookmarks">Извези обележиваче</string>
+    <string name="main_menu_developer_tools">Развојни алати</string>
+    <string name="appearance_preferences">Изглед</string>
+    <string name="appearance_preferences_themes">Теме</string>
     <string name="accessibility_keep_toolbar_visible_title">Toolbar always on screen</string>
     <string name="accessibility_keep_toolbar_visible_summary">Keep toolbar always on screen while scrolling</string>
     <string name="accessibility_preferences_text_rewrap_title">Text rewrap / reflow</string>
@@ -43,6 +43,10 @@
     <string name="preferences_restart_is_needed">Your changes will take effect on restart of Kiwi</string>
     <string name="preferences_restart_now">RESTART NOW</string>
     <string name="preferences_restart_later">Later</string>
+    <string name="preferences_autofill">Autofill</string>
+    <string name="preferences_developer_options">Developer options</string>
+    <string name="preferences_privacy">Privacy</string>
+    <string name="preferences_toolbar">Toolbar</string>
     <string name="preferences_translator">Translator</string>
     <string name="preferences_tabswitcher">Tab switcher</string>
     <string name="preferences_nightmode">Night mode</string>
@@ -66,4 +70,6 @@
     <string name="website_settings_desktop_mode_disabled">Prefer mobile-optimized version of websites</string>
     <string name="main_menu_mobile_site">Mobile site</string>
     <string name="data_reduction_description_lite_mode_kiwi">When Lite mode is activated, Kiwi Browser will try to save data by letting the websites know that they should serve a lighter version of the website. In this mode, Kiwi may disable certain pictures or elements on the page to speedup loading. The traffic goes directly to the website without intermediaries. To save the maximum amount of data, ticking \"Hide annoying ads\" in the main menu is recommended. Blocked ads do not count toward the data saving counter.</string>
+    <string name="accessibility_preferences_cws_mobile_friendly_title">Optimize Extensions Web Store</string>
+    <string name="accessibility_preferences_cws_mobile_friendly_summary">Improve the appearance of Extensions Web Store</string>
 </resources>

@@ -20,8 +20,8 @@
     <string name="accessibility_keep_toolbar_visible_summary">Не скрывать панель инструментов во время прокрутки</string>
     <string name="accessibility_preferences_text_rewrap_title">Перекомпоновка/перенос текста</string>
     <string name="accessibility_preferences_text_rewrap_summary">Перекомпоновка текста при масштабировании</string>
-    <string name="accessibility_preferences_holding_tabswitcher_opens_contextual_menu_title">Tab switcher long click menu</string>
-    <string name="accessibility_preferences_holding_tabswitcher_opens_contextual_menu_summary">Длительное нажатие кнопки переключения владок открывает меню, а не новую вкладку</string>
+    <string name="accessibility_preferences_holding_tabswitcher_opens_contextual_menu_title">Меню при удержании переключателя вкладок</string>
+    <string name="accessibility_preferences_holding_tabswitcher_opens_contextual_menu_summary">Длительное нажатие кнопки переключения вкладок открывает меню, а не новую вкладку</string>
     <string name="accessibility_preferences_open_in_external_application_title">Разрешить внешние приложения</string>
     <string name="accessibility_preferences_open_in_external_application_summary">По возможности открывать ссылки с помощью внешних приложений (Карты, YouTube, Vimeo)</string>
     <string name="accessibility_preferences_nightmode_grayscale_title">Градации серого в ночном режиме</string>
@@ -43,6 +43,10 @@
     <string name="preferences_restart_is_needed">Ваши изменения вступят в силу после перезагрузки Kiwi</string>
     <string name="preferences_restart_now">ПЕРЕЗАГРУЗИТЬ СЕЙЧАС</string>
     <string name="preferences_restart_later">Позже</string>
+    <string name="preferences_autofill">Автозаполнение</string>
+    <string name="preferences_developer_options">Опции разработчика</string>
+    <string name="preferences_privacy">Конфиденциальность</string>
+    <string name="preferences_toolbar">Панель инструментов</string>
     <string name="preferences_translator">Переводчик</string>
     <string name="preferences_tabswitcher">Переключатель вкладок</string>
     <string name="preferences_nightmode">Ночной режим</string>
@@ -65,5 +69,7 @@
     <string name="website_settings_desktop_mode_enabled">Предпочитать полную версию веб-сайтов</string>
     <string name="website_settings_desktop_mode_disabled">Предпочитать оптимизированную мобильную версию веб-сайтов</string>
     <string name="main_menu_mobile_site">Мобильный портал</string>
-    <string name="data_reduction_description_lite_mode_kiwi">When Lite mode is activated, Kiwi Browser will try to save data by letting the websites know that they should serve a lighter version of the website. In this mode, Kiwi may disable certain pictures or elements on the page to speedup loading. The traffic goes directly to the website without intermediaries. To save the maximum amount of data, ticking \"Hide annoying ads\" in the main menu is recommended. Blocked ads do not count toward the data saving counter.</string>
+    <string name="data_reduction_description_lite_mode_kiwi">Когда активирован упрощённый режим, Kiwi Browser попытается сэкономить данные, сообщая веб-сайтам, что они должны использовать более легкую версию сайта. В этом режиме Kiwi может отключать некоторые изображения или элементы страницы для ускорения загрузки. Трафик проходит непосредственно через сайт без посредников. Чтобы сэкономить максимальный объём данных, рекомендуется активировать в главном меню настройку \"Блокировать рекламу\". Заблокированные рекламные объявления не учитываются при подсчёте объёма сэкономленных данных.</string>
+    <string name="accessibility_preferences_cws_mobile_friendly_title">Оптимизировать веб-магазин расширений</string>
+    <string name="accessibility_preferences_cws_mobile_friendly_summary">Улучшить внешний вид веб-магазина расширений</string>
 </resources>

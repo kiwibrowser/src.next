@@ -16,8 +16,8 @@
     <string name="main_menu_developer_tools">Herramientas de desarrollador</string>
     <string name="appearance_preferences">Apariencia</string>
     <string name="appearance_preferences_themes">Temas</string>
-    <string name="accessibility_keep_toolbar_visible_title">Barra de navegación siempre en la pantalla</string>
-    <string name="accessibility_keep_toolbar_visible_summary">Mantener la barra de navegación siempre en la pantalla mientras se desplaza</string>
+    <string name="accessibility_keep_toolbar_visible_title">Barra de navegación siempre en pantalla</string>
+    <string name="accessibility_keep_toolbar_visible_summary">Mantener la barra de navegación siempre en pantalla mientras se desplaza</string>
     <string name="accessibility_preferences_text_rewrap_title">Ajuste de texto y línea</string>
     <string name="accessibility_preferences_text_rewrap_summary">Ajustar el texto al hacer zoom</string>
     <string name="accessibility_preferences_holding_tabswitcher_opens_contextual_menu_title">Pulsación larga en el selector de pestañas</string>
@@ -43,9 +43,13 @@
     <string name="preferences_restart_is_needed">Los cambios se actualizarán después de reiniciar Kiwi</string>
     <string name="preferences_restart_now">REINICIAR AHORA</string>
     <string name="preferences_restart_later">Después</string>
+    <string name="preferences_autofill">Autocompletar</string>
+    <string name="preferences_developer_options">Opciones de Desarrollador</string>
+    <string name="preferences_privacy">Privacidad</string>
+    <string name="preferences_toolbar">Barra de navegación</string>
     <string name="preferences_translator">Traductor</string>
     <string name="preferences_tabswitcher">Selector de pestañas</string>
-    <string name="preferences_nightmode">Modo nocturno</string>
+    <string name="preferences_nightmode">Modo noche</string>
     <string name="download_preferences_enable_external_download_manager_title">Administrador de descargas externo</string>
     <string name="download_preferences_enable_external_download_manager_summary">Usar un administrador de descargas externas (ej: Advanced Download Manager)</string>
     <string name="privacy_preferences_accept_cookie_consent_title">Aceptar cookies</string>
@@ -61,9 +65,11 @@
     <string name="search_engines_preferences_howto_add">Recientemente visitado\nPara añadir un nuevo motor de búsqueda, vaya al motor de búsqueda (ej: Bing.com) y hacer una búsqueda. Después de pocos segundos, el motor de búsqueda se añadirá a la lista.</string>
     <string name="suggest_adblock">Haga clic aquí para cambiar la protección de rastreo y anuncios</string>
     <string name="website_settings_add_site_description_ads">Permitir mostrar anuncios para un sitio específico</string>
-    <string name="website_settings_desktop_mode">Desktop mode by default</string>
-    <string name="website_settings_desktop_mode_enabled">Prefer desktop version of websites</string>
-    <string name="website_settings_desktop_mode_disabled">Prefer mobile-optimized version of websites</string>
-    <string name="main_menu_mobile_site">Mobile site</string>
-    <string name="data_reduction_description_lite_mode_kiwi">When Lite mode is activated, Kiwi Browser will try to save data by letting the websites know that they should serve a lighter version of the website. In this mode, Kiwi may disable certain pictures or elements on the page to speedup loading. The traffic goes directly to the website without intermediaries. To save the maximum amount of data, ticking \"Hide annoying ads\" in the main menu is recommended. Blocked ads do not count toward the data saving counter.</string>
+    <string name="website_settings_desktop_mode">Modo de escritorio por defecto</string>
+    <string name="website_settings_desktop_mode_enabled">Preferir la versión de escritorio de sitios web</string>
+    <string name="website_settings_desktop_mode_disabled">Preferir la versión optimizada para móviles de sitios web</string>
+    <string name="main_menu_mobile_site">Sitio móvil</string>
+    <string name="data_reduction_description_lite_mode_kiwi">Cuando el modo Lite está activado, Kiwi Browser intentará guardar los datos haciendo saber a los sitios web que deberían servir una versión más ligera del sitio web. En este modo, Kiwi puede desactivar ciertas imágenes o elementos de la página para acelerar la carga. El tráfico va directamente a la página web sin intermediarios. Para guardar la cantidad máxima de datos, se recomienda marcar \"Ocultar anuncios molestos\" en el menú principal. Los anuncios bloqueados no cuentan para el contador de ahorro de datos.</string>
+    <string name="accessibility_preferences_cws_mobile_friendly_title">Optimizar la Tienda de Extensiones</string>
+    <string name="accessibility_preferences_cws_mobile_friendly_summary">Mejora la apariencia de la Tienda de Extensiones</string>
 </resources>
