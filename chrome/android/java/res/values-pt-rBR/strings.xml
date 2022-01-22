@@ -22,7 +22,7 @@
     <string name="accessibility_preferences_text_rewrap_summary">Ajustar o texto durante o zoom</string>
     <string name="accessibility_preferences_holding_tabswitcher_opens_contextual_menu_title">Função do toque longo no seletor the abas</string>
     <string name="accessibility_preferences_holding_tabswitcher_opens_contextual_menu_summary">Segurar o botão do seletor de abas abre um menu em vez de abrir abrir uma nova aba</string>
-    <string name="accessibility_preferences_open_in_external_application_title">Permitir aplicativos externos</string>
+    <string name="accessibility_preferences_open_in_external_application_title">Preferir aplicativos nativos (habilitar aplicativos externos)</string>
     <string name="accessibility_preferences_open_in_external_application_summary">Abrir links com aplicativos externos (Maps, YouTube, Vimeo), quando possível</string>
     <string name="accessibility_preferences_nightmode_grayscale_title">Tons de cinza do modo noturno</string>
     <string name="accessibility_preferences_nightmode_grayscale_summary">Preferir modo noturno em tons de cinza</string>
@@ -43,6 +43,10 @@
     <string name="preferences_restart_is_needed">Suas alterações terão efeito após reiniciar o Kiwi</string>
     <string name="preferences_restart_now">REINICIAR AGORA</string>
     <string name="preferences_restart_later">Mais tarde</string>
+    <string name="preferences_autofill">Auto-preenchimento</string>
+    <string name="preferences_developer_options">Opções de Desenvolvedor</string>
+    <string name="preferences_privacy">Privacidade</string>
+    <string name="preferences_toolbar">Barra de Endereço</string>
     <string name="preferences_translator">Tradutor</string>
     <string name="preferences_tabswitcher">Seletor de abas</string>
     <string name="preferences_nightmode">Modo noturno</string>
@@ -66,4 +70,6 @@
     <string name="website_settings_desktop_mode_disabled">Preferir versão otimizada para dispositivos móveis de sites</string>
     <string name="main_menu_mobile_site">Site para dispositivo móvel</string>
     <string name="data_reduction_description_lite_mode_kiwi">Quando o Modo Lite estiver ativado, O Kiwi Browser tentará economizar dados, informando aos sites que eles devem oferecer uma versão mais leve. Neste modo, o Kiwi pode desativar certas imagens ou elementos na página para acelerar o carregamento. O tráfego vai diretamente para o site sem intermediários. Para economizar a quantidade máxima de dados, recomendamos marcar a opção \"Bloquear anúncios invasivos\" no menu principal. Anúncios bloqueados não contam para a estatística de economia de dados.</string>
+    <string name="accessibility_preferences_cws_mobile_friendly_title">Otimizar a Loja de Extensões</string>
+    <string name="accessibility_preferences_cws_mobile_friendly_summary">Aprimorar a aparência da Loja de Extensões</string>
 </resources>

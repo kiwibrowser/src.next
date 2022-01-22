@@ -43,6 +43,10 @@
     <string name="preferences_restart_is_needed">키위 브라우저를 다시 열면 변경사항이 적용됩니다.</string>
     <string name="preferences_restart_now">재시작</string>
     <string name="preferences_restart_later">나중에</string>
+    <string name="preferences_autofill">자동 채우기</string>
+    <string name="preferences_developer_options">개발자 옵션</string>
+    <string name="preferences_privacy">개인정보 보호</string>
+    <string name="preferences_toolbar">툴바</string>
     <string name="preferences_translator">번역기</string>
     <string name="preferences_tabswitcher">탭 버튼</string>
     <string name="preferences_nightmode">야간 모드</string>
@@ -66,4 +70,6 @@
     <string name="website_settings_desktop_mode_disabled">모바일 페이지를 기본으로 엽니다.</string>
     <string name="main_menu_mobile_site">모바일 페이지</string>
     <string name="data_reduction_description_lite_mode_kiwi">라이트 모드를 켜면 키위 브라우저가 데이터를 아끼기 위해 웹사이트에 보다 가벼운 버전의 페이지를 요청합니다. 이 과정에서 일부 이미지나 요소가 빠른 속도를 위해 희생돼 안 보일 수 있습니다. 트래픽은 중간에 거치는 곳 없이 바로 웺페이지로 갑니다. 데이터를 최대한으로 아끼려면 \"짜증나는 광고 숨기기\"를 켜는 걸 추천합니다. 차단된 광고는 아낀 데이터 수치에 반영되지 않습니다.</string>
+    <string name="accessibility_preferences_cws_mobile_friendly_title">기타 확장 스토어</string>
+    <string name="accessibility_preferences_cws_mobile_friendly_summary">Improve the appearance of Extensions Web Store</string>
 </resources>

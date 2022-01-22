@@ -43,6 +43,10 @@
     <string name="preferences_restart_is_needed">重启 Kiwi Browser 时修改生效</string>
     <string name="preferences_restart_now">现在重启</string>
     <string name="preferences_restart_later">稍后</string>
+    <string name="preferences_autofill">自动填充</string>
+    <string name="preferences_developer_options">开发者选项</string>
+    <string name="preferences_privacy">隐私</string>
+    <string name="preferences_toolbar">工具栏</string>
     <string name="preferences_translator">翻译器</string>
     <string name="preferences_tabswitcher">标签切换</string>
     <string name="preferences_nightmode">夜间模式</string>
@@ -66,4 +70,6 @@
     <string name="website_settings_desktop_mode_disabled">首选移动优化版本的网站</string>
     <string name="main_menu_mobile_site">移动版网站</string>
     <string name="data_reduction_description_lite_mode_kiwi">当精简模式被激活时，Kiwi Browser 将尝试通过让网站知道它们应该提供网站的精简版来节省数据。 在此模式下，Kiwi 可能会禁用页面上的某些图片或元素以加快加载速度。流量直接进入网站，无需中介。 为了最大限度地节省数据，建议在主菜单中勾选“隐藏烦人的广告”。 被阻止的广告不计入数据节省计数器。</string>
+    <string name="accessibility_preferences_cws_mobile_friendly_title">优化扩展网页商店</string>
+    <string name="accessibility_preferences_cws_mobile_friendly_summary">改进扩展网页商店的外观</string>
 </resources>
