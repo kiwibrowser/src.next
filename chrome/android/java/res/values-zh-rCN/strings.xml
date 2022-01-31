@@ -31,8 +31,8 @@
     <string name="accessibility_preferences_enable_bottom_toolbar_summary">移动地址栏到底部</string>
     <string name="accessibility_preferences_enable_overscroll_button_title">手形图标 (打开底部工具栏时生效)</string>
     <string name="accessibility_preferences_enable_overscroll_button_summary">添加一个手形图标来返回页面顶部</string>
-    <string name="accessibility_preferences_keep_address_bar_content_title">不删除地址栏内容</string>
-    <string name="accessibility_preferences_keep_address_bar_content_summary">保留地址栏的内容</string>
+    <string name="accessibility_preferences_keep_address_bar_content_title">不要删除地址栏内容</string>
+    <string name="accessibility_preferences_keep_address_bar_content_summary">聚焦地址栏时保留内容</string>
     <string name="accessibility_preferences_enable_side_swipe_title">边缘手势</string>
     <string name="accessibility_preferences_enable_side_swipe_summary">启用左右滑动手势来切换历史页面</string>
     <string name="accessibility_preferences_enable_up_swipe_title">向上滑动以打开标签切换页</string>
@@ -48,7 +48,7 @@
     <string name="preferences_privacy">隐私</string>
     <string name="preferences_toolbar">工具栏</string>
     <string name="preferences_translator">翻译器</string>
-    <string name="preferences_tabswitcher">标签切换</string>
+    <string name="preferences_tabswitcher">标签切换器</string>
     <string name="preferences_nightmode">夜间模式</string>
     <string name="download_preferences_enable_external_download_manager_title">外部下载器</string>
     <string name="download_preferences_enable_external_download_manager_summary">使用外部下载器 (如: ADM )</string>

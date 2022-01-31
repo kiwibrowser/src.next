@@ -68,7 +68,7 @@
     <string name="website_settings_desktop_mode">Режим робочого столу за замовчуванням</string>
     <string name="website_settings_desktop_mode_enabled">Віддавати перевагу настільній версії сайтів</string>
     <string name="website_settings_desktop_mode_disabled">Віддавати перевагу мобільній версії веб-сайтів</string>
-    <string name="main_menu_mobile_site">Mobile site</string>
+    <string name="main_menu_mobile_site">Мобільний портал</string>
     <string name="data_reduction_description_lite_mode_kiwi">Коли Lite режим активовано, Браузер Kiwi спробує зберегти дані, повідомляючи веб-сайтам про те, що вони повинні служити більш легкій версії веб-сайту. У цьому режимі Kiwi може вимкнути певні зображення або елементи на сторінці, щоб пришвидшити завантаження. Трафік прямує на веб-сайт без посередників. Для збереження максимальної кількості даних, рекомендується зробити відмічене \"Приховати набридливу рекламу\" в головному меню. Заблокована реклама не рахується до лічильника економії даних.</string>
     <string name="accessibility_preferences_cws_mobile_friendly_title">Оптимізація розширень веб-магазину</string>
     <string name="accessibility_preferences_cws_mobile_friendly_summary">Покращити зовнішній вигляд розширень веб-магазину</string>

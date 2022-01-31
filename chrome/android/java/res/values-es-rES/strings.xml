@@ -13,7 +13,7 @@
     <string name="main_menu_disable_proxy">Desactivar proxy / VPN</string>
     <string name="menu_import_bookmarks">Importar marcadores</string>
     <string name="menu_export_bookmarks">Exportar marcadores</string>
-    <string name="main_menu_developer_tools">Herramientas de desarrollador</string>
+    <string name="main_menu_developer_tools">Abrir DevTools</string>
     <string name="appearance_preferences">Apariencia</string>
     <string name="appearance_preferences_themes">Temas</string>
     <string name="accessibility_keep_toolbar_visible_title">Barra de navegación siempre en pantalla</string>
