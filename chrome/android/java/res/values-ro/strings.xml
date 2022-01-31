@@ -13,7 +13,7 @@
     <string name="main_menu_disable_proxy">Dezactivează proxy / VPN</string>
     <string name="menu_import_bookmarks">Importă favoritele din</string>
     <string name="menu_export_bookmarks">Export marcaje</string>
-    <string name="main_menu_developer_tools">Developer Tools</string>
+    <string name="main_menu_developer_tools">Instrumente dezvoltator</string>
     <string name="appearance_preferences">Aspect</string>
     <string name="appearance_preferences_themes">Teme</string>
     <string name="accessibility_keep_toolbar_visible_title">Bara de instrumente întotdeauna pe ecran</string>
@@ -45,7 +45,7 @@
     <string name="preferences_restart_later">Mai târziu</string>
     <string name="preferences_autofill">Completare automată</string>
     <string name="preferences_developer_options">Opțiuni dezvoltator</string>
-    <string name="preferences_privacy">Privacy</string>
+    <string name="preferences_privacy">Confidențialitate</string>
     <string name="preferences_toolbar">Bara de instrumente</string>
     <string name="preferences_translator">Traducător</string>
     <string name="preferences_tabswitcher">Comutator filă</string>
