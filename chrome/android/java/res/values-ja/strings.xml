@@ -48,7 +48,7 @@
     <string name="preferences_privacy">プライバシー</string>
     <string name="preferences_toolbar">ツールバー</string>
     <string name="preferences_translator">翻訳</string>
-    <string name="preferences_tabswitcher">タブ切り替え</string>
+    <string name="preferences_tabswitcher">タブの切り替え</string>
     <string name="preferences_nightmode">夜間モード</string>
     <string name="download_preferences_enable_external_download_manager_title">外部ダウンロードマネージャー</string>
     <string name="download_preferences_enable_external_download_manager_summary">Advanced Download Manager などの外部のダウンロードマネージャーを使用します</string>
