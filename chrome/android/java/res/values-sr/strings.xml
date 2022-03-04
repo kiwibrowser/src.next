@@ -3,8 +3,8 @@
     <string name="main_menu_ads_and_trackers_blocked" tools:ignore="PluralsCandidate">"%1$d ads &amp; trackers blocked"</string>
     <string name="main_menu_ads_blocked_since">"Since %1$s"</string>
     <string name="main_menu_adblock">Hide annoying ads</string>
-    <string name="main_menu_clear_data">Clear data</string>
-    <string name="main_menu_translate">Translate</string>
+    <string name="main_menu_clear_data">Очисти податке</string>
+    <string name="main_menu_translate">Преводите</string>
     <string name="main_menu_translate_undo">Stop translate</string>
     <string name="main_menu_turn_on_night_mode">Вклучить ночној режим</string>
     <string name="main_menu_turn_off_night_mode">Виклучить ночној режим</string>
