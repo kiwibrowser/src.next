@@ -314,7 +314,7 @@ void URLRequestHttpJob::Start() {
   }
   else if (request_info_.url.host().find("web.whatsapp.com") != std::string::npos)
   {
-     request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (X11; Linux) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.25 Mobile Safari/537.36");
+     request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (X11; Linux) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.66 Mobile Safari/537.36");
   }
   else if (request_info_.url.host().find("messenger.com") != std::string::npos)
   {
@@ -326,6 +326,10 @@ void URLRequestHttpJob::Start() {
      request_info_.extra_headers.SetHeader("Sec-CH-UA", "\" Not A;Brand\";v=\"99\", \"Chromium\";v=\"96\", \"Google Chrome\";v=\"96\"");
      request_info_.extra_headers.SetHeader("Sec-CH-UA-Mobile", "?0");
      request_info_.extra_headers.SetHeader("Sec-CH-UA-Platform", "Windows");
+  }
+  else if (request_info_.url.host().find("facebook.com") != std::string::npos)
+  {
+     request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (Linux; Android 3.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.66 Mobile Safari/537.36");
   }
   else if (request_info_.url.host().find("news.google.com") != std::string::npos && request_info_.url.path().find("CAAqJggKIiBDQkFTRWdvSUwyMHZNRFZxYUdjU0FtVnVHZ0pWVXlnQVAB") != std::string::npos)
   {
