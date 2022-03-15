@@ -27,7 +27,7 @@ Keep it in mind, if you need a computer to do a change, it means it's too compli
 
 Servers are paid-for and sponsored by Geometry OU (the company behind Kiwi Browser), and additional computing hours for contributors are provided for free by Microsoft Azure via GitHub Actions.
 
-If you want to join the development process or read more about topics like `Contributing` , `Development` and `Workflows`
+If you want to join the development process or read more about the technical work behind, or topics like `Contributing` , `Development` and `Workflows`, just click on the Wiki below:
 
 <a href="https://github.com/kiwibrowser/src.next/wiki">
 <img src="https://img.shields.io/badge/WIKI-ffffff?style=for-the-badge&logo=github&logoColor=black"></a>
