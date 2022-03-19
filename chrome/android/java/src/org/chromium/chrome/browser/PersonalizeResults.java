@@ -37,6 +37,9 @@ public class PersonalizeResults {
        if (tab != null && tab.getUrl().getSpec().contains("messenger.com/")) {
           tab.getWebContents().evaluateJavaScript(MESSENGER_VIEWPORT_SCRIPT, null);
        }
+       if (tab != null && tab.getUrl().getSpec().startsWith("https://m.facebook.com/")) {
+          tab.getWebContents().evaluateJavaScript(FB_VIEWFULLIMAGE_SCRIPT, null);
+       }
        if (tab != null && tab.getUrl().getSpec().startsWith("https://translate.google.com/translate_c")) {
           tab.getWebContents().evaluateJavaScript("(function(){ if (!document.location.href.includes('https://translate.google.com/translate_c')) { return; } var b=document.getElementById(\"gt-nvframe\");if(b){b.style.position='unset';document.body.style.top='0px'}else{var child=document.createElement('iframe');child.id='gt-nvframe';child.src=document.location.href.replace('/translate_c','/translate_nv');child.style.width='100%';child.style.height='93px';document.body.insertBefore(child,document.body.firstChild);var t=document.querySelector('meta[name=\"viewport\"]');if(!t){var metaTag=document.createElement('meta');metaTag.name='viewport';metaTag.content='width=device-width, initial-scale=1.0';document.body.appendChild(metaTag)}}})();", null);
        }
@@ -191,6 +194,22 @@ public class PersonalizeResults {
 +"        if (_kb_setIntervalCnt++ >= 10) { window.clearInterval(_kb_setInterval); }"
 +"    }, 1000);"
 +"})();";
+    
+    private static final String FB_VIEWFULLIMAGE_SCRIPT = ""
++"(function() {"
++"		if (!document.location.href.includes('https://m.facebook.com/')) { return; }"
++"		document.querySelector('body.touch').style = \"cursor:default\";"
++"    var _kb_setIntervalCnt2 = 0;"
++"    var _kb_setInterval2 = window.setInterval(function() {"
++"    var anchors = document.getElementsByTagName('span');"
++"    for(var i=0;i<anchors.length;i++){"
++"		if(anchors[i].innerHTML.contains(\"href=\"/photo/view_full_size/\")){"
++"			anchors[i].parentElement.innerHTML = (anchors[i].parentElement.innerHTML).replace(\"href=\"/photo/view_full_size/\",\"href=\"https://touch.facebook.com/photo/view_full_size/\")"
++"			break;"
++"		}"
++"	}"
++"	}, 1000);"
++"})();"
 
     private static final String CWS_MOBILE_SCRIPT = ""
 +"(function() {"
