@@ -327,9 +327,13 @@ void URLRequestHttpJob::Start() {
      request_info_.extra_headers.SetHeader("Sec-CH-UA-Mobile", "?0");
      request_info_.extra_headers.SetHeader("Sec-CH-UA-Platform", "Windows");
   }
-  else if (request_info_.url.host().find("facebook.com") != std::string::npos)
+  else if (request_info_.url.host().find("m.facebook.com") != std::string::npos)
   {
-     request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (Linux; Android 3.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.66 Mobile Safari/537.36");
+     request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (Mobile; ALCATEL 4056W; rv:84.0) Gecko/84.0 Firefox/84.0 KAIOS/3.0");
+  }
+  else if (request_info_.url.host().find("touch.facebook.com") != std::string::npos)
+  {
+     request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (X11; Linux) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.66 Mobile Safari/537.36");
   }
   else if (request_info_.url.host().find("news.google.com") != std::string::npos && request_info_.url.path().find("CAAqJggKIiBDQkFTRWdvSUwyMHZNRFZxYUdjU0FtVnVHZ0pWVXlnQVAB") != std::string::npos)
   {
