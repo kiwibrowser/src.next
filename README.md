@@ -15,6 +15,8 @@
 
 # Kiwi Browser Next
 
+CATA
+
 Source-code for Kiwi Next, a Kiwi Browser auto-rebased with latest [Chromium](https://www.chromium.org/Home/).
 
 This repository is the control center for development, testing and deployment of new releases.
