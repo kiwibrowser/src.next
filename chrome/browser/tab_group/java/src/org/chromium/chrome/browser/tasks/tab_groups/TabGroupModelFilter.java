@@ -241,7 +241,7 @@ public class TabGroupModelFilter extends TabModelFilter {
 
         AsyncTask.THREAD_POOL_EXECUTOR.execute(() -> {
             int sessionsCount = updateAndGetSessionsCount(groupId);
-            RecordHistogram.recordCountHistogram("TabGroups.SessionsPerGroup", sessionsCount);
+            RecordHistogram.recordCount1MHistogram("TabGroups.SessionsPerGroup", sessionsCount);
         });
     }
 
@@ -847,11 +847,6 @@ public class TabGroupModelFilter extends TabModelFilter {
         int groupId = getRootId(tab);
         if (!mGroupIdToGroupIndexMap.containsKey(groupId)) return TabList.INVALID_TAB_INDEX;
         return mGroupIdToGroupIndexMap.get(groupId);
-    }
-
-    @Override
-    public boolean isClosurePending(int tabId) {
-        return getTabModel().isClosurePending(tabId);
     }
 
     @VisibleForTesting

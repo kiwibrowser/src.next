@@ -55,7 +55,9 @@ StyleResolverState::StyleResolverState(
       layout_parent_style_(style_request.layout_parent_override),
       pseudo_request_type_(style_request.type),
       font_builder_(&document),
-      pseudo_element_(element.GetPseudoElement(style_request.pseudo_id)),
+      pseudo_element_(
+          element.GetNestedPseudoElement(style_request.pseudo_id,
+                                         style_request.pseudo_argument)),
       element_style_resources_(GetElement(),
                                document.DevicePixelRatio(),
                                pseudo_element_),
@@ -63,7 +65,10 @@ StyleResolverState::StyleResolverState(
                         ? ElementType::kPseudoElement
                         : ElementType::kElement),
       nearest_container_(style_recalc_context.container),
+      originating_element_style_(style_request.originating_element_style),
       is_for_highlight_(IsHighlightPseudoElement(style_request.pseudo_id)),
+      is_for_custom_highlight_(style_request.pseudo_id ==
+                               PseudoId::kPseudoIdHighlight),
       can_cache_base_style_(blink::CanCacheBaseStyle(style_request)) {
   DCHECK(!!parent_style_ == !!layout_parent_style_);
 
@@ -78,6 +83,10 @@ StyleResolverState::StyleResolverState(
     layout_parent_style_ = parent_style_;
 
   DCHECK(document.IsActive());
+
+  if (RuntimeEnabledFeatures::HighlightInheritanceEnabled() &&
+      is_for_highlight_)
+    DCHECK(originating_element_style_);
 }
 
 StyleResolverState::~StyleResolverState() {
@@ -90,15 +99,14 @@ bool StyleResolverState::IsInheritedForUnset(
     const CSSProperty& property) const {
   return property.IsInherited() ||
          (is_for_highlight_ &&
-          RuntimeEnabledFeatures::HighlightInheritanceEnabled());
+          (RuntimeEnabledFeatures::HighlightInheritanceEnabled() ||
+           is_for_custom_highlight_));
 }
 
 void StyleResolverState::SetStyle(scoped_refptr<ComputedStyle> style) {
   // FIXME: Improve RAII of StyleResolverState to remove this function.
   style_ = std::move(style);
-  css_to_length_conversion_data_ = CSSToLengthConversionData(
-      style_.get(), RootElementStyle(), GetDocument().GetLayoutView(),
-      nearest_container_, style_->EffectiveZoom());
+  UpdateLengthConversionData();
 }
 
 scoped_refptr<ComputedStyle> StyleResolverState::TakeStyle() {
@@ -107,6 +115,12 @@ scoped_refptr<ComputedStyle> StyleResolverState::TakeStyle() {
     return nullptr;
   }
   return std::move(style_);
+}
+
+void StyleResolverState::UpdateLengthConversionData() {
+  css_to_length_conversion_data_ = CSSToLengthConversionData(
+      Style(), RootElementStyle(), GetDocument().GetLayoutView(),
+      nearest_container_, Style()->EffectiveZoom());
 }
 
 CSSToLengthConversionData StyleResolverState::UnzoomedLengthConversionData(
@@ -119,8 +133,9 @@ CSSToLengthConversionData StyleResolverState::UnzoomedLengthConversionData(
       GetDocument().GetLayoutView());
   CSSToLengthConversionData::ContainerSizes container_sizes(nearest_container_);
 
-  return CSSToLengthConversionData(Style(), font_sizes, viewport_size,
-                                   container_sizes, 1);
+  return CSSToLengthConversionData(Style(), Style()->GetWritingMode(),
+                                   font_sizes, viewport_size, container_sizes,
+                                   1);
 }
 
 CSSToLengthConversionData StyleResolverState::FontSizeConversionData() const {
@@ -188,6 +203,7 @@ void StyleResolverState::SetWritingMode(WritingMode new_writing_mode) {
     return;
   }
   style_->SetWritingMode(new_writing_mode);
+  UpdateLengthConversionData();
   font_builder_.DidChangeWritingMode();
 }
 

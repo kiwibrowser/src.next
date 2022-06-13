@@ -5,16 +5,20 @@
 package org.chromium.chrome.browser.settings;
 
 import android.annotation.SuppressLint;
+import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager.NameNotFoundException;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.View;
 import android.view.ViewGroup;
 
+import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 import androidx.appcompat.widget.Toolbar;
 import androidx.fragment.app.Fragment;
@@ -26,22 +30,28 @@ import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.IntentUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ApplicationLifetime;
+import org.chromium.chrome.browser.BackPressHelper;
 import org.chromium.chrome.browser.ChromeBaseAppCompatActivity;
+import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.LaunchIntentDispatcher;
+import org.chromium.chrome.browser.accessibility.settings.ChromeAccessibilitySettingsDelegate;
 import org.chromium.chrome.browser.browsing_data.ClearBrowsingDataFragmentBasic;
 import org.chromium.chrome.browser.feedback.FragmentHelpAndFeedbackLauncher;
 import org.chromium.chrome.browser.feedback.HelpAndFeedbackLauncherImpl;
+import org.chromium.chrome.browser.history.HistoryActivity;
 import org.chromium.chrome.browser.image_descriptions.ImageDescriptionsController;
 import org.chromium.chrome.browser.image_descriptions.ImageDescriptionsSettings;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.language.settings.LanguageSettings;
 import org.chromium.chrome.browser.locale.LocaleManager;
 import org.chromium.chrome.browser.password_check.PasswordCheckComponentUiFactory;
-import org.chromium.chrome.browser.password_check.PasswordCheckEditFragmentView;
-import org.chromium.chrome.browser.password_check.PasswordCheckFactory;
 import org.chromium.chrome.browser.password_check.PasswordCheckFragmentView;
 import org.chromium.chrome.browser.password_entry_edit.CredentialEditUiFactory;
 import org.chromium.chrome.browser.password_entry_edit.CredentialEntryFragmentViewBase;
+import org.chromium.chrome.browser.privacy.settings.PrivacySettings;
+import org.chromium.chrome.browser.privacy_sandbox.AdMeasurementFragment;
+import org.chromium.chrome.browser.privacy_sandbox.AdPersonalizationFragment;
+import org.chromium.chrome.browser.privacy_sandbox.AdPersonalizationRemovedFragment;
 import org.chromium.chrome.browser.privacy_sandbox.FlocSettingsFragment;
 import org.chromium.chrome.browser.privacy_sandbox.PrivacySandboxSettingsFragment;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -54,11 +64,14 @@ import org.chromium.chrome.browser.signin.SyncConsentActivityLauncherImpl;
 import org.chromium.chrome.browser.site_settings.ChromeSiteSettingsDelegate;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager.SnackbarManageable;
+import org.chromium.components.browser_ui.accessibility.AccessibilitySettings;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetControllerFactory;
 import org.chromium.components.browser_ui.settings.FragmentSettingsLauncher;
 import org.chromium.components.browser_ui.settings.SettingsLauncher;
 import org.chromium.components.browser_ui.site_settings.SiteSettingsPreferenceFragment;
+import org.chromium.components.browser_ui.widget.displaystyle.UiConfig;
+import org.chromium.components.browser_ui.widget.displaystyle.ViewResizer;
 import org.chromium.components.browser_ui.widget.scrim.ScrimCoordinator;
 import org.chromium.ui.KeyboardVisibilityDelegate;
 import org.chromium.ui.UiUtils;
@@ -85,7 +98,6 @@ public class SettingsActivity extends ChromeBaseAppCompatActivity
          */
         boolean onBackPressed();
     }
-
     static final String EXTRA_SHOW_FRAGMENT = "show_fragment";
     static final String EXTRA_SHOW_FRAGMENT_ARGUMENTS = "show_fragment_args";
 
@@ -105,6 +117,9 @@ public class SettingsActivity extends ChromeBaseAppCompatActivity
     private ScrimCoordinator mScrim;
 
     private BottomSheetController mBottomSheetController;
+
+    @Nullable
+    private UiConfig mUiConfig;
 
     @SuppressLint("InlinedApi")
     @Override
@@ -140,16 +155,43 @@ public class SettingsActivity extends ChromeBaseAppCompatActivity
             getSupportFragmentManager().beginTransaction().replace(R.id.content, fragment).commit();
         }
 
+        // Set width constraints
+        configureWideDisplayStyle();
         setStatusBarColor();
-
         initBottomSheet();
+        BackPressHelper.create(this, getOnBackPressedDispatcher(), this::handleBackPressed);
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        // Set width constraints
+        configureWideDisplayStyle();
+    }
+
+    /**
+     * When this layout has a wide display style, it will be width constrained to
+     * {@link UiConfig#WIDE_DISPLAY_STYLE_MIN_WIDTH_DP}. If the current screen width is greater than
+     * UiConfig#WIDE_DISPLAY_STYLE_MIN_WIDTH_DP, the settings layout will be visually centered
+     * by adding padding to both sides.
+     */
+    private void configureWideDisplayStyle() {
+        if (mUiConfig == null) {
+            int minWidePaddingPixels =
+                    getResources().getDimensionPixelSize(R.dimen.settings_wide_display_min_padding);
+            View view = findViewById(R.id.content);
+            mUiConfig = new UiConfig(view);
+            ViewResizer.createAndAttach(view, mUiConfig, 0, minWidePaddingPixels);
+        } else {
+            mUiConfig.updateDisplayStyle();
+        }
     }
 
     /** Set up the bottom sheet for this activity. */
     private void initBottomSheet() {
         ViewGroup sheetContainer = findViewById(R.id.sheet_container);
-        mScrim = new ScrimCoordinator(this,
-                new ScrimCoordinator.SystemUiScrimDelegate() {
+        mScrim =
+                new ScrimCoordinator(this, new ScrimCoordinator.SystemUiScrimDelegate() {
                     @Override
                     public void setStatusBarScrimFraction(float scrimFraction) {
                         // TODO: Implement if status bar needs to change color with the scrim.
@@ -159,9 +201,7 @@ public class SettingsActivity extends ChromeBaseAppCompatActivity
                     public void setNavigationBarScrimFraction(float scrimFraction) {
                         // TODO: Implement if navigation bar needs to change color with the scrim.
                     }
-                },
-                (ViewGroup) sheetContainer.getParent(),
-                ApiCompatibilityUtils.getColor(getResources(), R.color.default_scrim_color));
+                }, (ViewGroup) sheetContainer.getParent(), getColor(R.color.default_scrim_color));
 
         // clang-format off
         mBottomSheetController = BottomSheetControllerFactory.createBottomSheetController(
@@ -206,6 +246,12 @@ public class SettingsActivity extends ChromeBaseAppCompatActivity
                     (ChromeSiteSettingsDelegate) (((SiteSettingsPreferenceFragment) fragment)
                                                           .getSiteSettingsDelegate());
             delegate.setSnackbarManager(mSnackbarManager);
+        }
+        if (fragment instanceof AdPersonalizationFragment) {
+            ((AdPersonalizationFragment) fragment).setSnackbarManager(getSnackbarManager());
+        }
+        if (fragment instanceof AdPersonalizationRemovedFragment) {
+            ((AdPersonalizationRemovedFragment) fragment).setSnackbarManager(getSnackbarManager());
         }
     }
 
@@ -292,18 +338,11 @@ public class SettingsActivity extends ChromeBaseAppCompatActivity
         return super.onOptionsItemSelected(item);
     }
 
-    @Override
-    public void onBackPressed() {
+    private boolean handleBackPressed() {
         Fragment activeFragment = getMainFragment();
-        if (!(activeFragment instanceof OnBackPressedListener)) {
-            super.onBackPressed();
-            return;
-        }
+        if (!(activeFragment instanceof OnBackPressedListener)) return false;
         OnBackPressedListener listener = (OnBackPressedListener) activeFragment;
-        if (!listener.onBackPressed()) {
-            // Fragment hasn't handled this event, fall back to AppCompatActivity handling.
-            super.onBackPressed();
-        }
+        return listener.onBackPressed();
     }
 
     @Override
@@ -333,10 +372,6 @@ public class SettingsActivity extends ChromeBaseAppCompatActivity
                     HelpAndFeedbackLauncherImpl.getInstance(), mSettingsLauncher,
                     LaunchIntentDispatcher::createCustomTabActivityIntent,
                     IntentUtils::addTrustedIntentExtras);
-        } else if (fragment instanceof PasswordCheckEditFragmentView) {
-            PasswordCheckEditFragmentView editFragment = (PasswordCheckEditFragmentView) fragment;
-            editFragment.setCheckProvider(
-                    () -> PasswordCheckFactory.getOrCreate(mSettingsLauncher));
         }
         if (fragment instanceof CredentialEntryFragmentViewBase) {
             CredentialEditUiFactory.create((CredentialEntryFragmentViewBase) fragment,
@@ -366,6 +401,19 @@ public class SettingsActivity extends ChromeBaseAppCompatActivity
                     .setCustomTabIntentHelper(
                             LaunchIntentDispatcher::createCustomTabActivityIntent);
         }
+        if (fragment instanceof AdMeasurementFragment) {
+            // Unlike HistoryManagerUtils, which opens History in a tab on Tablets, this always
+            // opens history in a new activity on top of the SettingsActivity.
+            Runnable openHistoryRunnable = () -> {
+                // TODO(crbug.com/1286276): Opening History overrides the last active tab. Fix it.
+                Activity activity = fragment.getActivity();
+                Intent intent = new Intent();
+                intent.setClass(activity, HistoryActivity.class);
+                intent.putExtra(IntentHandler.EXTRA_INCOGNITO_MODE, false);
+                activity.startActivity(intent);
+            };
+            ((AdMeasurementFragment) fragment).setSetHistoryHelper(openHistoryRunnable);
+        }
         if (fragment instanceof FlocSettingsFragment) {
             ((FlocSettingsFragment) fragment)
                     .setCustomTabIntentHelper(
@@ -380,6 +428,14 @@ public class SettingsActivity extends ChromeBaseAppCompatActivity
             ((ClearBrowsingDataFragmentBasic) fragment)
                     .setCustomTabIntentHelper(
                             LaunchIntentDispatcher::createCustomTabActivityIntent);
+        }
+        if (fragment instanceof PrivacySettings) {
+            ((PrivacySettings) fragment).setBottomSheetController(mBottomSheetController);
+            ((PrivacySettings) fragment).setDialogContainer(findViewById(R.id.dialog_container));
+        }
+        if (fragment instanceof AccessibilitySettings) {
+            ((AccessibilitySettings) fragment)
+                    .setDelegate(new ChromeAccessibilitySettingsDelegate());
         }
     }
 
@@ -403,13 +459,6 @@ public class SettingsActivity extends ChromeBaseAppCompatActivity
             // Something terribly wrong has happened.
             throw new RuntimeException(ex);
         }
-    }
-
-    @Override
-    protected void applyThemeOverlays() {
-        super.applyThemeOverlays();
-
-        setTheme(R.style.ThemeRefactorOverlay_Disabled_Settings);
     }
 
     /**

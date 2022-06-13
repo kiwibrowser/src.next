@@ -8,7 +8,7 @@
 #include "build/build_config.h"
 #include "content/public/browser/url_data_source.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #error "Instant is only used on desktop";
 #endif
 
@@ -30,6 +30,8 @@ class MostVisitedIframeSource : public content::URLDataSource {
       const content::WebContents::Getter& wc_getter,
       content::URLDataSource::GotDataCallback callback) override;
   std::string GetMimeType(const std::string& path_and_query) override;
+  bool ShouldServeMimeTypeAsContentTypeHeader() override;
+
   bool AllowCaching() override;
   bool ShouldDenyXFrameOptions() override;
   bool ShouldServiceRequest(const GURL& url,
