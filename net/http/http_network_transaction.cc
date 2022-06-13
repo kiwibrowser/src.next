@@ -38,13 +38,13 @@
 #include "net/filter/filter_source_stream.h"
 #include "net/http/bidirectional_stream_impl.h"
 #include "net/http/http_auth.h"
+#include "net/http/http_auth_controller.h"
 #include "net/http/http_auth_handler.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_basic_stream.h"
 #include "net/http/http_chunked_decoder.h"
 #include "net/http/http_log_util.h"
 #include "net/http/http_network_session.h"
-#include "net/http/http_proxy_client_socket.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_request_info.h"
 #include "net/http/http_response_headers.h"
@@ -187,8 +187,6 @@ int HttpNetworkTransaction::Start(const HttpRequestInfo* request_info,
   request_reporting_upload_depth_ = request_->reporting_upload_depth;
   start_timeticks_ = base::TimeTicks::Now();
 #endif  // BUILDFLAG(ENABLE_REPORTING)
-
-  session_->GetSSLConfig(&server_ssl_config_, &proxy_ssl_config_);
 
   if (request_->load_flags & LOAD_DISABLE_CERT_NETWORK_FETCHES) {
     server_ssl_config_.disable_cert_verification_network_fetches = true;
@@ -380,7 +378,7 @@ void HttpNetworkTransaction::DidDrainBodyForAuthRestart(bool keep_alive) {
       // Renewed streams shouldn't carry over sent or received bytes.
       DCHECK_EQ(0, new_stream->GetTotalReceivedBytes());
       DCHECK_EQ(0, new_stream->GetTotalSentBytes());
-      next_state_ = STATE_INIT_STREAM;
+      next_state_ = STATE_CONNECTED_CALLBACK;
     }
     stream_.reset(new_stream);
   }
@@ -680,9 +678,8 @@ void HttpNetworkTransaction::OnQuicBroken() {
   net_error_details_.quic_broken = true;
 }
 
-void HttpNetworkTransaction::GetConnectionAttempts(
-    ConnectionAttempts* out) const {
-  *out = connection_attempts_;
+ConnectionAttempts HttpNetworkTransaction::GetConnectionAttempts() const {
+  return connection_attempts_;
 }
 
 bool HttpNetworkTransaction::IsSecureRequest() const {
@@ -739,6 +736,9 @@ int HttpNetworkTransaction::DoLoop(int result) {
         break;
       case STATE_INIT_STREAM_COMPLETE:
         rv = DoInitStreamComplete(rv);
+        break;
+      case STATE_CONNECTED_CALLBACK:
+        rv = DoConnectedCallback();
         break;
       case STATE_CONNECTED_CALLBACK_COMPLETE:
         rv = DoConnectedCallbackComplete(rv);
@@ -859,7 +859,7 @@ int HttpNetworkTransaction::DoCreateStream() {
 int HttpNetworkTransaction::DoCreateStreamComplete(int result) {
   CopyConnectionAttemptsFromStreamRequest();
   if (result == OK) {
-    next_state_ = STATE_INIT_STREAM;
+    next_state_ = STATE_CONNECTED_CALLBACK;
     DCHECK(stream_.get());
   } else if (result == ERR_HTTP_1_1_REQUIRED ||
              result == ERR_PROXY_HTTP_1_1_REQUIRED) {
@@ -879,10 +879,8 @@ int HttpNetworkTransaction::DoInitStream() {
   DCHECK(stream_.get());
   next_state_ = STATE_INIT_STREAM_COMPLETE;
 
-  stream_->GetRemoteEndpoint(&remote_endpoint_);
-
-  return stream_->InitializeStream(request_, can_send_early_data_, priority_,
-                                   net_log_, io_callback_);
+  return stream_->InitializeStream(can_send_early_data_, priority_, net_log_,
+                                   io_callback_);
 }
 
 int HttpNetworkTransaction::DoInitStreamComplete(int result) {
@@ -900,30 +898,47 @@ int HttpNetworkTransaction::DoInitStreamComplete(int result) {
     return result;
   }
 
-  next_state_ = STATE_CONNECTED_CALLBACK_COMPLETE;
-
-  // Fire off notification that we have successfully connected.
-  if (!connected_callback_.is_null()) {
-    TransportType type = TransportType::kDirect;
-    if (!proxy_info_.is_direct()) {
-      type = TransportType::kProxied;
-    }
-    result = connected_callback_.Run(
-        TransportInfo(type, remote_endpoint_,
-                      std::string(stream_->GetAcceptChViaAlps())),
-        base::BindOnce(&HttpNetworkTransaction::ResumeAfterConnected,
-                       base::Unretained(this)));
-  }
-
+  next_state_ = STATE_GENERATE_PROXY_AUTH_TOKEN;
   return result;
 }
 
-int HttpNetworkTransaction::DoConnectedCallbackComplete(int result) {
-  if (result == OK) {
-    // Only transition if we succeeded. Otherwise stop at STATE_NONE.
-    next_state_ = STATE_GENERATE_PROXY_AUTH_TOKEN;
+int HttpNetworkTransaction::DoConnectedCallback() {
+  // Register the HttpRequestInfo object on the stream here so that it's
+  // available when invoking the `connected_callback_`, as
+  // HttpStream::GetAcceptChViaAlps() needs the HttpRequestInfo to retrieve
+  // the ACCEPT_CH frame payload.
+  stream_->RegisterRequest(request_);
+  stream_->GetRemoteEndpoint(&remote_endpoint_);
+  next_state_ = STATE_CONNECTED_CALLBACK_COMPLETE;
+
+  if (connected_callback_.is_null()) {
+    return OK;
   }
-  return result;
+
+  // Fire off notification that we have successfully connected.
+  TransportType type = TransportType::kDirect;
+  if (!proxy_info_.is_direct()) {
+    type = TransportType::kProxied;
+  }
+  return connected_callback_.Run(
+      TransportInfo(type, remote_endpoint_,
+                    std::string{stream_->GetAcceptChViaAlps()}),
+      base::BindOnce(&HttpNetworkTransaction::ResumeAfterConnected,
+                     base::Unretained(this)));
+}
+
+int HttpNetworkTransaction::DoConnectedCallbackComplete(int result) {
+  if (result != OK) {
+    if (stream_) {
+      stream_->Close(/*not_reusable=*/false);
+    }
+
+    // Stop the state machine here if the call failed.
+    return result;
+  }
+
+  next_state_ = STATE_INIT_STREAM;
+  return OK;
 }
 
 int HttpNetworkTransaction::DoGenerateProxyAuthToken() {
@@ -1094,19 +1109,11 @@ int HttpNetworkTransaction::DoReadHeaders() {
 }
 
 int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
-  // We can get a certificate error or ERR_SSL_CLIENT_AUTH_CERT_NEEDED here
-  // due to SSL renegotiation.
-  if (IsCertificateError(result)) {
-    // We don't handle a certificate error during SSL renegotiation, so we
-    // have to return an error that's not in the certificate error range
-    // (-2xx).
-    //
-    // TODO(davidben): Remove this error. This is impossible now that server
-    // certificates are forbidden from changing in renegotiation.
-    LOG(ERROR) << "Got a server certificate with error " << result
-               << " during SSL renegotiation";
-    result = ERR_CERT_ERROR_IN_SSL_RENEGOTIATION;
-  } else if (result == ERR_SSL_CLIENT_AUTH_CERT_NEEDED) {
+  // We can get a ERR_SSL_CLIENT_AUTH_CERT_NEEDED here due to SSL renegotiation.
+  // Server certificate errors are impossible. Rather than reverify the new
+  // server certificate, BoringSSL forbids server certificates from changing.
+  DCHECK(!IsCertificateError(result));
+  if (result == ERR_SSL_CLIENT_AUTH_CERT_NEEDED) {
     DCHECK(stream_.get());
     DCHECK(IsSecureRequest());
     response_.cert_request_info = base::MakeRefCounted<SSLCertRequestInfo>();

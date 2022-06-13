@@ -54,17 +54,12 @@ void TextPainterBase::SetEmphasisMark(const AtomicString& emphasis_mark,
 
   if (!font_data || emphasis_mark.IsNull()) {
     emphasis_mark_offset_ = 0;
-  } else if ((horizontal_ && (position == TextEmphasisPosition::kOverRight ||
-                              position == TextEmphasisPosition::kOverLeft)) ||
-             (!horizontal_ &&
-              (position == TextEmphasisPosition::kOverRight ||
-               position == TextEmphasisPosition::kUnderRight))) {
+  } else if ((horizontal_ && IsOver(position)) ||
+             (!horizontal_ && IsRight(position))) {
     emphasis_mark_offset_ = -font_data->GetFontMetrics().Ascent() -
                             font_.EmphasisMarkDescent(emphasis_mark);
   } else {
-    DCHECK(position == TextEmphasisPosition::kUnderRight ||
-           position == TextEmphasisPosition::kUnderLeft ||
-           position == TextEmphasisPosition::kOverLeft);
+    DCHECK(!IsOver(position) || position == TextEmphasisPosition::kOverLeft);
     emphasis_mark_offset_ = font_data->GetFontMetrics().Descent() +
                             font_.EmphasisMarkAscent(emphasis_mark);
   }
@@ -167,7 +162,7 @@ TextPaintStyle TextPainterBase::TextPaintingStyle(const Document& document,
     text_style.stroke_color =
         style.VisitedDependentColor(GetCSSPropertyWebkitTextStrokeColor());
     text_style.emphasis_mark_color =
-        style.VisitedDependentColor(GetCSSPropertyWebkitTextEmphasisColor());
+        style.VisitedDependentColor(GetCSSPropertyTextEmphasisColor());
     text_style.shadow = style.TextShadow();
 
     // Adjust text color when printing with a white background.
@@ -214,7 +209,7 @@ void TextPainterBase::DecorationsStripeIntercepts(
     // integers-equal-device pixels assumption, so vertically inflating by 1
     // pixel makes sure we're always covering. This should only be done on the
     // clipping rectangle, not when computing the glyph intersects.
-    clip_rect.Outset(dilation, 1.0);
+    clip_rect.Outset(gfx::OutsetsF::VH(1.0, dilation));
 
     if (!gfx::RectFToSkRect(clip_rect).isFinite())
       continue;
@@ -229,7 +224,7 @@ void TextPainterBase::PaintDecorationsExceptLineThrough(
     const Vector<AppliedTextDecoration>& decorations,
     const TextPaintStyle& text_style,
     bool* has_line_through_decoration,
-    const PaintFlags* flags) {
+    const cc::PaintFlags* flags) {
   GraphicsContext& context = paint_info.context;
   GraphicsContextStateSaver state_saver(context);
   UpdateGraphicsContext(context, text_style, state_saver);
@@ -328,7 +323,7 @@ void TextPainterBase::PaintDecorationsOnlyLineThrough(
     const PaintInfo& paint_info,
     const Vector<AppliedTextDecoration>& decorations,
     const TextPaintStyle& text_style,
-    const PaintFlags* flags) {
+    const cc::PaintFlags* flags) {
   GraphicsContext& context = paint_info.context;
   GraphicsContextStateSaver state_saver(context);
   UpdateGraphicsContext(context, text_style, state_saver);
@@ -364,13 +359,13 @@ void TextPainterBase::PaintDecorationUnderOrOverLine(
     GraphicsContext& context,
     TextDecorationInfo& decoration_info,
     TextDecorationLine line,
-    const PaintFlags* flags) {
+    const cc::PaintFlags* flags) {
   AppliedDecorationPainter decoration_painter(context, decoration_info);
   if (decoration_info.Style().TextDecorationSkipInk() ==
       ETextDecorationSkipInk::kAuto) {
     // In order to ignore intersects less than 0.5px, inflate by -0.5.
     gfx::RectF decoration_bounds = decoration_info.Bounds();
-    decoration_bounds.Inset(0, 0.5);
+    decoration_bounds.Inset(gfx::InsetsF::VH(0.5, 0));
     ClipDecorationsStripe(
         decoration_info.InkSkipClipUpper(decoration_bounds.y()),
         decoration_bounds.height(),

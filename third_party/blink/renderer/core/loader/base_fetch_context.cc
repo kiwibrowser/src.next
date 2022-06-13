@@ -21,7 +21,6 @@
 #include "third_party/blink/renderer/core/inspector/identifiers_factory.h"
 #include "third_party/blink/renderer/core/loader/frame_client_hints_preferences_context.h"
 #include "third_party/blink/renderer/core/loader/subresource_filter.h"
-#include "third_party/blink/renderer/core/loader/subresource_redirect_util.h"
 #include "third_party/blink/renderer/platform/exported/wrapped_resource_request.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/cors/cors.h"
@@ -118,14 +117,6 @@ bool BaseFetchContext::CalculateIfAdSubresource(
 
   return request.IsAdResource() ||
          (filter && filter->IsAdResource(url, request.GetRequestContext()));
-}
-
-bool BaseFetchContext::SendConversionRequestInsteadOfRedirecting(
-    const KURL& url,
-    const absl::optional<ResourceRequest::RedirectInfo>& redirect_info,
-    ReportingDisposition reporting_disposition,
-    const String& devtools_request_id) const {
-  return false;
 }
 
 void BaseFetchContext::AddClientHintsIfNecessary(
@@ -442,6 +433,17 @@ void BaseFetchContext::AddClientHintsIfNecessary(
 
     if (ShouldSendClientHint(
             ClientHintsMode::kStandard, policy, resource_origin, is_1p_origin,
+            network::mojom::blink::WebClientHintsType::kUAWoW64,
+            hints_preferences)) {
+      request.SetHttpHeaderField(
+          network::GetClientHintToNameMap()
+              .at(network::mojom::blink::WebClientHintsType::kUAWoW64)
+              .c_str(),
+          SerializeBoolHeader(ua->wow64));
+    }
+
+    if (ShouldSendClientHint(
+            ClientHintsMode::kStandard, policy, resource_origin, is_1p_origin,
             network::mojom::blink::WebClientHintsType::kUAReduced,
             hints_preferences)) {
       // If the UA-Reduced client hint should be sent according to the hints
@@ -450,6 +452,17 @@ void BaseFetchContext::AddClientHintsIfNecessary(
       request.SetHttpHeaderField(
           network::GetClientHintToNameMap()
               .at(network::mojom::blink::WebClientHintsType::kUAReduced)
+              .c_str(),
+          SerializeBoolHeader(true));
+    }
+
+    if (ShouldSendClientHint(
+            ClientHintsMode::kStandard, policy, resource_origin, is_1p_origin,
+            network::mojom::blink::WebClientHintsType::kFullUserAgent,
+            hints_preferences)) {
+      request.SetHttpHeaderField(
+          network::GetClientHintToNameMap()
+              .at(network::mojom::blink::WebClientHintsType::kFullUserAgent)
               .c_str(),
           SerializeBoolHeader(true));
     }
@@ -465,6 +478,30 @@ void BaseFetchContext::AddClientHintsIfNecessary(
             .at(network::mojom::blink::WebClientHintsType::kPrefersColorScheme)
             .c_str(),
         prefers_color_scheme.value());
+  }
+
+  if (ShouldSendClientHint(
+          ClientHintsMode::kStandard, policy, resource_origin, is_1p_origin,
+          network::mojom::blink::WebClientHintsType::kPartitionedCookies,
+          hints_preferences)) {
+    request.SetHttpHeaderField(
+        network::GetClientHintToNameMap()
+            .at(network::mojom::blink::WebClientHintsType::kPartitionedCookies)
+            .c_str(),
+        SerializeBoolHeader(true));
+  }
+
+  if (ShouldSendClientHint(ClientHintsMode::kStandard, policy, resource_origin,
+                           is_1p_origin,
+                           network::mojom::blink::WebClientHintsType::kSaveData,
+                           hints_preferences)) {
+    if (GetNetworkStateNotifier().SaveDataEnabled()) {
+      request.SetHttpHeaderField(
+          network::GetClientHintToNameMap()
+              .at(network::mojom::blink::WebClientHintsType::kSaveData)
+              .c_str(),
+          "on");
+    }
   }
 }
 
@@ -517,12 +554,6 @@ BaseFetchContext::CheckCSPForRequestInternal(
     ContentSecurityPolicy::CheckHeaderType check_header_type) const {
   if (options.content_security_policy_option ==
       network::mojom::CSPDisposition::DO_NOT_CHECK) {
-    return absl::nullopt;
-  }
-
-  if (ShouldDisableCSPCheckForLitePageSubresourceRedirectOrigin(
-          GetResourceFetcherProperties().GetLitePageSubresourceRedirectOrigin(),
-          request_context, redirect_status, url)) {
     return absl::nullopt;
   }
 
@@ -652,16 +683,6 @@ BaseFetchContext::CanRequestInternal(
     return ResourceRequestBlockedReason::kOther;
   }
 
-  // Redirect `ResourceRequest`s don't have a DevToolsId set, but are
-  // associated with the requestId of the initial request. The right
-  // DevToolsId needs to be resolved via the InspectorId.
-  const String devtools_request_id =
-      IdentifiersFactory::RequestId(nullptr, resource_request.InspectorId());
-  if (SendConversionRequestInsteadOfRedirecting(
-          url, redirect_info, reporting_disposition, devtools_request_id)) {
-    return ResourceRequestBlockedReason::kConversionRequest;
-  }
-
   // Let the client have the final say into whether or not the load should
   // proceed.
   if (GetSubresourceFilter()) {
@@ -688,12 +709,16 @@ bool BaseFetchContext::ShouldSendClientHint(
     origin_ok = true;
   } else {
     // For subresource requests, if the parent frame has Sec-CH-UA-Reduced,
-    // then send Sec-CH-UA-Reduced in the fetch request, regardless of the
-    // permissions policy.
-    origin_ok = type == network::mojom::blink::WebClientHintsType::kUAReduced ||
-                (policy && policy->IsFeatureEnabledForOrigin(
-                               GetClientHintToPolicyFeatureMap().at(type),
-                               resource_origin));
+    // Sec-CH-UA-Full, or Sec-CH-Partitioned-Cookies, then send the hint in the
+    // fetch request, regardless of the permissions policy.
+    origin_ok =
+        type == network::mojom::blink::WebClientHintsType::kUAReduced ||
+        type == network::mojom::blink::WebClientHintsType::kFullUserAgent ||
+        type ==
+            network::mojom::blink::WebClientHintsType::kPartitionedCookies ||
+        (policy &&
+         policy->IsFeatureEnabledForOrigin(
+             GetClientHintToPolicyFeatureMap().at(type), resource_origin));
   }
 
   if (!origin_ok)

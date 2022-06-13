@@ -65,7 +65,7 @@ public class EmptyTabModel implements TabModel {
     public void closeAllTabs() {}
 
     @Override
-    public void closeAllTabs(boolean allowDelegation, boolean uponExit) {}
+    public void closeAllTabs(boolean uponExit) {}
 
     @Override
     public int getCount() {
@@ -89,7 +89,7 @@ public class EmptyTabModel implements TabModel {
     }
 
     @Override
-    public void setIndex(int i, @TabSelectionType int type) {}
+    public void setIndex(int i, @TabSelectionType int type, boolean skipLoadingTab) {}
 
     @Override
     public boolean isActiveModel() {
@@ -156,5 +156,5 @@ public class EmptyTabModel implements TabModel {
     public void removeTab(Tab tab) {}
 
     @Override
-    public void openMostRecentlyClosedTab() {}
+    public void openMostRecentlyClosedEntry() {}
 }
