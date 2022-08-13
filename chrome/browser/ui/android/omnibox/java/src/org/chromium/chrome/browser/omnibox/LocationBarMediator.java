@@ -27,11 +27,16 @@ import org.chromium.base.CommandLine;
 import org.chromium.base.ObserverList;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
+import org.chromium.base.metrics.TimingMetric;
 import org.chromium.base.supplier.BooleanSupplier;
 import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.ObservableSupplierImpl;
 import org.chromium.base.supplier.OneshotSupplier;
 import org.chromium.base.supplier.OneshotSupplierImpl;
+import org.chromium.base.task.PostTask;
+import org.chromium.chrome.browser.back_press.BackPressManager;
 import org.chromium.chrome.browser.device.DeviceClassManager;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.gsa.GSAState;
 import org.chromium.chrome.browser.lens.LensController;
@@ -62,6 +67,7 @@ import org.chromium.chrome.browser.util.ChromeAccessibilityUtil;
 import org.chromium.chrome.browser.util.KeyNavigationUtil;
 import org.chromium.components.browser_ui.styles.ChromeColors;
 import org.chromium.components.browser_ui.widget.animation.CancelAwareAnimatorListener;
+import org.chromium.components.browser_ui.widget.gesture.BackPressHandler;
 import org.chromium.components.embedder_support.util.UrlUtilities;
 import org.chromium.components.externalauth.ExternalAuthUtils;
 import org.chromium.components.metrics.OmniboxEventProtos.OmniboxEventProto.PageClassification;
@@ -69,6 +75,7 @@ import org.chromium.components.search_engines.TemplateUrl;
 import org.chromium.components.search_engines.TemplateUrlService;
 import org.chromium.components.signin.AccountManagerFacadeProvider;
 import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.content_public.common.ResourceRequestBody;
 import org.chromium.ui.base.PageTransition;
 import org.chromium.ui.base.WindowAndroid;
@@ -85,7 +92,7 @@ class LocationBarMediator
         implements LocationBarDataProvider.Observer, OmniboxStub, VoiceRecognitionHandler.Delegate,
                    VoiceRecognitionHandler.Observer, AssistantVoiceSearchService.Observer,
                    UrlBarDelegate, OnKeyListener, ComponentCallbacks,
-                   TemplateUrlService.TemplateUrlServiceObserver {
+                   TemplateUrlService.TemplateUrlServiceObserver, BackPressHandler {
     private static final int ICON_FADE_ANIMATION_DURATION_MS = 150;
     private static final int ICON_FADE_ANIMATION_DELAY_MS = 75;
     private static final long NTP_KEYBOARD_FOCUS_DURATION_MS = 200;
@@ -184,6 +191,8 @@ class LocationBarMediator
     // Tracks if the location bar is laid out in a focused state due to an ntp scroll.
     private boolean mIsLocationBarFocusedFromNtpScroll;
     private @BrandedColorScheme int mBrandedColorScheme = BrandedColorScheme.APP_DEFAULT;
+    private ObservableSupplierImpl<Boolean> mBackPressStateSupplier =
+            new ObservableSupplierImpl<>();
 
     /*package */ LocationBarMediator(@NonNull Context context,
             @NonNull LocationBarLayout locationBarLayout,
@@ -263,6 +272,8 @@ class LocationBarMediator
     /*package */ void onUrlFocusChange(boolean hasFocus) {
         setUrlFocusChangeInProgress(true);
         mUrlHasFocus = hasFocus;
+        // Intercept back press if it has focus.
+        mBackPressStateSupplier.set(mUrlHasFocus);
         updateButtonVisibility();
         updateShouldAnimateIconChanges();
         onPrimaryColorChanged();
@@ -286,11 +297,13 @@ class LocationBarMediator
                 && !mLocationBarDataProvider.isIncognito()) {
             if (mNativeInitialized
                     && mTemplateUrlServiceSupplier.get().isDefaultSearchEngineGoogle()) {
-                GeolocationHeader.primeLocationForGeoHeader();
+                GeolocationHeader.primeLocationForGeoHeaderIfEnabled(
+                        mProfileSupplier.get(), mTemplateUrlServiceSupplier.get());
             } else {
                 mDeferredNativeRunnables.add(() -> {
                     if (mTemplateUrlServiceSupplier.get().isDefaultSearchEngineGoogle()) {
-                        GeolocationHeader.primeLocationForGeoHeader();
+                        GeolocationHeader.primeLocationForGeoHeaderIfEnabled(
+                                mProfileSupplier.get(), mTemplateUrlServiceSupplier.get());
                     }
                 });
             }
@@ -488,7 +501,10 @@ class LocationBarMediator
         // ContentView.
         if (currentTab != null && !url.isEmpty()) {
             LoadUrlParams loadUrlParams = new LoadUrlParams(url);
-            loadUrlParams.setVerbatimHeaders(GeolocationHeader.getGeoHeader(url, currentTab));
+            try (TimingMetric record =
+                            TimingMetric.shortUptime("Android.Omnibox.SetGeolocationHeadersTime")) {
+                loadUrlParams.setVerbatimHeaders(GeolocationHeader.getGeoHeader(url, currentTab));
+            }
             loadUrlParams.setTransitionType(transition | PageTransition.FROM_ADDRESS_BAR);
             if (inputStart != 0) {
                 loadUrlParams.setInputStartTimestamp(inputStart);
@@ -517,7 +533,12 @@ class LocationBarMediator
         }
         mLocaleManager.recordLocaleBasedSearchMetrics(false, url, transition);
 
-        focusCurrentTab();
+        // TODO(crbug.com/1316461): enable by default and remove this feature.
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.POST_TASK_FOCUS_TAB)) {
+            PostTask.postTask(UiThreadTaskTraits.USER_VISIBLE, () -> focusCurrentTab());
+        } else {
+            focusCurrentTab();
+        }
     }
 
     /* package */ boolean didFocusUrlFromFakebox() {
@@ -1120,6 +1141,9 @@ class LocationBarMediator
         if (mAutocompleteCoordinator.handleKeyEvent(keyCode, event)) {
             return true;
         } else if (keyCode == KeyEvent.KEYCODE_BACK) {
+            if (BackPressManager.isEnabled()) {
+                return false;
+            }
             if (KeyNavigationUtil.isActionDown(event) && event.getRepeatCount() == 0) {
                 // Tell the framework to start tracking this event.
                 mLocationBarLayout.getKeyDispatcherState().startTracking(event, this);
@@ -1365,8 +1389,12 @@ class LocationBarMediator
         return !mLocationBarDataProvider.isIncognito();
     }
 
+    // Traditional way to intercept keycode_back, which is deprecated from T.
     @Override
     public void backKeyPressed() {
+        if (!BackPressManager.isEnabled()) {
+            BackPressManager.record(BackPressHandler.Type.LOCATION_BAR);
+        }
         if (mBackKeyBehavior.handleBackKeyPressed()) {
             return;
         }
@@ -1381,6 +1409,18 @@ class LocationBarMediator
     public void gestureDetected(boolean isLongPress) {
         recordOmniboxFocusReason(isLongPress ? OmniboxFocusReason.OMNIBOX_LONG_PRESS
                                              : OmniboxFocusReason.OMNIBOX_TAP);
+    }
+
+    // BackPressHandler implementation.
+    // Modern way to intercept back press starting from T.
+    @Override
+    public void handleBackPress() {
+        backKeyPressed();
+    }
+
+    @Override
+    public ObservableSupplier<Boolean> getHandleBackPressChangedSupplier() {
+        return mBackPressStateSupplier;
     }
 
     // OnKeyListener implementation.

@@ -31,7 +31,7 @@
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
 #include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
-#include "chrome/browser/supervised_user/supervised_user_url_filter.h"
+#include "chrome/browser/supervised_user/supervised_user_url_filter.h"  // nogncheck
 #endif
 
 #if !BUILDFLAG(IS_ANDROID)
@@ -216,7 +216,7 @@ bool IsRenderedInInstantProcess(content::WebContents* contents,
   return false;
 #else
   content::RenderProcessHost* process_host =
-      contents->GetMainFrame()->GetProcess();
+      contents->GetPrimaryMainFrame()->GetProcess();
   if (!process_host)
     return false;
 

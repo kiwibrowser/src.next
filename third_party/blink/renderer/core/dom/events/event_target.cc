@@ -336,42 +336,6 @@ void EventTarget::SetDefaultAddEventListenerOptions(
     }
   }
 
-  // For mousewheel event listeners that have the target as the window and
-  // a bound function name of "ssc_wheel" treat and no passive value default
-  // passive to true. See crbug.com/501568.
-  if (event_type == event_type_names::kMousewheel && ToLocalDOMWindow() &&
-      event_listener && !options->hasPassive()) {
-    JSBasedEventListener* v8_listener =
-        DynamicTo<JSBasedEventListener>(event_listener);
-    if (!v8_listener)
-      return;
-    v8::Local<v8::Value> callback_object =
-        v8_listener->GetListenerObject(*this);
-    if (!callback_object.IsEmpty() && callback_object->IsFunction() &&
-        strcmp(
-            "ssc_wheel",
-            *v8::String::Utf8Value(
-                v8::Isolate::GetCurrent(),
-                v8::Local<v8::Function>::Cast(callback_object)->GetName())) ==
-            0) {
-      options->setPassive(true);
-      if (executing_window) {
-        UseCounter::Count(executing_window->document(),
-                          WebFeature::kSmoothScrollJSInterventionActivated);
-
-        executing_window->GetFrame()->Console().AddMessage(
-            MakeGarbageCollected<ConsoleMessage>(
-                mojom::ConsoleMessageSource::kIntervention,
-                mojom::ConsoleMessageLevel::kWarning,
-                "Registering mousewheel event as passive due to "
-                "smoothscroll.js usage. The smoothscroll.js library is "
-                "buggy, no longer necessary and degrades performance. See "
-                "https://www.chromestatus.com/feature/5749447073988608"));
-      }
-      return;
-    }
-  }
-
   if (!options->hasPassive())
     options->setPassive(false);
 
@@ -454,6 +418,15 @@ bool EventTarget::AddEventListenerInternal(
 
   if (options->hasSignal() && options->signal()->aborted())
     return false;
+
+  // Consider `Permissions-Policy: unload`.
+  if (event_type == event_type_names::kUnload &&
+      RuntimeEnabledFeatures::PermissionsPolicyUnloadEnabled() &&
+      !GetExecutionContext()->IsFeatureEnabled(
+          mojom::blink::PermissionsPolicyFeature::kUnload,
+          ReportOptions::kReportOnFailure)) {
+    return false;
+  }
 
   // Unload/Beforeunload handlers are not allowed in fenced frames.
   if (event_type == event_type_names::kUnload ||
@@ -541,6 +514,11 @@ void EventTarget::AddedEventListener(
         UseCounter::Count(*document, WebFeature::kSlotChangeEventAddListener);
       } else if (event_type == event_type_names::kBeforematch) {
         UseCounter::Count(*document, WebFeature::kBeforematchHandlerRegistered);
+      } else if (event_type ==
+                 event_type_names::kContentvisibilityautostatechanged) {
+        UseCounter::Count(
+            *document,
+            WebFeature::kContentVisibilityAutoStateChangedHandlerRegistered);
       }
     }
   }
@@ -728,9 +706,9 @@ DispatchEventResult EventTarget::DispatchEvent(Event& event) {
 DispatchEventResult EventTarget::DispatchEventInternal(Event& event) {
   event.SetTarget(this);
   event.SetCurrentTarget(this);
-  event.SetEventPhase(Event::kAtTarget);
+  event.SetEventPhase(Event::PhaseType::kAtTarget);
   DispatchEventResult dispatch_result = FireEventListeners(event);
-  event.SetEventPhase(0);
+  event.SetEventPhase(Event::PhaseType::kNone);
   return dispatch_result;
 }
 

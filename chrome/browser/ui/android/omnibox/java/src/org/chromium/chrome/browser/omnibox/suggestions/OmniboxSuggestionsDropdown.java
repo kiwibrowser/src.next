@@ -28,7 +28,10 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.chromium.base.TraceEvent;
+import org.chromium.base.metrics.TimingMetric;
 import org.chromium.base.task.PostTask;
+import org.chromium.chrome.browser.flags.CachedFeatureFlags;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.omnibox.R;
 import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
 import org.chromium.chrome.browser.util.KeyNavigationUtil;
@@ -42,6 +45,13 @@ import java.lang.annotation.RetentionPolicy;
 /** A widget for showing a list of omnibox suggestions. */
 public class OmniboxSuggestionsDropdown extends RecyclerView {
     private static final long DEFERRED_INITIAL_SHRINKING_LAYOUT_FROM_IME_DURATION_MS = 300;
+    /**
+     * Used to defer the accessibility announcement for list content.
+     * This makes core difference when the list is first shown up, when the interaction with the
+     * Omnibox and presence of virtual keyboard may actually cause throttling of the Accessibility
+     * events.
+     */
+    private static final long LIST_COMPOSITION_ACCESSIBILITY_ANNOUNCEMENT_DELAY_MS = 300;
 
     private final int mStandardBgColor;
     private final int mIncognitoBgColor;
@@ -129,18 +139,30 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
      */
     private class HistogramRecordingRecycledViewPool extends RecycledViewPool {
         HistogramRecordingRecycledViewPool() {
-            setMaxRecycledViews(OmniboxSuggestionUiType.CLIPBOARD_SUGGESTION, 1);
+            // The list below should include suggestions defined in OmniboxSuggestionUiType
+            // and specify the maximum anticipated volume of suggestions of each type.
+            // For readability reasons, keep the order of this list same as the order of
+            // the types defined in OmniboxSuggestionUiType.
+            setMaxRecycledViews(OmniboxSuggestionUiType.DEFAULT, 20);
             setMaxRecycledViews(OmniboxSuggestionUiType.EDIT_URL_SUGGESTION, 1);
             setMaxRecycledViews(OmniboxSuggestionUiType.ANSWER_SUGGESTION, 1);
-            setMaxRecycledViews(OmniboxSuggestionUiType.DEFAULT, 15);
             setMaxRecycledViews(OmniboxSuggestionUiType.ENTITY_SUGGESTION, 5);
-            setMaxRecycledViews(OmniboxSuggestionUiType.TAIL_SUGGESTION, 10);
+            setMaxRecycledViews(OmniboxSuggestionUiType.TAIL_SUGGESTION, 15);
+            setMaxRecycledViews(OmniboxSuggestionUiType.CLIPBOARD_SUGGESTION, 1);
+            setMaxRecycledViews(OmniboxSuggestionUiType.HEADER, 4);
+            setMaxRecycledViews(OmniboxSuggestionUiType.TILE_NAVSUGGEST, 1);
+            setMaxRecycledViews(OmniboxSuggestionUiType.PEDAL_SUGGESTION, 3);
         }
 
         @Override
         public ViewHolder getRecycledView(int viewType) {
             ViewHolder result = super.getRecycledView(viewType);
             SuggestionsMetrics.recordSuggestionViewReused(result != null);
+            if (result == null) {
+                SuggestionsMetrics.recordSuggestionsViewCreatedType(viewType);
+            } else {
+                SuggestionsMetrics.recordSuggestionsViewReusedType(viewType);
+            }
             return result;
         }
     }
@@ -173,9 +195,13 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
         });
 
         final Resources resources = context.getResources();
+        int paddingSide =
+                CachedFeatureFlags.isEnabled(ChromeFeatureList.OMNIBOX_MODERNIZE_VISUAL_UPDATE)
+                ? resources.getDimensionPixelOffset(R.dimen.omnibox_suggestion_list_padding_side)
+                : 0;
         int paddingBottom =
                 resources.getDimensionPixelOffset(R.dimen.omnibox_suggestion_list_padding_bottom);
-        ViewCompat.setPaddingRelative(this, 0, 0, 0, paddingBottom);
+        ViewCompat.setPaddingRelative(this, paddingSide, 0, paddingSide, paddingBottom);
 
         mStandardBgColor = ChromeColors.getDefaultThemeColor(context, false);
         mIncognitoBgColor = ChromeColors.getDefaultThemeColor(context, true);
@@ -293,8 +319,7 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         try (TraceEvent tracing = TraceEvent.scoped("OmniboxSuggestionsList.Measure");
-                SuggestionsMetrics.TimingMetric metric =
-                        SuggestionsMetrics.recordSuggestionListMeasureTime()) {
+                TimingMetric metric = SuggestionsMetrics.recordSuggestionListMeasureTime()) {
             int anchorBottomRelativeToContent = calculateAnchorBottomRelativeToContent();
             maybeUpdateLayoutParams(anchorBottomRelativeToContent);
 
@@ -392,8 +417,7 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
     @Override
     protected void onLayout(boolean changed, int l, int t, int r, int b) {
         try (TraceEvent tracing = TraceEvent.scoped("OmniboxSuggestionsList.Layout");
-                SuggestionsMetrics.TimingMetric metric =
-                        SuggestionsMetrics.recordSuggestionListLayoutTime()) {
+                TimingMetric metric = SuggestionsMetrics.recordSuggestionListLayoutTime()) {
             super.onLayout(changed, l, t, r, b);
         }
     }
@@ -507,6 +531,13 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
         } else {
             mAlignmentViewLayoutListener = null;
         }
+    }
+
+    public void emitWindowContentChanged() {
+        PostTask.postDelayedTask(UiThreadTaskTraits.DEFAULT, () -> {
+            announceForAccessibility(getContext().getString(
+                    R.string.accessibility_omnibox_suggested_items, mAdapter.getItemCount()));
+        }, LIST_COMPOSITION_ACCESSIBILITY_ANNOUNCEMENT_DELAY_MS);
     }
 
     private void adjustSidePadding() {

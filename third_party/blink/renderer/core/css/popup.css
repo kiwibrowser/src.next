@@ -1,0 +1,46 @@
+/*
+ * The default style sheet used to render elements with a `popup`
+ * content attribute (with HTMLPopupAttribute feature enabled).
+ *
+ * Copyright 2021 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
+
+@namespace "http://www.w3.org/1999/xhtml";
+
+[popup]:-internal-popup-hidden {
+  display: none;
+}
+
+[popup="" i],
+[popup=auto i],
+[popup=hint i],
+[popup=manual i] {
+  position: fixed;
+  inset-inline-start: 0;
+  inset-inline-end: 0;
+  inset-block-start: 0;
+  inset-block-end: 0;
+  width: fit-content;
+  height: fit-content;
+  margin: auto;
+  border: solid;
+  overflow: auto;
+  padding: 1em;
+  color: CanvasText;
+  background-color: Canvas;
+}
+
+[popup="" i]::backdrop,
+[popup=auto i]::backdrop,
+[popup=hint i]::backdrop,
+[popup=manual i]::backdrop {
+    position: fixed;
+    inset-inline-start: 0;
+    inset-inline-end: 0;
+    inset-block-start: 0;
+    inset-block-end: 0;
+    background: transparent;
+    pointer-events: none !important;
+}

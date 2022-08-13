@@ -113,32 +113,10 @@ const int HttpNetworkTransaction::kDrainBodyBufferSize;
 
 HttpNetworkTransaction::HttpNetworkTransaction(RequestPriority priority,
                                                HttpNetworkSession* session)
-    : pending_auth_target_(HttpAuth::AUTH_NONE),
-      io_callback_(base::BindRepeating(&HttpNetworkTransaction::OnIOComplete,
+    : io_callback_(base::BindRepeating(&HttpNetworkTransaction::OnIOComplete,
                                        base::Unretained(this))),
       session_(session),
-      request_(nullptr),
-      priority_(priority),
-      headers_valid_(false),
-      can_send_early_data_(false),
-      configured_client_cert_for_server_(false),
-      request_headers_(),
-#if BUILDFLAG(ENABLE_REPORTING)
-      network_error_logging_report_generated_(false),
-      request_reporting_upload_depth_(0),
-#endif  // BUILDFLAG(ENABLE_REPORTING)
-      read_buf_len_(0),
-      total_received_bytes_(0),
-      total_sent_bytes_(0),
-      next_state_(STATE_NONE),
-      establishing_tunnel_(false),
-      enable_ip_based_pooling_(true),
-      enable_alternative_services_(true),
-      websocket_handshake_stream_base_create_helper_(nullptr),
-      net_error_details_(),
-      retry_attempts_(0),
-      num_restarts_(0) {
-}
+      priority_(priority) {}
 
 HttpNetworkTransaction::~HttpNetworkTransaction() {
 #if BUILDFLAG(ENABLE_REPORTING)
@@ -360,7 +338,7 @@ void HttpNetworkTransaction::DidDrainBodyForAuthRestart(bool keep_alive) {
   if (stream_.get()) {
     total_received_bytes_ += stream_->GetTotalReceivedBytes();
     total_sent_bytes_ += stream_->GetTotalSentBytes();
-    HttpStream* new_stream = nullptr;
+    std::unique_ptr<HttpStream> new_stream;
     if (keep_alive && stream_->CanReuseConnection()) {
       // We should call connection_->set_idle_time(), but this doesn't occur
       // often enough to be worth the trouble.
@@ -380,7 +358,7 @@ void HttpNetworkTransaction::DidDrainBodyForAuthRestart(bool keep_alive) {
       DCHECK_EQ(0, new_stream->GetTotalSentBytes());
       next_state_ = STATE_CONNECTED_CALLBACK;
     }
-    stream_.reset(new_stream);
+    stream_ = std::move(new_stream);
   }
 
   // Reset the other member variables.
@@ -908,8 +886,17 @@ int HttpNetworkTransaction::DoConnectedCallback() {
   // HttpStream::GetAcceptChViaAlps() needs the HttpRequestInfo to retrieve
   // the ACCEPT_CH frame payload.
   stream_->RegisterRequest(request_);
-  stream_->GetRemoteEndpoint(&remote_endpoint_);
   next_state_ = STATE_CONNECTED_CALLBACK_COMPLETE;
+
+  int result = stream_->GetRemoteEndpoint(&remote_endpoint_);
+  if (result != OK) {
+    // `GetRemoteEndpoint()` fails when the underlying socket is not connected
+    // anymore, even though the peer's address is known. This can happen when
+    // we picked a socket from socket pools while it was still connected, but
+    // the remote side closes it before we get a chance to send our request.
+    // See if we should retry the request based on the error code we got.
+    return HandleIOError(result);
+  }
 
   if (connected_callback_.is_null()) {
     return OK;
@@ -1216,13 +1203,18 @@ int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
   // Unless this is a WebSocket request, in which case we pass it on up.
   if (response_.headers->response_code() / 100 == 1 &&
       !ForWebSocketHandshake()) {
-    response_.headers = new HttpResponseHeaders(std::string());
+    response_.headers =
+        base::MakeRefCounted<HttpResponseHeaders>(std::string());
     next_state_ = STATE_READ_HEADERS;
     return OK;
   }
 
+  const bool has_body_with_null_source =
+      request_->upload_data_stream &&
+      request_->upload_data_stream->has_null_source();
   if (response_.headers->response_code() == 421 &&
-      (enable_ip_based_pooling_ || enable_alternative_services_)) {
+      (enable_ip_based_pooling_ || enable_alternative_services_) &&
+      !has_body_with_null_source) {
 #if BUILDFLAG(ENABLE_REPORTING)
     GenerateNetworkErrorLoggingReport(OK);
 #endif  // BUILDFLAG(ENABLE_REPORTING)
@@ -1294,7 +1286,9 @@ int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
 
 int HttpNetworkTransaction::DoReadBody() {
   DCHECK(read_buf_.get());
-  DCHECK_GT(read_buf_len_, 0);
+  // TODO(https://crbug.com/1335423): Change to DCHECK_GT() or remove after bug
+  // is fixed.
+  CHECK_GT(read_buf_len_, 0);
   DCHECK(stream_ != nullptr);
 
   next_state_ = STATE_READ_BODY_COMPLETE;
@@ -1486,6 +1480,13 @@ void HttpNetworkTransaction::GenerateNetworkErrorLoggingReport(int rv) {
   details.user_agent = request_user_agent_;
   if (!remote_endpoint_.address().empty()) {
     details.server_ip = remote_endpoint_.address();
+  } else if (!connection_attempts_.empty()) {
+    // When we failed to connect to the server, `remote_endpoint_` is not set.
+    // In such case, we use the last endpoint address of `connection_attempts_`
+    // for the NEL report. This address information is important for the
+    // downgrade step to protect against port scan attack.
+    // https://www.w3.org/TR/network-error-logging/#generate-a-network-error-report
+    details.server_ip = connection_attempts_.back().endpoint.address();
   } else {
     details.server_ip = IPAddress();
   }
@@ -1574,9 +1575,10 @@ int HttpNetworkTransaction::HandleSSLClientAuthError(int error) {
 }
 
 // This method determines whether it is safe to resend the request after an
-// IO error.  It can only be called in response to request header or body
-// write errors or response header read errors.  It should not be used in
-// other cases, such as a Connect error.
+// IO error. It should only be called in response to errors received before
+// final set of response headers have been successfully parsed, that the
+// transaction may need to be retried on.
+// It should not be used in other cases, such as a Connect error.
 int HttpNetworkTransaction::HandleIOError(int error) {
   // Because the peer may request renegotiation with client authentication at
   // any time, check and handle client authentication errors.
@@ -1723,9 +1725,7 @@ bool HttpNetworkTransaction::ShouldResendRequest() const {
   // NOTE: we resend a request only if we reused a keep-alive connection.
   // This automatically prevents an infinite resend loop because we'll run
   // out of the cached keep-alive connections eventually.
-  if (connection_is_proven && !has_received_headers)
-    return true;
-  return false;
+  return connection_is_proven && !has_received_headers;
 }
 
 bool HttpNetworkTransaction::HasExceededMaxRetries() const {

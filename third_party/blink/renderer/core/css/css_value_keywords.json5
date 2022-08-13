@@ -1,0 +1,1537 @@
+{
+  // The mode argument is used to limit the keyword to be used only for certain
+  // CSSParserModes. Values that have the prefix -internal- are only allowed by
+  // CSSParserModes listed in CSSValueKeywordsWriter, which feeds the generated
+  // code for isValueAllowedInMode.
+
+  parameters: {
+    mode: {},
+  },
+
+  //
+  // CSS value names
+  //
+
+  data: [
+
+    "inherit",
+    "initial",
+    //
+    // outline-style
+    // border-top-style
+    // border-bottom-style
+    // border-left-style
+    // border-right-style
+    // The order here must match the order of the EBorderStyle enum in ComputedStyleConstants.h.
+    "none",
+    "hidden",
+    "inset",
+    "groove",
+    "outset",
+    "ridge",
+    "dotted",
+    "dashed",
+    "solid",
+    "double",
+
+    //
+    // font
+    //
+    "caption",
+    "icon",
+    "menu",
+    "message-box",
+    "small-caption",
+    "-webkit-mini-control",
+    "-webkit-small-control",
+    "-webkit-control",
+    "status-bar",
+
+    //
+    // font-style
+    //
+    //normal
+    "italic",
+    "oblique",
+    // The following is only allowed in @font-face:
+    "all",
+
+    // font-variant-ligatures:
+    //
+    // normal
+    "common-ligatures",
+    "no-common-ligatures",
+    "discretionary-ligatures",
+    "no-discretionary-ligatures",
+    "historical-ligatures",
+    "no-historical-ligatures",
+    "contextual",
+    "no-contextual",
+
+    // font-variant-caps:
+    //
+    // normal
+    "small-caps",
+    "all-small-caps",
+    "petite-caps",
+    "all-petite-caps",
+    "unicase",
+    "titling-caps",
+
+    // font-variant-caps:
+    //
+    // normal
+    "jis78",
+    "jis83",
+    "jis90",
+    "jis04",
+    "simplified",
+    "traditional",
+    "full-width",
+    "proportional-width",
+    "ruby",
+
+    // font-variant-numeric
+    // normal
+    "lining-nums",
+    "oldstyle-nums",
+    "proportional-nums",
+    "tabular-nums",
+    "diagonal-fractions",
+    "stacked-fractions",
+    "ordinal",
+    "slashed-zero",
+
+    //
+    // font-weight
+    //
+    "normal",
+    "bold",
+    "bolder",
+    "lighter",
+
+    // font-synthesis
+    // none
+    // style
+    // small-caps
+    "weight",
+
+    //
+    // font-stretch
+    //
+    "ultra-condensed",
+    "extra-condensed",
+    "condensed",
+    "semi-condensed",
+    "semi-expanded",
+    "expanded",
+    "extra-expanded",
+    "ultra-expanded",
+
+    //
+    // font-size
+    //
+    "xx-small",
+    "x-small",
+    "small",
+    "medium",
+    "large",
+    "x-large",
+    "xx-large",
+    "xxx-large",
+    "smaller",
+    "larger",
+    "-webkit-xxx-large",
+    // math
+
+    //
+    // font-family (<generic-family> in CSS 2.1)
+    //
+    // If you modify this list, please make sure you update css_parsing_utils's
+    // ConsumeGenericFamily, ComputedStyleUtils::IdentifierForFamily and
+    // FontFamily::InferredTypeFor accordingly.
+    "serif",
+    "sans-serif",
+    "cursive",
+    "fantasy",
+    "monospace",
+    "system-ui",
+    "-webkit-body",
+    "math",
+
+    //
+    // font-display
+    //
+    //auto
+    //block
+    "swap",
+    "fallback",
+    "optional",
+
+    //
+    // *-color
+    //
+    "aqua",
+    "black",
+    "blue",
+    "fuchsia",
+    "gray",
+    "green",
+    "lime",
+    "maroon",
+    "navy",
+    "olive",
+    "orange",
+    "purple",
+    "red",
+    "silver",
+    "teal",
+    "white",
+    "yellow",
+    "transparent",
+    "-webkit-link",
+    "-webkit-activelink",
+    "activeborder",
+    "activecaption",
+    "activetext",
+    "appworkspace",
+    "background",
+    "buttonborder",
+    "buttonface",
+    "buttonhighlight",
+    "buttonshadow",
+    "buttontext",
+    "canvas",
+    "canvastext",
+    "captiontext",
+    "field",
+    "fieldtext",
+    "graytext",
+    "highlight",
+    "highlighttext",
+    "inactiveborder",
+    "inactivecaption",
+    "inactivecaptiontext",
+    "infobackground",
+    "infotext",
+    "linktext",
+    "mark",
+    "marktext",
+    "menutext",
+    "selecteditem",
+    "selecteditemtext",
+    "scrollbar",
+    "threeddarkshadow",
+    "threedface",
+    "threedhighlight",
+    "threedlightshadow",
+    "threedshadow",
+    "visitedtext",
+    "window",
+    "windowframe",
+    "windowtext",
+    "-internal-active-list-box-selection",
+    "-internal-active-list-box-selection-text",
+    "-internal-inactive-list-box-selection",
+    "-internal-inactive-list-box-selection-text",
+    {
+      name: "-webkit-focus-ring-color",
+      mode: "QuirksOrUASheet",
+    },
+    "currentcolor",
+    "grey",
+    //
+    // Value used to implement the behavior in:
+    // https://quirks.spec.whatwg.org/#the-tables-inherit-color-from-body-quirk
+    "-internal-quirk-inherit",
+    //
+    // css-text-decor
+    // <https://github.com/w3c/csswg-drafts/issues/7522>
+    "-internal-spelling-error-color",
+    "-internal-grammar-error-color",
+
+    //
+    // "Extended" named colors
+    //
+    "aliceblue",
+    "antiquewhite",
+    "aquamarine",
+    "azure",
+    "beige",
+    "bisque",
+    "blanchedalmond",
+    "blueviolet",
+    "brown",
+    "burlywood",
+    "cadetblue",
+    "chartreuse",
+    "chocolate",
+    "coral",
+    "cornflowerblue",
+    "cornsilk",
+    "crimson",
+    "cyan",
+    "darkblue",
+    "darkcyan",
+    "darkgoldenrod",
+    "darkgray",
+    "darkgreen",
+    "darkgrey",
+    "darkkhaki",
+    "darkmagenta",
+    "darkolivegreen",
+    "darkorange",
+    "darkorchid",
+    "darkred",
+    "darksalmon",
+    "darkseagreen",
+    "darkslateblue",
+    "darkslategray",
+    "darkslategrey",
+    "darkturquoise",
+    "darkviolet",
+    "deeppink",
+    "deepskyblue",
+    "dimgray",
+    "dimgrey",
+    "dodgerblue",
+    "firebrick",
+    "floralwhite",
+    "forestgreen",
+    "gainsboro",
+    "ghostwhite",
+    "gold",
+    "goldenrod",
+    "greenyellow",
+    "honeydew",
+    "hotpink",
+    "indianred",
+    "indigo",
+    "ivory",
+    "khaki",
+    "lavender",
+    "lavenderblush",
+    "lawngreen",
+    "lemonchiffon",
+    "lightblue",
+    "lightcoral",
+    "lightcyan",
+    "lightgoldenrodyellow",
+    "lightgray",
+    "lightgreen",
+    "lightgrey",
+    "lightpink",
+    "lightsalmon",
+    "lightseagreen",
+    "lightskyblue",
+    "lightslategray",
+    "lightslategrey",
+    "lightsteelblue",
+    "lightyellow",
+    "limegreen",
+    "linen",
+    "magenta",
+    "mediumaquamarine",
+    "mediumblue",
+    "mediumorchid",
+    "mediumpurple",
+    "mediumseagreen",
+    "mediumslateblue",
+    "mediumspringgreen",
+    "mediumturquoise",
+    "mediumvioletred",
+    "midnightblue",
+    "mintcream",
+    "mistyrose",
+    "moccasin",
+    "navajowhite",
+    "oldlace",
+    "olivedrab",
+    "orangered",
+    "orchid",
+    "palegoldenrod",
+    "palegreen",
+    "paleturquoise",
+    "palevioletred",
+    "papayawhip",
+    "peachpuff",
+    "peru",
+    "pink",
+    "plum",
+    "powderblue",
+    "rebeccapurple",
+    "rosybrown",
+    "royalblue",
+    "saddlebrown",
+    "salmon",
+    "sandybrown",
+    "seagreen",
+    "seashell",
+    "sienna",
+    "skyblue",
+    "slateblue",
+    "slategray",
+    "slategrey",
+    "snow",
+    "springgreen",
+    "steelblue",
+    "tan",
+    "thistle",
+    "tomato",
+    "turquoise",
+    "violet",
+    "wheat",
+    "whitesmoke",
+    "yellowgreen",
+
+    //
+    // background-repeat
+    //
+    "repeat",
+    "repeat-x",
+    "repeat-y",
+    "no-repeat",
+    // round
+    // space
+    //
+    // -webkit-mask-composite
+    //
+    "clear",
+    "copy",
+    "source-over",
+    "source-in",
+    "source-out",
+    "source-atop",
+    "destination-over",
+    "destination-in",
+    "destination-out",
+    "destination-atop",
+    "xor",
+    // highlight
+    "plus-lighter",
+    //
+    // vertical-align
+    //
+    "baseline",
+    "middle",
+    "sub",
+    "super",
+    "text-top",
+    "text-bottom",
+    "top",
+    "bottom",
+    // HTML alignment MIDDLE has no corresponding CSS alignment
+    "-webkit-baseline-middle",
+    //
+    // text-align
+    // The order and contents this block MUST match the kTextAlign[Last] cases
+    // of CSSParserFastPaths::IsValidKeywordPropertyAndValue().
+    //
+    "-webkit-auto",
+    "left",
+    "right",
+    "center",
+    "justify",
+    "-webkit-left",
+    "-webkit-right",
+    "-webkit-center",
+    "-webkit-match-parent",
+    "-internal-center",
+    //
+    // float, clear, etc.
+    //
+    "inline-start",
+    "inline-end",
+    //
+    // text-justify
+    //
+    //auto
+    //none
+    "inter-word",
+    "distribute",
+    //
+    // list-style-position
+    //
+    "outside",
+    "inside",
+    //
+    // list-style-type
+    //
+    "disc",
+    "circle",
+    "square",
+    "disclosure-open",
+    "disclosure-closed",
+    "decimal",
+    //none
+    //
+    // The order must match the order found in IsDisplayOutside().
+    "inline",
+    "block",
+    // The order must match the order found in IsDisplayInside().
+    "flow-root",
+    "table",
+    "flex",
+    "grid",
+    //"math",
+    // The order must match the order found in IsDisplayBox().
+    "contents",
+    //none
+    // The order must match the order found in IsDisplayInternal().
+    "table-row-group",
+    "table-header-group",
+    "table-footer-group",
+    "table-row",
+    "table-column-group",
+    "table-column",
+    "table-cell",
+    "table-caption",
+    // The order must match the order found in IsDisplayLegacy().
+    "inline-block",
+    "inline-table",
+    "inline-flex",
+    "inline-grid",
+    "-webkit-box",
+    "-webkit-inline-box",
+    "-webkit-flex",
+    "-webkit-inline-flex",
+    "layout",
+    "inline-layout",
+    "list-item",
+    //
+    // cursor
+    // The order of this enum must match the order found in CSSPropertyParser::ConsumeCursor().
+    //
+    "auto",
+    "crosshair",
+    "default",
+    "pointer",
+    "move",
+    "vertical-text",
+    "cell",
+    "context-menu",
+    "alias",
+    // copy
+    "progress",
+    "no-drop",
+    "not-allowed",
+    "zoom-in",
+    "zoom-out",
+    "e-resize",
+    "ne-resize",
+    "nw-resize",
+    "n-resize",
+    "se-resize",
+    "sw-resize",
+    "s-resize",
+    "w-resize",
+    "ew-resize",
+    "ns-resize",
+    "nesw-resize",
+    "nwse-resize",
+    "col-resize",
+    "row-resize",
+    "text",
+    "wait",
+    "help",
+    "all-scroll",
+    "grab",
+    "grabbing",
+    "-webkit-grab",
+    "-webkit-grabbing",
+    "-webkit-zoom-in",
+    "-webkit-zoom-out",
+    // none
+    //
+    // direction
+    //
+    "ltr",
+    "rtl",
+    //
+    // text-transform
+    //
+    "capitalize",
+    "uppercase",
+    "lowercase",
+    //none
+    "math-auto",
+    //
+    // visibility
+    //
+    "visible",
+    //hidden
+    "collapse",
+    //
+    // Unordered rest
+    //
+    "a3",
+    "a4",
+    "a5",
+    "above",
+    "absolute",
+    "always",
+    "avoid",
+    "b4",
+    "b5",
+    "below",
+    "bidi-override",
+    "blink",
+    "both",
+    "break-spaces",
+    "close-quote",
+    "embed",
+    "fixed",
+    "hand",
+    "hide",
+    "isolate",
+    "isolate-override",
+    "plaintext",
+    "-webkit-isolate",
+    "-webkit-isolate-override",
+    "-webkit-plaintext",
+    "jis-b5",
+    "jis-b4",
+    "landscape",
+    "ledger",
+    "legal",
+    "letter",
+    "line-through",
+    "local",
+    "no-close-quote",
+    "no-open-quote",
+    "nowrap",
+    "open-quote",
+    "overlay",
+    "overline",
+    "portrait",
+    "pre",
+    "pre-line",
+    "pre-wrap",
+    "relative",
+    "scroll",
+    "separate",
+    "show",
+    "static",
+    "thick",
+    "thin",
+    "underline",
+    "wavy",
+    "-webkit-nowrap",
+
+    // math-shift
+    // normal
+    "compact",
+
+    // math-style
+    // normal
+    // compact
+
+    // CSS3 Values
+    // box-align
+    "stretch",
+    "start",
+    "end",
+    //center
+    //baseline
+
+    // box-decoration-break
+    "clone",
+    "slice",
+
+    // box-direction
+    // normal
+    "reverse",
+
+    // box-orient
+    "horizontal",
+    "vertical",
+    "inline-axis",
+    "block-axis",
+
+    // box-pack
+    // start
+    // end
+    // center
+    // justify
+
+    // align-content
+    // start
+    // end
+    "flex-start",
+    "flex-end",
+    // center
+    "space-between",
+    "space-around",
+    "space-evenly",
+    // stretch
+    "unsafe",
+    "safe",
+
+    // align-items / align-self
+    // flex-start
+    // flex-end
+    // center
+    // baseline
+    // last baseline,
+    // first baseline,
+    // stretch
+
+    // justify-content
+    // start
+    // end
+    // flex-start
+    // flex-end
+    // center
+    // space-between
+    // space-around
+    // space-evenly
+    // stretch
+    // unsafe
+    // safe
+
+
+    // flex-flow
+    "row",
+    "row-reverse",
+    "column",
+    "column-reverse",
+    // nowrap
+    "wrap",
+    "wrap-reverse",
+
+    // grid-auto-flow
+    "auto-flow",
+    "dense",
+
+    //
+    // -webkit-user-modify
+    //
+    "read-only",
+    "read-write",
+    "read-write-plaintext-only",
+
+    //
+    // -webkit-user-drag
+    //
+    "element",
+
+    //
+    // CSS3 intrinsic dimension keywords
+    //
+    "-webkit-min-content",
+    "-webkit-max-content",
+    "-webkit-fill-available",
+    "-webkit-fit-content",
+    "min-content",
+    "max-content",
+    "fit-content",
+
+    //
+    // text-overflow
+    //
+    "clip",
+    "ellipsis",
+
+    //
+    // text-decoration-line
+    //
+    "spelling-error",
+    "grammar-error",
+
+    //
+    // text-decoration-skip-ink
+    //
+    // auto
+    // none
+
+    //
+    // text-decoration-thickness
+    //
+    // auto
+    "from-font",
+
+    // text-underline-position
+    // auto
+    // "from-font",
+    // under
+    // left
+    // right
+
+    //
+    // word-break
+    //
+    "break-all",
+    "keep-all",
+
+    //
+    // word-wrap
+    //
+    "break-word",
+
+    //
+    // nbsp-mode
+    //
+    "space",
+
+    //
+    // -webkit-line-break
+    //
+    // auto
+    "loose",
+    // normal
+    "strict",
+    "after-white-space",
+    "anywhere",
+
+    // hyphens
+    "manual",
+
+    // -webkit-appearance
+    // The order here must match the order in the ControlPart enum in
+    // theme_types.h.
+    // All appearance values that should be accepted by the parser should be
+    // listed between 'checkbox' and 'textarea'.
+    "checkbox",
+    "radio",
+    "push-button",
+    "square-button",
+    "button",
+    "inner-spin-button",
+    "listbox",
+    "media-slider",
+    "media-sliderthumb",
+    "media-volume-slider",
+    "media-volume-sliderthumb",
+    "-internal-media-control",
+    "menulist",
+    "menulist-button",
+    "meter",
+    "progress-bar",
+    "slider-horizontal",
+    "slider-vertical",
+    "sliderthumb-horizontal",
+    "sliderthumb-vertical",
+    "searchfield",
+    "searchfield-cancel-button",
+    "textfield",
+    "textarea",
+
+    //
+    // border-image
+    //
+    // stretch
+    // repeat
+    "round",
+
+    //
+    // background-clip/background-origin
+    //
+    // border/content/padding are deprecated and ultimately will only apply to the -webkit- form of these properties.
+    // border-box/content-box/padding-box should be used instead.
+    //
+    "border",
+    "border-box",
+    "content",
+    "content-box",
+    "padding",
+    "padding-box",
+
+    // CSS 3 SHAPES
+    "margin-box",
+
+    //
+    // background-size
+    //
+    "contain",
+    "cover",
+
+    //
+    // -webkit-rtl-ordering
+    //
+    "logical",
+    "visual",
+
+    //
+    // animation-direction
+    //
+    "alternate",
+    "alternate-reverse",
+
+    //
+    // animation-fill-mode
+    //
+    "forwards",
+    "backwards",
+    // both
+
+    //
+    // animation-iteration-count
+    "infinite",
+
+    //
+    // animation-play-state
+    //
+    "running",
+    "paused",
+
+    //
+    // transform-style
+    //
+    "flat",
+    "preserve-3d",
+
+    //
+    // transform-box
+    //
+    // border-box
+    "fill-box",
+    "view-box",
+
+    //
+    // transition-timing-function
+    // animation-timing-function
+    //
+    "ease",
+    "linear",
+    "ease-in",
+    "ease-out",
+    "ease-in-out",
+    "jump-both",
+    "jump-end",
+    "jump-none",
+    "jump-start",
+    "step-start",
+    "step-end",
+    "steps",
+    "frames",
+    "cubic-bezier",
+
+    //
+    // zoom
+    //
+    "document",
+    "reset",
+
+    //
+    // user-zoom
+    //
+    // fixed
+    "zoom",
+
+    //
+    // pointer-events
+    //
+    "visiblepainted",
+    "visiblefill",
+    "visiblestroke",
+    //visible
+    "painted",
+    "fill",
+    "stroke",
+    "bounding-box",
+    //all
+    //none
+
+    //
+    // speech
+    //
+    "spell-out",
+    "digits",
+    "literal-punctuation",
+    "no-punctuation",
+
+    //
+    // -webkit-font-smoothing
+    //
+    // auto
+    // none
+    "antialiased",
+    "subpixel-antialiased",
+
+    // text-rendering
+    //auto
+    "optimizespeed",
+    "optimizelegibility",
+    "geometricprecision",
+
+    // shape-rendering
+    //auto
+    //optimizespeed
+    //geometricprecision
+    "crispedges",
+
+    // -webkit-color-adjust
+    "economy",
+    "exact",
+
+    // -webkit-writing-mode
+    // SVG compatibility
+    "lr",
+    "rl",
+    "tb",
+    "lr-tb",
+    "rl-tb",
+    "tb-rl",
+    // Standard values from CSS3
+    "horizontal-tb",
+    "vertical-rl",
+    "vertical-lr",
+
+    // -webkit-ruby-position
+    "after",
+    "before",
+
+    // text-emphasis-position
+    "over",
+    "under",
+    //right
+    //left
+
+    // -webkit-text-emphasis-style
+    "filled",
+    "open",
+    "dot",
+    // circle
+    "double-circle",
+    "triangle",
+    "sesame",
+
+    // -webkit-radial-gradient
+    // circle
+    "ellipse",
+    "closest-side",
+    "closest-corner",
+    "farthest-side",
+    "farthest-corner",
+    // contain
+    // cover
+
+    // text-orientation/-webkit-text-orientation
+    "mixed",
+    "sideways",
+    "sideways-right",
+    "upright",
+    "vertical-right",
+
+    // -webkit-font-feature-settings
+    "on",
+    "off",
+
+    // image-rendering
+    //auto
+    //optimizespeed
+    "optimizequality",
+    "pixelated",
+    "-webkit-optimize-contrast",
+
+    // image-orientation
+    "from-image",
+
+    // page-orientation
+    // upright
+    "rotate-left",
+    "rotate-right",
+
+    // shape-outside
+    "nonzero",
+    "evenodd",
+    "at",
+    // closest-side
+    // farthest-side
+
+    "alphabetic",
+
+    // (display-mode:) media feature
+    "borderless",
+    "fullscreen",
+    "standalone",
+    "minimal-ui",
+    "browser",
+    "window-controls-overlay",
+
+    // position
+    "sticky",
+
+    // (pointer:) media feature
+    // none
+    "coarse",
+    "fine",
+
+    // (hover:) media feature
+    //  none
+    "on-demand",
+    "hover",
+
+    // blend modes
+    // normal
+    "multiply",
+    "screen",
+    // overlay
+    "darken",
+    "lighten",
+    "color-dodge",
+    "color-burn",
+    "hard-light",
+    "soft-light",
+    "difference",
+    "exclusion",
+    "hue",
+    "saturation",
+    "color",
+    "luminosity",
+
+    // object-fit
+    "scale-down",
+
+    // column-fill
+    "balance",
+
+    // -webkit-app-region
+    "drag",
+    "no-drag",
+
+    // grid-{column|row}-{start|end}
+    "span",
+
+    // grid-template-{columns|rows}
+    "minmax",
+    "subgrid",
+
+    // text-indent
+    "each-line",
+    "hanging",
+
+    // (scan:) media feature
+    "progressive",
+    "interlace",
+
+    //
+    // paint-order
+    //
+    // normal
+    // fill
+    // stroke
+    "markers",
+
+    // mask-type
+    "alpha",
+    "luminance",
+
+    // color-interpolation / color-interpolation-filters
+    // auto
+    "srgb",
+    "linearrgb",
+
+    // stroke-linecap
+    "butt",
+    // round
+    // square
+
+    // stroke-linejoin
+    "miter",
+    // round
+    "bevel",
+
+    // alignment-baseline
+    // auto
+    // baseline
+    "before-edge",
+    "after-edge",
+    // middle
+    "central",
+    "text-before-edge",
+    "text-after-edge",
+    "ideographic",
+    // hanging
+    "mathematical",
+
+    // dominant-baseline
+    // auto
+    "use-script",
+    "no-change",
+    "reset-size",
+
+    // buffered-rendering
+    // auto
+    // static
+    "dynamic",
+
+    // vector-effect
+    // none
+    "non-scaling-stroke",
+
+    //
+    // CSS3 viewport-length keywords
+    //
+    "-internal-extend-to-zoom",
+
+    // isolation
+    // auto
+    // isolate
+
+    // touch-action
+    "pan-x",
+    "pan-y",
+    "pan-left",
+    "pan-right",
+    "pan-up",
+    "pan-down",
+    "manipulation",
+    "pinch-zoom",
+
+    // justify-items / justify-self
+    // auto
+    // stretch
+    // baseline
+    "last-baseline",
+    "first-baseline",
+    "first",
+    "last",
+    // center
+    // start
+    // end
+    "self-start",
+    "self-end",
+    // flex-start
+    // flex-end
+    // left
+    // right
+    // unsafe
+    // safe
+    "legacy",
+
+    // scroll-behavior
+    // auto
+    "smooth",
+
+    // will-change
+    // auto
+    // contents
+    "scroll-position",
+
+    // all
+    // initial
+    // inherit
+    "revert",
+    "revert-layer",
+    "unset",
+
+    // background-image, etc.
+    "linear-gradient",
+    "radial-gradient",
+    "conic-gradient",
+    "repeating-linear-gradient",
+    "repeating-radial-gradient",
+    "repeating-conic-gradient",
+    "paint",
+    "-webkit-cross-fade",
+    "-webkit-gradient",
+    "-webkit-linear-gradient",
+    "-webkit-radial-gradient",
+    "-webkit-repeating-linear-gradient",
+    "-webkit-repeating-radial-gradient",
+    "-webkit-image-set",
+
+    // deprecated gradients
+    "from",
+    "to",
+    "color-stop",
+    "radial",
+
+    // content
+    "attr",
+    "counter",
+    "counters",
+
+    // clip
+    "rect",
+
+    // shapes
+    "polygon",
+
+    // @font-face src
+    "format",
+
+    // (-webkit-)filter
+    "invert",
+    "grayscale",
+    "sepia",
+    "saturate",
+    "hue-rotate",
+    "opacity",
+    "brightness",
+    "contrast",
+    "blur",
+    "drop-shadow",
+    "url",
+
+    // colors
+    "rgb",
+    "rgba",
+    "hsl",
+    "hsla",
+    "hwb",
+    "-internal-light-dark",
+
+    // transform
+    "matrix",
+    "matrix3d",
+    "perspective",
+    "rotate",
+    "rotateX",
+    "rotateY",
+    "rotateZ",
+    "rotate3d",
+    "scale",
+    "scaleX",
+    "scaleY",
+    "scaleZ",
+    "scale3d",
+    "skew",
+    "skewX",
+    "skewY",
+    "translate",
+    "translateX",
+    "translateY",
+    "translateZ",
+    "translate3d",
+
+    // scale
+    "x",
+    "y",
+    "z",
+
+    // offset-path
+    "path",
+    "ray",
+    "sides",
+
+    // math functions
+    // https://drafts.csswg.org/css-values-4/#math
+    "calc",
+    "-webkit-calc",
+    "min",
+    "max",
+    "clamp",
+
+    // Trigonometic functions
+    "sin",
+    "cos",
+    // "tan" - already declared for color value
+    // "atan",
+    // "atan2",
+    // "acos",
+    // "asin",
+
+    //<calc-constant>
+    //https://drafts.csswg.org/css-values/#calc-syntax
+    "infinity",
+    "-infinity",
+    "nan",
+
+    // scroll-snap-type
+    // none
+    // x
+    // y
+    // block
+    // inline
+    // both
+    "mandatory",
+    "proximity",
+
+    // scroll-snap-align
+    // none
+    // start
+    // end
+    // center
+
+    // scroll-snap-stop
+    // normal
+    // always
+
+
+    // containment
+    // paint
+    "style",
+    // layout
+    "size",
+    "block-size",
+    "inline-size",
+
+    // @container
+    "name",
+    "type",
+
+    // grid auto-repeat
+    "auto-fill",
+    "auto-fit",
+
+    "var",
+    "-internal-variable-value",
+    "env",
+
+    // break-before, break-after, break-inside
+    "avoid-page",
+    "page",
+    "recto",
+    "verso",
+    "avoid-column",
+
+    // color-gamut
+    // srgb
+    "p3",
+    "rec2020",
+
+    // math-depth
+    "add",
+    "auto-add",
+
+    // overscroll-behavior
+    // auto,
+    // contain
+    // none
+
+    //scroll-customization
+    // auto
+    // pan-x,
+    // pan-left,
+    // pan-right,
+    // pan-y,
+    // pan-up,
+    // pan-down
+    // none
+
+    // @property
+    "true",
+    "false",
+
+    // (prefers-*:) media features
+    "no-preference",
+
+    // (prefers-color-scheme:) media feature
+    "dark",
+    "light",
+
+    // color-scheme
+    "only",
+
+    // (prefers-reduced-motion:) media feature
+    // (prefers-reduced-data:) media feature
+    "reduce",
+
+    // (forced-colors:) media feature
+    // none
+    "active",
+
+    // forced-color-adjust
+    // auto
+    // none
+    "preserve-parent-color",
+
+    // (navigation-controls) media feature
+    // none
+    "back-button",
+
+    // -internal-empty-line-height
+    // none
+    "fabricated",
+
+    // @supports selector(...)
+    // https://drafts.csswg.org/css-conditional-4/#typedef-supports-selector-fn
+    "selector",
+
+    // (device-posture) media feature
+    "continuous",
+    "folded",
+    "folded-over",
+
+    // scrollbar-gutter
+    // auto
+    "stable",
+    "both-edges",
+
+    // (prefers-contrast:) media feature
+    // no-preference
+    "more",
+    "less",
+    "custom",
+
+    // @counter-style system
+    "cyclic",
+    // fixed,
+    "symbolic",
+    // alphabetic,
+    "numeric",
+    "additive",
+    "extends",
+    // Predefined counter styles that don't use the above systems
+    "-internal-simp-chinese-informal",
+    "-internal-simp-chinese-formal",
+    "-internal-trad-chinese-informal",
+    "-internal-trad-chinese-formal",
+    "-internal-korean-hangul-formal",
+    "-internal-korean-hanja-informal",
+    "-internal-korean-hanja-formal",
+    "-internal-hebrew",
+    "-internal-lower-armenian",
+    "-internal-upper-armenian",
+    "-internal-ethiopic-numeric",
+
+    // @counter-style range
+    // infinite,
+
+    // @counter-style speak-as
+    // auto
+    "bullets",
+    "numbers",
+    "words",
+
+    // ([video]-dynamic-range) media feature
+    "standard",
+    "high",
+
+    // Layered @import rule
+    "layer",
+
+    // toggle-root
+    "group",
+    "self",
+    "cycle",
+    "cycle-on",
+
+    // toggle-trigger
+    "prev",
+    "next",
+    "set",
+
+    // color-contrast()
+    "color-contrast",
+    "vs",
+    "AA",
+    "AA-large",
+    "AAA",
+    "AAA-large",
+
+    // basic-shape functions.
+    "xywh",
+
+    // anchor positioning
+    "anchor",
+    // top,
+    // left,
+    // right,
+    // bottom,
+    // start,
+    // end,
+    // self-start,
+    // self-end,
+    // center,
+    "anchor-size",
+    "width",
+    "height",
+    // block,
+    // inline,
+    "self-block",
+    "self-inline",
+  ],
+}

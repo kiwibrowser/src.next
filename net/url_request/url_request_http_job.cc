@@ -54,6 +54,7 @@
 #include "net/cookies/cookie_store.h"
 #include "net/cookies/cookie_util.h"
 #include "net/cookies/first_party_set_metadata.h"
+#include "net/cookies/parsed_cookie.h"
 #include "net/cookies/same_party_context.h"
 #include "net/filter/brotli_source_stream.h"
 #include "net/filter/filter_source_stream.h"
@@ -107,18 +108,18 @@ base::Value CookieInclusionStatusNetLogParams(
     const std::string& cookie_path,
     const net::CookieInclusionStatus& status,
     net::NetLogCaptureMode capture_mode) {
-  base::Value dict(base::Value::Type::DICTIONARY);
-  dict.SetStringKey("operation", operation);
-  dict.SetStringKey("status", status.GetDebugString());
+  base::Value::Dict dict;
+  dict.Set("operation", operation);
+  dict.Set("status", status.GetDebugString());
   if (net::NetLogCaptureIncludesSensitive(capture_mode)) {
     if (!cookie_name.empty())
-      dict.SetStringKey("name", cookie_name);
+      dict.Set("name", cookie_name);
     if (!cookie_domain.empty())
-      dict.SetStringKey("domain", cookie_domain);
+      dict.Set("domain", cookie_domain);
     if (!cookie_path.empty())
-      dict.SetStringKey("path", cookie_path);
+      dict.Set("path", cookie_path);
   }
-  return dict;
+  return base::Value(std::move(dict));
 }
 
 // Records details about the most-specific trust anchor in |spki_hashes|,
@@ -228,18 +229,7 @@ URLRequestHttpJob::URLRequestHttpJob(
     URLRequest* request,
     const HttpUserAgentSettings* http_user_agent_settings)
     : URLRequestJob(request),
-      num_cookie_lines_left_(0),
-      priority_(DEFAULT_PRIORITY),
-      response_info_(nullptr),
-      proxy_auth_state_(AUTH_STATE_DONT_NEED_AUTH),
-      server_auth_state_(AUTH_STATE_DONT_NEED_AUTH),
-      read_in_progress_(false),
-      throttling_entry_(nullptr),
-      done_(false),
-      awaiting_callback_(false),
-      http_user_agent_settings_(http_user_agent_settings),
-      total_received_bytes_from_previous_transactions_(0),
-      total_sent_bytes_from_previous_transactions_(0) {
+      http_user_agent_settings_(http_user_agent_settings) {
   URLRequestThrottlerManager* manager = request->context()->throttler_manager();
   if (manager)
     throttling_entry_ = manager->RegisterRequestUrl(request->url());
@@ -278,6 +268,9 @@ void URLRequestHttpJob::Start() {
       net::MutableNetworkTrafficAnnotationTag(request_->traffic_annotation());
   request_info_.socket_tag = request_->socket_tag();
   request_info_.idempotency = request_->GetIdempotency();
+  request_info_.pervasive_payloads_index_for_logging =
+      request_->pervasive_payloads_index_for_logging();
+  request_info_.checksum = request_->expected_response_checksum();
 #if BUILDFLAG(ENABLE_REPORTING)
   request_info_.reporting_upload_depth = request_->reporting_upload_depth();
 #endif
@@ -342,7 +335,11 @@ void URLRequestHttpJob::OnGotFirstPartySetMetadata(
 
     cookie_partition_key_ = CookiePartitionKey::FromNetworkIsolationKey(
         request_->isolation_info().network_isolation_key(),
-        base::OptionalOrNullptr(first_party_set_metadata_.top_frame_owner()));
+        base::OptionalOrNullptr(
+            first_party_set_metadata_.top_frame_entry().has_value()
+                ? absl::make_optional(
+                      first_party_set_metadata_.top_frame_entry()->primary())
+                : absl::nullopt));
     AddCookieHeaderAndStart();
   } else {
     StartTransaction();
@@ -582,50 +579,16 @@ void URLRequestHttpJob::StartTransactionInternal() {
 }
 
 void URLRequestHttpJob::AddExtraHeaders() {
-  if (!request_info_.extra_headers.HasHeader(
-          HttpRequestHeaders::kAcceptEncoding)) {
-    // If a range is specifically requested, set the "Accepted Encoding" header
-    // to "identity"
-    if (request_info_.extra_headers.HasHeader(HttpRequestHeaders::kRange)) {
-      request_info_.extra_headers.SetHeader(HttpRequestHeaders::kAcceptEncoding,
-                                            "identity");
-    } else {
-      // Supply Accept-Encoding headers first so that it is more likely that
-      // they will be in the first transmitted packet. This can sometimes make
-      // it easier to filter and analyze the streams to assure that a proxy has
-      // not damaged these headers. Some proxies deliberately corrupt
-      // Accept-Encoding headers.
-      std::vector<std::string> advertised_encoding_names;
-      if (request_->Supports(SourceStream::SourceType::TYPE_GZIP)) {
-        advertised_encoding_names.push_back("gzip");
-      }
-      if (request_->Supports(SourceStream::SourceType::TYPE_DEFLATE)) {
-        advertised_encoding_names.push_back("deflate");
-      }
-      // Advertise "br" encoding only if transferred data is opaque to proxy.
-      if (request()->context()->enable_brotli() &&
-          request_->Supports(SourceStream::SourceType::TYPE_BROTLI)) {
-        if (request()->url().SchemeIsCryptographic() ||
-            IsLocalhost(request()->url())) {
-          advertised_encoding_names.push_back("br");
-        }
-      }
-      if (!advertised_encoding_names.empty()) {
-        // Tell the server what compression formats are supported.
-        request_info_.extra_headers.SetHeader(
-            HttpRequestHeaders::kAcceptEncoding,
-            base::JoinString(base::make_span(advertised_encoding_names), ", "));
-      }
-    }
-  }
+  request_info_.extra_headers.SetAcceptEncodingIfMissing(
+      request()->url(), request()->accepted_stream_types(),
+      request()->context()->enable_brotli());
 
   if (http_user_agent_settings_) {
     // Only add default Accept-Language if the request didn't have it
     // specified.
     std::string accept_language =
         http_user_agent_settings_->GetAcceptLanguage();
-    if (base::FeatureList::IsEnabled(features::kAcceptLanguageHeader) &&
-        !accept_language.empty()) {
+    if (!accept_language.empty()) {
       request_info_.extra_headers.SetHeaderIfMissing(
           HttpRequestHeaders::kAcceptLanguage,
           accept_language);
@@ -655,14 +618,10 @@ void URLRequestHttpJob::AddCookieHeaderAndStart() {
           is_main_frame_navigation, force_ignore_site_for_cookies);
 
   bool is_in_nontrivial_first_party_set =
-      first_party_set_metadata_.frame_owner().has_value();
+      first_party_set_metadata_.frame_entry().has_value();
   CookieOptions options = CreateCookieOptions(
       same_site_context, first_party_set_metadata_.context(),
       request_->isolation_info(), is_in_nontrivial_first_party_set);
-
-  UMA_HISTOGRAM_ENUMERATION(
-      "Cookie.FirstPartySetsContextType.HTTP.Read",
-      first_party_set_metadata_.first_party_sets_context_type());
 
   cookie_store->GetCookieListWithOptionsAsync(
       request_->url(), options,
@@ -840,8 +799,7 @@ void URLRequestHttpJob::AnnotateAndMoveUserBlockedCookies(
   if (request()->network_delegate()) {
     can_get_cookies =
         request()->network_delegate()->AnnotateAndMoveUserBlockedCookies(
-            *request(), maybe_included_cookies, excluded_cookies,
-            /*allowed_from_caller=*/true);
+            *request(), maybe_included_cookies, excluded_cookies);
   }
 
   if (!can_get_cookies) {
@@ -896,14 +854,10 @@ void URLRequestHttpJob::SaveCookiesAndNotifyHeadersComplete(int result) {
           force_ignore_site_for_cookies);
 
   bool is_in_nontrivial_first_party_set =
-      first_party_set_metadata_.frame_owner().has_value();
+      first_party_set_metadata_.frame_entry().has_value();
   CookieOptions options = CreateCookieOptions(
       same_site_context, first_party_set_metadata_.context(),
       request_->isolation_info(), is_in_nontrivial_first_party_set);
-
-  UMA_HISTOGRAM_ENUMERATION(
-      "Cookie.FirstPartySetsContextType.HTTP.Write",
-      first_party_set_metadata_.first_party_sets_context_type());
 
   // Set all cookies, without waiting for them to be set. Any subsequent
   // read will see the combined result of all cookie operation.
@@ -925,6 +879,12 @@ void URLRequestHttpJob::SaveCookiesAndNotifyHeadersComplete(int result) {
     CookieInclusionStatus returned_status;
 
     num_cookie_lines_left_++;
+
+    // `cookie_partition_key_` is only non-null when partitioned cookie are
+    // enabled.
+    if (cookie_partition_key_ && ParsedCookie(cookie_string).IsPartitioned()) {
+      request_->SetHasPartitionedCookie();
+    }
 
     std::unique_ptr<CanonicalCookie> cookie = net::CanonicalCookie::Create(
         request_->url(), cookie_string, base::Time::Now(), server_time,

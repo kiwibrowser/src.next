@@ -137,8 +137,8 @@ class IncognitoTabModelImpl implements IncognitoTabModel {
     }
 
     @Override
-    public Tab getNextTabIfClosed(int id) {
-        return mDelegateModel.getNextTabIfClosed(id);
+    public Tab getNextTabIfClosed(int id, boolean uponExit) {
+        return mDelegateModel.getNextTabIfClosed(id, uponExit);
     }
 
     @Override
@@ -238,6 +238,11 @@ class IncognitoTabModelImpl implements IncognitoTabModel {
     @Override
     public void cancelTabClosure(int tabId) {
         mDelegateModel.cancelTabClosure(tabId);
+    }
+
+    @Override
+    public void notifyAllTabsClosureUndone() {
+        mDelegateModel.notifyAllTabsClosureUndone();
     }
 
     @Override

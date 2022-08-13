@@ -215,8 +215,6 @@ const GpuFeatureData GetGpuFeatureData(
      DisableInfo::Problem(
          "WebGL2 has been disabled via blocklist or the command line."),
      false},
-    {"skia_renderer", gpu::kGpuFeatureStatusEnabled,
-     !features::IsUsingSkiaRenderer(), DisableInfo::NotProblem(), false},
     {"raw_draw", gpu::kGpuFeatureStatusEnabled, !features::IsUsingRawDraw(),
      DisableInfo::NotProblem(), false},
     {"direct_rendering_display_compositor", gpu::kGpuFeatureStatusEnabled,
@@ -261,10 +259,8 @@ base::Value GetFeatureStatusImpl(GpuFeatureInfoType type) {
         gpu_feature_info, i, is_gpu_compositing_disabled, &eof);
     std::string status;
     // Features undergoing a finch controlled roll out.
-    if (gpu_feature_data.name == "skia_renderer" ||
-        gpu_feature_data.name == "raw_draw" ||
-        gpu_feature_data.name == "direct_rendering_display_compositor" ||
-        gpu_feature_data.name == "viz_hit_test_surface_layer") {
+    if (gpu_feature_data.name == "raw_draw" ||
+        gpu_feature_data.name == "direct_rendering_display_compositor") {
       status = (gpu_feature_data.disabled ? "disabled_off_ok" : "enabled_on");
     } else if (gpu_feature_data.disabled || gpu_access_blocked ||
                gpu_feature_data.status == gpu::kGpuFeatureStatusDisabled) {
@@ -296,7 +292,7 @@ base::Value GetFeatureStatusImpl(GpuFeatureInfoType type) {
       if (gpu_feature_data.name == "multiple_raster_threads") {
         const base::CommandLine& command_line =
             *base::CommandLine::ForCurrentProcess();
-        if (command_line.HasSwitch(switches::kNumRasterThreads))
+        if (command_line.HasSwitch(blink::switches::kNumRasterThreads))
           status += "_force";
         status += "_on";
       }
@@ -436,12 +432,13 @@ int NumberOfRendererRasterThreads() {
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
 
-  if (command_line.HasSwitch(switches::kNumRasterThreads)) {
-    std::string string_value = command_line.GetSwitchValueASCII(
-        switches::kNumRasterThreads);
+  if (command_line.HasSwitch(blink::switches::kNumRasterThreads)) {
+    std::string string_value =
+        command_line.GetSwitchValueASCII(blink::switches::kNumRasterThreads);
     if (!base::StringToInt(string_value, &num_raster_threads)) {
-      DLOG(WARNING) << "Failed to parse switch " <<
-          switches::kNumRasterThreads  << ": " << string_value;
+      DLOG(WARNING) << "Failed to parse switch "
+                    << blink::switches::kNumRasterThreads << ": "
+                    << string_value;
     }
   }
 

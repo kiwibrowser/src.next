@@ -22,7 +22,7 @@
 
 #include "third_party/blink/renderer/core/css/resolver/style_resolver_state.h"
 
-#include "third_party/blink/public/mojom/web_feature/web_feature.mojom-blink.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink.h"
 #include "third_party/blink/renderer/core/animation/css/css_animations.h"
 #include "third_party/blink/renderer/core/css/css_light_dark_value_pair.h"
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
@@ -47,7 +47,7 @@ bool CanCacheBaseStyle(const StyleRequest& style_request) {
 StyleResolverState::StyleResolverState(
     Document& document,
     Element& element,
-    const StyleRecalcContext& style_recalc_context,
+    const StyleRecalcContext* style_recalc_context,
     const StyleRequest& style_request)
     : element_context_(element),
       document_(&document),
@@ -64,29 +64,29 @@ StyleResolverState::StyleResolverState(
       element_type_(style_request.IsPseudoStyleRequest()
                         ? ElementType::kPseudoElement
                         : ElementType::kElement),
-      nearest_container_(style_recalc_context.container),
+      container_unit_context_(style_recalc_context
+                                  ? style_recalc_context->container
+                                  : element.ParentOrShadowHostElement()),
       originating_element_style_(style_request.originating_element_style),
       is_for_highlight_(IsHighlightPseudoElement(style_request.pseudo_id)),
-      is_for_custom_highlight_(style_request.pseudo_id ==
-                               PseudoId::kPseudoIdHighlight),
+      uses_highlight_pseudo_inheritance_(
+          ::blink::UsesHighlightPseudoInheritance(style_request.pseudo_id)),
       can_cache_base_style_(blink::CanCacheBaseStyle(style_request)) {
   DCHECK(!!parent_style_ == !!layout_parent_style_);
 
-  if (!parent_style_) {
-    parent_style_ = element_context_.ParentStyle();
+  if (UsesHighlightPseudoInheritance()) {
+    DCHECK(originating_element_style_);
+  } else {
+    if (!parent_style_)
+      parent_style_ = element_context_.ParentStyle();
+    if (!layout_parent_style_)
+      layout_parent_style_ = element_context_.LayoutParentStyle();
   }
-
-  if (!layout_parent_style_)
-    layout_parent_style_ = element_context_.LayoutParentStyle();
 
   if (!layout_parent_style_)
     layout_parent_style_ = parent_style_;
 
   DCHECK(document.IsActive());
-
-  if (RuntimeEnabledFeatures::HighlightInheritanceEnabled() &&
-      is_for_highlight_)
-    DCHECK(originating_element_style_);
 }
 
 StyleResolverState::~StyleResolverState() {
@@ -97,10 +97,7 @@ StyleResolverState::~StyleResolverState() {
 
 bool StyleResolverState::IsInheritedForUnset(
     const CSSProperty& property) const {
-  return property.IsInherited() ||
-         (is_for_highlight_ &&
-          (RuntimeEnabledFeatures::HighlightInheritanceEnabled() ||
-           is_for_custom_highlight_));
+  return property.IsInherited() || UsesHighlightPseudoInheritance();
 }
 
 void StyleResolverState::SetStyle(scoped_refptr<ComputedStyle> style) {
@@ -120,7 +117,10 @@ scoped_refptr<ComputedStyle> StyleResolverState::TakeStyle() {
 void StyleResolverState::UpdateLengthConversionData() {
   css_to_length_conversion_data_ = CSSToLengthConversionData(
       Style(), RootElementStyle(), GetDocument().GetLayoutView(),
-      nearest_container_, Style()->EffectiveZoom());
+      CSSToLengthConversionData::ContainerSizes(container_unit_context_),
+      Style()->EffectiveZoom());
+  element_style_resources_.UpdateLengthConversionData(
+      &css_to_length_conversion_data_);
 }
 
 CSSToLengthConversionData StyleResolverState::UnzoomedLengthConversionData(
@@ -131,7 +131,8 @@ CSSToLengthConversionData StyleResolverState::UnzoomedLengthConversionData(
       em, rem, &font_style->GetFont(), font_style->EffectiveZoom());
   CSSToLengthConversionData::ViewportSize viewport_size(
       GetDocument().GetLayoutView());
-  CSSToLengthConversionData::ContainerSizes container_sizes(nearest_container_);
+  CSSToLengthConversionData::ContainerSizes container_sizes(
+      container_unit_context_);
 
   return CSSToLengthConversionData(Style(), Style()->GetWritingMode(),
                                    font_sizes, viewport_size, container_sizes,
@@ -223,6 +224,11 @@ Element* StyleResolverState::GetAnimatingElement() const {
     return &GetElement();
   DCHECK_EQ(ElementType::kPseudoElement, element_type_);
   return pseudo_element_;
+}
+
+PseudoElement* StyleResolverState::GetPseudoElement() const {
+  return element_type_ == ElementType::kPseudoElement ? pseudo_element_
+                                                      : nullptr;
 }
 
 const CSSValue& StyleResolverState::ResolveLightDarkPair(

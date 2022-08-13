@@ -117,6 +117,7 @@ scoped_refptr<Image> CSSGradientValue::GetImage(
     const ImageResourceObserver& client,
     const Document& document,
     const ComputedStyle& style,
+    const ContainerSizes& container_sizes,
     const gfx::SizeF& size) const {
   if (size.IsEmpty())
     return nullptr;
@@ -132,10 +133,9 @@ scoped_refptr<Image> CSSGradientValue::GetImage(
   // We need to create an image.
   const ComputedStyle* root_style =
       document.documentElement()->GetComputedStyle();
-  // TOOD(crbug.com/1223030): Handle container relative units.
   CSSToLengthConversionData conversion_data(
-      &style, root_style, document.GetLayoutView(),
-      /* nearest_container */ nullptr, style.EffectiveZoom());
+      &style, root_style, document.GetLayoutView(), container_sizes,
+      style.EffectiveZoom());
 
   scoped_refptr<Gradient> gradient;
   switch (GetClassType()) {
@@ -265,18 +265,29 @@ static void ReplaceColorHintsWithColorStops(
     }
 
     GradientStop new_stops[9];
-    // Position the new color stops.
+    // Position the new color stops. These must be in the range
+    // [offset_left, offset_right], and in non-decreasing order, even in the
+    // face of floating-point rounding.
     if (left_dist > right_dist) {
       for (size_t y = 0; y < 7; ++y)
-        new_stops[y].offset = offset_left + left_dist * (7 + y) / 13;
-      new_stops[7].offset = offset + right_dist / 3;
-      new_stops[8].offset = offset + right_dist * 2 / 3;
+        new_stops[y].offset = offset_left + left_dist * ((7.0f + y) / 13.0f);
+      new_stops[7].offset = offset + right_dist * (1.0f / 3.0f);
+      new_stops[8].offset = offset + right_dist * (2.0f / 3.0f);
     } else {
-      new_stops[0].offset = offset_left + left_dist / 3;
-      new_stops[1].offset = offset_left + left_dist * 2 / 3;
+      new_stops[0].offset = offset_left + left_dist * (1.0f / 3.0f);
+      new_stops[1].offset = offset_left + left_dist * (2.0f / 3.0f);
       for (size_t y = 0; y < 7; ++y)
-        new_stops[y + 2].offset = offset + right_dist * y / 13;
+        new_stops[y + 2].offset = offset + right_dist * (y / 13.0f);
     }
+
+#if DCHECK_IS_ON()
+    // Verify that offset_left <= x_0 <= x_1 <= ... <= x_8 <= offset_right.
+    DCHECK_GE(new_stops[0].offset, offset_left);
+    for (int i = 1; i < 8; ++i) {
+      DCHECK_GE(new_stops[i].offset, new_stops[i - 1].offset);
+    }
+    DCHECK_GE(offset_right, new_stops[8].offset);
+#endif  // DCHECK_IS_ON()
 
     // calculate colors for the new color hints.
     // The color weighting for the new color stops will be
@@ -1096,8 +1107,26 @@ static bool IsUsingCurrentColor(
   return false;
 }
 
+static bool IsUsingContainerRelativeUnits(const CSSValue* value) {
+  const auto* primitive_value = DynamicTo<CSSPrimitiveValue>(value);
+  return primitive_value && primitive_value->HasContainerRelativeUnits();
+}
+
+static bool IsUsingContainerRelativeUnits(
+    const HeapVector<CSSGradientColorStop, 2>& stops) {
+  for (const CSSGradientColorStop& stop : stops) {
+    if (IsUsingContainerRelativeUnits(stop.offset_.Get()))
+      return true;
+  }
+  return false;
+}
+
 bool CSSLinearGradientValue::IsUsingCurrentColor() const {
   return blink::cssvalue::IsUsingCurrentColor(stops_);
+}
+
+bool CSSLinearGradientValue::IsUsingContainerRelativeUnits() const {
+  return blink::cssvalue::IsUsingContainerRelativeUnits(stops_);
 }
 
 void CSSLinearGradientValue::TraceAfterDispatch(blink::Visitor* visitor) const {
@@ -1505,6 +1534,10 @@ bool CSSRadialGradientValue::IsUsingCurrentColor() const {
   return blink::cssvalue::IsUsingCurrentColor(stops_);
 }
 
+bool CSSRadialGradientValue::IsUsingContainerRelativeUnits() const {
+  return blink::cssvalue::IsUsingContainerRelativeUnits(stops_);
+}
+
 void CSSRadialGradientValue::TraceAfterDispatch(blink::Visitor* visitor) const {
   visitor->Trace(first_x_);
   visitor->Trace(first_y_);
@@ -1588,6 +1621,12 @@ CSSConicGradientValue* CSSConicGradientValue::ComputedCSSValue(
 
 bool CSSConicGradientValue::IsUsingCurrentColor() const {
   return blink::cssvalue::IsUsingCurrentColor(stops_);
+}
+
+bool CSSConicGradientValue::IsUsingContainerRelativeUnits() const {
+  return blink::cssvalue::IsUsingContainerRelativeUnits(stops_) ||
+         blink::cssvalue::IsUsingContainerRelativeUnits(x_.Get()) ||
+         blink::cssvalue::IsUsingContainerRelativeUnits(y_.Get());
 }
 
 void CSSConicGradientValue::TraceAfterDispatch(blink::Visitor* visitor) const {

@@ -39,31 +39,31 @@ import org.chromium.chrome.browser.bookmarks.BookmarkBridge;
 import org.chromium.chrome.browser.bookmarks.BookmarkFeatures;
 import org.chromium.chrome.browser.bookmarks.PowerBookmarkUtils;
 import org.chromium.chrome.browser.bookmarks.ReadingListFeatures;
-import org.chromium.chrome.browser.commerce.shopping_list.ShoppingFeatures;
-import org.chromium.chrome.browser.compositor.layouts.OverviewModeBehavior;
+import org.chromium.chrome.browser.commerce.ShoppingFeatures;
+import org.chromium.chrome.browser.commerce.ShoppingServiceFactory;
 import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.device.DeviceConditions;
 import org.chromium.chrome.browser.download.DownloadUtils;
-import org.chromium.chrome.browser.flags.CachedFeatureFlags;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.image_descriptions.ImageDescriptionsController;
 import org.chromium.chrome.browser.incognito.IncognitoUtils;
+import org.chromium.chrome.browser.incognito.reauth.IncognitoReauthController;
+import org.chromium.chrome.browser.layouts.LayoutStateProvider;
+import org.chromium.chrome.browser.layouts.LayoutType;
 import org.chromium.chrome.browser.multiwindow.MultiWindowModeStateDispatcher;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 import org.chromium.chrome.browser.night_mode.WebContentsDarkModeController;
 import org.chromium.chrome.browser.omaha.UpdateMenuItemHelper;
 import org.chromium.chrome.browser.partnercustomizations.PartnerBrowserCustomizations;
-import org.chromium.chrome.browser.power_bookmarks.PowerBookmarkMeta;
-import org.chromium.chrome.browser.power_bookmarks.PowerBookmarkType;
+import org.chromium.chrome.browser.price_tracking.PriceTrackingUtilities;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.read_later.ReadingListUtils;
 import org.chromium.chrome.browser.share.ShareHelper;
 import org.chromium.chrome.browser.share.ShareUtils;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.chrome.browser.tasks.ReturnToChromeExperimentsUtil;
-import org.chromium.chrome.browser.tasks.tab_management.PriceTrackingUtilities;
+import org.chromium.chrome.browser.tasks.ReturnToChromeUtil;
 import org.chromium.chrome.browser.tasks.tab_management.TabUiFeatureUtilities;
 import org.chromium.chrome.browser.toolbar.ToolbarManager;
 import org.chromium.chrome.browser.translate.TranslateUtils;
@@ -77,9 +77,13 @@ import org.chromium.chrome.features.start_surface.StartSurface;
 import org.chromium.chrome.features.start_surface.StartSurfaceState;
 import org.chromium.components.bookmarks.BookmarkId;
 import org.chromium.components.bookmarks.BookmarkType;
+import org.chromium.components.browser_ui.accessibility.PageZoomCoordinator;
+import org.chromium.components.commerce.core.ShoppingService;
 import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
 import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.components.embedder_support.util.UrlUtilities;
+import org.chromium.components.power_bookmarks.PowerBookmarkMeta;
+import org.chromium.components.power_bookmarks.PowerBookmarkType;
 import org.chromium.components.webapk.lib.client.WebApkValidator;
 import org.chromium.components.webapps.AppBannerManager;
 import org.chromium.components.webapps.WebappsUtils;
@@ -112,6 +116,8 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
     protected final TabModelSelector mTabModelSelector;
     protected final ToolbarManager mToolbarManager;
     protected final View mDecorView;
+
+    private CallbackController mIncognitoReauthCallbackController = new CallbackController();
     private CallbackController mCallbackController = new CallbackController();
     private ObservableSupplier<BookmarkBridge> mBookmarkBridgeSupplier;
     private boolean mUpdateMenuItemVisible;
@@ -120,6 +126,11 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
     private int mAddAppTitleShown;
     private Map<CustomViewBinder, Integer> mCustomViewTypeOffsetMap;
     private boolean mIsTypeSpecificBookmarkItemRowPresent;
+    /**
+     * This is non null for the case of ChromeTabbedActivity when the corresponding {@link
+     * CallbackController} has been fired.
+     */
+    private @Nullable IncognitoReauthController mIncognitoReauthController;
 
     @VisibleForTesting
     @IntDef({MenuGroup.INVALID, MenuGroup.PAGE_MENU, MenuGroup.OVERVIEW_MODE_MENU,
@@ -150,7 +161,7 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
         int NUM_ENTRIES = 8;
     }
 
-    protected @Nullable OverviewModeBehavior mOverviewModeBehavior;
+    protected @Nullable LayoutStateProvider mLayoutStateProvider;
     private @Nullable OneshotSupplier<StartSurface> mStartSurfaceSupplier;
     private @Nullable StartSurface.StateObserver mStartSurfaceStateObserver;
     private @StartSurfaceState int mStartSurfaceState;
@@ -166,18 +177,21 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
      * @param toolbarManager The {@link ToolbarManager} for the containing activity.
      * @param decorView The decor {@link View}, e.g. from Window#getDecorView(), for the containing
      *         activity.
-     * @param overviewModeBehaviorSupplier An {@link ObservableSupplier} for the
-     *         {@link OverviewModeBehavior} associated with the containing activity.
+     * @param layoutStateProvidersSupplier An {@link ObservableSupplier} for the
+     *         {@link LayoutStateProvider} associated with the containing activity.
      * @param startSurfaceSupplier An {@link OneshotSupplier} for the Start surface.
      * @param bookmarkBridgeSupplier An {@link ObservableSupplier} for the {@link BookmarkBridge}
-     *         associated with the containing activity.
+     * @param incognitoReauthControllerOneshotSupplier An {@link OneshotSupplier} for the {@link
+     *         IncognitoReauthController} which is not null for tabbed Activity.
      */
     public AppMenuPropertiesDelegateImpl(Context context, ActivityTabProvider activityTabProvider,
             MultiWindowModeStateDispatcher multiWindowModeStateDispatcher,
             TabModelSelector tabModelSelector, ToolbarManager toolbarManager, View decorView,
-            @Nullable OneshotSupplier<OverviewModeBehavior> overviewModeBehaviorSupplier,
+            @Nullable OneshotSupplier<LayoutStateProvider> layoutStateProvidersSupplier,
             @Nullable OneshotSupplier<StartSurface> startSurfaceSupplier,
-            ObservableSupplier<BookmarkBridge> bookmarkBridgeSupplier) {
+            ObservableSupplier<BookmarkBridge> bookmarkBridgeSupplier,
+            @Nullable OneshotSupplier<IncognitoReauthController>
+                    incognitoReauthControllerOneshotSupplier) {
         mContext = context;
         mIsTablet = DeviceFormFactor.isNonMultiDisplayContextOnTablet(mContext);
         mActivityTabProvider = activityTabProvider;
@@ -186,19 +200,30 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
         mToolbarManager = toolbarManager;
         mDecorView = decorView;
 
-        if (overviewModeBehaviorSupplier != null) {
-            overviewModeBehaviorSupplier.onAvailable(mCallbackController.makeCancelable(
-                    overviewModeBehavior -> { mOverviewModeBehavior = overviewModeBehavior; }));
+        if (incognitoReauthControllerOneshotSupplier != null) {
+            incognitoReauthControllerOneshotSupplier.onAvailable(
+                    mIncognitoReauthCallbackController.makeCancelable(incognitoReauthController -> {
+                        mIncognitoReauthController = incognitoReauthController;
+                    }));
         }
 
-        if (startSurfaceSupplier != null) {
+        if (layoutStateProvidersSupplier != null) {
+            layoutStateProvidersSupplier.onAvailable(mCallbackController.makeCancelable(
+                    layoutStateProvider -> { mLayoutStateProvider = layoutStateProvider; }));
+        }
+
+        if (!ReturnToChromeUtil.isTabSwitcherOnlyRefactorEnabled(mContext)
+                && startSurfaceSupplier != null) {
             mStartSurfaceSupplier = startSurfaceSupplier;
             startSurfaceSupplier.onAvailable(mCallbackController.makeCancelable((startSurface) -> {
-                mStartSurfaceState = startSurface.getController().getStartSurfaceState();
+                mStartSurfaceState = startSurface.getStartSurfaceState();
                 mStartSurfaceStateObserver = (newState, shouldShowToolbar) -> {
-                    assert ReturnToChromeExperimentsUtil.isStartSurfaceEnabled(mContext);
+                    assert ReturnToChromeUtil.isStartSurfaceEnabled(mContext);
                     mStartSurfaceState = newState;
                 };
+                // TODO(https://crbug.com/1315679): Remove |mStartSurfaceSupplier|,
+                // |mStartSurfaceState| and |mStartSurfaceStateObserver| after the refactor is
+                // enabled by default.
                 startSurface.addStateChangeObserver(mStartSurfaceStateObserver);
             }));
         }
@@ -232,7 +257,6 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
     public @Nullable List<CustomViewBinder> getCustomViewBinders() {
         List<CustomViewBinder> customViewBinders = new ArrayList<>();
         customViewBinders.add(new UpdateMenuItemViewBinder());
-        customViewBinders.add(new ManagedByMenuItemViewBinder());
         customViewBinders.add(new IncognitoMenuItemViewBinder());
         customViewBinders.add(new DividerLineMenuItemViewBinder());
         return customViewBinders;
@@ -278,14 +302,22 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
      * @return Whether the grid tab switcher is showing.
      */
     private boolean isInTabSwitcher() {
-        return mOverviewModeBehavior != null && mOverviewModeBehavior.overviewVisible()
+        return mLayoutStateProvider != null
+                && mLayoutStateProvider.isLayoutVisible(LayoutType.TAB_SWITCHER)
+                && !mLayoutStateProvider.isLayoutStartingToHide(LayoutType.TAB_SWITCHER)
                 && !isInStartSurfaceHomepage();
     }
 
     /**
      * @return Whether the Start surface homepage is showing.
      */
-    private boolean isInStartSurfaceHomepage() {
+    @VisibleForTesting
+    boolean isInStartSurfaceHomepage() {
+        if (ReturnToChromeUtil.isTabSwitcherOnlyRefactorEnabled(mContext)) {
+            return mLayoutStateProvider != null
+                    && mLayoutStateProvider.isLayoutVisible(LayoutType.START_SURFACE);
+        }
+
         return mStartSurfaceSupplier != null && mStartSurfaceSupplier.get() != null
                 && mStartSurfaceState == StartSurfaceState.SHOWN_HOMEPAGE;
     }
@@ -318,6 +350,7 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
             PropertyModel propertyModel = AppMenuUtil.menuItemToPropertyModel(item);
             propertyModel.set(AppMenuItemProperties.ICON_COLOR_RES, getMenuItemIconColorRes(item));
             propertyModel.set(AppMenuItemProperties.SUPPORT_ENTER_ANIMATION, true);
+            propertyModel.set(AppMenuItemProperties.MENU_ICON_AT_START, isMenuIconAtStart());
             if (item.hasSubMenu()) {
                 // Only support top level menu items have SUBMENU, and a SUBMENU item cannot have a
                 // SUBMENU.
@@ -490,6 +523,9 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
             menu.findItem(R.id.get_image_descriptions_id).setVisible(false);
         }
 
+        // Conditionally add the Zoom menu item.
+        menu.findItem(R.id.page_zoom_id).setVisible(PageZoomCoordinator.shouldShowMenuItem());
+
         // Disable find in page on the native NTP or on Start surface.
         menu.findItem(R.id.find_in_page_id)
                 .setVisible(isCurrentTabNotNull && shouldShowFindInPage(currentTab));
@@ -561,11 +597,15 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
             }
 
             if (item.getItemId() == R.id.new_incognito_tab_menu_id && item.isVisible()) {
+                // Disable new incognito tab when a re-authentication might be pending.
+                boolean isIncognitoReauthPending = (mIncognitoReauthController != null)
+                        && mIncognitoReauthController.isIncognitoReauthPending();
+
                 // Disable new incognito tab when it is blocked (e.g. by a policy).
                 // findItem(...).setEnabled(...)" is not enough here, because of the inflated
                 // main_menu.xml contains multiple items with the same id in different groups
                 // e.g.: menu_new_incognito_tab.
-                item.setEnabled(isIncognitoEnabled());
+                item.setEnabled(isIncognitoEnabled() && !isIncognitoReauthPending);
             }
 
             if (item.getItemId() == R.id.divider_line_id) {
@@ -583,8 +623,14 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
                 item.setVisible(!isIncognito);
             }
             if (item.getItemId() == R.id.menu_group_tabs) {
+                // Disable incognito group tabs when a re-authentication screen is shown.
+                // We show the re-auth screen only in Incognito mode.
+                boolean isIncognitoReauthShowing = isIncognito
+                        && (mIncognitoReauthController != null)
+                        && mIncognitoReauthController.isReauthPageShowing();
+
                 item.setVisible(isMenuGroupTabsVisible);
-                item.setEnabled(isMenuGroupTabsEnabled);
+                item.setEnabled(!isIncognitoReauthShowing && isMenuGroupTabsEnabled);
             }
             if (item.getItemId() == R.id.track_prices_row_menu_id) {
                 item.setVisible(isPriceTrackingVisible);
@@ -715,7 +761,7 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
 
     @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
     public boolean isNewWindowMenuFeatureEnabled() {
-        return CachedFeatureFlags.isEnabled(ChromeFeatureList.NEW_WINDOW_APP_MENU);
+        return ChromeFeatureList.sNewWindowAppMenu.isEnabled();
     }
 
     @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
@@ -766,8 +812,7 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
     @VisibleForTesting(otherwise = VisibleForTesting.PROTECTED)
     public boolean shouldShowPaintPreview(
             boolean isChromeScheme, @NonNull Tab currentTab, boolean isIncognito) {
-        return CachedFeatureFlags.isEnabled(ChromeFeatureList.PAINT_PREVIEW_DEMO) && !isChromeScheme
-                && !isIncognito;
+        return ChromeFeatureList.sPaintPreviewDemo.isEnabled() && !isChromeScheme && !isIncognito;
     }
 
     /**
@@ -980,6 +1025,11 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
                 getUmaEnumForMenuItem(menuItemId), AppMenuHighlightItem.NUM_ENTRIES);
     }
 
+    @Override
+    public boolean isMenuIconAtStart() {
+        return false;
+    }
+
     private int getUmaEnumForMenuItem(@Nullable @IdRes Integer menuItemId) {
         if (menuItemId == null) return AppMenuHighlightItem.UNKNOWN;
 
@@ -1099,7 +1149,13 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
      */
     protected void updatePriceTrackingMenuItemRow(@NonNull MenuItem startPriceTrackingMenuItem,
             @NonNull MenuItem stopPriceTrackingMenuItem, @Nullable Tab currentTab) {
-        PowerBookmarkMeta pageMeta = PowerBookmarkUtils.getPriceTrackingMetadataForTab(currentTab);
+        ShoppingService service =
+                ShoppingServiceFactory.getForProfile(Profile.getLastUsedRegularProfile());
+        ShoppingService.ProductInfo info = null;
+        if (service != null && currentTab != null) {
+            info = service.getAvailableProductInfoForUrl(currentTab.getUrl());
+        }
+
         // If price tracking isn't enabled or the page isn't eligible, then hide both items.
         if (!ShoppingFeatures.isShoppingListEnabled()
                 || !PowerBookmarkUtils.isPriceTrackingEligible(currentTab)
@@ -1124,9 +1180,11 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
         startPriceTrackingMenuItem.setEnabled(editEnabled);
         stopPriceTrackingMenuItem.setEnabled(editEnabled);
 
-        boolean priceTrackingEnabled = PowerBookmarkUtils.isPriceTrackingEnabledForClusterId(
-                pageMeta.getShoppingSpecifics().getProductClusterId(),
-                mBookmarkBridgeSupplier.get());
+        boolean priceTrackingEnabled = false;
+        if (info != null) {
+            priceTrackingEnabled = PowerBookmarkUtils.isPriceTrackingEnabledForClusterId(
+                    info.productClusterId, mBookmarkBridgeSupplier.get());
+        }
         startPriceTrackingMenuItem.setVisible(!priceTrackingEnabled);
         stopPriceTrackingMenuItem.setVisible(priceTrackingEnabled);
     }
@@ -1154,7 +1212,7 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
 
         boolean isRequestDesktopSite =
                 currentTab.getWebContents().getNavigationController().getUseDesktopUserAgent();
-        if (CachedFeatureFlags.isEnabled(ChromeFeatureList.APP_MENU_MOBILE_SITE_OPTION)) {
+        if (ChromeFeatureList.sAppMenuMobileSiteOption.isEnabled()) {
             requestMenuLabel.setTitle(isRequestDesktopSite
                             ? R.string.menu_item_request_mobile_site
                             : R.string.menu_item_request_desktop_site);
@@ -1200,19 +1258,14 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
     }
 
     protected void updateManagedByMenuItem(Menu menu, @Nullable Tab currentTab) {
-        MenuItem managedByMenuItem = menu.findItem(R.id.managed_by_menu_id);
         MenuItem managedByDividerLine = menu.findItem(R.id.managed_by_divider_line_id);
-        MenuItem managedByStandardMenuItem = menu.findItem(R.id.managed_by_standard_menu_id);
+        MenuItem managedByMenuItem = menu.findItem(R.id.managed_by_menu_id);
 
         boolean managedByMenuItemVisible =
                 currentTab != null && shouldShowManagedByMenuItem(currentTab);
-        boolean chromeManagementPageEnabled =
-                ChromeFeatureList.isEnabled(ChromeFeatureList.CHROME_MANAGEMENT_PAGE);
 
-        managedByMenuItem.setVisible(managedByMenuItemVisible && !chromeManagementPageEnabled);
-        managedByDividerLine.setVisible(managedByMenuItemVisible && chromeManagementPageEnabled);
-        managedByStandardMenuItem.setVisible(
-                managedByMenuItemVisible && chromeManagementPageEnabled);
+        managedByDividerLine.setVisible(managedByMenuItemVisible);
+        managedByMenuItem.setVisible(managedByMenuItemVisible);
     }
 
     @VisibleForTesting(otherwise = VisibleForTesting.PACKAGE_PRIVATE)
@@ -1228,6 +1281,11 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
     @VisibleForTesting
     static void setPageInReadingListForTesting(Boolean highlight) {
         sItemInReadingListForTesting = highlight;
+    }
+
+    @VisibleForTesting
+    void setStartSurfaceStateForTesting(@StartSurfaceState int state) {
+        mStartSurfaceState = state;
     }
 
     void setBookmarkBridgeSupplierForTesting(

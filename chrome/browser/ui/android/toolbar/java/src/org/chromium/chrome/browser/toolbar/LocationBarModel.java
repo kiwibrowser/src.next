@@ -37,7 +37,6 @@ import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TrustedCdn;
 import org.chromium.chrome.browser.theme.ThemeUtils;
 import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
-import org.chromium.chrome.features.start_surface.StartSurfaceConfiguration;
 import org.chromium.components.browser_ui.styles.ChromeColors;
 import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
 import org.chromium.components.embedder_support.util.UrlConstants;
@@ -205,7 +204,7 @@ public class LocationBarModel implements ToolbarDataProvider, LocationBarDataPro
      */
     public void initializeWithNative() {
         mOptimizationsEnabled =
-                ChromeFeatureList.isEnabled(ChromeFeatureList.LOCATION_BAR_MODEL_OPTIMIZATIONS);
+                ChromeFeatureList.isEnabled(ChromeFeatureList.ANDROID_SCROLL_OPTIMIZATIONS);
         mLastUsedNonOTRProfile = Profile.getLastUsedRegularProfile();
         if (mOptimizationsEnabled) {
             mSpannableDisplayTextCache = new LruCache<>(LRU_CACHE_SIZE);
@@ -290,8 +289,7 @@ public class LocationBarModel implements ToolbarDataProvider, LocationBarDataPro
         String url = getTab() != null && getTab().isInitialized()
                 ? getTab().getUrl().getSpec().trim()
                 : "";
-        if (isInOverviewAndShowingOmnibox()
-                || StartSurfaceConfiguration.shouldHandleAsNtp(getTab(), url)) {
+        if (isInOverviewAndShowingOmnibox()) {
             return UrlConstants.NTP_URL;
         }
 
@@ -327,7 +325,7 @@ public class LocationBarModel implements ToolbarDataProvider, LocationBarDataPro
         // the investigation is complete.
         try (TraceEvent te = TraceEvent.scoped("LocationBarModel.getUrlBarData")) {
             String url = getCurrentUrl();
-            if (!hasTab() || StartSurfaceConfiguration.shouldHandleAsNtp(getTab(), url)) {
+            if (!hasTab()) {
                 return UrlBarData.EMPTY;
             }
 
@@ -409,18 +407,21 @@ public class LocationBarModel implements ToolbarDataProvider, LocationBarDataPro
                 autocompleteSchemeClassifier = new ChromeAutocompleteSchemeClassifier(getProfile());
             }
 
-            if (cachedSpannableDisplayText != null) {
-                return UrlBarData.forUrlAndText(url, cachedSpannableDisplayText, editingText);
-            } else {
-                OmniboxUrlEmphasizer.emphasizeUrl(spannableDisplayText,
-                        autocompleteSchemeClassifier, getSecurityLevel(), isInternalPage,
-                        shouldEmphasizeHttpsScheme(), nonEmphasizedColor, emphasizedColor,
-                        dangerColor, secureColor);
-                if (mOptimizationsEnabled) {
-                    mSpannableDisplayTextCache.put(cacheKey, spannableDisplayText);
+            try {
+                if (cachedSpannableDisplayText != null) {
+                    return UrlBarData.forUrlAndText(url, cachedSpannableDisplayText, editingText);
+                } else {
+                    OmniboxUrlEmphasizer.emphasizeUrl(spannableDisplayText,
+                            autocompleteSchemeClassifier, getSecurityLevel(), isInternalPage,
+                            shouldEmphasizeHttpsScheme(), nonEmphasizedColor, emphasizedColor,
+                            dangerColor, secureColor);
+                    if (mOptimizationsEnabled) {
+                        mSpannableDisplayTextCache.put(cacheKey, spannableDisplayText);
+                    }
                 }
+            } finally {
+                if (!mOptimizationsEnabled) autocompleteSchemeClassifier.destroy();
             }
-            if (!mOptimizationsEnabled) autocompleteSchemeClassifier.destroy();
         }
         return UrlBarData.forUrlAndText(url, spannableDisplayText, editingText);
     }
@@ -571,10 +572,7 @@ public class LocationBarModel implements ToolbarDataProvider, LocationBarDataPro
         // Start Surface homepage is not bound with a tab and mTab is kept as the previous tab if
         // the homepage is shown. This is added here to make sure Start Surface homepage is not
         // regarded as a paint preview.
-        if (isInOverviewAndShowingOmnibox()
-                || StartSurfaceConfiguration.shouldHandleAsNtp(getTab())) {
-            return false;
-        }
+        if (isInOverviewAndShowingOmnibox()) return false;
         return hasTab() && TabbedPaintPreview.get(mTab).isShowing();
     }
 
@@ -589,25 +587,16 @@ public class LocationBarModel implements ToolbarDataProvider, LocationBarDataPro
     public int getPageClassification(boolean isFocusedFromFakebox) {
         if (mNativeLocationBarModelAndroid == 0) return PageClassification.INVALID_SPEC_VALUE;
 
-        // Provide NTP or START_SURFACE_HOMEPAGE as page class in overview mode (when Start Surface
-        // is enabled). No call to the backend necessary or possible, since there is no tab or
-        // navigation entry.
-        if (isInOverviewAndShowingOmnibox()) {
-            return StartSurfaceConfiguration.getPageClassificationForHomepage();
-        }
-
-        // Provides NTP or START_SURFACE_NEW_TAB as page class if it is a new Tab with Omnibox
-        // focused.
-        if (StartSurfaceConfiguration.shouldHandleAsNtp(getTab())) {
-            return StartSurfaceConfiguration.getPageClassificationForNewTab();
-        }
+        // Provide NTP as page class in overview mode (when Start Surface is enabled). No call
+        // to the backend necessary or possible, since there is no tab or navigation entry.
+        if (isInOverviewAndShowingOmnibox()) return PageClassification.NTP_VALUE;
 
         return LocationBarModelJni.get().getPageClassification(
                 mNativeLocationBarModelAndroid, LocationBarModel.this, isFocusedFromFakebox);
     }
 
     @Override
-    public int getSecurityIconResource(boolean isTablet) {
+    public @DrawableRes int getSecurityIconResource(boolean isTablet) {
         return getSecurityIconResource(
                 getSecurityLevel(), !isTablet, isOfflinePage(), isPaintPreview());
     }
@@ -697,6 +686,40 @@ public class LocationBarModel implements ToolbarDataProvider, LocationBarDataPro
         final @BrandedColorScheme int brandedColorScheme =
                 OmniboxResourceProvider.getBrandedColorScheme(mContext, isIncognito(), color);
 
+        // Assign red color to security icon if the page shows security warning.
+        return getSecurityIconColorWithSecurityLevel(
+                getSecurityLevel(), brandedColorScheme, isIncognito());
+    }
+
+    /**
+     * Get the color for the security icon for different security levels.
+     * If we are using dark background (dark mode or incognito mode), we should return light red.
+     * If we are using light background (light mode, but not LIGHT_BRANDED_THEME), we should return
+     * dark red. The default brand color will be returned if no change is needed.
+     *
+     * @param connectionSecurityLevel The connection security level for the current website.
+     * @param brandedColorScheme The branded color scheme for the omnibox.
+     * @param isIncognito Whether the tab is in Incognito mode.
+     * @return The color resource for the security icon, returns -1 if doe snot need to change
+     *         color.
+     */
+    @VisibleForTesting
+    protected @ColorRes int getSecurityIconColorWithSecurityLevel(
+            @ConnectionSecurityLevel int connectionSecurityLevel,
+            @BrandedColorScheme int brandedColorScheme, boolean isIncognito) {
+        // Return regular color scheme if the website does not show warning.
+        if (connectionSecurityLevel == ConnectionSecurityLevel.DANGEROUS) {
+            // Assign red color only on light or dark background including Incognito mode.
+            // We will not change the security icon to red when BrandedColorScheme is
+            // LIGHT_BRANDED_THEME for the purpose of improving contrast.
+            if (isIncognito) {
+                // Use light red for Incognito mode.
+                return R.color.baseline_error_200;
+            } else if (brandedColorScheme == BrandedColorScheme.APP_DEFAULT) {
+                // Use adaptive red for light and dark background.
+                return R.color.default_red;
+            }
+        }
         return ThemeUtils.getThemedToolbarIconTintRes(brandedColorScheme);
     }
 

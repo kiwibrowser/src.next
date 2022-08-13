@@ -23,7 +23,7 @@ public class EmptyTabModel implements TabModel {
      * EmptyTabModel.
      */
     @VisibleForTesting
-    protected EmptyTabModel() {}
+    public EmptyTabModel() {}
 
     // "Initialization on demand holder idiom"
     private static class LazyHolder {
@@ -54,7 +54,7 @@ public class EmptyTabModel implements TabModel {
     }
 
     @Override
-    public Tab getNextTabIfClosed(int id) {
+    public Tab getNextTabIfClosed(int id, boolean uponExit) {
         return null;
     }
 
@@ -131,6 +131,9 @@ public class EmptyTabModel implements TabModel {
 
     @Override
     public void cancelTabClosure(int tabId) {}
+
+    @Override
+    public void notifyAllTabsClosureUndone() {}
 
     @Override
     public boolean supportsPendingClosures() {
