@@ -13,7 +13,7 @@
 
   </p>
 
-# Kiwi Browser Next
+# Kiwi Browser Next(branch version)
 
 Source-code for Kiwi Next, a Kiwi Browser auto-rebased with latest [Chromium](https://www.chromium.org/Home/).
 
