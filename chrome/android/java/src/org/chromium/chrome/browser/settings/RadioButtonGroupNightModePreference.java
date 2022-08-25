@@ -103,7 +103,7 @@ public final class RadioButtonGroupNightModePreference
         } else if (mChoice_gray.isChecked()) {
           checkedNightMode = "gray";
         } else {
-          checkedNightMode = "default";
+          checkedNightMode = "amoled";
         }
 
         SharedPreferences.Editor sharedPreferencesEditor = ContextUtils.getAppSharedPreferences().edit();
