@@ -22,9 +22,9 @@ jobs:
 
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 1
       matrix:
-        platform: [arm, arm64, x86, x64]
+        platform: [arm64]
 
     # The GitHub Actions machines have a "slow disk", and a SSD "fast" disk.
     # However, there is not enough space to do all the processing on the SSD.
@@ -119,18 +119,12 @@ jobs:
       - name: Checking available disk-space
         run: df -h
 
-      - name: Uploading args.gn
-        run: rclone copy --fast-list --transfers=128 --retries=10 secondary_disk/out/android_${{ matrix.platform }}/args.gn cache:kiwibrowser-next-builds-${{ matrix.platform }}/
-
       - name: Calling buildbot
         if: false
         run: curl ipinfo.io
 
-      - name: Downloading binary objects cache to $HOME/cache
-        run: rclone copy --fast-list --transfers=128 --retries=10 cache:kiwibrowser-next-builds-${{ matrix.platform }}/ $HOME/kiwibrowser-next-builds-${{ matrix.platform }}
-
-      - name: Transferring build to the standard Kiwi Browser run ID
-        run: rclone copy --fast-list --transfers=128 --retries=10 cache:kiwibrowser-next-builds-${{ matrix.platform }}/ cache:kiwibrowser-builds/${{ github.run_id }}/${{ matrix.platform }}
+      - name: Copy args.gn to $HOME/cache
+        run: cp secondary_disk/out/android_${{ matrix.platform }}/args.gn $HOME/kiwibrowser-next-builds-${{ matrix.platform }}
 
       - name: Listing files
         run: |
@@ -339,15 +333,4 @@ jobs:
           asset_path: ./apk-x64/ChromePublic-Next-DevSigned.apk
           asset_name: com.kiwibrowser.browser.dev-${{ github.run_id }}-x64-github.apk
           asset_content_type: application/vnd.android.package-archive
-
-      - name: Send announcement on Discord
-        continue-on-error: true
-        if: contains(github.event.inputs.announceOnDiscord, 'yes')
-        run: |
-          curl -H 'Content-Type: application/json' -X POST -d '{"username": "Kiwi Builder (Next)", "content": "A new build of Kiwi Browser Next (preview version) is available. This version will replace your currently installed Kiwi Browser (com.kiwibrowser.browser) <@&913196471787065344> - https://github.com/kiwibrowser/src.next/releases/tag/${{ github.run_id }}"}' ${{ secrets.DISCORD_WEBHOOK }}
-      
-      - name: Send announcement on Telegram
-        continue-on-error: true
-        run: |
-          curl -H "Content-Type: application/json" -X POST -d '{"text":"A new build of Kiwi Browser Next (preview version) is available. \n Version :[${{ github.run_id }}](https://github.com/kiwibrowser/src.next/releases/tag/${{ github.run_id }})", "chat_id":"@kiwibrowserbuilds","parse_mode" : "markdown","reply_markup" : {"inline_keyboard": [[{"text": "x86", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser-${{ github.run_id }}-x86-github.apk"},{"text": "x64", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser-${{ github.run_id }}-x64-github.apk"}],[{"text": "arm", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser-${{ github.run_id }}-arm-github.apk"},{"text": "arm64", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser-${{ github.run_id }}-arm64-github.apk"}],[{"text": ".DEV x86", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser.dev-${{ github.run_id }}-x86-github.apk"},{"text": ".DEV x64", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser.dev-${{ github.run_id }}-x64-github.apk"}],[{"text": ".DEV arm", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser.dev-${{ github.run_id }}-arm-github.apk"},{"text": ".DEV arm64", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser.dev-${{ github.run_id }}-arm64-github.apk"}]]}}' https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage
 
