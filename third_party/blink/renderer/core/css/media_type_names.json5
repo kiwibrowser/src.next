@@ -1,0 +1,20 @@
+{
+  metadata: {
+    namespace: "media_type_names",
+    export: "CORE_EXPORT",
+  },
+
+  data: [
+    // http://www.w3.org/TR/CSS2/media.html//media-types
+    "all",
+    "braille",
+    "embossed",
+    "handheld",
+    "print",
+    "projection",
+    "screen",
+    "speech",
+    "tty",
+    "tv",
+  ],
+}

@@ -1,0 +1,291 @@
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+#ifndef CONTENT_BROWSER_GPU_GPU_DATA_MANAGER_IMPL_PRIVATE_H_
+#define CONTENT_BROWSER_GPU_GPU_DATA_MANAGER_IMPL_PRIVATE_H_
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include <list>
+#include <map>
+#include <memory>
+#include <set>
+#include <string>
+#include <vector>
+
+#include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/ref_counted.h"
+#include "base/observer_list_threadsafe.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
+#include "base/values.h"
+#include "build/build_config.h"
+#include "content/browser/gpu/gpu_data_manager_impl.h"
+#include "content/common/content_export.h"
+#include "media/base/supported_video_decoder_config.h"
+#include "media/video/video_encode_accelerator.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "ui/display/display_observer.h"
+#include "ui/gl/gpu_preference.h"
+
+namespace base {
+class CommandLine;
+}
+
+namespace content {
+
+class CONTENT_EXPORT GpuDataManagerImplPrivate {
+ public:
+  explicit GpuDataManagerImplPrivate(GpuDataManagerImpl* owner);
+
+  GpuDataManagerImplPrivate(const GpuDataManagerImplPrivate&) = delete;
+  GpuDataManagerImplPrivate& operator=(const GpuDataManagerImplPrivate&) =
+      delete;
+
+  virtual ~GpuDataManagerImplPrivate();
+
+  void StartUmaTimer();
+  void BlocklistWebGLForTesting();
+  gpu::GPUInfo GetGPUInfo() const;
+  gpu::GPUInfo GetGPUInfoForHardwareGpu() const;
+  std::vector<std::string> GetDawnInfoList() const;
+  bool GpuAccessAllowed(std::string* reason) const;
+  bool GpuAccessAllowedForHardwareGpu(std::string* reason) const;
+  void RequestDxdiagDx12VulkanVideoGpuInfoIfNeeded(
+      GpuDataManagerImpl::GpuInfoRequest request,
+      bool delayed);
+  bool IsEssentialGpuInfoAvailable() const;
+  bool IsDx12VulkanVersionAvailable() const;
+  bool IsGpuFeatureInfoAvailable() const;
+  gpu::GpuFeatureStatus GetFeatureStatus(gpu::GpuFeatureType feature) const;
+  void RequestVideoMemoryUsageStatsUpdate(
+      GpuDataManager::VideoMemoryUsageStatsCallback callback) const;
+  void AddObserver(GpuDataManagerObserver* observer);
+  void RemoveObserver(GpuDataManagerObserver* observer);
+  void UnblockDomainFrom3DAPIs(const GURL& url);
+  void DisableHardwareAcceleration();
+  bool HardwareAccelerationEnabled() const;
+
+  void UpdateGpuInfo(
+      const gpu::GPUInfo& gpu_info,
+      const absl::optional<gpu::GPUInfo>& optional_gpu_info_for_hardware_gpu);
+#if BUILDFLAG(IS_WIN)
+  void UpdateDxDiagNode(const gpu::DxDiagNode& dx_diagnostics);
+  void UpdateDx12Info(uint32_t d3d12_feature_level);
+  void UpdateVulkanInfo(uint32_t vulkan_version);
+  void UpdateDevicePerfInfo(const gpu::DevicePerfInfo& device_perf_info);
+
+  void UpdateOverlayInfo(const gpu::OverlayInfo& overlay_info);
+  void UpdateDXGIInfo(gfx::mojom::DXGIInfoPtr dxgi_info);
+  void UpdateDxDiagNodeRequestStatus(bool request_continues);
+  void UpdateDx12RequestStatus(bool request_continues);
+  void UpdateVulkanRequestStatus(bool request_continues);
+  bool Dx12Requested() const;
+  bool VulkanRequested() const;
+  void PostCreateThreads();
+  void TerminateInfoCollectionGpuProcess();
+#endif
+  void UpdateDawnInfo(const std::vector<std::string>& dawn_info_list);
+
+  void UpdateGpuFeatureInfo(const gpu::GpuFeatureInfo& gpu_feature_info,
+                            const absl::optional<gpu::GpuFeatureInfo>&
+                                gpu_feature_info_for_hardware_gpu);
+  void UpdateGpuExtraInfo(const gfx::GpuExtraInfo& process_info);
+  void UpdateMojoMediaVideoDecoderCapabilities(
+      const media::SupportedVideoDecoderConfigs& configs);
+  void UpdateMojoMediaVideoEncoderCapabilities(
+      const media::VideoEncodeAccelerator::SupportedProfiles&
+          supported_profiles);
+
+  gpu::GpuFeatureInfo GetGpuFeatureInfo() const;
+  gpu::GpuFeatureInfo GetGpuFeatureInfoForHardwareGpu() const;
+  gfx::GpuExtraInfo GetGpuExtraInfo() const;
+
+  bool IsGpuCompositingDisabled() const;
+  bool IsGpuCompositingDisabledForHardwareGpu() const;
+
+  void SetGpuCompositingDisabled();
+
+  void AppendGpuCommandLine(base::CommandLine* command_line,
+                            GpuProcessKind kind) const;
+
+  void UpdateGpuPreferences(gpu::GpuPreferences* gpu_preferences,
+                            GpuProcessKind kind) const;
+
+  void AddLogMessage(int level,
+                     const std::string& header,
+                     const std::string& message);
+
+  void ProcessCrashed();
+
+  std::unique_ptr<base::ListValue> GetLogMessages() const;
+
+  void HandleGpuSwitch();
+
+  void BlockDomainFrom3DAPIs(const GURL& url, gpu::DomainGuilt guilt);
+  bool Are3DAPIsBlocked(const GURL& top_origin_url,
+                        ThreeDAPIType requester);
+
+  void DisableDomainBlockingFor3DAPIsForTesting();
+
+  void Notify3DAPIBlocked(const GURL& top_origin_url,
+                          int render_process_id,
+                          int render_frame_id,
+                          ThreeDAPIType requester);
+
+  gpu::GpuMode GetGpuMode() const;
+  void FallBackToNextGpuMode();
+
+  bool CanFallback() const { return !fallback_modes_.empty(); }
+
+  bool IsGpuProcessUsingHardwareGpu() const;
+
+  void SetApplicationVisible(bool is_visible);
+
+  void OnDisplayAdded(const display::Display& new_display);
+  void OnDisplayRemoved(const display::Display& old_display);
+  void OnDisplayMetricsChanged(const display::Display& display,
+                               uint32_t changed_metrics);
+
+ private:
+  friend class GpuDataManagerImplPrivateTest;
+
+  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTest,
+                           GpuInfoUpdate);
+  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTest,
+                           BlockAllDomainsFrom3DAPIs);
+  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTest,
+                           UnblockGuiltyDomainFrom3DAPIs);
+  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTest,
+                           UnblockDomainOfUnknownGuiltFrom3DAPIs);
+  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTest,
+                           UnblockOtherDomainFrom3DAPIs);
+  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTest,
+                           UnblockThisDomainFrom3DAPIs);
+
+  // Indicates the reason that access to a given client API (like
+  // WebGL or Pepper 3D) was blocked or not. This state is distinct
+  // from blocklisting of an entire feature.
+  enum class DomainBlockStatus {
+    kBlocked,
+    kAllDomainsBlocked,
+    kNotBlocked,
+  };
+
+  using DomainGuiltMap = std::map<std::string, gpu::DomainGuilt>;
+
+  using GpuDataManagerObserverList =
+      base::ObserverListThreadSafe<GpuDataManagerObserver>;
+
+  struct LogMessage {
+    int level;
+    std::string header;
+    std::string message;
+
+    LogMessage(int _level,
+               const std::string& _header,
+               const std::string& _message)
+        : level(_level),
+          header(_header),
+          message(_message) { }
+  };
+
+  // Decide the order of GPU process states, and go to the first one. This
+  // should only be called once, during initialization.
+  void InitializeGpuModes();
+
+  // Called when GPU access (hardware acceleration and swiftshader) becomes
+  // blocked.
+  void OnGpuBlocked();
+
+  // Helper to extract the domain from a given URL.
+  std::string GetDomainFromURL(const GURL& url) const;
+
+  // Implementation functions for blocking of 3D graphics APIs, used
+  // for unit testing.
+  void BlockDomainFrom3DAPIsAtTime(const GURL& url,
+                                   gpu::DomainGuilt guilt,
+                                   base::Time at_time);
+  DomainBlockStatus Are3DAPIsBlockedAtTime(const GURL& url,
+                                           base::Time at_time) const;
+  int64_t GetBlockAllDomainsDurationInMs() const;
+
+  // Notify all observers whenever there is a GPU info update.
+  void NotifyGpuInfoUpdate();
+
+  void RequestDxDiagNodeData();
+  void RequestGpuSupportedDx12Version(bool delayed);
+  void RequestGpuSupportedVulkanVersion(bool delayed);
+  void RequestDawnInfo();
+  void RequestMojoMediaVideoCapabilities();
+
+  void RecordCompositingMode();
+
+  const raw_ptr<GpuDataManagerImpl> owner_;
+
+  gpu::GpuFeatureInfo gpu_feature_info_;
+  gpu::GPUInfo gpu_info_;
+  gl::GpuPreference active_gpu_heuristic_ = gl::GpuPreference::kDefault;
+#if BUILDFLAG(IS_WIN)
+  bool gpu_info_dx_diag_requested_ = false;
+  bool gpu_info_dx_diag_request_failed_ = false;
+  bool gpu_info_dx12_valid_ = false;
+  bool gpu_info_dx12_requested_ = false;
+  bool gpu_info_dx12_request_failed_ = false;
+  bool gpu_info_vulkan_valid_ = false;
+  bool gpu_info_vulkan_requested_ = false;
+  bool gpu_info_vulkan_request_failed_ = false;
+#endif
+  bool gpu_info_dawn_toggles_requested_ = false;
+  // The Dawn info queried from the GPU process.
+  std::vector<std::string> dawn_info_list_;
+
+  // What we would have gotten if we haven't fallen back to SwiftShader or
+  // pure software (in the viz case).
+  gpu::GpuFeatureInfo gpu_feature_info_for_hardware_gpu_;
+  gpu::GPUInfo gpu_info_for_hardware_gpu_;
+  bool is_gpu_compositing_disabled_for_hardware_gpu_ = false;
+  bool gpu_access_allowed_for_hardware_gpu_ = true;
+  std::string gpu_access_blocked_reason_for_hardware_gpu_;
+
+  gfx::GpuExtraInfo gpu_extra_info_;
+
+  const scoped_refptr<GpuDataManagerObserverList> observer_list_;
+
+  // Periodically calls RecordCompositingMode() for compositing mode UMA.
+  base::RepeatingTimer compositing_mode_timer_;
+
+  // Contains the 1000 most recent log messages.
+  std::vector<LogMessage> log_messages_;
+
+  // What the gpu process is being run for.
+  gpu::GpuMode gpu_mode_ = gpu::GpuMode::UNKNOWN;
+
+  // Order of gpu process fallback states, used as a stack.
+  std::vector<gpu::GpuMode> fallback_modes_;
+
+  absl::optional<display::ScopedOptionalDisplayObserver> display_observer_;
+
+  // Used to tell if the gpu was disabled by an explicit call to
+  // DisableHardwareAcceleration(), rather than by fallback.
+  bool hardware_disabled_explicitly_ = false;
+
+  // We disable histogram stuff in testing, especially in unit tests because
+  // they cause random failures.
+  bool update_histograms_ = true;
+
+  DomainGuiltMap blocked_domains_;
+  mutable std::list<base::Time> timestamps_of_gpu_resets_;
+  bool domain_blocking_enabled_ = true;
+
+  bool application_is_visible_ = true;
+
+  bool disable_gpu_compositing_ = false;
+};
+
+}  // namespace content
+
+#endif  // CONTENT_BROWSER_GPU_GPU_DATA_MANAGER_IMPL_PRIVATE_H_

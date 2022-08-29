@@ -26,12 +26,11 @@
 
 #include "third_party/blink/renderer/core/page/create_window.h"
 
+#include "base/check_op.h"
 #include "base/feature_list.h"
-#include "base/metrics/histogram_macros.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "third_party/blink/public/common/dom_storage/session_storage_namespace_id.h"
 #include "third_party/blink/public/common/features.h"
-#include "third_party/blink/public/common/frame/from_ad_state.h"
 #include "third_party/blink/public/mojom/loader/request_context_frame_type.mojom-blink.h"
 #include "third_party/blink/public/web/web_view_client.h"
 #include "third_party/blink/public/web/web_window_features.h"
@@ -39,12 +38,12 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
 #include "third_party/blink/renderer/core/frame/ad_tracker.h"
+#include "third_party/blink/renderer/core/frame/attribution_src_loader.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/frame/frame_client.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
-#include "third_party/blink/renderer/core/html/conversion_measurement_parsing.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/loader/frame_load_request.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
@@ -70,10 +69,9 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
                                               LocalDOMWindow* dom_window) {
   WebWindowFeatures window_features;
 
-  ImpressionFeatures impression_features;
-  bool conversion_measurement_enabled =
+  bool attribution_reporting_enabled =
       dom_window &&
-      RuntimeEnabledFeatures::ConversionMeasurementEnabled(dom_window);
+      RuntimeEnabledFeatures::AttributionReportingEnabled(dom_window);
 
   // This code follows the HTML spec, specifically
   // https://html.spec.whatwg.org/C/#concept-window-open-features-tokenize
@@ -86,8 +84,8 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
   unsigned key_begin, key_end;
   unsigned value_begin, value_end;
 
-  String buffer = feature_string.LowerASCII();
-  unsigned length = buffer.length();
+  const String buffer = feature_string.LowerASCII();
+  const unsigned length = buffer.length();
   for (unsigned i = 0; i < length;) {
     // skip to first non-separator (start of key name), but don't skip
     // past the end of the string
@@ -147,7 +145,8 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
 
     // Listing a key with no value is shorthand for key=yes
     int value;
-    if (value_string.IsEmpty() || value_string == "yes") {
+    if (value_string.IsEmpty() || value_string == "yes" ||
+        value_string == "true") {
       value = 1;
     } else if (value_string.Is8Bit()) {
       value = CharactersToInt(value_string.Characters8(), value_string.length(),
@@ -160,12 +159,7 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
 
     if (!ui_features_were_disabled && key_string != "noopener" &&
         key_string != "noreferrer" &&
-        (!conversion_measurement_enabled ||
-         (key_string != "attributionsourceeventid" &&
-          key_string != "attributiondestination" &&
-          key_string != "attributionreportto" &&
-          key_string != "attributionexpiry" &&
-          key_string != "attributionsourcepriority"))) {
+        (!attribution_reporting_enabled || key_string != "attributionsrc")) {
       ui_features_were_disabled = true;
       window_features.menu_bar_visible = false;
       window_features.status_bar_visible = false;
@@ -206,17 +200,37 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
       window_features.background = true;
     } else if (key_string == "persistent") {
       window_features.persistent = true;
-    } else if (conversion_measurement_enabled) {
-      if (key_string == "attributionsourceeventid") {
-        impression_features.impression_data = value_string.ToString();
-      } else if (key_string == "attributiondestination") {
-        impression_features.conversion_destination = value_string.ToString();
-      } else if (key_string == "attributionreportto") {
-        impression_features.reporting_origin = value_string.ToString();
-      } else if (key_string == "attributionexpiry") {
-        impression_features.expiry = value_string.ToString();
-      } else if (key_string == "attributionsourcepriority") {
-        impression_features.priority = value_string.ToString();
+    } else if (attribution_reporting_enabled &&
+               key_string == "attributionsrc") {
+      // attributionsrc values are URLs, and as such their original case needs
+      // to be retained for correctness. Positions in both `feature_string` and
+      // `buffer` correspond because ASCII-lowercasing doesn't add, remove, or
+      // swap character positions; it only does in-place transformations of
+      // capital ASCII characters. See crbug.com/1338698 for details.
+      DCHECK_EQ(feature_string.length(), buffer.length());
+      const StringView original_case_value_string(feature_string, value_begin,
+                                                  value_end - value_begin);
+
+      // attributionsrc values are encoded in order to support embedded special
+      // characters, such as '='.
+      const String decoded = DecodeURLEscapeSequences(
+          original_case_value_string.ToString(), DecodeURLMode::kUTF8);
+
+      if (!decoded.IsEmpty()) {
+        window_features.impression =
+            dom_window->GetFrame()
+                ->GetAttributionSrcLoader()
+                ->RegisterNavigation(dom_window->CompleteURL(decoded));
+      }
+
+      // If the impression could not be set, or if the value was empty, mark
+      // attribution eligibility by adding an impression.
+      if (!window_features.impression &&
+          CanRegisterAttributionInContext(
+              dom_window->GetFrame(), /*element=*/nullptr,
+              /*request_id=*/absl::nullopt,
+              AttributionSrcLoader::RegisterContext::kAttributionSrc)) {
+        window_features.impression = blink::Impression();
       }
     }
   }
@@ -240,11 +254,6 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
   if (window_features.noreferrer)
     window_features.noopener = true;
 
-  if (conversion_measurement_enabled) {
-    window_features.impression =
-        GetImpressionFromWindowFeatures(dom_window, impression_features);
-  }
-
   return window_features;
 }
 
@@ -256,11 +265,6 @@ static void MaybeLogWindowOpen(LocalFrame& opener_frame) {
   bool is_ad_subframe = opener_frame.IsAdSubframe();
   bool is_ad_script_in_stack =
       ad_tracker->IsAdScriptInStack(AdTracker::StackType::kBottomAndTop);
-  FromAdState state =
-      blink::GetFromAdState(is_ad_subframe, is_ad_script_in_stack);
-
-  // Log to UMA.
-  UMA_HISTOGRAM_ENUMERATION("Blink.WindowOpen.FromAdState", state);
 
   // Log to UKM.
   ukm::UkmRecorder* ukm_recorder = opener_frame.GetDocument()->UkmRecorder();
@@ -311,9 +315,15 @@ Frame* CreateNewWindow(LocalFrame& opener_frame,
   }
 
   const WebWindowFeatures& features = request.GetWindowFeatures();
-  request.SetNavigationPolicy(NavigationPolicyForCreateWindow(features));
-  probe::WindowOpen(&opener_window, url, frame_name, features,
-                    LocalFrame::HasTransientUserActivation(&opener_frame));
+  const auto& picture_in_picture_window_options =
+      request.GetPictureInPictureWindowOptions();
+  if (picture_in_picture_window_options.has_value()) {
+    request.SetNavigationPolicy(kNavigationPolicyPictureInPicture);
+  } else {
+    request.SetNavigationPolicy(NavigationPolicyForCreateWindow(features));
+    probe::WindowOpen(&opener_window, url, frame_name, features,
+                      LocalFrame::HasTransientUserActivation(&opener_frame));
+  }
 
   // Sandboxed frames cannot open new auxiliary browsing contexts.
   if (opener_window.IsSandboxed(
@@ -367,7 +377,7 @@ Frame* CreateNewWindow(LocalFrame& opener_frame,
 
   frame.View()->SetCanHaveScrollbars(features.scrollbars_visible);
 
-  IntRect window_rect = page->GetChromeClient().RootWindowRect(frame);
+  gfx::Rect window_rect = page->GetChromeClient().RootWindowRect(frame);
   if (features.x_set)
     window_rect.set_x(features.x);
   if (features.y_set)
@@ -377,10 +387,8 @@ Frame* CreateNewWindow(LocalFrame& opener_frame,
   if (features.height_set)
     window_rect.set_height(features.height);
 
-  IntRect rect = page->GetChromeClient().CalculateWindowRectWithAdjustment(
-      window_rect, frame, opener_frame);
-  page->GetChromeClient().Show(opener_frame.GetLocalFrameToken(),
-                               request.GetNavigationPolicy(), rect,
+  page->GetChromeClient().Show(frame, opener_frame,
+                               request.GetNavigationPolicy(), window_rect,
                                consumed_user_gesture);
   MaybeLogWindowOpen(opener_frame);
   return &frame;

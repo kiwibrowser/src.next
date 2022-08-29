@@ -36,6 +36,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/execution_context/security_context.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
@@ -54,8 +55,9 @@
 #include "third_party/blink/renderer/core/layout/style_retain_scope.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/platform/geometry/int_rect.h"
 #include "third_party/blink/renderer/platform/network/network_utils.h"
+#include "third_party/blink/renderer/platform/weborigin/security_origin.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace blink {
 
@@ -63,7 +65,7 @@ namespace {
 
 inline int GetLayoutInlineSize(const Document& document,
                                const LocalFrameView& main_frame_view) {
-  IntSize size = main_frame_view.GetLayoutSize();
+  gfx::Size size = main_frame_view.GetLayoutSize();
   const LayoutView* layout_view = document.GetLayoutView();
   if (IsHorizontalWritingMode(layout_view->StyleRef().GetWritingMode()))
     return size.width();
@@ -136,7 +138,7 @@ static bool IsIndependentDescendant(const LayoutBlock* layout_object) {
                                   layout_object->IsHorizontalWritingMode()) ||
          layout_object->StyleRef().IsDisplayReplacedType() ||
          layout_object->IsTextAreaIncludingNG() ||
-         layout_object->StyleRef().UserModify() != EUserModify::kReadOnly;
+         layout_object->StyleRef().UsedUserModify() != EUserModify::kReadOnly;
 }
 
 static bool BlockIsRowOfLinks(const LayoutBlock* block) {
@@ -297,15 +299,23 @@ void TextAutosizer::Record(LayoutText* text) {
     MarkSuperclusterForConsistencyCheck(parent);
 }
 
-void TextAutosizer::Destroy(LayoutBlock* block) {
+void TextAutosizer::Destroy(LayoutObject* layout_object) {
   if (!page_info_.setting_enabled_ && !fingerprint_mapper_.HasFingerprints())
     return;
 
 #if DCHECK_IS_ON()
-  DCHECK(!blocks_that_have_begun_layout_.Contains(block));
+  if (layout_object->IsLayoutBlock()) {
+    DCHECK(!blocks_that_have_begun_layout_.Contains(
+        To<LayoutBlock>(layout_object)));
+  }
 #endif
 
-  if (fingerprint_mapper_.Remove(block) && first_block_to_begin_layout_) {
+  bool result = fingerprint_mapper_.Remove(layout_object);
+
+  if (layout_object->IsLayoutBlock())
+    return;
+
+  if (result && first_block_to_begin_layout_) {
     // LayoutBlock with a fingerprint was destroyed during layout.
     // Clear the cluster stack and the supercluster map to avoid stale pointers.
     // Speculative fix for http://crbug.com/369485.
@@ -637,7 +647,7 @@ void TextAutosizer::UpdatePageInfo() {
       page_info_.shared_info_ = document_->GetPage()->TextAutosizerPageInfo();
     } else {
       LocalFrame& main_frame = To<LocalFrame>(frame);
-      IntSize frame_size =
+      gfx::Size frame_size =
           document_->GetSettings()->GetTextAutosizingWindowSizeOverride();
       if (frame_size.IsEmpty())
         frame_size = WindowSize();
@@ -698,7 +708,7 @@ void TextAutosizer::UpdatePageInfo() {
   }
 }
 
-IntSize TextAutosizer::WindowSize() const {
+gfx::Size TextAutosizer::WindowSize() const {
   Page* page = document_->GetPage();
   DCHECK(page);
   return page->GetVisualViewport().Size();
@@ -781,7 +791,7 @@ bool TextAutosizer::ClusterHasEnoughTextToAutosize(
   // of text content.
   if (root->IsTextAreaIncludingNG() ||
       (root->Style() &&
-       root->StyleRef().UserModify() != EUserModify::kReadOnly)) {
+       root->StyleRef().UsedUserModify() != EUserModify::kReadOnly)) {
     cluster->has_enough_text_to_autosize_ = kHasEnoughText;
     return true;
   }
@@ -797,8 +807,8 @@ bool TextAutosizer::ClusterHasEnoughTextToAutosize(
     minimum_text_length_to_autosize =
         document_->GetPage()
             ->GetChromeClient()
-            .ViewportToScreen(IntRect(0, 0, minimum_text_length_to_autosize, 0),
-                              view)
+            .ViewportToScreen(
+                gfx::Rect(0, 0, minimum_text_length_to_autosize, 0), view)
             .width();
   }
 
