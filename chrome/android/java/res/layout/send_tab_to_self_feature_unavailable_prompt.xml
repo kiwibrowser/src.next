@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2019 The Chromium Authors. All rights reserved.
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file. -->
+
+<!-- Container for sign in prompt if Sync is disable or no devices are available -->
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/send_tab_to_self_feature_unavailable_prompt"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:minHeight="@dimen/min_touch_target_size"
+    android:orientation="vertical">
+
+  <ImageView
+    android:id="@+id/empty_state_image"
+    android:layout_height="wrap_content"
+    android:layout_width ="match_parent"
+    android:paddingTop="16dp"
+    android:contentDescription="@string/sharing_hub_no_devices_available_text"
+    app:srcCompat="@drawable/shared_clipboard_zero_state"/>
+
+  <TextView
+    android:layout_width="match_parent"
+    android:layout_height="@dimen/min_touch_target_size"
+    android:gravity="center"
+    android:paddingStart="30dp"
+    android:paddingEnd="30dp"
+    android:paddingTop="16dp"
+    android:ellipsize="end"
+    android:textAppearance="@style/TextAppearance.BlackToolbarTitle"
+    android:text="@string/send_tab_to_self_share_activity_title"/>
+
+  <TextView
+    android:id="@+id/empty_state_label"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center"
+    android:paddingStart="30dp"
+    android:paddingEnd="30dp"
+    android:paddingTop="16dp"
+    android:paddingBottom="32dp"
+    android:ellipsize="end"
+    android:textAppearance="@style/TextAppearance.TextLarge.Secondary"
+    android:text="@string/send_tab_to_self_when_signed_in_unavailable"/>
+
+  <!-- TODO(crbug.com/1295204): Make this visible by default after launch. -->
+  <org.chromium.chrome.browser.share.send_tab_to_self.ManageAccountDevicesLinkView
+      android:id="@+id/manage_account_devices_link"
+      android:visibility="gone"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:paddingTop="16dp" />
+</LinearLayout>

@@ -19,6 +19,9 @@
         android:src="@drawable/btn_toolbar_home"
         android:contentDescription="@string/accessibility_toolbar_btn_home"
         android:visibility="gone"
+        app:menuVerticalOverlapAnchor="false"
+        app:menuMaxWidth="@dimen/home_button_list_menu_width"
+        app:menuPositionedAtEnd="false"
         app:tint="@color/default_icon_color_tint_list" />
 
     <org.chromium.chrome.browser.omnibox.LocationBarPhone
@@ -33,16 +36,17 @@
         android:orientation="horizontal"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="top|end" >
+        android:layout_gravity="top|end"
+        android:focusable="true"
+        android:focusableInTouchMode="true">
 
         <ViewStub
             android:id="@+id/optional_button_stub"
-            android:inflatedId="@+id/optional_toolbar_button"
-            android:layout="@layout/optional_toolbar_button"
-            style="@style/ToolbarButton"
-            android:paddingStart="@dimen/toolbar_phone_optional_button_padding"
-            android:visibility="gone" />
-
+            android:inflatedId="@+id/optional_toolbar_button_container"
+            android:layout_gravity="top"
+            android:visibility="gone"
+            android:layout_width="52dp"
+            style="@style/ToolbarButton" />
         <org.chromium.chrome.browser.toolbar.top.ToggleTabStackButton
             android:id="@+id/tab_switcher_button"
             style="@style/ToolbarButton"

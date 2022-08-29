@@ -1,0 +1,42 @@
+# This OWNERS list is a last resort. Please prefer to use more specific OWNERS
+# where possible.
+
+set noparent
+
+# Reviewers (in CET):
+alexilin@chromium.org
+blundell@chromium.org
+droger@chromium.org
+treib@chromium.org
+vasilii@chromium.org
+
+# Reviewers (in EST):
+avi@chromium.org
+thakis@chromium.org
+yfriedman@chromium.org
+
+# Reviewers (in PST):
+dtrainor@chromium.org
+fgorski@chromium.org
+nyquist@chromium.org
+sky@chromium.org
+tedchoc@chromium.org
+thestig@chromium.org
+twellington@chromium.org
+
+# per-file rules:
+# These are for the common case of adding or renaming files. If you're doing
+# structural changes, please get a review from a reviewer in this file.
+per-file *.gni=*
+per-file BUILD.gn=file://build/OWNERS
+# For lacros-qa-qualified-tracking-roller related changes:
+per-file LACROS_QA_QUALIFIED_VERSION=lacros-tracking-roller@chops-service-accounts.iam.gserviceaccount.com
+# TODO(https://crbug.com/1292666): remove the following line when
+# lacros-qa-qualified-tracking-roller is stable
+per-file LACROS_QA_QUALIFIED_VERSION=svenzheng@chromium.org
+per-file MAJOR_BRANCH_DATE=chrome-official-brancher@chops-service-accounts.iam.gserviceaccount.com
+per-file VERSION=chrome-official-brancher@chops-service-accounts.iam.gserviceaccount.com
+per-file VERSION=govind@chromium.org
+
+# For Fuchsia-specific changes:
+per-file ...fuchsia*=file://build/fuchsia/OWNERS
