@@ -108,4 +108,26 @@ public class WebContentsDarkModeController {
         new UkmRecorder.Bridge().recordEventWithBooleanMetric(
                 webContents, "Android.DarkTheme.AutoDarkMode", "DisabledByUser");
     }
+
+    /**
+     * Return the current enabled state for auto dark mode. If the input {@link GURL} is not null,
+     * the enabled state will also check if auto dark is enabled for URL.
+     * @param browserContextHandle Current browser context handle.
+     * @param context {@link Context} used to check whether UI is in night mode.
+     * @param url Queried URL whether auto dark is enabled.
+     * @return Whether auto dark is enabled for the given input.
+     */
+    public static boolean getEnabledState(
+            BrowserContextHandle browserContextHandle, Context context, GURL url) {
+        if (!isGlobalUserSettingsEnabled(browserContextHandle)) {
+            return false;
+        }
+        if (!ColorUtils.inNightMode(context)) {
+            return false;
+        }
+        if (!url.isEmpty() && !isEnabledForUrl(browserContextHandle, url)) {
+            return false;
+        }
+        return true;
+    }
 }

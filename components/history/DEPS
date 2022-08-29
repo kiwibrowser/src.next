@@ -1,0 +1,17 @@
+include_rules = [
+  "+components/favicon_base",
+  "+components/keyed_service",
+  "+components/query_parser",
+  "+components/prefs",
+  "+components/sync",
+  "+google_apis/gaia",
+  "+net",
+  "+services/network/public/cpp",
+  "+services/network/public/mojom",
+  "+services/network/test",
+  "+sql",
+  "+third_party/skia",
+  "+third_party/sqlite",
+  "+ui/base",
+  "+ui/gfx",
+]

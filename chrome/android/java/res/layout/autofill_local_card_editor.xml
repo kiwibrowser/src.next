@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2016 The Chromium Authors. All rights reserved.
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file. -->
+
+<merge
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Credit card number -->
+    <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/credit_card_number_label"
+        android:labelFor="@+id/credit_card_number_edit"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/pref_autofill_field_large_top_margin"
+        android:layout_marginBottom="@dimen/pref_autofill_field_bottom_margin"
+        app:errorTextAppearance="@style/TextAppearance.ErrorCaption">
+
+        <!-- TODO(crbug.com/900912): Fix and remove lint ignore -->
+        <EditText
+            tools:ignore="Autofill,LabelFor"
+            android:id="@+id/credit_card_number_edit"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:imeOptions="flagNoExtractUi"
+            android:inputType="phone"
+            android:digits="0123456789- "
+            android:hint="@string/autofill_credit_card_editor_number" />
+
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <!-- Expiration date -->
+    <TextView
+        android:id="@+id/credit_card_expiration_label"
+        android:labelFor="@+id/credit_card_expiration_month"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/pref_autofill_field_top_margin"
+        android:layout_marginStart="@dimen/pref_autofill_field_horizontal_padding"
+        android:layout_marginEnd="@dimen/pref_autofill_field_horizontal_padding"
+        android:textAppearance="@style/TextAppearance.TextSmall.Secondary"
+        android:text="@string/autofill_credit_card_editor_expiration_date" />
+
+    <LinearLayout
+        android:id="@+id/credit_card_expiration_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/pref_autofill_field_top_margin"
+        android:layout_marginBottom="@dimen/pref_autofill_dropdown_bottom_margin"
+        android:layout_marginStart="@dimen/pref_autofill_field_horizontal_padding"
+        android:layout_marginEnd="@dimen/pref_autofill_field_horizontal_padding"
+        android:orientation="horizontal"
+        android:baselineAligned="false">
+
+        <LinearLayout
+            android:id="@+id/credit_card_expiration_month"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="@dimen/editor_dialog_section_large_spacing"
+            android:orientation="vertical">
+
+            <androidx.appcompat.widget.AppCompatSpinner
+                android:id="@+id/autofill_credit_card_editor_month_spinner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/autofill_credit_card_editor_expiration_month" />
+
+            <View style="@style/PreferenceSpinnerUnderlineView" />
+
+        </LinearLayout>
+
+       <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <androidx.appcompat.widget.AppCompatSpinner
+                android:id="@+id/autofill_credit_card_editor_year_spinner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/autofill_credit_card_editor_expiration_year" />
+
+            <View style="@style/PreferenceSpinnerUnderlineView"  />
+
+        </LinearLayout>
+    </LinearLayout>
+
+     <!-- Name -->
+    <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/credit_card_name_label"
+        android:labelFor="@+id/credit_card_name_edit"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/pref_autofill_field_top_margin"
+        android:layout_marginBottom="@dimen/pref_autofill_field_bottom_margin">
+
+        <!-- TODO(crbug.com/900912): Fix and remove lint ignore -->
+        <EditText
+            tools:ignore="Autofill,LabelFor"
+            android:id="@+id/credit_card_name_edit"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:imeOptions="flagNoExtractUi"
+            android:inputType="textCapWords"
+            android:hint="@string/autofill_credit_card_editor_name" />
+
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <include layout="@layout/autofill_billing_address_dropdown" />
+
+    <!-- Nickname -->
+    <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/credit_card_nickname_label"
+        android:labelFor="@+id/credit_card_nickname_edit"
+        app:counterMaxLength="25"
+        app:errorEnabled="true"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/pref_autofill_field_extra_large_top_margin"
+        android:layout_marginBottom="@dimen/pref_autofill_field_bottom_margin">
+
+        <EditText
+            tools:ignore="Autofill,LabelFor"
+            android:id="@+id/credit_card_nickname_edit"
+            android:maxLength="25"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:imeOptions="flagNoExtractUi"
+            android:inputType="textCapWords"
+            android:hint="@string/autofill_credit_card_editor_nickname" />
+
+    </com.google.android.material.textfield.TextInputLayout>
+</merge>

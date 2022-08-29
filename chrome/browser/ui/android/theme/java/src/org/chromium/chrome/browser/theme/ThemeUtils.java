@@ -15,14 +15,13 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.content.res.AppCompatResources;
 import androidx.core.content.res.ResourcesCompat;
 
-import com.google.android.material.color.MaterialColors;
-
-import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.browser.flags.BooleanCachedFieldTrialParameter;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.ui.native_page.NativePage;
+import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
 import org.chromium.components.browser_ui.styles.ChromeColors;
+import org.chromium.components.browser_ui.styles.SemanticColorUtils;
 import org.chromium.content_public.browser.RenderWidgetHostView;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.util.ColorUtils;
@@ -39,7 +38,7 @@ public class ThemeUtils {
     private static final String FULL_DYNAMIC_COLORS_PARAM = "dynamic_color_full";
     public static final BooleanCachedFieldTrialParameter ENABLE_FULL_DYNAMIC_COLORS =
             new BooleanCachedFieldTrialParameter(
-                    ChromeFeatureList.DYNAMIC_COLOR_ANDROID, FULL_DYNAMIC_COLORS_PARAM, false);
+                    ChromeFeatureList.DYNAMIC_COLOR_ANDROID, FULL_DYNAMIC_COLORS_PARAM, true);
 
     /**
      * The background color to use for a given {@link Tab}. This will either be the color specified
@@ -88,8 +87,8 @@ public class ThemeUtils {
         // Text box color on default toolbar background in incognito mode is a pre-defined
         // color. We calculate the equivalent opaque color from the pre-defined translucent color.
         if (isIncognito) {
-            final int overlayColor = ApiCompatibilityUtils.getColor(
-                    context.getResources(), R.color.toolbar_text_box_background_incognito);
+            final int overlayColor =
+                    context.getColor(R.color.toolbar_text_box_background_incognito);
             final float overlayColorAlpha = Color.alpha(overlayColor) / 255f;
             final int overlayColorOpaque = overlayColor & 0xFF000000;
             return ColorUtils.getColorWithOverlay(color, overlayColorOpaque, overlayColorAlpha);
@@ -129,7 +128,40 @@ public class ThemeUtils {
         // Light toolbar theme colors may be used in night mode, so use toolbar_icon_tint_dark which
         // is not overridden in night- resources.
         return useLight ? R.color.default_icon_color_light_tint_list
-                        : R.color.toolbar_icon_tint_dark;
+                        : R.color.default_icon_color_dark_tint_list;
+    }
+
+    /**
+     * Returns the themed toolbar icon tint list.
+     *
+     * @param context The context to retrieve the resources from.
+     * @param brandedColorScheme The {@link BrandedColorScheme}.
+     * @return Primary icon tint list.
+     */
+    public static ColorStateList getThemedToolbarIconTint(
+            Context context, @BrandedColorScheme int brandedColorScheme) {
+        return AppCompatResources.getColorStateList(
+                context, getThemedToolbarIconTintRes(brandedColorScheme));
+    }
+
+    /**
+     * Returns the themed toolbar icon tint resource.
+     *
+     * @param brandedColorScheme The {@link BrandedColorScheme}.
+     * @return Primary icon tint resource.
+     */
+    public static @ColorRes int getThemedToolbarIconTintRes(
+            @BrandedColorScheme int brandedColorScheme) {
+        @ColorRes
+        int colorId = R.color.default_icon_color_tint_list;
+        if (brandedColorScheme == BrandedColorScheme.INCOGNITO) {
+            colorId = R.color.default_icon_color_light_tint_list;
+        } else if (brandedColorScheme == BrandedColorScheme.LIGHT_BRANDED_THEME) {
+            colorId = R.color.default_icon_color_dark_tint_list;
+        } else if (brandedColorScheme == BrandedColorScheme.DARK_BRANDED_THEME) {
+            colorId = R.color.default_icon_color_white_tint_list;
+        }
+        return colorId;
     }
 
     /**
@@ -155,9 +187,8 @@ public class ThemeUtils {
             Context context, @ColorInt int toolbarColor, boolean isIncognito) {
         final Resources res = context.getResources();
         if (isUsingDefaultToolbarColor(context, isIncognito, toolbarColor)) {
-            return isIncognito
-                    ? res.getColor(R.color.divider_line_bg_color_light)
-                    : MaterialColors.getColor(context, R.attr.divider_line_bg_color_dynamic, TAG);
+            return isIncognito ? res.getColor(R.color.divider_line_bg_color_light)
+                               : SemanticColorUtils.getDividerLineBgColor(context);
         }
 
         final float alpha = ResourcesCompat.getFloat(res, R.dimen.toolbar_hairline_overlay_alpha);

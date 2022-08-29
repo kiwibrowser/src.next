@@ -1,0 +1,521 @@
+# Copyright 2018 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/config/chromeos/ui_mode.gni")
+import("//third_party/closure_compiler/compile_js.gni")
+import("//tools/grit/preprocess_if_expr.gni")
+import("//tools/polymer/css_to_wrapper.gni")
+import("//tools/polymer/html_to_wrapper.gni")
+import("//tools/polymer/polymer.gni")
+import("//ui/webui/resources/include_polymer.gni")
+import("//ui/webui/resources/tools/generate_grd.gni")
+import("//ui/webui/resources/tools/js_modulizer.gni")
+
+preprocess_folder = "$root_gen_dir/ui/webui/resources/preprocessed/cr_elements"
+if (include_polymer) {
+  preprocess_gen_manifest = "preprocessed_gen_manifest.json"
+}
+
+if (is_chromeos_ash) {
+  preprocess_polymer2_manifest = "preprocessed_polymer2_manifest.json"
+  preprocess_src_manifest = "preprocessed_src_manifest.json"
+}
+
+if (include_polymer) {
+  generate_grd("build_grdp") {
+    grd_prefix = "cr_elements"
+    out_grd = "$target_gen_dir/${grd_prefix}_resources.grdp"
+    public_deps = [ ":preprocess" ]
+    manifest_files = [ "$target_gen_dir/$preprocess_gen_manifest" ]
+
+    if (is_chromeos_ash) {
+      manifest_files += [
+        # TODO(crbug.com/1184053): Fully remove once no longer used by CrOS.
+        "$target_gen_dir/$preprocess_polymer2_manifest",
+        "$target_gen_dir/$preprocess_src_manifest",
+      ]
+    }
+    resource_path_prefix = "cr_elements"
+  }
+}
+
+group("preprocess") {
+  public_deps = [
+    ":preprocess_generated_ts",
+    ":preprocess_src_ts",
+  ]
+
+  if (include_polymer) {
+    public_deps += [ ":preprocess_generated" ]
+  }
+
+  if (is_chromeos_ash) {
+    public_deps += [
+      # TODO(crbug.com/1184053): Fully remove once no longer used by CrOS.
+      ":preprocess_polymer2",
+      ":preprocess_src",
+    ]
+  }
+}
+
+if (is_chromeos_ash) {
+  preprocess_if_expr("preprocess_src") {
+    in_folder = "."
+    out_folder = "$preprocess_folder"
+    out_manifest = "$target_gen_dir/$preprocess_src_manifest"
+
+    in_files = [
+      "chromeos/cr_picture/cr_camera.js",
+      "chromeos/cr_picture/cr_picture_list.js",
+      "chromeos/cr_picture/cr_picture_pane.js",
+      "chromeos/cr_picture/cr_picture_types.js",
+      "chromeos/cr_picture/png.js",
+      "chromeos/cr_picture/webcam_utils.js",
+    ]
+  }
+}
+
+# TS files are passed to a separate target so that they are not listed in the
+# |out_manifest|.
+preprocess_if_expr("preprocess_src_ts") {
+  in_folder = "."
+  out_folder = preprocess_folder
+  in_files = [
+    "cr_splitter/cr_splitter.ts",
+    "cr_tab_box/cr_tab_box.ts",
+    "cr_tree/cr_tree_base.ts",
+    "cr_tree/cr_tree_item.ts",
+    "cr_tree/cr_tree.ts",
+  ]
+  if (include_polymer) {
+    in_files += [
+      "cr_a11y_announcer/cr_a11y_announcer.ts",
+      "cr_action_menu/cr_action_menu.ts",
+      "cr_auto_img/cr_auto_img.ts",
+      "cr_container_shadow_mixin.ts",
+      "cr_drawer/cr_drawer.ts",
+      "cr_grid/cr_grid.ts",
+      "cr_link_row/cr_link_row.ts",
+      "cr_menu_selector/cr_menu_selector.ts",
+      "cr_profile_avatar_selector/cr_profile_avatar_selector_grid.ts",
+      "cr_profile_avatar_selector/cr_profile_avatar_selector.ts",
+      "cr_search_field/cr_search_field_mixin.ts",
+      "cr_search_field/cr_search_field.ts",
+      "cr_slider/cr_slider.ts",
+      "cr_tabs/cr_tabs.ts",
+      "cr_toast/cr_toast_manager.ts",
+      "cr_toast/cr_toast.ts",
+      "cr_toolbar/cr_toolbar_search_field.ts",
+      "cr_toolbar/cr_toolbar_selection_overlay.ts",
+      "cr_toolbar/cr_toolbar.ts",
+      "cr_view_manager/cr_view_manager.ts",
+      "find_shortcut_mixin.ts",
+      "mouse_hoverable_mixin.ts",
+    ]
+
+    if (is_chromeos) {
+      in_files += [ "cr_searchable_drop_down/cr_searchable_drop_down.ts" ]
+    }
+  }
+}
+
+if (is_chromeos_ash) {
+  preprocess_if_expr("preprocess_polymer2") {
+    in_folder = "./"
+    out_folder = "$preprocess_folder"
+    out_manifest = "$target_gen_dir/$preprocess_polymer2_manifest"
+    in_files = [
+      "action_link_css.html",
+      "chromeos/cros_color_overrides.html",
+      "cr_actionable_row_style.html",
+      "cr_button/cr_button.html",
+      "cr_button/cr_button.js",
+      "cr_checkbox/cr_checkbox.html",
+      "cr_checkbox/cr_checkbox.js",
+      "cr_container_shadow_behavior.html",
+      "cr_container_shadow_behavior.js",
+      "cr_dialog/cr_dialog.html",
+      "cr_dialog/cr_dialog.js",
+      "cr_expand_button/cr_expand_button.html",
+      "cr_expand_button/cr_expand_button.js",
+      "cr_fingerprint/cr_fingerprint_icon.html",
+      "cr_fingerprint/cr_fingerprint_progress_arc.html",
+      "cr_fingerprint/cr_fingerprint_progress_arc.js",
+      "cr_icon_button/cr_icon_button.html",
+      "cr_icon_button/cr_icon_button.js",
+      "cr_icons_css.html",
+      "cr_input/cr_input.html",
+      "cr_input/cr_input.js",
+      "cr_input/cr_input_style_css.html",
+      "cr_lazy_render/cr_lazy_render.html",
+      "cr_lazy_render/cr_lazy_render.js",
+      "cr_lottie/cr_lottie.html",
+      "cr_lottie/cr_lottie.js",
+      "cr_radio_button/cr_card_radio_button.html",
+      "cr_radio_button/cr_card_radio_button.js",
+      "cr_radio_button/cr_radio_button_behavior.html",
+      "cr_radio_button/cr_radio_button_behavior.js",
+      "cr_radio_button/cr_radio_button.html",
+      "cr_radio_button/cr_radio_button.js",
+      "cr_radio_button/cr_radio_button_style_css.html",
+      "cr_radio_group/cr_radio_group.html",
+      "cr_radio_group/cr_radio_group.js",
+      "cr_scrollable_behavior.html",
+      "cr_scrollable_behavior.js",
+      "cr_toggle/cr_toggle.html",
+      "cr_toggle/cr_toggle.js",
+      "find_shortcut_behavior.js",
+      "hidden_style_css.html",
+      "icons.html",
+      "md_select_css.html",
+      "policy/cr_policy_indicator_behavior.html",
+      "policy/cr_policy_indicator_behavior.js",
+      "policy/cr_policy_indicator.html",
+      "policy/cr_policy_indicator.js",
+      "policy/cr_policy_pref_indicator.html",
+      "policy/cr_policy_pref_indicator.js",
+      "policy/cr_tooltip_icon.html",
+      "policy/cr_tooltip_icon.js",
+      "shared_style_css.html",
+      "shared_vars_css.html",
+    ]
+  }
+}
+
+if (include_polymer) {
+  preprocess_if_expr("preprocess_generated") {
+    deps = [ ":custom_elements" ]
+    in_folder = target_gen_dir
+    out_folder = preprocess_folder
+    out_manifest = "$target_gen_dir/$preprocess_gen_manifest"
+    in_files = [
+      "action_link_css.m.js",
+      "cr_actionable_row_style.m.js",
+      "cr_button/cr_button.m.js",
+      "cr_checkbox/cr_checkbox.m.js",
+      "cr_container_shadow_behavior.m.js",
+      "cr_dialog/cr_dialog.m.js",
+      "cr_expand_button/cr_expand_button.m.js",
+      "cr_fingerprint/cr_fingerprint_icon.m.js",
+      "cr_fingerprint/cr_fingerprint_progress_arc.m.js",
+      "cr_icon_button/cr_icon_button.m.js",
+      "cr_icons_css.m.js",
+      "cr_input/cr_input.m.js",
+      "cr_input/cr_input_style_css.m.js",
+      "cr_lazy_render/cr_lazy_render.m.js",
+      "cr_lottie/cr_lottie.m.js",
+      "cr_radio_button/cr_card_radio_button.m.js",
+      "cr_radio_button/cr_radio_button_behavior.m.js",
+      "cr_radio_button/cr_radio_button.m.js",
+      "cr_radio_button/cr_radio_button_style_css.m.js",
+      "cr_radio_group/cr_radio_group.m.js",
+      "cr_scrollable_behavior.m.js",
+      "cr_toggle/cr_toggle.m.js",
+      "hidden_style_css.m.js",
+      "icons.m.js",
+      "md_select_css.m.js",
+      "policy/cr_policy_indicator_behavior.m.js",
+      "policy/cr_policy_indicator.m.js",
+      "policy/cr_policy_pref_indicator.m.js",
+      "policy/cr_tooltip_icon.m.js",
+      "shared_style_css.m.js",
+      "shared_vars_css.m.js",
+    ]
+
+    if (is_chromeos_ash) {
+      in_files += [
+        "chromeos/cros_color_overrides.m.js",
+        "chromeos/cr_picture/cr_camera.html.js",
+        "chromeos/cr_picture/cr_picture_list.html.js",
+        "chromeos/cr_picture/cr_picture_pane.html.js",
+        "chromeos/cr_picture/icons.html.js",
+      ]
+    }
+  }
+}
+
+# TS files are passed to a separate target so that they are not listed in the
+# |out_manifest|.
+preprocess_if_expr("preprocess_generated_ts") {
+  deps = [ ":html_wrapper_files_native" ]
+  in_folder = target_gen_dir
+  out_folder = preprocess_folder
+  in_files = [
+    "cr_tab_box/cr_tab_box.html.ts",
+    "cr_tree/cr_tree.html.ts",
+    "cr_tree/cr_tree_item.html.ts",
+  ]
+  if (include_polymer) {
+    deps += [
+      ":css_wrapper_files",
+      ":html_wrapper_files",
+    ]
+    in_files += [
+      "cr_a11y_announcer/cr_a11y_announcer.html.ts",
+      "cr_action_menu/cr_action_menu.html.ts",
+      "cr_drawer/cr_drawer.html.ts",
+      "cr_grid/cr_grid.html.ts",
+      "cr_link_row/cr_link_row.html.ts",
+      "cr_nav_menu_item_style.css.ts",
+      "cr_page_host_style.css.ts",
+      "cr_profile_avatar_selector/cr_profile_avatar_selector_grid.html.ts",
+      "cr_profile_avatar_selector/cr_profile_avatar_selector.html.ts",
+      "cr_search_field/cr_search_field.html.ts",
+      "cr_slider/cr_slider.html.ts",
+      "cr_tabs/cr_tabs.html.ts",
+      "cr_toast/cr_toast.html.ts",
+      "cr_toast/cr_toast_manager.html.ts",
+      "cr_toolbar/cr_toolbar.html.ts",
+      "cr_toolbar/cr_toolbar_search_field.html.ts",
+      "cr_toolbar/cr_toolbar_selection_overlay.html.ts",
+      "cr_view_manager/cr_view_manager.html.ts",
+      "mwb_element_shared_style.css.ts",
+      "mwb_shared_icons.html.ts",
+      "mwb_shared_style.css.ts",
+      "mwb_shared_vars.css.ts",
+      "search_highlight_style.css.ts",
+    ]
+
+    if (is_chromeos) {
+      in_files += [ "cr_searchable_drop_down/cr_searchable_drop_down.html.ts" ]
+    }
+  }
+}
+
+if (include_polymer) {
+  group("closure_compile") {
+    deps = [
+      ":cr_elements_resources",
+      "cr_checkbox:closure_compile",
+      "cr_dialog:closure_compile",
+      "cr_fingerprint:closure_compile",
+      "cr_icon_button:closure_compile",
+      "cr_input:closure_compile",
+      "cr_lottie:closure_compile",
+      "cr_radio_button:closure_compile",
+      "cr_radio_group:closure_compile",
+      "cr_toggle:closure_compile",
+      "policy:closure_compile",
+
+      # Targets for auto-generated Polymer 3 JS Modules
+      ":cr_elements_module_resources",
+      "cr_button:closure_compile_module",
+      "cr_checkbox:closure_compile_module",
+      "cr_dialog:closure_compile_module",
+      "cr_expand_button:closure_compile_module",
+      "cr_fingerprint:closure_compile_module",
+      "cr_icon_button:closure_compile_module",
+      "cr_input:closure_compile_module",
+      "cr_lazy_render:closure_compile_module",
+      "cr_lottie:closure_compile_module",
+      "cr_radio_button:closure_compile_module",
+      "cr_radio_group:closure_compile_module",
+      "cr_toggle:closure_compile_module",
+      "policy:closure_compile_module",
+    ]
+
+    if (is_chromeos_ash) {
+      deps += [
+        "chromeos:closure_compile",
+        "cr_button:closure_compile",
+        "cr_expand_button:closure_compile",
+      ]
+    }
+  }
+
+  js_type_check("cr_elements_resources") {
+    uses_legacy_modules = true
+    deps = [
+      ":cr_container_shadow_behavior",
+      ":cr_scrollable_behavior",
+    ]
+  }
+
+  js_library("cr_scrollable_behavior") {
+    deps = [ "//third_party/polymer/v1_0/components-chromium/iron-list:iron-list-extracted" ]
+  }
+
+  js_library("cr_container_shadow_behavior") {
+    deps = [ "//ui/webui/resources/js:assert" ]
+  }
+}
+
+# Targets for auto-generating Polymer 3 JS Modules.
+if (include_polymer) {
+  polymer_modulizer("action_link_css") {
+    js_file = "action_link_css.m.js"
+    html_file = "action_link_css.html"
+    html_type = "style-module"
+  }
+
+  polymer_modulizer("cr_actionable_row_style") {
+    js_file = "cr_actionable_row_style.m.js"
+    html_file = "cr_actionable_row_style.html"
+    html_type = "style-module"
+  }
+
+  polymer_modulizer("shared_vars_css") {
+    js_file = "shared_vars_css.m.js"
+    html_file = "shared_vars_css.html"
+    html_type = "custom-style"
+  }
+
+  polymer_modulizer("shared_style_css") {
+    js_file = "shared_style_css.m.js"
+    html_file = "shared_style_css.html"
+    html_type = "style-module"
+  }
+
+  polymer_modulizer("hidden_style_css") {
+    js_file = "hidden_style_css.m.js"
+    html_file = "hidden_style_css.html"
+    html_type = "style-module"
+  }
+
+  polymer_modulizer("md_select_css") {
+    js_file = "md_select_css.m.js"
+    html_file = "md_select_css.html"
+    html_type = "style-module"
+  }
+
+  polymer_modulizer("cr_icons_css") {
+    js_file = "cr_icons_css.m.js"
+    html_file = "cr_icons_css.html"
+    html_type = "style-module"
+  }
+
+  polymer_modulizer("icons") {
+    js_file = "icons.m.js"
+    html_file = "icons.html"
+    html_type = "iron-iconset"
+  }
+
+  js_modulizer("modulize") {
+    input_files = [
+      "cr_container_shadow_behavior.js",
+      "cr_scrollable_behavior.js",
+    ]
+  }
+}
+
+if (include_polymer) {
+  group("custom_elements") {
+    public_deps = [
+      ":action_link_css_module",
+      ":cr_actionable_row_style_module",
+      ":cr_icons_css_module",
+      ":hidden_style_css_module",
+      ":icons_module",
+      ":md_select_css_module",
+      ":modulize",
+      ":shared_style_css_module",
+      ":shared_vars_css_module",
+      "cr_button:cr_button_module",
+      "cr_checkbox:cr_checkbox_module",
+      "cr_dialog:cr_dialog_module",
+      "cr_expand_button:cr_expand_button_module",
+      "cr_fingerprint:polymer3_elements",
+      "cr_icon_button:cr_icon_button_module",
+      "cr_input:polymer3_elements",
+      "cr_lazy_render:cr_lazy_render_module",
+      "cr_lottie:cr_lottie_module",
+      "cr_radio_button:polymer3_elements",
+      "cr_radio_group:cr_radio_group_module",
+      "cr_toggle:cr_toggle_module",
+      "policy:polymer3_elements",
+    ]
+
+    if (is_chromeos) {
+      public_deps += [ "chromeos:polymer3_elements" ]
+    }
+  }
+}
+
+if (include_polymer) {
+  js_type_check("cr_elements_module_resources") {
+    is_polymer3 = true
+    deps = [
+      ":cr_container_shadow_behavior.m",
+      ":cr_scrollable_behavior.m",
+    ]
+
+    if (is_chromeos_ash) {
+      deps += [ ":find_shortcut_behavior" ]
+    }
+  }
+
+  js_library("cr_container_shadow_behavior.m") {
+    sources = [ "$root_gen_dir/ui/webui/resources/cr_elements/cr_container_shadow_behavior.m.js" ]
+    deps = [ "//ui/webui/resources/js:assert.m" ]
+    extra_deps = [ ":modulize" ]
+  }
+
+  js_library("cr_scrollable_behavior.m") {
+    sources = [ "$root_gen_dir/ui/webui/resources/cr_elements/cr_scrollable_behavior.m.js" ]
+    deps = [
+      "//third_party/polymer/v3_0/components-chromium/iron-list:iron-list",
+      "//third_party/polymer/v3_0/components-chromium/polymer:polymer_bundled",
+    ]
+    extra_deps = [ ":modulize" ]
+  }
+}
+
+if (is_chromeos_ash) {
+  js_library("find_shortcut_behavior") {
+    deps = [
+      "//ui/webui/resources/js:assert.m",
+      "//ui/webui/resources/js:cr.m",
+      "//ui/webui/resources/js:util.m",
+      "//ui/webui/resources/js/cr/ui:keyboard_shortcut_list.m",
+    ]
+  }
+}
+
+html_to_wrapper("html_wrapper_files_native") {
+  in_files = [
+    "cr_tab_box/cr_tab_box.html",
+    "cr_tree/cr_tree.html",
+    "cr_tree/cr_tree_item.html",
+  ]
+  template = "native"
+}
+
+if (include_polymer) {
+  html_to_wrapper("html_wrapper_files") {
+    in_files = [
+      "cr_a11y_announcer/cr_a11y_announcer.html",
+      "cr_action_menu/cr_action_menu.html",
+      "cr_drawer/cr_drawer.html",
+      "cr_grid/cr_grid.html",
+      "cr_link_row/cr_link_row.html",
+      "cr_profile_avatar_selector/cr_profile_avatar_selector_grid.html",
+      "cr_profile_avatar_selector/cr_profile_avatar_selector.html",
+      "cr_search_field/cr_search_field.html",
+      "cr_slider/cr_slider.html",
+      "cr_tabs/cr_tabs.html",
+      "cr_toast/cr_toast.html",
+      "cr_toast/cr_toast_manager.html",
+      "cr_toolbar/cr_toolbar.html",
+      "cr_toolbar/cr_toolbar_search_field.html",
+      "cr_toolbar/cr_toolbar_selection_overlay.html",
+      "cr_view_manager/cr_view_manager.html",
+      "mwb_shared_icons.html",
+    ]
+
+    if (is_chromeos) {
+      in_files += [ "cr_searchable_drop_down/cr_searchable_drop_down.html" ]
+    }
+  }
+
+  css_to_wrapper("css_wrapper_files") {
+    in_files = [
+      "cr_nav_menu_item_style.css",
+      "mwb_element_shared_style.css",
+      "mwb_shared_style.css",
+      "mwb_shared_vars.css",
+      "search_highlight_style.css",
+      "cr_page_host_style.css",
+    ]
+  }
+}

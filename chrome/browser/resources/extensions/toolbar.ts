@@ -12,10 +12,11 @@ import 'chrome://resources/polymer/v3_0/paper-styles/color.js';
 import './pack_dialog.js';
 
 import {getToastManager} from 'chrome://resources/cr_elements/cr_toast/cr_toast_manager.js';
+import {CrToggleElement} from 'chrome://resources/cr_elements/cr_toggle/cr_toggle.m.js';
 import {I18nMixin} from 'chrome://resources/js/i18n_mixin.js';
 import {listenOnce} from 'chrome://resources/js/util.m.js';
-import {IronA11yAnnouncer} from 'chrome://resources/polymer/v3_0/iron-a11y-announcer/iron-a11y-announcer.js';
-import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {getTemplate} from './toolbar.html.js';
 
 export interface ToolbarDelegate {
   /**
@@ -28,25 +29,32 @@ export interface ToolbarDelegate {
 
   /** Updates all extensions. */
   updateAllExtensions(extensions: chrome.developerPrivate.ExtensionInfo[]):
-      Promise<string>;
+      Promise<void>;
 }
 
-interface ExtensionsToolbarElement {
+export interface ExtensionsToolbarElement {
   $: {
     devDrawer: HTMLElement,
+    devMode: CrToggleElement,
+    loadUnpacked: HTMLElement,
     packExtensions: HTMLElement,
+    updateNow: HTMLElement,
+
+    // <if expr="chromeos_ash">
+    kioskExtensions: HTMLElement,
+    // </if>
   };
 }
 
 const ExtensionsToolbarElementBase = I18nMixin(PolymerElement);
 
-class ExtensionsToolbarElement extends ExtensionsToolbarElementBase {
+export class ExtensionsToolbarElement extends ExtensionsToolbarElementBase {
   static get is() {
     return 'extensions-toolbar';
   }
 
   static get template() {
-    return html`{__html_template__}`;
+    return getTemplate();
   }
 
   static get properties() {
@@ -62,9 +70,9 @@ class ExtensionsToolbarElement extends ExtensionsToolbarElementBase {
       },
 
       devModeControlledByPolicy: Boolean,
-      isSupervised: Boolean,
+      isChildAccount: Boolean,
 
-      // <if expr="chromeos">
+      // <if expr="chromeos_ash">
       kioskEnabled: Boolean,
       // </if>
 
@@ -80,13 +88,13 @@ class ExtensionsToolbarElement extends ExtensionsToolbarElementBase {
     };
   }
 
-  extensions: Array<chrome.developerPrivate.ExtensionInfo>;
+  extensions: chrome.developerPrivate.ExtensionInfo[];
   delegate: ToolbarDelegate;
   inDevMode: boolean;
   devModeControlledByPolicy: boolean;
-  isSupervised: boolean;
+  isChildAccount: boolean;
 
-  // <if expr="chromeos">
+  // <if expr="chromeos_ash">
   kioskEnabled: boolean;
   // </if>
 
@@ -96,12 +104,9 @@ class ExtensionsToolbarElement extends ExtensionsToolbarElementBase {
   private showPackDialog_: boolean;
   private isUpdating_: boolean;
 
-  ready() {
+  override ready() {
     super.ready();
     this.setAttribute('role', 'banner');
-    this.toggleAttribute(
-        'enable-branding-update',
-        document.documentElement.hasAttribute('enable-branding-update'));
   }
 
   private fire_(eventName: string, detail?: any) {
@@ -110,17 +115,17 @@ class ExtensionsToolbarElement extends ExtensionsToolbarElementBase {
   }
 
   private shouldDisableDevMode_(): boolean {
-    return this.devModeControlledByPolicy || this.isSupervised;
+    return this.devModeControlledByPolicy || this.isChildAccount;
   }
 
   private getTooltipText_(): string {
     return this.i18n(
-        this.isSupervised ? 'controlledSettingChildRestriction' :
-                            'controlledSettingPolicy');
+        this.isChildAccount ? 'controlledSettingChildRestriction' :
+                              'controlledSettingPolicy');
   }
 
   private getIcon_(): string {
-    return this.isSupervised ? 'cr20:kite' : 'cr20:domain';
+    return this.isChildAccount ? 'cr20:kite' : 'cr20:domain';
   }
 
   private onDevModeToggleChange_(e: CustomEvent<boolean>) {
@@ -178,7 +183,7 @@ class ExtensionsToolbarElement extends ExtensionsToolbarElementBase {
     this.$.packExtensions.focus();
   }
 
-  // <if expr="chromeos">
+  // <if expr="chromeos_ash">
   private onKioskTap_() {
     this.fire_('kiosk-tap');
   }
@@ -209,6 +214,12 @@ class ExtensionsToolbarElement extends ExtensionsToolbarElementBase {
               toastManager.hide();
               this.isUpdating_ = false;
             });
+  }
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    'extensions-toolbar': ExtensionsToolbarElement;
   }
 }
 
