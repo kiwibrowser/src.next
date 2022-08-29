@@ -372,13 +372,15 @@
         <template is="dom-if"
           if="[[shouldShowIncognitoOption_(
               data.incognitoAccess.isEnabled, incognitoAvailable)]]">
+<a href="enable_incognito"></a>
+<div id="enable_incognito"></a>
           <extensions-toggle-row id="allow-incognito"
               checked="[[data.incognitoAccess.isActive]]"
               class="hr"
               on-change="onAllowIncognitoChange_">
             <div>
               <div>$i18n{itemAllowIncognito}</div>
-              <div class="section-content">$i18n{incognitoInfoWarning}</div>
+<!--              <div class="section-content">$i18n{incognitoInfoWarning}</div> -->
             </div>
           </extensions-toggle-row>
         </template>

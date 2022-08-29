@@ -142,7 +142,7 @@ public class DownloadDialogBridge implements DownloadLocationDialogController {
     @CalledByNative
     private void showDialog(WindowAndroid windowAndroid, long totalBytes,
             @ConnectionType int connectionType, @DownloadLocationDialogType int dialogType,
-            String suggestedPath, boolean supportsLaterDialog, boolean isIncognito) {
+            String suggestedPath, boolean supportsLaterDialog, boolean isIncognito, String urlToDownload) {
         mWindowAndroid = windowAndroid;
         Activity activity = windowAndroid.getActivity().get();
         if (activity == null) {

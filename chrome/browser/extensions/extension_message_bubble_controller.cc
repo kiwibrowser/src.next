@@ -316,8 +316,10 @@ ExtensionIdList* ExtensionMessageBubbleController::GetOrCreateExtensionList() {
         all_extensions ? *all_extensions : registry->enabled_extensions();
     for (const scoped_refptr<const Extension>& extension :
          extensions_to_check) {
+#if 0
       if (delegate_->ShouldIncludeExtension(extension.get()))
         extension_list_.push_back(extension->id());
+#endif
     }
 
     initialized_ = true;

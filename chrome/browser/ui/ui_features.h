@@ -38,7 +38,7 @@ extern const base::Feature kChromeWhatsNewUI;
 extern const base::Feature kChromeWhatsNewInMainMenuNewBadge;
 #endif
 
-#if !defined(ANDROID)
+#if !defined(ANDROID) || true
 extern const base::Feature kAccessCodeCastUI;
 #endif
 

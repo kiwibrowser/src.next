@@ -98,6 +98,7 @@ public class RadioButtonGroupThemePreference
      * Remove and insert the checkbox to the view, based on the current theme preference.
      */
     private void positionCheckbox() {
+        if (false)
         if (ChromeFeatureList.isEnabled(
                     ChromeFeatureList.DARKEN_WEBSITES_CHECKBOX_IN_THEMES_SETTING)) {
             if (mSetting == ThemeType.SYSTEM_DEFAULT || mSetting == ThemeType.DARK) {

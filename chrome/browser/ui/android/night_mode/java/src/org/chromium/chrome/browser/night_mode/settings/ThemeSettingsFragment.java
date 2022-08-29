@@ -61,6 +61,7 @@ public class ThemeSettingsFragment extends PreferenceFragmentCompat {
             }
             int theme = (int) newValue;
             sharedPreferencesManager.writeInt(UI_THEME_SETTING, theme);
+            WebContentsDarkModeController.updateDarkModeStringSettings();
             return true;
         });
 

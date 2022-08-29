@@ -61,6 +61,7 @@ public class FaviconHelper {
         private Bitmap mDefaultLightBitmap;
 
         private int getResourceId(GURL url) {
+            if (true) return R.drawable.default_favicon;
             return UrlUtilities.isInternalScheme(url) ? R.drawable.chromelogo16
                                                       : R.drawable.default_favicon;
         }

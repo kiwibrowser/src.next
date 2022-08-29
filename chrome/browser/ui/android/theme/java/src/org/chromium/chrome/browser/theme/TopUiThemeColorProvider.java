@@ -26,6 +26,8 @@ import org.chromium.ui.util.ColorUtils;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 
+import org.chromium.base.ContextUtils;
+
 /**
  * Manages the theme color used on the top part of the UI based on Tab's theme color and other
  * conditions such as dark mode settings, incognito mode, security state, etc.
@@ -182,6 +184,9 @@ public class TopUiThemeColorProvider extends ThemeColorProvider {
     private boolean isThemingAllowed(Tab tab) {
         boolean disallowDueToNightMode =
                 !mAllowThemingInNightMode && ColorUtils.inNightMode(tab.getContext());
+
+        if (ContextUtils.getAppSharedPreferences().getBoolean("darken_websites_enabled", false) || ContextUtils.getAppSharedPreferences().getInt("ui_theme_setting", 0) == 2)
+            disallowDueToNightMode = true;
 
         return tab.isThemingAllowed() && !mIsTablet && !disallowDueToNightMode
                 && !tab.isNativePage() && !tab.isIncognito();

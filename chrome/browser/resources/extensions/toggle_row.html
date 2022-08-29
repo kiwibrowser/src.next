@@ -23,6 +23,29 @@
     flex: 1;
     margin-inline-end: 20px;
   }
+
+  :host(.fade) {
+     -moz-transition: background-color 1s cubic-bezier(1,1,1,1);
+     -moz-transition: color 0.5s cubic-bezier(1,1,1,1);
+     -moz-transition-delay: 0s;
+     -ms-transition: background-color 1s cubic-bezier(1,1,1,1);
+     -ms-transition: color 0.5s cubic-bezier(1,1,1,1);
+     -ms-transition-delay: 0s;
+     -o-transition: background-color 1s cubic-bezier(1,1,1,1);
+     -o-transition: color 0.5s cubic-bezier(1,1,1,1);
+     -o-transition-delay: 0s;
+     -webkit-transition: background-color 1s cubic-bezier(1,1,1,1);
+     -webkit-transition: color 0.5s cubic-bezier(1,1,1,1);
+     -webkit-transition-delay: 0s;
+     transition: background-color 1s cubic-bezier(1,1,1,1);
+     transition: color 0.5s cubic-bezier(1,1,1,1);
+     transition-delay: 0s;
+  }
+
+  :host(.fadeIn) {
+     background-color: #1E90FF;
+     color: #fff;
+  }
 </style>
 <label id="label" aria-hidden="true">
   <input id="native" type="checkbox" checked="[[checked]]"

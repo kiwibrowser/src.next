@@ -70,6 +70,7 @@ bool AreShellOperationsAllowed() {
 
 }  // namespace internal
 
+#if 0
 void OpenItem(Profile* profile,
               const base::FilePath& full_path,
               OpenItemType item_type,
@@ -87,6 +88,7 @@ void OpenItem(Profile* profile,
       base::BindOnce(&VerifyAndOpenItemOnBlockingThread, full_path, item_type,
                      std::move(callback)));
 }
+#endif
 
 bool IsBrowserLockedFullscreen(const Browser* browser) {
 #if BUILDFLAG(IS_CHROMEOS_LACROS)

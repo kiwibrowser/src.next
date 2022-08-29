@@ -34,6 +34,8 @@ import android.view.View.OnClickListener;
 import android.view.ViewDebug;
 import android.view.ViewGroup;
 import android.view.ViewStub;
+import android.view.ViewTreeObserver;
+import android.widget.LinearLayout;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -51,6 +53,7 @@ import org.chromium.base.MathUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.supplier.BooleanSupplier;
 import org.chromium.chrome.browser.browser_controls.BrowserStateBrowserControlsVisibilityDelegate;
+import org.chromium.base.ContextUtils;
 import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
@@ -96,6 +99,11 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.util.ArrayList;
 import java.util.List;
+
+import android.widget.Toast;
+import android.animation.ValueAnimator;
+
+import org.chromium.ui.display.DisplayAndroid;
 
 /**
  * Phone specific toolbar implementation.
@@ -145,6 +153,7 @@ public class ToolbarPhone extends ToolbarLayout implements OnClickListener, TabC
     protected @Nullable ToggleTabStackButton mToggleTabStackButton;
     // Non-null after inflation occurs.
     protected @NonNull HomeButton mHomeButton;
+    protected @Nullable HandButton mHandButton;
     private TextView mUrlBar;
     protected View mUrlActionContainer;
     protected ImageView mToolbarShadow;
@@ -568,6 +577,40 @@ public class ToolbarPhone extends ToolbarLayout implements OnClickListener, TabC
 +        "d.getElementsByTagName('body')[0].style.height='';"
 +        "_kbOverscroll = false;}}(document));";
         currentTab.getWebContents().evaluateJavaScript(SCRIPT, null);
+        // matching chrome-native://newtab and chrome://newtab and kiwi://newtab
+        if (currentTab.isNativePage() && currentTab.getUrl().getSpec().contains("/newtab")) {
+            View nativeView = currentTab.getView();
+            DisplayAndroid display =
+                    DisplayAndroid.getNonMultiDisplay(ContextUtils.getApplicationContext());
+            int screenHeight = display.getDisplayHeight();
+            int targetHeight = (int)Math.round(screenHeight * 0.42);
+            final View handSpacer = nativeView.findViewWithTag("hand_button_spacer");
+            if (handSpacer != null && handSpacer.getHeight() > 0) {
+                ValueAnimator animator = ValueAnimator.ofInt(handSpacer.getHeight(), 0);
+                animator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                    @Override
+                    public void onAnimationUpdate(ValueAnimator valueAnimator) {
+                        LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) handSpacer.getLayoutParams();
+                        params.height = ((Integer) valueAnimator.getAnimatedValue());
+                        handSpacer.setLayoutParams(params);
+                    }
+                });
+                animator.setDuration(500);
+                animator.start();
+            } else if (handSpacer != null) {
+                ValueAnimator animator = ValueAnimator.ofInt(handSpacer.getHeight(), targetHeight);
+                animator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                    @Override
+                    public void onAnimationUpdate(ValueAnimator valueAnimator) {
+                        LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) handSpacer.getLayoutParams();
+                        params.height = ((Integer) valueAnimator.getAnimatedValue());
+                        handSpacer.setLayoutParams(params);
+                    }
+                });
+                animator.setDuration(500);
+                animator.start();
+            }
+        }
     }
 
     @Override
@@ -1210,7 +1253,8 @@ public class ToolbarPhone extends ToolbarLayout implements OnClickListener, TabC
         mLocationBar.getPhoneCoordinator().setTranslationY(0);
         if (!mUrlFocusChangeInProgress) {
             mToolbarButtonsContainer.setTranslationY(0);
-            mHomeButton.setTranslationY(0);
+            if (mHomeButton != null) mHomeButton.setTranslationY(0);
+            if (mHandButton != null) mHandButton.setTranslationY(0);
         }
 
         if (!mUrlFocusChangeInProgress && mToolbarShadow != null) {
@@ -1301,7 +1345,8 @@ public class ToolbarPhone extends ToolbarLayout implements OnClickListener, TabC
         int transY = mTabSwitcherState == STATIC_TAB ? Math.min(mNtpSearchBoxTranslation.y, 0) : 0;
 
         mToolbarButtonsContainer.setTranslationY(transY);
-        mHomeButton.setTranslationY(transY);
+        if (mHomeButton != null) mHomeButton.setTranslationY(transY);
+        if (mHandButton != null) mHandButton.setTranslationY(transY);
     }
 
     private void setAncestorsShouldClipChildren(boolean clip) {
@@ -1639,7 +1684,7 @@ public class ToolbarPhone extends ToolbarLayout implements OnClickListener, TabC
         if (mForceTextureCapture) {
             return CaptureReadinessResult.readyForced();
         }
-        if (ChromeFeatureList.isEnabled(ChromeFeatureList.SUPPRESS_TOOLBAR_CAPTURES)) {
+        if (true || ChromeFeatureList.isEnabled(ChromeFeatureList.SUPPRESS_TOOLBAR_CAPTURES)) {
             return getReadinessStateWithSuppression();
         } else {
             return CaptureReadinessResult.unknown(!(urlHasFocus() || mUrlFocusChangeInProgress));
@@ -1770,7 +1815,12 @@ public class ToolbarPhone extends ToolbarLayout implements OnClickListener, TabC
 
     @Override
     public void onTintChanged(ColorStateList tint, @BrandedColorScheme int brandedColorScheme) {
-        ApiCompatibilityUtils.setImageTintList(mHomeButton, tint);
+        if (mHomeButton != null) {
+            ApiCompatibilityUtils.setImageTintList(mHomeButton, tint);
+        }
+        if (mHandButton != null) {
+            ApiCompatibilityUtils.setImageTintList(mHandButton, tint);
+        }
 
         if (mToggleTabStackButton != null) {
             mToggleTabStackButton.setBrandedColorScheme(brandedColorScheme);
@@ -2279,7 +2329,9 @@ public class ToolbarPhone extends ToolbarLayout implements OnClickListener, TabC
 
     @Override
     public void onTabCountChanged(int numberOfTabs, boolean isIncognito) {
-        mHomeButton.setEnabled(true);
+        if (mHomeButton != null) mHomeButton.setEnabled(true);
+        if (mHandButton != null) mHandButton.setEnabled(true);
+
         if (mToggleTabStackButton == null) return;
 
         @BrandedColorScheme
@@ -2464,6 +2516,7 @@ public class ToolbarPhone extends ToolbarLayout implements OnClickListener, TabC
      * @return Whether the toolbar shadow should be drawn.
      */
     private boolean shouldDrawShadow() {
+        if (true) return false;
         // TODO(twellington): Move this shadow state information to ToolbarDataProvider and show
         // shadow when incognito NTP is scrolled.
         return mTabSwitcherState == STATIC_TAB && !mForceHideShadow && !hideShadowForIncognitoNtp()

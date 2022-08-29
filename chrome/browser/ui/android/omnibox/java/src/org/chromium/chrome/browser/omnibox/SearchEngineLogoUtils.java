@@ -163,7 +163,7 @@ public class SearchEngineLogoUtils {
         // If TemplateUrlService is available and the default search engine is Google,
         // then we serve the Google icon we have locally.
         // Otherwise, the search engine is non-Google and we go to the network to fetch it.
-        if (profile == null || templateUrlService == null || needToCheckForSearchEnginePromo()) {
+        if (true || profile == null || templateUrlService == null || needToCheckForSearchEnginePromo()) {
             callback.onResult(getSearchLoupeResource(brandedColorScheme));
             return;
         } else if (templateUrlService.isDefaultSearchEngineGoogle()) {

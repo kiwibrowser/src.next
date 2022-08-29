@@ -83,7 +83,7 @@ const base::Feature kDoubleTapToZoomInTabletMode{
     "DoubleTapToZoomInTabletMode", base::FEATURE_DISABLED_BY_DEFAULT};
 #endif
 
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) || true
 // Adds an item to the context menu that copies a link to the page with the
 // selected text highlighted.
 const base::Feature kCopyLinkToText{"CopyLinkToText",

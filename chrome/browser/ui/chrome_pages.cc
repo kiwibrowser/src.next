@@ -61,7 +61,7 @@
 #include "chrome/browser/ui/signin_view_controller.h"
 #endif
 
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) || true
 #include "base/metrics/histogram_functions.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "components/signin/public/base/signin_pref_names.h"
@@ -168,10 +168,12 @@ void ShowHelpImpl(Browser* browser, Profile* profile, HelpSource source) {
   }
 #endif  // BUILDFLAG_IS_CHROMEOS_LACROS)
   std::unique_ptr<ScopedTabbedBrowserDisplayer> displayer;
+#if 0
   if (!browser) {
     displayer = std::make_unique<ScopedTabbedBrowserDisplayer>(profile);
     browser = displayer->browser();
   }
+#endif
   ShowSingletonTab(browser, url);
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
 }
@@ -257,12 +259,14 @@ void ShowHistory(Browser* browser, const std::string& host_name) {
   // History UI should not be shown in Incognito mode, instead history
   // disclaimer bubble should show up. This also updates the behavior of history
   // keyboard shortcts in Incognito.
+#if 0
   if (browser->profile()->IsOffTheRecord() &&
       base::FeatureList::IsEnabled(
           features::kUpdateHistoryEntryPointsInIncognito)) {
     browser->window()->ShowIncognitoHistoryDisclaimerDialog();
     return;
   }
+#endif
 
   base::RecordAction(UserMetricsAction("ShowHistory"));
   GURL url = GURL(kChromeUIHistoryURL);
@@ -306,7 +310,7 @@ void ShowExtensions(Browser* browser,
 }
 
 void ShowHelp(Browser* browser, HelpSource source) {
-  ShowHelpImpl(browser, browser->profile(), source);
+  ShowHelpImpl(browser, NULL, source);
 }
 
 void ShowHelpForProfile(Profile* profile, HelpSource source) {
@@ -412,7 +416,7 @@ void ShowContentSettingsExceptionsForProfile(
 }
 
 void ShowSiteSettings(Browser* browser, const GURL& url) {
-  ShowSiteSettingsImpl(browser, browser->profile(), url);
+  ShowSiteSettingsImpl(browser, NULL, url);
 }
 
 void ShowSiteSettings(Profile* profile, const GURL& url) {
@@ -613,12 +617,14 @@ void ShowBrowserSigninOrSettings(Browser* browser,
 #endif
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
-    BUILDFLAG(IS_FUCHSIA)
+    BUILDFLAG(IS_FUCHSIA) || true
 void ShowWebAppSettings(Browser* browser,
                         const std::string& app_id,
                         web_app::AppSettingsPageEntryPoint entry_point) {
+#if 0
   base::UmaHistogramEnumeration(
       web_app::kAppSettingsPageEntryPointsHistogramName, entry_point);
+#endif
 
   const GURL link_destination(chrome::kChromeUIWebAppSettingsURL + app_id);
   NavigateParams params(browser->profile(), link_destination,

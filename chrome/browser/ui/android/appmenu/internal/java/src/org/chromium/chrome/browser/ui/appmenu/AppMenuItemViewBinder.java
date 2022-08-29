@@ -27,6 +27,10 @@ import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.widget.ChromeImageButton;
 import org.chromium.ui.widget.ChromeImageView;
 
+import android.graphics.Color;
+import android.graphics.PorterDuff;
+import android.widget.ImageView;
+
 /**
  * The binder to bind the app menu  {@link PropertyModel} with the view.
  */
@@ -60,6 +64,13 @@ class AppMenuItemViewBinder {
             Drawable icon = model.get(AppMenuItemProperties.ICON);
             ChromeImageView imageView = (ChromeImageView) view.findViewById(R.id.menu_item_icon);
             imageView.setImageDrawable(icon);
+            CharSequence titleCondensed = model.get(AppMenuItemProperties.TITLE_CONDENSED);
+            if (titleCondensed != null && titleCondensed.toString().contains("Extension: ")) {
+                imageView.setColorFilter(Color.BLACK, PorterDuff.Mode.DST);
+                imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            } else {
+                imageView.setColorFilter(null);
+            }
             imageView.setVisibility(icon == null ? View.GONE : View.VISIBLE);
 
             // tint the icon
@@ -68,6 +79,9 @@ class AppMenuItemViewBinder {
             if (colorResId == 0) {
                 // If there is no color assigned to the icon, use the default color.
                 colorResId = R.color.default_icon_color_secondary_tint_list;
+            }
+            if (titleCondensed != null && titleCondensed.toString().contains("Extension (inactive): ")) {
+                colorResId = R.color.default_text_color_disabled_list;
             }
             ApiCompatibilityUtils.setImageTintList(imageView,
                     AppCompatResources.getColorStateList(imageView.getContext(), colorResId));

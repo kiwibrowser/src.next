@@ -28,7 +28,7 @@
 #include "ui/gfx/native_widget_types.h"
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || \
-    (BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMEOS_LACROS))
+    (BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMEOS_LACROS)) || true
 #include "chrome/browser/web_applications/web_app_id.h"
 #endif
 
@@ -189,7 +189,7 @@ void ShowWebAppIdentityUpdateDialog(
 // without any user interaction.
 void SetAutoAcceptAppIdentityUpdateForTesting(bool auto_accept);
 
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) || true
 // Callback used to indicate whether a user has accepted the launch of a
 // web app. The |allowed| is true when the user allows the app to launch.
 // |remember_user_choice| is true if the user wants to persist the decision.

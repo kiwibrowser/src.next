@@ -623,6 +623,7 @@ void ChromeExtensionsBrowserClient::NotifyExtensionApiTabExecuteScript(
     content::BrowserContext* context,
     const ExtensionId& extension_id,
     const std::string& code) const {
+#if 0
   auto* telemetry_service =
       safe_browsing::ExtensionTelemetryServiceFactory::GetForProfile(
           Profile::FromBrowserContext(context));
@@ -635,26 +636,34 @@ void ChromeExtensionsBrowserClient::NotifyExtensionApiTabExecuteScript(
   auto signal = std::make_unique<safe_browsing::TabsExecuteScriptSignal>(
       extension_id, code);
   telemetry_service->AddSignal(std::move(signal));
+#endif
 }
 
 bool ChromeExtensionsBrowserClient::IsExtensionTelemetryServiceEnabled(
     content::BrowserContext* context) const {
+#if 0
   auto* telemetry_service =
       safe_browsing::ExtensionTelemetryServiceFactory::GetForProfile(
           Profile::FromBrowserContext(context));
   return telemetry_service && telemetry_service->enabled();
+#endif
+  return false;
 }
 
 bool ChromeExtensionsBrowserClient::
     IsExtensionTelemetryRemoteHostContactedSignalEnabled() const {
+#if 0
   return base::FeatureList::IsEnabled(
       safe_browsing::kExtensionTelemetryReportContactedHosts);
+#endif
+  return false;
 }
 
 void ChromeExtensionsBrowserClient::NotifyExtensionRemoteHostContacted(
     content::BrowserContext* context,
     const ExtensionId& extension_id,
     const GURL& url) const {
+#if 0
   if (!url.SchemeIsHTTPOrHTTPS()) {
     return;
   }
@@ -669,6 +678,7 @@ void ChromeExtensionsBrowserClient::NotifyExtensionRemoteHostContacted(
       std::make_unique<safe_browsing::RemoteHostContactedSignal>(extension_id,
                                                                  url);
   telemetry_service->AddSignal(std::move(remote_host_signal));
+#endif
 }
 
 // static

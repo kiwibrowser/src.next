@@ -42,6 +42,8 @@ import org.chromium.components.browser_ui.widget.scrim.ScrimCoordinator;
 import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.resources.dynamics.DynamicResourceLoader;
 
+import org.chromium.base.ContextUtils;
+
 /**
  * Impl class that will resolve components for tab management.
  */
@@ -75,14 +77,18 @@ public class TabManagementDelegateImpl implements TabManagementDelegate {
                     "Downloaded_Enabled");
         }
 
+        int mode = TabListCoordinator.TabListMode.GRID;
+        if (TabUiFeatureUtilities.isTabGroupsAndroidContinuationEnabled(activity)
+                                && SysUtils.isLowEndDevice())
+            mode = TabListCoordinator.TabListMode.LIST;
+        if (ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("classic") || ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("grid"))
+            mode = TabListCoordinator.TabListMode.GRID;
+
         return new TabSwitcherCoordinator(activity, activityLifecycleDispatcher, tabModelSelector,
                 tabContentManager, browserControlsStateProvider, tabCreatorManager,
                 menuOrKeyboardActionController, containerView, shareDelegateSupplier,
                 multiWindowModeStateDispatcher, scrimCoordinator,
-                TabUiFeatureUtilities.isTabGroupsAndroidContinuationEnabled(activity)
-                                && SysUtils.isLowEndDevice()
-                        ? TabListCoordinator.TabListMode.LIST
-                        : TabListCoordinator.TabListMode.GRID,
+                mode,
                 rootView, dynamicResourceLoaderSupplier, snackbarManager, modalDialogManager);
     }
 

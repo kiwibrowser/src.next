@@ -338,7 +338,9 @@ void ExtensionService::OnExternalProviderUpdateComplete(
     updater_->CheckNow(ExtensionUpdater::CheckParams());
   }
 
+#if 0
   error_controller_->ShowErrorIfNeeded();
+#endif
   external_install_manager_->UpdateExternalExtensionAlert();
 }
 
@@ -874,7 +876,9 @@ void ExtensionService::PerformActionBasedOnOmahaAttributes(
                                                                 attributes);
   allowlist_.PerformActionBasedOnOmahaAttributes(extension_id, attributes);
   // Show an error for the newly blocklisted extension.
+#if 0
   error_controller_->ShowErrorIfNeeded();
+#endif
 }
 
 void ExtensionService::OnGreylistStateRemoved(const std::string& extension_id) {
@@ -1371,7 +1375,9 @@ void ExtensionService::OnAllExternalProvidersReady() {
       CheckExternalUninstall(info->extension_id);
   }
 
+#if 0
   error_controller_->ShowErrorIfNeeded();
+#endif
 
   external_install_manager_->UpdateExternalExtensionAlert();
 }
@@ -1756,7 +1762,9 @@ void ExtensionService::OnExtensionInstalled(
 }
 
 void ExtensionService::OnExtensionManagementSettingsChanged() {
+#if 0
   error_controller_->ShowErrorIfNeeded();
+#endif
 
   // Revokes blocked permissions from active_permissions for all extensions.
   ExtensionManagement* settings =
@@ -2216,7 +2224,10 @@ void ExtensionService::ManageBlocklist(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   safe_browsing_verdict_handler_.ManageBlocklist(state_map);
+
+#if 0
   error_controller_->ShowErrorIfNeeded();
+#endif
 }
 
 void ExtensionService::AddUpdateObserver(UpdateObserver* observer) {

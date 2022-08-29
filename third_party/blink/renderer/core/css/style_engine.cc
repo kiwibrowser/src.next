@@ -115,6 +115,8 @@
 #include "third_party/blink/renderer/platform/theme/web_theme_engine_helper.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
+#include "third_party/blink/renderer/platform/graphics/dark_mode_settings_builder.h"
+
 namespace blink {
 
 namespace {
@@ -154,6 +156,16 @@ StyleEngine::StyleEngine(Document& document)
 
     DCHECK(document.GetSettings());
     preferred_color_scheme_ = document.GetSettings()->GetPreferredColorScheme();
+  }
+  if (document.IsInMainFrame())
+    viewport_resolver_ = MakeGarbageCollected<ViewportStyleResolver>(document);
+  if (auto* settings = GetDocument().GetSettings()) {
+    preferred_color_scheme_ = settings->GetPreferredColorScheme();
+    if (GetCurrentDarkModeSettings().is_dark_ui)
+      preferred_color_scheme_ = mojom::PreferredColorScheme::kDark;
+    bool force_dark_enabled = settings && settings->GetForceDarkModeEnabled();
+    if (force_dark_enabled)
+     owner_color_scheme_ = mojom::blink::ColorScheme::kDark;
     UpdateColorSchemeMetrics();
   }
 
@@ -3103,6 +3115,9 @@ void StyleEngine::UpdateColorScheme() {
     }
   }
 
+  if (GetCurrentDarkModeSettings().is_dark_ui)
+    preferred_color_scheme_ = mojom::blink::PreferredColorScheme::kDark;
+
   if (GetDocument().Printing())
     preferred_color_scheme_ = mojom::blink::PreferredColorScheme::kLight;
 
@@ -3196,6 +3211,10 @@ void StyleEngine::UpdateColorSchemeBackground(bool color_scheme_changed) {
       else if (SupportsDarkColorScheme())
         root_color_scheme = mojom::blink::ColorScheme::kDark;
     }
+    auto* settings = GetDocument().GetSettings();
+    bool force_dark_enabled = settings && settings->GetForceDarkModeEnabled();
+    if (force_dark_enabled)
+      root_color_scheme = mojom::blink::ColorScheme::kDark;
     color_scheme_background_ =
         root_color_scheme == mojom::blink::ColorScheme::kLight
             ? Color::kWhite

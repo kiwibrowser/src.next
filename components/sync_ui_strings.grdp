@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <grit-part>
-  <if expr="not is_android">
+  <if expr="not is_android or is_android">
     <message name="IDS_SYNC_BASIC_ENCRYPTION_DATA" desc="Text of the radio that when selected enables basic encryption.">
       Encrypt synced passwords with your Google Account
     </message>

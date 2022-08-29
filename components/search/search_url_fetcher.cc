@@ -221,8 +221,7 @@ void SearchURLFetcher::OnURLLoadComplete(
                                      -1);
       prefs_->SetInteger(prefs::kLastKnownSearchVersion,
                                      -1);
-      ListPrefUpdate update(prefs_, prefs::kSearchProviderOverrides);
-      base::ListValue* list = update.Get();
+      base::Value overrides(base::Value::Type::LIST);
       bool found_existing_search_engine = false;
       bool success = false;
       size_t num_engines = value->GetList().size();
@@ -238,7 +237,8 @@ void SearchURLFetcher::OnURLLoadComplete(
           LOG(INFO) << "[Kiwi] Adding to the list one search engine: " << engine << " is " << name << " (keyword: " << keyword << ")";
           if (keyword == new_dse->keyword())
             found_existing_search_engine = true;
-          list->Append(engine->CreateDeepCopy());
+          base::Value entry(base::Value::Type::DICTIONARY);
+          overrides.Append(engine->Clone());
         }
       }
 
@@ -246,11 +246,13 @@ void SearchURLFetcher::OnURLLoadComplete(
         LOG(INFO) << "[Kiwi] Search engine " << new_dse->keyword() << " was already present";
       } else {
         LOG(INFO) << "[Kiwi] Search engine " << new_dse->keyword() << " was not already present";
-        list->Append(saved_dse->CreateDeepCopy());
+        overrides.Append(saved_dse->Clone());
       }
 
       if (success) {
         LOG(INFO) << "[Kiwi] Search engines processing is a success";
+        prefs_->SetUserPrefValue(prefs::kSearchProviderOverrides,
+                        std::move(overrides));
         prefs_->SetInteger(prefs::kSearchProviderOverridesVersion,
                                        version_code);
         prefs_->SetInteger(prefs::kLastKnownSearchVersion,

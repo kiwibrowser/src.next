@@ -322,13 +322,31 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
 
             int availableViewportHeight =
                     calculateAvailableViewportHeight(anchorBottomRelativeToContent);
-            if (ContextUtils.getAppSharedPreferences().getBoolean("enable_bottom_toolbar", false)) {
-                int displayableSuggestions = 0;
-                int suggestionHeightPx = getResources().getDimensionPixelSize(R.dimen.omnibox_suggestion_semicompact_height);
-                for (int spaceTakenBySuggestions = 0; (spaceTakenBySuggestions + suggestionHeightPx) < (availableViewportHeight / 2); spaceTakenBySuggestions += suggestionHeightPx, displayableSuggestions++);
-                availableViewportHeight = displayableSuggestions * suggestionHeightPx;
-            }
+            int viewportDivider = 1;
+            if (ContextUtils.getAppSharedPreferences().getBoolean("enable_bottom_toolbar", false))
+              viewportDivider = 2;
+            int displayableSuggestions = 0;
+            int suggestionHeightPx = getResources().getDimensionPixelSize(R.dimen.omnibox_suggestion_semicompact_height);
+            for (int spaceTakenBySuggestions = 0; (spaceTakenBySuggestions + suggestionHeightPx) < (availableViewportHeight / viewportDivider); spaceTakenBySuggestions += suggestionHeightPx, displayableSuggestions++);
+            if (mAdapter != null && displayableSuggestions > mAdapter.getItemCount())
+              displayableSuggestions = mAdapter.getItemCount();
+            if (displayableSuggestions == 0)
+              displayableSuggestions = 1;
+            // When bottom toolbar is enabled, having two suggestions displays as 1
+            if (displayableSuggestions == 1 && ContextUtils.getAppSharedPreferences().getBoolean("enable_bottom_toolbar", false))
+              displayableSuggestions = 2;
+            availableViewportHeight = displayableSuggestions * suggestionHeightPx;
+            availableViewportHeight += getResources().getDimensionPixelSize(R.dimen.omnibox_suggestion_list_padding_bottom) / 2;
+
             int desiredWidth = mAnchorView.getMeasuredWidth();
+
+            notifyObserversIfViewportHeightChanged(availableViewportHeight);
+            mWidthMeasureSpec = MeasureSpec.makeMeasureSpec(desiredWidth, MeasureSpec.EXACTLY);
+            mHeightMeasureSpec = MeasureSpec.makeMeasureSpec(availableViewportHeight,
+                    mEmbedder.isTablet() ? MeasureSpec.AT_MOST : MeasureSpec.EXACTLY);
+            super.onMeasure(mWidthMeasureSpec, mHeightMeasureSpec);
+            requestLayout();
+
             // Suppress the initial requests to shrink the viewport of the omnibox suggestion
             // dropdown. The viewport will decrease when the keyboard is triggered, but the request
             // to resize happens when the keyboard starts showing before it has had the chance to

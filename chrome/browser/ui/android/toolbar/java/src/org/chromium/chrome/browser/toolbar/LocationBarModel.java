@@ -290,7 +290,7 @@ public class LocationBarModel implements ToolbarDataProvider, LocationBarDataPro
                 ? getTab().getUrl().getSpec().trim()
                 : "";
         if (isInOverviewAndShowingOmnibox()) {
-            return UrlConstants.NTP_URL;
+            return "chrome-search://local-ntp/local-ntp.html";
         }
 
         return url;
@@ -341,6 +341,9 @@ public class LocationBarModel implements ToolbarDataProvider, LocationBarDataPro
                         DomDistillerUrlUtils.getOriginalUrlFromDistillerUrl(new GURL(url));
                 return buildUrlBarData(mUrlFormatter.format(originalUrl));
             }
+
+            if (mTab.getUrl().getSpec().startsWith("devtools://"))
+                return buildUrlBarData(mTab.getUrl().getSpec(), mTab.getTitle(), "");
 
             if (isOfflinePage()) {
                 GURL originalUrl = mTab.getOriginalUrl();
@@ -585,7 +588,7 @@ public class LocationBarModel implements ToolbarDataProvider, LocationBarDataPro
 
     @Override
     public int getPageClassification(boolean isFocusedFromFakebox) {
-        if (mNativeLocationBarModelAndroid == 0) return PageClassification.INVALID_SPEC_VALUE;
+        if (mNativeLocationBarModelAndroid == 0) return PageClassification.NTP_VALUE;
 
         // Provide NTP as page class in overview mode (when Start Surface is enabled). No call
         // to the backend necessary or possible, since there is no tab or navigation entry.
@@ -610,7 +613,7 @@ public class LocationBarModel implements ToolbarDataProvider, LocationBarDataPro
     @VisibleForTesting
     @ConnectionSecurityLevel
     int getSecurityLevel(Tab tab, boolean isOfflinePage, @Nullable String publisherUrl) {
-        if (tab == null || isOfflinePage || isInOverviewAndShowingOmnibox()) {
+        if (tab == null || isOfflinePage || isInOverviewAndShowingOmnibox() ||  (!TextUtils.isEmpty(tab.getUrl().getSpec()) && (tab.getUrl().getSpec().startsWith("chrome-extension") || tab.getUrl().getSpec().startsWith("chrome") || tab.getUrl().getSpec().startsWith("devtools") || tab.getUrl().getSpec().startsWith("kiwi")))) {
             return ConnectionSecurityLevel.NONE;
         }
 
@@ -651,9 +654,7 @@ public class LocationBarModel implements ToolbarDataProvider, LocationBarDataPro
         }
 
         // Return early if native initialization hasn't been done yet.
-        if ((securityLevel == ConnectionSecurityLevel.NONE
-                    || securityLevel == ConnectionSecurityLevel.WARNING)
-                && mNativeLocationBarModelAndroid == 0) {
+        if (mNativeLocationBarModelAndroid == 0) {
             return R.drawable.omnibox_info;
         }
 
@@ -662,6 +663,10 @@ public class LocationBarModel implements ToolbarDataProvider, LocationBarDataPro
                 || mNtpDelegate.isCurrentlyVisible() || isInOverviewAndShowingOmnibox();
 
         String currentUrl = getCurrentUrl();
+        if (currentUrl != null && currentUrl.startsWith("chrome://"))
+            skipIconForNeutralState = true;
+        if (currentUrl != null && currentUrl.startsWith("kiwi://"))
+            skipIconForNeutralState = true;
         if (currentUrl != null && currentUrl.startsWith("chrome-search://"))
             skipIconForNeutralState = true;
         if (currentUrl != null && currentUrl.startsWith("kiwi-search://"))

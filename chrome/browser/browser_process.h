@@ -41,7 +41,7 @@ class StatusTray;
 class SystemNetworkContextManager;
 class WebRtcLogUploader;
 
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) || true
 class IntranetRedirectDetector;
 #endif
 
@@ -184,7 +184,7 @@ class BrowserProcess {
   virtual printing::BackgroundPrintingManager*
       background_printing_manager() = 0;
 
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) || true
   virtual IntranetRedirectDetector* intranet_redirect_detector() = 0;
 #endif
 
@@ -256,7 +256,7 @@ class BrowserProcess {
   virtual resource_coordinator::ResourceCoordinatorParts*
   resource_coordinator_parts() = 0;
 
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) || true
   // Returns the object which keeps track of serial port permissions configured
   // through the policy engine.
   virtual SerialPolicyAllowedPorts* serial_policy_allowed_ports() = 0;

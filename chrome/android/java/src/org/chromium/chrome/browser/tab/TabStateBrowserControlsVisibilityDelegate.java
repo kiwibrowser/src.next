@@ -25,6 +25,8 @@ import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.url.GURL;
 
+import org.chromium.base.ContextUtils;
+
 /**
  * Determines the desired visibility of the browser controls based on the current state of a given
  * tab.
@@ -192,6 +194,18 @@ public class TabStateBrowserControlsVisibilityDelegate
         //                logic.  They should be moved to application level checks.
         enableHidingBrowserControls &= !ChromeAccessibilityUtil.get().isAccessibilityEnabled();
         enableHidingBrowserControls &= DeviceClassManager.enableFullscreen();
+
+        String KeepToolbarSetting = ContextUtils.getAppSharedPreferences().getString("keep_toolbar_visible_configuration", "unknown");
+        if (KeepToolbarSetting.equals("unknown")) {
+          if (ChromeAccessibilityUtil.get().isAccessibilityEnabled())
+            enableHidingBrowserControls &= false;
+          else
+            enableHidingBrowserControls &= true;
+        } else if (KeepToolbarSetting.equals("on")) {
+            enableHidingBrowserControls &= false;
+        } else {
+            enableHidingBrowserControls &= true;
+        }
 
         return enableHidingBrowserControls;
     }

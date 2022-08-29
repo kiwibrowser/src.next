@@ -5,7 +5,248 @@
   <title>New Tab</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="theme-color" content="#ffffff">
-  <link rel="stylesheet" href="./local-ntp.css">
+  <style>
+html {
+    height: 100%
+}
+
+body {
+    background-attachment: fixed !important;
+    position: initial!important;
+    cursor: default;
+    font-family: arial, sans-serif;
+    font-size: small;
+    margin: 0;
+    min-height: 100%;
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+    background: white
+}
+
+#ntp-contents {
+    height: 100%;
+    position: relative;
+    z-index: 1;
+    width: 98%
+}
+
+#logo, #fakebox-container {
+    flex-shrink: 0
+}
+
+a:-webkit-any-link {
+    text-decoration: none !important
+}
+
+a:link {
+    text-decoration: none !important
+}
+
+
+#attribution {
+    bottom: 0;
+    color: var(--text-color-light);
+    cursor: default;
+    display: inline-block;
+    font-size: 13px;
+    left: auto;
+    position: fixed;
+    right: 8px;
+    text-align: left;
+    user-select: none;
+    z-index: -1
+}
+
+
+#bookmarks-grid, #fake-bookmarks-grid, #ideas-grid {
+    margin: 2%;
+    margin-top: 0px;
+    position: relative
+}
+
+@media (max-width: 450px) {
+    #bookmarks-grid, #fake-bookmarks-grid, #ideas-grid {
+        min-height: 208px
+    }
+}
+
+@media (min-width: 450px) {
+    #bookmarks-grid, #fake-bookmarks-grid, #ideas-grid {
+        min-height: 104px
+    }
+}
+
+#fake-bookmarks-grid {
+    z-index: -99999
+}
+
+.grid-item {
+    float: left;
+    width: 64px;
+    font-size: 10px;
+    overflow: hidden;
+    background: #fff;
+    margin: 10px;
+    color: #3c3c3c;
+    text-align: center;
+    z-index: 999999
+}
+
+.grid-item a {
+    text-decoration: none;
+    color: #555
+}
+
+.grid-image {
+    height: 64px;
+    width: 64px;
+    object-fit: contain
+}
+
+#explore-section {
+    padding-bottom: 20px
+}
+
+.plus-item a {
+    text-decoration: none
+}
+
+.plus-item {
+    line-height: 30px;
+    color: #3c3c3c;
+    font-size: 25px;
+    text-align: center;
+    z-index: 999999;
+    color: #777
+}
+
+.configure-item a, .configure-item-explore a {
+    text-decoration: none
+}
+
+.configure-item, .configure-item-explore {
+    font-size: 21px;
+    font-weight: 450;
+    z-index: 999999;
+    color: #777;
+    float: left;
+    padding-left: 12px
+}
+
+.close-item a {
+    text-decoration: none;
+    z-index: 9999999
+}
+
+.close-item {
+    font-size: 21px;
+    font-weight: 450;
+    z-index: 99999999;
+    color: #777;
+    position: absolute;
+    right: 10px
+}
+
+.newsImage {
+    width: 128px;
+    height: 128px;
+    object-fit: cover;
+    z-index: 9999999;
+    border-radius: 6px
+}
+
+.newsItem {
+    margin: 5px;
+    border-radius: 5px;
+    border-bottom: 1px solid #efefef;
+    padding-bottom: 15px !important;
+    font-family: Roboto,RobotoDraft,Helvetica,Arial,sans-serif;
+    margin-top: 15px
+}
+
+.newsItem a {
+    text-decoration: none
+}
+
+.newsTitle {
+    color: #222;
+    padding-right: 148px;
+    padding-top: 5px
+}
+
+.newsAttribution, .newsTime {
+    color: #555;
+    font-size: 70%
+}
+
+.newsTime {
+    position: relative;
+    top: 10px
+}
+
+#locale, #explore-title {
+    font-size: 12px;
+    position: relative;
+    top: -2px;
+    padding-right: 6px
+}
+
+.arrow-down {
+    width: 0;
+    height: 0;
+    border-left: 10px solid transparent;
+    border-right: 10px solid transparent;
+    border-top: 10px solid #ccc;
+    position: relative;
+    top: 7px
+}
+
+.show {
+    display: block !important
+}
+
+.dropbtn {
+    cursor: pointer
+}
+
+.dropdown {
+    position: relative;
+    display: inline-block
+}
+
+.dropdown-content {
+    display: none;
+    position: absolute;
+    background-color: #f1f1f1;
+    min-width: 160px;
+    overflow: auto;
+    box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+    z-index: 1;
+    margin-top: 15px;
+    margin-left: 11px;
+    height: 300px
+}
+
+.dropdown-content a {
+    color: black;
+    padding: 3px 1px;
+    text-decoration: none;
+    display: block;
+    font-size: 14px
+}
+
+.dropdown a:hover {
+    background-color: #ddd
+}
+
+.localesList {
+    line-height: 28px
+}
+
+.localesListUnselected {
+    list-style-type: circle
+}
+</style>
   <meta charset="utf-8">
   <meta name="google" value="notranslate">
   <script>
@@ -21,7 +262,6 @@ if (window.chrome.embeddedSearch.newTabPage.isIncognito) document.body.style.bac
 <style>
 .newsImage {
   opacity: 0;
-  transition: visibility 0.15s linear, opacity 0.15s linear;
   visibility: hidden;
 }
 
@@ -179,17 +419,6 @@ function locale_to_readabletext(string)
 }
 
 </script>
-<div id="youtubePromo" style="display: none;">
-<div style="position: relative; background-color: #0096FF; color: #FFF; z-index: 2147483647">
-<table>
-<tbody><tr>
-<td>
-<div><b>Important information</b></div><div>Videos on the mobile version of YouTube.com cannot be played in the background.</div>
-    </td>
-    <td style="width: 30px"><div style="background-color: #42B1FF; padding: 10px;" id="youtubeClose"><a style="color: #fff" target="_blank:"><b>OK</b></a></div></td>
-    </tr></tbody></table>
-</div>
-</div>
 
   <!-- Container for the OneGoogleBar HTML. -->
   <div id="one-google" class="hidden" style="display: none;"></div>
@@ -317,7 +546,37 @@ catch (err) {
 }
 </style>
 <script>
-!function(t,e){"object"==typeof exports&&"undefined"!=typeof module?module.exports=e():"function"==typeof define&&define.amd?define(e):t.timeago=e()}(this,function(){"use strict";var t="second_minute_hour_day_week_month_year".split("_"),e="秒_分钟_小时_天_周_月_年".split("_"),n=[60,60,24,7,365/7/12,12],r={en:function(e,n){if(0===n)return["just now","right now"];var r=t[parseInt(n/2)];return e>1&&(r+="s"),[e+" "+r+" ago","in "+e+" "+r]},zh_CN:function(t,n){if(0===n)return["刚刚","片刻后"];var r=e[parseInt(n/2)];return[t+" "+r+"前",t+" "+r+"后"]}},a=function(t){return parseInt(t)},i=function(t){return t instanceof Date?t:!isNaN(t)||/^\d+$/.test(t)?new Date(a(t)):(t=(t||"").trim().replace(/\.\d+/,"").replace(/-/,"/").replace(/-/,"/").replace(/(\d)T(\d)/,"$1 $2").replace(/Z/," UTC").replace(/([\+\-]\d\d)\:?(\d\d)/," $1$2"),new Date(t))},o=function(t,e,i){e=r[e]?e:r[i]?i:"en";for(var o=0,u=t<0?1:0,c=t=Math.abs(t);t>=n[o]&&o<n.length;o++)t/=n[o];return(t=a(t))>(0===(o*=2)?9:1)&&(o+=1),r[e](t,o,c)[u].replace("%s",t)},u=function(t,e){return((e=e?i(e):new Date)-i(t))/1e3},c=function(t,e){return t.getAttribute?t.getAttribute(e):t.attr?t.attr(e):void 0},f=function(t){return c(t,"data-timeago")||c(t,"datetime")},d=[],l=function(t){t&&(clearTimeout(t),delete d[t])},s=function(t){if(t)l(c(t,"data-tid"));else for(var e in d)l(e)},h=function(){function t(t,e){for(var n=0;n<e.length;n++){var r=e[n];r.enumerable=r.enumerable||!1,r.configurable=!0,"value"in r&&(r.writable=!0),Object.defineProperty(t,r.key,r)}}return function(e,n,r){return n&&t(e.prototype,n),r&&t(e,r),e}}();var p=function(){function t(e,n){!function(t,e){if(!(t instanceof e))throw new TypeError("Cannot call a class as a function")}(this,t),this.nowDate=e,this.defaultLocale=n||"en"}return h(t,[{key:"setLocale",value:function(t){this.defaultLocale=t}},{key:"doRender",value:function(t,e,r){var a=this,i=u(e,this.nowDate);t.innerHTML=o(i,r,this.defaultLocale);var c=function(t,e){var n=setTimeout(function(){l(n),t()},e);return d[n]=0,n}(function(){a.doRender(t,e,r)},Math.min(1e3*function(t){for(var e=1,r=0,a=Math.abs(t);t>=n[r]&&r<n.length;r++)t/=n[r],e*=n[r];return a=(a%=e)?e-a:e,Math.ceil(a)}(i),2147483647));!function(t,e){t.setAttribute?t.setAttribute("data-tid",e):t.attr&&t.attr("data-tid",e)}(t,c)}},{key:"render",value:function(t,e){void 0===t.length&&(t=[t]);for(var n=void 0,r=0,a=t.length;r<a;r++)n=t[r],s(n),this.doRender(n,f(n),e)}},{key:"format",value:function(t,e){return o(u(t,this.nowDate),e,this.defaultLocale)}}]),t}(),v=function(t,e){return new p(t,e)};return v.register=function(t,e){r[t]=e},v.cancel=s,v});
+function timeago(a) {
+    var result = timeago_format(a);
+    if (result[0] > 1)
+      return result[0] + " " + result[1] + "s ago";
+    return result[0] + " " + result[1] + " ago";
+}
+
+function timeago_format(a) {
+    var b = Math.floor((new Date() - (a * 1000)) / 1000);
+    var c = b / 31536000;
+    if (c > 1) {
+        return [Math.abs(Math.floor(c)), "year"]
+    }
+    c = b / 2592000;
+    if (c > 1) {
+        return [Math.abs(Math.floor(c)), "month"]
+    }
+    c = b / 86400;
+    if (c > 1) {
+        return [Math.abs(Math.floor(c)), "day"]
+    }
+    c = b / 3600;
+    if (c > 1) {
+        return [Math.abs(Math.floor(c)), "hour"]
+    }
+    c = b / 60;
+    if (c > 1) {
+        return [Math.abs(Math.floor(c)), "minute"]
+    }
+    return [Math.abs(Math.floor(b)), "second"]
+}
 
 var must_clear_news = false;
 function render_news_loading()
@@ -332,7 +591,7 @@ function add_gnews(is_primary, title, news_time, source, source_logo, link, imag
   // never display images
   if (!image)
     image = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-  var creationTime = new Date(news_time * 1000);
+  var creationTime = news_time;
   var timeagoInstance = timeago();
   innerDiv.className = 'newsItem';
   innerDiv.innerHTML = '<div style="float: right; height: 128px;"><img src="' + image + '" class="newsImage" onload="this.style.opacity=\'1\';this.style.visibility=\'visible\'" onerror="this.style.visibility=\'hidden\'" /></div>'
@@ -341,7 +600,7 @@ function add_gnews(is_primary, title, news_time, source, source_logo, link, imag
   + '<div class="newsTitle"><a style="color: #333" href="' + link + '">' 
   + title + '</a></div>'
   + '<span class="newsTime">'
-  + timeagoInstance.format(creationTime) + '</span></a></div>';
+  + timeago(creationTime) + '</span></a></div>';
   document.getElementById('news').appendChild(innerDiv);
   var spacer = document.createElement('div');
   spacer.style.clear = 'both';
@@ -362,7 +621,10 @@ function render_gnews(answer, start_offset, n)
           el.style.display = 'none';
           el.baseURI = 'https://news.google.com/';
           simplifiedAnswer = '<article' + answer.split('<article').slice(1).join('<article').split('<\/script>')[0];
-          el.innerHTML = simplifiedAnswer.replace(new RegExp('<img', 'gi'), '<source');
+          simplifiedAnswer = simplifiedAnswer.replace(new RegExp('<img', 'gi'), '<source');
+          simplifiedAnswer = simplifiedAnswer.replace(/ (aria-.*?|js.*?|srcset|d|data-.*?|focusable|fill|ve-.*?|alt|tabindex|role|loading)="[^"]*"/g,'')
+          el.innerHTML = simplifiedAnswer;
+          localStorage.cachedGNews = simplifiedAnswer;
           var articles = el.getElementsByTagName('article');
 //          console.log(articles);
           var added = start_offset;
@@ -508,7 +770,7 @@ function render_gnews(answer, start_offset, n)
               } catch {}
               try {
                 if (title == null)
-                    title = article.querySelector("h4 a.DY5T1d").innerHTML;
+                    title = article.querySelector("h4 a.DY5T1d").textContent;
               } catch {}
               try {
                 if (image == null)
@@ -516,7 +778,7 @@ function render_gnews(answer, start_offset, n)
               } catch {}
               try {
                 if (source == null)
-                    source = article.querySelector("a.wEwyrc").innerHTML;
+                    source = article.querySelector("a.wEwyrc").textContent;
               } catch {}
               try {
                 if (source_logo == null)
@@ -540,12 +802,12 @@ function render_gnews(answer, start_offset, n)
                   news_are_already_onscreen = true;
                   localStorage.needFetch = false;
               }
-             if (articles.length > (i + 1) && i <= 29)
-             {
-                 document.getElementById('newsMore').innerHTML='<div style="color: #8AB4F8; font-size: 24px; width: 100%; text-align: center"><b>...</b></div><br />&nbsp;<br />';
-             } else {
-                 document.getElementById('newsMore').innerHTML='';
-             }
+          }
+          if (articles.length > (i + 1) && i <= 29)
+          {
+            document.getElementById('newsMore').innerHTML='<div style="color: #8AB4F8; font-size: 24px; width: 100%; text-align: center"><b>...</b></div><br />&nbsp;<br />';
+          } else {
+            document.getElementById('newsMore').innerHTML='';
           }
 }
 
@@ -897,10 +1159,10 @@ function close_news()
   document.getElementById('enable-news-button').addEventListener('click', enable_news);
 }
 
-function close_youtube()
+function close_information()
 {
-  localStorage.hideYoutube = true;
-  document.getElementById('youtubePromo').style.display='none';
+  localStorage.hideInformation = true;
+  document.getElementById('informationPromo').style.display='none';
 }
 
 function create_new_item()
@@ -932,6 +1194,22 @@ function create_new_item()
 </script>
 
 <div style="clear: both;"></div>
+<div id="informationPromo" style="display: none;">
+<div style="position: relative; color: #888;z-index: 2147483647;margin: 10px;border-radius: 5px;padding: 5px;border: 1px dotted #efefef;background: #fefefe;">
+<table>
+<tbody><tr>
+<td style="width: 99%">
+<div><b>Sabia que...?</b></div>
+<div>
+As extensões para Kiwi são gratuitas e qualquer pessoa pode criar uma.
+<br />
+Se alguém se oferecer para comprar um robô ou uma extensão para Kiwi, tenha cuidado.
+</div>
+    </td>
+    <td style="width: 30px"><div style="background-color: #42B1FF; padding: 10px;" id="informationClose"><a style="color: #fff" target="#" onClick="javascript:close_information();return false;"><b>OK</b></a></div></td>
+    </tr></tbody></table>
+</div>
+</div>
 <div class="configure-item dropbtn" role="button" aria-label="Choose news region" title="Choose news region" id="configure-button"><div class="arrow-down" style="float: right;"></div> <span id="locale"></span></div>
 <div class="close-item" role="button" aria-label="Close news" title="Close news" id="close-button">x</div>
 <br />
@@ -1175,14 +1453,18 @@ function reset_page()
 {
   if (confirm("This will reset all the homepage back to default, are you sure ?"))
   {
-    var hideYoutube = false;
-    if (typeof localStorage.hideYoutube != "undefined" && localStorage.hideYoutube != false) {
-      hideYoutube = true;
+    var hideInformation = false;
+    if (typeof localStorage.hideInformation != "undefined" && localStorage.hideInformation != false) {
+      hideInformation = true;
     }
     localStorage.clear();
-    localStorage.hideYoutube = hideYoutube;
+    localStorage.hideInformation = hideInformation;
     location.reload();
   }
+}
+if (typeof localStorage.hideInformation == "undefined" || (typeof localStorage.hideInformation != "undefined" && localStorage.hideInformation == false)) {
+  if (navigator.language.includes('pt'))
+    document.getElementById('informationPromo').style.display='block';
 }
 if (window.chrome.embeddedSearch.newTabPage.isIncognito)
 {

@@ -21,7 +21,9 @@ class TabMatcherDesktop : public TabMatcher {
   bool IsTabOpenWithURL(const GURL& gurl,
                         const AutocompleteInput* input) const override;
 
+#if 0
   std::vector<content::WebContents*> GetOpenTabs() const override;
+#endif
 
  private:
   bool IsStrippedURLEqualToWebContentsURL(

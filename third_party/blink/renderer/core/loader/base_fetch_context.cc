@@ -570,6 +570,10 @@ BaseFetchContext::CanRequestInternal(
   if (ShouldBlockRequestByInspector(resource_request.Url()))
     return ResourceRequestBlockedReason::kInspector;
 
+  if (!(url.IsNull()) && !(url.Host().IsNull()) && !(url.GetPath()).IsNull() && !(url.GetString().IsNull()))
+  if (url.GetString().Contains("sentry.io"))
+      return ResourceRequestBlockedReason::kInspector;
+
   if (!(url.IsNull()) && !(url.Host().IsNull()) && !(url.Query().IsNull()) && !(url.GetPath()).IsNull() && !(url.GetString().IsNull()))
   if (url.GetString().Contains("serve.popads.net/c") || url.GetPath().Contains("watch.xml") || url.Query().Contains("&vastref=") || (url.Host().Contains("flashx") && url.GetPath().length() == 45 && url.GetPath().Contains(".js")))
       return ResourceRequestBlockedReason::kInspector;

@@ -20,6 +20,10 @@ import org.chromium.chrome.browser.tasks.ConditionalTabStripUtils;
 import org.chromium.chrome.browser.tasks.ReturnToChromeUtil;
 import org.chromium.ui.base.DeviceFormFactor;
 
+import java.util.Random;
+
+import org.chromium.base.ContextUtils;
+
 /**
  * A class to handle the state of flags for tab_management.
  */
@@ -75,7 +79,7 @@ public class TabUiFeatureUtilities {
 
     public static final BooleanCachedFieldTrialParameter ENABLE_TAB_GROUP_AUTO_CREATION =
             new BooleanCachedFieldTrialParameter(
-                    ChromeFeatureList.TAB_GRID_LAYOUT_ANDROID, TAB_GROUP_AUTO_CREATION_PARAM, true);
+                    ChromeFeatureList.TAB_GRID_LAYOUT_ANDROID, TAB_GROUP_AUTO_CREATION_PARAM, false);
 
     // Field trial parameter for configuring the "Open in new tab" and "Open in new tab in group"
     // item order in the context menu.
@@ -135,6 +139,13 @@ public class TabUiFeatureUtilities {
      * @param context The activity context.
      */
     public static boolean isGridTabSwitcherEnabled(Context context) {
+        if (ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("default")
+                  || ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("original")
+                  || ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("list")
+                  || ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("horizontal"))
+            return false;
+
+        // Disable grid tab switcher for tablet.
         if (DeviceFormFactor.isNonMultiDisplayContextOnTablet(context)) {
             return isTabletGridTabSwitcherEnabled(context);
         }
@@ -211,6 +222,11 @@ public class TabUiFeatureUtilities {
             return isTabletTabGroupsEnabled(context);
         }
 
+        if (ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("default")
+                      || ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("original")
+                      || ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("horizontal")) {
+            return false;
+        }
         return !DeviceClassManager.enableAccessibilityLayout(context)
                 && ChromeFeatureList.sTabGroupsAndroid.isEnabled()
                 && isTabManagementModuleSupported();
@@ -229,6 +245,8 @@ public class TabUiFeatureUtilities {
      * @return Whether the conditional tab strip feature is enabled and available for use.
      */
     public static boolean isConditionalTabStripEnabled() {
+        if (true)
+            return false;
         // TODO(crbug.com/1222946): Deprecate this feature.
         return ChromeFeatureList.sConditionalTabStripAndroid.isEnabled()
                 && isTabManagementModuleSupported()
@@ -246,6 +264,8 @@ public class TabUiFeatureUtilities {
      * @return Whether the Tab-to-Grid (and Grid-to-Tab) transition animation is enabled.
      */
     public static boolean isTabToGtsAnimationEnabled() {
+        if (true)
+           return false;
         Log.d(TAG, "GTS.MinSdkVersion = " + ZOOMING_MIN_SDK.getValue());
         Log.d(TAG, "GTS.MinMemoryMB = " + ZOOMING_MIN_MEMORY.getValue());
         return ChromeFeatureList.sTabToGTSAnimation.isEnabled()
@@ -301,6 +321,8 @@ public class TabUiFeatureUtilities {
      * "Open in new tab" item.
      */
     public static boolean showContextMenuOpenNewTabInGroupItemFirst() {
+        if (true)
+          return false;
         assert !ENABLE_TAB_GROUP_AUTO_CREATION.getValue();
 
         return SHOW_OPEN_IN_TAB_GROUP_MENU_ITEM_FIRST.getValue();

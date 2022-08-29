@@ -130,10 +130,13 @@ bool AccountConsistencyModeManager::IsDiceEnabledForProfile(Profile* profile) {
   return GetMethodForProfile(profile) == AccountConsistencyMethod::kDice;
 }
 
-#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+#if BUILDFLAG(ENABLE_DICE_SUPPORT) || true
 // static
 bool AccountConsistencyModeManager::IsDiceSignInAllowed() {
+#if 0
   return CanEnableDiceForBuild() && IsBrowserSigninAllowedByCommandLine();
+#endif
+  return false;
 }
 #endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
 

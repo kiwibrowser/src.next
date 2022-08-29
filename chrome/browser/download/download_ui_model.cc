@@ -30,7 +30,7 @@
 #include "ui/base/l10n/time_format.h"
 #include "ui/base/text/bytes_formatting.h"
 
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) || true
 #include "chrome/browser/ui/browser.h"
 #include "ui/views/vector_icons.h"
 #endif
@@ -561,7 +561,7 @@ bool DownloadUIModel::ShouldPromoteOrigin() const {
   return false;
 }
 
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) || true
 bool DownloadUIModel::IsCommandEnabled(
     const DownloadCommands* download_commands,
     DownloadCommands::Command command) const {
@@ -861,11 +861,13 @@ DownloadUIModel::BubbleUIInfo DownloadUIModel::GetBubbleUIInfoForInterrupted(
       DownloadUIModel::BubbleUIInfo(/*has_progress_bar=*/false)
           .AddIconAndColor(vector_icons::kFileDownloadOffIcon,
                            ui::kColorAlertHighSeverity);
+#if 0
   if (IsBubbleV2Enabled()) {
     bubble_ui_info.AddPrimaryButton(CanResume()
                                         ? DownloadCommands::Command::RESUME
                                         : DownloadCommands::Command::RETRY);
   }
+#endif
   return bubble_ui_info;
 }
 

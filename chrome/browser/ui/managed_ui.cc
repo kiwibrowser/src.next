@@ -76,7 +76,7 @@ bool ShouldDisplayManagedUi(Profile* profile) {
   return enterprise_util::IsBrowserManaged(profile);
 }
 
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) || true
 std::u16string GetManagedUiMenuItemLabel(Profile* profile) {
   absl::optional<std::string> account_manager =
       GetAccountManagerIdentity(profile);

@@ -119,6 +119,12 @@ import org.chromium.components.content_settings.ContentSettingValues;
 import org.chromium.chrome.browser.AppMenuBridge;
 import org.chromium.base.Log;
 
+import android.graphics.Color;
+import android.text.SpannableString;
+import android.text.style.RelativeSizeSpan;
+import android.text.style.ForegroundColorSpan;
+import org.chromium.components.browser_ui.site_settings.ContentSettingsResources;
+
 /**
  * Base implementation of {@link AppMenuPropertiesDelegate} that handles hiding and showing menu
  * items based on activity state.
@@ -362,11 +368,39 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
         prepareExtensionMenu(
                     extensionMenu, isInStartSurfaceHomepage() ? null : currentTab, handler, mTabModelSelector.getCurrentModel().isIncognito());
 
+        boolean menuHasFiveIconsRow = false;
+        for (int i = 0; i < menu.size(); ++i) {
+            MenuItem item = menu.getItem(i);
+            if (!item.isVisible()) continue;
+
+            if (item.getItemId() == R.id.icon_row_menu_id
+                && item.getSubMenu().size() == 5)
+                menuHasFiveIconsRow = true;
+        }
+
+        boolean extensionsHaveBeenAdded = false;
+
         // TODO(crbug.com/1119550): Programmatically create menu item's PropertyModel instead of
         // converting from MenuItems.
         for (int i = 0; i < menu.size(); ++i) {
             MenuItem item = menu.getItem(i);
             if (!item.isVisible()) continue;
+
+            // If we do not have a five icons row in the main menu, we immediately show the extensions
+            if (ContextUtils.getAppSharedPreferences().getBoolean("show_extensions_first", false)
+                && !menuHasFiveIconsRow
+                && !extensionsHaveBeenAdded) {
+                    extensionsHaveBeenAdded = true;
+                    for (int j = 0; j < extensionMenu.size(); ++j) {
+                        MenuItem extensionItem = extensionMenu.getItem(j);
+                        if (!extensionItem.isVisible()) continue;
+                        PropertyModel extensionPropertyModel = AppMenuUtil.menuItemToPropertyModel(extensionItem);
+                        extensionPropertyModel.set(AppMenuItemProperties.ICON_COLOR_RES, getMenuItemIconColorRes(extensionItem));
+                        extensionPropertyModel.set(AppMenuItemProperties.SUPPORT_ENTER_ANIMATION, true);
+
+                        modelList.add(new MVCListAdapter.ListItem(AppMenuItemType.STANDARD, extensionPropertyModel));
+                    }
+            }
 
             PropertyModel propertyModel = AppMenuUtil.menuItemToPropertyModel(item);
             propertyModel.set(AppMenuItemProperties.ICON_COLOR_RES, getMenuItemIconColorRes(item));
@@ -415,10 +449,14 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
             }
             modelList.add(new MVCListAdapter.ListItem(menutype, propertyModel));
 
-            // If we gave to show extensions first, we append them after the first row that has 5 action buttons
+            // If we chose to show extensions first, we append them after the first row that has 5 action buttons
             if (ContextUtils.getAppSharedPreferences().getBoolean("show_extensions_first", false)
+                && !extensionsHaveBeenAdded
+                && menuHasFiveIconsRow
+                // current row is five icons row
                 && item.getItemId() == R.id.icon_row_menu_id
-                && menutype == AppMenuItemType.FIVE_BUTTON_ROW) {
+                && item.getSubMenu().size() == 5) {
+                    extensionsHaveBeenAdded = true;
                     for (int j = 0; j < extensionMenu.size(); ++j) {
                         MenuItem extensionItem = extensionMenu.getItem(j);
                         if (!extensionItem.isVisible()) continue;
@@ -428,7 +466,7 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
 
                         modelList.add(new MVCListAdapter.ListItem(AppMenuItemType.STANDARD, extensionPropertyModel));
                     }
-               }
+            }
         }
 
         return modelList;
@@ -463,7 +501,11 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
 
         if (canShowExtensions) {
           int itemIndex = numItems++;
-          String extensions = AppMenuBridge.getRunningExtensions(Profile.fromWebContents(webContents).getOriginalProfile(), webContents);
+          String extensions = "";
+          if (isIncognito)
+            extensions = AppMenuBridge.getRunningExtensions(Profile.fromWebContents(webContents).getPrimaryOTRProfile(true), webContents);
+          else
+            extensions = AppMenuBridge.getRunningExtensions(Profile.fromWebContents(webContents).getOriginalProfile(), webContents);
           if (!extensions.isEmpty()) {
             String[] extensionsArray = extensions.split("\u001f");
             for (String extension: extensionsArray) {
@@ -483,6 +525,17 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
                 Bitmap decodedByte = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
 
                 newlyAdded.setIcon(new BitmapDrawable(mContext.getResources(), decodedByte));
+
+                boolean isIncognitoEnabled = false;
+                if (extensionsInfo[4].equals("active"))
+                  isIncognitoEnabled = true;
+                if (!isIncognitoEnabled && isIncognito) {
+                  SpannableString spanString = new SpannableString(newlyAdded.getTitle().toString());
+                  spanString.setSpan(new ForegroundColorSpan(Color.GRAY), 0, spanString.length(), 0);
+                  newlyAdded.setTitle(spanString);
+                  newlyAdded.setTitleCondensed("Extension (inactive): " + extensionsInfo[1] + ": " + extensionsInfo[2]);
+                  newlyAdded.setIcon(ContentSettingsResources.getBlockedSquareIcon(mContext.getResources(), newlyAdded.getIcon()));
+                }
               }
               itemIndex++;
            }
@@ -508,6 +561,7 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
 
         // Update the icon row items (shown in narrow form factors).
         boolean shouldShowIconRow = shouldShowIconRow();
+        if (menu.findItem(R.id.icon_row_menu_id) != null)
         menu.findItem(R.id.icon_row_menu_id).setVisible(shouldShowIconRow);
         if (shouldShowIconRow) {
             SubMenu actionBar = menu.findItem(R.id.icon_row_menu_id).getSubMenu();
@@ -537,18 +591,23 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
         }
 
         mUpdateMenuItemVisible = shouldShowUpdateMenuItem();
+        if (menu.findItem(R.id.update_menu_id) != null)
         menu.findItem(R.id.update_menu_id).setVisible(mUpdateMenuItemVisible);
         if (mUpdateMenuItemVisible) {
             mAppMenuInvalidator = () -> handler.invalidateAppMenu();
             UpdateMenuItemHelper.getInstance().registerObserver(mAppMenuInvalidator);
         }
 
+        if (menu.findItem(R.id.new_window_menu_id) != null)
         menu.findItem(R.id.new_window_menu_id).setVisible(shouldShowNewWindow());
+        if (menu.findItem(R.id.move_to_other_window_menu_id) != null)
         menu.findItem(R.id.move_to_other_window_menu_id).setVisible(shouldShowMoveToOtherWindow());
         MenuItem menu_all_windows = menu.findItem(R.id.manage_all_windows_menu_id);
         boolean showManageAllWindows = shouldShowManageAllWindows();
+        if (menu_all_windows != null)
         menu_all_windows.setVisible(showManageAllWindows);
         if (showManageAllWindows) {
+            if (menu_all_windows != null)
             menu_all_windows.setTitle(
                     mContext.getString(R.string.menu_manage_all_windows, getInstanceCount()));
         }
@@ -566,6 +625,7 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
 
         // Don't allow either "chrome://" pages or interstitial pages to be shared, or when the
         // current tab is null.
+        if (menu.findItem(R.id.share_row_menu_id) != null)
         menu.findItem(R.id.share_row_menu_id)
                 .setVisible(isCurrentTabNotNull && mShareUtils.shouldEnableShare(currentTab));
 
@@ -574,12 +634,14 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
                     mContext, menu.findItem(R.id.direct_share_menu_id));
         }
 
+        if (menu.findItem(R.id.paint_preview_show_id) != null)
         menu.findItem(R.id.paint_preview_show_id)
                 .setVisible(isCurrentTabNotNull
                         && shouldShowPaintPreview(isChromeScheme, currentTab, isIncognito));
 
         // Enable image descriptions if touch exploration is currently enabled.
         if (ImageDescriptionsController.getInstance().shouldShowImageDescriptionsMenuItem()) {
+            if (menu.findItem(R.id.get_image_descriptions_id) != null)
             menu.findItem(R.id.get_image_descriptions_id).setVisible(true);
 
             int titleId = R.string.menu_stop_image_descriptions;
@@ -597,13 +659,16 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
 
             menu.findItem(R.id.get_image_descriptions_id).setTitle(titleId);
         } else {
+            if (menu.findItem(R.id.get_image_descriptions_id) != null)
             menu.findItem(R.id.get_image_descriptions_id).setVisible(false);
         }
 
         // Conditionally add the Zoom menu item.
+        if (menu.findItem(R.id.page_zoom_id) != null)
         menu.findItem(R.id.page_zoom_id).setVisible(PageZoomCoordinator.shouldShowMenuItem());
 
         // Disable find in page on the native NTP or on Start surface.
+        if (menu.findItem(R.id.find_in_page_id) != null)
         menu.findItem(R.id.find_in_page_id)
                 .setVisible(isCurrentTabNotNull && shouldShowFindInPage(currentTab));
 
@@ -633,20 +698,25 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
         MenuItem disableProxyMenu = menu.findItem(R.id.disable_proxy_id);
         boolean isProxyEnabled = AppMenuBridge.isProxyEnabled(Profile.getLastUsedRegularProfile());
         if (isProxyEnabled) {
-            disableProxyMenu.setVisible(true);
+            if (disableProxyMenu != null)
+                disableProxyMenu.setVisible(true);
         } else {
-            disableProxyMenu.setVisible(false);
+            if (disableProxyMenu != null)
+                disableProxyMenu.setVisible(false);
         }
 
         // Only display reader mode settings menu option if the current page is in reader mode.
+        if (menu.findItem(R.id.reader_mode_prefs_id) != null)
         menu.findItem(R.id.reader_mode_prefs_id)
                 .setVisible(isCurrentTabNotNull && shouldShowReaderModePrefs(currentTab));
 
         // Only display the Enter VR button if VR Shell Dev environment is enabled.
+        if (menu.findItem(R.id.enter_vr_id) != null)
         menu.findItem(R.id.enter_vr_id).setVisible(isCurrentTabNotNull && shouldShowEnterVr());
 
         updateManagedByMenuItem(menu, currentTab);
-        menu.findItem(R.id.help_id).setVisible(false);
+        if (menu.findItem(R.id.help_id) != null)
+            menu.findItem(R.id.help_id).setVisible(false);
     }
 
     /**
@@ -767,6 +837,7 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
         MenuItem adblockMenuLabel = menu.findItem(R.id.adblock_id);
         MenuItem adblockMenuCheck = menu.findItem(R.id.adblock_check_id);
 
+        if (currentTab == null || currentTab.getUrl() == null) { if (adblockMenuRow != null) adblockMenuRow.setVisible(false); return ; }
         String url = currentTab.getUrl().getSpec();
         boolean isChromeScheme = url.startsWith(UrlConstants.CHROME_URL_PREFIX)
                 || url.startsWith(UrlConstants.CHROME_NATIVE_URL_PREFIX);
@@ -776,7 +847,8 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
         // adsEnabled means "adBlockingEnabled"
         boolean itemVisible = canShowAdblockMenu
                 && !isChromeScheme && !currentTab.isNativePage() && !isDistilledPage;
-        adblockMenuRow.setVisible(itemVisible);
+        if (adblockMenuRow != null)
+            adblockMenuRow.setVisible(itemVisible);
         if (!itemVisible) return;
 
         boolean adBlockIsActive = (WebsitePreferenceBridgeJni.get().isContentSettingEnabled(Profile.getLastUsedRegularProfile(), ContentSettingsType.ADS) == false);
@@ -1013,6 +1085,7 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
             Menu menu, Tab currentTab, boolean shouldShowHomeScreenMenuItem) {
         MenuItem homescreenItem = menu.findItem(R.id.add_to_homescreen_id);
         MenuItem openWebApkItem = menu.findItem(R.id.open_webapk_id);
+        if (homescreenItem == null || openWebApkItem == null) return ;
         mAddAppTitleShown = AppMenuVerbiage.APP_MENU_OPTION_UNKNOWN;
         if (currentTab != null && shouldShowHomeScreenMenuItem) {
             Context context = ContextUtils.getApplicationContext();
@@ -1069,7 +1142,9 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
      */
     protected void prepareTranslateMenuItem(Menu menu, @Nullable Tab currentTab) {
         boolean isTranslateVisible = currentTab != null && shouldShowTranslateMenuItem(currentTab);
+        if (menu.findItem(R.id.translate_id) != null)
         menu.findItem(R.id.translate_id).setVisible(isTranslateVisible);
+        if (currentTab == null || currentTab.getUrl() == null) return ;
         String url = currentTab.getUrl().getSpec();
             MenuItem translate_menu = menu.findItem(R.id.translate_id);
             if (translate_menu != null) {
@@ -1245,7 +1320,9 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
      */
     protected void updateBookmarkMenuItemShortcut(
             MenuItem bookmarkMenuItemShortcut, @Nullable Tab currentTab, boolean fromCCT) {
+        if (bookmarkMenuItemShortcut == null) return ;
         if (!fromCCT && BookmarkFeatures.isBookmarkMenuItemAsDedicatedRowEnabled()) {
+            if (bookmarkMenuItemShortcut != null)
             bookmarkMenuItemShortcut.setVisible(false);
             return;
         }
@@ -1279,6 +1356,7 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
      */
     protected void updateBookmarkMenuItemRow(
             MenuItem bookmarkMenuItemAdd, MenuItem bookmarkMenuItemEdit, @Nullable Tab currentTab) {
+        if (bookmarkMenuItemAdd == null || bookmarkMenuItemEdit == null) return ;
         // If the bookmark menu item row is disabled, then hide both item.
         if (!BookmarkFeatures.isBookmarkMenuItemAsDedicatedRowEnabled()
                 || !mBookmarkBridgeSupplier.hasValue() || currentTab == null) {
@@ -1427,7 +1505,8 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
         boolean isAutoDarkEnabled = isAutoDarkWebContentsEnabled();
         boolean itemVisible = currentTab != null && !isChromeScheme && isAutoDarkEnabled;
         itemVisible = false;
-        autoDarkMenuRow.setVisible(itemVisible);
+        if (autoDarkMenuRow != null)
+            autoDarkMenuRow.setVisible(itemVisible);
         if (!itemVisible) return;
 
         // Set text based on if site is blocked or not.

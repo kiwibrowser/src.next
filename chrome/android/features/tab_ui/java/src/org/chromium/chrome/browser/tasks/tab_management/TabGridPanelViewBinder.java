@@ -39,6 +39,9 @@ import androidx.recyclerview.widget.RecyclerView;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
 
+import org.chromium.base.ContextUtils;
+import android.content.res.Resources;
+
 /**
  * ViewBinder for TabGridDialog.
  */
@@ -123,6 +126,13 @@ class TabGridPanelViewBinder {
             }
         } else if (INITIAL_SCROLL_INDEX == propertyKey) {
             int index = (Integer) model.get(INITIAL_SCROLL_INDEX);
+            if (ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("classic")) {
+                int space = (int) Math.ceil(75 * Resources.getSystem().getDisplayMetrics().density);
+                if (index == 0)
+                    space = 0;
+                ((LinearLayoutManager) viewHolder.contentView.getLayoutManager())
+                         .scrollToPositionWithOffset(index, space);
+            } else
             ((LinearLayoutManager) viewHolder.contentView.getLayoutManager())
                     .scrollToPositionWithOffset(index, 0);
         } else if (IS_MAIN_CONTENT_VISIBLE == propertyKey) {

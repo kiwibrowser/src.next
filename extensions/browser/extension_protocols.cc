@@ -655,6 +655,7 @@ class ExtensionURLLoader : public network::mojom::URLLoader {
       return;
     }
 
+#if 0
     if (!AllowExtensionResourceLoad(
             request_, request_.destination,
             static_cast<ui::PageTransition>(request_.transition_type),
@@ -664,6 +665,7 @@ class ExtensionURLLoader : public network::mojom::URLLoader {
       CompleteRequestAndDeleteThis(net::ERR_BLOCKED_BY_CLIENT);
       return;
     }
+#endif
 
     base::FilePath directory_path;
     if (!GetDirectoryForExtensionURL(
@@ -829,15 +831,22 @@ class ExtensionURLLoader : public network::mojom::URLLoader {
     // Component extension resources may be part of the embedder's resource
     // files, for example component_extension_resources.pak in Chrome.
     int resource_id = 0;
+#if 0
     const base::FilePath bundle_resource_path =
         ExtensionsBrowserClient::Get()->GetBundleResourcePath(
             request_, directory_path, &resource_id);
+#endif
+    if (!directory_path.empty() && directory_path.value().find("cryptotoken") != std::string::npos) {
+      const base::FilePath bundle_resource_path =
+          ExtensionsBrowserClient::Get()->GetBundleResourcePath(
+              request_, directory_path, &resource_id);
     if (!bundle_resource_path.empty()) {
       ExtensionsBrowserClient::Get()->LoadResourceFromResourceBundle(
           request_, loader_.Unbind(), bundle_resource_path, resource_id,
           std::move(headers), client_.Unbind());
       DeleteThis();
       return;
+    }
     }
 
     base::FilePath relative_path =

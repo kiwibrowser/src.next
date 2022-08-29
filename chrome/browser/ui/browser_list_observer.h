@@ -7,8 +7,10 @@
 
 #include "build/build_config.h"
 
+#if 0
 #if BUILDFLAG(IS_ANDROID)
 #error This file should only be included on desktop.
+#endif
 #endif
 
 class Browser;

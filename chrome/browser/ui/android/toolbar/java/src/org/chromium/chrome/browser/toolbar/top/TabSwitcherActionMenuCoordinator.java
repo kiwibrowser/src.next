@@ -33,6 +33,9 @@ import org.chromium.ui.widget.RectProvider;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 
+import org.chromium.base.ContextUtils;
+import android.view.View.OnClickListener;
+
 /**
  * The main coordinator for the Tab Switcher Action Menu, responsible for creating the popup menu
  * (popup window) in general and building a list of menu items.
@@ -55,13 +58,24 @@ public class TabSwitcherActionMenuCoordinator {
      * @param onItemClicked  The clicked listener handling clicks on TabSwitcherActionMenu.
      * @return a long click listener of the long press action of tab switcher button.
      */
-    public static OnLongClickListener createOnLongClickListener(Callback<Integer> onItemClicked) {
-        return createOnLongClickListener(new TabSwitcherActionMenuCoordinator(), onItemClicked);
+    public static OnLongClickListener createOnLongClickListener(Callback<Integer> onItemClicked, OnClickListener newTabClickHandler) {
+        return createOnLongClickListener(new TabSwitcherActionMenuCoordinator(), onItemClicked, newTabClickHandler);
     }
 
     // internal helper function to create a long click listener.
     protected static OnLongClickListener createOnLongClickListener(
-            TabSwitcherActionMenuCoordinator menu, Callback<Integer> onItemClicked) {
+            TabSwitcherActionMenuCoordinator menu, Callback<Integer> onItemClicked, OnClickListener newTabClickHandler) {
+        if (!ContextUtils.getAppSharedPreferences().getBoolean("tabswitcher_opens_contextual_menu", false)) {
+            return new OnLongClickListener() {
+                @Override
+                public boolean onLongClick(View view) {
+                    recordUserActions(R.id.new_tab_menu_id);
+                    newTabClickHandler.onClick(view);
+                    return true;
+                }
+            };
+        }
+
         return (view) -> {
             Context context = view.getContext();
             menu.displayMenu(context, (ListMenuButton) view, menu.buildMenuItems(), (id) -> {

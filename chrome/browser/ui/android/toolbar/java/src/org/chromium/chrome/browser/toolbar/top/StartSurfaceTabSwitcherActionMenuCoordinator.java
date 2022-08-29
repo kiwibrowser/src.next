@@ -9,6 +9,8 @@ import android.view.View.OnLongClickListener;
 import org.chromium.base.Callback;
 import org.chromium.ui.modelutil.MVCListAdapter.ModelList;
 
+import android.view.View.OnClickListener;
+
 /**
  * The coordinator responsible for showing the Tab Switcher Action Menu on the Start Surface.
  *
@@ -20,9 +22,9 @@ public class StartSurfaceTabSwitcherActionMenuCoordinator extends TabSwitcherAct
      * @param onItemClicked The clicked listener handling clicks on TabSwitcherActionMenu.
      * @return a long click listener of the long press action of tab switcher button.
      */
-    public static OnLongClickListener createOnLongClickListener(Callback<Integer> onItemClicked) {
+    public static OnLongClickListener createOnLongClickListener(Callback<Integer> onItemClicked, OnClickListener newTabClickHandler) {
         return createOnLongClickListener(
-                new StartSurfaceTabSwitcherActionMenuCoordinator(), onItemClicked);
+                new StartSurfaceTabSwitcherActionMenuCoordinator(), onItemClicked, newTabClickHandler);
     }
 
     @Override

@@ -2005,7 +2005,7 @@ const FeatureEntry::FeatureVariation kTabGridLayoutAndroidVariations[] = {
 
 const FeatureEntry::FeatureParam kStartSurfaceAndroid_SingleSurface[] = {
     {"start_surface_variation", "single"},
-    {"show_tabs_in_mru_order", "true"}};
+    {"show_tabs_in_mru_order", "false"}};
 
 const FeatureEntry::FeatureParam kStartSurfaceAndroid_SingleSurface_V2[] = {
     {"start_surface_variation", "single"},

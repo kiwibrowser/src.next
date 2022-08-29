@@ -626,7 +626,7 @@ void ExtensionInstallPrompt::OnImageLoaded(const gfx::Image& image) {
 void ExtensionInstallPrompt::LoadImageIfNeeded() {
   // Don't override an icon that was passed in. Also, |profile_| can be null in
   // unit tests.
-  if (!icon_.empty() || !profile_) {
+  if (!icon_.empty() || !profile_ || true) {
     ShowConfirmation();
     return;
   }
@@ -707,14 +707,14 @@ void ExtensionInstallPrompt::ShowConfirmation() {
   // Notify observers.
   prompt_->OnDialogOpened();
 
-  if (contents_) {
+  if (contents_ && contents_->GetPrimaryMainFrame() != nullptr) {
     LOG(INFO) << "[EXTENSIONS] contents_ is not empty, displaying prompt";
     scoped_refptr<CloseDialogCallbackWrapper> wrapper = new CloseDialogCallbackWrapper(std::move(done_callback_));
 
     if (permissions_to_display) {
       bool ignored;
       javascript_dialogs::AppModalDialogManager::GetInstance()->RunJavaScriptDialog(
-          contents_, contents_->GetMainFrame(), content::JAVASCRIPT_DIALOG_TYPE_CONFIRM,
+          contents_, contents_->GetPrimaryMainFrame(), content::JAVASCRIPT_DIALOG_TYPE_CONFIRM,
           prompt_->GetPermissionsAsString(), std::u16string(),
                    base::BindOnce(&CloseDialogCallbackWrapper::Run, wrapper, false),
                    &ignored);

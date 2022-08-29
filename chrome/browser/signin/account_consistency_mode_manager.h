@@ -42,7 +42,7 @@ class AccountConsistencyModeManager : public KeyedService {
   // `IdentityManager::GetAccountConsistency`.
   static signin::AccountConsistencyMethod GetMethodForProfile(Profile* profile);
 
-#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+#if BUILDFLAG(ENABLE_DICE_SUPPORT) || true
   // This is a pre-requisite of IsDiceEnabledForProfile(), independent of
   // particular profile type or profile prefs.
   static bool IsDiceSignInAllowed();

@@ -614,6 +614,8 @@ static_library("extensions") {
     "forced_extensions/install_stage_tracker_factory.h",
     "global_shortcut_listener.cc",
     "global_shortcut_listener.h",
+    "global_shortcut_listener_android.cc",
+    "global_shortcut_listener_android.h",
     "install_gate.h",
     "install_observer.cc",
     "install_observer.h",
@@ -680,6 +682,8 @@ static_library("extensions") {
     "sync_bundle.cc",
     "sync_bundle.h",
     "system_display/display_info_provider.h",
+    "system_display/display_info_provider_aura.cc",
+    "system_display/display_info_provider_aura.h",
     "tab_helper.cc",
     "tab_helper.h",
     "theme_installed_infobar_delegate.cc",
@@ -1261,7 +1265,7 @@ static_library("extensions") {
     ]
   }
 
-  if (is_linux) {
+  if (is_linux || true) {
     sources +=
         [ "api/image_writer_private/removable_storage_provider_linux.cc" ]
   }
@@ -1299,8 +1303,8 @@ static_library("extensions") {
     ]
   } else if (use_aura && !is_chromeos) {
     sources += [
-      "system_display/display_info_provider_aura.cc",
-      "system_display/display_info_provider_aura.h",
+#      "system_display/display_info_provider_aura.cc",
+#      "system_display/display_info_provider_aura.h",
     ]
   }
 

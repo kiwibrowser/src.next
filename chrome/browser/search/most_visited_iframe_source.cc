@@ -90,7 +90,9 @@ bool MostVisitedIframeSource::ShouldDenyXFrameOptions() {
 
 bool MostVisitedIframeSource::ServesPath(const std::string& path) const {
   return path == kTitleHTMLPath || path == kTitleCSSPath ||
-         path == kTitleJSPath;
+         path == kTitleJSPath ||
+         path == "/local-ntp.html" || path == "/local-ntp.js" ||
+         path == "/local-ntp.css" || path == "/new-ntp.html";
 }
 
 void MostVisitedIframeSource::SendResource(

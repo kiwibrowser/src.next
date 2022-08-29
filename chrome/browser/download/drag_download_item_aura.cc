@@ -30,6 +30,7 @@ void DragDownloadItem(const download::DownloadItem* download,
   DCHECK(download);
   DCHECK_EQ(download::DownloadItem::COMPLETE, download->GetState());
 
+#if 0
   aura::Window* root_window = view->GetRootWindow();
   if (!root_window || !aura::client::GetDragDropClient(root_window))
     return;
@@ -54,4 +55,5 @@ void DragDownloadItem(const download::DownloadItem* download,
           std::move(data), root_window, view, location,
           ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_LINK,
           ui::mojom::DragEventSource::kMouse);
+#endif
 }

@@ -209,7 +209,8 @@ const int Extension::kValidHostPermissionSchemes =
     URLPattern::SCHEME_CHROMEUI | URLPattern::SCHEME_HTTP |
     URLPattern::SCHEME_HTTPS | URLPattern::SCHEME_FILE |
     URLPattern::SCHEME_FTP | URLPattern::SCHEME_WS | URLPattern::SCHEME_WSS |
-    URLPattern::SCHEME_UUID_IN_PACKAGE;
+    URLPattern::SCHEME_UUID_IN_PACKAGE |
+    URLPattern::SCHEME_CHROMESEARCH;
 
 //
 // Extension

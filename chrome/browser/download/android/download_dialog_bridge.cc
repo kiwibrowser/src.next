@@ -93,7 +93,10 @@ void DownloadDialogBridge::ShowDialog(
       static_cast<int>(dialog_type),
       base::android::ConvertUTF8ToJavaString(env,
                                              suggested_path.AsUTF8Unsafe()),
-      false /*supports_later_dialog*/, is_incognito);
+      false /*supports_later_dialog*/, is_incognito,
+      base::android::ConvertUTF8ToJavaString(env,
+                                             url_to_download)
+  );
 }
 
 void DownloadDialogBridge::OnComplete(

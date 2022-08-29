@@ -24,7 +24,7 @@ import org.chromium.base.ContextUtils;
 import org.chromium.components.browser_ui.widget.RadioButtonWithDescription;
 import org.chromium.components.browser_ui.widget.RadioButtonWithDescriptionLayout;
 
-import org.chromium.chrome.browser.accessibility.settings.AccessibilitySettings;
+import org.chromium.chrome.browser.settings.ToolbarSettings;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -108,7 +108,7 @@ public final class RadioButtonGroupTabSwitcherPreference
         sharedPreferencesEditor.putString("active_tabswitcher", checkedTabSwitcher);
         sharedPreferencesEditor.apply();
         ContextUtils.getAppSharedPreferences().edit().putBoolean("accessibility_tab_switcher", false).apply();
-        AccessibilitySettings.AskForRelaunch(mActivity);
+        ToolbarSettings.AskForRelaunch(mActivity);
     }
 
     public void setActivity(Activity activity) {

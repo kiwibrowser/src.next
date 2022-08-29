@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <grit-part>
   <!-- Desktop only -->
-  <if expr="not is_android and not is_ios">
+  <if expr="not is_android and not is_ios or is_android">
     <message name="IDS_DISCOUNT_CONTEXTUAL_CONSENT_TITLE" desc="The title shown on the consent bubble for getting discount.">
       Get discount on <ph name="MERCHANT_NAME">$1</ph> and more
     </message>

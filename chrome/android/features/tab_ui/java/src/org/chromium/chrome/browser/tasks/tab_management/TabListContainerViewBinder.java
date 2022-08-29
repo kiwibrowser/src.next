@@ -22,6 +22,9 @@ import org.chromium.components.browser_ui.styles.ChromeColors;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
 
+import org.chromium.base.ContextUtils;
+import android.content.res.Resources;
+
 /**
  * ViewBinder for TabListRecyclerView.
  */
@@ -48,6 +51,12 @@ class TabListContainerViewBinder {
         } else if (INITIAL_SCROLL_INDEX == propertyKey) {
             // RecyclerView#scrollToPosition(int) behaves incorrectly first time after cold start.
             int index = (Integer) model.get(INITIAL_SCROLL_INDEX);
+            if (ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("classic")) {
+                int space = (int) Math.ceil(75 * Resources.getSystem().getDisplayMetrics().density);
+                if (index == 0)
+                    space = 0;
+                ((LinearLayoutManager) view.getLayoutManager()).scrollToPositionWithOffset(index, space);
+            } else
             ((LinearLayoutManager) view.getLayoutManager()).scrollToPositionWithOffset(index, 0);
         } else if (TOP_MARGIN == propertyKey) {
             FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) view.getLayoutParams();

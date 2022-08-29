@@ -24,8 +24,9 @@ const constexpr DarkModeInversionAlgorithm kDefaultDarkModeInversionAlgorithm =
     DarkModeInversionAlgorithm::kInvertLightnessLAB;
 const constexpr DarkModeImagePolicy kDefaultDarkModeImagePolicy =
     DarkModeImagePolicy::kFilterSmart;
-const constexpr int kDefaultForegroundBrightnessThreshold = 150;
+const constexpr int kDefaultForegroundBrightnessThreshold = 127;
 const constexpr int kDefaultBackgroundBrightnessThreshold = 205;
+const constexpr bool kDefaultDarkModeIsGrayscale = false;
 const constexpr float kDefaultDarkModeContrastPercent = 0.0f;
 const constexpr float kDefaultDarkModeImageGrayscalePercent = 0.0f;
 
@@ -43,6 +44,9 @@ SwitchParams ParseDarkModeSettings() {
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           "dark-mode-settings"),
       ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
+
+    LOG(INFO) << "[Kiwi] ParseDarkModeSettings - Read: " << base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          "dark-mode-settings");
 
   for (auto param_value : param_values) {
     std::vector<std::string> pair = base::SplitString(
@@ -178,6 +182,8 @@ DarkModeSettings BuildDarkModeSettings() {
     settings.increase_text_contrast = true;
   else
     settings.increase_text_contrast = false;
+  settings.is_dark_ui = GetIntegerSwitchParamValue<bool>(
+      switch_params, "IsDarkUi", false);
 
   return settings;
 }

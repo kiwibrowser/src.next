@@ -202,6 +202,7 @@ void ShowSigninErrorLearnMorePage(Profile* profile) {
 void ShowReauthForPrimaryAccountWithAuthError(
     Profile* profile,
     signin_metrics::AccessPoint access_point) {
+#if 0
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   // On ChromeOS, sync errors are fixed by re-signing into the OS.
   NOTREACHED();
@@ -215,11 +216,32 @@ void ShowReauthForPrimaryAccountWithAuthError(
       primary_account_info.account_id));
   ShowReauthForAccount(profile, primary_account_info.email, access_point);
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif
+}
+
+namespace internal {
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+void ShowReauthForPrimaryAccountWithAuthErrorLacros(
+    Browser* browser,
+    signin_metrics::AccessPoint access_point,
+    account_manager::AccountManagerFacade* account_manager_facade) {
+  Profile* profile = browser->profile();
+>>>>>>> 1c87c96a4902c... [Kiwi] Fix profile and sync related issues
+  signin::IdentityManager* identity_manager =
+      IdentityManagerFactory::GetForProfile(browser->profile());
+  CoreAccountInfo primary_account_info =
+      identity_manager->GetPrimaryAccountInfo(signin::ConsentLevel::kSignin);
+  DCHECK(!primary_account_info.IsEmpty());
+  DCHECK(identity_manager->HasAccountWithRefreshTokenInPersistentErrorState(
+      primary_account_info.account_id));
+  ShowReauthForAccount(browser, primary_account_info.email, access_point);
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 }
 
 void ShowReauthForAccount(Profile* profile,
                           const std::string& email,
                           signin_metrics::AccessPoint access_point) {
+#if 0
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   // Only `ACCESS_POINT_WEB_SIGNIN` is supported, because `kContentAreaReauth`
   // is hardcoded.
@@ -236,11 +258,13 @@ void ShowReauthForAccount(Profile* profile,
       /*enable_sync=*/false, access_point,
       signin_metrics::PromoAction::PROMO_ACTION_NO_SIGNIN_PROMO);
 #endif
+#endif
 }
 
 void ShowExtensionSigninPrompt(Profile* profile,
                                bool enable_sync,
                                const std::string& email_hint) {
+#if 0
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   NOTREACHED();
 #else
@@ -274,6 +298,7 @@ void ShowExtensionSigninPrompt(Profile* profile,
       signin_metrics::AccessPoint::ACCESS_POINT_EXTENSIONS,
       signin_metrics::PromoAction::PROMO_ACTION_NO_SIGNIN_PROMO);
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif
 }
 
 void EnableSyncFromSingleAccountPromo(

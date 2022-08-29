@@ -82,6 +82,10 @@
 #include "components/captive_portal/content/captive_portal_tab_helper.h"
 #endif
 
+#include "chrome/browser/ui/android/tab_model/tab_model.h"
+#include "chrome/browser/ui/android/tab_model/tab_model_list.h"
+#include "content/public/browser/web_contents.h"
+
 using content::GlobalRequestID;
 using content::NavigationController;
 using content::WebContents;
@@ -592,6 +596,34 @@ std::unique_ptr<content::WebContents> CreateTargetContents(
 base::WeakPtr<content::NavigationHandle> Navigate(NavigateParams* params) {
   TRACE_EVENT1("navigation", "chrome::Navigate", "disposition",
                params->disposition);
+  if (true) {
+    TabModelList::TabModelVector tab_model_vector = TabModelList::models();
+    if (!tab_model_vector.size())
+      return nullptr;
+
+    TabModel* tab_model = TabModelList::models()[0];
+    if (!tab_model)
+      return nullptr;
+
+    Profile* profile = GetSourceProfile(params);
+    if (profile && profile->IsOffTheRecord()) {
+       for (TabModel* tab_model_from_vector : tab_model_vector) {
+         if (tab_model_from_vector->IsOffTheRecord()) {
+           tab_model = tab_model_from_vector;
+           break;
+         }
+       }
+    }
+
+    GURL url = GURL("about:blank");
+    if (params->url.is_valid() && !(params->url.is_empty())) {
+      url = params->url;
+    }
+
+    tab_model->CreateNewTabForDevTools(url.is_empty() ? GURL(chrome::kChromeUINewTabURL) : url);
+    return nullptr;
+  }
+
   Browser* source_browser = params->browser;
   if (source_browser)
     params->initiating_profile = source_browser->profile();

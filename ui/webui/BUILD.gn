@@ -32,7 +32,7 @@ static_library("webui") {
     "//ui/webui/resources/js/metrics_reporter:mojo_bindings",
   ]
 
-  if (!is_android && !is_ios) {
+  if (!is_android && !is_ios|| true) {
     public_deps += [
       "//ui/webui/resources/cr_components/color_change_listener:mojom",
       "//ui/webui/resources/cr_components/customize_themes:mojom",

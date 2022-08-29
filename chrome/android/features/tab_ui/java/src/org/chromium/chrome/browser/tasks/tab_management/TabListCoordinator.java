@@ -43,9 +43,14 @@ import org.chromium.ui.modelutil.SimpleRecyclerViewAdapter;
 import org.chromium.ui.resources.dynamics.DynamicResourceLoader;
 import org.chromium.ui.widget.ViewLookupCachingFrameLayout;
 
+import org.chromium.base.ContextUtils;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.util.List;
+
+import android.app.Activity;
+import android.content.res.Configuration;
+import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 
 /**
  * Coordinator for showing UI for a list of tabs. Can be used in GRID or STRIP modes.
@@ -90,6 +95,25 @@ public class TabListCoordinator
     private OnLayoutChangeListener mListLayoutListener;
     private boolean mLayoutListenerRegistered;
 
+    static class ClassicStyleSwitcher extends RecyclerView.ItemDecoration {
+        @Override
+        public void getItemOffsets(
+                        Rect outRect, View view, RecyclerView parent, RecyclerView.State state) {
+            boolean isPortrait = parent.getContext().getResources().getConfiguration().orientation == Configuration.ORIENTATION_PORTRAIT
+                            || MultiWindowUtils.getInstance().isInMultiWindowMode((Activity) parent.getContext());
+            int space = (int) Math.ceil(75 * Resources.getSystem().getDisplayMetrics().density); // dp to pixels
+            outRect.left = 0;
+            outRect.right = 0;
+            outRect.top = -space;
+            if (!isPortrait)
+                outRect.top = 0;
+            outRect.bottom = 0;
+            if (parent.getChildAdapterPosition(view) == 0) {
+              outRect.top = 0;
+            }
+        }
+    }
+
     /**
      * Construct a coordinator for UI that shows a list of tabs.
      * @param mode Modes of showing the list of tabs. Can be used in GRID or STRIP.
@@ -124,6 +148,12 @@ public class TabListCoordinator
                     .PriceWelcomeMessageController priceWelcomeMessageController,
             @NonNull ViewGroup parentView, boolean attachToParent, String componentName,
             @NonNull ViewGroup rootView) {
+/*
+        if (ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("list"))
+          mode = TabListMode.LIST;
+        if (ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("classic") || ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("grid"))
+          mode = TabListMode.GRID;
+*/
         mMode = mode;
         mItemType = itemType;
         mContext = context;
@@ -131,6 +161,15 @@ public class TabListCoordinator
         mAdapter = new SimpleRecyclerViewAdapter(mModel);
         mRootView = rootView;
         RecyclerView.RecyclerListener recyclerListener = null;
+/*
+        if (ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("classic") && componentName != "TabGridDialogInSwitcher" && componentName != "TabGridDialogFromStrip") {
+          GRID_LAYOUT_SPAN_COUNT_PORTRAIT = 1;
+          GRID_LAYOUT_SPAN_COUNT_LANDSCAPE = 1;
+        } else {
+          GRID_LAYOUT_SPAN_COUNT_PORTRAIT = 2;
+          GRID_LAYOUT_SPAN_COUNT_LANDSCAPE = 3;
+        }
+*/
         if (mMode == TabListMode.GRID || mMode == TabListMode.CAROUSEL) {
             mAdapter.registerType(UiType.SELECTABLE, parent -> {
                 ViewGroup group = (ViewGroup) LayoutInflater.from(context).inflate(
@@ -251,6 +290,8 @@ public class TabListCoordinator
                 GridLayoutManager gridLayoutManager =
                         new GridLayoutManager(context, GRID_LAYOUT_SPAN_COUNT_COMPACT);
                 mRecyclerView.setLayoutManager(gridLayoutManager);
+                if (ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("classic") && componentName != "TabGridDialogInSwitcher" && componentName != "TabGridDialogFromStrip")
+                    mRecyclerView.addItemDecoration(new ClassicStyleSwitcher());
                 mMediator.registerOrientationListener(gridLayoutManager);
                 mMediator.updateSpanCount(gridLayoutManager,
                         context.getResources().getConfiguration().orientation,

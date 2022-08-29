@@ -245,7 +245,7 @@ public class TopToolbarCoordinator implements Toolbar {
             mStartSurfaceToolbarCoordinator.setTabSwitcherListener(tabSwitcherClickHandler);
             mStartSurfaceToolbarCoordinator.setOnTabSwitcherLongClickHandler(
                     StartSurfaceTabSwitcherActionMenuCoordinator.createOnLongClickListener(
-                            tabSwitcherLongClickCallback));
+                            tabSwitcherLongClickCallback, newTabClickHandler));
             mStartSurfaceToolbarCoordinator.onDefaultSearchEngineChanged();
         }
 
@@ -254,7 +254,7 @@ public class TopToolbarCoordinator implements Toolbar {
         mToolbarLayout.setOnTabSwitcherClickHandler(tabSwitcherClickHandler);
         mToolbarLayout.setOnTabSwitcherLongClickHandler(
                 TabSwitcherActionMenuCoordinator.createOnLongClickListener(
-                        tabSwitcherLongClickCallback));
+                        tabSwitcherLongClickCallback, newTabClickHandler));
         mToolbarLayout.setBookmarkClickHandler(bookmarkClickHandler);
         mToolbarLayout.setCustomTabCloseClickHandler(customTabsBackClickHandler);
         mToolbarLayout.setLayoutUpdater(layoutUpdater);

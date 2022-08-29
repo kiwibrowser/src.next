@@ -29,6 +29,23 @@ export class ExtensionsToggleRowElement extends PolymerElement {
     return 'extensions-toggle-row';
   }
 
+  override ready() {
+    super.ready();
+    var _incognitoToggle = this;
+    if (this.id == 'allow-incognito' && document.location.hash == '#enable_incognito') {
+      console.log('Executing Kiwi additions: ' + document.location.hash + ' on element: ' + this.id);
+      console.log('Scrolling into view');
+      _incognitoToggle.scrollIntoView({
+        block: "end",
+        behavior: 'smooth'
+      });
+      _incognitoToggle.classList.add("fade");
+      window.setTimeout(function () { _incognitoToggle.classList.add("fadeIn"); }, 1000);
+      window.setTimeout(function () { _incognitoToggle.classList.remove("fadeIn"); }, 1500);
+      window.setTimeout(function () { _incognitoToggle.classList.add("fadeIn"); }, 2000);
+    }
+  }
+
   static get template() {
     return getTemplate();
   }

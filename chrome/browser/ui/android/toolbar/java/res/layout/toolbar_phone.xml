@@ -47,6 +47,12 @@
             android:visibility="gone"
             android:layout_width="52dp"
             style="@style/ToolbarButton" />
+
+        <org.chromium.chrome.browser.toolbar.top.HandButton
+            android:id="@+id/hand_button"
+            style="@style/ToolbarButton"
+            android:src="@drawable/btn_toolbar_hand" />
+
         <org.chromium.chrome.browser.toolbar.top.ToggleTabStackButton
             android:id="@+id/tab_switcher_button"
             style="@style/ToolbarButton"

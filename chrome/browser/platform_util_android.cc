@@ -42,6 +42,11 @@ gfx::NativeWindow GetTopLevel(gfx::NativeView view) {
   return view->GetWindowAndroid();
 }
 
+gfx::NativeView GetViewForWindow(gfx::NativeWindow window) {
+  NOTIMPLEMENTED();
+  return window;
+}
+
 gfx::NativeView GetParent(gfx::NativeView view) {
   NOTIMPLEMENTED();
   return view;

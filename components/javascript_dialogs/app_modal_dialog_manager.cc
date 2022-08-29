@@ -162,12 +162,14 @@ void AppModalDialogManager::RunJavaScriptDialog(
     return;
   }
 
-  GURL unwrapped_parent_frame_url = web_contents->GetURL();
-  GURL unwrapped_alerting_frame_url = render_frame_host->GetLastCommittedURL();
+  if (render_frame_host != NULL) {
+    const url::Origin unwrapped_alerting_frame_origin =
+        UnwrapOriginIfOpaque(render_frame_host->GetLastCommittedOrigin());
 
-  if (unwrapped_parent_frame_url.SchemeIs("chrome-extension") || unwrapped_alerting_frame_url.SchemeIs("chrome-extension")) {
-    *did_suppress_message = true;
-    return;
+    if (unwrapped_alerting_frame_origin.GetURL().SchemeIs("chrome-extension")) {
+      *did_suppress_message = true;
+      return;
+    }
   }
 
   std::u16string dialog_title =

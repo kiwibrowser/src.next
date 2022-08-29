@@ -128,7 +128,7 @@ void EnsureUserSignoutAllowedIsInitializedForProfile(Profile* profile) {
   }
 }
 
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) || true
 #if !BUILDFLAG(IS_CHROMEOS)
 bool ProfileSeparationEnforcedByPolicy(
     Profile* profile,

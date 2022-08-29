@@ -59,6 +59,9 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
 
+import org.chromium.chrome.browser.compositor.LayerTitleCache;
+import org.chromium.chrome.browser.compositor.TitleCache;
+
 /**
  * A {@link Layout} that shows all tabs in one grid or list view.
  */
@@ -638,17 +641,17 @@ public class TabSwitcherLayout extends Layout {
     @Override
     protected void updateSceneLayer(RectF viewport, RectF contentViewport,
             TabContentManager tabContentManager, ResourceManager resourceManager,
-            BrowserControlsStateProvider browserControls) {
+            BrowserControlsStateProvider browserControls, LayerTitleCache layerTitleCache) {
         ensureSceneLayerCreated();
         super.updateSceneLayer(
-                viewport, contentViewport, tabContentManager, resourceManager, browserControls);
+                viewport, contentViewport, tabContentManager, resourceManager, browserControls, layerTitleCache);
         assert mSceneLayer != null;
 
         // The content viewport is intentionally sent as both params below.
         mSceneLayer.pushLayers(getContext(), contentViewport, contentViewport, this,
                 tabContentManager, resourceManager, browserControls,
                 isTabGtsAnimationEnabled() ? mGridTabListDelegate.getResourceId() : 0,
-                mBackgroundAlpha, mGridTabListDelegate.getTabListTopOffset());
+                mBackgroundAlpha, mGridTabListDelegate.getTabListTopOffset(), layerTitleCache);
         mFrameCount++;
         if (mLastFrameTime != 0) {
             long elapsed = SystemClock.elapsedRealtime() - mLastFrameTime;

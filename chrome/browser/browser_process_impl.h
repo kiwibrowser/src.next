@@ -35,7 +35,7 @@
 #include "services/network/public/cpp/network_quality_tracker.h"
 #include "services/network/public/mojom/network_service.mojom-forward.h"
 
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) || true
 #include "chrome/browser/upgrade_detector/build_state.h"
 #endif
 
@@ -167,7 +167,7 @@ class BrowserProcessImpl : public BrowserProcess,
   printing::PrintPreviewDialogController* print_preview_dialog_controller()
       override;
   printing::BackgroundPrintingManager* background_printing_manager() override;
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) || true
   IntranetRedirectDetector* intranet_redirect_detector() override;
 #endif
   const std::string& GetApplicationLocale() override;
@@ -203,7 +203,7 @@ class BrowserProcessImpl : public BrowserProcess,
   resource_coordinator::ResourceCoordinatorParts* resource_coordinator_parts()
       override;
 
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) || true
   SerialPolicyAllowedPorts* serial_policy_allowed_ports() override;
   HidPolicyAllowedDevices* hid_policy_allowed_devices() override;
 #endif
@@ -308,7 +308,7 @@ class BrowserProcessImpl : public BrowserProcess,
   std::unique_ptr<NotificationUIManager> notification_ui_manager_;
 #endif
 
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) || true
   std::unique_ptr<IntranetRedirectDetector> intranet_redirect_detector_;
 #endif
 
@@ -411,7 +411,7 @@ class BrowserProcessImpl : public BrowserProcess,
   std::unique_ptr<SecureOriginPrefsObserver> secure_origin_prefs_observer_;
   std::unique_ptr<SiteIsolationPrefsObserver> site_isolation_prefs_observer_;
 
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) || true
   // Called to signal the process' main message loop to exit.
   base::OnceClosure quit_closure_;
 

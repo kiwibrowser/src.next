@@ -4,21 +4,25 @@
 
 #include "base/notreached.h"
 #include "chrome/browser/icon_loader.h"
+#include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
 
 // static
 IconLoader::IconGroup IconLoader::GroupForFilepath(
     const base::FilePath& file_path) {
-  NOTIMPLEMENTED();
   return IconLoader::IconGroup();
 }
 
 // static
 scoped_refptr<base::TaskRunner> IconLoader::GetReadIconTaskRunner() {
-  NOTIMPLEMENTED();
-  return nullptr;
+  return content::GetUIThreadTaskRunner({});
 }
 
 void IconLoader::ReadIcon() {
-  NOTIMPLEMENTED();
+  gfx::Image image;
+
+  target_task_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(std::move(callback_), std::move(image), group_));
   delete this;
 }

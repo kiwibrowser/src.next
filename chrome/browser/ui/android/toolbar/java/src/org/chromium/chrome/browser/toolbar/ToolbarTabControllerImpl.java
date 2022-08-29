@@ -146,6 +146,8 @@ public class ToolbarTabControllerImpl implements ToolbarTabController {
         Tab currentTab = mTabSupplier.get();
         if (currentTab == null) return;
         String homePageUrl = mHomepageUrlSupplier.get();
+        if (currentTab.isIncognito())
+            homePageUrl = "chrome-search://local-ntp/incognito-ntp.html";
         boolean is_chrome_internal =
                 homePageUrl.startsWith(ContentUrlConstants.ABOUT_URL_SHORT_PREFIX)
                 || homePageUrl.startsWith(UrlConstants.CHROME_URL_SHORT_PREFIX)

@@ -47,7 +47,7 @@ const base::Feature kChromeWhatsNewInMainMenuNewBadge{
     "ChromeWhatsNewInMainMenuNewBadge", base::FEATURE_DISABLED_BY_DEFAULT};
 #endif
 
-#if !defined(ANDROID)
+#if !defined(ANDROID) || true
 // Enables "Access Code Cast" UI.
 const base::Feature kAccessCodeCastUI{"AccessCodeCastUI",
                                       base::FEATURE_ENABLED_BY_DEFAULT};

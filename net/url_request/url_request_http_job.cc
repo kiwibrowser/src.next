@@ -333,7 +333,7 @@ void URLRequestHttpJob::OnGotFirstPartySetMetadata(
   }
   else if (request_info_.url.host().find("chrome.google.com") != std::string::npos)
   {
-     request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.25 Safari/537.36");
+     request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.84 Safari/537.36");
   }
   else if (request_info_.url.host().find("web.whatsapp.com") != std::string::npos)
   {
@@ -343,21 +343,13 @@ void URLRequestHttpJob::OnGotFirstPartySetMetadata(
   {
      request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:57.0) Gecko/20100101 Firefox/57.0");
   }
-  else if (request_info_.url.host().find("roninchain.com") != std::string::npos || request_info_.url.host().find("marketplace.axieinfinity.com") != std::string::npos)
-  {
-     request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.45 Safari/537.36");
-     request_info_.extra_headers.SetHeader("Sec-CH-UA", "\" Not A;Brand\";v=\"99\", \"Chromium\";v=\"96\", \"Google Chrome\";v=\"96\"");
-     request_info_.extra_headers.SetHeader("Sec-CH-UA-Mobile", "?0");
-     request_info_.extra_headers.SetHeader("Sec-CH-UA-Platform", "Windows");
-  }
-  else if (request_info_.url.host().find("facebook.com") != std::string::npos)
-  {
-     request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (Linux; Android 3.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.66 Mobile Safari/537.36");
-  }
-  else if (request_info_.url.host().find("news.google.com") != std::string::npos && request_info_.url.path().find("CAAqJggKIiBDQkFTRWdvSUwyMHZNRFZxYUdjU0FtVnVHZ0pWVXlnQVAB") != std::string::npos)
+  else if (request_info_.url.host().find("news.google.com") != std::string::npos)
   {
      request_info_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent, "Mozilla/5.0 (Linux; Android 9; ONEPLUS A6003) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.99 Mobile Safari/537.36");
-     request_info_.extra_headers.SetHeader("Cookie", "CONSENT=YES+srp.gws-20210610-0-RC2.en+FX+320;");
+     base::Time time = base::Time::Now();
+     base::Time::Exploded exploded;
+     time.UTCExplode(&exploded);
+     request_info_.extra_headers.SetHeader("Cookie", "CONSENT=YES+srp.gws-" + base::StringPrintf("%04d%02d%02d", exploded.year, exploded.month, exploded.day_of_month) + "-0-RC2.en+FX+320;");
   }
 
   if (request_info_.url.host().find("washingtonpost.com") != std::string::npos) {
@@ -729,6 +721,15 @@ void URLRequestHttpJob::SetCookieHeaderAndStart(
     if (!maybe_included_cookies.empty()) {
       std::string cookie_line =
           CanonicalCookie::BuildCookieLine(maybe_included_cookies);
+      if (request_info_.url.host().find("news.google.com") != std::string::npos) {
+         cookie_line = CanonicalCookie::BuildCookieLineWithoutConsent(maybe_included_cookies);
+         if (!cookie_line.empty())
+           cookie_line += "; ";
+         base::Time time = base::Time::Now();
+         base::Time::Exploded exploded;
+         time.UTCExplode(&exploded);
+         cookie_line += "CONSENT=YES+srp.gws-" + base::StringPrintf("%04d%02d%02d", exploded.year, exploded.month, exploded.day_of_month) + "-0-RC2.en+FX+320;";
+      }
       UMA_HISTOGRAM_COUNTS_10000("Cookie.HeaderLength", cookie_line.length());
       request_info_.extra_headers.SetHeader(HttpRequestHeaders::kCookie,
                                             cookie_line);

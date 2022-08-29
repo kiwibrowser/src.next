@@ -1583,6 +1583,11 @@ public class ExternalNavigationHandler {
             return OverrideUrlLoadingResult.forNoOverride();
         }
 
+        final boolean canOpenInExternalApp = ContextUtils.getAppSharedPreferences().getBoolean("open_in_external_app", false);
+        if (!isExternalProtocol && !canOpenInExternalApp && params.getUrl() != null && !params.getUrl().getSpec().contains("play.google.com") && !params.getUrl().getSpec().startsWith("market://")) {
+            return OverrideUrlLoadingResult.forNoOverride();
+        }
+
         if (isYoutubePairingCode(params.getUrl())) return OverrideUrlLoadingResult.forNoOverride();
 
         if (shouldStayInIncognito(params, isExternalProtocol)) {

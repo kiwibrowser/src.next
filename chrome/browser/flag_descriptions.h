@@ -888,6 +888,9 @@ extern const char kTabSearchMediaTabsId[];
 extern const char kTabSearchMediaTabsName[];
 extern const char kTabSearchMediaTabsDescription[];
 
+extern const char kHorizontalTabSwitcherAndroidName[];
+extern const char kHorizontalTabSwitcherAndroidDescription[];
+
 extern const char kTabSwitcherOnReturnName[];
 extern const char kTabSwitcherOnReturnDescription[];
 
@@ -2257,8 +2260,6 @@ extern const char kEnableAndroidGamepadVibrationDescription[];
 
 // Non-Android ----------------------------------------------------------------
 
-#else  // !BUILDFLAG(IS_ANDROID)
-
 extern const char kAppManagementAppDetailsName[];
 extern const char kAppManagementAppDetailsDescription[];
 
@@ -3474,7 +3475,7 @@ extern const char kSideSearchDSESupportDescription[];
 // Random platform combinations -----------------------------------------------
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
-    BUILDFLAG(IS_FUCHSIA)
+    BUILDFLAG(IS_FUCHSIA) || true
 
 extern const char kDesktopDetailedLanguageSettingsName[];
 extern const char kDesktopDetailedLanguageSettingsDescription[];

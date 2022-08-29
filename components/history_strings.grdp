@@ -63,7 +63,7 @@
       Clear Browsing Data...
     </message>
   </if>
-  <if expr="not is_android">
+  <if expr="not is_android or is_android">
     <message name="IDS_HISTORY_OTHER_SESSIONS_COLLAPSE_SESSION" desc="In the 'Other Sessions' menu on the history page, the label for the command to collapse (hide) the list of windows and tabs in a session.">
       Collapse list
     </message>

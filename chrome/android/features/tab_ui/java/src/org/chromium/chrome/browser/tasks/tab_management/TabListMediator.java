@@ -91,6 +91,7 @@ import org.chromium.ui.modelutil.ListObservable.ListObserver;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.modelutil.SimpleRecyclerViewAdapter;
 import org.chromium.url.GURL;
+import org.chromium.base.ContextUtils;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -567,6 +568,12 @@ class TabListMediator {
             @Nullable TabGridDialogHandler dialogHandler,
             @Nullable PriceWelcomeMessageController priceWelcomeMessageController,
             String componentName, @UiType int uiType) {
+/*
+        if (ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("list"))
+          mode = TabListMode.LIST;
+        if (ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("classic") || ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "default").equals("grid"))
+          mode = TabListMode.GRID;
+*/
         mContext = context;
         mTabModelSelector = tabModelSelector;
         mThumbnailProvider = thumbnailProvider;
@@ -1339,6 +1346,9 @@ class TabListMediator {
     void updateSpanCount(
             GridLayoutManager manager, int orientation, int screenWidthDp) {
         int spanCount = getSpanCount(orientation, screenWidthDp);
+        if (ContextUtils.getAppSharedPreferences().getString("active_tabswitcher", "classic").equals("classic")) {
+          spanCount = 1;
+        }
         manager.setSpanCount(spanCount);
         manager.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
             @Override

@@ -7,9 +7,77 @@
   <meta name="theme-color" content="#000000">
   <meta charset="utf-8">
   <meta name="google" value="notranslate">
-  <link rel="stylesheet" href="./local-ntp.css">
   <style>
   html, body { background-color: black; }
+
+@keyframes fadein {
+    from {
+        opacity:0;
+    }
+    to {
+        opacity:1;
+    }
+}
+@-moz-keyframes fadein { /* Firefox */
+    from {
+        opacity:0;
+    }
+    to {
+        opacity:1;
+    }
+}
+@-webkit-keyframes fadein { /* Safari and Chrome */
+    from {
+        opacity:0;
+    }
+    to {
+        opacity:1;
+    }
+}
+@-o-keyframes fadein { /* Opera */
+    from {
+        opacity:0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+html {
+    height: 100%
+}
+
+body {
+    background-attachment: fixed !important;
+    position: initial!important;
+    cursor: default;
+    font-family: arial, sans-serif;
+    font-size: small;
+    margin: 0;
+    min-height: 100%;
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+}
+
+#ntp-contents {
+    height: 100%;
+    position: relative;
+    z-index: 1;
+    width: 98%
+}
+
+#logo, #fakebox-container {
+    flex-shrink: 0
+}
+
+a:-webkit-any-link {
+    text-decoration: none !important
+}
+
+a:link {
+    text-decoration: none !important
+}
+
   </style>
 </head>
 <!-- Remember to update the test HTML files in chrome/test/data/local_ntp/

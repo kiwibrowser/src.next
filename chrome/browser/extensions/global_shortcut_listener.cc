@@ -26,7 +26,7 @@ GlobalShortcutListener::~GlobalShortcutListener() {
 bool GlobalShortcutListener::RegisterAccelerator(
     const ui::Accelerator& accelerator, Observer* observer) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (IsShortcutHandlingSuspended())
+  if (true || IsShortcutHandlingSuspended())
     return false;
 
   AcceleratorMap::const_iterator it = accelerator_map_.find(accelerator);
@@ -83,6 +83,7 @@ void GlobalShortcutListener::UnregisterAccelerators(Observer* observer) {
 }
 
 void GlobalShortcutListener::SetShortcutHandlingSuspended(bool suspended) {
+  if (true) return;
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (shortcut_handling_suspended_ == suspended)
     return;

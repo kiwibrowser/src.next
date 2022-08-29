@@ -24,7 +24,7 @@ import org.chromium.base.ContextUtils;
 import org.chromium.components.browser_ui.widget.RadioButtonWithDescription;
 import org.chromium.components.browser_ui.widget.RadioButtonWithDescriptionLayout;
 
-import org.chromium.chrome.browser.accessibility.settings.AccessibilitySettings;
+import org.chromium.chrome.browser.settings.ToolbarSettings;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -110,7 +110,7 @@ public final class RadioButtonGroupNightModePreference
         sharedPreferencesEditor.putString("active_nightmode", checkedNightMode);
         sharedPreferencesEditor.apply();
         WebContentsDarkModeController.updateDarkModeStringSettings();
-        AccessibilitySettings.AskForRelaunch(mActivity);
+        ToolbarSettings.AskForRelaunch(mActivity);
     }
 
     public void setActivity(Activity activity) {

@@ -183,6 +183,10 @@ public class MainSettings extends PreferenceFragmentCompat
             setManagedPreferenceDelegateForPreference(PREF_PASSWORDS);
         }
 
+        Preference safetyCheck = findPreference(PREF_SAFETY_CHECK);
+        if (safetyCheck != null)
+            getPreferenceScreen().removePreference(safetyCheck);
+
         setManagedPreferenceDelegateForPreference(PREF_SEARCH_ENGINE);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -397,6 +401,8 @@ public class MainSettings extends PreferenceFragmentCompat
     }
 
     private void onSyncPromoPreferenceStateChanged() {
+        if (true)
+            return;
         if (ChromeFeatureList.isEnabled(ChromeFeatureList.SYNC_ANDROID_PROMOS_WITH_ILLUSTRATION)
                 || ChromeFeatureList.isEnabled(
                         ChromeFeatureList.SYNC_ANDROID_PROMOS_WITH_SINGLE_BUTTON)

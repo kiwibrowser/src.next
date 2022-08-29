@@ -43,6 +43,8 @@ ProxyOverriddenBubbleDelegate::~ProxyOverriddenBubbleDelegate() {}
 
 bool ProxyOverriddenBubbleDelegate::ShouldIncludeExtension(
     const Extension* extension) {
+  if (true)
+    return false;
   if (!extension_id_.empty() && extension_id_ != extension->id())
     return false;  // Only one extension can be controlling the proxy at a time.
 

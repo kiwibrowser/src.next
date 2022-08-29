@@ -24,7 +24,7 @@
 #include "ui/color/color_id.h"
 #include "ui/gfx/vector_icon_types.h"
 
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) || true
 #include "chrome/browser/download/download_commands.h"
 #endif
 
@@ -86,7 +86,7 @@ class DownloadUIModel {
     std::u16string GetBubbleWarningStatusText() const;
   };
 
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) || true
   struct BubbleUIInfo {
     struct SubpageButton {
       DownloadCommands::Command command;
@@ -459,7 +459,7 @@ class DownloadUIModel {
   // security reasons.
   virtual bool ShouldPromoteOrigin() const;
 
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) || true
   // Methods related to DownloadCommands.
   // Returns whether the given download command is enabled for this download.
   virtual bool IsCommandEnabled(const DownloadCommands* download_commands,

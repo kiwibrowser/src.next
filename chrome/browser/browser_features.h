@@ -44,7 +44,7 @@ extern const base::Feature kDoubleTapToZoomInTabletMode;
 extern const base::Feature kEnableUniveralLinks;
 #endif
 
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) || true
 extern const base::Feature kCopyLinkToText;
 extern const base::Feature kMuteNotificationSnoozeAction;
 #endif

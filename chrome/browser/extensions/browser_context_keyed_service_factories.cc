@@ -4,6 +4,7 @@
 
 #include "chrome/browser/extensions/browser_context_keyed_service_factories.h"
 
+#include "base/logging.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/activity_log/activity_log.h"
@@ -71,6 +72,7 @@
 namespace chrome_extensions {
 
 void EnsureBrowserContextKeyedServiceFactoriesBuilt() {
+  LOG(INFO) << "[Kiwi] chrome_extensions::EnsureBrowserContextKeyedServiceFactoriesBuilt";
   extensions::ActivityLog::GetFactoryInstance();
   extensions::ActivityLogAPI::GetFactoryInstance();
   extensions::AutofillPrivateEventRouterFactory::GetInstance();
@@ -131,7 +133,9 @@ void EnsureBrowserContextKeyedServiceFactoriesBuilt() {
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   extensions::TerminalPrivateAPI::GetFactoryInstance();
 #endif
+#if 0
   extensions::TtsAPI::GetFactoryInstance();
+#endif
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   extensions::VerifyTrustAPI::GetFactoryInstance();
 #endif

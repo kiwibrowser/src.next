@@ -13,7 +13,7 @@ import("//ui/webui/resources/tools/generate_grd.gni")
 import("//ui/webui/resources/tools/js_modulizer.gni")
 
 preprocess_folder = "$root_gen_dir/ui/webui/resources/preprocessed/cr_elements"
-if (include_polymer) {
+if (include_polymer || true) {
   preprocess_gen_manifest = "preprocessed_gen_manifest.json"
 }
 
@@ -22,7 +22,7 @@ if (is_chromeos_ash) {
   preprocess_src_manifest = "preprocessed_src_manifest.json"
 }
 
-if (include_polymer) {
+if (include_polymer || true) {
   generate_grd("build_grdp") {
     grd_prefix = "cr_elements"
     out_grd = "$target_gen_dir/${grd_prefix}_resources.grdp"
@@ -46,7 +46,7 @@ group("preprocess") {
     ":preprocess_src_ts",
   ]
 
-  if (include_polymer) {
+  if (include_polymer || true) {
     public_deps += [ ":preprocess_generated" ]
   }
 
@@ -88,7 +88,7 @@ preprocess_if_expr("preprocess_src_ts") {
     "cr_tree/cr_tree_item.ts",
     "cr_tree/cr_tree.ts",
   ]
-  if (include_polymer) {
+  if (include_polymer || true) {
     in_files += [
       "cr_a11y_announcer/cr_a11y_announcer.ts",
       "cr_action_menu/cr_action_menu.ts",
@@ -183,7 +183,7 @@ if (is_chromeos_ash) {
   }
 }
 
-if (include_polymer) {
+if (include_polymer || true) {
   preprocess_if_expr("preprocess_generated") {
     deps = [ ":custom_elements" ]
     in_folder = target_gen_dir
@@ -246,7 +246,7 @@ preprocess_if_expr("preprocess_generated_ts") {
     "cr_tree/cr_tree.html.ts",
     "cr_tree/cr_tree_item.html.ts",
   ]
-  if (include_polymer) {
+  if (include_polymer || true) {
     deps += [
       ":css_wrapper_files",
       ":html_wrapper_files",
@@ -283,7 +283,7 @@ preprocess_if_expr("preprocess_generated_ts") {
   }
 }
 
-if (include_polymer) {
+if (include_polymer || true) {
   group("closure_compile") {
     deps = [
       ":cr_elements_resources",
@@ -342,7 +342,7 @@ if (include_polymer) {
 }
 
 # Targets for auto-generating Polymer 3 JS Modules.
-if (include_polymer) {
+if (include_polymer || true) {
   polymer_modulizer("action_link_css") {
     js_file = "action_link_css.m.js"
     html_file = "action_link_css.html"
@@ -399,7 +399,7 @@ if (include_polymer) {
   }
 }
 
-if (include_polymer) {
+if (include_polymer || true) {
   group("custom_elements") {
     public_deps = [
       ":action_link_css_module",
@@ -432,7 +432,7 @@ if (include_polymer) {
   }
 }
 
-if (include_polymer) {
+if (include_polymer || true) {
   js_type_check("cr_elements_module_resources") {
     is_polymer3 = true
     deps = [
@@ -467,7 +467,7 @@ if (is_chromeos_ash) {
       "//ui/webui/resources/js:assert.m",
       "//ui/webui/resources/js:cr.m",
       "//ui/webui/resources/js:util.m",
-      "//ui/webui/resources/js/cr/ui:keyboard_shortcut_list.m",
+      "//ui/webui/resources/js/cr/ui:keyboard_shortcut_list",
     ]
   }
 }
@@ -481,7 +481,7 @@ html_to_wrapper("html_wrapper_files_native") {
   template = "native"
 }
 
-if (include_polymer) {
+if (include_polymer || true) {
   html_to_wrapper("html_wrapper_files") {
     in_files = [
       "cr_a11y_announcer/cr_a11y_announcer.html",

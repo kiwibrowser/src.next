@@ -62,6 +62,8 @@ public class WebContentsDarkModeMessageController {
      * @return Whether or not the user education message should be shown.
      */
     private static boolean shouldSendMessage(Profile profile, Context context) {
+        if (true)
+            return false;
         // Only send message if the feature is enabled and the message has not yet been shown.
         Tracker tracker = TrackerFactory.getTrackerForProfile(profile);
         boolean featureEnabled = WebContentsDarkModeController.isFeatureEnabled(context, profile);

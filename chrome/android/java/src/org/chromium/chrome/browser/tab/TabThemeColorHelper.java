@@ -11,6 +11,8 @@ import org.chromium.content_public.browser.NavigationHandle;
 import org.chromium.net.NetError;
 import org.chromium.ui.base.WindowAndroid;
 
+import org.chromium.components.embedder_support.util.UrlUtilities;
+
 /**
  * Monitor changes that indicate a theme color change may be needed from tab contents.
  */
@@ -43,6 +45,8 @@ public class TabThemeColorHelper extends EmptyTabObserver {
     @Override
     public void onUrlUpdated(Tab tab) {
         updateIfNeeded(tab, false);
+        if (tab != null && UrlUtilities.isNTPUrl(tab.getUrl().getSpec()))
+            updateIfNeeded(tab, true);
     }
 
     @Override
