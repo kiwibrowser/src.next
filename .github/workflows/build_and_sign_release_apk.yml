@@ -260,7 +260,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./apk-arm/ChromePublic-DevSigned.apk
-          asset_name: com.kiwibrowser.browser-${{ github.run_id }}-arm-github.apk
+          asset_name: com.kiwibrowser.browser-arm-${{ github.run_id }}-github.apk
           asset_content_type: application/vnd.android.package-archive
 
       - name: Uploading release asset (arm64-signed)
@@ -271,7 +271,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./apk-arm64/ChromePublic-DevSigned.apk
-          asset_name: com.kiwibrowser.browser-${{ github.run_id }}-arm64-github.apk
+          asset_name: com.kiwibrowser.browser-arm64-${{ github.run_id }}-github.apk
           asset_content_type: application/vnd.android.package-archive
 
       - name: Uploading release asset (x86-signed)
@@ -282,7 +282,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./apk-x86/ChromePublic-DevSigned.apk
-          asset_name: com.kiwibrowser.browser-${{ github.run_id }}-x86-github.apk
+          asset_name: com.kiwibrowser.browser-x86-${{ github.run_id }}-github.apk
           asset_content_type: application/vnd.android.package-archive
 
       - name: Uploading release asset (x64-signed)
@@ -293,7 +293,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./apk-x64/ChromePublic-DevSigned.apk
-          asset_name: com.kiwibrowser.browser-${{ github.run_id }}-x64-github.apk
+          asset_name: com.kiwibrowser.browser-x64-${{ github.run_id }}-github.apk
           asset_content_type: application/vnd.android.package-archive
 
       - name: Uploading dev asset (arm-signed)
@@ -304,7 +304,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./apk-arm/ChromePublic-Next-DevSigned.apk
-          asset_name: com.kiwibrowser.browser.dev-${{ github.run_id }}-arm-github.apk
+          asset_name: com.kiwibrowser.browser.dev-arm-${{ github.run_id }}-github.apk
           asset_content_type: application/vnd.android.package-archive
 
       - name: Uploading dev asset (arm64-signed)
@@ -315,7 +315,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./apk-arm64/ChromePublic-Next-DevSigned.apk
-          asset_name: com.kiwibrowser.browser.dev-${{ github.run_id }}-arm64-github.apk
+          asset_name: com.kiwibrowser.browser.dev-arm64-${{ github.run_id }}-github.apk
           asset_content_type: application/vnd.android.package-archive
 
       - name: Uploading dev asset (x86-signed)
@@ -326,7 +326,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./apk-x86/ChromePublic-Next-DevSigned.apk
-          asset_name: com.kiwibrowser.browser.dev-${{ github.run_id }}-x86-github.apk
+          asset_name: com.kiwibrowser.browser.dev-x86-${{ github.run_id }}-github.apk
           asset_content_type: application/vnd.android.package-archive
 
       - name: Uploading dev asset (x64-signed)
@@ -337,7 +337,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./apk-x64/ChromePublic-Next-DevSigned.apk
-          asset_name: com.kiwibrowser.browser.dev-${{ github.run_id }}-x64-github.apk
+          asset_name: com.kiwibrowser.browser.dev-x64-${{ github.run_id }}-github.apk
           asset_content_type: application/vnd.android.package-archive
 
       - name: Send announcement on Discord
