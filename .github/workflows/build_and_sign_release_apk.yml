@@ -179,14 +179,16 @@ jobs:
             This release was automatically generated from GitHub ${{ github.ref }} in run ID ${{ github.run_id }}.
             
             Summary:
-              - To install / update Kiwi Browser, use "Kiwi-${{ github.run_id }}-arm64-github.apk".
-              If it doesn't work, try again using "Kiwi-${{ github.run_id }}-arm64-playstore.apk" (if it exists).
+              - To install / update Kiwi Browser, use "com.kiwibrowser.browser-arm64-${{ github.run_id }}-github.apk".
+              If it doesn't work, try again using "com.kiwibrowser.browser-arm64-${{ github.run_id }}-playstore.apk" (if it exists).
 
             Detailed information about the different files:
               - ".map" files are files that developers can use to investigate crashes (ProGuard mapping files), these files are not needed to run the browser and are for developers only.
               - ".apk" files are packages that you have to install to use Kiwi Browser.
 
-            The filenames are in the form "Kiwi-[BUILD_VERSION]-[ARCHITECTURE]-[SIGNATURE_TYPE].apk"
+            The filenames are in the form "[PACKAGE_NAME]-[ARCHITECTURE]-[BUILD_VERSION]-[SIGNATURE_TYPE].apk"
+
+            If you want to keep the Play Store version installed, and still try the GitHub edition then you can install the APKs starting with "com.kiwibrowser.browser.dev" (you will keep all your Play Store bookmarks, settings and passwords, and the GitHub edition will be installed separately).
 
             Build version:
               - Everytime a change is introduced in Kiwi Browser, a new build version is generated.
