@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -77,7 +77,7 @@ class UtilityProcessHostBrowserTest : public BrowserChildProcessObserver,
 #endif
     EXPECT_TRUE(host->Start());
 
-    host->GetChildProcess()->BindReceiver(
+    host->GetChildProcess()->BindServiceInterface(
         service_.BindNewPipeAndPassReceiver());
     if (crash) {
       service_->DoCrashImmediately(
@@ -183,9 +183,13 @@ IN_PROC_BROWSER_TEST_F(UtilityProcessHostBrowserTest, LaunchProcess) {
   RunUtilityProcess(/*elevated=*/false, /*crash=*/false, /*fail_launch=*/false);
 }
 
+// Disabled because it crashes on android-arm64-tests:
+// https://crbug.com/1358585.
+#if !(BUILDFLAG(IS_ANDROID) && defined(ARCH_CPU_ARM64))
 IN_PROC_BROWSER_TEST_F(UtilityProcessHostBrowserTest, LaunchProcessAndCrash) {
   RunUtilityProcess(/*elevated=*/false, /*crash=*/true, /*fail_launch=*/false);
 }
+#endif
 
 // This test won't work as-is on POSIX platforms, where fork()+exec() is used to
 // launch child processes, failure does not happen until exec(), therefore the

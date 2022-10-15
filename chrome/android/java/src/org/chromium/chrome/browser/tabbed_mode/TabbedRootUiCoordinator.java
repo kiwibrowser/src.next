@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -87,6 +87,7 @@ import org.chromium.chrome.browser.signin.SyncConsentActivityLauncherImpl;
 import org.chromium.chrome.browser.status_indicator.StatusIndicatorCoordinator;
 import org.chromium.chrome.browser.subscriptions.CommerceSubscriptionsService;
 import org.chromium.chrome.browser.subscriptions.CommerceSubscriptionsServiceFactory;
+import org.chromium.chrome.browser.tab.RequestDesktopUtils;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabAssociatedApp;
 import org.chromium.chrome.browser.tab.TabLaunchType;
@@ -526,19 +527,34 @@ public class TabbedRootUiCoordinator extends RootUiCoordinator {
         initUndoGroupSnackbarController();
     }
 
+    /**
+     * Creates an instance of {@link IncognitoReauthCoordinatorFactory} for tabbed activity.
+     *
+     * Note that, it requires a valid instance of start surface to work properly if
+     * {@link ReturnToChromeUtil.isTabSwitcherOnlyRefactorEnabled} returns false. Start surface is
+     * only constructed if grid tab switcher is enabled.
+     * See {@link ChromeTabbedActivity#setupCompositorContentPreNativeForPhone} and
+     * {@link ChromeTabbedActivity#setupCompositorContentPreNativeForTablet} for more detail.
+     *
+     * TODO(crbug.com/1355870): Validate the Chrome behaviour when grid tab switcher is not enabled.
+     */
     @Override
     protected IncognitoReauthCoordinatorFactory getIncognitoReauthCoordinatorFactory() {
         // TODO(crbug.com/1315676): When the refactor is enabled by default, use
         // |tabSwitcherCustomView| directly instead of the supplier.
         OneshotSupplier<TabSwitcherCustomViewManager> tabSwitcherCustomViewSupplier =
                 new OneshotSupplierImpl<>();
-        if (ReturnToChromeUtil.isTabSwitcherOnlyRefactorEnabled(mActivity)
-                && mActivityType == ActivityType.TABBED) {
+        if (ReturnToChromeUtil.isTabSwitcherOnlyRefactorEnabled(mActivity)) {
             ((OneshotSupplierImpl) tabSwitcherCustomViewSupplier)
                     .set(mTabSwitcherSupplier.get().getTabSwitcherCustomViewManager());
         } else {
-            tabSwitcherCustomViewSupplier =
-                    mStartSurfaceSupplier.get().getTabSwitcherCustomViewManagerSupplier();
+            if (mStartSurfaceSupplier.hasValue()) {
+                assert TabUiFeatureUtilities.isGridTabSwitcherEnabled(mActivity)
+                        || TabUiFeatureUtilities.isTabletGridTabSwitcherEnabled(mActivity)
+                    : "Grid tab switcher should be enabled.";
+                tabSwitcherCustomViewSupplier =
+                        mStartSurfaceSupplier.get().getTabSwitcherCustomViewManagerSupplier();
+            }
         }
 
         // TODO(crbug.com/1324211, crbug.com/1227656) : Refactor below to remove
@@ -657,6 +673,18 @@ public class TabbedRootUiCoordinator extends RootUiCoordinator {
         }
 
         if (!didTriggerPromo) {
+            didTriggerPromo = DeviceFormFactor.isWindowOnTablet(mWindowAndroid)
+                    && RequestDesktopUtils.maybeShowGlobalSettingOptInMessage(
+                            getPrimaryDisplaySizeInInches(), Profile.getLastUsedRegularProfile(),
+                            mMessageDispatcher, mActivity, mActivityTabProvider.get());
+        }
+
+        if (!didTriggerPromo) {
+            didTriggerPromo = RequestDesktopUtils.maybeShowDefaultEnableGlobalSettingMessage(
+                    Profile.getLastUsedRegularProfile(), mMessageDispatcher, mActivity);
+        }
+
+        if (!didTriggerPromo) {
             mToolbarButtonInProductHelpController.showColdStartIPH();
             mReadLaterIPHController.showColdStartIPH();
             if (MultiWindowUtils.instanceSwitcherEnabled()
@@ -666,9 +694,7 @@ public class TabbedRootUiCoordinator extends RootUiCoordinator {
                         mAppMenuCoordinator.getAppMenuHandler(), R.id.manage_all_windows_menu_id);
             }
         }
-        if (ChromeFeatureList.isEnabled(ChromeFeatureList.TOOLBAR_IPH_ANDROID)) {
-            mPromoShownOneshotSupplier.set(didTriggerPromo);
-        }
+        mPromoShownOneshotSupplier.set(didTriggerPromo);
 
         if (mOfflineIndicatorController != null) {
             // Initialize the OfflineIndicatorInProductHelpController if the
@@ -772,6 +798,7 @@ public class TabbedRootUiCoordinator extends RootUiCoordinator {
         final BrowserControlsSizer browserControlsSizer = mBrowserControlsManager;
         mStatusIndicatorCoordinator = new StatusIndicatorCoordinator(mActivity,
                 mCompositorViewHolderSupplier.get().getResourceManager(), browserControlsSizer,
+                mTabObscuringHandlerSupplier.get(),
                 mStatusBarColorController::getStatusBarColorWithoutStatusIndicator,
                 mCanAnimateBrowserControls, layoutManager::requestUpdate);
         layoutManager.addSceneOverlay(mStatusIndicatorCoordinator.getSceneLayer());

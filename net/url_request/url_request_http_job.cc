@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,13 +25,13 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/rand_util.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
+#include "base/types/optional_util.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "net/base/features.h"
@@ -39,6 +39,7 @@
 #include "net/base/http_user_agent_settings.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
+#include "net/base/network_anonymization_key.h"
 #include "net/base/network_delegate.h"
 #include "net/base/network_isolation_key.h"
 #include "net/base/privacy_mode.h"
@@ -53,13 +54,13 @@
 #include "net/cookies/cookie_constants.h"
 #include "net/cookies/cookie_store.h"
 #include "net/cookies/cookie_util.h"
-#include "net/cookies/first_party_set_metadata.h"
 #include "net/cookies/parsed_cookie.h"
-#include "net/cookies/same_party_context.h"
 #include "net/filter/brotli_source_stream.h"
 #include "net/filter/filter_source_stream.h"
 #include "net/filter/gzip_source_stream.h"
 #include "net/filter/source_stream.h"
+#include "net/first_party_sets/first_party_set_metadata.h"
+#include "net/first_party_sets/same_party_context.h"
 #include "net/http/http_content_disposition.h"
 #include "net/http/http_log_util.h"
 #include "net/http/http_network_session.h"
@@ -108,18 +109,18 @@ base::Value CookieInclusionStatusNetLogParams(
     const std::string& cookie_path,
     const net::CookieInclusionStatus& status,
     net::NetLogCaptureMode capture_mode) {
-  base::Value dict(base::Value::Type::DICTIONARY);
-  dict.SetStringKey("operation", operation);
-  dict.SetStringKey("status", status.GetDebugString());
+  base::Value::Dict dict;
+  dict.Set("operation", operation);
+  dict.Set("status", status.GetDebugString());
   if (net::NetLogCaptureIncludesSensitive(capture_mode)) {
     if (!cookie_name.empty())
-      dict.SetStringKey("name", cookie_name);
+      dict.Set("name", cookie_name);
     if (!cookie_domain.empty())
-      dict.SetStringKey("domain", cookie_domain);
+      dict.Set("domain", cookie_domain);
     if (!cookie_path.empty())
-      dict.SetStringKey("path", cookie_path);
+      dict.Set("path", cookie_path);
   }
-  return dict;
+  return base::Value(std::move(dict));
 }
 
 // Records details about the most-specific trust anchor in |spki_hashes|,
@@ -257,6 +258,8 @@ void URLRequestHttpJob::Start() {
 
   request_info_.network_isolation_key =
       request_->isolation_info().network_isolation_key();
+  request_info_.network_anonymization_key =
+      request_->isolation_info().network_anonymization_key();
   request_info_.possibly_top_frame_origin =
       request_->isolation_info().top_frame_origin();
   request_info_.is_subframe_document_resource =
@@ -335,7 +338,11 @@ void URLRequestHttpJob::OnGotFirstPartySetMetadata(
 
     cookie_partition_key_ = CookiePartitionKey::FromNetworkIsolationKey(
         request_->isolation_info().network_isolation_key(),
-        base::OptionalOrNullptr(first_party_set_metadata_.top_frame_owner()));
+        base::OptionalToPtr(
+            first_party_set_metadata_.top_frame_entry().has_value()
+                ? absl::make_optional(
+                      first_party_set_metadata_.top_frame_entry()->primary())
+                : absl::nullopt));
     AddCookieHeaderAndStart();
   } else {
     StartTransaction();
@@ -451,8 +458,8 @@ void URLRequestHttpJob::DestroyTransaction() {
       transaction_->GetTotalReceivedBytes();
   total_sent_bytes_from_previous_transactions_ +=
       transaction_->GetTotalSentBytes();
-  transaction_.reset();
   response_info_ = nullptr;
+  transaction_.reset();
   override_response_headers_ = nullptr;
   receive_headers_end_ = base::TimeTicks();
 }
@@ -584,8 +591,7 @@ void URLRequestHttpJob::AddExtraHeaders() {
     // specified.
     std::string accept_language =
         http_user_agent_settings_->GetAcceptLanguage();
-    if (base::FeatureList::IsEnabled(features::kAcceptLanguageHeader) &&
-        !accept_language.empty()) {
+    if (!accept_language.empty()) {
       request_info_.extra_headers.SetHeaderIfMissing(
           HttpRequestHeaders::kAcceptLanguage,
           accept_language);
@@ -615,14 +621,10 @@ void URLRequestHttpJob::AddCookieHeaderAndStart() {
           is_main_frame_navigation, force_ignore_site_for_cookies);
 
   bool is_in_nontrivial_first_party_set =
-      first_party_set_metadata_.frame_owner().has_value();
+      first_party_set_metadata_.frame_entry().has_value();
   CookieOptions options = CreateCookieOptions(
       same_site_context, first_party_set_metadata_.context(),
       request_->isolation_info(), is_in_nontrivial_first_party_set);
-
-  UMA_HISTOGRAM_ENUMERATION(
-      "Cookie.FirstPartySetsContextType.HTTP.Read",
-      first_party_set_metadata_.first_party_sets_context_type());
 
   cookie_store->GetCookieListWithOptionsAsync(
       request_->url(), options,
@@ -800,8 +802,7 @@ void URLRequestHttpJob::AnnotateAndMoveUserBlockedCookies(
   if (request()->network_delegate()) {
     can_get_cookies =
         request()->network_delegate()->AnnotateAndMoveUserBlockedCookies(
-            *request(), maybe_included_cookies, excluded_cookies,
-            /*allowed_from_caller=*/true);
+            *request(), maybe_included_cookies, excluded_cookies);
   }
 
   if (!can_get_cookies) {
@@ -856,14 +857,10 @@ void URLRequestHttpJob::SaveCookiesAndNotifyHeadersComplete(int result) {
           force_ignore_site_for_cookies);
 
   bool is_in_nontrivial_first_party_set =
-      first_party_set_metadata_.frame_owner().has_value();
+      first_party_set_metadata_.frame_entry().has_value();
   CookieOptions options = CreateCookieOptions(
       same_site_context, first_party_set_metadata_.context(),
       request_->isolation_info(), is_in_nontrivial_first_party_set);
-
-  UMA_HISTOGRAM_ENUMERATION(
-      "Cookie.FirstPartySetsContextType.HTTP.Write",
-      first_party_set_metadata_.first_party_sets_context_type());
 
   // Set all cookies, without waiting for them to be set. Any subsequent
   // read will see the combined result of all cookie operation.

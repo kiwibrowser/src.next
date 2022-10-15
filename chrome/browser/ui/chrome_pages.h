@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -62,7 +62,9 @@ enum HelpSource {
 //
 // WARNING: The below enum MUST never be renamed, modified or reordered, as
 // they're written to logs. You can only insert a new element immediately
-// before the last.
+// before the last. Also, 'FeedbackSource' in
+// 'tools/metrics/histograms/enums.xml' MUST be kept in sync with the enum
+// below.
 enum FeedbackSource {
   kFeedbackSourceArcApp = 0,
   kFeedbackSourceAsh,
@@ -89,6 +91,9 @@ enum FeedbackSource {
   kFeedbackSourceProjectorApp,
   kFeedbackSourceDesksTemplates,
   kFeedbackSourceFilesApp,
+  kFeedbackSourceChannelIndicator,
+  kFeedbackSourceLauncher,
+  kFeedbackSourceSettingsPerformancePage,
 
   // Must be last.
   kFeedbackSourceCount,
@@ -171,6 +176,9 @@ void ShowPrivacySandboxAdPersonalization(Browser* browser);
 void ShowPrivacySandboxLearnMore(Browser* browser);
 void ShowAddresses(Browser* browser);
 void ShowPaymentMethods(Browser* browser);
+void ShowAllSitesSettingsFilteredByFpsOwner(
+    Browser* browser,
+    const std::string& fps_owner_host_name);
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 // Shows the enterprise management info page in a browser tab.

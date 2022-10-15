@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,7 +34,6 @@
 #include "base/task/bind_post_task.h"
 #include "base/trace_event/trace_event.h"
 #include "base/version.h"
-#include "build/build_config.h"
 #include "build/chromecast_buildflags.h"
 #include "build/chromeos_buildflags.h"
 #include "cc/base/switches.h"
@@ -64,8 +63,8 @@
 #include "gpu/config/gpu_util.h"
 #include "gpu/config/software_rendering_list_autogen.h"
 #include "gpu/ipc/common/memory_stats.h"
+#include "gpu/ipc/host/gpu_disk_cache.h"
 #include "gpu/ipc/host/gpu_memory_buffer_support.h"
-#include "gpu/ipc/host/shader_disk_cache.h"
 #include "gpu/vulkan/buildflags.h"
 #include "media/gpu/gpu_video_accelerator_util.h"
 #include "media/media_buildflags.h"
@@ -372,19 +371,6 @@ void DisplayReconfigCallback(CGDirectDisplayID display,
   manager->HandleGpuSwitch();
 }
 #endif  // BUILDFLAG(IS_MAC)
-
-// Block all domains' use of 3D APIs for this many milliseconds if
-// approaching a threshold where system stability might be compromised.
-const int64_t kBlockAllDomainsMs = 10000;
-const int kNumResetsWithinDuration = 1;
-
-// Enums for UMA histograms.
-enum BlockStatusHistogram {
-  BLOCK_STATUS_NOT_BLOCKED,
-  BLOCK_STATUS_SPECIFIC_DOMAIN_BLOCKED,
-  BLOCK_STATUS_ALL_DOMAINS_BLOCKED,
-  BLOCK_STATUS_MAX
-};
 
 void OnVideoMemoryUsageStats(
     GpuDataManager::VideoMemoryUsageStatsCallback callback,
@@ -878,9 +864,7 @@ void GpuDataManagerImplPrivate::RequestMojoMediaVideoCapabilities() {
 
   GetUIThreadTaskRunner({})->PostTask(FROM_HERE, std::move(task));
 
-  // Since Android never had PPAPI/NaCl it doesn't initialize encoder profiles
-  // at GPU process startup. Query them now so chrome://gpu is accurate.
-#if BUILDFLAG(IS_ANDROID)
+  // Query VEA profiles to show in chrome://gpu
   auto update_vea_profiles_callback = base::BindPostTask(
       GetUIThreadTaskRunner({}),
       base::BindOnce([](const media::VideoEncodeAccelerator::SupportedProfiles&
@@ -893,7 +877,7 @@ void GpuDataManagerImplPrivate::RequestMojoMediaVideoCapabilities() {
   using VEAProfileCallback = base::OnceCallback<void(
       const media::VideoEncodeAccelerator::SupportedProfiles&)>;
   GpuProcessHost::CallOnIO(
-      GPU_PROCESS_KIND_SANDBOXED, /*force_create=*/false,
+      FROM_HERE, GPU_PROCESS_KIND_SANDBOXED, /*force_create=*/false,
       base::BindOnce(
           [](VEAProfileCallback update_vea_profiles_callback,
              GpuProcessHost* host) {
@@ -926,7 +910,6 @@ void GpuDataManagerImplPrivate::RequestMojoMediaVideoCapabilities() {
                     std::move(vea_provider)));
           },
           std::move(update_vea_profiles_callback)));
-#endif
 }
 
 bool GpuDataManagerImplPrivate::IsEssentialGpuInfoAvailable() const {
@@ -964,7 +947,7 @@ gpu::GpuFeatureStatus GpuDataManagerImplPrivate::GetFeatureStatus(
 void GpuDataManagerImplPrivate::RequestVideoMemoryUsageStatsUpdate(
     GpuDataManager::VideoMemoryUsageStatsCallback callback) const {
   GpuProcessHost::CallOnIO(
-      GPU_PROCESS_KIND_SANDBOXED, false /* force_create */,
+      FROM_HERE, GPU_PROCESS_KIND_SANDBOXED, false /* force_create */,
       base::BindOnce(&RequestVideoMemoryUsageStats, std::move(callback)));
 }
 
@@ -978,29 +961,35 @@ void GpuDataManagerImplPrivate::RemoveObserver(
 }
 
 void GpuDataManagerImplPrivate::UnblockDomainFrom3DAPIs(const GURL& url) {
-  // This method must do two things:
-  //
-  //  1. If the specific domain is blocked, then unblock it.
-  //
-  //  2. Reset our notion of how many GPU resets have occurred recently.
-  //     This is necessary even if the specific domain was blocked.
-  //     Otherwise, if we call Are3DAPIsBlocked with the same domain right
-  //     after unblocking it, it will probably still be blocked because of
-  //     the recent GPU reset caused by that domain.
-  //
-  // These policies could be refined, but at a certain point the behavior
-  // will become difficult to explain.
+  // Remove all instances of this domain from the recent domain
+  // blocking events. This may have the side-effect of removing the
+  // kAllDomainsBlocked status.
 
   // Shortcut in the common case where no blocking has occurred. This
   // is important to not regress navigation performance, since this is
   // now called on every user-initiated navigation.
-  if (blocked_domains_.empty() && timestamps_of_gpu_resets_.empty())
+  if (blocked_domains_.empty())
     return;
 
   std::string domain = GetDomainFromURL(url);
+  auto iter = blocked_domains_.begin();
+  while (iter != blocked_domains_.end()) {
+    if (domain == iter->second.domain) {
+      iter = blocked_domains_.erase(iter);
+    } else {
+      ++iter;
+    }
+  }
 
-  blocked_domains_.erase(domain);
-  timestamps_of_gpu_resets_.clear();
+  // If there are have been enough context loss events spread over a
+  // long enough time period, it is possible that a given page will be
+  // blocked from using 3D APIs because of other domains' entries, and
+  // that reloading this page will not allow 3D APIs to run on this
+  // page. Compared to an earlier version of these heuristics, it's
+  // not clear whether unblocking a domain that doesn't exist in the
+  // blocked_domains_ list should clear out the list entirely.
+  // Currently, kBlockedDomainExpirationPeriod is set low enough that
+  // this should hopefully not be a problem in practice.
 }
 
 void GpuDataManagerImplPrivate::UpdateGpuInfo(
@@ -1364,8 +1353,7 @@ void GpuDataManagerImplPrivate::UpdateGpuPreferences(
             gfx::BufferUsage::GPU_READ_CPU_READ_WRITE);
   }
 
-  gpu_preferences->gpu_program_cache_size =
-      gpu::ShaderDiskCache::CacheSizeBytes();
+  gpu_preferences->gpu_program_cache_size = gpu::GetDefaultGpuDiskCacheSize();
 
   gpu_preferences->texture_target_exception_list =
       gpu::CreateBufferUsageAndFormatExceptionList();
@@ -1451,15 +1439,14 @@ void GpuDataManagerImplPrivate::ProcessCrashed() {
                          &GpuDataManagerObserver::OnGpuProcessCrashed);
 }
 
-std::unique_ptr<base::ListValue> GpuDataManagerImplPrivate::GetLogMessages()
-    const {
-  auto value = std::make_unique<base::ListValue>();
+base::Value::List GpuDataManagerImplPrivate::GetLogMessages() const {
+  base::Value::List value;
   for (const auto& log_message : log_messages_) {
     base::Value::Dict dict;
     dict.Set("level", log_message.level);
     dict.Set("header", log_message.header);
     dict.Set("message", log_message.message);
-    value->GetList().Append(std::move(dict));
+    value.Append(std::move(dict));
   }
   return value;
 }
@@ -1471,7 +1458,7 @@ void GpuDataManagerImplPrivate::HandleGpuSwitch() {
       active_gpu_heuristic_);
   // Pass the notification to the GPU process to notify observers there.
   GpuProcessHost::CallOnIO(
-      GPU_PROCESS_KIND_SANDBOXED, false /* force_create */,
+      FROM_HERE, GPU_PROCESS_KIND_SANDBOXED, false /* force_create */,
       base::BindOnce(
           [](gl::GpuPreference active_gpu, GpuProcessHost* host) {
             if (host)
@@ -1498,7 +1485,8 @@ void GpuDataManagerImplPrivate::OnDisplayAdded(
   // Notify observers in the browser process.
   ui::GpuSwitchingManager::GetInstance()->NotifyDisplayAdded();
   // Pass the notification to the GPU process to notify observers there.
-  GpuProcessHost::CallOnIO(GPU_PROCESS_KIND_SANDBOXED, false /* force_create */,
+  GpuProcessHost::CallOnIO(FROM_HERE, GPU_PROCESS_KIND_SANDBOXED,
+                           false /* force_create */,
                            base::BindOnce([](GpuProcessHost* host) {
                              if (host)
                                host->gpu_service()->DisplayAdded();
@@ -1523,7 +1511,8 @@ void GpuDataManagerImplPrivate::OnDisplayRemoved(
   // Notify observers in the browser process.
   ui::GpuSwitchingManager::GetInstance()->NotifyDisplayRemoved();
   // Pass the notification to the GPU process to notify observers there.
-  GpuProcessHost::CallOnIO(GPU_PROCESS_KIND_SANDBOXED, false /* force_create */,
+  GpuProcessHost::CallOnIO(FROM_HERE, GPU_PROCESS_KIND_SANDBOXED,
+                           false /* force_create */,
                            base::BindOnce([](GpuProcessHost* host) {
                              if (host)
                                host->gpu_service()->DisplayRemoved();
@@ -1549,16 +1538,18 @@ void GpuDataManagerImplPrivate::OnDisplayMetricsChanged(
   // Notify observers in the browser process.
   ui::GpuSwitchingManager::GetInstance()->NotifyDisplayMetricsChanged();
   // Pass the notification to the GPU process to notify observers there.
-  GpuProcessHost::CallOnIO(GPU_PROCESS_KIND_SANDBOXED, false /* force_create */,
+  GpuProcessHost::CallOnIO(FROM_HERE, GPU_PROCESS_KIND_SANDBOXED,
+                           false /* force_create */,
                            base::BindOnce([](GpuProcessHost* host) {
                              if (host)
                                host->gpu_service()->DisplayMetricsChanged();
                            }));
 }
 
-void GpuDataManagerImplPrivate::BlockDomainFrom3DAPIs(const GURL& url,
-                                                      gpu::DomainGuilt guilt) {
-  BlockDomainFrom3DAPIsAtTime(url, guilt, base::Time::Now());
+void GpuDataManagerImplPrivate::BlockDomainsFrom3DAPIs(
+    const std::set<GURL>& urls,
+    gpu::DomainGuilt guilt) {
+  BlockDomainsFrom3DAPIsAtTime(urls, guilt, base::Time::Now());
 }
 
 bool GpuDataManagerImplPrivate::Are3DAPIsBlocked(const GURL& top_origin_url,
@@ -1606,17 +1597,43 @@ std::string GpuDataManagerImplPrivate::GetDomainFromURL(const GURL& url) const {
   return url.host();
 }
 
-void GpuDataManagerImplPrivate::BlockDomainFrom3DAPIsAtTime(
-    const GURL& url,
+void GpuDataManagerImplPrivate::BlockDomainsFrom3DAPIsAtTime(
+    const std::set<GURL>& urls,
     gpu::DomainGuilt guilt,
     base::Time at_time) {
   if (!domain_blocking_enabled_)
     return;
 
-  std::string domain = GetDomainFromURL(url);
+  // The coalescing of multiple entries for the same blocking event is
+  // crucially important for the algorithm. Coalescing based on timestamp
+  // would introduce flakiness.
+  std::set<std::string> domains;
+  for (const auto& url : urls) {
+    domains.insert(GetDomainFromURL(url));
+  }
 
-  blocked_domains_[domain] = guilt;
-  timestamps_of_gpu_resets_.push_back(at_time);
+  for (const auto& domain : domains) {
+    blocked_domains_.insert({at_time, {domain, guilt}});
+  }
+}
+
+static const base::TimeDelta kBlockedDomainExpirationPeriod = base::Minutes(2);
+
+void GpuDataManagerImplPrivate::ExpireOldBlockedDomainsAtTime(
+    base::Time at_time) const {
+  // After kBlockedDomainExpirationPeriod, un-block a domain previously
+  // blocked due to context loss.
+
+  // Uses the fact that "blocked_domains_" is mutable to perform a cleanup.
+  base::Time everything_expired_before =
+      at_time - kBlockedDomainExpirationPeriod;
+  blocked_domains_.erase(
+      blocked_domains_.begin(),
+      std::lower_bound(blocked_domains_.begin(), blocked_domains_.end(),
+                       everything_expired_before,
+                       [](const auto& elem, const base::Time& t) {
+                         return elem.first < t;
+                       }));
 }
 
 GpuDataManagerImplPrivate::DomainBlockStatus
@@ -1627,51 +1644,51 @@ GpuDataManagerImplPrivate::Are3DAPIsBlockedAtTime(const GURL& url,
 
   // Note: adjusting the policies in this code will almost certainly
   // require adjusting the associated unit tests.
+
+  // First expire old domain blocks.
+  ExpireOldBlockedDomainsAtTime(at_time);
+
   std::string domain = GetDomainFromURL(url);
+  size_t losses_for_domain = std::count_if(
+      blocked_domains_.begin(), blocked_domains_.end(),
+      [domain](const auto& entry) { return (entry.second.domain == domain); });
+  // Allow one context loss per domain, so block if there are two or more.
+  if (losses_for_domain > 1)
+    return DomainBlockStatus::kBlocked;
 
-  {
-    if (blocked_domains_.find(domain) != blocked_domains_.end()) {
-      // Err on the side of caution, and assume that if a particular
-      // domain shows up in the block map, it's there for a good
-      // reason and don't let its presence there automatically expire.
-      return DomainBlockStatus::kBlocked;
-    }
-  }
-
-  // Look at the timestamps of the recent GPU resets to see if there are
-  // enough within the threshold which would cause us to blocklist all
-  // domains. This doesn't need to be overly precise -- if time goes
-  // backward due to a system clock adjustment, that's fine.
+  // Look at and cluster the timestamps of recent domain blocking events to
+  // see if there are more than the threshold which would cause us to
+  // blocklist all domains. GPU process crashes or TDR events are
+  // discovered because the blocked domain entries all have the same
+  // timestamp.
   //
   // TODO(kbr): make this pay attention to the TDR thresholds in the
   // Windows registry, but make sure it continues to be testable.
   {
-    auto iter = timestamps_of_gpu_resets_.begin();
-    int num_resets_within_timeframe = 0;
-    while (iter != timestamps_of_gpu_resets_.end()) {
-      base::Time time = *iter;
-      base::TimeDelta delta_t = at_time - time;
+    int num_event_clusters = 0;
+    base::Time last_time;  // Initialized to the "zero" time.
 
-      // If this entry has "expired", just remove it.
-      if (delta_t.InMilliseconds() > kBlockAllDomainsMs) {
-        iter = timestamps_of_gpu_resets_.erase(iter);
-        continue;
+    // Relies on the domain blocking events being sorted by increasing
+    // timestamp.
+    for (const auto& elem : blocked_domains_) {
+      if (last_time.is_null() || elem.first != last_time) {
+        last_time = elem.first;
+        ++num_event_clusters;
       }
-
-      ++num_resets_within_timeframe;
-      ++iter;
     }
 
-    if (num_resets_within_timeframe >= kNumResetsWithinDuration) {
+    const int kMaxNumResetsWithinDuration = 2;
+
+    if (num_event_clusters > kMaxNumResetsWithinDuration)
       return DomainBlockStatus::kAllDomainsBlocked;
-    }
   }
 
   return DomainBlockStatus::kNotBlocked;
 }
 
-int64_t GpuDataManagerImplPrivate::GetBlockAllDomainsDurationInMs() const {
-  return kBlockAllDomainsMs;
+base::TimeDelta GpuDataManagerImplPrivate::GetDomainBlockingExpirationPeriod()
+    const {
+  return kBlockedDomainExpirationPeriod;
 }
 
 gpu::GpuMode GpuDataManagerImplPrivate::GetGpuMode() const {

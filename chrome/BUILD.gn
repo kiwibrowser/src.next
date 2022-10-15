@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -45,9 +45,9 @@ if (is_android) {
   import("//build/config/mac/mac_sdk.gni")
   import("//build/config/mac/rules.gni")
   import("//build/util/branding.gni")
-  import("//build/util/version.gni")
   import("//chrome/browser/buildflags.gni")
   import("//chrome/updater/branding.gni")
+  import("//chrome/version.gni")
   import("//content/public/app/mac_helpers.gni")
   import("//media/cdm/library_cdm/cdm_paths.gni")
   import("//third_party/icu/config.gni")
@@ -113,16 +113,6 @@ group("assert_no_deps") {
   assert_no_deps = [ "//chrome/installer/util:strings" ]
 }
 
-config("disable_thinlto_cache_flags") {
-  if (is_linux && use_thin_lto) {
-    # This build target has so many inputs that LLD will run into the default
-    # vm.max_map_count limit of 65530 memory mappings when using the ThinLTO
-    # cache.
-    # TODO (crbug.com/1183211): Re-enable once the linker has been fixed.
-    ldflags = [ "-Wl,--thinlto-cache-dir=" ]
-  }
-}
-
 if (!is_android && !is_mac) {
   group("chrome") {
     public_deps = [ ":chrome_initial" ]
@@ -145,11 +135,6 @@ if (!is_android && !is_mac) {
   executable("chrome_initial") {
     configs -= [ "//build/config/compiler:thinlto_optimize_default" ]
     configs += [ "//build/config/compiler:thinlto_optimize_max" ]
-
-    # TODO (crbug.com/1345158): Re-enable once the linker has been fixed or
-    # the limit on the bots raised.
-    configs += [ ":disable_thinlto_cache_flags" ]
-
     if (is_win) {
       output_name = "initialexe/chrome"
     } else {
@@ -317,7 +302,7 @@ if (!is_android && !is_mac) {
       # On Chrome OS builds (for both ash-chrome and lacros-chrome), put
       # a metadata.json file in root directory containing Chrome version.
       if (is_chromeos) {
-        deps += [ "//build:version_metadata" ]
+        data_deps += [ "//build:version_metadata" ]
       }
 
       # Chrome OS debug builds for arm need to pass --long-plt to the linker.
@@ -587,7 +572,7 @@ if (is_win) {
     args =
         [
           "-b",
-          "${branding_path_component}_strings",
+          "${branding_path_product}_strings",
           "-v",
           chrome_version_full,
           "-g",
@@ -1421,7 +1406,7 @@ group("dependencies") {
     "//v8:v8_headers",
   ]
 
-  if (enable_plugins) {
+  if (enable_ppapi) {
     public_deps += [ "//ppapi/host" ]
   }
 

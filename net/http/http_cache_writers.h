@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -114,9 +114,6 @@ class NET_EXPORT_PRIVATE HttpCache::Writers {
 
   // Returns true if this object is empty.
   bool IsEmpty() const { return all_writers_.empty(); }
-
-  // Invoked during HttpCache's destruction.
-  void Clear() { all_writers_.clear(); }
 
   // Returns true if |transaction| is part of writers.
   bool HasTransaction(const Transaction* transaction) const {
@@ -249,7 +246,7 @@ class NET_EXPORT_PRIVATE HttpCache::Writers {
   raw_ptr<HttpCache> const cache_ = nullptr;
 
   // Owner of |this|.
-  raw_ptr<ActiveEntry> const entry_ = nullptr;
+  raw_ptr<ActiveEntry, DanglingUntriaged> const entry_ = nullptr;
 
   std::unique_ptr<HttpTransaction> network_transaction_;
 

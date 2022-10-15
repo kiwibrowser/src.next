@@ -309,7 +309,7 @@ bool ThemePainterDefault::PaintMenuListButton(const Element& element,
   WebThemeEngine::ExtraParams extra_params;
   extra_params.menu_list.has_border = false;
   extra_params.menu_list.has_border_radius = style.HasBorderRadius();
-  extra_params.menu_list.background_color = Color::kTransparent;
+  extra_params.menu_list.background_color = SK_ColorTRANSPARENT;
   extra_params.menu_list.fill_content_area = false;
   SetupMenuListArrow(document, style, rect, extra_params);
 
@@ -539,8 +539,9 @@ bool ThemePainterDefault::PaintSearchFieldCancelButton(
     Color search_field_text_color =
         cancel_button_object.StyleRef().VisitedDependentColor(
             GetCSSPropertyColor());
-    bool text_is_dark = color_utils::GetRelativeLuminance(
-                            SkColor(search_field_text_color)) < 0.5;
+    bool text_is_dark =
+        color_utils::GetRelativeLuminance(
+            search_field_text_color.ToSkColorDeprecated()) < 0.5;
     color_scheme_adjusted_cancel_image =
         text_is_dark ? cancel_image_hc_light_mode : cancel_image_dark_mode;
     color_scheme_adjusted_cancel_pressed_image =
@@ -562,9 +563,9 @@ bool ThemePainterDefault::PaintSearchFieldCancelButton(
                             : color_scheme_adjusted_cancel_image;
   // TODO(penglin): It's no need to do further classification here but
   // force Dark mode may not pick up the correct resource image now.
-  paint_info.context.DrawImage(target_image, Image::kSyncDecode,
-                               ImageAutoDarkMode::Disabled(),
-                               gfx::RectF(painting_rect));
+  paint_info.context.DrawImage(
+      target_image, Image::kSyncDecode, ImageAutoDarkMode::Disabled(),
+      ImagePaintTimingInfo(), gfx::RectF(painting_rect));
   return false;
 }
 

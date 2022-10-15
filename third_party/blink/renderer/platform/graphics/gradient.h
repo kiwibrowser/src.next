@@ -115,6 +115,12 @@ class PLATFORM_EXPORT Gradient : public RefCounted<Gradient> {
   void ApplyToFlags(cc::PaintFlags&,
                     const SkMatrix& local_matrix,
                     const ImageDrawOptions& draw_options);
+  void SetColorInterpolationSpace(
+      Color::ColorInterpolationSpace color_space_interpolation_space,
+      Color::HueInterpolationMethod hue_interpolation_method) {
+    color_space_interpolation_space_ = color_space_interpolation_space;
+    hue_interpolation_method_ = hue_interpolation_method;
+  }
 
   DarkModeFilter& EnsureDarkModeFilter();
 
@@ -152,6 +158,9 @@ class PLATFORM_EXPORT Gradient : public RefCounted<Gradient> {
 
   mutable sk_sp<PaintShader> cached_shader_;
   mutable sk_sp<SkColorFilter> color_filter_;
+
+  Color::ColorInterpolationSpace color_space_interpolation_space_;
+  Color::HueInterpolationMethod hue_interpolation_method_;
 };
 
 }  // namespace blink

@@ -1,24 +1,23 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_HISTORY_CORE_BROWSER_TOP_SITES_DATABASE_H_
 #define COMPONENTS_HISTORY_CORE_BROWSER_TOP_SITES_DATABASE_H_
 
-#include <map>
+#include <memory>
 
 #include "base/gtest_prod_util.h"
 #include "components/history/core/browser/history_types.h"
 #include "sql/meta_table.h"
-#include "sql/transaction.h"
 
 namespace base {
 class FilePath;
-}
+}  // namespace base
 
 namespace sql {
 class Database;
-}
+}  // namespace sql
 
 namespace history {
 
@@ -39,7 +38,7 @@ class TopSitesDatabase {
   void ApplyDelta(const TopSitesDelta& delta);
 
   // Returns a list of all URLs currently in the table.
-  // WARNING: clears both input arguments.
+  // WARNING: clears input argument.
   void GetSites(MostVisitedURLList* urls);
 
  private:
@@ -94,8 +93,6 @@ class TopSitesDatabase {
   // Init() to retry in case of failure, since some failures will
   // invoke recovery code.
   bool InitImpl(const base::FilePath& db_name);
-
-  std::unique_ptr<sql::Database> CreateDB(const base::FilePath& db_name);
 
   std::unique_ptr<sql::Database> db_;
   sql::MetaTable meta_table_;

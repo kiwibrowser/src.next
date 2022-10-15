@@ -62,7 +62,6 @@ class CORE_EXPORT StyleRuleBase : public GarbageCollected<StyleRuleBase> {
     kContainer,
     kCounterStyle,
     kScope,
-    kScrollTimeline,
     kSupports,
     kViewport,
     kPositionFallback,
@@ -94,7 +93,6 @@ class CORE_EXPORT StyleRuleBase : public GarbageCollected<StyleRuleBase> {
   bool IsPropertyRule() const { return GetType() == kProperty; }
   bool IsStyleRule() const { return GetType() == kStyle; }
   bool IsScopeRule() const { return GetType() == kScope; }
-  bool IsScrollTimelineRule() const { return GetType() == kScrollTimeline; }
   bool IsSupportsRule() const { return GetType() == kSupports; }
   bool IsViewportRule() const { return GetType() == kViewport; }
   bool IsImportRule() const { return GetType() == kImport; }
@@ -149,30 +147,40 @@ class CORE_EXPORT StyleRule : public StyleRuleBase {
                            padding_bytes};
   }
 
+  // Used to send the right value of StyleArena to the constructors.
+  template <bool UseArena>
+  struct Tag {};
+
  public:
   // Use these to allocate the right amount of memory for the StyleRule.
-  static StyleRule* Create(CSSSelectorVector& selector_vector,
+  template <bool UseArena>
+  static StyleRule* Create(CSSSelectorVector<UseArena>& selector_vector,
                            CSSPropertyValueSet* properties) {
-    size_t flattened_size = CSSSelectorList::FlattenedSize(selector_vector);
+    size_t flattened_size =
+        CSSSelectorList::FlattenedSize<UseArena>(selector_vector);
     return MakeGarbageCollected<StyleRule>(
         AdditionalBytesForSelectors(flattened_size), base::PassKey<StyleRule>(),
-        selector_vector, flattened_size, properties);
+        Tag<UseArena>(), selector_vector, flattened_size, properties);
   }
-  static StyleRule* Create(CSSSelectorVector& selector_vector,
+  template <bool UseArena>
+  static StyleRule* Create(CSSSelectorVector<UseArena>& selector_vector,
                            CSSLazyPropertyParser* lazy_property_parser) {
-    size_t flattened_size = CSSSelectorList::FlattenedSize(selector_vector);
+    size_t flattened_size =
+        CSSSelectorList::FlattenedSize<UseArena>(selector_vector);
     return MakeGarbageCollected<StyleRule>(
         AdditionalBytesForSelectors(flattened_size), base::PassKey<StyleRule>(),
-        selector_vector, flattened_size, lazy_property_parser);
+        Tag<UseArena>(), selector_vector, flattened_size, lazy_property_parser);
   }
 
   // Creates a StyleRule with the selectors changed (used by setSelectorText()).
-  static StyleRule* Create(CSSSelectorVector& selector_vector,
+  template <bool UseArena>
+  static StyleRule* Create(CSSSelectorVector<UseArena>& selector_vector,
                            StyleRule&& other) {
-    size_t flattened_size = CSSSelectorList::FlattenedSize(selector_vector);
+    size_t flattened_size =
+        CSSSelectorList::FlattenedSize<UseArena>(selector_vector);
     return MakeGarbageCollected<StyleRule>(
         AdditionalBytesForSelectors(flattened_size), base::PassKey<StyleRule>(),
-        selector_vector, flattened_size, std::move(other));
+        Tag<UseArena>(), selector_vector, flattened_size, std::move(other));
   }
 
   // Constructors. Note that these expect that the StyleRule has been
@@ -181,16 +189,22 @@ class CORE_EXPORT StyleRule : public StyleRuleBase {
   // selectors). Do not call them directly; they are public only so that
   // MakeGarbageCollected() can call them. Instead, use Create() above or
   // Copy() below, as appropriate.
+  template <bool UseArena>
   StyleRule(base::PassKey<StyleRule>,
-            CSSSelectorVector& selector_vector,
+            Tag<UseArena>,
+            CSSSelectorVector<UseArena>& selector_vector,
             size_t flattened_size,
             CSSPropertyValueSet*);
+  template <bool UseArena>
   StyleRule(base::PassKey<StyleRule>,
-            CSSSelectorVector& selector_vector,
+            Tag<UseArena>,
+            CSSSelectorVector<UseArena>& selector_vector,
             size_t flattened_size,
             CSSLazyPropertyParser*);
+  template <bool UseArena>
   StyleRule(base::PassKey<StyleRule>,
-            CSSSelectorVector& selector_vector,
+            Tag<UseArena>,
+            CSSSelectorVector<UseArena>& selector_vector,
             size_t flattened_size,
             StyleRule&&);
   StyleRule(const StyleRule&, size_t flattened_size);
@@ -326,35 +340,6 @@ class CORE_EXPORT StyleRuleProperty : public StyleRuleBase {
  private:
   String name_;
   Member<CSSPropertyValueSet> properties_;
-  Member<const CascadeLayer> layer_;
-};
-
-class CORE_EXPORT StyleRuleScrollTimeline : public StyleRuleBase {
- public:
-  StyleRuleScrollTimeline(const String& name, const CSSPropertyValueSet*);
-  StyleRuleScrollTimeline(const StyleRuleScrollTimeline&) = default;
-
-  StyleRuleScrollTimeline* Copy() const {
-    return MakeGarbageCollected<StyleRuleScrollTimeline>(*this);
-  }
-
-  void TraceAfterDispatch(blink::Visitor*) const;
-
-  const AtomicString& GetName() const { return name_; }
-  const CSSValue* GetSource() const { return source_; }
-  const CSSValue* GetOrientation() const { return orientation_; }
-  const CSSValue* GetStart() const { return start_; }
-  const CSSValue* GetEnd() const { return end_; }
-
-  void SetCascadeLayer(const CascadeLayer* layer) { layer_ = layer; }
-  const CascadeLayer* GetCascadeLayer() const { return layer_; }
-
- private:
-  AtomicString name_;
-  Member<const CSSValue> source_;
-  Member<const CSSValue> orientation_;
-  Member<const CSSValue> start_;
-  Member<const CSSValue> end_;
   Member<const CascadeLayer> layer_;
 };
 
@@ -570,13 +555,6 @@ template <>
 struct DowncastTraits<StyleRuleProperty> {
   static bool AllowFrom(const StyleRuleBase& rule) {
     return rule.IsPropertyRule();
-  }
-};
-
-template <>
-struct DowncastTraits<StyleRuleScrollTimeline> {
-  static bool AllowFrom(const StyleRuleBase& rule) {
-    return rule.IsScrollTimelineRule();
   }
 };
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -119,7 +119,7 @@ class EnableViaDialogFlow : public ExtensionEnableFlowDelegate {
 const Extension* GetExtension(Profile* profile,
                               const apps::AppLaunchParams& params) {
   if (params.app_id.empty())
-    return NULL;
+    return nullptr;
   ExtensionRegistry* registry = ExtensionRegistry::Get(profile);
   return registry->GetExtensionById(
       params.app_id, ExtensionRegistry::ENABLED | ExtensionRegistry::DISABLED |
@@ -221,9 +221,9 @@ WebContents* OpenApplicationTab(Profile* profile,
       extensions::GetLaunchType(ExtensionPrefs::Get(profile), extension);
   UMA_HISTOGRAM_ENUMERATION("Extensions.AppTabLaunchType", launch_type, 100);
 
-  int add_type = TabStripModel::ADD_ACTIVE;
+  int add_type = AddTabTypes::ADD_ACTIVE;
   if (launch_type == extensions::LAUNCH_TYPE_PINNED)
-    add_type |= TabStripModel::ADD_PINNED;
+    add_type |= AddTabTypes::ADD_PINNED;
 
   ui::PageTransition transition = ui::PAGE_TRANSITION_AUTO_BOOKMARK;
   NavigateParams params(browser, url, transition);
@@ -244,12 +244,12 @@ WebContents* OpenApplicationTab(Profile* profile,
         disposition, transition, false));
     // Reset existing_tab as OpenURL() may have clobbered it.
     existing_tab = browser->tab_strip_model()->GetActiveWebContents();
-    if (params.tabstrip_add_types & TabStripModel::ADD_PINNED) {
+    if (params.tabstrip_add_types & AddTabTypes::ADD_PINNED) {
       model->SetTabPinned(tab_index, true);
       // Pinning may have moved the tab.
       tab_index = model->GetIndexOfWebContents(existing_tab);
     }
-    if (params.tabstrip_add_types & TabStripModel::ADD_ACTIVE) {
+    if (params.tabstrip_add_types & AddTabTypes::ADD_ACTIVE) {
       model->ActivateTabAt(
           tab_index, TabStripUserGestureDetails(
                          TabStripUserGestureDetails::GestureType::kOther));
@@ -478,7 +478,7 @@ WebContents* OpenAppShortcutWindow(Profile* profile, const GURL& url) {
   WebContents* tab = OpenApplicationWindow(profile, launch_params, url);
 
   if (!tab)
-    return NULL;
+    return nullptr;
 
   return tab;
 }

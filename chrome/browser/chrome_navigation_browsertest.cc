@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -70,6 +70,7 @@
 #include "net/dns/mock_host_resolver.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/network/public/cpp/features.h"
+#include "services/network/public/cpp/network_switches.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-shared.h"
@@ -1160,20 +1161,28 @@ class WebstoreIsolationBrowserTest : public ChromeNavigationBrowserTest {
 
   void SetUp() override {
     https_server_.ServeFilesFromSourceDirectory("chrome/test/data");
+    // Also serve files from the extensions test directory as it has a
+    // /webstore/ directory, which the Webstore hosted app expects for the URL
+    // it is associated with.
+    https_server_.ServeFilesFromSourceDirectory("chrome/test/data/extensions");
     ASSERT_TRUE(https_server_.InitializeAndListen());
     ChromeNavigationBrowserTest::SetUp();
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    // Override the webstore URL.
-    command_line->AppendSwitchASCII(
-        ::switches::kAppsGalleryURL,
-        https_server()->GetURL("chrome.foo.com", "/frame_tree").spec());
-
     // Ignore cert errors so that the webstore URL can be loaded from a site
     // other than localhost (the EmbeddedTestServer serves a certificate that
     // is valid for localhost).
     command_line->AppendSwitch(switches::kIgnoreCertificateErrors);
+    // Add a host resolver rule to map all outgoing requests to the test server.
+    // This allows us to use "real" hostnames and standard ports in URLs (i.e.,
+    // without having to inject the port number into all URLs). This is
+    // important as the URL check to determine if a navigation is to/from the
+    // new Webstore compares the full origin, which includes the scheme, host
+    // and port.
+    command_line->AppendSwitchASCII(
+        network::switches::kHostResolverRules,
+        "MAP * " + https_server_.host_port_pair().ToString());
 
     ChromeNavigationBrowserTest::SetUpCommandLine(command_line);
   }
@@ -1183,65 +1192,182 @@ class WebstoreIsolationBrowserTest : public ChromeNavigationBrowserTest {
     ChromeNavigationBrowserTest::SetUpOnMainThread();
   }
 
-  net::EmbeddedTestServer* https_server() { return &https_server_; }
-
  private:
   net::EmbeddedTestServer https_server_;
 };
 
-// Make sure that Chrome Web Store origins are isolated from the rest of their
-// foo.com site.  See https://crbug.com/939108.
+// Tests that Chrome Web Store URL used by the hosted app in production
+// (chrome.google.com/webstore/) is isolated from the rest of google.com and
+// other chrome.google.com pages not in the /webstore/ path. See
+// https://crbug.com/939108.
 IN_PROC_BROWSER_TEST_F(WebstoreIsolationBrowserTest, WebstorePopupIsIsolated) {
-  const GURL first_url = https_server()->GetURL("foo.com", "/title1.html");
+  const GURL first_url("https://google.com/title1.html");
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), first_url));
-  content::WebContents* web_contents =
+  content::WebContents* initial_web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
+  scoped_refptr<content::SiteInstance> initial_instance(
+      initial_web_contents->GetPrimaryMainFrame()->GetSiteInstance());
 
-  // Open a popup for chrome.foo.com and ensure that it's isolated in a
-  // different SiteInstance and process from the rest of foo.com.  Note that
-  // we're opening a URL that does *not* match the web store URL due to a
-  // different path, so there will be no BrowsingInstance swap, and window.open
-  // is still expected to return a valid window reference.
-  content::TestNavigationObserver popup_waiter(nullptr, 1);
-  popup_waiter.StartWatchingNewWebContents();
-  const GURL webstore_origin_url =
-      https_server()->GetURL("chrome.foo.com", "/title1.html");
-  EXPECT_TRUE(content::EvalJs(
-                  web_contents,
-                  content::JsReplace("!!window.open($1);", webstore_origin_url))
-                  .ExtractBool());
-  popup_waiter.Wait();
+  // Open a popup for chrome.google.com and ensure that it's isolated in a
+  // different SiteInstance and process from the previous google.com page.
+  const GURL webstore_origin_url("https://chrome.google.com/title1.html");
+  {
+    content::TestNavigationObserver popup_waiter(webstore_origin_url);
+    popup_waiter.StartWatchingNewWebContents();
+    EXPECT_TRUE(content::EvalJs(initial_web_contents,
+                                content::JsReplace("!!window.open($1);",
+                                                   webstore_origin_url))
+                    .ExtractBool());
+    popup_waiter.WaitForNavigationFinished();
+    EXPECT_TRUE(popup_waiter.last_navigation_succeeded());
+  }
   EXPECT_EQ(2, browser()->tab_strip_model()->count());
   content::WebContents* popup =
       browser()->tab_strip_model()->GetActiveWebContents();
-  EXPECT_NE(popup, web_contents);
-  EXPECT_TRUE(content::WaitForLoadStop(popup));
+  EXPECT_NE(popup, initial_web_contents);
+  EXPECT_EQ(webstore_origin_url, popup->GetLastCommittedURL());
 
   scoped_refptr<content::SiteInstance> popup_instance(
       popup->GetPrimaryMainFrame()->GetSiteInstance());
-  EXPECT_NE(web_contents->GetPrimaryMainFrame()->GetSiteInstance(),
-            popup_instance);
-  EXPECT_NE(
-      web_contents->GetPrimaryMainFrame()->GetSiteInstance()->GetProcess(),
-      popup_instance->GetProcess());
+  EXPECT_NE(initial_instance, popup_instance);
+  EXPECT_NE(initial_instance->GetProcess(), popup_instance->GetProcess());
+  // This URL still does *not* match the web store URL due to it not having the
+  // /webstore/ path, so there will not have been a full BrowsingInstance swap.
+  EXPECT_TRUE(initial_instance->IsRelatedSiteInstance(popup_instance.get()));
 
-  // Also navigate the popup to the full web store URL and confirm that this
+  // Now navigate the popup to the full web store URL. This will again cause it
+  // to be isolated in a different SiteInstance and process from the previous
+  // pages, but also now cause a BrowsingInstance swap.
+  {
+    const GURL webstore_url(
+        "https://chrome.google.com/webstore/mock_store.html");
+    content::TestNavigationObserver navigation_waiter(popup);
+    EXPECT_TRUE(
+        ExecuteScript(popup, "location = '" + webstore_url.spec() + "';"));
+    navigation_waiter.WaitForNavigationFinished();
+    EXPECT_TRUE(navigation_waiter.last_navigation_succeeded());
+    EXPECT_EQ(webstore_url, popup->GetLastCommittedURL());
+  }
+  scoped_refptr<content::SiteInstance> webstore_instance(
+      popup->GetPrimaryMainFrame()->GetSiteInstance());
+  EXPECT_NE(webstore_instance, popup_instance);
+  EXPECT_NE(webstore_instance, initial_instance);
+  EXPECT_NE(webstore_instance->GetProcess(), initial_instance->GetProcess());
+  EXPECT_NE(webstore_instance->GetProcess(), popup_instance->GetProcess());
+  EXPECT_FALSE(webstore_instance->IsRelatedSiteInstance(popup_instance.get()));
+  EXPECT_FALSE(
+      webstore_instance->IsRelatedSiteInstance(initial_instance.get()));
+}
+
+// Make sure that the new Chrome Web Store URL used in production
+// (webstore.google.com) is isolated from the rest of the google.com domain.
+IN_PROC_BROWSER_TEST_F(WebstoreIsolationBrowserTest,
+                       NewWebstorePopupIsIsolated) {
+  const GURL first_url("https://google.com/title1.html");
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), first_url));
+  content::WebContents* initial_web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  scoped_refptr<content::SiteInstance> initial_instance(
+      initial_web_contents->GetPrimaryMainFrame()->GetSiteInstance());
+
+  // Open a popup for webstore.google.com and ensure that it's isolated in a
+  // different SiteInstance and process from the rest of google.com. Since the
+  // new Webstore encompasses the entire subdomain, there should have also been
+  // a BrowsingInstance swap at this point.
+  const GURL webstore_origin_url("https://webstore.google.com/title1.html");
+  {
+    content::TestNavigationObserver popup_waiter(webstore_origin_url);
+    popup_waiter.StartWatchingNewWebContents();
+    EXPECT_TRUE(content::EvalJs(initial_web_contents,
+                                content::JsReplace("!!window.open($1);",
+                                                   webstore_origin_url))
+                    .ExtractBool());
+    popup_waiter.WaitForNavigationFinished();
+    EXPECT_TRUE(popup_waiter.last_navigation_succeeded());
+  }
+  EXPECT_EQ(2, browser()->tab_strip_model()->count());
+  content::WebContents* popup =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  EXPECT_NE(popup, initial_web_contents);
+  EXPECT_EQ(webstore_origin_url, popup->GetLastCommittedURL());
+
+  scoped_refptr<content::SiteInstance> popup_instance(
+      popup->GetPrimaryMainFrame()->GetSiteInstance());
+  EXPECT_NE(initial_instance, popup_instance);
+  EXPECT_NE(initial_instance->GetProcess(), popup_instance->GetProcess());
+  EXPECT_FALSE(initial_instance->IsRelatedSiteInstance(popup_instance.get()));
+}
+
+class WebstoreOverrideIsolationBrowserTest
+    : public WebstoreIsolationBrowserTest {
+ public:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    // Override the webstore URL.
+    command_line->AppendSwitchASCII(::switches::kAppsGalleryURL,
+                                    "https://chrome.foo.com/frame_tree");
+
+    WebstoreIsolationBrowserTest::SetUpCommandLine(command_line);
+  }
+};
+
+// Make sure that Chrome Web Store origins are isolated from the rest of their
+// site when overriding the URL from the command line. See
+// https://crbug.com/939108.
+IN_PROC_BROWSER_TEST_F(WebstoreOverrideIsolationBrowserTest,
+                       WebstorePopupIsIsolated) {
+  const GURL first_url("https://foo.com/title1.html");
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), first_url));
+  content::WebContents* initial_web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  scoped_refptr<content::SiteInstance> initial_instance(
+      initial_web_contents->GetPrimaryMainFrame()->GetSiteInstance());
+
+  // Open a popup for chrome.foo.com and ensure that it's isolated in a
+  // different SiteInstance and process from the rest of foo.com.
+  const GURL webstore_origin_url("https://chrome.foo.com/title1.html");
+  {
+    content::TestNavigationObserver popup_waiter(webstore_origin_url);
+    popup_waiter.StartWatchingNewWebContents();
+    EXPECT_TRUE(content::EvalJs(initial_web_contents,
+                                content::JsReplace("!!window.open($1);",
+                                                   webstore_origin_url))
+                    .ExtractBool());
+    popup_waiter.WaitForNavigationFinished();
+    EXPECT_TRUE(popup_waiter.last_navigation_succeeded());
+  }
+  EXPECT_EQ(2, browser()->tab_strip_model()->count());
+  content::WebContents* popup =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  EXPECT_NE(popup, initial_web_contents);
+  EXPECT_EQ(webstore_origin_url, popup->GetLastCommittedURL());
+
+  scoped_refptr<content::SiteInstance> popup_instance(
+      popup->GetPrimaryMainFrame()->GetSiteInstance());
+  EXPECT_NE(initial_instance, popup_instance);
+  EXPECT_NE(initial_instance->GetProcess(), popup_instance->GetProcess());
+  // This URL still does *not* match the web store URL due to it not having the
+  // /frame_tree/ path, so there will not have been a full BrowsingInstance
+  // swap.
+  EXPECT_TRUE(initial_instance->IsRelatedSiteInstance(popup_instance.get()));
+
+  // Now navigate the popup to the full web store URL and confirm that this
   // causes a BrowsingInstance swap.
-  const GURL webstore_url =
-      https_server()->GetURL("chrome.foo.com", "/frame_tree/simple.htm");
-  content::TestNavigationManager manager(popup, webstore_url);
-  EXPECT_TRUE(
-      ExecuteScript(popup, "location = '" + webstore_url.spec() + "';"));
-  manager.WaitForNavigationFinished();
-  EXPECT_NE(popup->GetPrimaryMainFrame()->GetSiteInstance(), popup_instance);
-  EXPECT_NE(popup->GetPrimaryMainFrame()->GetSiteInstance(),
-            web_contents->GetPrimaryMainFrame()->GetSiteInstance());
+  {
+    const GURL webstore_url("https://chrome.foo.com/frame_tree/simple.htm");
+    content::TestNavigationObserver navigation_waiter(popup);
+    EXPECT_TRUE(
+        ExecuteScript(popup, "location = '" + webstore_url.spec() + "';"));
+    navigation_waiter.WaitForNavigationFinished();
+    EXPECT_TRUE(navigation_waiter.last_navigation_succeeded());
+    EXPECT_EQ(webstore_url, popup->GetLastCommittedURL());
+  }
+  scoped_refptr<content::SiteInstance> webstore_instance(
+      popup->GetPrimaryMainFrame()->GetSiteInstance());
+  EXPECT_NE(webstore_instance, popup_instance);
+  EXPECT_NE(webstore_instance, initial_instance);
+  EXPECT_FALSE(webstore_instance->IsRelatedSiteInstance(popup_instance.get()));
   EXPECT_FALSE(
-      popup->GetPrimaryMainFrame()->GetSiteInstance()->IsRelatedSiteInstance(
-          popup_instance.get()));
-  EXPECT_FALSE(
-      popup->GetPrimaryMainFrame()->GetSiteInstance()->IsRelatedSiteInstance(
-          web_contents->GetPrimaryMainFrame()->GetSiteInstance()));
+      webstore_instance->IsRelatedSiteInstance(initial_instance.get()));
 }
 
 // Check that it's possible to navigate to a chrome scheme URL from a crashed
@@ -1287,18 +1413,18 @@ using ChromeNavigationBrowserTestWithMobileEmulation = DevToolsProtocolTestBase;
 
 // Tests the behavior of navigating to a PDF when mobile emulation is enabled.
 IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTestWithMobileEmulation,
-                       NavigateToPDFWithMobileEmulation) {
+                       DISABLED_NavigateToPDFWithMobileEmulation) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
   GURL initial_url = embedded_test_server()->GetURL("/title1.html");
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
 
   Attach();
-  base::Value params(base::Value::Type::DICTIONARY);
-  params.SetIntKey("width", 400);
-  params.SetIntKey("height", 800);
-  params.SetDoubleKey("deviceScaleFactor", 1.0);
-  params.SetBoolKey("mobile", true);
+  base::Value::Dict params;
+  params.Set("width", 400);
+  params.Set("height", 800);
+  params.Set("deviceScaleFactor", 1.0);
+  params.Set("mobile", true);
   SendCommandSync("Emulation.setDeviceMetricsOverride", std::move(params));
 
   GURL pdf_url = embedded_test_server()->GetURL("/pdf/test.pdf");
@@ -1314,8 +1440,9 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTestWithMobileEmulation,
 
 // Tests the behavior of cross origin redirection to a PDF with mobile emulation
 // is enabled.
+// TODO(crbug.com/1355793): Re-enable this test
 IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTestWithMobileEmulation,
-                       CrossSiteRedirectionToPDFWithMobileEmulation) {
+                       DISABLED_CrossSiteRedirectionToPDFWithMobileEmulation) {
   net::EmbeddedTestServer https_server(net::EmbeddedTestServer::TYPE_HTTPS);
   https_server.AddDefaultHandlers(GetChromeTestDataDir());
   ASSERT_TRUE(https_server.Start());
@@ -1325,11 +1452,11 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTestWithMobileEmulation,
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
 
   Attach();
-  base::Value params(base::Value::Type::DICTIONARY);
-  params.SetIntKey("width", 400);
-  params.SetIntKey("height", 800);
-  params.SetDoubleKey("deviceScaleFactor", 1.0);
-  params.SetBoolKey("mobile", true);
+  base::Value::Dict params;
+  params.Set("width", 400);
+  params.Set("height", 800);
+  params.Set("deviceScaleFactor", 1.0);
+  params.Set("mobile", true);
   SendCommandSync("Emulation.setDeviceMetricsOverride", std::move(params));
 
   GURL pdf_url = embedded_test_server()->GetURL("/pdf/test.pdf");
@@ -1968,10 +2095,10 @@ class SiteIsolationForPasswordSitesBrowserTest
 
   std::vector<std::string> GetSavedIsolatedSites(Profile* profile) {
     PrefService* prefs = profile->GetPrefs();
-    auto* list =
+    auto& list =
         prefs->GetList(site_isolation::prefs::kUserTriggeredIsolatedOrigins);
     std::vector<std::string> sites;
-    for (const base::Value& value : list->GetListDeprecated())
+    for (const base::Value& value : list)
       sites.push_back(value.GetString());
     return sites;
   }
@@ -2494,10 +2621,10 @@ class SiteIsolationForCOOPBrowserTest : public ChromeNavigationBrowserTest {
   // Returns the list of COOP sites currently stored in user prefs.
   std::vector<std::string> GetSavedIsolatedSites(Profile* profile) {
     PrefService* prefs = profile->GetPrefs();
-    auto* dict = prefs->GetDictionary(
-        site_isolation::prefs::kWebTriggeredIsolatedOrigins);
+    auto& dict =
+        prefs->GetDict(site_isolation::prefs::kWebTriggeredIsolatedOrigins);
     std::vector<std::string> sites;
-    for (auto site_time_pair : dict->DictItems())
+    for (auto site_time_pair : dict)
       sites.push_back(site_time_pair.first);
     return sites;
   }

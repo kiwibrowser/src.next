@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,29 +29,6 @@ namespace extensions {
 class ExtensionPrefs;
 class Extension;
 class PermissionSet;
-
-// TODO(crbug.com/1343623): This no longer needs to be a struct.
-struct UpdatedExtensionPermissionsInfo {
-  enum Reason {
-    ADDED,    // The permissions were added to the extension.
-    REMOVED,  // The permissions were removed from the extension.
-    POLICY,   // The policy that affects permissions was updated.
-  };
-
-  Reason reason;
-
-  // The extension whose permissions have changed.
-  raw_ptr<const Extension> extension;
-
-  // The permissions that have changed. For Reason::ADDED, this would contain
-  // only the permissions that have added, and for Reason::REMOVED, this would
-  // only contain the removed permissions.
-  const PermissionSet& permissions;
-
-  UpdatedExtensionPermissionsInfo(const Extension* extension,
-                                  const PermissionSet& permissions,
-                                  Reason reason);
-};
 
 // Class for managing user-scoped extension permissions.
 // Includes blocking all extensions from running on a site and automatically
@@ -108,12 +85,22 @@ class PermissionsManager : public KeyedService {
     kCustomizeByExtension,
   };
 
+  enum class UpdateReason {
+    // Permissions were added to the extension.
+    kAdded,
+    // Permissions were removed from the extension.
+    kRemoved,
+    // Policy that affects permissions was updated.
+    kPolicy,
+  };
+
   class Observer {
    public:
     virtual void OnUserPermissionsSettingsChanged(
         const UserPermissionsSettings& settings) {}
-    virtual void OnExtensionPermissionsUpdated(
-        const UpdatedExtensionPermissionsInfo& info) {}
+    virtual void OnExtensionPermissionsUpdated(const Extension& extension,
+                                               const PermissionSet& permissions,
+                                               UpdateReason reason) {}
   };
 
   explicit PermissionsManager(content::BrowserContext* browser_context);
@@ -129,6 +116,11 @@ class PermissionsManager : public KeyedService {
 
   // Registers the user preference that stores user permissions.
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
+
+  //  Updates the user site settings for the given `origin` to be
+  //  `site_settings`.
+  void UpdateUserSiteSetting(const url::Origin& origin,
+                             PermissionsManager::UserSiteSetting site_setting);
 
   // Adds `origin` to the list of sites the user has blocked all
   // extensions from running on. If `origin` is in permitted_sites, it will
@@ -170,27 +162,28 @@ class PermissionsManager : public KeyedService {
   // Returns null if there are no stored runtime-granted permissions.
   // TODO(https://crbug.com/931881): ExtensionPrefs should return
   // properly-bounded permissions.
-  std::unique_ptr<const PermissionSet> GetRuntimePermissionsFromPrefs(
+  std::unique_ptr<PermissionSet> GetRuntimePermissionsFromPrefs(
       const Extension& extension) const;
 
   // Returns the set of permissions that the `extension` wants to have active at
   // this time. This does *not* take into account user-granted or runtime-
   // withheld permissions.
-  std::unique_ptr<const PermissionSet> GetBoundedExtensionDesiredPermissions(
+  std::unique_ptr<PermissionSet> GetBoundedExtensionDesiredPermissions(
       const Extension& extension) const;
 
   // Returns the set of permissions that should be granted to the given
   // `extension` according to the runtime-granted permissions and current
   // preferences, omitting host permissions if the extension supports it and
   // the user has withheld permissions.
-  std::unique_ptr<const PermissionSet> GetEffectivePermissionsToGrant(
+  std::unique_ptr<PermissionSet> GetEffectivePermissionsToGrant(
       const Extension& extension,
       const PermissionSet& desired_permissions) const;
 
   // Notifies `observers_` that the permissions have been updated for an
   // extension.
-  void NotifyExtensionPermissionsUpdated(
-      const UpdatedExtensionPermissionsInfo& info);
+  void NotifyExtensionPermissionsUpdated(const Extension& extension,
+                                         const PermissionSet& permissions,
+                                         UpdateReason reason);
 
   // Adds or removes observers.
   void AddObserver(Observer* observer);

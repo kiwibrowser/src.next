@@ -46,6 +46,8 @@ class PLATFORM_EXPORT CanvasResourceDispatcher
   };
 
   CanvasResourceDispatcher(CanvasResourceDispatcherClient*,
+                           scoped_refptr<base::SingleThreadTaskRunner>
+                               agent_group_scheduler_compositor_task_runner,
                            uint32_t client_id,
                            uint32_t sink_id,
                            int placeholder_canvas_id,
@@ -56,13 +58,15 @@ class PLATFORM_EXPORT CanvasResourceDispatcher
   void SetSuspendAnimation(bool);
   bool NeedsBeginFrame() const { return needs_begin_frame_; }
   bool IsAnimationSuspended() const { return suspend_animation_; }
-  void DispatchFrame(scoped_refptr<CanvasResource>,
+  void DispatchFrame(scoped_refptr<CanvasResource>&&,
                      base::TimeTicks commit_start_time,
                      const SkIRect& damage_rect,
                      bool needs_vertical_flip,
                      bool is_opaque);
-  void ReclaimResource(viz::ResourceId);
-  void DispatchFrameSync(scoped_refptr<CanvasResource>,
+  // virtual for mocking
+  virtual void ReclaimResource(viz::ResourceId,
+                               scoped_refptr<CanvasResource>&&);
+  void DispatchFrameSync(scoped_refptr<CanvasResource>&&,
                          base::TimeTicks commit_start_time,
                          const SkIRect& damage_rect,
                          bool needs_vertical_flip,
@@ -93,13 +97,14 @@ class PLATFORM_EXPORT CanvasResourceDispatcher
   void SetPlaceholderCanvasDispatcher(int placeholder_canvas_id);
 
  private:
+  friend class OffscreenCanvasPlaceholderTest;
   friend class CanvasResourceDispatcherTest;
   struct FrameResource;
 
   using ResourceMap =
       HashMap<viz::ResourceId, std::unique_ptr<FrameResource>, ResourceIdHash>;
 
-  bool PrepareFrame(scoped_refptr<CanvasResource>,
+  bool PrepareFrame(scoped_refptr<CanvasResource>&&,
                     base::TimeTicks commit_start_time,
                     const SkIRect& damage_rect,
                     bool needs_vertical_flip,
@@ -119,13 +124,14 @@ class PLATFORM_EXPORT CanvasResourceDispatcher
   void SetNeedsBeginFrameInternal();
 
   bool VerifyImageSize(const gfx::Size&);
-  void PostImageToPlaceholderIfNotBlocked(scoped_refptr<CanvasResource>,
+  void PostImageToPlaceholderIfNotBlocked(scoped_refptr<CanvasResource>&&,
                                           viz::ResourceId resource_id);
   // virtual for testing
-  virtual void PostImageToPlaceholder(scoped_refptr<CanvasResource>,
+  virtual void PostImageToPlaceholder(scoped_refptr<CanvasResource>&&,
                                       viz::ResourceId resource_id);
 
-  void ReclaimResourceInternal(viz::ResourceId resource_id);
+  void ReclaimResourceInternal(viz::ResourceId resource_id,
+                               scoped_refptr<CanvasResource>&&);
   void ReclaimResourceInternal(const ResourceMap::iterator&);
 
   mojo::Remote<viz::mojom::blink::CompositorFrameSink> sink_;
@@ -150,6 +156,9 @@ class PLATFORM_EXPORT CanvasResourceDispatcher
   CanvasResourceDispatcherClient* client_;
 
   std::unique_ptr<power_scheduler::PowerModeVoter> animation_power_mode_voter_;
+
+  scoped_refptr<base::SingleThreadTaskRunner>
+      agent_group_scheduler_compositor_task_runner_;
 
   base::WeakPtrFactory<CanvasResourceDispatcher> weak_ptr_factory_{this};
 };

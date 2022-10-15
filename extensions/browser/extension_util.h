@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -82,19 +82,6 @@ bool CanWithholdPermissionsFromExtension(
 
 // Returns a unique int id for each context.
 int GetBrowserContextId(content::BrowserContext* context);
-
-// Calculates the allowlist and blocklist for |extension| and forwards the
-// request to |browser_contexts|.
-void SetCorsOriginAccessListForExtension(
-    const std::vector<content::BrowserContext*>& browser_contexts,
-    const Extension& extension,
-    base::OnceClosure closure);
-
-// Resets the allowlist and blocklist for |extension| to empty lists for
-// |browser_context| and for all related regular+incognito contexts.
-void ResetCorsOriginAccessListForExtension(
-    content::BrowserContext* browser_context,
-    const Extension& extension);
 
 // Returns whether the |extension| should be loaded in the given
 // |browser_context|.

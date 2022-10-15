@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,7 +39,8 @@ import org.chromium.chrome.browser.bookmarks.BookmarkBridge;
 import org.chromium.chrome.browser.bookmarks.BookmarkFeatures;
 import org.chromium.chrome.browser.bookmarks.PowerBookmarkUtils;
 import org.chromium.chrome.browser.bookmarks.ReadingListFeatures;
-import org.chromium.chrome.browser.commerce.shopping_list.ShoppingFeatures;
+import org.chromium.chrome.browser.commerce.ShoppingFeatures;
+import org.chromium.chrome.browser.commerce.ShoppingServiceFactory;
 import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.device.DeviceConditions;
 import org.chromium.chrome.browser.download.DownloadUtils;
@@ -77,14 +78,15 @@ import org.chromium.chrome.features.start_surface.StartSurfaceState;
 import org.chromium.components.bookmarks.BookmarkId;
 import org.chromium.components.bookmarks.BookmarkType;
 import org.chromium.components.browser_ui.accessibility.PageZoomCoordinator;
+import org.chromium.components.commerce.core.ShoppingService;
 import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
 import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.components.embedder_support.util.UrlUtilities;
 import org.chromium.components.power_bookmarks.PowerBookmarkMeta;
-import org.chromium.components.power_bookmarks.PowerBookmarkType;
 import org.chromium.components.webapk.lib.client.WebApkValidator;
 import org.chromium.components.webapps.AppBannerManager;
 import org.chromium.components.webapps.WebappsUtils;
+import org.chromium.content_public.browser.ContentFeatureList;
 import org.chromium.net.ConnectionType;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.modelutil.MVCListAdapter;
@@ -210,7 +212,8 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
                     layoutStateProvider -> { mLayoutStateProvider = layoutStateProvider; }));
         }
 
-        if (startSurfaceSupplier != null) {
+        if (!ReturnToChromeUtil.isTabSwitcherOnlyRefactorEnabled(mContext)
+                && startSurfaceSupplier != null) {
             mStartSurfaceSupplier = startSurfaceSupplier;
             startSurfaceSupplier.onAvailable(mCallbackController.makeCancelable((startSurface) -> {
                 mStartSurfaceState = startSurface.getStartSurfaceState();
@@ -218,6 +221,9 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
                     assert ReturnToChromeUtil.isStartSurfaceEnabled(mContext);
                     mStartSurfaceState = newState;
                 };
+                // TODO(https://crbug.com/1315679): Remove |mStartSurfaceSupplier|,
+                // |mStartSurfaceState| and |mStartSurfaceStateObserver| after the refactor is
+                // enabled by default.
                 startSurface.addStateChangeObserver(mStartSurfaceStateObserver);
             }));
         }
@@ -307,6 +313,11 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
      */
     @VisibleForTesting
     boolean isInStartSurfaceHomepage() {
+        if (ReturnToChromeUtil.isTabSwitcherOnlyRefactorEnabled(mContext)) {
+            return mLayoutStateProvider != null
+                    && mLayoutStateProvider.isLayoutVisible(LayoutType.START_SURFACE);
+        }
+
         return mStartSurfaceSupplier != null && mStartSurfaceSupplier.get() != null
                 && mStartSurfaceState == StartSurfaceState.SHOWN_HOMEPAGE;
     }
@@ -1138,7 +1149,13 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
      */
     protected void updatePriceTrackingMenuItemRow(@NonNull MenuItem startPriceTrackingMenuItem,
             @NonNull MenuItem stopPriceTrackingMenuItem, @Nullable Tab currentTab) {
-        PowerBookmarkMeta pageMeta = PowerBookmarkUtils.getPriceTrackingMetadataForTab(currentTab);
+        ShoppingService service =
+                ShoppingServiceFactory.getForProfile(Profile.getLastUsedRegularProfile());
+        ShoppingService.ProductInfo info = null;
+        if (service != null && currentTab != null) {
+            info = service.getAvailableProductInfoForUrl(currentTab.getUrl());
+        }
+
         // If price tracking isn't enabled or the page isn't eligible, then hide both items.
         if (!ShoppingFeatures.isShoppingListEnabled()
                 || !PowerBookmarkUtils.isPriceTrackingEligible(currentTab)
@@ -1150,8 +1167,7 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
 
         PowerBookmarkMeta existingBookmarkMeta = PowerBookmarkUtils.getBookmarkBookmarkMetaForTab(
                 mBookmarkBridgeSupplier.get(), currentTab);
-        if (existingBookmarkMeta != null
-                && existingBookmarkMeta.getType() != PowerBookmarkType.SHOPPING) {
+        if (existingBookmarkMeta != null && !existingBookmarkMeta.hasShoppingSpecifics()) {
             startPriceTrackingMenuItem.setVisible(false);
             stopPriceTrackingMenuItem.setVisible(false);
             return;
@@ -1163,9 +1179,11 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
         startPriceTrackingMenuItem.setEnabled(editEnabled);
         stopPriceTrackingMenuItem.setEnabled(editEnabled);
 
-        boolean priceTrackingEnabled = PowerBookmarkUtils.isPriceTrackingEnabledForClusterId(
-                pageMeta.getShoppingSpecifics().getProductClusterId(),
-                mBookmarkBridgeSupplier.get());
+        boolean priceTrackingEnabled = false;
+        if (info != null) {
+            priceTrackingEnabled = PowerBookmarkUtils.isPriceTrackingEnabledForClusterId(
+                    info.productClusterId, mBookmarkBridgeSupplier.get());
+        }
         startPriceTrackingMenuItem.setVisible(!priceTrackingEnabled);
         stopPriceTrackingMenuItem.setVisible(priceTrackingEnabled);
     }
@@ -1184,10 +1202,15 @@ public class AppMenuPropertiesDelegateImpl implements AppMenuPropertiesDelegate 
         MenuItem requestMenuLabel = menu.findItem(R.id.request_desktop_site_id);
         MenuItem requestMenuCheck = menu.findItem(R.id.request_desktop_site_check_id);
 
-        // Hide request desktop site on all chrome:// pages except for the NTP.
+        // Hide request desktop site on all chrome:// pages except for the NTP. If
+        // REQUEST_DESKTOP_SITE_EXCEPTIONS is enabled, hide the entry for all native pages.
         boolean itemVisible = currentTab != null && canShowRequestDesktopSite
-                && (!isChromeScheme || currentTab.isNativePage())
+                && (!isChromeScheme
+                        || (!ContentFeatureList.isEnabled(
+                                    ContentFeatureList.REQUEST_DESKTOP_SITE_EXCEPTIONS)
+                                && currentTab.isNativePage()))
                 && !shouldShowReaderModePrefs(currentTab) && currentTab.getWebContents() != null;
+
         requestMenuRow.setVisible(itemVisible);
         if (!itemVisible) return;
 

@@ -30,6 +30,7 @@
 
 #include "third_party/blink/renderer/core/dom/element_rare_data.h"
 
+#include <memory>
 #include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
 #include "third_party/blink/renderer/core/css/container_query_data.h"
 #include "third_party/blink/renderer/core/css/cssom/inline_style_property_map.h"
@@ -128,6 +129,17 @@ void ElementRareData::RemovePopupData() {
     super_rare_data_->RemovePopupData();
 }
 
+CSSToggleMap& ElementSuperRareData::EnsureToggleMap(Element* owner_element) {
+  DCHECK(!toggle_map_ || toggle_map_->OwnerElement() == owner_element);
+  if (!toggle_map_)
+    toggle_map_ = MakeGarbageCollected<CSSToggleMap>(owner_element);
+  return *toggle_map_;
+}
+
+CSSToggleMap& ElementRareData::EnsureToggleMap(Element* owner_element) {
+  return EnsureSuperRareData().EnsureToggleMap(owner_element);
+}
+
 ElementInternals& ElementSuperRareData::EnsureElementInternals(
     HTMLElement& target) {
   if (element_internals_)
@@ -162,6 +174,7 @@ void ElementSuperRareData::Trace(blink::Visitor* visitor) const {
   visitor->Trace(custom_element_definition_);
   visitor->Trace(last_intrinsic_size_);
   visitor->Trace(popup_data_);
+  visitor->Trace(toggle_map_);
 }
 
 ASSERT_SIZE(ElementRareData, SameSizeAsElementRareData);

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,7 +40,12 @@
 
 namespace base {
 class CommandLine;
+#if BUILDFLAG(IS_ANDROID)
+namespace android {
+enum class ChildBindingState;
 }
+#endif
+}  // namespace base
 
 namespace perfetto {
 namespace protos {
@@ -264,6 +269,9 @@ class CONTENT_EXPORT ChildProcessLauncher {
   Client* ReplaceClientForTest(Client* client);
 
 #if BUILDFLAG(IS_ANDROID)
+  // Returns the highest binding state for the ChildProcessConnection.
+  base::android::ChildBindingState GetEffectiveChildBindingState();
+
   // Dumps the stack of the child process without crashing it.
   void DumpProcessStack();
 #endif
@@ -290,6 +298,10 @@ class CONTENT_EXPORT ChildProcessLauncher {
   // Controls whether the child process should be terminated on browser
   // shutdown. Default behavior is to terminate the child.
   const bool terminate_child_on_shutdown_;
+
+  // Indicates if the child process should be launched with elevated privileges.
+  // Can only be true on Windows.
+  bool should_launch_elevated_ = false;
 
   scoped_refptr<internal::ChildProcessLauncherHelper> helper_;
 

@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include "base/location.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
+#include "base/ranges/algorithm.h"
 #include "base/run_loop.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
@@ -70,6 +71,8 @@
 #include "chrome/browser/ui/tabs/pinned_tab_codec.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/ui_features.h"
+#include "chrome/browser/web_applications/test/web_app_install_test_utils.h"
+#include "chrome/browser/web_applications/web_app_id.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -138,7 +141,6 @@
 
 #if BUILDFLAG(IS_WIN)
 #include "base/i18n/rtl.h"
-#include "chrome/browser/browser_process.h"
 #endif
 
 using base::ASCIIToUTF16;
@@ -358,7 +360,7 @@ class BrowserTest : public extensions::ExtensionBrowserTest {
         return extension.get();
     }
     NOTREACHED();
-    return NULL;
+    return nullptr;
   }
 };
 
@@ -1167,7 +1169,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, TabClosingWhenRemovingExtension) {
   extensions_tab_helper->SetExtensionApp(extension_app);
 
   model->AddWebContents(std::move(app_contents), 0,
-                        ui::PageTransitionFromInt(0), TabStripModel::ADD_NONE);
+                        ui::PageTransitionFromInt(0), AddTabTypes::ADD_NONE);
   model->SetTabPinned(0, true);
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
 
@@ -1178,8 +1180,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, TabClosingWhenRemovingExtension) {
   extensions::ExtensionService* service =
       extensions::ExtensionSystem::Get(browser()->profile())
           ->extension_service();
-  service->UninstallExtension(GetExtension()->id(),
-                              extensions::UNINSTALL_REASON_FOR_TESTING, NULL);
+  service->UninstallExtension(
+      GetExtension()->id(), extensions::UNINSTALL_REASON_FOR_TESTING, nullptr);
   EXPECT_EQ(1, observer.closing_count());
 
   model->RemoveObserver(&observer);
@@ -1188,45 +1190,48 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, TabClosingWhenRemovingExtension) {
   ASSERT_EQ(1, browser()->tab_strip_model()->count());
 }
 
-// Open with --app-id=<id>, and see that an application tab opens by default.
-IN_PROC_BROWSER_TEST_F(BrowserTest, AppIdSwitch) {
+// Open with --app-id=<id>, and see that an application window opens by default.
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
+// TODO(crbug.com/1358181): Flaky on MacOS.
+#if BUILDFLAG(IS_MAC)
+#define MAYBE_AppIdSwitch DISABLED_AppIdSwitch
+#else
+#define MAYBE_AppIdSwitch AppIdSwitch
+#endif
+IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_AppIdSwitch) {
   base::HistogramTester tester;
   ASSERT_TRUE(embedded_test_server()->Start());
 
-  // There should be one tab to start with.
+  // There should be one browser and one tab to start with.
+  EXPECT_EQ(1u, chrome::GetBrowserCount(browser()->profile()));
   ASSERT_EQ(1, browser()->tab_strip_model()->count());
 
-  ui_test_utils::TabAddedWaiter tab_waiter(browser());
-
   // Load an app.
-  ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("app/")));
-  const Extension* extension_app = GetExtension();
-
+  web_app::AppId app_id = web_app::test::InstallDummyWebApp(
+      browser()->profile(), "testapp", GURL("https://testapp.com"));
   base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
-  command_line.AppendSwitchASCII(switches::kAppId, extension_app->id());
+  command_line.AppendSwitchASCII(switches::kAppId, app_id);
 
   EXPECT_TRUE(StartupBrowserCreator().ProcessCmdLineImpl(
       command_line, base::FilePath(), chrome::startup::IsProcessStartup::kNo,
       {browser()->profile(), StartupProfileMode::kBrowserWindow}, {}));
 
-  tab_waiter.Wait();
-
+  Browser* app_browser = ui_test_utils::WaitForBrowserToOpen();
+  EXPECT_TRUE(app_browser->is_type_app());
   {
     // From launch_mode_recorder.cc:
     constexpr char kLaunchModesHistogram[] = "Launch.Modes";
-    const base::HistogramBase::Sample LM_AS_WEBAPP_IN_TAB = 21;
+    const base::HistogramBase::Sample LM_AS_WEBAPP_IN_WINDOW_BY_APP_ID = 24;
 
-    tester.ExpectUniqueSample(kLaunchModesHistogram, LM_AS_WEBAPP_IN_TAB, 1);
+    tester.ExpectUniqueSample(kLaunchModesHistogram,
+                              LM_AS_WEBAPP_IN_WINDOW_BY_APP_ID, 1);
   }
 
   // Check that the number of browsers and tabs is correct.
-  const unsigned int expected_browsers = 1;
-  int expected_tabs = 1;
-  expected_tabs++;
-
-  EXPECT_EQ(expected_browsers, chrome::GetBrowserCount(browser()->profile()));
-  EXPECT_EQ(expected_tabs, browser()->tab_strip_model()->count());
+  EXPECT_EQ(2u, chrome::GetBrowserCount(browser()->profile()));
+  EXPECT_EQ(1, browser()->tab_strip_model()->count());
 }
+#endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
 // Overscroll is only enabled on Aura platforms currently, and even then only
 // when a specific feature (OverscrollHistoryNavigation) is enabled.
@@ -1278,8 +1283,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, ShouldShowLocationBar) {
   ASSERT_EQ(3u, chrome::GetBrowserCount(browser()->profile()));
 
   // Find the new browsers.
-  Browser* app_browser = NULL;
-  Browser* dev_tools_browser = NULL;
+  Browser* app_browser = nullptr;
+  Browser* dev_tools_browser = nullptr;
   for (auto* b : *BrowserList::GetInstance()) {
     if (b == browser()) {
       continue;
@@ -1396,9 +1401,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, RestorePinnedTabs) {
 
   // Find the new browser.
   BrowserList* browsers = BrowserList::GetInstance();
-  auto new_browser_iter =
-      std::find_if(browsers->begin(), browsers->end(),
-                   [this](Browser* b) { return b != browser(); });
+  auto new_browser_iter = base::ranges::find_if_not(
+      *browsers, [this](Browser* b) { return b == browser(); });
   ASSERT_NE(browsers->end(), new_browser_iter);
 
   Browser* new_browser = *new_browser_iter;
@@ -1466,7 +1470,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, OpenAppWindowLikeNtp) {
   ASSERT_EQ(2u, chrome::GetBrowserCount(browser()->profile()));
 
   // Find the new browser.
-  Browser* new_browser = NULL;
+  Browser* new_browser = nullptr;
   for (auto* b : *BrowserList::GetInstance()) {
     if (b != browser())
       new_browser = b;
@@ -2189,11 +2193,14 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, AboutVersion) {
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(),
                                            GURL(chrome::kChromeUIVersionURL)));
   WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
-  ASSERT_GT(ui_test_utils::FindInPage(tab, u"WebKit", true, true, NULL, NULL),
-            0);
-  ASSERT_GT(ui_test_utils::FindInPage(tab, u"OS", true, true, NULL, NULL), 0);
   ASSERT_GT(
-      ui_test_utils::FindInPage(tab, u"JavaScript", true, true, NULL, NULL), 0);
+      ui_test_utils::FindInPage(tab, u"WebKit", true, true, nullptr, nullptr),
+      0);
+  ASSERT_GT(ui_test_utils::FindInPage(tab, u"OS", true, true, nullptr, nullptr),
+            0);
+  ASSERT_GT(ui_test_utils::FindInPage(tab, u"JavaScript", true, true, nullptr,
+                                      nullptr),
+            0);
 }
 
 static const base::FilePath::CharType* kTestDir =

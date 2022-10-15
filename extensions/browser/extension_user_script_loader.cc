@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,7 @@
 #include "base/one_shot_event.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
+#include "base/types/optional_util.h"
 #include "base/version.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -273,12 +274,12 @@ void LoadScriptsOnFileTaskRunner(
 }
 
 UserScriptList ConvertValueToScripts(const Extension& extension,
-                                     const base::Value& list) {
+                                     const base::Value::List& list) {
   const int valid_schemes = UserScript::ValidUserScriptSchemes(
       scripting::kScriptsCanExecuteEverywhere);
 
   UserScriptList scripts;
-  for (const base::Value& value : list.GetListDeprecated()) {
+  for (const base::Value& value : list) {
     std::u16string error;
     std::unique_ptr<api::content_scripts::ContentScript> content_script =
         api::content_scripts::ContentScript::FromValue(value, &error);
@@ -287,9 +288,8 @@ UserScriptList ConvertValueToScripts(const Extension& extension,
       continue;
 
     std::unique_ptr<UserScript> script = std::make_unique<UserScript>();
-    const auto* dict = static_cast<const base::DictionaryValue*>(&value);
-    const base::Value* id_value = dict->FindKey(scripting::kId);
-    auto* id = id_value->GetIfString();
+    const auto& dict = value.GetDict();
+    auto* id = dict.FindString(scripting::kId);
     if (!id)
       continue;
 
@@ -304,7 +304,8 @@ UserScriptList ConvertValueToScripts(const Extension& extension,
     script->set_execution_world(ConvertExecutionWorld(content_script->world));
 
     if (!script_parsing::ParseMatchPatterns(
-            content_script->matches, content_script->exclude_matches.get(),
+            content_script->matches,
+            base::OptionalToPtr(content_script->exclude_matches),
             /*definition_index=*/0, extension.creation_flags(),
             scripting::kScriptsCanExecuteEverywhere, valid_schemes,
             scripting::kAllUrlsIncludesChromeUrls, script.get(), &error,
@@ -313,7 +314,8 @@ UserScriptList ConvertValueToScripts(const Extension& extension,
     }
 
     if (!script_parsing::ParseFileSources(
-            &extension, content_script->js.get(), content_script->css.get(),
+            &extension, base::OptionalToPtr(content_script->js),
+            base::OptionalToPtr(content_script->css),
             /*definition_index=*/0, script.get(), &error)) {
       continue;
     }
@@ -336,8 +338,7 @@ api::content_scripts::ContentScript CreateContentScriptObject(
     content_script.matches.push_back(pattern.GetAsString());
 
   if (!script.exclude_url_patterns().is_empty()) {
-    content_script.exclude_matches =
-        std::make_unique<std::vector<std::string>>();
+    content_script.exclude_matches.emplace();
     content_script.exclude_matches->reserve(
         script.exclude_url_patterns().size());
     for (const URLPattern& pattern : script.exclude_url_patterns())
@@ -347,23 +348,23 @@ api::content_scripts::ContentScript CreateContentScriptObject(
   // File paths may be normalized in the returned object and can differ slightly
   // compared to what was originally passed into registerContentScripts.
   if (!script.js_scripts().empty()) {
-    content_script.js = std::make_unique<std::vector<std::string>>();
+    content_script.js.emplace();
     content_script.js->reserve(script.js_scripts().size());
     for (const auto& js_script : script.js_scripts())
       content_script.js->push_back(js_script->relative_path().AsUTF8Unsafe());
   }
 
   if (!script.css_scripts().empty()) {
-    content_script.css = std::make_unique<std::vector<std::string>>();
+    content_script.css.emplace();
     content_script.css->reserve(script.css_scripts().size());
     for (const auto& css_script : script.css_scripts())
       content_script.css->push_back(css_script->relative_path().AsUTF8Unsafe());
   }
 
-  content_script.all_frames = std::make_unique<bool>(script.match_all_frames());
+  content_script.all_frames = script.match_all_frames();
   content_script.match_origin_as_fallback =
-      std::make_unique<bool>(script.match_origin_as_fallback() ==
-                             MatchOriginAsFallbackBehavior::kAlways);
+      script.match_origin_as_fallback() ==
+      MatchOriginAsFallbackBehavior::kAlways;
 
   content_script.run_at =
       script_parsing::ConvertRunLocationToManifestType(script.run_location());
@@ -594,17 +595,16 @@ void ExtensionUserScriptLoader::DynamicScriptsStorageHelper::SetDynamicScripts(
   if (!state_store_)
     return;
 
-  auto scripts_value = std::make_unique<base::Value>(base::Value::Type::LIST);
+  base::Value::List scripts_value;
   URLPatternSet persistent_patterns;
   for (const std::unique_ptr<UserScript>& script : scripts) {
     if (!base::Contains(persistent_dynamic_script_ids, script->id()))
       continue;
 
-    base::DictionaryValue value =
-        std::move(*CreateContentScriptObject(*script).ToValue());
-    value.SetStringPath(scripting::kId, script->id());
+    base::Value::Dict value = CreateContentScriptObject(*script).ToValue();
+    value.Set(scripting::kId, script->id());
 
-    scripts_value->Append(std::move(value));
+    scripts_value.Append(std::move(value));
     persistent_patterns.AddPatterns(script->url_patterns());
   }
 
@@ -612,12 +612,12 @@ void ExtensionUserScriptLoader::DynamicScriptsStorageHelper::SetDynamicScripts(
                                             std::move(persistent_patterns));
   state_store_->SetExtensionValue(extension_id_,
                                   scripting::kRegisteredScriptsStorageKey,
-                                  std::move(scripts_value));
+                                  base::Value(std::move(scripts_value)));
 }
 
 void ExtensionUserScriptLoader::DynamicScriptsStorageHelper::
     OnDynamicScriptsReadFromStorage(DynamicScriptsReadCallback callback,
-                                    std::unique_ptr<base::Value> value) {
+                                    absl::optional<base::Value> value) {
   const Extension* extension = ExtensionRegistry::Get(browser_context_)
                                    ->enabled_extensions()
                                    .GetByID(extension_id_);
@@ -625,8 +625,9 @@ void ExtensionUserScriptLoader::DynamicScriptsStorageHelper::
                        "up if the extension was disabled";
 
   UserScriptList scripts;
-  if (value && value->type() == base::Value::Type::LIST) {
-    UserScriptList dynamic_scripts = ConvertValueToScripts(*extension, *value);
+  if (value && value->is_list()) {
+    UserScriptList dynamic_scripts =
+        ConvertValueToScripts(*extension, value->GetList());
     scripts.insert(scripts.end(),
                    std::make_move_iterator(dynamic_scripts.begin()),
                    std::make_move_iterator(dynamic_scripts.end()));

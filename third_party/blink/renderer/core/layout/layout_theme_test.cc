@@ -48,7 +48,7 @@ TEST_F(LayoutThemeTest, ChangeFocusRingColor) {
   EXPECT_NE(nullptr, span);
   EXPECT_NE(nullptr, span->GetLayoutObject());
 
-  Color custom_color = MakeRGB(123, 145, 167);
+  Color custom_color = Color::FromRGB(123, 145, 167);
 
   // Checking unfocused style.
   EXPECT_EQ(EBorderStyle::kNone, OutlineStyle(span));
@@ -132,6 +132,25 @@ TEST_F(LayoutThemeTest, SetSelectionColors) {
   EXPECT_EQ(Color::kWhite,
             LayoutTheme::GetTheme().ActiveSelectionForegroundColor(
                 mojom::blink::ColorScheme::kLight));
+}
+
+TEST_F(LayoutThemeTest, SetSelectionColorsNoInvalidation) {
+  LayoutTheme::GetTheme().SetSelectionColors(Color::kWhite, Color::kWhite,
+                                             Color::kWhite, Color::kWhite);
+
+  SetHtmlInnerHTML("<body>");
+  EXPECT_EQ(GetDocument().documentElement()->GetStyleChangeType(),
+            StyleChangeType::kNoStyleChange);
+  EXPECT_EQ(Color::kWhite,
+            LayoutTheme::GetTheme().ActiveSelectionForegroundColor(
+                mojom::blink::ColorScheme::kLight));
+
+  // Setting selection colors to the same values should not cause style
+  // recalculation.
+  LayoutTheme::GetTheme().SetSelectionColors(Color::kWhite, Color::kWhite,
+                                             Color::kWhite, Color::kWhite);
+  EXPECT_EQ(GetDocument().documentElement()->GetStyleChangeType(),
+            StyleChangeType::kNoStyleChange);
 }
 #endif  // !BUILDFLAG(IS_MAC)
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,7 +36,7 @@ enum AlternateProtocolUsage {
   ALTERNATE_PROTOCOL_USAGE_BROKEN = 4,
   // HTTPS DNS protocol upgrade job was used without racing with a normal
   // connection and an Alternate Protocol job.
-  ALTERNATE_PROTOCOL_USAGE_DNS_ALPN_H3_JOB_WON_WITOUT_RACE = 5,
+  ALTERNATE_PROTOCOL_USAGE_DNS_ALPN_H3_JOB_WON_WITHOUT_RACE = 5,
   // HTTPS DNS protocol upgrade job won a race with a normal connection and
   // an Alternate Protocol job.
   ALTERNATE_PROTOCOL_USAGE_DNS_ALPN_H3_JOB_WON_RACE = 6,

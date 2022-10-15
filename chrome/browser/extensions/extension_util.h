@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,8 @@
 #include <memory>
 #include <string>
 
+#include "base/values.h"
 #include "extensions/common/constants.h"
-
-namespace base {
-class DictionaryValue;
-}
 
 namespace content {
 class BrowserContext;
@@ -82,8 +79,7 @@ bool IsExtensionIdle(const std::string& extension_id,
 
 // Sets the name, id, and icon resource path of the given extension into the
 // returned dictionary.
-std::unique_ptr<base::DictionaryValue> GetExtensionInfo(
-    const Extension* extension);
+base::Value::Dict GetExtensionInfo(const Extension* extension);
 
 // Returns the default extension/app icon (for extensions or apps that don't
 // have one).

@@ -43,6 +43,7 @@
 #include "third_party/blink/public/web/web_local_frame_client.h"
 #include "third_party/blink/public/web/web_plugin.h"
 #include "third_party/blink/public/web/web_text_check_client.h"
+#include "third_party/blink/renderer/core/annotation/annotation_agent_container_impl.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
@@ -134,9 +135,20 @@ uint32_t EnumToBitmask(enumType outcome) {
   return 1 << static_cast<uint8_t>(outcome);
 }
 
-absl::optional<uint64_t> GetRendererId(HitTestResult& result) {
-  if (auto* input = DynamicTo<HTMLInputElement>(result.InnerNode()))
-    return input->UniqueRendererFormControlId();
+absl::optional<uint64_t> GetFormRendererId(HitTestResult& result) {
+  if (auto* text_control_element =
+          DynamicTo<TextControlElement>(result.InnerNode())) {
+    if (text_control_element->Form() != nullptr)
+      return text_control_element->Form()->UniqueRendererFormId();
+  }
+  return absl::nullopt;
+}
+
+absl::optional<uint64_t> GetFieldRendererId(HitTestResult& result) {
+  if (auto* text_control_element =
+          DynamicTo<TextControlElement>(result.InnerNode())) {
+    return text_control_element->UniqueRendererFormControlId();
+  }
   return absl::nullopt;
 }
 
@@ -370,6 +382,8 @@ static mojom::blink::ContextMenuDataInputFieldType ComputeInputFieldType(
     if (input->IsTextField())
       return mojom::blink::ContextMenuDataInputFieldType::kPlainText;
     return mojom::blink::ContextMenuDataInputFieldType::kOther;
+  } else if (IsA<HTMLTextAreaElement>(result.InnerNode())) {
+    return mojom::blink::ContextMenuDataInputFieldType::kPlainText;
   }
   return mojom::blink::ContextMenuDataInputFieldType::kNone;
 }
@@ -649,6 +663,9 @@ bool ContextMenuController::ShowContextMenu(LocalFrame* frame,
                .ComputeVisibleSelectionInDOMTreeDeprecated();
     if (!result.IsContentEditable()) {
       TextFragmentHandler::OpenedContextMenuOverSelection(selected_frame);
+      AnnotationAgentContainerImpl* annotation_container =
+          AnnotationAgentContainerImpl::From(*selected_frame->GetDocument());
+      annotation_container->OpenedContextMenuOverSelection();
     }
   }
 
@@ -759,7 +776,8 @@ bool ContextMenuController::ShowContextMenu(LocalFrame* frame,
   data.input_field_type = ComputeInputFieldType(result);
   data.selection_rect = ComputeSelectionRect(selected_frame);
   data.source_type = source_type;
-  data.field_renderer_id = GetRendererId(result);
+  data.form_renderer_id = GetFormRendererId(result);
+  data.field_renderer_id = GetFieldRendererId(result);
 
   const bool from_touch = source_type == kMenuSourceTouch ||
                           source_type == kMenuSourceLongPress ||

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -77,6 +77,13 @@ class ExtensionActionRunner : public content::WebContentsObserver,
       const Extension* extension,
       SitePermissionsHelper::SiteAccess current_access,
       SitePermissionsHelper::SiteAccess new_access);
+
+  // Notifies the ExtensionActionRunner that the user site setting for `origin`
+  // with `action_ids` has changed.
+  void HandleUserSiteSettingModified(
+      const base::flat_set<ToolbarActionsModel::ActionId>& action_ids,
+      const url::Origin& origin,
+      PermissionsManager::UserSiteSetting new_site_settings);
 
   // Notifies the ExtensionActionRunner that an extension has been granted
   // active tab permissions. This will run any pending injections for that
@@ -185,15 +192,27 @@ class ExtensionActionRunner : public content::WebContentsObserver,
   // action for the given |extension_ids|. |callback| is invoked when the
   // bubble is closed.
   void ShowReloadPageBubble(const std::vector<ExtensionId>& extension_ids,
-                            bool update_permissions,
                             base::OnceClosure callback);
 
-  // Called when the reload page bubble is accepted.
-  void OnReloadPageBubbleAccepted(
+  // Called when the reload page bubble is accepted. Grants one time site access
+  // to `page_url` for each extension in `extension_ids`.
+  void OnReloadPageBubbleAcceptedForGrantTabPermissions(
       const std::vector<ExtensionId>& extension_ids,
+      const GURL& page_url);
+
+  // Called when the reload page bubble is accepted. Updates site access of
+  // `extension_id` from `current_access` to `new_access` for `page_url`.
+  void OnReloadPageBubbleAcceptedForExtensionSiteAccessChange(
+      const ExtensionId& extension_id,
       const GURL& page_url,
       SitePermissionsHelper::SiteAccess current_access,
       SitePermissionsHelper::SiteAccess new_access);
+
+  // Called when the reload page bubble is accepted. Updates user site setting
+  // of `origin` to `site_settings`.
+  void OnReloadPageBubbleAcceptedForUserSiteSettingsChange(
+      const url::Origin& origin,
+      extensions::PermissionsManager::UserSiteSetting site_settings);
 
   // Handles permission changes necessary for page access modification of the
   // |extension|.
@@ -205,6 +224,10 @@ class ExtensionActionRunner : public content::WebContentsObserver,
   // Runs any actions that were blocked for the given |extension|. As a
   // requirement, this will grant activeTab permission to the extension.
   void RunBlockedActions(const Extension* extension);
+
+  // Returns true if the given `extension` needs a page refresh to run a blocked
+  // action.
+  bool PageNeedsRefreshToRun(const Extension* extension);
 
   // content::WebContentsObserver implementation.
   void DidFinishNavigation(

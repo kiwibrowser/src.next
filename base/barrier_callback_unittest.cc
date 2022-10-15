@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@
 namespace {
 
 TEST(BarrierCallbackTest, RunsImmediatelyForZeroCallbacks) {
-  bool done = true;
+  bool done = false;
   auto barrier_callback = base::BarrierCallback<int>(
       0, base::BindLambdaForTesting([&done](std::vector<int> results) {
         EXPECT_THAT(results, testing::IsEmpty());

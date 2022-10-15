@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -130,7 +130,7 @@ PeakGpuMemoryTrackerImpl::PeakGpuMemoryTrackerImpl(
   // |sequence_number_|. This will normally be created from the UI thread, so
   // repost to the IO thread.
   GpuProcessHost::CallOnIO(
-      GPU_PROCESS_KIND_SANDBOXED, /* force_create=*/false,
+      FROM_HERE, GPU_PROCESS_KIND_SANDBOXED, /* force_create=*/false,
       base::BindOnce(
           [](uint32_t sequence_num, GpuProcessHost* host) {
             // There may be no host nor service available. This may occur during
@@ -150,7 +150,7 @@ PeakGpuMemoryTrackerImpl::~PeakGpuMemoryTrackerImpl() {
     return;
 
   GpuProcessHost::CallOnIO(
-      GPU_PROCESS_KIND_SANDBOXED, /* force_create=*/false,
+      FROM_HERE, GPU_PROCESS_KIND_SANDBOXED, /* force_create=*/false,
       base::BindOnce(
           [](uint32_t sequence_num, PeakGpuMemoryTracker::Usage usage,
              base::OnceClosure testing_callback, GpuProcessHost* host) {
@@ -175,7 +175,8 @@ PeakGpuMemoryTrackerImpl::~PeakGpuMemoryTrackerImpl() {
 void PeakGpuMemoryTrackerImpl::Cancel() {
   canceled_ = true;
   // Notify the GpuProcessHost that we are done observing this sequence.
-  GpuProcessHost::CallOnIO(GPU_PROCESS_KIND_SANDBOXED, /* force_create=*/false,
+  GpuProcessHost::CallOnIO(FROM_HERE, GPU_PROCESS_KIND_SANDBOXED,
+                           /* force_create=*/false,
                            base::BindOnce(
                                [](uint32_t sequence_num, GpuProcessHost* host) {
                                  if (!host)

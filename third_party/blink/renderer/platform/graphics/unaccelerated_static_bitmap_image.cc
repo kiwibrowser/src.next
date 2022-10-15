@@ -23,6 +23,8 @@ namespace blink {
 scoped_refptr<UnacceleratedStaticBitmapImage>
 UnacceleratedStaticBitmapImage::Create(sk_sp<SkImage> image,
                                        ImageOrientation orientation) {
+  if (!image)
+    return nullptr;
   DCHECK(!image->isTextureBacked());
   return base::AdoptRef(
       new UnacceleratedStaticBitmapImage(std::move(image), orientation));
@@ -98,7 +100,8 @@ void UnacceleratedStaticBitmapImage::Transfer() {
   DETACH_FROM_THREAD(thread_checker_);
 
   original_skia_image_ = paint_image_.GetSwSkImage();
-  original_skia_image_task_runner_ = Thread::Current()->GetTaskRunner();
+  original_skia_image_task_runner_ =
+      Thread::Current()->GetDeprecatedTaskRunner();
 }
 
 scoped_refptr<StaticBitmapImage>

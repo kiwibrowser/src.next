@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #ifndef NET_URL_REQUEST_URL_REQUEST_FILTER_H_
@@ -59,8 +59,7 @@ class NET_EXPORT URLRequestFilter : public URLRequestInterceptor {
 
   void RemoveUrlHandler(const GURL& url);
 
-  // Clear all the existing URL handlers and unregister with the
-  // ProtocolFactory.  Resets the hit count.
+  // Clear all the existing URL and hostname handlers.  Resets the hit count.
   void ClearHandlers();
 
   // Returns the number of times a handler was used to service a request.

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -84,14 +84,14 @@ namespace extensions {
 scoped_refptr<CrxInstaller> CrxInstaller::CreateSilent(
     ExtensionService* frontend) {
   return new CrxInstaller(frontend->AsWeakPtr(),
-                          std::unique_ptr<ExtensionInstallPrompt>(), NULL);
+                          std::unique_ptr<ExtensionInstallPrompt>(), nullptr);
 }
 
 // static
 scoped_refptr<CrxInstaller> CrxInstaller::Create(
     ExtensionService* frontend,
     std::unique_ptr<ExtensionInstallPrompt> client) {
-  return new CrxInstaller(frontend->AsWeakPtr(), std::move(client), NULL);
+  return new CrxInstaller(frontend->AsWeakPtr(), std::move(client), nullptr);
 }
 
 // static
@@ -148,7 +148,8 @@ CrxInstaller::CrxInstaller(base::WeakPtr<ExtensionService> service_weak,
     expected_manifest_check_level_ = approval->manifest_check_level;
     if (expected_manifest_check_level_ !=
         WebstoreInstaller::MANIFEST_CHECK_LEVEL_NONE) {
-      expected_manifest_ = approval->manifest->value()->CreateDeepCopy();
+      expected_manifest_ = base::DictionaryValue::From(
+          base::Value::ToUniquePtrValue(approval->manifest->value()->Clone()));
     }
     expected_id_ = approval->extension_id;
   }
@@ -1120,7 +1121,7 @@ void CrxInstaller::NotifyCrxInstallComplete(
   // on the extension.
   content::NotificationService::current()->Notify(
       NOTIFICATION_CRX_INSTALLER_DONE, content::Source<CrxInstaller>(this),
-      content::Details<const Extension>(success ? extension() : NULL));
+      content::Details<const Extension>(success ? extension() : nullptr));
 
   InstallTrackerFactory::GetForBrowserContext(profile())
       ->OnFinishCrxInstall(success ? extension()->id() : expected_id_, success);

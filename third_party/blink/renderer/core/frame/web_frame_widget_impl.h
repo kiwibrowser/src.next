@@ -349,12 +349,14 @@ class CORE_EXPORT WebFrameWidgetImpl
   void ResetZoomLevelForTesting() override;
   void SetDeviceScaleFactorForTesting(float factor) override;
   FrameWidgetTestHelper* GetFrameWidgetTestHelperForTesting() override;
+  void PrepareForFinalLifecyclUpdateForTesting() override;
 
   // Called when a drag-n-drop operation should begin.
   virtual void StartDragging(const WebDragData&,
                              DragOperationsMask,
                              const SkBitmap& drag_image,
-                             const gfx::Point& drag_image_offset);
+                             const gfx::Vector2d& cursor_offset,
+                             const gfx::Rect& drag_obj_rect);
 
   bool DoingDragAndDrop() { return doing_drag_and_drop_; }
   static void SetIgnoreInputEvents(bool value) { ignore_input_events_ = value; }
@@ -409,10 +411,6 @@ class CORE_EXPORT WebFrameWidgetImpl
   void BeginMainFrame(base::TimeTicks last_frame_time) override;
   void UpdateLifecycle(WebLifecycleUpdate requested_update,
                        DocumentUpdateReason reason) override;
-  void OnDeferCommitsChanged(
-      bool defer_status,
-      cc::PaintHoldingReason reason,
-      absl::optional<cc::PaintHoldingCommitTrigger> trigger) override;
 
   // mojom::blink::FrameWidget overrides:
   void ShowContextMenu(ui::mojom::MenuSourceType source_type,
@@ -495,6 +493,9 @@ class CORE_EXPORT WebFrameWidgetImpl
   // Immediately stop deferring commits.
   void StopDeferringCommits(cc::PaintHoldingCommitTrigger);
 
+  // Pause all rendering (main and compositor thread) in the compositor.
+  [[nodiscard]] std::unique_ptr<cc::ScopedPauseRendering> PauseRendering();
+
   // Prevents any updates to the input for the layer tree, and the layer tree
   // itself, and the layer tree from becoming visible.
   std::unique_ptr<cc::ScopedDeferMainFrameUpdate> DeferMainFrameUpdate();
@@ -544,6 +545,7 @@ class CORE_EXPORT WebFrameWidgetImpl
 
   void ShowVirtualKeyboardOnElementFocus();
   void ProcessTouchAction(WebTouchAction touch_action);
+  void SetPanAction(mojom::blink::PanAction pan_action);
 
   // Called to update whether low latency input mode is enabled or not.
   void SetNeedsLowLatencyInput(bool);
@@ -1004,6 +1006,7 @@ class CORE_EXPORT WebFrameWidgetImpl
 
   // Metrics for gathering time for commit of compositor frame.
   absl::optional<base::TimeTicks> commit_compositor_frame_start_time_;
+  absl::optional<base::TimeTicks> next_commit_compositor_frame_start_time_;
 
   // Present when emulation is enabled, only on a main frame's WebFrameWidget.
   // Used to override values given from the browser such as ScreenInfo,

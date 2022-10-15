@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -234,8 +234,9 @@ TEST_F(ProfilePickerParamsTest, ForLacrosPrimaryProfileFirstRun_Notify) {
               params.profile_path().BaseName());
     EXPECT_CALL(callback, Run(ProfilePicker::FirstRunExitStatus::kCompleted,
                               ::testing::_));
-    params.NotifyFirstRunExited(ProfilePicker::FirstRunExitStatus::kCompleted,
-                                base::DoNothing());
+    params.NotifyFirstRunExited(
+        ProfilePicker::FirstRunExitStatus::kCompleted,
+        ProfilePicker::FirstRunExitSource::kFlowFinished, base::DoNothing());
   }
 }
 #endif

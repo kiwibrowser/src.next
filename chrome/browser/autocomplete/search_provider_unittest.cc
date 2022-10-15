@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,7 +44,6 @@
 #include "components/omnibox/browser/suggestion_answer.h"
 #include "components/omnibox/common/omnibox_features.h"
 #include "components/prefs/pref_service.h"
-#include "components/search_engines/omnibox_focus_type.h"
 #include "components/search_engines/search_engine_type.h"
 #include "components/search_engines/search_engines_switches.h"
 #include "components/search_engines/search_terms_data.h"
@@ -59,6 +58,7 @@
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/metrics_proto/omnibox_event.pb.h"
+#include "third_party/metrics_proto/omnibox_focus_type.pb.h"
 #include "ui/base/device_form_factor.h"
 
 using base::ASCIIToUTF16;
@@ -2531,7 +2531,7 @@ TEST_P(SearchProviderTest, DefaultProviderSuggestRelevanceScoringUrlInput) {
 TEST_P(SearchProviderTest, FieldTrialTriggeredParsing) {
   base::FieldTrial* trial = base::FieldTrialList::CreateFieldTrial(
       OmniboxFieldTrial::kBundledExperimentFieldTrialName, "DefaultGroup");
-  trial->group();
+  trial->Activate();
 
   QueryForInputAndWaitForFetcherResponses(
       u"foo", false,
@@ -2564,7 +2564,7 @@ TEST_P(SearchProviderTest, FieldTrialTriggeredParsing) {
 TEST_P(SearchProviderTest, SpecificTypeIdentifierParsing) {
   struct Match {
     std::string contents;
-    base::flat_set<int> subtypes;
+    base::flat_set<omnibox::SuggestSubtype> subtypes;
   };
 
   struct {
@@ -2587,7 +2587,14 @@ TEST_P(SearchProviderTest, SpecificTypeIdentifierParsing) {
          "google:suggesttype":     ["QUERY", "NAVIGATION"],
          "google:suggestsubtypes": [[1,7,12], [3,22,49]]
        }])",
-       {{"cd", {1, 7, 12}}, {"d.com", {3, 22, 49}}}},
+       {{"cd",
+         {static_cast<omnibox::SuggestSubtype>(1),
+          static_cast<omnibox::SuggestSubtype>(7),
+          static_cast<omnibox::SuggestSubtype>(12)}},
+        {"d.com",
+         {static_cast<omnibox::SuggestSubtype>(3),
+          static_cast<omnibox::SuggestSubtype>(22),
+          static_cast<omnibox::SuggestSubtype>(49)}}}},
 
       // Check that legacy subtypeid is populated alongside the suggestsubtypes.
       {"c",
@@ -2596,7 +2603,14 @@ TEST_P(SearchProviderTest, SpecificTypeIdentifierParsing) {
          "google:suggestsubtypes": [[1,7], [3,49]],
          "google:subtypeid":       [9, 11]
        }])",
-       {{"cd", {1, 7, 9}}, {"d.com", {3, 11, 49}}}},
+       {{"cd",
+         {static_cast<omnibox::SuggestSubtype>(1),
+          static_cast<omnibox::SuggestSubtype>(7),
+          static_cast<omnibox::SuggestSubtype>(9)}},
+        {"d.com",
+         {static_cast<omnibox::SuggestSubtype>(3),
+          static_cast<omnibox::SuggestSubtype>(11),
+          static_cast<omnibox::SuggestSubtype>(49)}}}},
 
       // Check that the specific type is set to zero when the number of
       // suggestions is smaller than the number of id's provided.
@@ -2606,7 +2620,8 @@ TEST_P(SearchProviderTest, SpecificTypeIdentifierParsing) {
          "google:suggestsubtypes": [[17], [26]],
          "google:subtypeid":       [1, 2, 3]
        }])",
-       {{"foo bar", {17}}, {"foo baz", {26}}}},
+       {{"foo bar", {static_cast<omnibox::SuggestSubtype>(17)}},
+        {"foo baz", {static_cast<omnibox::SuggestSubtype>(26)}}}},
 
       // Check that the specific type is set to zero when the number of
       // suggestions is larger than the number of id's provided.
@@ -2616,7 +2631,8 @@ TEST_P(SearchProviderTest, SpecificTypeIdentifierParsing) {
          "google:suggestsubtypes": [[19], [31]],
          "google:subtypeid":       [1]
        }])",
-       {{"bar foo", {19}}, {"bar foz", {31}}}},
+       {{"bar foo", {static_cast<omnibox::SuggestSubtype>(19)}},
+        {"bar foz", {static_cast<omnibox::SuggestSubtype>(31)}}}},
 
       // Check that in the event of receiving both suggestsubtypes and subtypeid
       // we try to preserve both, deduplicating repetitive numbers.
@@ -2626,7 +2642,10 @@ TEST_P(SearchProviderTest, SpecificTypeIdentifierParsing) {
          "google:suggestsubtypes": [[19], [31]],
          "google:subtypeid":       [1, 31]
        }])",
-       {{"bar foo", {1, 19}}, {"bar foz", {31}}}},
+       {{"bar foo",
+         {static_cast<omnibox::SuggestSubtype>(1),
+          static_cast<omnibox::SuggestSubtype>(19)}},
+        {"bar foz", {static_cast<omnibox::SuggestSubtype>(31)}}}},
 
       // Check that in the event of receiving partially invalid subtypes we
       // extract as much information as reasonably possible.
@@ -2636,7 +2655,12 @@ TEST_P(SearchProviderTest, SpecificTypeIdentifierParsing) {
          "google:suggestsubtypes": [22, 0, [99, 10.3, "abc", 1]],
          "google:subtypeid":       [19, 11, 27]
        }])",
-       {{"barbados", {19}}, {"barn", {11}}, {"barry", {27, 99, 1}}}},
+       {{"barbados", {static_cast<omnibox::SuggestSubtype>(19)}},
+        {"barn", {static_cast<omnibox::SuggestSubtype>(11)}},
+        {"barry",
+         {static_cast<omnibox::SuggestSubtype>(27),
+          static_cast<omnibox::SuggestSubtype>(99),
+          static_cast<omnibox::SuggestSubtype>(1)}}}},
 
       // Check that ids stick to their suggestions when these are reordered
       // based on suggestion relevance values.
@@ -2647,7 +2671,12 @@ TEST_P(SearchProviderTest, SpecificTypeIdentifierParsing) {
          "google:suggestsubtypes":  [[99], [100]],
          "google:subtypeid":        [2, 4]
        }])",
-       {{"ef", {2, 99}}, {"e.com", {4, 100}}}}};
+       {{"ef",
+         {static_cast<omnibox::SuggestSubtype>(2),
+          static_cast<omnibox::SuggestSubtype>(99)}},
+        {"e.com",
+         {static_cast<omnibox::SuggestSubtype>(4),
+          static_cast<omnibox::SuggestSubtype>(100)}}}}};
 
   for (const auto& test : cases) {
     QueryForInputAndWaitForFetcherResponses(ASCIIToUTF16(test.input_text),
@@ -3416,68 +3445,68 @@ TEST_P(SearchProviderTest, CanSendRequestWithURL) {
   TemplateURL google_template_url(template_url_data);
 
   // All conditions should be met.
-  EXPECT_TRUE(SearchProvider::CanSendRequestWithURL(
+  EXPECT_TRUE(SearchProvider::CanSendCurrentPageURLInRequest(
       GURL("http://www.google.com/search"),
       GURL("https://www.google.com/complete/search"), &google_template_url,
       metrics::OmniboxEventProto::OTHER, SearchTermsData(), client_.get(),
       true));
 
   // Invalid page URL.
-  EXPECT_FALSE(SearchProvider::CanSendRequestWithURL(
+  EXPECT_FALSE(SearchProvider::CanSendCurrentPageURLInRequest(
       GURL("badpageurl"), GURL("https://www.google.com/complete/search"),
       &google_template_url, metrics::OmniboxEventProto::OTHER,
       SearchTermsData(), client_.get(), true));
 
   // Invalid page classification.
-  EXPECT_FALSE(SearchProvider::CanSendRequestWithURL(
+  EXPECT_FALSE(SearchProvider::CanSendCurrentPageURLInRequest(
       GURL("http://www.google.com/search"),
       GURL("https://www.google.com/complete/search"), &google_template_url,
       metrics::OmniboxEventProto::INSTANT_NTP_WITH_FAKEBOX_AS_STARTING_FOCUS,
       SearchTermsData(), client_.get(), true));
 
   // Invalid page classification.
-  EXPECT_FALSE(SearchProvider::CanSendRequestWithURL(
+  EXPECT_FALSE(SearchProvider::CanSendCurrentPageURLInRequest(
       GURL("http://www.google.com/search"),
       GURL("https://www.google.com/complete/search"), &google_template_url,
       metrics::OmniboxEventProto::INSTANT_NTP_WITH_OMNIBOX_AS_STARTING_FOCUS,
       SearchTermsData(), client_.get(), true));
 
   // Invalid page classification.
-  EXPECT_FALSE(SearchProvider::CanSendRequestWithURL(
+  EXPECT_FALSE(SearchProvider::CanSendCurrentPageURLInRequest(
       GURL("http://www.google.com/search"),
       GURL("https://www.google.com/complete/search"), &google_template_url,
       metrics::OmniboxEventProto::NTP, SearchTermsData(), client_.get(), true));
 
   // Invalid page classification.
-  EXPECT_FALSE(SearchProvider::CanSendRequestWithURL(
+  EXPECT_FALSE(SearchProvider::CanSendCurrentPageURLInRequest(
       GURL("http://www.google.com/search"),
       GURL("https://www.google.com/complete/search"), &google_template_url,
       metrics::OmniboxEventProto::OBSOLETE_INSTANT_NTP, SearchTermsData(),
       client_.get(), true));
 
   // HTTPS page URL on same domain as provider.
-  EXPECT_TRUE(SearchProvider::CanSendRequestWithURL(
+  EXPECT_TRUE(SearchProvider::CanSendCurrentPageURLInRequest(
       GURL("https://www.google.com/search"),
       GURL("https://www.google.com/complete/search"), &google_template_url,
       metrics::OmniboxEventProto::OTHER, SearchTermsData(), client_.get(),
       true));
 
   // Non-HTTP[S] page URL on same domain as provider.
-  EXPECT_FALSE(SearchProvider::CanSendRequestWithURL(
+  EXPECT_FALSE(SearchProvider::CanSendCurrentPageURLInRequest(
       GURL("ftp://www.google.com/search"),
       GURL("https://www.google.com/complete/search"), &google_template_url,
       metrics::OmniboxEventProto::OTHER, SearchTermsData(), client_.get(),
       true));
 
   // Non-HTTP page URL on different domain.
-  EXPECT_TRUE(SearchProvider::CanSendRequestWithURL(
+  EXPECT_TRUE(SearchProvider::CanSendCurrentPageURLInRequest(
       GURL("https://www.notgoogle.com/search"),
       GURL("https://www.google.com/complete/search"), &google_template_url,
       metrics::OmniboxEventProto::OTHER, SearchTermsData(), client_.get(),
       true));
 
   // Non-HTTPS provider.
-  EXPECT_FALSE(SearchProvider::CanSendRequestWithURL(
+  EXPECT_FALSE(SearchProvider::CanSendCurrentPageURLInRequest(
       GURL("http://www.google.com/search"),
       GURL("http://www.google.com/complete/search"), &google_template_url,
       metrics::OmniboxEventProto::OTHER, SearchTermsData(), client_.get(),
@@ -3485,7 +3514,7 @@ TEST_P(SearchProviderTest, CanSendRequestWithURL) {
 
   // Suggest disabled.
   profile_->GetPrefs()->SetBoolean(prefs::kSearchSuggestEnabled, false);
-  EXPECT_FALSE(SearchProvider::CanSendRequestWithURL(
+  EXPECT_FALSE(SearchProvider::CanSendCurrentPageURLInRequest(
       GURL("http://www.google.com/search"),
       GURL("https://www.google.com/complete/search"), &google_template_url,
       metrics::OmniboxEventProto::OTHER, SearchTermsData(), client_.get(),
@@ -3495,7 +3524,7 @@ TEST_P(SearchProviderTest, CanSendRequestWithURL) {
   // Incognito.
   ChromeAutocompleteProviderClient client_incognito(
       profile_->GetPrimaryOTRProfile(/*create_if_needed=*/true));
-  EXPECT_FALSE(SearchProvider::CanSendRequestWithURL(
+  EXPECT_FALSE(SearchProvider::CanSendCurrentPageURLInRequest(
       GURL("http://www.google.com/search"),
       GURL("https://www.google.com/complete/search"), &google_template_url,
       metrics::OmniboxEventProto::OTHER, SearchTermsData(), &client_incognito,
@@ -3506,25 +3535,25 @@ TEST_P(SearchProviderTest, CanSendRequestWithURL) {
   // empty.
   client_->set_is_personalized_url_data_collection_active(false);
   // Different origin, with search terms.
-  EXPECT_FALSE(SearchProvider::CanSendRequestWithURL(
+  EXPECT_FALSE(SearchProvider::CanSendCurrentPageURLInRequest(
       GURL("https://www.different-origin.com"),
       GURL("https://www.google.com/complete/search"), &google_template_url,
       metrics::OmniboxEventProto::OTHER, SearchTermsData(), client_.get(),
       true));
   // Same origin, with search terms.
-  EXPECT_FALSE(SearchProvider::CanSendRequestWithURL(
+  EXPECT_FALSE(SearchProvider::CanSendCurrentPageURLInRequest(
       GURL("https://www.google.com/search"),
       GURL("https://www.google.com/complete/search"), &google_template_url,
       metrics::OmniboxEventProto::OTHER, SearchTermsData(), client_.get(),
       true));
   // Different origin, empty search terms.
-  EXPECT_FALSE(SearchProvider::CanSendRequestWithURL(
+  EXPECT_FALSE(SearchProvider::CanSendCurrentPageURLInRequest(
       GURL("https://www.different-origin.com"),
       GURL("https://www.google.com/complete/search"), &google_template_url,
       metrics::OmniboxEventProto::OTHER, SearchTermsData(), client_.get(),
       false));
   // Same origin, empty search terms.
-  EXPECT_TRUE(SearchProvider::CanSendRequestWithURL(
+  EXPECT_TRUE(SearchProvider::CanSendCurrentPageURLInRequest(
       GURL("https://www.google.com/search"),
       GURL("https://www.google.com/complete/search"), &google_template_url,
       metrics::OmniboxEventProto::OTHER, SearchTermsData(), client_.get(),
@@ -3532,7 +3561,7 @@ TEST_P(SearchProviderTest, CanSendRequestWithURL) {
   client_->set_is_personalized_url_data_collection_active(true);
 
   // Check that there were no side effects from previous tests.
-  EXPECT_TRUE(SearchProvider::CanSendRequestWithURL(
+  EXPECT_TRUE(SearchProvider::CanSendCurrentPageURLInRequest(
       GURL("http://www.google.com/search"),
       GURL("https://www.google.com/complete/search"), &google_template_url,
       metrics::OmniboxEventProto::OTHER, SearchTermsData(), client_.get(),
@@ -3737,7 +3766,7 @@ TEST_P(SearchProviderTest, DoesNotProvideOnFocus) {
   AutocompleteInput input(u"f", metrics::OmniboxEventProto::OTHER,
                           ChromeAutocompleteSchemeClassifier(profile_.get()));
   input.set_prefer_keyword(true);
-  input.set_focus_type(OmniboxFocusType::ON_FOCUS);
+  input.set_focus_type(metrics::OmniboxFocusType::INTERACTION_FOCUS);
   provider_->Start(input, false);
   EXPECT_TRUE(provider_->matches().empty());
 }
@@ -3754,7 +3783,7 @@ TEST_P(SearchProviderTest, SendsWarmUpRequestOnFocus) {
   AutocompleteInput input(u"f", metrics::OmniboxEventProto::OTHER,
                           ChromeAutocompleteSchemeClassifier(profile_.get()));
   input.set_prefer_keyword(true);
-  input.set_focus_type(OmniboxFocusType::ON_FOCUS);
+  input.set_focus_type(metrics::OmniboxFocusType::INTERACTION_FOCUS);
 
   provider_->Start(input, false);
   // RunUntilIdle so that SearchProvider create the URLFetcher.

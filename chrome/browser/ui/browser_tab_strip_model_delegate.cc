@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,6 +28,7 @@
 #include "chrome/browser/ui/tabs/tab_menu_model_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/unload_controller.h"
+#include "chrome/browser/ui/web_applications/app_browser_controller.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/reading_list/core/reading_list_model.h"
 #include "components/security_interstitials/content/security_interstitial_tab_helper.h"
@@ -82,7 +83,7 @@ Browser* BrowserTabStripModelDelegate::CreateNewStripWithContents(
     // Enforce that there is an active tab in the strip at all times by forcing
     // the first web contents to be marked as active.
     if (i == 0)
-      item.add_types |= TabStripModel::ADD_ACTIVE;
+      item.add_types |= AddTabTypes::ADD_ACTIVE;
 
     content::WebContents* raw_web_contents = item.web_contents.get();
     new_model->InsertWebContentsAt(
@@ -242,6 +243,10 @@ void BrowserTabStripModelDelegate::AddToReadLater(
   chrome::MoveTabToReadLater(browser_, web_contents);
 }
 
+bool BrowserTabStripModelDelegate::SupportsReadLater() {
+  return !browser_->profile()->IsGuestSession() && !IsForWebApp();
+}
+
 void BrowserTabStripModelDelegate::CacheWebContents(
     const std::vector<std::unique_ptr<TabStripModel::DetachedWebContents>>&
         web_contents) {
@@ -279,6 +284,14 @@ void BrowserTabStripModelDelegate::FollowSite(
 void BrowserTabStripModelDelegate::UnfollowSite(
     content::WebContents* web_contents) {
   chrome::UnfollowSite(web_contents);
+}
+
+bool BrowserTabStripModelDelegate::IsForWebApp() {
+  return web_app::AppBrowserController::IsWebApp(browser_);
+}
+
+void BrowserTabStripModelDelegate::CopyURL(content::WebContents* web_contents) {
+  chrome::CopyURL(web_contents);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

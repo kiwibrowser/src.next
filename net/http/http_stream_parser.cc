@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -1127,6 +1127,12 @@ bool HttpStreamParser::CanReuseConnection() const {
     return false;
 
   return stream_socket_->IsConnected();
+}
+
+void HttpStreamParser::OnConnectionClose() {
+  // This is to ensure `stream_socket_` doesn't get dangling on connection
+  // close.
+  stream_socket_ = nullptr;
 }
 
 void HttpStreamParser::GetSSLInfo(SSLInfo* ssl_info) {

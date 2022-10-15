@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,7 @@ import android.app.Activity;
 
 import androidx.annotation.Nullable;
 
-import org.chromium.chrome.browser.AppHooks;
 import org.chromium.chrome.browser.app.ChromeActivity;
-import org.chromium.components.external_intents.AuthenticatorNavigationInterceptor;
 import org.chromium.components.external_intents.ExternalNavigationHandler;
 import org.chromium.components.external_intents.ExternalNavigationHandler.OverrideUrlLoadingResult;
 import org.chromium.components.external_intents.InterceptNavigationDelegateClient;
@@ -76,11 +74,6 @@ public class InterceptNavigationDelegateClientImpl implements InterceptNavigatio
     @Override
     public RedirectHandler getOrCreateRedirectHandler() {
         return RedirectHandlerTabHelper.getOrCreateHandlerFor(mTab);
-    }
-
-    @Override
-    public AuthenticatorNavigationInterceptor createAuthenticatorNavigationInterceptor() {
-        return AppHooks.get().createAuthenticatorNavigationInterceptor(mTab);
     }
 
     @Override

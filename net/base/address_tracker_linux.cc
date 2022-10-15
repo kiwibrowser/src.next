@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -395,7 +395,7 @@ void AddressTrackerLinux::HandleMessage(const char* buffer,
           // prefix which can cause the linux kernel to frequently output two
           // back-to-back messages, one without the deprecated flag and one with
           // the deprecated flag but both with preferred lifetimes of 0. Avoid
-          // interpretting this as an actual change by canonicalizing the two
+          // interpreting this as an actual change by canonicalizing the two
           // messages by setting the deprecated flag based on the preferred
           // lifetime also.  http://crbug.com/268042
           if (really_deprecated)

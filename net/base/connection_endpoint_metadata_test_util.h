@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,7 +20,8 @@ ExpectConnectionEndpointMetadata(
     testing::Matcher<std::vector<std::string>>
         supported_protocol_alpns_matcher = testing::IsEmpty(),
     testing::Matcher<ConnectionEndpointMetadata::EchConfigList>
-        ech_config_list_matcher = testing::IsEmpty());
+        ech_config_list_matcher = testing::IsEmpty(),
+    testing::Matcher<std::string> target_name_matcher = testing::IsEmpty());
 
 std::ostream& operator<<(
     std::ostream& os,

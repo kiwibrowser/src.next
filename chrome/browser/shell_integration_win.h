@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -84,12 +84,11 @@ std::wstring GetAppUserModelIdForBrowser(const base::FilePath& profile_path);
 
 // Returns the taskbar pin state of Chrome via the IsPinnedToTaskbarCallback.
 // The first bool is true if the state could be calculated, and the second bool
-// is true if Chrome is pinned to the taskbar (without verb check).  The third
-// bool is true if Chrome is pinned to the taskbar (with verb check)
+// is true if Chrome is pinned to the taskbar.
 // The ConnectionErrorCallback is called instead if something wrong happened
 // with the connection to the remote process.
 using ConnectionErrorCallback = base::OnceClosure;
-using IsPinnedToTaskbarCallback = base::OnceCallback<void(bool, bool, bool)>;
+using IsPinnedToTaskbarCallback = base::OnceCallback<void(bool, bool)>;
 void GetIsPinnedToTaskbarState(ConnectionErrorCallback on_error_callback,
                                IsPinnedToTaskbarCallback result_callback);
 

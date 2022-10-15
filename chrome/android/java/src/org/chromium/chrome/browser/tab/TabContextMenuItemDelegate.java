@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -289,13 +289,13 @@ public class TabContextMenuItemDelegate implements ContextMenuItemDelegate {
         chromeIntent.setPackage(applicationContext.getPackageName());
         chromeIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
 
-        if (PackageManagerUtils.queryIntentActivities(chromeIntent, 0).isEmpty()) {
+        if (!PackageManagerUtils.canResolveActivity(chromeIntent)) {
             // If Chrome can't handle intent fallback to using any other VIEW handlers.
             chromeIntent.setPackage(null);
 
             // Query again without the package name set and if there are still no handlers for the
             // URI fail gracefully, and do nothing, since this will still cause a crash if launched.
-            if (PackageManagerUtils.queryIntentActivities(chromeIntent, 0).isEmpty()) return;
+            if (!PackageManagerUtils.canResolveActivity(chromeIntent)) return;
         }
 
         boolean activityStarted = false;

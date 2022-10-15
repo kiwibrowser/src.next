@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -219,9 +219,10 @@ class ChildProcessSecurityPolicyTest : public testing::Test {
                         const url::Origin& origin) {
     ChildProcessSecurityPolicyImpl* p =
         ChildProcessSecurityPolicyImpl::GetInstance();
-    return p->IsIsolatedOrigin(IsolationContext(browsing_instance_id, context,
-                                                /*is_guest=*/false),
-                               origin, false /* origin_requests_isolation */);
+    return p->IsIsolatedOrigin(
+        IsolationContext(browsing_instance_id, context,
+                         /*is_guest=*/false, /*is_fenced=*/false),
+        origin, false /* origin_requests_isolation */);
   }
 
   // Returns the number of isolated origin entries for a particular origin.
@@ -2776,10 +2777,8 @@ TEST_F(ChildProcessSecurityPolicyTest,
       baz_instance->GetIsolationContext().browsing_instance_id();
 
   // Isolate foo.com for `foo_instance`'s BrowsingInstance only.
-  p->AddIsolatedOriginForBrowsingInstance(
-      foo_instance->GetIsolationContext(), foo,
-      false /* is_origin_agent_cluster */,
-      false /* requires_origin_keyed_process */, IsolatedOriginSource::TEST);
+  p->AddCoopIsolatedOriginForBrowsingInstance(
+      foo_instance->GetIsolationContext(), foo, IsolatedOriginSource::TEST);
   LOCKED_EXPECT_THAT(
       p->isolated_origins_lock_, p->isolated_origins_,
       testing::UnorderedElementsAre(GetIsolatedOriginEntry(
@@ -2810,10 +2809,8 @@ TEST_F(ChildProcessSecurityPolicyTest,
 
   // Isolating foo.com again in the same BrowsingInstance should have no
   // effect.
-  p->AddIsolatedOriginForBrowsingInstance(
-      foo_instance->GetIsolationContext(), foo,
-      false /* is_origin_agent_cluster */,
-      false /* requires_origin_keyed_process */, IsolatedOriginSource::TEST);
+  p->AddCoopIsolatedOriginForBrowsingInstance(
+      foo_instance->GetIsolationContext(), foo, IsolatedOriginSource::TEST);
   EXPECT_EQ(1, GetIsolatedOriginEntryCount(foo));
   LOCKED_EXPECT_THAT(
       p->isolated_origins_lock_, p->isolated_origins_,
@@ -2822,10 +2819,8 @@ TEST_F(ChildProcessSecurityPolicyTest,
           foo_browsing_instance_id, foo)));
 
   // Isolate baz.com in `baz_browsing_instance`'s BrowsingInstance.
-  p->AddIsolatedOriginForBrowsingInstance(
-      baz_instance->GetIsolationContext(), baz,
-      false /* is_origin_agent_cluster */,
-      false /* requires_origin_keyed_process */, IsolatedOriginSource::TEST);
+  p->AddCoopIsolatedOriginForBrowsingInstance(
+      baz_instance->GetIsolationContext(), baz, IsolatedOriginSource::TEST);
   LOCKED_EXPECT_THAT(
       p->isolated_origins_lock_, p->isolated_origins_,
       testing::UnorderedElementsAre(
@@ -2849,10 +2844,8 @@ TEST_F(ChildProcessSecurityPolicyTest,
   EXPECT_TRUE(IsIsolatedOrigin(&context, baz_browsing_instance_id, baz));
 
   // Isolate bar.com in foo.com (not bar.com)'s BrowsingInstance.
-  p->AddIsolatedOriginForBrowsingInstance(
-      foo_instance->GetIsolationContext(), bar,
-      false /* is_origin_agent_cluster */,
-      false /* requires_origin_keyed_process */, IsolatedOriginSource::TEST);
+  p->AddCoopIsolatedOriginForBrowsingInstance(
+      foo_instance->GetIsolationContext(), bar, IsolatedOriginSource::TEST);
 
   // Verify that foo.com and bar.com are both isolated in `foo_instance`'s
   // BrowsingInstance, nothing is isolated in bar_instance's BrowsingInstance,
@@ -2870,14 +2863,10 @@ TEST_F(ChildProcessSecurityPolicyTest,
   // Isolate foo.com in `bar_instance` and `baz_instance`'s BrowsingInstances
   // and verify that this takes effect.  This should result in having three
   // entries for foo.com, one for each BrowsingInstance.
-  p->AddIsolatedOriginForBrowsingInstance(
-      bar_instance->GetIsolationContext(), foo,
-      false /* is_origin_agent_cluster */,
-      false /* requires_origin_keyed_process */, IsolatedOriginSource::TEST);
-  p->AddIsolatedOriginForBrowsingInstance(
-      baz_instance->GetIsolationContext(), foo,
-      false /* is_origin_agent_cluster */,
-      false /* requires_origin_keyed_process */, IsolatedOriginSource::TEST);
+  p->AddCoopIsolatedOriginForBrowsingInstance(
+      bar_instance->GetIsolationContext(), foo, IsolatedOriginSource::TEST);
+  p->AddCoopIsolatedOriginForBrowsingInstance(
+      baz_instance->GetIsolationContext(), foo, IsolatedOriginSource::TEST);
   EXPECT_TRUE(IsIsolatedOrigin(&context, foo_browsing_instance_id, foo));
   EXPECT_TRUE(IsIsolatedOrigin(&context, foo_browsing_instance_id, bar));
   EXPECT_FALSE(IsIsolatedOrigin(&context, foo_browsing_instance_id, baz));
@@ -2930,10 +2919,8 @@ TEST_F(ChildProcessSecurityPolicyTest,
       foo_instance->GetIsolationContext().browsing_instance_id();
 
   // Isolate foo.com for `foo_instance`'s BrowsingInstance only.
-  p->AddIsolatedOriginForBrowsingInstance(
-      foo_instance->GetIsolationContext(), foo,
-      false /* is_origin_agent_cluster */,
-      false /* requires_origin_keyed_process */, IsolatedOriginSource::TEST);
+  p->AddCoopIsolatedOriginForBrowsingInstance(
+      foo_instance->GetIsolationContext(), foo, IsolatedOriginSource::TEST);
   EXPECT_EQ(1, GetIsolatedOriginEntryCount(foo));
 
   // Create a SiteInstance for bar.com in a new BrowsingInstance.
@@ -2971,10 +2958,8 @@ TEST_F(ChildProcessSecurityPolicyTest,
       SiteInstanceImpl::CreateForTesting(&context, GURL("https://foo.com/"));
   EXPECT_EQ(future_id,
             future_instance->GetIsolationContext().browsing_instance_id());
-  p->AddIsolatedOriginForBrowsingInstance(
-      future_instance->GetIsolationContext(), foo,
-      false /* is_origin_agent_cluster */,
-      false /* requires_origin_keyed_process */, IsolatedOriginSource::TEST);
+  p->AddCoopIsolatedOriginForBrowsingInstance(
+      future_instance->GetIsolationContext(), foo, IsolatedOriginSource::TEST);
   EXPECT_EQ(2, GetIsolatedOriginEntryCount(foo));
 
   // Likewise, an attempt to re-add foo.com for future BrowsingInstances should
@@ -2986,10 +2971,8 @@ TEST_F(ChildProcessSecurityPolicyTest,
   // precedes `future_id` and doesn't match `foo_browsing_instance_id`.  Check
   // this with `bar_instance`'s BrowsingInstance.
   EXPECT_LT(bar_browsing_instance_id, future_id);
-  p->AddIsolatedOriginForBrowsingInstance(
-      bar_instance->GetIsolationContext(), foo,
-      false /* is_origin_agent_cluster */,
-      false /* requires_origin_keyed_process */, IsolatedOriginSource::TEST);
+  p->AddCoopIsolatedOriginForBrowsingInstance(
+      bar_instance->GetIsolationContext(), foo, IsolatedOriginSource::TEST);
   EXPECT_EQ(3, GetIsolatedOriginEntryCount(foo));
   EXPECT_TRUE(IsIsolatedOrigin(&context, foo_browsing_instance_id, foo));
   EXPECT_TRUE(IsIsolatedOrigin(&context, bar_browsing_instance_id, foo));
@@ -3040,7 +3023,8 @@ TEST_F(ChildProcessSecurityPolicyTest, NoBrowsingInstanceIDs_OriginKeyed) {
                          .WithOriginIsolationRequest(origin_isolation_request));
     scoped_refptr<SiteInstanceImpl> foo_instance =
         SiteInstanceImpl::CreateForUrlInfo(&context, url_info,
-                                           /*is_guest=*/false);
+                                           /*is_guest=*/false,
+                                           /*is_fenced=*/false);
 
     p->Add(kRendererID, &context);
     p->LockProcess(foo_instance->GetIsolationContext(), kRendererID,
@@ -3097,7 +3081,8 @@ TEST_F(ChildProcessSecurityPolicyTest, NoBrowsingInstanceIDs_SiteKeyed) {
     UrlInfo url_info(UrlInfoInit(foo.GetURL()));
     scoped_refptr<SiteInstanceImpl> foo_instance =
         SiteInstanceImpl::CreateForUrlInfo(&context, url_info,
-                                           /*is_guest=*/false);
+                                           /*is_guest=*/false,
+                                           /*is_fenced=*/false);
     p->LockProcess(foo_instance->GetIsolationContext(), kRendererID,
                    /*is_process_used=*/false,
                    ProcessLock::FromSiteInfo(foo_instance->GetSiteInfo()));

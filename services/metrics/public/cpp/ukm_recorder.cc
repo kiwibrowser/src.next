@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,6 +51,14 @@ ukm::SourceId UkmRecorder::GetSourceIdForWebApkManifestUrl(
 // static
 ukm::SourceId UkmRecorder::GetSourceIdForDesktopWebAppStartUrl(
     base::PassKey<web_app::DesktopWebAppUkmRecorder>,
+    const GURL& start_url) {
+  return UkmRecorder::GetSourceIdFromScopeImpl(
+      start_url, SourceIdType::DESKTOP_WEB_APP_ID);
+}
+
+// static
+ukm::SourceId UkmRecorder::GetSourceIdForWebsiteUrl(
+    base::PassKey<apps::WebsiteMetrics>,
     const GURL& start_url) {
   return UkmRecorder::GetSourceIdFromScopeImpl(
       start_url, SourceIdType::DESKTOP_WEB_APP_ID);

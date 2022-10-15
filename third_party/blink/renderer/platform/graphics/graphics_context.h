@@ -115,6 +115,11 @@ struct AutoDarkMode {
   AutoDarkMode(DarkModeFilter::ElementRole role, bool enabled)
       : role(role), enabled(enabled) {}
 
+  AutoDarkMode(DarkModeFilter::ElementRole role,
+               bool enabled,
+               SkColor contrast_color)
+      : role(role), enabled(enabled), contrast_color(contrast_color) {}
+
   explicit AutoDarkMode(const ImageDrawOptions& draw_options)
       : role(DarkModeFilter::ElementRole::kBackground),
         enabled(draw_options.apply_dark_mode) {}
@@ -126,6 +131,7 @@ struct AutoDarkMode {
 
   DarkModeFilter::ElementRole role;
   bool enabled;
+  SkColor contrast_color = 0;
 };
 
 struct ImageAutoDarkMode : AutoDarkMode {
@@ -141,6 +147,20 @@ struct ImageAutoDarkMode : AutoDarkMode {
   }
 
   DarkModeFilter::ImageType image_type;
+};
+
+struct ImagePaintTimingInfo {
+  explicit ImagePaintTimingInfo(bool image_may_be_lcp_candidate)
+      : image_may_be_lcp_candidate(image_may_be_lcp_candidate) {}
+  ImagePaintTimingInfo(bool image_may_be_lcp_candidate,
+                       bool report_paint_timing)
+      : image_may_be_lcp_candidate(image_may_be_lcp_candidate),
+        report_paint_timing(report_paint_timing) {}
+  ImagePaintTimingInfo() = default;
+  bool image_may_be_lcp_candidate = false;
+  // Whether |PaintController::SetImagePainted| should be called if the image
+  // is painted.
+  bool report_paint_timing = true;
 };
 
 class PLATFORM_EXPORT GraphicsContext {
@@ -315,35 +335,34 @@ class PLATFORM_EXPORT GraphicsContext {
                        const gfx::RectF& dest,
                        const gfx::RectF& src,
                        SkBlendMode);
-
   void DrawImage(Image*,
                  Image::ImageDecodingMode,
                  const ImageAutoDarkMode& auto_dark_mode,
+                 const ImagePaintTimingInfo& paint_timing_info,
                  const gfx::RectF& dest_rect,
                  const gfx::RectF* src_rect = nullptr,
                  SkBlendMode = SkBlendMode::kSrcOver,
                  RespectImageOrientationEnum = kRespectImageOrientation,
-                 bool image_may_be_lcp_candidate = false,
                  Image::ImageClampingMode clamping_mode =
                      Image::ImageClampingMode::kClampImageToSourceRect);
   void DrawImageRRect(Image*,
                       Image::ImageDecodingMode,
                       const ImageAutoDarkMode& auto_dark_mode,
+                      const ImagePaintTimingInfo& paint_timing_info,
                       const FloatRoundedRect& dest,
                       const gfx::RectF& src_rect,
                       SkBlendMode = SkBlendMode::kSrcOver,
                       RespectImageOrientationEnum = kRespectImageOrientation,
-                      bool image_may_be_lcp_candidate = false,
                       Image::ImageClampingMode clamping_mode =
                           Image::ImageClampingMode::kClampImageToSourceRect);
   void DrawImageTiled(Image* image,
                       const gfx::RectF& dest_rect,
                       const ImageTilingInfo& tiling_info,
                       const ImageAutoDarkMode& auto_dark_mode,
+                      const ImagePaintTimingInfo& paint_timing_info,
                       SkBlendMode = SkBlendMode::kSrcOver,
-                      RespectImageOrientationEnum = kRespectImageOrientation,
-                      bool image_may_be_lcp_candidate = false);
-
+                      RespectImageOrientationEnum = kRespectImageOrientation);
+  void SetImagePainted(bool report_paint_timing);
   // These methods write to the canvas.
   // Also drawLine(const gfx::Point& point1, const gfx::Point& point2) and
   // fillRoundedRect().
@@ -590,10 +609,6 @@ class PLATFORM_EXPORT GraphicsContext {
   }
 
   class DarkModeFlags;
-
-  bool ShouldDrawDarkModeTextContrastOutline(
-      const cc::PaintFlags& original_flags,
-      const DarkModeFlags& dark_flags) const;
 
   // This is owned by paint_recorder_. Never delete this object.
   // Drawing operations are allowed only after the first BeginRecording() which

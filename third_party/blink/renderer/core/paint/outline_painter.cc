@@ -330,6 +330,8 @@ void ExtendLineAtEndpoint(SkPoint& point, const SkPoint& other, int offset) {
 // [1] An "edge" means a segment of the path, including a horizontal or vertical
 // line and approximate halves of its adjacent arcs if any.
 class RoundedEdgePathIterator {
+  STACK_ALLOCATED();
+
  public:
   RoundedEdgePathIterator(const SkPath& rounded_center_path, int center_inset)
       : iter_(rounded_center_path, /*forceClose*/ true),
@@ -417,6 +419,8 @@ class RoundedEdgePathIterator {
 };
 
 class ComplexOutlinePainter {
+  STACK_ALLOCATED();
+
  public:
   ComplexOutlinePainter(GraphicsContext& context,
                         const Vector<gfx::Rect>& rects,
@@ -457,7 +461,7 @@ class ComplexOutlinePainter {
                            outline_style_ != EBorderStyle::kDouble;
     if (use_alpha_layer) {
       context_.BeginLayer(color_.Alpha() / 255.0);
-      color_.SetRGB(color_.Red(), color_.Green(), color_.Blue());
+      color_ = Color::FromRGB(color_.Red(), color_.Green(), color_.Blue());
     }
 
     SkPath outer_path = right_angle_outer_path_;

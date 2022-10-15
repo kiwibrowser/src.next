@@ -20,47 +20,33 @@ bool DocumentLayoutUpgrade::ShouldUpgrade() {
 }
 
 bool ParentLayoutUpgrade::ShouldUpgrade() {
-  return document_.GetStyleEngine().HasViewportDependentMediaQueries() ||
+  StyleEngine& style_engine = document_.GetStyleEngine();
+  return style_engine.HasViewportDependentMediaQueries() ||
+         style_engine.HasViewportDependentPropertyRegistrations() ||
          NodeLayoutUpgrade(owner_).ShouldUpgrade();
 }
 
-NodeLayoutUpgrade::Reasons NodeLayoutUpgrade::GetReasons(const Node& node) {
-  Reasons reasons = 0;
-
-  const ComputedStyle* style =
-      ComputedStyle::NullifyEnsured(node.GetComputedStyle());
-  if (style && style->DependsOnSizeContainerQueries())
-    reasons |= kDependsOnSizeContainerQueries;
-  if (ComputedStyle::IsInterleavingRoot(node.GetComputedStyle()))
-    reasons |= kInterleavingRoot;
-  return reasons;
-}
-
 bool NodeLayoutUpgrade::ShouldUpgrade() {
+  if (!node_.isConnected())
+    return false;
   // We do not allow any elements to remain in a skipped state after a style
   // update, therefore we always upgrade whenever we've skipped something, even
   // if the current ancestors chain does not depend on layout.
   StyleEngine& style_engine = node_.GetDocument().GetStyleEngine();
   if (style_engine.SkippedContainerRecalc())
     return true;
-  if (!style_engine.StyleAffectedByLayout())
+
+  bool maybe_affected_by_layout =
+      style_engine.StyleMaybeAffectedByLayout(node_);
+
+  if (!maybe_affected_by_layout)
     return false;
 
-  Reasons mask = kDependsOnSizeContainerQueries;
-
-  if (GetReasons(node_) & mask)
-    return true;
-
-  // Whether or not `node_` depends on container queries is stored on its
-  // `ComputedStyle`. If the node does not have a style, we defensively assume
-  // that it *does* depend on container queries, and upgrade whenever we're
-  // inside any interleaving root.
-  if (ComputedStyle::IsNullOrEnsured(node_.GetComputedStyle()))
-    mask |= NodeLayoutUpgrade::kInterleavingRoot;
-
-  for (ContainerNode* ancestor = LayoutTreeBuilderTraversal::Parent(node_);
-       ancestor; ancestor = LayoutTreeBuilderTraversal::Parent(*ancestor)) {
-    if (GetReasons(*ancestor) & mask)
+  // For pseudo-style requests, we may have to update pseudo-elements of the
+  // interleaving root itself. Hence we use inclusive ancestors here.
+  for (const Node* ancestor = &node_; ancestor;
+       ancestor = LayoutTreeBuilderTraversal::Parent(*ancestor)) {
+    if (ComputedStyle::IsInterleavingRoot(ancestor->GetComputedStyle()))
       return true;
   }
 

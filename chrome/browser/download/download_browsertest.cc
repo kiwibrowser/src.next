@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -1381,6 +1381,9 @@ class FakeDownloadProtectionService
   void CheckClientDownload(
       DownloadItem* download_item,
       safe_browsing::CheckDownloadRepeatingCallback callback) override {
+    DownloadProtectionService::SetDownloadProtectionData(
+        download_item, "token", safe_browsing::ClientDownloadResponse::UNCOMMON,
+        safe_browsing::ClientDownloadResponse::TailoredVerdict());
     std::move(callback).Run(safe_browsing::DownloadCheckResult::UNCOMMON);
   }
 };

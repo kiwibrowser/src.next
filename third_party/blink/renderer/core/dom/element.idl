@@ -138,17 +138,13 @@ dictionary CheckVisibilityOptions {
     readonly attribute long clientWidth;
     readonly attribute long clientHeight;
 
-    // Typed OM
-    // https://drafts.css-houdini.org/css-typed-om/#inline-stylepropertymap-objects
-    [SameObject, MeasureAs=CSSTypedOMStylePropertyMap] readonly attribute StylePropertyMap attributeStyleMap;
-
     // Non-standard API
     [MeasureAs=ElementScrollIntoViewIfNeeded] void scrollIntoViewIfNeeded(optional boolean centerIfNeeded);
 
     // The Pop-up API
     [MeasureAs=ElementShowPopup,RuntimeEnabled=HTMLPopupAttribute,RaisesException] void showPopUp();
     [MeasureAs=ElementHidePopup,RuntimeEnabled=HTMLPopupAttribute,RaisesException] void hidePopUp();
-    [Unscopable,CEReactions,RuntimeEnabled=HTMLPopupAttribute,MeasureAs=AnyPopupAttribute,Reflect,ReflectOnly=("auto","hint","manual"),ReflectEmpty="auto",ReflectInvalid] attribute DOMString? popUp;
+    [Unscopable,CEReactions,RuntimeEnabled=HTMLPopupAttribute,MeasureAs=AnyPopupAttribute,Reflect,ReflectOnly=("auto","hint","manual"),ReflectEmpty="auto",ReflectInvalid="manual"] attribute DOMString? popUp;
     [CEReactions,RuntimeEnabled=HTMLPopupAttribute,Reflect] attribute boolean defaultOpen;
     [CEReactions,RuntimeEnabled=HTMLPopupAttribute,Reflect] attribute DOMString? popUpToggleTarget;
     [CEReactions,RuntimeEnabled=HTMLPopupAttribute,Reflect] attribute DOMString? popUpHideTarget;
@@ -169,6 +165,11 @@ dictionary CheckVisibilityOptions {
 
     // Element Timing
     [CEReactions, Reflect=elementtiming] attribute DOMString elementTiming;
+
+    // CSS Toggles
+    // See https://tabatkins.github.io/css-toggle/#dom and
+    // https://github.com/tabatkins/css-toggle/issues/26
+    [RuntimeEnabled=CSSToggles, SameObject] readonly attribute CSSToggleMap toggles;
 };
 
 Element includes ParentNode;

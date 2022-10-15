@@ -58,16 +58,11 @@ class PLATFORM_EXPORT StaticBitmapImageToVideoFrameCopier {
   void OnARGBPixelsReadAsync(scoped_refptr<StaticBitmapImage> image,
                              scoped_refptr<media::VideoFrame> temp_argb_frame,
                              FrameReadyCallback callback,
-                             GrSurfaceOrigin result_origin,
                              bool success);
   void OnYUVPixelsReadAsync(scoped_refptr<media::VideoFrame> yuv_frame,
                             FrameReadyCallback callback,
                             bool success);
   void OnReleaseMailbox(scoped_refptr<StaticBitmapImage> image);
-
-  scoped_refptr<media::VideoFrame> ConvertToYUVFrame(
-      scoped_refptr<media::VideoFrame> argb_video_frame,
-      bool flip);
 
   media::VideoFramePool frame_pool_;
   std::unique_ptr<WebGraphicsContext3DVideoFramePool> accelerated_frame_pool_;

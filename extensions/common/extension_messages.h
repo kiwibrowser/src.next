@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -141,7 +141,7 @@ IPC_STRUCT_TRAITS_END()
 // originate from a tab.
 IPC_STRUCT_BEGIN(ExtensionMsg_TabConnectionInfo)
   // The tab from where the connection was created.
-  IPC_STRUCT_MEMBER(base::DictionaryValue, tab)
+  IPC_STRUCT_MEMBER(base::Value::Dict, tab)
 
   // The ID of the frame that initiated the connection.
   // 0 if main frame, positive otherwise. -1 if not initiated from a frame.

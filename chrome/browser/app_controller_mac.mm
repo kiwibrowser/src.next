@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -86,6 +86,7 @@
 #include "chrome/browser/ui/startup/startup_browser_creator_impl.h"
 #include "chrome/browser/ui/startup/startup_tab.h"
 #include "chrome/browser/ui/startup/startup_types.h"
+#include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/web_applications/os_integration/web_app_shortcut_mac.h"
 #include "chrome/browser/web_applications/web_app_helpers.h"
@@ -143,6 +144,9 @@ NSMutableDictionary* GetPendingWebAuthRequests() API_AVAILABLE(macos(10.15)) {
 void OpenUrlsInBrowserWithProfile(const std::vector<GURL>& urls,
                                   Profile* profile);
 
+// Returns true if the profile requires signin before being used.
+bool IsProfileSignedOut(const base::FilePath& profile_path);
+
 // Starts a web authentication session request.
 void BeginHandlingWebAuthenticationSessionRequestWithProfile(
     ASWebAuthenticationSessionRequest* request,
@@ -192,6 +196,29 @@ Browser* ActivateOrCreateBrowser(Profile* profile) {
   return CreateBrowser(profile);
 }
 
+// Attempts restoring a previous session if there is one. Otherwise, opens
+// either the profile picker or a new browser, depending on user preferences.
+void AttemptSessionRestore(Profile* profile) {
+  DCHECK(!profile->IsGuestSession());
+  DCHECK(!IsProfileSignedOut(profile->GetPath()));
+  SessionService* sessionService =
+      SessionServiceFactory::GetForProfileForSessionRestore(profile);
+  if (sessionService &&
+      sessionService->RestoreIfNecessary(StartupTabs(),
+                                         /*restore_apps=*/false)) {
+    // Session was restored.
+    return;
+  }
+
+  // No session to restore, proceed with normal startup.
+  if (ProfilePicker::ShouldShowAtLaunch()) {
+    ProfilePicker::Show(ProfilePicker::Params::FromEntryPoint(
+        ProfilePicker::EntryPoint::kNewSessionOnExistingProcess));
+  } else {
+    CreateBrowser(profile);
+  }
+}
+
 CFStringRef BaseBundleID_CFString() {
   return base::mac::NSToCFCast(
       base::SysUTF8ToNSString(base::mac::BaseBundleID()));
@@ -223,11 +250,11 @@ void RecordLastRunAppBundlePath() {
       app_bundle_path_cfstring, BaseBundleID_CFString());
 }
 
-bool IsProfileSignedOut(Profile* profile) {
+bool IsProfileSignedOut(const base::FilePath& profile_path) {
   ProfileAttributesEntry* entry =
       g_browser_process->profile_manager()
           ->GetProfileAttributesStorage()
-          .GetProfileAttributesWithPath(profile->GetPath());
+          .GetProfileAttributesWithPath(profile_path);
   return entry && entry->IsSigninRequired();
 }
 
@@ -539,6 +566,7 @@ class AppControllerNativeThemeObserver : public ui::NativeThemeObserver {
 
 - (void)dealloc {
   [[_closeTabMenuItem menu] setDelegate:nil];
+  [NSMenu cr_setMenuItemForKeyEquivalentEventPreSearchBlock:nil];
   [super dealloc];
 }
 
@@ -693,6 +721,8 @@ class AppControllerNativeThemeObserver : public ui::NativeThemeObserver {
 
   // Reset local state watching, as this object outlives the prefs system.
   _localPrefRegistrar.RemoveAll();
+
+  _isShuttingDown = true;
 
   // It's safe to delete |_lastProfile| now.
   [self setLastProfile:nullptr];
@@ -1391,52 +1421,44 @@ class AppControllerNativeThemeObserver : public ui::NativeThemeObserver {
     }
   }
 
+  base::FilePath lastProfilePath = GetStartupProfilePathMac();
+  DCHECK_NE(lastProfilePath, ProfileManager::GetSystemProfilePath());
+
   // If launched as a hidden login item (due to installation of a persistent app
   // or by the user, for example in System Preferences->Accounts->Login Items),
   // allow session to be restored first time the user clicks on a Dock icon.
   // Normally, it'd just open a new empty page.
-  {
-    static BOOL doneOnce = NO;
-    BOOL attemptRestore =
-        apps::AppShimTerminationManager::Get()->ShouldRestoreSession() ||
-        (!doneOnce && base::mac::WasLaunchedAsHiddenLoginItem());
-    doneOnce = YES;
-    if (attemptRestore) {
-      Profile* lastProfile = [self lastProfile];
-      if (!lastProfile || IsProfileSignedOut(lastProfile)) {
-        // There is no session to be restored without a valid profile or a
-        // profile that is locked and requires signin. Return NO to do nothing.
-        return NO;
-      }
-      SessionService* sessionService =
-          SessionServiceFactory::GetForProfileForSessionRestore(lastProfile);
-      if (sessionService &&
-          sessionService->RestoreIfNecessary(StartupTabs(),
-                                             /* restore_apps */ false))
-        return NO;
-    }
-  }
+  static BOOL doneOnce = NO;
+  BOOL attemptRestore =
+      apps::AppShimTerminationManager::Get()->ShouldRestoreSession() ||
+      (!doneOnce && base::mac::WasLaunchedAsHiddenLoginItem());
+  doneOnce = YES;
 
-  // Otherwise open a new window.
-  // If the last profile was locked, we have to open the User Manager, as the
-  // profile requires authentication. Similarly, because guest mode and system
-  // profile are implemented as forced incognito, we can't open a new guest
-  // browser either, so we have to show the User Manager as well.
-  Profile* lastProfile = [self lastProfile];
-  if (!lastProfile) {
-    // Without a profile there's nothing that can be done, but still return NO
-    // to AppKit as there's nothing that it can do either.
-    return NO;
-  }
-  if (lastProfile->IsGuestSession() || IsProfileSignedOut(lastProfile) ||
-      lastProfile->IsSystemProfile()) {
+  // If the profile is locked or was off-the-record, open the profile picker.
+  if (lastProfilePath == ProfileManager::GetGuestProfilePath() ||
+      IsProfileSignedOut(lastProfilePath)) {
     ProfilePicker::Show(ProfilePicker::Params::FromEntryPoint(
         ProfilePicker::EntryPoint::kProfileLocked));
-  } else if (ProfilePicker::ShouldShowAtLaunch()) {
+    return NO;
+  }
+
+  if (attemptRestore) {
+    // Load the profile and attempt session restore.
+    app_controller_mac::RunInLastProfileSafely(
+        base::BindOnce(&AttemptSessionRestore),
+        app_controller_mac::kShowProfilePickerOnFailure);
+    return NO;
+  }
+
+  // Open the profile picker (for multi-profile users) or a new window.
+  if (ProfilePicker::ShouldShowAtLaunch()) {
     ProfilePicker::Show(ProfilePicker::Params::FromEntryPoint(
         ProfilePicker::EntryPoint::kNewSessionOnExistingProcess));
   } else {
-    CreateBrowser(lastProfile);
+    // Asynchronously load profile first if needed.
+    app_controller_mac::RunInLastProfileSafely(
+        base::BindOnce(base::IgnoreResult(&CreateBrowser)),
+        app_controller_mac::kShowProfilePickerOnFailure);
   }
 
   // We've handled the reopen event, so return NO to tell AppKit not
@@ -1563,7 +1585,7 @@ class AppControllerNativeThemeObserver : public ui::NativeThemeObserver {
   if (profile->IsGuestSession() && !profiles::IsGuestModeEnabled())
     return nullptr;
 
-  if (IsProfileSignedOut(profile))
+  if (IsProfileSignedOut(profile->GetPath()))
     return nullptr;  // Profile is locked.
 
   return ProfileManager::MaybeForceOffTheRecordMode(profile);
@@ -1709,9 +1731,13 @@ class AppControllerNativeThemeObserver : public ui::NativeThemeObserver {
 
   // Before tearing down the menu controller bridges, return the history menu to
   // its initial state.
-  if (_historyMenuBridge)
-    _historyMenuBridge->ResetMenu();
-  _historyMenuBridge.reset();
+  if (profile != nullptr) {
+    if (_historyMenuBridge)
+      _historyMenuBridge->ResetMenu();
+    _historyMenuBridge.reset();
+  } else if (_historyMenuBridge && !_isShuttingDown) {
+    _historyMenuBridge->OnProfileWillBeDestroyed();
+  }
 
   _profilePrefRegistrar.reset();
 
@@ -1817,6 +1843,14 @@ class AppControllerNativeThemeObserver : public ui::NativeThemeObserver {
 
   [self adjustCloseWindowMenuItemKeyEquivalent:enableCloseTabShortcut];
   [self adjustCloseTabMenuItemKeyEquivalent:enableCloseTabShortcut];
+}
+
+// This only has an effect on macOS 12+, and requests any state restoration
+// archive to be created with secure encoding. See the article at
+// https://sector7.computest.nl/post/2022-08-process-injection-breaking-all-macos-security-layers-with-a-single-vulnerability/
+// for more details.
+- (BOOL)applicationSupportsSecureRestorableState:(NSApplication*)app {
+  return YES;
 }
 
 - (BOOL)application:(NSApplication*)application
@@ -1955,12 +1989,12 @@ class AppControllerNativeThemeObserver : public ui::NativeThemeObserver {
 
 namespace {
 
-void UpdateProfileInUse(Profile* profile, Profile::CreateStatus status) {
-  if (status == Profile::CREATE_STATUS_INITIALIZED) {
-    AppController* controller =
-        base::mac::ObjCCastStrict<AppController>([NSApp delegate]);
-    [controller setLastProfile:profile];
-  }
+void UpdateProfileInUse(Profile* profile) {
+  if (!profile)
+    return;
+  AppController* controller =
+      base::mac::ObjCCastStrict<AppController>([NSApp delegate]);
+  [controller setLastProfile:profile];
 }
 
 void OpenUrlsInBrowserWithProfile(const std::vector<GURL>& urls,
@@ -1999,21 +2033,14 @@ void OpenUrlsInBrowserWithProfile(const std::vector<GURL>& urls,
       (startupContent->GetVisibleURL() == chrome::kChromeUINewTabURL ||
        startupContent->GetVisibleURL() == chrome::kChromeUINewTabPageURL)) {
     browser->tab_strip_model()->CloseWebContentsAt(startupIndex,
-                                                   TabStripModel::CLOSE_NONE);
+                                                   TabCloseTypes::CLOSE_NONE);
   }
 }
 
 // Returns the profile to be used for new windows (or nullptr if it fails).
-Profile* GetSafeProfile(Profile* loaded_profile, Profile::CreateStatus status) {
-  switch (status) {
-    case Profile::CREATE_STATUS_INITIALIZED:
-      break;
-    case Profile::CREATE_STATUS_CREATED:
-      NOTREACHED() << "Should only be called when profile loading is complete";
-      [[fallthrough]];
-    case Profile::CREATE_STATUS_LOCAL_FAIL:
-      return nullptr;
-  }
+Profile* GetSafeProfile(Profile* loaded_profile) {
+  if (!loaded_profile)
+    return nullptr;
   AppController* controller =
       base::mac::ObjCCastStrict<AppController>([NSApp delegate]);
   if (!controller)
@@ -2024,13 +2051,10 @@ Profile* GetSafeProfile(Profile* loaded_profile, Profile::CreateStatus status) {
 
 // Called when the profile has been loaded for RunIn*ProfileSafely(). This
 // profile may not be safe to use for new windows (due to policies).
-void OnProfileLoaded(base::OnceCallback<void(Profile*)>& callback,
+void OnProfileLoaded(base::OnceCallback<void(Profile*)> callback,
                      app_controller_mac::ProfileLoadFailureBehavior on_failure,
-                     Profile* loaded_profile,
-                     Profile::CreateStatus status) {
-  if (status == Profile::CREATE_STATUS_CREATED)
-    return;  // Profile loading is not complete, wait to be called again.
-  Profile* safe_profile = GetSafeProfile(loaded_profile, status);
+                     Profile* loaded_profile) {
+  Profile* safe_profile = GetSafeProfile(loaded_profile);
   if (!safe_profile) {
     switch (on_failure) {
       case app_controller_mac::kShowProfilePickerOnFailure:
@@ -2056,7 +2080,7 @@ bool IsOpeningNewWindow() {
 void CreateGuestProfileIfNeeded() {
   g_browser_process->profile_manager()->CreateProfileAsync(
       ProfileManager::GetGuestProfilePath(),
-      base::BindRepeating(&UpdateProfileInUse));
+      base::BindOnce(&UpdateProfileInUse));
 }
 
 void EnterpriseStartupDialogClosed() {
@@ -2076,21 +2100,17 @@ void RunInLastProfileSafely(base::OnceCallback<void(Profile*)> callback,
   AppController* controller =
       base::mac::ObjCCastStrict<AppController>([NSApp delegate]);
   if (!controller) {
-    OnProfileLoaded(callback, on_failure, nullptr,
-                    Profile::CREATE_STATUS_LOCAL_FAIL);
+    OnProfileLoaded(std::move(callback), on_failure, nullptr);
     return;
   }
   if (Profile* profile = [controller lastProfileIfLoaded]) {
-    OnProfileLoaded(callback, on_failure, profile,
-                    Profile::CREATE_STATUS_INITIALIZED);
+    OnProfileLoaded(std::move(callback), on_failure, profile);
     return;
   }
-  // Pass the OnceCallback by reference because CreateProfileAsync() needs a
-  // repeating callback. It will be called at most once.
+
   g_browser_process->profile_manager()->CreateProfileAsync(
       GetStartupProfilePathMac(),
-      base::BindRepeating(&OnProfileLoaded, base::OwnedRef(std::move(callback)),
-                          on_failure));
+      base::BindOnce(&OnProfileLoaded, std::move(callback), on_failure));
 }
 
 void RunInProfileSafely(const base::FilePath& profile_dir,
@@ -2100,21 +2120,18 @@ void RunInProfileSafely(const base::FilePath& profile_dir,
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   // `profile_manager` can be null in tests.
   if (!profile_manager) {
-    OnProfileLoaded(callback, on_failure, nullptr,
-                    Profile::CREATE_STATUS_LOCAL_FAIL);
+    OnProfileLoaded(std::move(callback), on_failure, nullptr);
     return;
   }
   if (Profile* profile = profile_manager->GetProfileByPath(profile_dir)) {
-    OnProfileLoaded(callback, on_failure, profile,
-                    Profile::CREATE_STATUS_INITIALIZED);
+    OnProfileLoaded(std::move(callback), on_failure, profile);
     return;
   }
   // Pass the OnceCallback by reference because CreateProfileAsync() needs a
   // repeating callback. It will be called at most once.
   g_browser_process->profile_manager()->CreateProfileAsync(
       profile_dir,
-      base::BindRepeating(&OnProfileLoaded, base::OwnedRef(std::move(callback)),
-                          on_failure));
+      base::BindOnce(&OnProfileLoaded, std::move(callback), on_failure));
 }
 
 // static

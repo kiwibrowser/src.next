@@ -901,13 +901,10 @@ TEST_P(VisualViewportTest, TestRestoredFromHistoryItem) {
 
   RegisterMockedHttpURLLoad("200-by-300.html");
 
-  WebHistoryItem item;
-  item.Initialize();
-  WebURL destination_url(
-      url_test_helpers::ToKURL(base_url_ + "200-by-300.html"));
-  item.SetURLString(destination_url.GetString());
-  item.SetVisualViewportScrollOffset(gfx::PointF(100, 120));
-  item.SetPageScaleFactor(2);
+  HistoryItem* item = MakeGarbageCollected<HistoryItem>();
+  item->SetURL(url_test_helpers::ToKURL(base_url_ + "200-by-300.html"));
+  item->SetVisualViewportScrollOffset(ScrollOffset(100, 120));
+  item->SetPageScaleFactor(2);
 
   frame_test_helpers::LoadHistoryItem(WebView()->MainFrameImpl(), item,
                                       mojom::FetchCacheMode::kDefault);
@@ -928,16 +925,14 @@ TEST_P(VisualViewportTest, TestRestoredFromLegacyHistoryItem) {
 
   RegisterMockedHttpURLLoad("200-by-300-viewport.html");
 
-  WebHistoryItem item;
-  item.Initialize();
-  WebURL destination_url(
+  HistoryItem* item = MakeGarbageCollected<HistoryItem>();
+  item->SetURL(
       url_test_helpers::ToKURL(base_url_ + "200-by-300-viewport.html"));
-  item.SetURLString(destination_url.GetString());
   // (-1, -1) will be used if the HistoryItem is an older version prior to
   // having visual viewport scroll offset.
-  item.SetVisualViewportScrollOffset(gfx::PointF(-1, -1));
-  item.SetScrollOffset(gfx::Point(120, 180));
-  item.SetPageScaleFactor(2);
+  item->SetVisualViewportScrollOffset(ScrollOffset(-1, -1));
+  item->SetScrollOffset(ScrollOffset(120, 180));
+  item->SetPageScaleFactor(2);
 
   frame_test_helpers::LoadHistoryItem(WebView()->MainFrameImpl(), item,
                                       mojom::FetchCacheMode::kDefault);
@@ -1671,7 +1666,7 @@ TEST_P(VisualViewportTest, ResizeVisualViewportStaysWithinOuterViewport) {
   EXPECT_EQ(0, visual_viewport.GetScrollOffset().y());
 }
 
-TEST_P(VisualViewportTest, ElementBoundsInViewportSpaceAccountsForViewport) {
+TEST_P(VisualViewportTest, ElementBoundsInWidgetSpaceAccountsForViewport) {
   InitializeWithAndroidSettings();
 
   WebView()->MainFrameViewWidget()->Resize(gfx::Size(500, 800));
@@ -1690,7 +1685,7 @@ TEST_P(VisualViewportTest, ElementBoundsInViewportSpaceAccountsForViewport) {
   visual_viewport.SetScale(2);
   visual_viewport.SetLocation(gfx::PointAtOffsetFromOrigin(scroll_delta));
 
-  const gfx::Rect bounds_in_viewport = input_element->BoundsInViewport();
+  const gfx::Rect bounds_in_viewport = input_element->BoundsInWidget();
   gfx::Rect expected_bounds = gfx::ScaleToRoundedRect(bounds, 2.f);
   gfx::Vector2dF expected_scroll_delta = scroll_delta;
   expected_scroll_delta.Scale(2.f, 2.f);
@@ -1834,6 +1829,28 @@ TEST_P(VisualViewportTest, FractionalMaxScrollOffset) {
   WebView()->SetPageScaleFactor(2);
   EXPECT_EQ(ScrollOffset(101. / 2., 201. / 2.),
             scrollable_area->MaximumScrollOffset());
+}
+
+// Tests that the scroll offset is consistent when scale specified.
+TEST_P(VisualViewportTest, MaxScrollOffsetAtScale) {
+  InitializeWithDesktopSettings();
+  WebView()->MainFrameViewWidget()->Resize(gfx::Size(101, 201));
+  NavigateTo("about:blank");
+
+  VisualViewport& visual_viewport = GetFrame()->GetPage()->GetVisualViewport();
+
+  WebView()->SetPageScaleFactor(0.1);
+  EXPECT_EQ(ScrollOffset(), visual_viewport.MaximumScrollOffsetAtScale(1.0));
+
+  WebView()->SetPageScaleFactor(2);
+  EXPECT_EQ(ScrollOffset(), visual_viewport.MaximumScrollOffsetAtScale(1.0));
+
+  WebView()->SetPageScaleFactor(5);
+  EXPECT_EQ(ScrollOffset(), visual_viewport.MaximumScrollOffsetAtScale(1.0));
+
+  WebView()->SetPageScaleFactor(10);
+  EXPECT_EQ(ScrollOffset(101. / 2., 201. / 2.),
+            visual_viewport.MaximumScrollOffsetAtScale(2.0));
 }
 
 // Tests that the slow scrolling after an impl scroll on the visual viewport is
@@ -2292,6 +2309,19 @@ TEST_P(VisualViewportTest, EnsureOverscrollElasticityTransformNode) {
   UpdateAllLifecyclePhases();
 
   VisualViewport& visual_viewport = GetFrame()->GetPage()->GetVisualViewport();
+  EXPECT_EQ(visual_viewport.GetOverscrollType() == OverscrollType::kTransform,
+            !!visual_viewport.GetOverscrollElasticityTransformNode());
+
+  visual_viewport.SetOverscrollTypeForTesting(OverscrollType::kNone);
+  UpdateAllLifecyclePhases();
+  EXPECT_FALSE(visual_viewport.GetOverscrollElasticityTransformNode());
+
+  visual_viewport.SetOverscrollTypeForTesting(OverscrollType::kFilter);
+  UpdateAllLifecyclePhases();
+  EXPECT_FALSE(visual_viewport.GetOverscrollElasticityTransformNode());
+
+  visual_viewport.SetOverscrollTypeForTesting(OverscrollType::kTransform);
+  UpdateAllLifecyclePhases();
   EXPECT_TRUE(visual_viewport.GetOverscrollElasticityTransformNode());
 }
 

@@ -69,6 +69,49 @@ void LayoutObjectTest::ExpectAnonymousInlineWrapperFor(Node* node) {
   }
 }
 
+TEST_F(LayoutObjectTest, CommonAncestor) {
+  SetBodyInnerHTML(R"HTML(
+    <div id="container">
+      <div id="child1">
+        <div id="child1_1"></div>
+      </div>
+      <div id="child2">
+        <div id="child2_1">
+          <div id="child2_1_1"></div>
+        </div>
+      </div>
+    </div>
+  )HTML");
+  LayoutObject* container = GetLayoutObjectByElementId("container");
+  LayoutObject* child1 = GetLayoutObjectByElementId("child1");
+  LayoutObject* child1_1 = GetLayoutObjectByElementId("child1_1");
+  LayoutObject* child2 = GetLayoutObjectByElementId("child2");
+  LayoutObject* child2_1 = GetLayoutObjectByElementId("child2_1");
+  LayoutObject* child2_1_1 = GetLayoutObjectByElementId("child2_1_1");
+
+  EXPECT_EQ(container->CommonAncestor(*container), container);
+
+  EXPECT_EQ(child1->CommonAncestor(*child2), container);
+  EXPECT_EQ(child2->CommonAncestor(*child1), container);
+  EXPECT_TRUE(child1->IsBeforeInPreOrder(*child2));
+  EXPECT_FALSE(child2->IsBeforeInPreOrder(*child1));
+
+  EXPECT_EQ(child1->CommonAncestor(*child1_1), child1);
+  EXPECT_EQ(child1_1->CommonAncestor(*child1), child1);
+  EXPECT_TRUE(child1->IsBeforeInPreOrder(*child1_1));
+  EXPECT_FALSE(child1_1->IsBeforeInPreOrder(*child1));
+
+  EXPECT_EQ(child1_1->CommonAncestor(*child2_1), container);
+  EXPECT_EQ(child2_1->CommonAncestor(*child1_1), container);
+  EXPECT_TRUE(child1_1->IsBeforeInPreOrder(*child2_1));
+  EXPECT_FALSE(child2_1->IsBeforeInPreOrder(*child1_1));
+
+  EXPECT_EQ(child1_1->CommonAncestor(*child2_1_1), container);
+  EXPECT_EQ(child2_1_1->CommonAncestor(*child1_1), container);
+  EXPECT_TRUE(child1_1->IsBeforeInPreOrder(*child2_1_1));
+  EXPECT_FALSE(child2_1_1->IsBeforeInPreOrder(*child1_1));
+}
+
 TEST_F(LayoutObjectTest, LayoutDecoratedNameCalledWithPositionedObject) {
   SetBodyInnerHTML("<div id='div' style='position: fixed'>test</div>");
   Element* div = GetDocument().getElementById(AtomicString("div"));
@@ -1528,6 +1571,25 @@ TEST_F(LayoutObjectTest, SetNeedsCollectInlinesForSvgInline) {
   EXPECT_TRUE(GetLayoutObjectByElementId("text")->NeedsCollectInlines());
 }
 
+TEST_F(LayoutObjectTest, RemovePendingTransformUpdatesCorrectly) {
+  SetBodyInnerHTML(R"HTML(
+  <div id="div1" style="transform:translateX(100px)">
+  </div>
+  <div id="div2" style="transform:translateX(100px)">
+  </div>
+      )HTML");
+
+  auto* div2 = GetDocument().getElementById("div2");
+  div2->setAttribute(html_names::kStyleAttr, "transform: translateX(200px)");
+  GetDocument().View()->UpdateLifecycleToLayoutClean(
+      DocumentUpdateReason::kTest);
+
+  auto* div1 = GetDocument().getElementById("div1");
+  div1->setAttribute(html_names::kStyleAttr, "transform: translateX(200px)");
+  div2->SetInlineStyleProperty(CSSPropertyID::kDisplay, "none");
+  UpdateAllLifecyclePhasesForTest();
+}
+
 static const char* const kTransformsWith3D[] = {"transform: rotateX(20deg)",
                                                 "transform: translateZ(30px)"};
 static const char kTransformWithout3D[] =
@@ -1651,6 +1713,46 @@ TEST_F(LayoutObjectTest, HasTransformRelatedProperty) {
   test("svg-rect-preserve-3d", false, false, false);
   test("svg-text", true, true, false);
   test("foreign", true, true, false);
+}
+
+TEST_F(LayoutObjectTest, ContainingScrollContainer) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      .scroller { width: 100px; height: 100px; overflow: scroll; }
+    </style>
+    <div id="scroller1" class="scroller" style="position: relative">
+      <div id="child1"></div>
+      <div id="scroller2" class="scroller">
+        <div id="child2" style="position: relative"></div>
+        <div id="fixed" style="position: fixed">
+          <div id="under-fixed"></div>
+        </div>
+        <div id="absolute" style="position: absolute">
+          <div id="under-absolute"></div>
+        </div>
+      </div>
+    </div>
+  )HTML");
+
+  auto* scroller1 = GetLayoutObjectByElementId("scroller1");
+  auto* scroller2 = GetLayoutObjectByElementId("scroller2");
+
+  EXPECT_EQ(&GetLayoutView(), scroller1->ContainingScrollContainer());
+  EXPECT_EQ(scroller1,
+            GetLayoutObjectByElementId("child1")->ContainingScrollContainer());
+  EXPECT_EQ(scroller1, scroller2->ContainingScrollContainer());
+  EXPECT_EQ(scroller2,
+            GetLayoutObjectByElementId("child2")->ContainingScrollContainer());
+  EXPECT_EQ(&GetLayoutView(),
+            GetLayoutObjectByElementId("fixed")->ContainingScrollContainer());
+  EXPECT_EQ(
+      &GetLayoutView(),
+      GetLayoutObjectByElementId("under-fixed")->ContainingScrollContainer());
+  EXPECT_EQ(
+      scroller1,
+      GetLayoutObjectByElementId("absolute")->ContainingScrollContainer());
+  EXPECT_EQ(scroller1, GetLayoutObjectByElementId("under-absolute")
+                           ->ContainingScrollContainer());
 }
 
 }  // namespace blink

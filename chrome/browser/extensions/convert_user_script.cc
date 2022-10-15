@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -128,14 +128,11 @@ scoped_refptr<Extension> ConvertUserScriptToExtension(
 
   ContentScript content_script;
   content_script.matches = std::move(matches);
-  content_script.exclude_matches =
-      std::make_unique<std::vector<std::string>>(std::move(exclude_matches));
-  content_script.include_globs =
-      std::make_unique<std::vector<std::string>>(script.globs());
-  content_script.exclude_globs =
-      std::make_unique<std::vector<std::string>>(script.exclude_globs());
+  content_script.exclude_matches = std::move(exclude_matches);
+  content_script.include_globs = script.globs();
+  content_script.exclude_globs = script.exclude_globs();
 
-  content_script.js = std::make_unique<std::vector<std::string>>();
+  content_script.js.emplace();
   content_script.js->push_back("script.js");
 
   if (script.run_location() == mojom::RunLocation::kDocumentStart) {
@@ -148,8 +145,7 @@ scoped_refptr<Extension> ConvertUserScriptToExtension(
   }
 
   base::Value content_scripts(base::Value::Type::LIST);
-  content_scripts.Append(
-      base::Value::FromUniquePtrValue(content_script.ToValue()));
+  content_scripts.Append(base::Value(content_script.ToValue()));
   root->SetKey(api::content_scripts::ManifestKeys::kContentScripts,
                std::move(content_scripts));
 

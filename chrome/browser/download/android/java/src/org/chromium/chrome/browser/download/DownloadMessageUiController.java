@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -79,6 +79,13 @@ public interface DownloadMessageUiController extends OfflineContentProvider.Obse
      * @param originalUrl The URL of the download.
      */
     void addDownloadInterstitialSource(GURL originalUrl);
+
+    /**
+     * Returns true if the given download information matches an interstitial download.
+     * @param originalUrl The URL of the download.
+     * @param guid Unique GUID of the download.
+     */
+    boolean isDownloadInterstitialItem(GURL originalUrl, String guid);
 
     /**
      * Shows a message that asks for the user confirmation before the actual download starts.

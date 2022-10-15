@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -70,6 +70,10 @@ class ExtensionsTest : public testing::Test {
   MockExtensionSystem* extension_system() {
     return static_cast<MockExtensionSystem*>(
         extension_system_factory_.GetForBrowserContext(browser_context_.get()));
+  }
+
+  content::BrowserTaskEnvironment* task_environment() {
+    return task_environment_.get();
   }
 
   // testing::Test overrides:

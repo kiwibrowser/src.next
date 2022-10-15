@@ -45,14 +45,14 @@ class RuleFeatureSetTest : public testing::Test {
   }
 
   static RuleFeatureSet::SelectorPreMatch CollectFeaturesTo(
-      CSSSelectorVector& selector_vector,
+      CSSSelectorVector</*UseArena=*/true>& selector_vector,
       const StyleScope* style_scope,
       RuleFeatureSet& set) {
     if (selector_vector.IsEmpty()) {
       return RuleFeatureSet::SelectorPreMatch::kSelectorNeverMatches;
     }
 
-    auto* style_rule = StyleRule::Create(
+    auto* style_rule = StyleRule::Create</*UseArena=*/true>(
         selector_vector,
         MakeGarbageCollected<MutableCSSPropertyValueSet>(kHTMLStandardMode));
     return CollectFeaturesTo(style_rule, style_scope, set);
@@ -81,9 +81,11 @@ class RuleFeatureSetTest : public testing::Test {
   static RuleFeatureSet::SelectorPreMatch CollectFeaturesTo(
       const String& selector_text,
       RuleFeatureSet& set) {
-    CSSSelectorVector selector_vector = CSSParser::ParseSelector(
-        StrictCSSParserContext(SecureContextMode::kInsecureContext), nullptr,
-        selector_text);
+    Arena arena;
+    CSSSelectorVector</*UseArena=*/true> selector_vector =
+        CSSParser::ParseSelector</*UseArena=*/true>(
+            StrictCSSParserContext(SecureContextMode::kInsecureContext),
+            nullptr, selector_text, arena);
     return CollectFeaturesTo(selector_vector, nullptr /* style_scope */, set);
   }
 

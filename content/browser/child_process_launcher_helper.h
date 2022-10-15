@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -77,8 +77,8 @@ using FileMappedForLaunch = base::HandlesToInheritVector;
 // process. Since ChildProcessLauncher can be deleted by its client at any time,
 // this class is used to keep state as the process is started asynchronously.
 // It also contains the platform specific pieces.
-class ChildProcessLauncherHelper :
-    public base::RefCountedThreadSafe<ChildProcessLauncherHelper> {
+class ChildProcessLauncherHelper
+    : public base::RefCountedThreadSafe<ChildProcessLauncherHelper> {
  public:
   // Abstraction around a process required to deal in a platform independent way
   // between Linux (which can use zygotes) and the other platforms.
@@ -191,8 +191,9 @@ class ChildProcessLauncherHelper :
       const ChildProcessLauncherPriority& priority);
 
 #if BUILDFLAG(IS_ANDROID)
-  void OnChildProcessStarted(JNIEnv* env,
-                             jint handle);
+  void OnChildProcessStarted(JNIEnv* env, jint handle);
+
+  base::android::ChildBindingState GetEffectiveChildBindingState();
 
   // Dumps the stack of the child process without crashing it.
   void DumpProcessStack(const base::Process& process);

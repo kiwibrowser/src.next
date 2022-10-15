@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,6 @@
 #include "components/download/public/common/download_danger_type.h"
 #include "components/download/public/common/download_item.h"
 #include "components/download/public/common/download_path_reservation_tracker.h"
-#include "components/download/public/common/download_schedule.h"
 #include "components/download/public/common/download_utils.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
@@ -51,10 +50,9 @@ class DownloadTargetDeterminerDelegate {
   //    selection, then this parameter will be the empty path. On Chrome OS,
   //    this path may contain virtual mount points if the user chose a virtual
   //    path (e.g. Google Drive).
-  using ConfirmationCallback = base::OnceCallback<void(
-      DownloadConfirmationResult,
-      const base::FilePath& virtual_path,
-      absl::optional<download::DownloadSchedule> download_schedule)>;
+  using ConfirmationCallback =
+      base::OnceCallback<void(DownloadConfirmationResult,
+                              const base::FilePath& virtual_path)>;
 
   // Callback to be invoked when RequestIncognitoWarningConfirmation()
   // completes.

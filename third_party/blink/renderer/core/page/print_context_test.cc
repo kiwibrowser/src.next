@@ -192,10 +192,12 @@ class PrintContextFrameTest : public PrintContextTest {
 
 #define EXPECT_SKRECT_EQ(expectedX, expectedY, expectedWidth, expectedHeight, \
                          actualRect)                                          \
-  EXPECT_EQ(expectedX, actualRect.x());                                       \
-  EXPECT_EQ(expectedY, actualRect.y());                                       \
-  EXPECT_EQ(expectedWidth, actualRect.width());                               \
-  EXPECT_EQ(expectedHeight, actualRect.height());
+  do {                                                                        \
+    EXPECT_EQ(expectedX, actualRect.x());                                     \
+    EXPECT_EQ(expectedY, actualRect.y());                                     \
+    EXPECT_EQ(expectedWidth, actualRect.width());                             \
+    EXPECT_EQ(expectedHeight, actualRect.height());                           \
+  } while (false)
 
 INSTANTIATE_PAINT_TEST_SUITE_P(PrintContextTest);
 
@@ -237,19 +239,22 @@ TEST_P(PrintContextTest, LinkTargetUnderAnonymousBlockBeforeBlock) {
 }
 
 TEST_P(PrintContextTest, LinkTargetContainingABlock) {
-  GetDocument().SetCompatibilityMode(Document::kQuirksMode);
   MockPageContextCanvas canvas;
   SetBodyInnerHTML(
-      "<div style='padding-top: 50px'>" +
+      "<div style='padding-top: 50px; width:555px;'>" +
       InlineHtmlForLink("http://www.google2.com",
-                        "<div style='width:133; height: 30'>BLOCK</div>") +
+                        "<div style='width:133px; height: 30px'>BLOCK</div>") +
       "</div>");
   PrintSinglePage(canvas);
   const Vector<MockPageContextCanvas::Operation>& operations =
       canvas.RecordedOperations();
   ASSERT_EQ(1u, operations.size());
   EXPECT_EQ(MockPageContextCanvas::kDrawRect, operations[0].type);
-  EXPECT_SKRECT_EQ(0, 50, 133, 30, operations[0].rect);
+  // Block-in-inline behaves differently in LayoutNG.
+  if (RuntimeEnabledFeatures::LayoutNGPrintingEnabled())
+    EXPECT_SKRECT_EQ(0, 50, 555, 30, operations[0].rect);
+  else
+    EXPECT_SKRECT_EQ(0, 50, 133, 30, operations[0].rect);
 }
 
 TEST_P(PrintContextTest, LinkTargetUnderInInlines) {
@@ -267,6 +272,48 @@ TEST_P(PrintContextTest, LinkTargetUnderInInlines) {
   EXPECT_SKRECT_EQ(0, 40, 144, 40, operations[0].rect);
 }
 
+TEST_P(PrintContextTest, LinkTargetUnderInInlinesMultipleLines) {
+  MockPageContextCanvas canvas;
+  SetBodyInnerHTML(
+      "<span><b><i><img style='width: 40px; height: 40px'><br>" +
+      InlineHtmlForLink("http://www.google3.com",
+                        "<img style='width: 144px; height: 40px'><br><img "
+                        "style='width: 14px; height: 40px'>") +
+      "</i></b></span>");
+  PrintSinglePage(canvas);
+  const Vector<MockPageContextCanvas::Operation>& operations =
+      canvas.RecordedOperations();
+  ASSERT_EQ(1u, operations.size());
+  EXPECT_EQ(MockPageContextCanvas::kDrawRect, operations[0].type);
+  EXPECT_SKRECT_EQ(0, 40, 144, 80, operations[0].rect);
+}
+
+TEST_P(PrintContextTest, LinkTargetUnderInInlinesMultipleLinesCulledInline) {
+  MockPageContextCanvas canvas;
+  SetBodyInnerHTML("<span><b><i><br>" +
+                   InlineHtmlForLink("http://www.google3.com", "xxx<br>xxx") +
+                   "</i></b></span>");
+  PrintSinglePage(canvas);
+  const Vector<MockPageContextCanvas::Operation>& operations =
+      canvas.RecordedOperations();
+  ASSERT_EQ(1u, operations.size());
+}
+
+TEST_P(PrintContextTest, LinkTargetRelativelyPositionedInline) {
+  MockPageContextCanvas canvas;
+  SetBodyInnerHTML(
+      "<a style='position: relative; top: 50px; left: 50px' "
+      "href='http://www.google3.com'>"
+      "  <img style='width: 1px; height: 40px'>"
+      "</a>");
+  PrintSinglePage(canvas);
+  const Vector<MockPageContextCanvas::Operation>& operations =
+      canvas.RecordedOperations();
+  ASSERT_EQ(1u, operations.size());
+  EXPECT_EQ(MockPageContextCanvas::kDrawRect, operations[0].type);
+  EXPECT_SKRECT_EQ(50, 50, 1, 40, operations[0].rect);
+}
+
 TEST_P(PrintContextTest, LinkTargetUnderRelativelyPositionedInline) {
   MockPageContextCanvas canvas;
   SetBodyInnerHTML(
@@ -279,6 +326,36 @@ TEST_P(PrintContextTest, LinkTargetUnderRelativelyPositionedInline) {
   ASSERT_EQ(1u, operations.size());
   EXPECT_EQ(MockPageContextCanvas::kDrawRect, operations[0].type);
   EXPECT_SKRECT_EQ(50, 90, 155, 50, operations[0].rect);
+}
+
+TEST_P(PrintContextTest,
+       LinkTargetUnderRelativelyPositionedInlineMultipleLines) {
+  MockPageContextCanvas canvas;
+  SetBodyInnerHTML(
+        + "<span style='position: relative; top: 50px; left: 50px'><b><i><img style='width: 1px; height: 40px'><br>"
+        + InlineHtmlForLink(
+            "http://www.google3.com",
+            "<img style='width: 10px; height: 50px'><br><img style='width: 155px; height: 50px'>")
+        + "</i></b></span>");
+  PrintSinglePage(canvas);
+  const Vector<MockPageContextCanvas::Operation>& operations =
+      canvas.RecordedOperations();
+  ASSERT_EQ(1u, operations.size());
+  EXPECT_EQ(MockPageContextCanvas::kDrawRect, operations[0].type);
+  EXPECT_SKRECT_EQ(50, 90, 155, 100, operations[0].rect);
+}
+
+TEST_P(PrintContextTest,
+       LinkTargetUnderRelativelyPositionedInlineMultipleLinesCulledInline) {
+  MockPageContextCanvas canvas;
+  SetBodyInnerHTML(
+      +"<span style='position: relative; top: 50px; left: 50px'><b><i><br>" +
+      InlineHtmlForLink("http://www.google3.com", "xxx<br>xxx") +
+      "</i></b></span>");
+  PrintSinglePage(canvas);
+  const Vector<MockPageContextCanvas::Operation>& operations =
+      canvas.RecordedOperations();
+  ASSERT_EQ(1u, operations.size());
 }
 
 TEST_P(PrintContextTest, LinkTargetSvg) {
@@ -354,9 +431,9 @@ TEST_P(PrintContextTest, LinkedTarget) {
   EXPECT_EQ(MockPageContextCanvas::kDrawPoint, operations[5].type);
   EXPECT_SKRECT_EQ(0, 0, 0, 0, operations[5].rect);
   EXPECT_EQ(MockPageContextCanvas::kDrawPoint, operations[6].type);
-  EXPECT_SKRECT_EQ(0, 0, 0, 0, operations[6].rect);
+  EXPECT_SKRECT_EQ(450, 60, 0, 0, operations[6].rect);
   EXPECT_EQ(MockPageContextCanvas::kDrawPoint, operations[7].type);
-  EXPECT_SKRECT_EQ(450, 60, 0, 0, operations[7].rect);
+  EXPECT_SKRECT_EQ(0, 0, 0, 0, operations[7].rect);
 }
 
 TEST_P(PrintContextTest, EmptyLinkedTarget) {
@@ -389,7 +466,9 @@ TEST_P(PrintContextTest, LinkTargetBoundingBox) {
   EXPECT_SKRECT_EQ(50, 60, 200, 100, operations[0].rect);
 }
 
-TEST_P(PrintContextTest, ScaledVerticalRL) {
+// Here are a few tests to check that shrink to fit doesn't mess up page count.
+
+TEST_P(PrintContextTest, ScaledVerticalRL1) {
   SetBodyInnerHTML(R"HTML(
     <style>html { writing-mode:vertical-rl; }</style>
     <div style="break-after:page;">x</div>
@@ -399,6 +478,105 @@ TEST_P(PrintContextTest, ScaledVerticalRL) {
   int page_count = PrintContext::NumberOfPages(GetDocument().GetFrame(),
                                                gfx::SizeF(500, 500));
   EXPECT_EQ(2, page_count);
+}
+
+TEST_P(PrintContextTest, ScaledVerticalRL2) {
+  SetBodyInnerHTML(R"HTML(
+    <style>html { writing-mode:vertical-rl; }</style>
+    <div style="break-after:page;">x</div>
+    <div style="inline-size:10000px; block-size:500px;"></div>
+  )HTML");
+
+  int page_count = PrintContext::NumberOfPages(GetDocument().GetFrame(),
+                                               gfx::SizeF(500, 500));
+  EXPECT_EQ(2, page_count);
+}
+
+TEST_P(PrintContextTest, ScaledVerticalRL3) {
+  SetBodyInnerHTML(R"HTML(
+    <style>html { writing-mode:vertical-rl; }</style>
+    <div style="break-after:page;">x</div>
+    <div style="break-after:page; inline-size:10000px; block-size:10px;"></div>
+    <div style="inline-size:10000px; block-size:10px;"></div>
+  )HTML");
+
+  int page_count = PrintContext::NumberOfPages(GetDocument().GetFrame(),
+                                               gfx::SizeF(500, 500));
+  EXPECT_EQ(3, page_count);
+}
+
+TEST_P(PrintContextTest, ScaledVerticalLR1) {
+  SetBodyInnerHTML(R"HTML(
+    <style>html { writing-mode:vertical-lr; }</style>
+    <div style="break-after:page;">x</div>
+    <div style="inline-size:10000px; block-size:10px;"></div>
+  )HTML");
+
+  int page_count = PrintContext::NumberOfPages(GetDocument().GetFrame(),
+                                               gfx::SizeF(500, 500));
+  EXPECT_EQ(2, page_count);
+}
+
+TEST_P(PrintContextTest, ScaledVerticalLR2) {
+  SetBodyInnerHTML(R"HTML(
+    <style>html { writing-mode:vertical-lr; }</style>
+    <div style="break-after:page;">x</div>
+    <div style="inline-size:10000px; block-size:500px;"></div>
+  )HTML");
+
+  int page_count = PrintContext::NumberOfPages(GetDocument().GetFrame(),
+                                               gfx::SizeF(500, 500));
+  EXPECT_EQ(2, page_count);
+}
+
+TEST_P(PrintContextTest, ScaledVerticalLR3) {
+  SetBodyInnerHTML(R"HTML(
+    <style>html { writing-mode:vertical-lr; }</style>
+    <div style="break-after:page;">x</div>
+    <div style="break-after:page; inline-size:10000px; block-size:10px;"></div>
+    <div style="inline-size:10000px; block-size:10px;"></div>
+  )HTML");
+
+  int page_count = PrintContext::NumberOfPages(GetDocument().GetFrame(),
+                                               gfx::SizeF(500, 500));
+  EXPECT_EQ(3, page_count);
+}
+
+TEST_P(PrintContextTest, ScaledHorizontalTB1) {
+  SetBodyInnerHTML(R"HTML(
+    <style>html { writing-mode:horizontal-tb; }</style>
+    <div style="break-after:page;">x</div>
+    <div style="inline-size:10000px; block-size:10px;"></div>
+  )HTML");
+
+  int page_count = PrintContext::NumberOfPages(GetDocument().GetFrame(),
+                                               gfx::SizeF(500, 500));
+  EXPECT_EQ(2, page_count);
+}
+
+TEST_P(PrintContextTest, ScaledHorizontalTB2) {
+  SetBodyInnerHTML(R"HTML(
+    <style>html { writing-mode:horizontal-tb; }</style>
+    <div style="break-after:page;">x</div>
+    <div style="inline-size:10000px; block-size:500px;"></div>
+  )HTML");
+
+  int page_count = PrintContext::NumberOfPages(GetDocument().GetFrame(),
+                                               gfx::SizeF(500, 500));
+  EXPECT_EQ(2, page_count);
+}
+
+TEST_P(PrintContextTest, ScaledHorizontalTB3) {
+  SetBodyInnerHTML(R"HTML(
+    <style>html { writing-mode:horizontal-tb; }</style>
+    <div style="break-after:page;">x</div>
+    <div style="break-after:page; inline-size:10000px; block-size:10px;"></div>
+    <div style="inline-size:10000px; block-size:10px;"></div>
+  )HTML");
+
+  int page_count = PrintContext::NumberOfPages(GetDocument().GetFrame(),
+                                               gfx::SizeF(500, 500));
+  EXPECT_EQ(3, page_count);
 }
 
 INSTANTIATE_PAINT_TEST_SUITE_P(PrintContextFrameTest);

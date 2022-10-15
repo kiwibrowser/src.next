@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -251,8 +251,7 @@ bool ModifyExtensionForServiceWorker(const base::FilePath& extension_root,
   }
 
   // Number of JS scripts must be >= 1.
-  base::Value::ConstListView scripts_list =
-      background_scripts_list->GetListDeprecated();
+  const base::Value::List& scripts_list = background_scripts_list->GetList();
   if (scripts_list.size() < 1) {
     ADD_FAILURE() << extension_root.value()
                   << ": Only event pages with JS script(s) can be loaded "
@@ -362,7 +361,7 @@ const Extension* ExtensionBrowserTest::GetExtensionByPath(
       return extension.get();
     }
   }
-  return NULL;
+  return nullptr;
 }
 
 void ExtensionBrowserTest::SetUp() {
@@ -480,7 +479,7 @@ const Extension* ExtensionBrowserTest::LoadExtensionAsComponentWithManifest(
   base::ScopedAllowBlockingForTesting allow_blocking;
   std::string manifest;
   if (!base::ReadFileToString(path.Append(manifest_relative_path), &manifest)) {
-    return NULL;
+    return nullptr;
   }
 
   extension_service()->component_loader()->set_ignore_allowlist_for_testing(
@@ -490,7 +489,7 @@ const Extension* ExtensionBrowserTest::LoadExtensionAsComponentWithManifest(
   const Extension* extension =
       extension_registry()->enabled_extensions().GetByID(extension_id);
   if (!extension)
-    return NULL;
+    return nullptr;
   observer_->set_last_loaded_extension_id(extension->id());
   return extension;
 }
@@ -674,7 +673,7 @@ const Extension* ExtensionBrowserTest::InstallOrUpdateExtension(
       crx_path = PackExtension(path, run_flags);
     }
     if (crx_path.empty())
-      return NULL;
+      return nullptr;
 
     std::unique_ptr<ExtensionInstallPrompt> install_ui;
     if (prompt_auto_confirm) {
@@ -718,11 +717,11 @@ const Extension* ExtensionBrowserTest::InstallOrUpdateExtension(
     for (auto iter = errors->begin(); iter != errors->end(); ++iter)
       VLOG(1) << *iter;
 
-    return NULL;
+    return nullptr;
   }
 
   if (!observer_->WaitForExtensionViewsToLoad())
-    return NULL;
+    return nullptr;
   return registry->GetExtensionById(last_loaded_extension_id(),
                                     ExtensionRegistry::ENABLED);
 }

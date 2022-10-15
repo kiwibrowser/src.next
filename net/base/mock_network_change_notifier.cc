@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,33 +51,33 @@ void MockNetworkChangeNotifier::GetCurrentConnectedNetworks(
 }
 
 void MockNetworkChangeNotifier::NotifyNetworkMadeDefault(
-    NetworkChangeNotifier::NetworkHandle network) {
+    handles::NetworkHandle network) {
   QueueNetworkMadeDefault(network);
   // Spin the message loop so the notification is delivered.
   base::RunLoop().RunUntilIdle();
 }
 
 void MockNetworkChangeNotifier::QueueNetworkMadeDefault(
-    NetworkChangeNotifier::NetworkHandle network) {
+    handles::NetworkHandle network) {
   NetworkChangeNotifier::NotifyObserversOfSpecificNetworkChange(
       NetworkChangeNotifier::NetworkChangeType::kMadeDefault, network);
 }
 
 void MockNetworkChangeNotifier::NotifyNetworkDisconnected(
-    NetworkChangeNotifier::NetworkHandle network) {
+    handles::NetworkHandle network) {
   QueueNetworkDisconnected(network);
   // Spin the message loop so the notification is delivered.
   base::RunLoop().RunUntilIdle();
 }
 
 void MockNetworkChangeNotifier::QueueNetworkDisconnected(
-    NetworkChangeNotifier::NetworkHandle network) {
+    handles::NetworkHandle network) {
   NetworkChangeNotifier::NotifyObserversOfSpecificNetworkChange(
       NetworkChangeNotifier::NetworkChangeType::kDisconnected, network);
 }
 
 void MockNetworkChangeNotifier::NotifyNetworkConnected(
-    NetworkChangeNotifier::NetworkHandle network) {
+    handles::NetworkHandle network) {
   NetworkChangeNotifier::NotifyObserversOfSpecificNetworkChange(
       NetworkChangeNotifier::NetworkChangeType::kConnected, network);
   // Spin the message loop so the notification is delivered.

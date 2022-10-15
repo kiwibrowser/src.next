@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -9,6 +9,7 @@ import("//tools/typescript/ts_definitions.gni")
 import("//tools/typescript/ts_library.gni")
 import("//ui/webui/resources/include_polymer.gni")
 import("//ui/webui/resources/tools/generate_grd.gni")
+import("./cr_elements/cr_elements.gni")
 
 generate_grd("build_grd") {
   grd_prefix = "webui_generated"
@@ -20,7 +21,6 @@ generate_grd("build_grd") {
     "html:build_grdp",
     "images:build_grdp",
     "js:build_grdp",
-    "js/cr/ui:build_grdp",
     "js/metrics_reporter:build_grdp",
     "//third_party/jstemplate:build_grdp",
   ]
@@ -28,7 +28,6 @@ generate_grd("build_grd") {
     "$target_gen_dir/css/resources.grdp",
     "$target_gen_dir/html/resources.grdp",
     "$target_gen_dir/images/resources.grdp",
-    "$target_gen_dir/js/cr/ui/resources.grdp",
     "$target_gen_dir/js/metrics_reporter/resources.grdp",
     "$target_gen_dir/js/resources.grdp",
     "$target_gen_dir/resources_ts.grdp",
@@ -49,7 +48,6 @@ generate_grd("build_grd") {
 
   if (include_polymer) {
     public_deps += [
-      "cr_components:build_grdp",
       "cr_components/app_management:build_grdp",
       "cr_components/customize_themes:build_grdp",
       "cr_components/help_bubble:build_grdp",
@@ -60,27 +58,18 @@ generate_grd("build_grd") {
     ]
     grdp_files += [
       "$root_gen_dir/third_party/polymer/v3_0/polymer_3_0_resources.grdp",
-      "$root_gen_dir/ui/webui/resources/cr_components/app_management/resources.grdp",
-      "$root_gen_dir/ui/webui/resources/cr_components/cr_components_resources.grdp",
-      "$root_gen_dir/ui/webui/resources/cr_components/customize_themes/resources.grdp",
-      "$root_gen_dir/ui/webui/resources/cr_components/help_bubble/resources.grdp",
-      "$root_gen_dir/ui/webui/resources/cr_components/most_visited/resources.grdp",
       "$root_gen_dir/ui/webui/resources/cr_elements/cr_elements_resources.grdp",
-      "$root_gen_dir/ui/webui/resources/js/browser_command/resources.grdp",
+      "$target_gen_dir/cr_components/app_management/resources.grdp",
+      "$target_gen_dir/cr_components/customize_themes/resources.grdp",
+      "$target_gen_dir/cr_components/help_bubble/resources.grdp",
+      "$target_gen_dir/cr_components/most_visited/resources.grdp",
+      "$target_gen_dir/js/browser_command/resources.grdp",
     ]
 
     if (use_nss_certs) {
       public_deps += [ "cr_components/certificate_manager:build_grdp" ]
       grdp_files +=
           [ "$target_gen_dir/cr_components/certificate_manager/resources.grdp" ]
-    }
-
-    # TODO(crbug.com/1184053): Fully remove once no longer used by CrOS.
-    if (is_chromeos_ash) {
-      public_deps += [ "//third_party/polymer/v1_0:build_grdp" ]
-      grdp_files += [
-        "$root_gen_dir/third_party/polymer/v1_0/polymer_1_0_resources.grdp",
-      ]
     }
 
     if (!is_android) {
@@ -92,17 +81,23 @@ generate_grd("build_grd") {
   if (is_chromeos_ash) {
     public_deps += [
       ":build_cros_styles_grdp",
+      "cr_components:build_grdp",
+      "js/cr/ui:build_grdp",
       "//ash/webui/common/resources:build_grdp",
+      "//ash/webui/common/resources:build_html_css_wrapper_files_grdp",
       "//chromeos/ash/components/cros_elements:build_grdp",
       "//third_party/material_web_components:build_grdp",
       "//third_party/web-animations-js:build_grdp",
     ]
     grdp_files += [
-      "$root_gen_dir/chromeos/ash/components/cros_elements/cros_elements_resources.grdp",
-      "$root_gen_dir/ui/webui/resources/cros_styles_resources.grdp",
-      "$root_gen_dir/third_party/web-animations-js/web_animations_resources.grdp",
-      "$root_gen_dir/third_party/material_web_components/material_web_components_resources.grdp",
       "$root_gen_dir/ash/webui/common/resources/ash_common_resources.grdp",
+      "$root_gen_dir/ash/webui/common/resources/html_css_wrapper_files_resources.grdp",
+      "$root_gen_dir/chromeos/ash/components/cros_elements/cros_elements_resources.grdp",
+      "$root_gen_dir/third_party/material_web_components/material_web_components_resources.grdp",
+      "$root_gen_dir/third_party/web-animations-js/web_animations_resources.grdp",
+      "$target_gen_dir/cr_components/cr_components_resources.grdp",
+      "$target_gen_dir/cros_styles_resources.grdp",
+      "$target_gen_dir/js/cr/ui/resources.grdp",
     ]
   }
 
@@ -147,12 +142,11 @@ group("closure_compile") {
     "js:closure_compile_modules",
   ]
 
-  if (include_polymer) {
-    deps += [ "cr_elements:closure_compile" ]
-
-    if (is_chromeos_ash) {
-      deps += [ "cr_components/chromeos:closure_compile" ]
-    }
+  if (include_polymer && is_chromeos_ash) {
+    deps += [
+      "cr_components/chromeos:closure_compile",
+      "cr_elements:closure_compile",
+    ]
   }
 }
 
@@ -161,59 +155,75 @@ group("closure_compile") {
 preprocessed_folder = "$target_gen_dir/preprocessed"
 
 checked_in_dts_files = [
-  "cr_elements/cr_button/cr_button.m.d.ts",
-  "cr_elements/cr_checkbox/cr_checkbox.m.d.ts",
-  "cr_elements/cr_container_shadow_behavior.m.d.ts",
-  "cr_elements/cr_dialog/cr_dialog.m.d.ts",
-  "cr_elements/cr_expand_button/cr_expand_button.m.d.ts",
-  "cr_elements/cr_fingerprint/cr_fingerprint_progress_arc.m.d.ts",
-  "cr_elements/cr_icon_button/cr_icon_button.m.d.ts",
-  "cr_elements/cr_input/cr_input.m.d.ts",
-  "cr_elements/cr_lazy_render/cr_lazy_render.m.d.ts",
-  "cr_elements/cr_lottie/cr_lottie.m.d.ts",
-  "cr_elements/cr_radio_button/cr_card_radio_button.m.d.ts",
-  "cr_elements/cr_radio_button/cr_radio_button_behavior.m.d.ts",
-  "cr_elements/cr_radio_button/cr_radio_button.m.d.ts",
-  "cr_elements/cr_radio_group/cr_radio_group.m.d.ts",
-  "cr_elements/cr_scrollable_behavior.m.d.ts",
-  "cr_elements/cr_toggle/cr_toggle.m.d.ts",
+  "cr_elements/cr_scrollable_behavior.d.ts",
   "cr_elements/find_shortcut_behavior.d.ts",
-  "cr_elements/policy/cr_policy_indicator_behavior.m.d.ts",
-  "cr_elements/policy/cr_policy_indicator.m.d.ts",
-  "cr_elements/policy/cr_policy_pref_indicator.m.d.ts",
-  "cr_elements/policy/cr_tooltip_icon.m.d.ts",
-  "js/cr/ui/focus_row_behavior.m.d.ts",
-  "js/i18n_behavior.m.d.ts",
-  "js/list_property_update_behavior.m.d.ts",
-  "js/parse_html_subset.m.d.ts",
+  "cr_elements/i18n_behavior.d.ts",
+  "cr_elements/policy/cr_policy_indicator_behavior.d.ts",
+  "cr_elements/web_ui_listener_behavior.d.ts",
+  "js/parse_html_subset.d.ts",
   "js/promise_resolver.m.d.ts",
   "js/static_types.d.ts",
-  "js/web_ui_listener_behavior.m.d.ts",
 ]
-
-if (is_chromeos_ash || is_fuchsia || is_linux || is_mac || is_win) {
-  checked_in_dts_files += [
-    "js/cr/ui/context_menu_handler.m.d.ts",
-    "js/cr/ui/menu_button.m.d.ts",
-    "js/cr/ui/menu_item.m.d.ts",
-  ]
-}
 
 if (is_chromeos_ash) {
   checked_in_dts_files += [
     "cr_components/chromeos/bluetooth/bluetooth_base_page.d.ts",
     "cr_components/chromeos/bluetooth/bluetooth_battery_icon_percentage.d.ts",
     "cr_components/chromeos/bluetooth/bluetooth_device_battery_info.d.ts",
+    "cr_components/chromeos/bluetooth/bluetooth_dialog.d.ts",
     "cr_components/chromeos/bluetooth/bluetooth_icon.d.ts",
+    "cr_components/chromeos/bluetooth/bluetooth_pairing_confirm_code_page.d.ts",
     "cr_components/chromeos/bluetooth/bluetooth_pairing_device_item.d.ts",
     "cr_components/chromeos/bluetooth/bluetooth_pairing_device_selection_page.d.ts",
     "cr_components/chromeos/bluetooth/bluetooth_pairing_enter_code_page.d.ts",
     "cr_components/chromeos/bluetooth/bluetooth_pairing_request_code_page.d.ts",
     "cr_components/chromeos/bluetooth/bluetooth_pairing_ui.d.ts",
+    "cr_components/chromeos/bluetooth/bluetooth_spinner_page.d.ts",
+    "cr_components/chromeos/cellular_setup/base_page.d.ts",
+    "cr_components/chromeos/cellular_setup/button_bar.d.ts",
+    "cr_components/chromeos/cellular_setup/cellular_eid_dialog.d.ts",
+    "cr_components/chromeos/cellular_setup/cellular_setup.d.ts",
+    "cr_components/chromeos/cellular_setup/cellular_setup_delegate.d.ts",
+    "cr_components/chromeos/cellular_setup/cellular_setup_icons.d.ts",
+    "cr_components/chromeos/cellular_setup/cellular_types.d.ts",
+    "cr_components/chromeos/cellular_setup/esim_flow_ui.d.ts",
+    "cr_components/chromeos/cellular_setup/esim_manager_listener_behavior.d.ts",
+    "cr_components/chromeos/cellular_setup/esim_manager_utils.d.ts",
+    "cr_components/chromeos/cellular_setup/profile_discovery_list_page.d.ts",
+    "cr_components/chromeos/cellular_setup/provisioning_page.d.ts",
+    "cr_components/chromeos/cellular_setup/psim_flow_ui.d.ts",
+    "cr_components/chromeos/cellular_setup/setup_loading_page.d.ts",
+    "cr_components/chromeos/network/cellular_utils.d.ts",
+    "cr_components/chromeos/network/cr_policy_network_behavior_mojo.d.ts",
+    "cr_components/chromeos/network/cr_policy_network_indicator_mojo.d.ts",
+    "cr_components/chromeos/network/mojo_interface_provider.d.ts",
+    "cr_components/chromeos/network/network_apnlist.d.ts",
+    "cr_components/chromeos/network/network_choose_mobile.d.ts",
+    "cr_components/chromeos/network/network_config.d.ts",
+    "cr_components/chromeos/network/network_config_input.d.ts",
+    "cr_components/chromeos/network/network_config_toggle.d.ts",
+    "cr_components/chromeos/network/network_icon.d.ts",
+    "cr_components/chromeos/network/network_ip_config.d.ts",
+    "cr_components/chromeos/network/network_list.d.ts",
+    "cr_components/chromeos/network/network_list_item.d.ts",
+    "cr_components/chromeos/network/network_list_types.d.ts",
+    "cr_components/chromeos/network/network_listener_behavior.d.ts",
+    "cr_components/chromeos/network/network_nameservers.d.ts",
+    "cr_components/chromeos/network/network_property_list_mojo.d.ts",
+    "cr_components/chromeos/network/network_proxy.d.ts",
+    "cr_components/chromeos/network/network_shared_css.d.ts",
+    "cr_components/chromeos/network/network_siminfo.d.ts",
+    "cr_components/chromeos/network/onc_mojo.d.ts",
+    "cr_components/chromeos/network/sim_lock_dialogs.d.ts",
     "cr_components/chromeos/smb_shares/add_smb_share_dialog.d.ts",
     "cr_components/chromeos/smb_shares/smb_browser_proxy.d.ts",
-    "js/cr/ui/grid.m.d.ts",
-    "js/cr/ui/list.m.d.ts",
+    "cr_components/chromeos/traffic_counters/traffic_counters.d.ts",
+    "cr_components/chromeos/traffic_counters/traffic_counters_adapter.d.ts",
+    "cr_components/chromeos/quick_unlock/pin_keyboard.d.ts",
+    "cr_components/chromeos/quick_unlock/setup_pin_keyboard.d.ts",
+    "cr_elements/cr_container_shadow_behavior.d.ts",
+    "js/list_property_update_behavior.d.ts",
+    "js/cr/ui/focus_row_behavior.d.ts",
   ]
 }
 
@@ -229,86 +239,37 @@ generate_definitions_js_files = [
   "js/action_link.js",
   "js/assert.m.js",
   "js/color_utils.js",
-  "js/cr/event_target.m.js",
+  "js/cr/event_target.js",
   "js/cr.m.js",
-  "js/cr/ui.m.js",
-  "js/cr/ui/focus_outline_manager.m.js",
-  "js/cr/ui/focus_row.m.js",
-  "js/cr/ui/keyboard_shortcut_list.m.js",
-  "js/cr/ui/store.js",
-  "js/event_tracker.m.js",
+  "js/cr/ui.js",
+  "js/event_tracker.js",
   "js/load_time_data.m.js",
   "js/plural_string_proxy.js",
-  "js/search_highlight_utils.js",
   "js/icon.js",
   "js/util.m.js",
 ]
 
-if (is_chromeos_ash || is_fuchsia || is_linux || is_mac || is_win) {
-  generate_definitions_js_files += [
-    "js/cr/ui/menu.m.js",
-    "js/cr/ui/command.m.js",
-    "js/cr/ui/position_util.m.js",
-  ]
-}
-
 if (is_chromeos_ash) {
   generate_definitions_js_files += [
-    "js/cr/ui/array_data_model.m.js",
-    "js/cr/ui/list_item.m.js",
-    "js/cr/ui/list_selection_controller.m.js",
-    "js/cr/ui/list_selection_model.m.js",
-    "js/cr/ui/list_single_selection_model.m.js",
+    "js/cr/ui/focus_row_js.js",
+    "js/cr/ui/focus_without_ink_js.js",
+    "js/cr/ui/keyboard_shortcut_list_js.js",
     "js/cr/ui/store_client.js",
+    "js/cr/ui/store.js",
   ]
 }
 
-if (include_polymer) {
+if (include_polymer && is_chromeos_ash) {
   generate_definitions_js_files += [
-    "cr_elements/action_link_css.m.js",
-    "cr_elements/cr_fingerprint/cr_fingerprint_icon.m.js",
-    "cr_elements/cr_actionable_row_style.m.js",
-    "cr_elements/cr_icons_css.m.js",
-    "cr_elements/cr_input/cr_input_style_css.m.js",
-    "cr_elements/cr_radio_button/cr_radio_button_style_css.m.js",
-    "cr_elements/hidden_style_css.m.js",
-    "cr_elements/icons.m.js",
-    "cr_elements/md_select_css.m.js",
-    "cr_elements/shared_style_css.m.js",
-    "cr_elements/shared_vars_css.m.js",
+    "cr_components/chromeos/bluetooth/bluetooth_icons.js",
+    "cr_components/chromeos/bluetooth/bluetooth_metrics_utils.js",
+    "cr_components/chromeos/bluetooth/bluetooth_types.js",
+    "cr_components/chromeos/bluetooth/bluetooth_utils.js",
+    "cr_components/chromeos/bluetooth/cros_bluetooth_config.js",
+    "cr_components/chromeos/quick_unlock/lock_screen_constants.js",
+    "cr_components/chromeos/quick_unlock/pin_keyboard_icon.js",
+    "cr_elements/chromeos/cros_color_overrides.m.js",
   ]
-
-  if (is_chromeos_ash) {
-    generate_definitions_js_files += [
-      "cr_components/chromeos/bluetooth/bluetooth_dialog.js",
-      "cr_components/chromeos/bluetooth/bluetooth_icons.js",
-      "cr_components/chromeos/bluetooth/bluetooth_metrics_utils.js",
-      "cr_components/chromeos/bluetooth/bluetooth_pairing_confirm_code_page.js",
-      "cr_components/chromeos/bluetooth/bluetooth_spinner_page.js",
-      "cr_components/chromeos/bluetooth/bluetooth_types.js",
-      "cr_components/chromeos/bluetooth/bluetooth_utils.js",
-      "cr_components/chromeos/bluetooth/cros_bluetooth_config.js",
-      "cr_components/chromeos/quick_unlock/lock_screen_constants.m.js",
-      "cr_components/chromeos/quick_unlock/pin_keyboard_icon.m.js",
-      "cr_components/chromeos/quick_unlock/pin_keyboard.m.js",
-      "cr_components/chromeos/quick_unlock/setup_pin_keyboard.m.js",
-      "cr_elements/chromeos/cros_color_overrides.m.js",
-      "cr_elements/chromeos/cr_picture/cr_camera.html.js",
-      "cr_elements/chromeos/cr_picture/cr_camera.js",
-      "cr_elements/chromeos/cr_picture/cr_picture_list.html.js",
-      "cr_elements/chromeos/cr_picture/cr_picture_list.js",
-      "cr_elements/chromeos/cr_picture/cr_picture_pane.html.js",
-      "cr_elements/chromeos/cr_picture/cr_picture_pane.js",
-      "cr_elements/chromeos/cr_picture/cr_picture_types.js",
-      "cr_elements/chromeos/cr_picture/icons.html.js",
-      "cr_elements/chromeos/cr_picture/png.js",
-      "cr_elements/chromeos/cr_picture/webcam_utils.js",
-    ]
-  }
-}
-
-if (!is_android) {
-  generate_definitions_js_files += [ "js/cr/ui/focus_without_ink.m.js" ]
 }
 
 if (is_ios) {
@@ -320,88 +281,34 @@ ts_library("library") {
   out_dir = preprocessed_folder
   composite = true
   tsconfig_base = "tsconfig_base.json"
+  extra_deps = []
 
-  in_files = [
-    "cr_elements/cr_splitter/cr_splitter.ts",
-    "cr_elements/cr_tab_box/cr_tab_box.ts",
-    "cr_elements/cr_tab_box/cr_tab_box.html.ts",
-    "cr_elements/cr_tree/cr_tree.ts",
-    "cr_elements/cr_tree/cr_tree.html.ts",
-    "cr_elements/cr_tree/cr_tree_base.ts",
-    "cr_elements/cr_tree/cr_tree_item.ts",
-    "cr_elements/cr_tree/cr_tree_item.html.ts",
-    "js/assert_ts.ts",
-    "js/custom_element.ts",
-    "js/cr/ui/focus_grid.ts",
-    "js/cr/ui/drag_wrapper.ts",
-  ]
+  in_files = cr_elements_files + [
+               "js/assert_ts.ts",
+               "js/custom_element.ts",
+               "js/cr/ui/drag_wrapper.ts",
+               "js/cr/ui/focus_grid.ts",
+               "js/cr/ui/focus_row.ts",
+               "js/cr/ui/focus_outline_manager.ts",
+               "js/cr/ui/keyboard_shortcut_list.ts",
+               "js/cr/ui/store_ts.ts",
+             ]
 
   if (include_polymer) {
     in_files += [
       "cr_components/localized_link/localized_link.html.ts",
       "cr_components/localized_link/localized_link.ts",
-      "cr_components/managed_footnote/managed_footnote.html.ts",
-      "cr_components/managed_footnote/managed_footnote.ts",
       "cr_components/managed_dialog/managed_dialog.html.ts",
       "cr_components/managed_dialog/managed_dialog.ts",
-      "cr_elements/cr_auto_img/cr_auto_img.ts",
-      "cr_elements/cr_grid/cr_grid.html.ts",
-      "cr_elements/cr_grid/cr_grid.ts",
-      "cr_elements/cr_a11y_announcer/cr_a11y_announcer.html.ts",
-      "cr_elements/cr_a11y_announcer/cr_a11y_announcer.ts",
-      "cr_elements/cr_action_menu/cr_action_menu.html.ts",
-      "cr_elements/cr_action_menu/cr_action_menu.ts",
-      "cr_elements/cr_container_shadow_mixin.ts",
-      "cr_elements/cr_drawer/cr_drawer.html.ts",
-      "cr_elements/cr_drawer/cr_drawer.ts",
-      "cr_elements/cr_link_row/cr_link_row.html.ts",
-      "cr_elements/cr_link_row/cr_link_row.ts",
-      "cr_elements/cr_menu_selector/cr_menu_selector.ts",
-      "cr_elements/cr_nav_menu_item_style.css.ts",
-      "cr_elements/cr_page_host_style.css.ts",
-      "cr_elements/cr_profile_avatar_selector/cr_profile_avatar_selector_grid.html.ts",
-      "cr_elements/cr_profile_avatar_selector/cr_profile_avatar_selector_grid.ts",
-      "cr_elements/cr_profile_avatar_selector/cr_profile_avatar_selector.html.ts",
-      "cr_elements/cr_profile_avatar_selector/cr_profile_avatar_selector.ts",
-      "cr_elements/cr_search_field/cr_search_field_mixin.ts",
-      "cr_elements/cr_search_field/cr_search_field.html.ts",
-      "cr_elements/cr_search_field/cr_search_field.ts",
-      "cr_elements/cr_slider/cr_slider.html.ts",
-      "cr_elements/cr_slider/cr_slider.ts",
-      "cr_elements/cr_tabs/cr_tabs.html.ts",
-      "cr_elements/cr_tabs/cr_tabs.ts",
-      "cr_elements/cr_toast/cr_toast_manager.html.ts",
-      "cr_elements/cr_toast/cr_toast_manager.ts",
-      "cr_elements/cr_toast/cr_toast.html.ts",
-      "cr_elements/cr_toast/cr_toast.ts",
-      "cr_elements/cr_toolbar/cr_toolbar_search_field.html.ts",
-      "cr_elements/cr_toolbar/cr_toolbar_search_field.ts",
-      "cr_elements/cr_toolbar/cr_toolbar_selection_overlay.html.ts",
-      "cr_elements/cr_toolbar/cr_toolbar_selection_overlay.ts",
-      "cr_elements/cr_toolbar/cr_toolbar.html.ts",
-      "cr_elements/cr_toolbar/cr_toolbar.ts",
-      "cr_elements/cr_view_manager/cr_view_manager.html.ts",
-      "cr_elements/cr_view_manager/cr_view_manager.ts",
-      "cr_elements/find_shortcut_mixin.ts",
-      "cr_elements/mouse_hoverable_mixin.ts",
-      "cr_elements/mwb_element_shared_style.css.ts",
-      "cr_elements/mwb_shared_icons.html.ts",
-      "cr_elements/mwb_shared_style.css.ts",
-      "cr_elements/mwb_shared_vars.css.ts",
-      "cr_elements/search_highlight_style.css.ts",
+      "cr_components/managed_footnote/managed_footnote.html.ts",
+      "cr_components/managed_footnote/managed_footnote.ts",
+      "js/cr/ui/focus_row_mixin.ts",
+      "js/cr/ui/focus_without_ink.ts",
       "js/i18n_mixin.ts",
       "js/list_property_update_mixin.ts",
+      "js/search_highlight_utils.ts",
       "js/web_ui_listener_mixin.ts",
     ]
-
-    if (is_chromeos) {
-      # cr-searchable-drop-down is only used in smb and cups dialogs, both of
-      # which are chromeos only.
-      in_files += [
-        "cr_elements/cr_searchable_drop_down/cr_searchable_drop_down.html.ts",
-        "cr_elements/cr_searchable_drop_down/cr_searchable_drop_down.ts",
-      ]
-    }
   }
 
   definitions = [
@@ -423,7 +330,7 @@ ts_library("library") {
   }
 
   deps = [ "//third_party/polymer/v3_0:library" ]
-  extra_deps = [
+  extra_deps += [
     ":copy_checked_in_dts_files",
     ":generate_definitions",
     ":preprocess",

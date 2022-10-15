@@ -1650,8 +1650,6 @@ inline EContainerType CSSIdentifierValue::ConvertTo() const {
       return kContainerTypeInlineSize;
     case CSSValueID::kSize:
       return kContainerTypeSize;
-    case CSSValueID::kStyle:
-      return kContainerTypeStyle;
     default:
       break;
   }
@@ -1731,6 +1729,70 @@ inline ScrollbarGutter CSSIdentifierValue::ConvertTo() const {
   }
   NOTREACHED();
   return kScrollbarGutterAuto;
+}
+
+template <>
+inline CSSIdentifierValue::CSSIdentifierValue(TimelineAxis axis)
+    : CSSValue(kIdentifierClass) {
+  switch (axis) {
+    case TimelineAxis::kBlock:
+      value_id_ = CSSValueID::kBlock;
+      break;
+    case TimelineAxis::kInline:
+      value_id_ = CSSValueID::kInline;
+      break;
+    case TimelineAxis::kVertical:
+      value_id_ = CSSValueID::kVertical;
+      break;
+    case TimelineAxis::kHorizontal:
+      value_id_ = CSSValueID::kHorizontal;
+      break;
+  }
+}
+
+template <>
+inline TimelineAxis CSSIdentifierValue::ConvertTo() const {
+  switch (GetValueID()) {
+    case CSSValueID::kBlock:
+      return TimelineAxis::kBlock;
+    case CSSValueID::kInline:
+      return TimelineAxis::kInline;
+    case CSSValueID::kVertical:
+      return TimelineAxis::kVertical;
+    case CSSValueID::kHorizontal:
+      return TimelineAxis::kHorizontal;
+    default:
+      break;
+  }
+  NOTREACHED();
+  return TimelineAxis::kBlock;
+}
+
+template <>
+inline CSSIdentifierValue::CSSIdentifierValue(TimelineScroller scroller)
+    : CSSValue(kIdentifierClass) {
+  switch (scroller) {
+    case TimelineScroller::kNearest:
+      value_id_ = CSSValueID::kNearest;
+      break;
+    case TimelineScroller::kRoot:
+      value_id_ = CSSValueID::kRoot;
+      break;
+  }
+}
+
+template <>
+inline TimelineScroller CSSIdentifierValue::ConvertTo() const {
+  switch (GetValueID()) {
+    case CSSValueID::kNearest:
+      return TimelineScroller::kNearest;
+    case CSSValueID::kRoot:
+      return TimelineScroller::kRoot;
+    default:
+      break;
+  }
+  NOTREACHED();
+  return TimelineScroller::kNearest;
 }
 
 }  // namespace blink

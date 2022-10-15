@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -144,10 +144,6 @@ const char* const kObsoleteComponentExtensionIds[] = {
     // The Video Player chrome app became obsolete in m93, but is preserved for
     // continued test coverage.
     "jcgeabjmjgoblfofpppfkcoakmfobdko",  // Video Player
-    // The Audio Player chrome app became obsolete in m97. This entry can be
-    // removed after references to kAudioPlayerAppId in component_loader.cc
-    // are removed.
-    "cjbfomnbifhcdnihkgipgfcihmgjfhbf"  // Audio Player
 };
 
 }  // namespace

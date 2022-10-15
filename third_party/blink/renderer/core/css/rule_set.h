@@ -99,6 +99,11 @@ class CORE_EXPORT RuleData {
   // RuleData. This is useful for @scope, where inner selectors must gain
   // additional specificity from the <scope-start> of the enclosing @scope.
   // https://drafts.csswg.org/css-cascade-6/#scope-atrule
+  //
+  // NOTE: You will want to call ComputeBloomFilterHashes() before actually
+  // using this RuleData for matching. However, the constructor cannot do it
+  // right away, since RuleMap wants to use the space normally used for hashes
+  // for its grouping (before compaction), so it needs to delay the call.
   RuleData(StyleRule*,
            unsigned selector_index,
            unsigned position,
@@ -133,6 +138,27 @@ class CORE_EXPORT RuleData {
     return descendant_selector_identifier_hashes_;
   }
 
+  // Used when the RuleData lives in a RuleMap, to store information about
+  // which bucket (group) in the RuleMap this RuleData lives in. The information
+  // is gone after ComputeBloomFilterHashes() is called.
+  void SetBucketInformation(unsigned bucket_number, unsigned order_in_bucket) {
+    bucket_number_ = bucket_number;
+    order_in_bucket_ = order_in_bucket;
+#if DCHECK_IS_ON()
+    marker_ = 0x12345678;
+#endif
+  }
+  unsigned GetBucketNumber() const {
+    DCHECK_EQ(marker_, 0x12345678U);
+    return bucket_number_;
+  }
+  unsigned GetOrderInBucket() const {
+    DCHECK_EQ(marker_, 0x12345678U);
+    return order_in_bucket_;
+  }
+
+  void ComputeBloomFilterHashes();
+
   void Trace(Visitor*) const;
 
   // This number is picked fairly arbitrary. If lowered, be aware that there
@@ -156,8 +182,24 @@ class CORE_EXPORT RuleData {
   unsigned has_document_security_origin_ : 1;
   unsigned valid_property_filter_ : 3;
   // 30 bits above
-  // Use plain array instead of a Vector to minimize memory overhead.
-  unsigned descendant_selector_identifier_hashes_[kMaximumIdentifierCount];
+  union {
+    // Used by RuleMap before compaction, to hold what bucket this RuleData
+    // is to be sorted into. (If the RuleData lives in a RuleMap, the hashes
+    // for the Bloom filter are computed after compaction, not right away.)
+    struct {
+      unsigned bucket_number_;
+      unsigned order_in_bucket_;
+
+      // Used only for DCHECKs, to verify that we don't access
+      // these members after compaction.
+      unsigned marker_;
+    };
+
+    // Hashes used for the Bloom filter.
+    // Use plain array instead of a Vector to minimize memory overhead.
+    // Zero-terminated if we do not use all elements.
+    unsigned descendant_selector_identifier_hashes_[kMaximumIdentifierCount];
+  };
 };
 
 }  // namespace blink
@@ -175,6 +217,125 @@ struct SameSizeAsRuleData {
 };
 
 ASSERT_SIZE(RuleData, SameSizeAsRuleData);
+
+// A memory-efficient and (fairly) cache-efficient mapping from bucket key
+// (e.g. CSS class, tag name, attribute key, etc.) to a collection of rules
+// (RuleData objects). It uses a vector as backing storage, and generally works
+// in two phases:
+//
+//  - During RuleSet setup (before compaction), we simply add rules to the
+//    back of the vector, ie., the elements will be in a random order.
+//  - Before rule matching, we need to _compact_ the rule map. This is done
+//    by grouping/sorting the vector by bucket, so that everything that belongs
+//    to the same vector lives together and can easily be picked out.
+//
+// The normal flow is that you first add all rules, call Compact(), then call
+// Find() as many times as you need. (Compact() is a moderately expensive
+// operation, which is why we don't want to be doing it too much.) However, in
+// certain cases related to UA stylesheets, we may need to insert new rules
+// on-the-fly (e.g., when seeing a <video> element for the first time, we
+// insert additional rules related to it); if so, you need to call Uncompact()
+// before adding them, then Compact() again.
+class RuleMap {
+  DISALLOW_NEW();
+
+ private:
+  struct Extent;
+
+ public:
+  void Add(const AtomicString& key, const RuleData& rule_data);
+  base::span<const RuleData> Find(const AtomicString& key) const {
+    DCHECK(buckets.IsEmpty() || compacted);
+    auto it = buckets.find(key);
+    if (it == buckets.end()) {
+      return {};
+    } else {
+      return GetRulesFromExtent(it->value);
+    }
+  }
+  bool IsEmpty() const { return backing.IsEmpty(); }
+  bool IsCompacted() const { return compacted; }
+
+  void Compact();
+  void Uncompact();
+
+  void Trace(Visitor* visitor) const { visitor->Trace(backing); }
+
+  struct ConstIterator {
+    HashMap<AtomicString, Extent>::const_iterator sub_it;
+    const RuleMap* rule_map;
+
+    WTF::KeyValuePair<AtomicString, base::span<const RuleData>> operator*()
+        const {
+      return {sub_it->key, rule_map->GetRulesFromExtent(sub_it->value)};
+    }
+    bool operator==(const ConstIterator& other) const {
+      DCHECK_EQ(rule_map, other.rule_map);
+      return sub_it == other.sub_it;
+    }
+    bool operator!=(const ConstIterator& other) const {
+      DCHECK_EQ(rule_map, other.rule_map);
+      return sub_it != other.sub_it;
+    }
+    ConstIterator& operator++() {
+      ++sub_it;
+      return *this;
+    }
+  };
+  ConstIterator begin() const { return {buckets.begin(), this}; }
+  ConstIterator end() const { return {buckets.end(), this}; }
+
+ private:
+  base::span<RuleData> GetRulesFromExtent(Extent extent) {
+    return {backing.begin() + extent.start_index, extent.length};
+  }
+  base::span<const RuleData> GetRulesFromExtent(Extent extent) const {
+    return {backing.begin() + extent.start_index, extent.length};
+  }
+
+  // A collection of rules that are in the same bucket. Before compaction,
+  // they are scattered around in the bucket vector; after compaction,
+  // each bucket will be contiguous.
+  struct Extent {
+    Extent() : bucket_number(0) {}
+    union {
+      // [0..num_buckets). Valid before compaction.
+      unsigned bucket_number;
+
+      // Into the backing vector. Valid after compaction.
+      unsigned start_index;
+    };
+
+    // How many rules are in this bucket. Will naturally not change
+    // by compaction.
+    wtf_size_t length = 0;
+  };
+
+  HashMap<AtomicString, Extent> buckets;
+
+  // Contains all the rules from all the buckets; after compaction,
+  // they will be contiguous in memory and you can do easily lookups
+  // on them through Find(); before, they are identified
+  // by having the group number stored in the RuleData itself
+  // (where the hashes for the fast-rejection Bloom filter would
+  // normally live; we delay their computation to after compaction).
+  //
+  // The inline size is, perhaps surprisingly, to reduce GC pressure
+  // for _large_ vectors. Setting an inline size (other than zero)
+  // causes Vector, and by extension HeapVector, to grow more
+  // aggressively on push_back(), leading to fewer memory allocations
+  // that need freeing. We call ShrinkToFit() on compaction, so the
+  // excess increase (which would normally be the downside of this
+  // strategy) is not a big problem for us.
+  //
+  // Of course, we also save a few allocations for the rule sets
+  // that are tiny. Most RuleMaps are either ~1–2 entries or in
+  // the hundreds/thousands.
+  HeapVector<RuleData, 4> backing;
+
+  wtf_size_t num_buckets = 0;
+  bool compacted = false;
+};
 
 // Holds RuleData objects. It partitions them into various indexed groups,
 // e.g. it stores separately rules that match against id, class, tag, shadow
@@ -197,61 +358,53 @@ class CORE_EXPORT RuleSet final : public GarbageCollected<RuleSet> {
 
   const RuleFeatureSet& Features() const { return features_; }
 
-  const HeapVector<RuleData>* IdRules(const AtomicString& key) const {
-    auto it = id_rules_.find(key);
-    return it != id_rules_.end() ? it->value : nullptr;
+  base::span<const RuleData> IdRules(const AtomicString& key) const {
+    return id_rules_.Find(key);
   }
-  const HeapVector<RuleData>* ClassRules(const AtomicString& key) const {
-    auto it = class_rules_.find(key);
-    return it != class_rules_.end() ? it->value : nullptr;
+  base::span<const RuleData> ClassRules(const AtomicString& key) const {
+    return class_rules_.Find(key);
   }
   bool HasAnyAttrRules() const { return !attr_rules_.IsEmpty(); }
-  const HeapVector<RuleData>* AttrRules(const AtomicString& key) const {
-    auto it = attr_rules_.find(key);
-    return it != attr_rules_.end() ? it->value : nullptr;
+  base::span<const RuleData> AttrRules(const AtomicString& key) const {
+    return attr_rules_.Find(key);
   }
-  bool CanIgnoreEntireList(const HeapVector<RuleData>* list,
+  bool CanIgnoreEntireList(base::span<const RuleData> list,
                            const AtomicString& key,
                            const AtomicString& value) const;
-  const HeapVector<RuleData>* TagRules(const AtomicString& key) const {
-    auto it = tag_rules_.find(key);
-    return it != tag_rules_.end() ? it->value : nullptr;
+  base::span<const RuleData> TagRules(const AtomicString& key) const {
+    return tag_rules_.Find(key);
   }
-  const HeapVector<RuleData>* UAShadowPseudoElementRules(
+  base::span<const RuleData> UAShadowPseudoElementRules(
       const AtomicString& key) const {
-    auto it = ua_shadow_pseudo_element_rules_.find(key);
-    return it != ua_shadow_pseudo_element_rules_.end() ? it->value : nullptr;
+    return ua_shadow_pseudo_element_rules_.Find(key);
   }
-  const HeapVector<RuleData>* LinkPseudoClassRules() const {
-    return &link_pseudo_class_rules_;
+  base::span<const RuleData> LinkPseudoClassRules() const {
+    return link_pseudo_class_rules_;
   }
-  const HeapVector<RuleData>* CuePseudoRules() const {
-    return &cue_pseudo_rules_;
+  base::span<const RuleData> CuePseudoRules() const {
+    return cue_pseudo_rules_;
   }
-  const HeapVector<RuleData>* FocusPseudoClassRules() const {
-    return &focus_pseudo_class_rules_;
+  base::span<const RuleData> FocusPseudoClassRules() const {
+    return focus_pseudo_class_rules_;
   }
-  const HeapVector<RuleData>* FocusVisiblePseudoClassRules() const {
-    return &focus_visible_pseudo_class_rules_;
+  base::span<const RuleData> FocusVisiblePseudoClassRules() const {
+    return focus_visible_pseudo_class_rules_;
   }
-  const HeapVector<RuleData>* SpatialNavigationInterestPseudoClassRules()
-      const {
-    return &spatial_navigation_interest_class_rules_;
+  base::span<const RuleData> SpatialNavigationInterestPseudoClassRules() const {
+    return spatial_navigation_interest_class_rules_;
   }
-  const HeapVector<RuleData>* UniversalRules() const {
-    return &universal_rules_;
+  base::span<const RuleData> UniversalRules() const { return universal_rules_; }
+  base::span<const RuleData> ShadowHostRules() const {
+    return shadow_host_rules_;
   }
-  const HeapVector<RuleData>* ShadowHostRules() const {
-    return &shadow_host_rules_;
+  base::span<const RuleData> PartPseudoRules() const {
+    return part_pseudo_rules_;
   }
-  const HeapVector<RuleData>* PartPseudoRules() const {
-    return &part_pseudo_rules_;
+  base::span<const RuleData> VisitedDependentRules() const {
+    return visited_dependent_rules_;
   }
-  const HeapVector<RuleData>* VisitedDependentRules() const {
-    return &visited_dependent_rules_;
-  }
-  const HeapVector<RuleData>* SelectorFragmentAnchorRules() const {
-    return &selector_fragment_anchor_rules_;
+  base::span<const RuleData> SelectorFragmentAnchorRules() const {
+    return selector_fragment_anchor_rules_;
   }
   const HeapVector<Member<StyleRulePage>>& PageRules() const {
     return page_rules_;
@@ -272,16 +425,12 @@ class CORE_EXPORT RuleSet final : public GarbageCollected<RuleSet> {
       const {
     return font_palette_values_rules_;
   }
-  const HeapVector<Member<StyleRuleScrollTimeline>>& ScrollTimelineRules()
-      const {
-    return scroll_timeline_rules_;
-  }
   const HeapVector<Member<StyleRulePositionFallback>>& PositionFallbackRules()
       const {
     return position_fallback_rules_;
   }
-  const HeapVector<RuleData>* SlottedPseudoElementRules() const {
-    return &slotted_pseudo_element_rules_;
+  base::span<const RuleData> SlottedPseudoElementRules() const {
+    return slotted_pseudo_element_rules_;
   }
 
   bool HasCascadeLayers() const { return implicit_outer_layer_; }
@@ -356,17 +505,16 @@ class CORE_EXPORT RuleSet final : public GarbageCollected<RuleSet> {
   FRIEND_TEST_ALL_PREFIXES(RuleSetTest, RuleDataPositionLimit);
   friend class RuleSetCascadeLayerTest;
 
-  using RuleMap = HeapHashMap<AtomicString, Member<HeapVector<RuleData>>>;
   using SubstringMatcherMap =
       HashMap<AtomicString, std::unique_ptr<base::SubstringSetMatcher>>;
 
   void AddToRuleSet(const AtomicString& key, RuleMap&, const RuleData&);
+  void AddToRuleSet(HeapVector<RuleData>&, const RuleData&);
   void AddPageRule(StyleRulePage*);
   void AddViewportRule(StyleRuleViewport*);
   void AddFontFaceRule(StyleRuleFontFace*);
   void AddKeyframesRule(StyleRuleKeyframes*);
   void AddPropertyRule(StyleRuleProperty*);
-  void AddScrollTimelineRule(StyleRuleScrollTimeline*);
   void AddCounterStyleRule(StyleRuleCounterStyle*);
   void AddFontPaletteValuesRule(StyleRuleFontPaletteValues*);
   void AddPositionFallbackRule(StyleRulePositionFallback*);
@@ -390,7 +538,6 @@ class CORE_EXPORT RuleSet final : public GarbageCollected<RuleSet> {
   void SortKeyframesRulesIfNeeded();
 
   void CompactRules();
-  static void CompactRuleMap(RuleMap&);
   static void CreateSubstringMatchers(
       RuleMap& attr_map,
       SubstringMatcherMap& substring_matcher_map);
@@ -457,7 +604,6 @@ class CORE_EXPORT RuleSet final : public GarbageCollected<RuleSet> {
   HeapVector<Member<StyleRuleKeyframes>> keyframes_rules_;
   HeapVector<Member<StyleRuleProperty>> property_rules_;
   HeapVector<Member<StyleRuleCounterStyle>> counter_style_rules_;
-  HeapVector<Member<StyleRuleScrollTimeline>> scroll_timeline_rules_;
   HeapVector<Member<StyleRulePositionFallback>> position_fallback_rules_;
   HeapVector<MediaQuerySetResult> media_query_set_results_;
 

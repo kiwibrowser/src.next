@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -310,7 +310,7 @@ void ShowHelp(Browser* browser, HelpSource source) {
 }
 
 void ShowHelpForProfile(Profile* profile, HelpSource source) {
-  ShowHelpImpl(NULL, profile, source);
+  ShowHelpImpl(nullptr, profile, source);
 }
 
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
@@ -492,6 +492,23 @@ void ShowAddresses(Browser* browser) {
 void ShowPaymentMethods(Browser* browser) {
   base::RecordAction(UserMetricsAction("Options_ShowPaymentMethods"));
   ShowSettingsSubPage(browser, kPaymentsSubPage);
+}
+
+void ShowAllSitesSettingsFilteredByFpsOwner(
+    Browser* browser,
+    const std::string& fps_owner_host_name) {
+  GURL url = GetSettingsUrl(kAllSitesSettingsSubpage);
+  if (!fps_owner_host_name.empty()) {
+    GURL::Replacements replacements;
+    std::string query("searchSubpage=");
+    query += base::EscapeQueryParamValue(
+        base::StrCat({"related:", fps_owner_host_name}),
+        /*use_plus=*/false);
+    replacements.SetQueryStr(query);
+    url = url.ReplaceComponents(replacements);
+  }
+
+  ShowSingletonTabIgnorePathOverwriteNTP(browser, url);
 }
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)

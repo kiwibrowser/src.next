@@ -456,10 +456,7 @@ void StyleCascade::ApplyHighPriority(CascadeResolver& resolver) {
     }
   }
 
-  state_.GetFontBuilder().CreateFont(state_.StyleRef(), state_.ParentStyle());
-  state_.SetConversionFontSizes(CSSToLengthConversionData::FontSizes(
-      state_.Style(), state_.RootElementStyle()));
-  state_.SetConversionZoom(state_.Style()->EffectiveZoom());
+  state_.UpdateFont();
 }
 
 void StyleCascade::ApplyWideOverlapping(CascadeResolver& resolver) {
@@ -739,18 +736,20 @@ StyleCascade::TokenSequence::TokenSequence(const CSSVariableData* data)
 }
 
 bool StyleCascade::TokenSequence::AppendTokens(
-    const Vector<CSSParserToken>& tokens,
+    base::span<const CSSParserToken> tokens,
     wtf_size_t limit) {
   // https://drafts.csswg.org/css-variables/#long-variables
   if (tokens.size() > limit)
     return false;
-  tokens_.AppendVector(tokens);
+  for (const CSSParserToken& token : tokens) {
+    tokens_.push_back(token);
+  }
   return true;
 }
 
 bool StyleCascade::TokenSequence::Append(const TokenSequence& sequence,
                                          wtf_size_t limit) {
-  if (!AppendTokens(sequence.tokens_, limit))
+  if (!AppendTokens(base::span<const CSSParserToken>{sequence.tokens_}, limit))
     return false;
   variable_data_.AppendVector(sequence.variable_data_);
   is_animation_tainted_ |= sequence.is_animation_tainted_;
@@ -778,7 +777,7 @@ scoped_refptr<CSSVariableData>
 StyleCascade::TokenSequence::BuildVariableData() {
   Vector<String> backing_strings;
   for (scoped_refptr<const CSSVariableData>& data : variable_data_)
-    backing_strings.AppendVector(data->BackingStrings());
+    data->AppendBackingStrings(backing_strings);
   variable_data_.clear();
   return CSSVariableData::CreateResolved(
       std::move(tokens_), std::move(backing_strings), is_animation_tainted_,
@@ -858,7 +857,8 @@ const CSSValue* StyleCascade::ResolveVariableReference(
 
   TokenSequence sequence;
 
-  if (ResolveTokensInto(data->Tokens(), resolver, sequence)) {
+  if (ResolveTokensInto(CSSParserTokenRange{data->Tokens()}, resolver,
+                        sequence)) {
     if (const auto* parsed = Parse(property, sequence.TokenRange(), context))
       return TreatRevertAsUnset(parsed);
   }
@@ -891,7 +891,8 @@ const CSSValue* StyleCascade::ResolvePendingSubstitution(
 
     TokenSequence sequence;
 
-    if (!ResolveTokensInto(shorthand_data->Tokens(), resolver, sequence))
+    if (!ResolveTokensInto(CSSParserTokenRange{shorthand_data->Tokens()},
+                           resolver, sequence))
       return cssvalue::CSSUnsetValue::Create();
 
     HeapVector<CSSPropertyValue, 64> parsed_properties;
@@ -986,7 +987,8 @@ scoped_refptr<CSSVariableData> StyleCascade::ResolveVariableData(
 
   TokenSequence sequence(data);
 
-  if (!ResolveTokensInto(data->Tokens(), resolver, sequence))
+  if (!ResolveTokensInto(CSSParserTokenRange{data->Tokens()}, resolver,
+                         sequence))
     return nullptr;
 
   return sequence.BuildVariableData();

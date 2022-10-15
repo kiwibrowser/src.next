@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -69,7 +69,7 @@ class NET_EXPORT_PRIVATE AddressTrackerLinux {
 
   AddressMap GetAddressMap() const;
 
-  // Returns set of interface indicies for online interfaces.
+  // Returns set of interface indices for online interfaces.
   std::unordered_set<int> GetOnlineLinks() const;
 
   // Implementation of NetworkChangeNotifierLinux::GetCurrentConnectionType().

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -56,11 +56,14 @@ class BrowserTabStripModelDelegate : public TabStripModelDelegate {
   bool ShouldDisplayFavicon(content::WebContents* contents) const override;
   bool CanReload() const override;
   void AddToReadLater(content::WebContents* web_contents) override;
+  bool SupportsReadLater() override;
   void CacheWebContents(
       const std::vector<std::unique_ptr<TabStripModel::DetachedWebContents>>&
           web_contents) override;
   void FollowSite(content::WebContents* web_contents) override;
   void UnfollowSite(content::WebContents* web_contents) override;
+  bool IsForWebApp() override;
+  void CopyURL(content::WebContents* web_contents) override;
 
   void CloseFrame();
 

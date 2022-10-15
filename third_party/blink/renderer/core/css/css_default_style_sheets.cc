@@ -34,6 +34,7 @@
 #include "third_party/blink/renderer/core/css/media_query_evaluator.h"
 #include "third_party/blink/renderer/core/css/rule_set.h"
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/execution_context/security_context.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/html/html_anchor_element.h"
@@ -59,8 +60,11 @@ String OverflowForSVGRules() {
   if (!RuntimeEnabledFeatures::CSSOverflowForReplacedElementsEnabled())
     return "";
 
+  // SVG uses an overflow value of 'hidden' for backwards compatibility with
+  // flex layout. 'overflow-clip-margin' below still applies because the used
+  // value of overflow at paint time is 'clip'.
+  // See https://github.com/w3c/csswg-drafts/issues/7714 for context.
   return String(R"CSS(svg:not(:root) {
-    overflow: clip;
     overflow-clip-margin: content-box;
         })CSS");
 }
@@ -135,11 +139,11 @@ CSSDefaultStyleSheets::CSSDefaultStyleSheets()
   default_svg_style_->CompactRulesIfNeeded();
   default_html_quirks_style_->CompactRulesIfNeeded();
   default_print_style_->CompactRulesIfNeeded();
-  DCHECK(default_html_style_->UniversalRules()->IsEmpty());
-  DCHECK(default_mathml_style_->UniversalRules()->IsEmpty());
-  DCHECK(default_svg_style_->UniversalRules()->IsEmpty());
-  DCHECK(default_html_quirks_style_->UniversalRules()->IsEmpty());
-  DCHECK(default_print_style_->UniversalRules()->IsEmpty());
+  DCHECK(default_html_style_->UniversalRules().empty());
+  DCHECK(default_mathml_style_->UniversalRules().empty());
+  DCHECK(default_svg_style_->UniversalRules().empty());
+  DCHECK(default_html_quirks_style_->UniversalRules().empty());
+  DCHECK(default_print_style_->UniversalRules().empty());
 #endif
 }
 
@@ -297,8 +301,6 @@ bool CSSDefaultStyleSheets::EnsureDefaultStyleSheetsForElement(
       builder.Append("video::-webkit-media-text-track-display { ");
       AddTextTrackCSSProperties(&builder, CSSPropertyID::kBackgroundColor,
                                 settings->GetTextTrackWindowColor());
-      AddTextTrackCSSProperties(&builder, CSSPropertyID::kPadding,
-                                settings->GetTextTrackWindowPadding());
       AddTextTrackCSSProperties(&builder, CSSPropertyID::kBorderRadius,
                                 settings->GetTextTrackWindowRadius());
       builder.Append(" } video::cue { ");
@@ -324,9 +326,10 @@ bool CSSDefaultStyleSheets::EnsureDefaultStyleSheetsForElement(
     }
   }
 
-  if (!popup_style_sheet_ && element.HasValidPopupAttribute()) {
+  if (!popup_style_sheet_ && element.HasPopupAttribute()) {
     // TODO: We should assert that this sheet only contains rules for popups.
-    DCHECK(RuntimeEnabledFeatures::HTMLPopupAttributeEnabled());
+    DCHECK(RuntimeEnabledFeatures::HTMLPopupAttributeEnabled(
+        element.GetDocument().GetExecutionContext()));
     popup_style_sheet_ =
         ParseUASheet(UncompressResourceAsASCIIString(IDR_UASTYLE_POPUP_CSS));
     AddRulesToDefaultStyleSheets(popup_style_sheet_, NamespaceType::kHTML);

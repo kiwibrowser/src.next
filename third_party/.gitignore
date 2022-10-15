@@ -10,6 +10,7 @@
 /amd/
 /android_build_tools/aapt2/aapt2
 /android_build_tools/aapt2/lib64/*.so
+/android_build_tools/apkanalyzer/apkanalyzer.jar
 /android_build_tools/bundletool/*.jar
 /android_ndk/
 /android_prebuilts/build_tools
@@ -221,6 +222,7 @@
 /qemu-mac-x64
 /quic_trace/src
 /r8/lib
+/r8/d8/lib
 /re2/src
 /requests/src
 /robolectric/lib/
@@ -245,6 +247,7 @@
 /subresource-filter-ruleset/data/UnindexedRules
 /swift-format
 /swiftshader/
+/swift-toolchain
 /syzygy
 /syzygy/binaries
 /text-fragments-polyfill/src

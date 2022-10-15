@@ -1,4 +1,4 @@
-# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -36,6 +36,12 @@ import("//v8/gni/v8.gni")
 
 if (is_android) {
   import("//build/config/android/config.gni")
+}
+
+if (is_fuchsia) {
+  import("//build/config/fuchsia/generate_runner_scripts.gni")
+  import("//third_party/fuchsia-sdk/sdk/build/component.gni")
+  import("//third_party/fuchsia-sdk/sdk/build/package.gni")
 }
 
 if (is_linux) {
@@ -80,8 +86,6 @@ group("gn_all") {
     ":gn_visibility",
     "//base:base_perftests",
     "//base:base_unittests",
-    "//chrome/installer",
-    "//chrome/updater",
     "//codelabs",
     "//components:components_unittests",
     "//components/gwp_asan:gwp_asan_unittests",
@@ -147,7 +151,14 @@ group("gn_all") {
     ]
   }
 
-  if (enable_plugins) {
+  if (!is_castos) {
+    deps += [
+      "//chrome/installer",
+      "//chrome/updater",
+    ]
+  }
+
+  if (enable_ppapi) {
     deps += [
       "//ppapi:ppapi_unittests",
       "//ppapi/examples",
@@ -161,11 +172,14 @@ group("gn_all") {
     ]
   }
 
+  if (!is_ios && !is_castos) {
+    deps += [ "//chrome/test:unit_tests" ]
+  }
+
   if (!is_ios) {
     deps += [
       ":chromedriver",
       "//cc:cc_unittests",
-      "//chrome/test:unit_tests",
       "//components:components_browsertests",
       "//components/policy:policy_templates",
       "//components/url_formatter/tools:format_url",
@@ -218,15 +232,12 @@ group("gn_all") {
     }
   }
 
-  if (!is_ios && !is_android && !is_fuchsia) {
-    deps += [ "//components/viz/demo:viz_demo" ]
-    if (!use_libfuzzer) {
-      # TODO(crbug.com/1241949): libcronet.$version.so fails to link in libfuzzer builds.
-      deps += [
-        "//components/cronet:cronet_tests",
-        "//components/cronet:cronet_unittests",
-      ]
-    }
+  if (!is_ios && !is_android) {
+    deps += [
+      "//components/cronet:cronet_tests",
+      "//components/cronet:cronet_unittests",
+      "//components/viz/demo:viz_demo",
+    ]
   }
 
   if (!is_ios) {
@@ -236,7 +247,9 @@ group("gn_all") {
       "//third_party/catapult/telemetry:bitmaptools($host_toolchain)",
     ]
     if (!is_android) {
-      deps += [ "//chrome/test:telemetry_perf_unittests" ]
+      if (!is_castos) {
+        deps += [ "//chrome/test:telemetry_perf_unittests" ]
+      }
     } else {
       import("//tools/perf/chrome_telemetry_build/android_browser_types.gni")
       foreach(_target_suffix, telemetry_android_browser_target_suffixes) {
@@ -258,10 +271,6 @@ group("gn_all") {
       "//chrome/app:chrome_fuchsia",
       "//fuchsia_web:gn_all",
       "//tools/fuchsia/size_tests:fuchsia_sizes",
-
-      # Ensure this target, used by cipd, is built in all configurations.
-      # TODO(crbug.com/1265618): Remove this once it has a natural dependency.
-      "//media/cdm/library_cdm/clear_key_cdm",
 
       # Ensure this target continues to build.
       "//chromecast/bindings:bindings_manager_fuchsia",
@@ -307,6 +316,7 @@ group("gn_all") {
     deps += [
       "//ui/aura:aura_demo",
       "//ui/aura:aura_unittests",
+      "//ui/webui/examples:webui_examples",
       "//ui/wm:wm_unittests",
     ]
   }
@@ -315,8 +325,10 @@ group("gn_all") {
     deps += [
       "//ui/ozone",
       "//ui/ozone:unittests",
-      "//ui/ozone/demo",
     ]
+    if (!is_fuchsia) {
+      deps += [ "//ui/ozone/demo" ]
+    }
   }
 
   if (is_win) {
@@ -457,6 +469,7 @@ group("gn_all") {
       "//ash/keyboard/ui:keyboard_unittests",
       "//ash/webui:ash_webui_unittests",
       "//chrome/browser/metrics/perf:profile_provider_unittest",
+      "//chrome/test:ash_crosapi_browsertests",
       "//chrome/test:usage_time_limit_unittests",
       "//chromeos/components:chromeos_components_unittests",
       "//components/exo/wayland:wayland_client_compatibility_tests",
@@ -482,7 +495,6 @@ group("gn_all") {
   if (is_linux || is_chromeos) {
     # The following are definitely linux-only.
     deps += [
-      "//chrome:xdg_mime",
       "//net:disk_cache_memory_test",
       "//net:quic_client",
       "//net:quic_server",
@@ -491,6 +503,10 @@ group("gn_all") {
     ]
     if (!is_clang) {
       deps += [ "//testing:empty_main" ]
+    }
+
+    if (!is_castos) {
+      deps += [ "//chrome:xdg_mime" ]
     }
 
     if (use_dbus) {
@@ -542,10 +558,15 @@ group("gn_all") {
       "//ui/compositor:compositor_unittests",
     ]
 
-    if (!is_android) {
+    if (!is_android && !is_castos) {
       deps += [
         "//chrome/test:load_library_perf_tests",
         "//chrome/test:sync_performance_tests",
+      ]
+    }
+
+    if (!is_android) {
+      deps += [
         "//courgette:courgette",
         "//courgette:courgette_fuzz",
         "//courgette:courgette_minimal_tool",
@@ -583,7 +604,7 @@ group("gn_all") {
     }
   }
 
-  if (enable_plugins) {
+  if (enable_ppapi) {
     deps += [
       "//ppapi:pepper_hash_for_uma",
       "//ppapi:ppapi_perftests",
@@ -606,7 +627,6 @@ group("gn_all") {
 
   if (is_linux || is_chromeos_lacros) {
     deps += [
-      "//chrome/test:chrome_app_unittests",
       "//gpu/khronos_glcts_support:khronos_glcts_test",
       "//media/cast:cast_benchmarks",
       "//media/cast:tap_proxy",
@@ -615,7 +635,11 @@ group("gn_all") {
       "//ui/snapshot:snapshot_unittests",
     ]
 
-    if (!is_debug && !is_component_build) {
+    if (!is_castos) {
+      deps += [ "//chrome/test:chrome_app_unittests" ]
+    }
+
+    if (!is_debug && !is_component_build && !is_castos) {
       deps += [ "//chrome/tools/service_discovery_sniffer" ]
     }
   }
@@ -685,10 +709,6 @@ group("gn_all") {
       "//chromecast:cast_shell",
       "//chromecast/cast_core:core_runtime_simple",
     ]
-
-    if (enable_extensions && use_aura) {
-      deps += [ "//chrome/browser/resources/chromeos/accessibility:build" ]
-    }
   }
 
   if (is_mac || is_win || is_android || is_linux || is_chromeos) {
@@ -918,16 +938,19 @@ if (is_android) {
 if (is_fuchsia) {
   # TODO(https://crbug.com/731217): This can't practically be in //v8 without
   # duplicating all the Fuchsia running infrastructure there.
-  cr_fuchsia_package("d8_fuchsia_pkg") {
+  fuchsia_component("d8_component") {
     testonly = true
-    binary = "//v8:d8"
-    manifest = "//v8/gni/v8.cmx"
-    package_name = "d8"
+    manifest = "//v8/gni/v8.cml"
+    data_deps = [ "//v8:d8" ]
   }
-
+  fuchsia_package("d8_pkg") {
+    testonly = true
+    package_name = "d8"
+    deps = [ ":d8_component" ]
+  }
   fuchsia_package_installer("d8_fuchsia") {
     testonly = true
-    package = ":d8_fuchsia_pkg"
+    package = ":d8_pkg"
     package_name = "d8"
   }
 }
@@ -997,6 +1020,7 @@ if (is_chromeos_ash) {
       "//components/exo/wayland:wayland_client_integration_tests",
       "//components/exo/wayland:wayland_client_perftests",
       "//components/exo/wayland:wayland_client_tests",
+      "//components/policy/test_support:fake_dmserver",
       "//media:media_unittests",
       "//media/capture:capture_unittests",
       "//sandbox/linux:chrome_sandbox",
@@ -1066,7 +1090,7 @@ if (!is_ios) {
       if (is_android && !is_cast_android) {
         deps += [ "//chrome/test/chromedriver/test/webview_shell:chromedriver_webview_shell_apk" ]
       }
-    } else {
+    } else if (!is_castos) {
       deps = [
         "//chrome/test/chromedriver:chromedriver",
         "//chrome/test/chromedriver:chromedriver_unittests",
@@ -1099,7 +1123,7 @@ if (!is_ios) {
     ]
   }
 
-  if (!is_chromeos_ash && !is_ios && !is_fuchsia && !is_android) {
+  if (!is_chromeos_ash && !is_ios && !is_fuchsia && !is_android && !is_castos) {
     # WPT Webdriver tests runner
     # chrome/test/chromedriver/test/run_webdriver_tests.py
     script_test("webdriver_wpt_tests") {
@@ -1131,12 +1155,19 @@ if (!is_ios) {
       }
     }
     script_test("wpt_tests_isolate") {
-      script = "//testing/scripts/run_wpt_tests.py"
+      script = "//third_party/blink/tools/run_wpt_tests.py"
       data_deps = [
         "//chrome:chrome",
         "//chrome/test/chromedriver",
         "//third_party/blink/tools:wpt_tests_isolate",
-        "//tools/imagediff",
+      ]
+    }
+    script_test("wpt_tests_isolate_content_shell") {
+      script = "//third_party/blink/tools/run_wpt_tests.py"
+      args = [ "--product=content_shell" ]
+      data_deps = [
+        ":blink_web_tests_support_data",
+        "//third_party/blink/tools:wpt_tests_isolate",
       ]
     }
   }
@@ -1215,11 +1246,6 @@ if (!is_ios) {
       "//testing/scripts/run_isolated_script_test.py",
       "//testing/xvfb.py",
       "//third_party/blink/tools/",
-      "//third_party/blink/web_tests/VirtualTestSuites",
-      "//third_party/blink/web_tests/external/WPT_BASE_MANIFEST_8.json",
-      "//third_party/blink/web_tests/external/wpt/common/",
-      "//third_party/blink/web_tests/external/wpt/resources/",
-      "//third_party/blink/web_tests/fast/harness/results.html",
       "//third_party/blink/web_tests/resources/",
       "//third_party/pywebsocket3/src/mod_pywebsocket/",
       "//third_party/test_fonts/test_fonts/",
@@ -1310,9 +1336,6 @@ if (!is_ios) {
       "//third_party/blink/web_tests/WebDriverExpectations",
       "//third_party/blink/web_tests/WebGPUExpectations",
 
-      # Generic baselines
-      "//third_party/blink/web_tests/platform/generic/",
-
       # === List Test Cases folders here ===
       "//third_party/blink/web_tests/accessibility/",
       "//third_party/blink/web_tests/android/",
@@ -1361,7 +1384,6 @@ if (!is_ios) {
       "//third_party/blink/web_tests/overflow/",
       "//third_party/blink/web_tests/paint/",
       "//third_party/blink/web_tests/payments/",
-      "//third_party/blink/web_tests/pending_beacon/",
       "//third_party/blink/web_tests/permissionclient/",
       "//third_party/blink/web_tests/plugins/",
       "//third_party/blink/web_tests/pointer-lock/",
@@ -1442,6 +1464,9 @@ if (!is_ios) {
 
     args = _common_web_test_args
 
+    # Use --wpt-only to skip tests under web_tests/virtual/
+    args += [ "--wpt-only" ]
+
     data_deps = [ ":blink_web_tests_support_data" ]
     data = [
       "//third_party/blink/perf_tests/",
@@ -1459,12 +1484,10 @@ if (!is_ios) {
       "//third_party/blink/web_tests/WebDriverExpectations",
       "//third_party/blink/web_tests/WebGPUExpectations",
 
-      # Generic baselines
-      "//third_party/blink/web_tests/platform/generic/",
-
       # === List Test Cases folders here ===
       "//third_party/blink/web_tests/external/",
       "//third_party/blink/web_tests/wpt_internal/",
+      "//third_party/blink/web_tests/virtual/",
 
       # === Test Case Folders Ends ===
     ]
@@ -1541,7 +1564,10 @@ if (!is_ios) {
       "//third_party/webgpu-cts",
     ]
     data = [
+      "//third_party/blink/web_tests/external/wpt/common/",
+      "//third_party/blink/web_tests/external/wpt/resources/",
       "//third_party/blink/web_tests/FlagSpecificConfig",
+      "//third_party/blink/web_tests/VirtualTestSuites",
       "//third_party/blink/web_tests/WebGPUExpectations",
       "//third_party/blink/web_tests/wpt_internal/",
       "//third_party/webgpu-cts/scripts/",
@@ -1573,12 +1599,9 @@ if (!is_ios) {
 
   script_test("blink_python_tests") {
     script = "//testing/scripts/run_isolated_script_test.py"
-    args = [
-      "@WrappedPath(" +
-          rebase_path("//third_party/blink/tools/run_blinkpy_tests.py",
-                      root_build_dir) + ")",
-      "--coverage",
-    ]
+    args = [ "@WrappedPath(" +
+             rebase_path("//third_party/blink/tools/run_blinkpy_tests.py",
+                         root_build_dir) + ")" ]
 
     data = [
       # These tests use //build/android/devil_chromium.py even when !is_android,
@@ -1604,11 +1627,11 @@ if (!is_ios) {
       "//third_party/catapult/devil/",
       "//third_party/catapult/dependency_manager/",
       "//third_party/catapult/third_party/typ/",
-      "//third_party/depot_tools/pylint",
       "//third_party/depot_tools/pylint-1.5",
       "//third_party/depot_tools/pylint_main.py",
       "//third_party/depot_tools/pylintrc",
       "//third_party/ply/",
+      "//third_party/wpt_tools/",
       "//tools/idl_parser/",
     ]
 
@@ -1737,8 +1760,6 @@ if (enable_js_type_check) {
   group("webui_closure_compile") {
     testonly = true
     data_deps = [
-      "chrome/browser/resources:closure_compile",
-      "chrome/test:closure_compile",
       "components/neterror/resources:closure_compile",
       "components/security_interstitials:closure_compile",
       "mojo/public/tools/bindings/generators/js_templates/lite/test:closure_compile",
@@ -1748,6 +1769,12 @@ if (enable_js_type_check) {
       data_deps += [
         "ash/webui:closure_compile",
         "ui/file_manager:closure_compile",
+      ]
+    }
+    if (!is_castos) {
+      data_deps += [
+        "chrome/browser/resources:closure_compile",
+        "chrome/test:closure_compile",
       ]
     }
   }

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,6 +32,7 @@ import android.content.res.ColorStateList;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Rect;
+import android.os.Build.VERSION_CODES;
 import android.text.TextUtils;
 import android.util.Property;
 import android.view.ContextThemeWrapper;
@@ -60,6 +61,7 @@ import org.robolectric.annotation.Implements;
 import org.chromium.base.supplier.ObservableSupplierImpl;
 import org.chromium.base.supplier.OneshotSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.JniMocker;
 import org.chromium.build.BuildConfig;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
@@ -570,7 +572,9 @@ public class LocationBarMediatorTest {
         verify(mUrlCoordinator).clearFocus();
     }
 
+    // KEYCODE_BACK will not be sent from Android OS starting from T.
     @Test
+    @DisableIf.Build(sdk_is_greater_than = VERSION_CODES.S_V2)
     public void testOnKey_autocompleteHandles() {
         doReturn(true)
                 .when(mAutocompleteCoordinator)
@@ -580,6 +584,7 @@ public class LocationBarMediatorTest {
     }
 
     @Test
+    @DisableIf.Build(sdk_is_greater_than = VERSION_CODES.S_V2)
     public void testOnKey_back() {
         doReturn(mKeyDispatcherState).when(mLocationBarLayout).getKeyDispatcherState();
         doReturn(KeyEvent.ACTION_DOWN).when(mKeyEvent).getAction();
@@ -1047,8 +1052,9 @@ public class LocationBarMediatorTest {
 
     @Test
     public void testLensButtonVisibility_lensEnabledWithInputText_tablet() {
+        // Do not show lens when the omnibox already has input.
         doReturn(true).when(mLensController).isLensEnabled(any());
-        verifyLensButtonVisibilityWhenFocusChanges(true, "text");
+        verifyLensButtonVisibilityWhenFocusChanges(false, "text");
     }
 
     private void verifyLensButtonVisibilityWhenFocusChanges(

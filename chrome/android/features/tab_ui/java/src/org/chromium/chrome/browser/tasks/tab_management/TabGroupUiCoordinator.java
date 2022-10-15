@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@ import android.view.ViewGroup;
 
 import androidx.annotation.NonNull;
 
+import org.chromium.base.Callback;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.supplier.ObservableSupplier;
@@ -131,7 +132,8 @@ public class TabGroupUiCoordinator implements TabGroupUiMediator.ResetHandler, T
      */
     @Override
     public void initializeWithNative(Activity activity,
-            BottomControlsCoordinator.BottomControlsVisibilityController visibilityController) {
+            BottomControlsCoordinator.BottomControlsVisibilityController visibilityController,
+            Callback<Object> onModelTokenChange) {
         try (TraceEvent e = TraceEvent.scoped("TabGroupUiCoordinator.initializeWithNative")) {
             if (UmaSessionStats.isMetricsServiceAvailable()) {
                 UmaSessionStats.registerSyntheticFieldTrial(
@@ -143,7 +145,7 @@ public class TabGroupUiCoordinator implements TabGroupUiMediator.ResetHandler, T
             mTabStripCoordinator = new TabListCoordinator(TabListCoordinator.TabListMode.STRIP,
                     mContext, mTabModelSelector, null, null, actionOnAllRelatedTabs, null, null,
                     TabProperties.UiType.STRIP, null, null, mTabListContainerView, true,
-                    COMPONENT_NAME, mRootView);
+                    COMPONENT_NAME, mRootView, onModelTokenChange);
             mTabStripCoordinator.initWithNative(mDynamicResourceLoaderSupplier.get());
 
             mModelChangeProcessor = PropertyModelChangeProcessor.create(mModel,

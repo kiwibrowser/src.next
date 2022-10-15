@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,7 +35,7 @@ HttpStreamRequest::HttpStreamRequest(
 
 HttpStreamRequest::~HttpStreamRequest() {
   net_log_.EndEvent(NetLogEventType::HTTP_STREAM_REQUEST);
-  helper_->OnRequestComplete();
+  helper_.ExtractAsDangling()->OnRequestComplete();  // May delete `*helper_`;
 }
 
 void HttpStreamRequest::Complete(bool was_alpn_negotiated,

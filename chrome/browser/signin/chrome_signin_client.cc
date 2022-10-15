@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -256,10 +256,10 @@ void ChromeSigninClient::OnConnectionChanged(
 
 void ChromeSigninClient::DelayNetworkCall(base::OnceClosure callback) {
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-  // Do not make network requests in unit tests. chromeos::NetworkHandler should
+  // Do not make network requests in unit tests. ash::NetworkHandler should
   // not be used and is not expected to have been initialized in unit tests.
   if (url_loader_factory_for_testing_ &&
-      !chromeos::NetworkHandler::IsInitialized()) {
+      !ash::NetworkHandler::IsInitialized()) {
     std::move(callback).Run();
     return;
   }

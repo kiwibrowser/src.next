@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -536,8 +536,8 @@ TEST(DownloadPrefsTest, DownloadDirSanitization) {
   base::FilePath linux_files_dir;
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-  removable_media_dir = chromeos::CrosDisksClient::GetRemovableDiskMountPoint();
-  android_files_dir = base::FilePath(file_manager::util::kAndroidFilesPath);
+  removable_media_dir = ash::CrosDisksClient::GetRemovableDiskMountPoint();
+  android_files_dir = base::FilePath(file_manager::util::GetAndroidFilesPath());
   linux_files_dir = file_manager::util::GetCrostiniMountDirectory(&profile);
 #elif BUILDFLAG(IS_CHROMEOS_LACROS)
   // These values would normally be sent by ash during lacros startup.

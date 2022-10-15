@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@ import android.os.Bundle;
 
 import androidx.annotation.CallSuper;
 import androidx.annotation.Nullable;
+import androidx.annotation.RequiresApi;
 import androidx.annotation.StyleRes;
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -35,7 +36,6 @@ import org.chromium.chrome.browser.metrics.UmaSessionStats;
 import org.chromium.chrome.browser.night_mode.GlobalNightModeStateProviderHolder;
 import org.chromium.chrome.browser.night_mode.NightModeStateProvider;
 import org.chromium.chrome.browser.night_mode.NightModeUtils;
-import org.chromium.chrome.browser.theme.ThemeUtils;
 import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.modaldialog.ModalDialogManagerHolder;
 
@@ -133,6 +133,13 @@ public class ChromeBaseAppCompatActivity extends AppCompatActivity
     }
 
     @Override
+    @RequiresApi(Build.VERSION_CODES.O)
+    public void onMultiWindowModeChanged(boolean inMultiWindowMode, Configuration configuration) {
+        super.onMultiWindowModeChanged(inMultiWindowMode, configuration);
+        onMultiWindowModeChanged(inMultiWindowMode);
+    }
+
+    @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
         NightModeUtils.updateConfigurationForNightMode(
@@ -212,10 +219,8 @@ public class ChromeBaseAppCompatActivity extends AppCompatActivity
     @CallSuper
     protected void applyThemeOverlays() {
         setTheme(R.style.ColorOverlay_ChromiumAndroid);
+        DynamicColors.applyToActivityIfAvailable(this);
 
-        if (supportsDynamicColors()) {
-            DynamicColors.applyIfAvailable(this);
-        }
         DeferredStartupHandler.getInstance().addDeferredTask(() -> {
             // #registerSyntheticFieldTrial requires native.
             boolean isDynamicColorAvailable = DynamicColors.isDynamicColorAvailable();
@@ -236,24 +241,14 @@ public class ChromeBaseAppCompatActivity extends AppCompatActivity
             setTheme(R.style.ThemeOverlay_DisableOverscroll);
         }
 
+        // TODO(https://crbug.com/1345778): Remove these overlays.
         // We apply an extra theme overlay to override some of the dynamic colors. For example,
         // android:textColorHighlight is overridden by dynamic colors, preventing us from specifying
         // the alpha for the selected text highlight. In this case, the overridden colors should
         // still use dynamic colors, as in the android:textColorHighlight example where we use a
         // color state list that depends on colorPrimary.
         setTheme(R.style.ThemeOverlay_DynamicColorOverrides);
-
-        if (ChromeFeatureList.sDynamicColorButtonsAndroid.isEnabled()) {
-            setTheme(R.style.ThemeOverlay_DynamicButtons);
-        }
-    }
-
-    /**
-     * Returns whether the activity supports dynamic colors. For most activities this is only true
-     * if full dynamic colors are enabled.
-     */
-    protected boolean supportsDynamicColors() {
-        return ThemeUtils.ENABLE_FULL_DYNAMIC_COLORS.getValue();
+        setTheme(R.style.ThemeOverlay_DynamicButtons);
     }
 
     /**

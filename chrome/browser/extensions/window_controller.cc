@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,7 +46,7 @@ WindowController::TypeFilter WindowController::GetFilterFromWindowTypesValues(
   WindowController::TypeFilter filter = WindowController::kNoWindowFilter;
   if (!types)
     return filter;
-  for (const base::Value& type : types->GetListDeprecated()) {
+  for (const base::Value& type : types->GetList()) {
     const std::string* window_type = type.GetIfString();
     if (window_type)
       filter |= 1 << api::windows::ParseWindowType(*window_type);

@@ -1,4 +1,4 @@
-// Copyright (c) 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,6 @@
 #include "build/build_config.h"
 
 namespace net::features {
-
-const base::Feature kAcceptLanguageHeader{"AcceptLanguageHeader",
-                                          base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kAlpsForHttp2{"AlpsForHttp2",
                                   base::FEATURE_ENABLED_BY_DEFAULT};
@@ -68,36 +65,38 @@ base::TimeDelta GetExtraTimeAbsolute() {
 }  // namespace dns_httpssvc_experiment
 
 const base::Feature kUseDnsHttpsSvcb{"UseDnsHttpsSvcb",
-                                     base::FEATURE_DISABLED_BY_DEFAULT};
+                                     base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::FeatureParam<bool> kUseDnsHttpsSvcbHttpUpgrade{
-    &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbHttpUpgrade", false};
+    &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbHttpUpgrade", true};
 
 const base::FeatureParam<bool> kUseDnsHttpsSvcbEnforceSecureResponse{
     &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbEnforceSecureResponse", false};
 
 const base::FeatureParam<bool> kUseDnsHttpsSvcbEnableInsecure{
-    &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbEnableInsecure", false};
+    &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbEnableInsecure", true};
 
 const base::FeatureParam<base::TimeDelta> kUseDnsHttpsSvcbInsecureExtraTimeMax{
     &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbInsecureExtraTimeMax",
-    base::TimeDelta()};
+    base::Milliseconds(50)};
 
 const base::FeatureParam<int> kUseDnsHttpsSvcbInsecureExtraTimePercent{
-    &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbInsecureExtraTimePercent", 0};
+    &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbInsecureExtraTimePercent", 20};
 
 const base::FeatureParam<base::TimeDelta> kUseDnsHttpsSvcbInsecureExtraTimeMin{
     &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbInsecureExtraTimeMin",
-    base::TimeDelta()};
+    base::Milliseconds(5)};
 
 const base::FeatureParam<base::TimeDelta> kUseDnsHttpsSvcbSecureExtraTimeMax{
-    &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbSecureExtraTimeMax", base::TimeDelta()};
+    &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbSecureExtraTimeMax",
+    base::Milliseconds(50)};
 
 const base::FeatureParam<int> kUseDnsHttpsSvcbSecureExtraTimePercent{
-    &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbSecureExtraTimePercent", 0};
+    &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbSecureExtraTimePercent", 20};
 
 const base::FeatureParam<base::TimeDelta> kUseDnsHttpsSvcbSecureExtraTimeMin{
-    &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbSecureExtraTimeMin", base::TimeDelta()};
+    &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbSecureExtraTimeMin",
+    base::Milliseconds(5)};
 
 const base::FeatureParam<base::TimeDelta> kUseDnsHttpsSvcbExtraTimeAbsolute{
     &kUseDnsHttpsSvcb, "UseDnsHttpsSvcbExtraTimeAbsolute", base::TimeDelta()};
@@ -148,6 +147,14 @@ const base::Feature kPartitionExpectCTStateByNetworkIsolationKey{
 
 const base::Feature kPartitionNelAndReportingByNetworkIsolationKey{
     "PartitionNelAndReportingByNetworkIsolationKey",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kEnableDoubleKeyNetworkAnonymizationKey{
+    "EnableDoubleKeyNetworkAnonymizationKey",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kEnableCrossSiteFlagNetworkAnonymizationKey{
+    "EnableCrossSiteFlagNetworkAnonymizationKey",
     base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kExpectCTPruning{"ExpectCTPruning",
@@ -281,8 +288,8 @@ const base::Feature kPartitionedCookies{"PartitionedCookies",
 const base::Feature kPartitionedCookiesBypassOriginTrial{
     "PartitionedCookiesBypassOriginTrial", base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kNoncedPartitionedCookies{
-    "NoncedPartitionedCookies", base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kNoncedPartitionedCookies{"NoncedPartitionedCookies",
+                                              base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kExtraCookieValidityChecks{
     "ExtraCookieValidityChecks", base::FEATURE_ENABLED_BY_DEFAULT};
@@ -296,11 +303,7 @@ const base::Feature kClampCookieExpiryTo400Days(
 
 const base::Feature kStaticKeyPinningEnforcement(
     "StaticKeyPinningEnforcement",
-#if BUILDFLAG(IS_ANDROID)
-    base::FEATURE_DISABLED_BY_DEFAULT);
-#else
     base::FEATURE_ENABLED_BY_DEFAULT);
-#endif
 
 const base::Feature kCookieDomainRejectNonASCII{
     "CookieDomainRejectNonASCII", base::FEATURE_DISABLED_BY_DEFAULT};
@@ -325,10 +328,39 @@ const base::FeatureParam<int>
         &kOptimizeNetworkBuffers, "filter_source_stream_buffer_size",
         32 * 1024};
 
+const base::FeatureParam<bool> kOptimizeNetworkBuffersInputStreamCheckAvailable{
+    &kOptimizeNetworkBuffers, "input_stream_check_available", true};
+
 const base::Feature kStorageAccessAPI{"StorageAccessAPI",
                                       base::FEATURE_DISABLED_BY_DEFAULT};
 constexpr int kStorageAccessAPIDefaultImplicitGrantLimit = 5;
 const base::FeatureParam<int> kStorageAccessAPIImplicitGrantLimit{
     &kStorageAccessAPI, "storage-access-api-implicit-grant-limit",
     kStorageAccessAPIDefaultImplicitGrantLimit};
+const base::FeatureParam<bool> kStorageAccessAPIGrantsUnpartitionedStorage(
+    &kStorageAccessAPI,
+    "storage-access-api-grants-unpartitioned-storage",
+    false);
+const base::FeatureParam<bool> kStorageAccessAPIAutoGrantInFPS{
+    &kStorageAccessAPI, "storage_access_api_auto_grant_in_fps", true};
+const base::FeatureParam<bool> kStorageAccessAPIAutoDenyOutsideFPS{
+    &kStorageAccessAPI, "storage_access_api_auto_deny_outside_fps", true};
+
+// Enables partitioning of third party storage (IndexedDB, CacheStorage, etc.)
+// by the top level site to reduce fingerprinting.
+const base::Feature kThirdPartyStoragePartitioning{
+    "ThirdPartyStoragePartitioning", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kAlpsParsing{"AlpsParsing",
+                                 base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kAlpsClientHintParsing{"AlpsClientHintParsing",
+                                           base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kShouldKillSessionOnAcceptChMalformed{
+    "ShouldKillSessionOnAcceptChMalformed", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kCaseInsensitiveCookiePrefix{
+    "CaseInsensitiveCookiePrefix", base::FEATURE_ENABLED_BY_DEFAULT};
+
 }  // namespace net::features

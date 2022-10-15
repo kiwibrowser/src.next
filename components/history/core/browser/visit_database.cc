@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@
 #include "base/time/time.h"
 #include "components/google/core/common/google_util.h"
 #include "components/history/core/browser/history_backend.h"
+#include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/url_database.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
@@ -96,6 +97,22 @@ bool TransitionIsVisible(int32_t transition) {
                                        ui::PAGE_TRANSITION_KEYWORD_GENERATED);
 }
 
+VisitSource VisitSourceFromInt(int value) {
+  auto converted = static_cast<VisitSource>(value);
+  // Verify that `converted` is actually a valid enum value.
+  switch (converted) {
+    case SOURCE_SYNCED:
+    case SOURCE_BROWSED:
+    case SOURCE_EXTENSION:
+    case SOURCE_FIREFOX_IMPORTED:
+    case SOURCE_IE_IMPORTED:
+    case SOURCE_SAFARI_IMPORTED:
+      return converted;
+  }
+  // In cases of database corruption, SOURCE_BROWSED is a safe default value.
+  return SOURCE_BROWSED;
+}
+
 }  // namespace
 
 VisitDatabase::VisitDatabase() = default;
@@ -120,6 +137,7 @@ bool VisitDatabase::InitVisitTable() {
             "id INTEGER PRIMARY KEY AUTOINCREMENT,"
             "url INTEGER NOT NULL,"  // key of the URL this corresponds to
             "visit_time INTEGER NOT NULL,"
+            // Although NULLable, our code writes 0 to visits without referrers.
             "from_visit INTEGER,"
             "transition INTEGER DEFAULT 0 NOT NULL,"
             "segment_id INTEGER,"
@@ -127,18 +145,35 @@ bool VisitDatabase::InitVisitTable() {
             // longer used and should NOT be read or written from any longer.
             "visit_duration INTEGER DEFAULT 0 NOT NULL,"
             "incremented_omnibox_typed_score BOOLEAN DEFAULT FALSE NOT NULL,"
+            // Although NULLable, our code writes 0 to visits without openers.
             "opener_visit INTEGER,"
-            // These four fields are non-null only for remote visits synced to
-            // the local machine. The `originator_cache_guid` is the unique
-            // identifier for the originator machine the visit was originally
-            // made on, and `originator_visit_id` is the `id` of the visit row
-            // as originally assigned by AUTOINCREMENT on the originator.
-            // The tuple of (`originator_cache_guid`, `origin_visit_id`) is
-            // globally unique.
+            // For remote visits synced onto our local machine:
+            //  - `originator_cache_guid` is the unique identifier for the
+            //    machine the visit was originally made on (called the
+            //    "originator" below).
+            //  - `originator_visit_id` is the `id` of the visit row as
+            //    originally assigned by AUTOINCREMENT on the originator.
+            //  - The tuple of (`originator_cache_guid`, `originator_visit_id`)
+            //    is globally unique.
+            //  - `originator_from_visit` and `originator_opener_visit` refer to
+            //    `originator_visit_id`, NOT the local visit IDs.
+            //  - The `from_visit` and `opener_visit` columns are remapped to
+            //    local IDs.
+            // For local visits:
+            //  - Although NULLable, local visits always write an empty string
+            //    and 0s to these columns for implementation simplicity and
+            //    consistency with C++ types. It's harmless, because NULL is
+            //    interpreted that way upon reading anyways.
+            //  - NULL values in the database can occur in the wild for old
+            //    database versions that were migrated, but this is harmless.
             "originator_cache_guid TEXT,"
             "originator_visit_id INTEGER,"
             "originator_from_visit INTEGER,"
-            "originator_opener_visit INTEGER)"))
+            "originator_opener_visit INTEGER,"
+            // Set to true for visits known to Chrome Sync, which can be:
+            //  1. Remote visits that have been synced to the local machine.
+            //  2. Local visits that have been sent to Sync.
+            "is_known_to_sync BOOLEAN DEFAULT FALSE NOT NULL)"))
       return false;
   }
 
@@ -208,6 +243,7 @@ void VisitDatabase::FillVisitRow(sql::Statement& statement, VisitRow* visit) {
   visit->originator_visit_id = statement.ColumnInt64(10);
   visit->originator_referring_visit = statement.ColumnInt64(11);
   visit->originator_opener_visit = statement.ColumnInt64(12);
+  visit->is_known_to_sync = statement.ColumnBool(13);
 }
 
 // static
@@ -269,8 +305,10 @@ VisitID VisitDatabase::AddVisit(VisitRow* visit, VisitSource source) {
       "(url, visit_time, from_visit, transition, segment_id, "
       "visit_duration, incremented_omnibox_typed_score, opener_visit,"
       "originator_cache_guid,originator_visit_id,originator_from_visit,"
-      "originator_opener_visit) "
-      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"));
+      "originator_opener_visit,is_known_to_sync) "
+      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+  // Although some columns are NULLable, we never write NULL. We write 0 or ""
+  // instead for simplicity. See the CREATE TABLE comments for details.
   statement.BindInt64(0, visit->url_id);
   statement.BindInt64(1, visit->visit_time.ToInternalValue());
   statement.BindInt64(2, visit->referring_visit);
@@ -283,6 +321,7 @@ VisitID VisitDatabase::AddVisit(VisitRow* visit, VisitSource source) {
   statement.BindInt64(9, visit->originator_visit_id);
   statement.BindInt64(10, visit->originator_referring_visit);
   statement.BindInt64(11, visit->originator_opener_visit);
+  statement.BindBool(12, visit->is_known_to_sync);
 
   if (!statement.Run()) {
     DVLOG(0) << "Failed to execute visit insert statement:  "
@@ -407,8 +446,10 @@ bool VisitDatabase::UpdateVisitRow(const VisitRow& visit) {
       "UPDATE visits SET "
       "url=?,visit_time=?,from_visit=?,transition=?,segment_id=?,"
       "visit_duration=?,incremented_omnibox_typed_score=?,opener_visit=?,"
-      "originator_cache_guid=?,originator_visit_id=? "
+      "originator_cache_guid=?,originator_visit_id=?,is_known_to_sync=? "
       "WHERE id=?"));
+  // Although some columns are NULLable, we never write NULL. We write 0 or ""
+  // instead for simplicity. See the CREATE TABLE comments for details.
   statement.BindInt64(0, visit.url_id);
   statement.BindInt64(1, visit.visit_time.ToInternalValue());
   statement.BindInt64(2, visit.referring_visit);
@@ -419,7 +460,8 @@ bool VisitDatabase::UpdateVisitRow(const VisitRow& visit) {
   statement.BindInt64(7, visit.opener_visit);
   statement.BindString(8, visit.originator_cache_guid);
   statement.BindInt64(9, visit.originator_visit_id);
-  statement.BindInt64(10, visit.visit_id);
+  statement.BindInt64(10, visit.is_known_to_sync);
+  statement.BindInt64(11, visit.visit_id);
 
   return statement.Run();
 }
@@ -939,8 +981,7 @@ void VisitDatabase::GetVisitsSource(const VisitVector& visits,
     // Get the source entries out of the query result.
     while (statement.Step()) {
       std::pair<VisitID, VisitSource> source_entry(
-          statement.ColumnInt64(0),
-          static_cast<VisitSource>(statement.ColumnInt(1)));
+          statement.ColumnInt64(0), VisitSourceFromInt(statement.ColumnInt(1)));
       sources->insert(source_entry);
     }
   }
@@ -952,7 +993,7 @@ VisitSource VisitDatabase::GetVisitSource(const VisitID visit_id) {
   statement.BindInt64(0, visit_id);
   if (!statement.Step())
     return VisitSource::SOURCE_BROWSED;
-  return static_cast<VisitSource>(statement.ColumnInt(0));
+  return VisitSourceFromInt(statement.ColumnInt(0));
 }
 
 std::vector<DomainVisit>
@@ -1240,6 +1281,30 @@ bool VisitDatabase::GetAllVisitedURLRowidsForMigrationToVersion40(
     visited_url_rowids_sorted->push_back(statement.ColumnInt64(0));
   }
   return statement.Succeeded();
+}
+
+bool VisitDatabase::MigrateVisitsAddIsKnownToSyncColumn() {
+  if (!GetDB().DoesTableExist("visits")) {
+    NOTREACHED() << " Visits table should exist before migration";
+    return false;
+  }
+
+  if (!GetDB().DoesColumnExist("visits", "is_known_to_sync")) {
+    if (!GetDB().Execute("ALTER TABLE visits "
+                         "ADD COLUMN is_known_to_sync "
+                         "BOOLEAN DEFAULT FALSE NOT NULL")) {
+      return false;
+    }
+
+    // Note we specifically DO NOT update the existing visits that have
+    // `visit_source` == `SOURCE_SYNCED` to have `is_known_to_sync` set to true.
+    //
+    // This is because we don't know if the user has subsequently turned off
+    // Sync, and we only want to flag this on for visits that are CURRENTLY
+    // known to Sync and associated with the current user.
+  }
+
+  return true;
 }
 
 }  // namespace history

@@ -176,8 +176,8 @@ bool SupportsInvalidation(CSSSelector::PseudoType type) {
     case CSSSelector::kPseudoListBox:
     case CSSSelector::kPseudoMultiSelectFocus:
     case CSSSelector::kPseudoHostHasAppearance:
-    case CSSSelector::kPseudoTopLayer:
-    case CSSSelector::kPseudoPopupHidden:
+    case CSSSelector::kPseudoOpen:
+    case CSSSelector::kPseudoPopupOpeningOrOpen:
     case CSSSelector::kPseudoSlotted:
     case CSSSelector::kPseudoVideoPersistent:
     case CSSSelector::kPseudoVideoPersistentAncestor:
@@ -194,6 +194,7 @@ bool SupportsInvalidation(CSSSelector::PseudoType type) {
     case CSSSelector::kPseudoPageTransitionImageWrapper:
     case CSSSelector::kPseudoPageTransitionIncomingImage:
     case CSSSelector::kPseudoPageTransitionOutgoingImage:
+    case CSSSelector::kPseudoToggle:
       return true;
     case CSSSelector::kPseudoUnknown:
     case CSSSelector::kPseudoLeftPage:
@@ -651,8 +652,8 @@ InvalidationSet* RuleFeatureSet::InvalidationSetForSimpleSelector(
       case CSSSelector::kPseudoInRange:
       case CSSSelector::kPseudoOutOfRange:
       case CSSSelector::kPseudoDefined:
-      case CSSSelector::kPseudoTopLayer:
-      case CSSSelector::kPseudoPopupHidden:
+      case CSSSelector::kPseudoOpen:
+      case CSSSelector::kPseudoPopupOpeningOrOpen:
       case CSSSelector::kPseudoVideoPersistent:
       case CSSSelector::kPseudoVideoPersistentAncestor:
       case CSSSelector::kPseudoXrOverlay:
@@ -661,6 +662,7 @@ InvalidationSet* RuleFeatureSet::InvalidationSetForSimpleSelector(
       case CSSSelector::kPseudoMultiSelectFocus:
       case CSSSelector::kPseudoModal:
       case CSSSelector::kPseudoSelectorFragmentAnchor:
+      case CSSSelector::kPseudoToggle:
         return &EnsurePseudoInvalidationSet(selector.GetPseudoType(), type,
                                             position);
       case CSSSelector::kPseudoFirstOfType:

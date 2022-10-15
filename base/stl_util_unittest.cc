@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -300,15 +300,6 @@ TEST(Erase, IsNotIn) {
   std::vector<int> expected = {2, 2, 4, 6};
   EXPECT_EQ(5u, EraseIf(lhs, IsNotIn<std::vector<int>>(rhs)));
   EXPECT_EQ(expected, lhs);
-}
-
-TEST(STLUtilTest, OptionalOrNullptr) {
-  absl::optional<float> optional;
-  EXPECT_EQ(nullptr, base::OptionalOrNullptr(optional));
-
-  optional = 0.1f;
-  EXPECT_EQ(&optional.value(), base::OptionalOrNullptr(optional));
-  EXPECT_NE(nullptr, base::OptionalOrNullptr(optional));
 }
 
 }  // namespace

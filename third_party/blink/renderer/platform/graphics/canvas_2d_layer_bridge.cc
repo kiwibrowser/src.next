@@ -58,20 +58,24 @@
 
 namespace blink {
 
-#if BUILDFLAG(IS_MAC)
-
 namespace {
 
-base::Feature kCanvas2DHibernation{
-    "Canvas2DHibernation", base::FeatureState::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kCanvas2DHibernation {
+  "Canvas2DHibernation",
+#if BUILDFLAG(IS_MAC)
+      // Canvas hibernation is not always enabled on MacOS X due to a bug that
+      // causes content loss. TODO: Find a better fix for crbug.com/588434
+      base::FeatureState::FEATURE_DISABLED_BY_DEFAULT
+#else
+      base::FeatureState::FEATURE_ENABLED_BY_DEFAULT
+#endif
+};
 }
 
 // static
 bool Canvas2DLayerBridge::IsHibernationEnabled() {
   return base::FeatureList::IsEnabled(kCanvas2DHibernation);
 }
-
-#endif  // BUILDFLAG(IS_MAC)
 
 Canvas2DLayerBridge::Canvas2DLayerBridge(const gfx::Size& size,
                                          RasterMode raster_mode,
@@ -388,7 +392,7 @@ void Canvas2DLayerBridge::SetIsInHiddenPage(bool hidden) {
           ::features::kCanvasContextLostInBackground)) {
     lose_context_in_background_scheduled_ = true;
     if (dont_use_idle_scheduling_for_testing_) {
-      Thread::Current()->GetTaskRunner()->PostTask(
+      Thread::Current()->GetDeprecatedTaskRunner()->PostTask(
           FROM_HERE, WTF::Bind(&LoseContextInBackgroundForTestingWrapper,
                                weak_ptr_factory_.GetWeakPtr()));
     } else {
@@ -405,7 +409,7 @@ void Canvas2DLayerBridge::SetIsInHiddenPage(bool hidden) {
     logger_->ReportHibernationEvent(kHibernationScheduled);
     hibernation_scheduled_ = true;
     if (dont_use_idle_scheduling_for_testing_) {
-      Thread::Current()->GetTaskRunner()->PostTask(
+      Thread::Current()->GetDeprecatedTaskRunner()->PostTask(
           FROM_HERE, WTF::Bind(&HibernateWrapperForTesting,
                                weak_ptr_factory_.GetWeakPtr()));
     } else {
@@ -660,6 +664,19 @@ bool Canvas2DLayerBridge::Restore() {
   return ResourceProvider();
 }
 
+namespace {
+
+// Adapter for wrapping a CanvasResourceReleaseCallback into a
+// viz::ReleaseCallback
+void ReleaseCanvasResource(CanvasResource::ReleaseCallback callback,
+                           scoped_refptr<CanvasResource> canvas_resource,
+                           const gpu::SyncToken& sync_token,
+                           bool is_lost) {
+  std::move(callback).Run(std::move(canvas_resource), sync_token, is_lost);
+}
+
+}  // unnamed namespace
+
 bool Canvas2DLayerBridge::PrepareTransferableResource(
     cc::SharedBitmapIdRegistrar* bitmap_registrar,
     viz::TransferableResource* out_resource,
@@ -690,16 +707,20 @@ bool Canvas2DLayerBridge::PrepareTransferableResource(
   if (!frame || !frame->IsValid())
     return false;
 
-  // Note frame is kept alive via a reference kept in out_release_callback.
-  if (!frame->PrepareTransferableResource(out_resource, out_release_callback,
+  CanvasResource::ReleaseCallback release_callback;
+  if (!frame->PrepareTransferableResource(out_resource, &release_callback,
                                           kUnverifiedSyncToken) ||
       *out_resource == layer_->current_transferable_resource()) {
     // If the resource did not change, the release will be handled correctly
     // when the callback from the previous frame is dispatched. But run the
-    // |out_release_callback| to release the ref acquired above.
-    std::move(*out_release_callback).Run(gpu::SyncToken(), false /* is_lost */);
+    // |release_callback| to release the ref acquired above.
+    std::move(release_callback)
+        .Run(std::move(frame), gpu::SyncToken(), false /* is_lost */);
     return false;
   }
+  // Note: frame is kept alive via a reference kept in out_release_callback.
+  *out_release_callback = base::BindOnce(
+      ReleaseCanvasResource, std::move(release_callback), std::move(frame));
 
   return true;
 }

@@ -1279,7 +1279,15 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
 
       const NGPhysicalBoxFragment& operator*() const;
 
-      void operator++() { ++iterator_; }
+      Iterator& operator++() {
+        ++iterator_;
+        return *this;
+      }
+      Iterator operator++(int) {
+        Iterator copy = *this;
+        ++*this;
+        return copy;
+      }
 
       bool operator==(const Iterator& other) const {
         return iterator_ == other.iterator_;
@@ -2113,8 +2121,10 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   }
 
   // Returns true if this box is fixed position and will not move with
-  // scrolling.
-  bool IsFixedToView() const;
+  // scrolling. If the caller can pre-calculate |container_for_fixed_position|,
+  // it should pass it to avoid recalculation.
+  bool IsFixedToView(
+      const LayoutObject* container_for_fixed_position = nullptr) const;
 
   // Returns true if the overflow property should be respected. Otherwise
   // HasNonVisibleOverflow() will be false and we won't create scrollable area
@@ -2135,7 +2145,21 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   // container, returns that container, so that at paint time, we can apply an
   // offset to this element when the returned scroll container is scrolled.
   // Returns nullptr otherwise.
-  const LayoutBlock* AnchorScrollContainer() const;
+  const LayoutBox* AnchorScrollContainer() const;
+
+  struct AnchorScrollData {
+    const PaintLayer* inner_most_scroll_container_layer = nullptr;
+    const PaintLayer* outer_most_scroll_container_layer = nullptr;
+    gfx::Vector2dF accumulated_scroll_offset;
+    gfx::Vector2d accumulated_scroll_origin;
+
+    STACK_ALLOCATED();
+  };
+  AnchorScrollData ComputeAnchorScrollData() const;
+
+  // Utility function that returns and rounds accumulated_scroll_offset of
+  // AnchorScrollData as a PhysicalOffset.
+  PhysicalOffset ComputeAnchorScrollOffset() const;
 
  protected:
   ~LayoutBox() override;

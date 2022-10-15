@@ -1416,4 +1416,112 @@ TEST_P(LayoutBoxModelObjectTest, UpdateStackingContextForOption) {
   EXPECT_TRUE(option_layout->StyleRef().HasCurrentOpacityAnimation());
 }
 
+TEST_P(LayoutBoxModelObjectTest,
+       StickyParentContainStrictChangeOverflowProperty) {
+  SetBodyInnerHTML(R"HTML(
+    <style>html, body { contain: strict; }</style>
+    <div id="sticky" style="position: sticky; top: 1px"></div>
+  )HTML");
+
+  auto* sticky = GetLayoutBoxByElementId("sticky");
+  auto* constraints = sticky->StickyConstraints();
+  ASSERT_TRUE(constraints);
+  EXPECT_EQ(&GetLayoutView(),
+            &constraints->containing_scroll_container_layer->GetLayoutObject());
+
+  GetDocument().body()->setAttribute(html_names::kStyleAttr,
+                                     "overflow: hidden");
+  UpdateAllLifecyclePhasesForTest();
+  constraints = sticky->StickyConstraints();
+  ASSERT_TRUE(constraints);
+  EXPECT_EQ(GetDocument().body()->GetLayoutObject(),
+            &constraints->containing_scroll_container_layer->GetLayoutObject());
+
+  GetDocument().body()->setAttribute(html_names::kStyleAttr, "");
+  UpdateAllLifecyclePhasesForTest();
+  constraints = sticky->StickyConstraints();
+  ASSERT_TRUE(constraints);
+  EXPECT_EQ(&GetLayoutView(),
+            &constraints->containing_scroll_container_layer->GetLayoutObject());
+}
+
+TEST_P(LayoutBoxModelObjectTest, RemoveStickyUnderContain) {
+  SetBodyInnerHTML(R"HTML(
+    <div id="contain" style="contain: strict; width: 100px; height: 2000px">
+      <div id="parent">
+        <div id="sticky" style="top: 100px; position: sticky">STICKY</div>
+      </div>
+    </div>
+  )HTML");
+
+  auto* scrollable_area = GetLayoutView().GetScrollableArea();
+  auto* sticky_layer = GetPaintLayerByElementId("sticky");
+  EXPECT_TRUE(scrollable_area->HasStickyLayer(sticky_layer));
+
+  GetDocument().getElementById("parent")->remove();
+  EXPECT_FALSE(scrollable_area->HasStickyLayer(sticky_layer));
+
+  UpdateAllLifecyclePhasesForTest();
+
+  // This should not crash.
+  scrollable_area->SetScrollOffset(ScrollOffset(0, 100),
+                                   mojom::blink::ScrollType::kProgrammatic);
+  UpdateAllLifecyclePhasesForTest();
+}
+
+TEST_P(LayoutBoxModelObjectTest, ChangeStickyStatusUnderContain) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      body { contain: strict; height: 2000px; }
+    </style>
+    <div id="target"></div>
+  )HTML");
+
+  auto* target = GetDocument().getElementById("target");
+  EXPECT_FALSE(target->GetLayoutBox()->StickyConstraints());
+
+  target->setAttribute(html_names::kStyleAttr, "top: 1px; position: sticky");
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_TRUE(target->GetLayoutBox()->StickyConstraints());
+  GetLayoutView().GetScrollableArea()->ScrollToAbsolutePosition(
+      gfx::PointF(0, 50));
+
+  target->setAttribute(html_names::kStyleAttr, "");
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_FALSE(target->GetLayoutBox()->StickyConstraints());
+
+  // This should not crash.
+  GetLayoutView().GetScrollableArea()->ScrollToAbsolutePosition(
+      gfx::PointF(0, 100));
+  UpdateAllLifecyclePhasesForTest();
+}
+
+TEST_P(LayoutBoxModelObjectTest, ChangeStickyStatusKeepLayerUnderContain) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      body { contain: strict; height: 2000px; }
+      #target { opacity: 0.9; }
+    </style>
+    <div id="target"></div>
+  )HTML");
+
+  auto* target = GetDocument().getElementById("target");
+  EXPECT_FALSE(target->GetLayoutBox()->StickyConstraints());
+
+  target->setAttribute(html_names::kStyleAttr, "top: 1px; position: sticky");
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_TRUE(target->GetLayoutBox()->StickyConstraints());
+  GetLayoutView().GetScrollableArea()->ScrollToAbsolutePosition(
+      gfx::PointF(0, 50));
+
+  target->setAttribute(html_names::kStyleAttr, "");
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_FALSE(target->GetLayoutBox()->StickyConstraints());
+
+  // This should not crash.
+  GetLayoutView().GetScrollableArea()->ScrollToAbsolutePosition(
+      gfx::PointF(0, 100));
+  UpdateAllLifecyclePhasesForTest();
+}
+
 }  // namespace blink

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -73,6 +73,19 @@ TEST(ExtensionActionHandlerTest, LoadInvisiblePageActionIconUnpacked) {
       "Icon 'invisible_icon.png' specified in 'page_action' is not "
       "sufficiently visible.",
       error);
+}
+
+// Tests that an action is always validated in manifest V3.
+TEST(ExtensionActionHandlerTest, InvalidActionIcon_ManifestV3) {
+  base::FilePath extension_dir =
+      GetTestDataDir().AppendASCII("action_invalid_icon");
+  std::string error;
+  scoped_refptr<Extension> extension(file_util::LoadExtension(
+      extension_dir, mojom::ManifestLocation::kUnpacked, Extension::NO_FLAGS,
+      &error));
+  EXPECT_FALSE(extension);
+  EXPECT_EQ("Could not load icon 'nonexistent_icon.png' specified in 'action'.",
+            error);
 }
 
 using ExtensionActionHandlerManifestTest = ManifestTest;

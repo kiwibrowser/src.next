@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -31,7 +31,7 @@ group("resources") {
       "commander:resources",
       "downloads:resources",
       "feed:resources",
-      "feedback_webui:resources",
+      "feedback:resources",
       "gaia_auth_host:resources",
       "history:resources",
       "image_editor:trusted_resources",
@@ -40,6 +40,7 @@ group("resources") {
       "new_tab_page:resources",
       "new_tab_page_instant:resources",
       "new_tab_page_third_party:resources",
+      "password_manager:resources",
       "privacy_sandbox:resources",
       "profile_internals:resources",
       "settings:resources",
@@ -82,6 +83,7 @@ group("resources") {
 
   if (is_win || is_mac || is_linux || is_fuchsia) {
     public_deps += [
+      "app_home:resources",
       "app_settings:resources",
       "ntp4:apps_resources",
     ]
@@ -93,6 +95,7 @@ group("resources") {
 
   if (!is_android && !is_chromeos_ash) {
     public_deps += [
+      "intro:resources",
       "signin/profile_picker:resources",
       "welcome:resources",
     ]
@@ -315,35 +318,5 @@ repack("dev_ui_paks") {
   if (is_android) {
     sources += [ "$root_gen_dir/chrome/webapks_resources.pak" ]
     deps += [ "//chrome/browser/resources/webapks:resources" ]
-  }
-}
-
-# Some targets in this file are depended on independent of include_js_tests,
-# so this file gets loaded even if !include_js_tests. Since js2gtest()s don't
-# compile in some scenarios when include_js_tests is false, and since this
-# file is loaded even when it's false, we need to make sure the js2gtest()
-# target only exists in this file when it works. (In contrast, most other
-# BUILD.gn files containing js2gtest()s contain nothing else and hence are only
-# loaded when include_js_tests is true.)
-if (!is_android && include_js_tests) {
-  js2gtest("resources_unitjs_tests") {
-    test_type = "webui"
-    sources = [ "gaia_auth_host/password_change_authenticator_test.unitjs" ]
-
-    # This has to be a gen_include, so it doesn't collide with other js2gtests
-    gen_include_files = [ "//ui/webui/resources/js/cr.js" ]
-
-    # But these have to be extra_js_files, since it uses a native object
-    # EventTarget, which doesn't work at compile time.
-    extra_js_files = [
-      "//ui/webui/resources/js/cr/event_target.js",
-      "gaia_auth_host/password_change_authenticator.js",
-    ]
-    defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
-  }
-
-  source_set("browser_tests_js") {
-    testonly = true
-    deps = [ ":resources_unitjs_tests" ]
   }
 }

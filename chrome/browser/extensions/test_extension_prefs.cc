@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -175,9 +175,9 @@ scoped_refptr<Extension> TestExtensionPrefs::AddExtensionWithManifestAndFlags(
     const base::DictionaryValue& manifest,
     ManifestLocation location,
     int extra_flags) {
-  std::string name;
-  EXPECT_TRUE(manifest.GetString(manifest_keys::kName, &name));
-  base::FilePath path =  extensions_dir_.AppendASCII(name);
+  const std::string* name = manifest.GetDict().FindString(manifest_keys::kName);
+  EXPECT_TRUE(name);
+  base::FilePath path = extensions_dir_.AppendASCII(*name);
   std::string errors;
   scoped_refptr<Extension> extension =
       Extension::Create(path, location, manifest, extra_flags, &errors);

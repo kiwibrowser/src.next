@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 
 #include "base/bind.h"
 #include "base/check_op.h"
+#include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/strcat.h"
@@ -37,6 +38,7 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/api/extension_action/action_info.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_features.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/permissions/api_permission.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -226,7 +228,10 @@ bool ExtensionActionViewController::IsRequestingSiteAccess(
 
 void ExtensionActionViewController::HidePopup() {
   if (IsShowingPopup()) {
-    popup_host_->Close();
+    // Only call Close() on the popup if it's been shown; otherwise, the popup
+    // will be cleaned up in ShowPopup().
+    if (has_opened_popup_)
+      popup_host_->Close();
     // We need to do these actions synchronously (instead of closing and then
     // performing the rest of the cleanup in OnExtensionHostDestroyed()) because
     // the extension host may close asynchronously, and we need to keep the view
@@ -314,6 +319,15 @@ void ExtensionActionViewController::UpdateState() {
   view_delegate_->UpdateState();
 }
 
+void ExtensionActionViewController::UpdateHoverCard(
+    ToolbarActionView* action_view,
+    ToolbarActionHoverCardUpdateType update_type) {
+  if (!ExtensionIsValid())
+    return;
+
+  extensions_container_->UpdateToolbarActionHoverCard(action_view, update_type);
+}
+
 void ExtensionActionViewController::RegisterCommand() {
   if (!ExtensionIsValid())
     return;
@@ -366,6 +380,52 @@ bool ExtensionActionViewController::GetExtensionCommand(
   return command_service->GetExtensionActionCommand(
       extension_->id(), extension_action_->action_type(),
       CommandService::ACTIVE, command, nullptr);
+}
+
+ToolbarActionViewController::HoverCardState
+ExtensionActionViewController::GetHoverCardState(
+    content::WebContents* web_contents) const {
+  DCHECK(ExtensionIsValid());
+  DCHECK(web_contents);
+
+  url::Origin origin =
+      web_contents->GetPrimaryMainFrame()->GetLastCommittedOrigin();
+  extensions::PermissionsManager::UserSiteSetting site_setting =
+      extensions::PermissionsManager::Get(browser_->profile())
+          ->GetUserSiteSetting(origin);
+
+  // Compute hover card status based on:
+  // 1. Extension wants site access: user site settings takes precedence
+  // over the extension's site access.
+  // 2. Extension does not want access: if all extensions are blocked display
+  // such message because a) user could wrongly infer that an extension that
+  // does not want access has access if we only show the blocked message for
+  // extensions that want access; and b) it helps us work around tricky
+  // calculations where we get into collisions between withheld and denied
+  // permission. Otherwise, it should display "does not want access".
+  auto site_interaction = GetSiteInteraction(web_contents);
+  switch (site_interaction) {
+    case extensions::SitePermissionsHelper::SiteInteraction::kGranted:
+      return site_setting == extensions::PermissionsManager::UserSiteSetting::
+                                 kGrantAllExtensions
+                 ? HoverCardState::kAllExtensionsAllowed
+                 : HoverCardState::kExtensionHasAccess;
+
+    case extensions::SitePermissionsHelper::SiteInteraction::kWithheld:
+    case extensions::SitePermissionsHelper::SiteInteraction::kActiveTab:
+      return site_setting == extensions::PermissionsManager::UserSiteSetting::
+                                 kBlockAllExtensions
+                 ? HoverCardState::kAllExtensionsBlocked
+                 : HoverCardState::kExtensionRequestsAccess;
+
+    case extensions::SitePermissionsHelper::SiteInteraction::kNone:
+      // kNone site interaction includes extensions that don't want access when
+      // user site setting is "block all extensions".
+      return site_setting == extensions::PermissionsManager::UserSiteSetting::
+                                 kBlockAllExtensions
+                 ? HoverCardState::kAllExtensionsBlocked
+                 : HoverCardState::kExtensionDoesNotWantAccess;
+  }
 }
 
 bool ExtensionActionViewController::CanHandleAccelerators() const {
@@ -459,6 +519,12 @@ void ExtensionActionViewController::ShowPopup(
       std::move(callback).Run(nullptr);
     return;
   }
+  // NOTE: Today, ShowPopup() always synchronously creates the platform-specific
+  // popup class, which is what we care most about (since `has_opened_popup_`
+  // is used to determine whether we need to manually close the
+  // ExtensionViewHost). This doesn't necessarily mean that the popup has
+  // completed rendering on the screen.
+  has_opened_popup_ = true;
   platform_delegate_->ShowPopup(std::move(popup_host), show_action,
                                 std::move(callback));
   view_delegate_->OnPopupShown(grant_tab_permissions);
@@ -468,6 +534,7 @@ void ExtensionActionViewController::OnPopupClosed() {
   DCHECK(popup_host_observation_.IsObservingSource(popup_host_.get()));
   popup_host_observation_.Reset();
   popup_host_ = nullptr;
+  has_opened_popup_ = false;
   extensions_container_->SetPopupOwner(nullptr);
   if (extensions_container_->GetPoppedOutAction() == this)
     extensions_container_->UndoPopOut();
@@ -513,6 +580,11 @@ ExtensionActionViewController::GetIconImageSource(
           extensions::SitePermissionsHelper::SiteInteraction::kNone &&
       !action_is_visible;
   image_source->set_grayscale(grayscale);
+
+  if (base::FeatureList::IsEnabled(
+          extensions_features::kExtensionsMenuAccessControl)) {
+    return image_source;
+  }
 
   bool was_blocked = extensions::SitePermissionsHelper(browser_->profile())
                          .HasBeenBlocked(*extension(), web_contents);

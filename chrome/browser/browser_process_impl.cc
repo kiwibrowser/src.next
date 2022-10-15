@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,7 @@
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/notreached.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/synchronization/waitable_event.h"
@@ -196,7 +197,6 @@
 
 #if BUILDFLAG(ENABLE_PLUGINS)
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
-#include "chrome/browser/plugins/plugin_finder.h"
 #include "content/public/browser/plugin_service.h"
 #endif
 
@@ -218,7 +218,7 @@
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #endif
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/chromeos/extensions/telemetry/chromeos_telemetry_extensions_browser_api_provider.h"
 #endif
 
@@ -302,11 +302,11 @@ void BrowserProcessImpl::Init() {
       std::make_unique<chrome_apps::ChromeAppsBrowserAPIProvider>());
   extensions::ExtensionsBrowserClient::Set(extensions_browser_client_.get());
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   extensions_browser_client_->AddAPIProvider(
       std::make_unique<
           chromeos::ChromeOSTelemetryExtensionsBrowserAPIProvider>());
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
@@ -391,7 +391,7 @@ BrowserProcessImpl::~BrowserProcessImpl() {
   KeepAliveRegistry::GetInstance()->RemoveObserver(this);
 #endif
 
-  g_browser_process = NULL;
+  g_browser_process = nullptr;
 }
 
 #if !BUILDFLAG(IS_ANDROID)
@@ -825,7 +825,12 @@ bool BrowserProcessImpl::IsShuttingDown() {
 
 printing::PrintJobManager* BrowserProcessImpl::print_job_manager() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+#if BUILDFLAG(ENABLE_PRINTING)
   return print_job_manager_.get();
+#else
+  NOTREACHED();
+  return nullptr;
+#endif
 }
 
 printing::PrintPreviewDialogController*
@@ -904,12 +909,7 @@ WebRtcLogUploader* BrowserProcessImpl::webrtc_log_uploader() {
 }
 
 network_time::NetworkTimeTracker* BrowserProcessImpl::network_time_tracker() {
-  if (!network_time_tracker_) {
-    network_time_tracker_ = std::make_unique<network_time::NetworkTimeTracker>(
-        base::WrapUnique(new base::DefaultClock()),
-        base::WrapUnique(new base::DefaultTickClock()), local_state(),
-        system_network_context_manager()->GetSharedURLLoaderFactory());
-  }
+  CreateNetworkTimeTracker();
   return network_time_tracker_.get();
 }
 
@@ -986,12 +986,6 @@ void BrowserProcessImpl::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(prefs::kEulaAccepted, false);
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_ANDROID)
 
-  // TODO(brettw,*): this comment about ResourceBundle was here since
-  // initial commit.  This comment seems unrelated, bit-rotten and
-  // a candidate for removal.
-  // Initialize ResourceBundle which handles files loaded from external
-  // sources. This has to be done before uninstall code path and before prefs
-  // are registered.
   registry->RegisterStringPref(language::prefs::kApplicationLocale,
                                std::string());
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -1171,11 +1165,8 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
 #endif
 
 #if BUILDFLAG(ENABLE_PLUGINS)
-  auto* plugin_service = content::PluginService::GetInstance();
-  plugin_service->SetFilter(ChromePluginServiceFilter::GetInstance());
-
-  // Triggers initialization of the singleton instance on UI thread.
-  PluginFinder::GetInstance();
+  content::PluginService::GetInstance()->SetFilter(
+      ChromePluginServiceFilter::GetInstance());
 #endif  // BUILDFLAG(ENABLE_PLUGINS)
 
 #if !BUILDFLAG(IS_ANDROID)
@@ -1185,10 +1176,7 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
   platform_part_->PreMainMessageLoopRun();
 
   if (base::FeatureList::IsEnabled(network_time::kNetworkTimeServiceQuerying)) {
-    network_time_tracker_ = std::make_unique<network_time::NetworkTimeTracker>(
-        base::WrapUnique(new base::DefaultClock()),
-        base::WrapUnique(new base::DefaultTickClock()), local_state(),
-        system_network_context_manager()->GetSharedURLLoaderFactory());
+    CreateNetworkTimeTracker();
   }
 
   CreateNetworkQualityObserver();
@@ -1342,6 +1330,16 @@ void BrowserProcessImpl::CreateGCMDriver() {
       blocking_task_runner);
 }
 #endif  // !BUILDFLAG(IS_ANDROID)
+
+void BrowserProcessImpl::CreateNetworkTimeTracker() {
+  if (network_time_tracker_) {
+    return;
+  }
+  network_time_tracker_ = std::make_unique<network_time::NetworkTimeTracker>(
+      base::WrapUnique(new base::DefaultClock()),
+      base::WrapUnique(new base::DefaultTickClock()), local_state(),
+      system_network_context_manager()->GetSharedURLLoaderFactory());
+}
 
 void BrowserProcessImpl::ApplyDefaultBrowserPolicy() {
   if (local_state()->GetBoolean(prefs::kDefaultBrowserSettingEnabled)) {

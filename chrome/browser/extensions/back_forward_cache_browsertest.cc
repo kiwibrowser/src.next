@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,7 +48,6 @@ class ExtensionBackForwardCacheBrowserTest : public ExtensionBrowserTest {
            {"extension_message_supported",
             extension_message_support ? "true" : "false"},
            {"TimeToLiveInBackForwardCacheInSeconds", "3600"},
-           {"enable_same_site", "true"},
            {"all_extensions_allowed",
             all_extensions_allowed ? "true" : "false"},
            {"blocked_extensions", blocked_extensions},
@@ -972,10 +971,16 @@ IN_PROC_BROWSER_TEST_F(ExtensionBackForwardCacheBrowserTest,
                 base::StringPrintf(kScript, iframe_frame_tree_node_id)));
 }
 
+// TODO(crbug.com/1317431): WebSQL does not work on Fuchsia.
+#if BUILDFLAG(IS_FUCHSIA)
+#define MAYBE_StorageCallbackEvicts DISABLED_StorageCallbackEvicts
+#else
+#define MAYBE_StorageCallbackEvicts StorageCallbackEvicts
+#endif
 // Test that running extensions message dispatching via a ScriptContext::ForEach
 // for back forward cached pages causes eviction of that RenderFrameHost.
 IN_PROC_BROWSER_TEST_F(ExtensionBackForwardCacheBrowserTest,
-                       StorageCallbackEvicts) {
+                       MAYBE_StorageCallbackEvicts) {
   const Extension* extension = extension =
       LoadExtension(test_data_dir_.AppendASCII("back_forward_cache")
                         .AppendASCII("content_script_storage"));

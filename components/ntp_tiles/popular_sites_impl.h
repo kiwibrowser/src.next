@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -57,7 +57,7 @@ class PopularSitesImpl : public PopularSites {
   std::string GetDirectoryToFetch() override;
   std::string GetCountryToFetch() override;
   std::string GetVersionToFetch() override;
-  const base::ListValue* GetCachedJson() override;
+  const base::Value::List& GetCachedJson() override;
 
   // Register preferences used by this class.
   static void RegisterProfilePrefs(

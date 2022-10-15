@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -240,11 +240,11 @@ class TabGridViewBinder {
                             // TODO(crbug.com/1337117): add logging for when
                             // couponPersistedTabData is not null
                             if (couponPersistedTabData == null
-                                    || couponPersistedTabData.getCoupon() == null) {
+                                    || couponPersistedTabData.getCouponAnnotationText() == null) {
                                 couponCardView.setVisibility(View.GONE);
                             } else {
                                 couponCardView.setCouponString(
-                                        couponPersistedTabData.getCoupon().couponName);
+                                        couponPersistedTabData.getCouponAnnotationText());
                                 couponCardView.setVisibility(View.VISIBLE);
                             }
                         });

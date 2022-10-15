@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,6 +55,8 @@ ContextMenuMatcher::ContextMenuMatcher(
       filter_(filter),
       is_smart_text_selection_enabled_(false) {}
 
+ContextMenuMatcher::~ContextMenuMatcher() = default;
+
 void ContextMenuMatcher::AppendExtensionItems(
     const MenuItem::ExtensionKey& extension_key,
     const std::u16string& selection_text,
@@ -66,7 +68,7 @@ void ContextMenuMatcher::AppendExtensionItems(
   if (*index >= max_index)
     return;
 
-  const Extension* extension = NULL;
+  const Extension* extension = nullptr;
   MenuItem::List items;
   bool can_cross_incognito;
   if (!GetRelevantExtensionTopLevelItems(
@@ -173,7 +175,7 @@ void ContextMenuMatcher::Clear() {
 std::u16string ContextMenuMatcher::GetTopLevelContextMenuTitle(
     const MenuItem::ExtensionKey& extension_key,
     const std::u16string& selection_text) {
-  const Extension* extension = NULL;
+  const Extension* extension = nullptr;
   MenuItem::List items;
   bool can_cross_incognito;
   GetRelevantExtensionTopLevelItems(
@@ -373,7 +375,7 @@ MenuItem* ContextMenuMatcher::GetExtensionMenuItem(int id) const {
     if (item)
       return item;
   }
-  return NULL;
+  return nullptr;
 }
 
 void ContextMenuMatcher::SetExtensionIcon(const std::string& extension_id) {

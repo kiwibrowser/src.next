@@ -116,6 +116,8 @@ class CORE_EXPORT FrameFetchContext final : public BaseFetchContext,
   void AddClientHintsIfNecessary(const FetchParameters::ResourceWidth&,
                                  ResourceRequest&);
 
+  void AddReducedAcceptLanguageIfNecessary(ResourceRequest&);
+
   FetchContext* Detach() override;
 
   void Trace(Visitor*) const override;
@@ -168,6 +170,7 @@ class CORE_EXPORT FrameFetchContext final : public BaseFetchContext,
       override;
   bool ShouldBlockFetchByMixedContentCheck(
       mojom::blink::RequestContextType request_context,
+      network::mojom::blink::IPAddressSpace target_address_space,
       const absl::optional<ResourceRequest::RedirectInfo>& redirect_info,
       const KURL& url,
       ReportingDisposition reporting_disposition,
@@ -188,6 +191,7 @@ class CORE_EXPORT FrameFetchContext final : public BaseFetchContext,
   const PermissionsPolicy* GetPermissionsPolicy() const override;
   const ClientHintsPreferences GetClientHintsPreferences() const;
   float GetDevicePixelRatio() const;
+  String GetReducedAcceptLanguage() const;
 
   enum class ClientHintsMode { kLegacy, kStandard };
   bool ShouldSendClientHint(ClientHintsMode mode,

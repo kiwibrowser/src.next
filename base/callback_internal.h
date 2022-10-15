@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,7 +33,7 @@ struct BindState;
 class CallbackBase;
 class CallbackBaseCopyable;
 
-struct BindStateBaseRefCountTraits {
+struct BASE_EXPORT BindStateBaseRefCountTraits {
   static void Destruct(const BindStateBase*);
 };
 

@@ -38,7 +38,6 @@
 #include "third_party/blink/renderer/core/css/css_custom_ident_value.h"
 #include "third_party/blink/renderer/core/css/css_custom_property_declaration.h"
 #include "third_party/blink/renderer/core/css/css_cyclic_variable_value.h"
-#include "third_party/blink/renderer/core/css/css_element_offset_value.h"
 #include "third_party/blink/renderer/core/css/css_font_face_src_value.h"
 #include "third_party/blink/renderer/core/css/css_font_family_value.h"
 #include "third_party/blink/renderer/core/css/css_font_feature_value.h"
@@ -49,7 +48,6 @@
 #include "third_party/blink/renderer/core/css/css_grid_auto_repeat_value.h"
 #include "third_party/blink/renderer/core/css/css_grid_integer_repeat_value.h"
 #include "third_party/blink/renderer/core/css/css_grid_template_areas_value.h"
-#include "third_party/blink/renderer/core/css/css_id_selector_value.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
 #include "third_party/blink/renderer/core/css/css_image_set_value.h"
 #include "third_party/blink/renderer/core/css/css_image_value.h"
@@ -73,6 +71,7 @@
 #include "third_party/blink/renderer/core/css/css_reflect_value.h"
 #include "third_party/blink/renderer/core/css/css_revert_layer_value.h"
 #include "third_party/blink/renderer/core/css/css_revert_value.h"
+#include "third_party/blink/renderer/core/css/css_scroll_value.h"
 #include "third_party/blink/renderer/core/css/css_shadow_value.h"
 #include "third_party/blink/renderer/core/css/css_string_value.h"
 #include "third_party/blink/renderer/core/css/css_timing_function_value.h"
@@ -297,10 +296,8 @@ bool CSSValue::operator==(const CSSValue& other) const {
         return CompareCSSValues<CSSCyclicVariableValue>(*this, other);
       case kLightDarkValuePairClass:
         return CompareCSSValues<CSSLightDarkValuePair>(*this, other);
-      case kIdSelectorClass:
-        return CompareCSSValues<cssvalue::CSSIdSelectorValue>(*this, other);
-      case kElementOffsetClass:
-        return CompareCSSValues<cssvalue::CSSElementOffsetValue>(*this, other);
+      case kScrollClass:
+        return CompareCSSValues<cssvalue::CSSScrollValue>(*this, other);
       case kRatioClass:
         return CompareCSSValues<cssvalue::CSSRatioValue>(*this, other);
     }
@@ -433,10 +430,8 @@ String CSSValue::CssText() const {
       return To<CSSCyclicVariableValue>(this)->CustomCSSText();
     case kLightDarkValuePairClass:
       return To<CSSLightDarkValuePair>(this)->CustomCSSText();
-    case kIdSelectorClass:
-      return To<cssvalue::CSSIdSelectorValue>(this)->CustomCSSText();
-    case kElementOffsetClass:
-      return To<cssvalue::CSSElementOffsetValue>(this)->CustomCSSText();
+    case kScrollClass:
+      return To<cssvalue::CSSScrollValue>(this)->CustomCSSText();
     case kRatioClass:
       return To<cssvalue::CSSRatioValue>(this)->CustomCSSText();
   }
@@ -635,11 +630,8 @@ void CSSValue::FinalizeGarbageCollectedObject() {
     case kLightDarkValuePairClass:
       To<CSSLightDarkValuePair>(this)->~CSSLightDarkValuePair();
       return;
-    case kIdSelectorClass:
-      To<cssvalue::CSSIdSelectorValue>(this)->~CSSIdSelectorValue();
-      return;
-    case kElementOffsetClass:
-      To<cssvalue::CSSElementOffsetValue>(this)->~CSSElementOffsetValue();
+    case kScrollClass:
+      To<cssvalue::CSSScrollValue>(this)->~CSSScrollValue();
       return;
     case kRatioClass:
       To<cssvalue::CSSRatioValue>(this)->~CSSRatioValue();
@@ -839,11 +831,8 @@ void CSSValue::Trace(Visitor* visitor) const {
     case kLightDarkValuePairClass:
       To<CSSLightDarkValuePair>(this)->TraceAfterDispatch(visitor);
       return;
-    case kIdSelectorClass:
-      To<cssvalue::CSSIdSelectorValue>(this)->TraceAfterDispatch(visitor);
-      return;
-    case kElementOffsetClass:
-      To<cssvalue::CSSElementOffsetValue>(this)->TraceAfterDispatch(visitor);
+    case kScrollClass:
+      To<cssvalue::CSSScrollValue>(this)->TraceAfterDispatch(visitor);
       return;
     case kRatioClass:
       To<cssvalue::CSSRatioValue>(this)->TraceAfterDispatch(visitor);

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -483,7 +483,8 @@ scoped_refptr<Extension>
     std::string* error) {
   std::unique_ptr<base::DictionaryValue> localized_manifest;
   if (!localized_name.empty() || !localized_description.empty()) {
-    localized_manifest.reset(manifest->DeepCopy());
+    localized_manifest = base::DictionaryValue::From(
+        base::Value::ToUniquePtrValue(manifest->Clone()));
     if (!localized_name.empty()) {
       localized_manifest->SetStringKey(extensions::manifest_keys::kName,
                                        localized_name);

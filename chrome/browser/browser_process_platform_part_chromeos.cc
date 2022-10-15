@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -157,7 +157,7 @@ void BrowserProcessPlatformPartChromeOS::BrowserRestoreObserver::RestoreUrls(
     if (!handled_by_chrome)
       continue;
 
-    int add_types = TabStripModel::ADD_NONE | TabStripModel::ADD_FORCE_INDEX;
+    int add_types = AddTabTypes::ADD_NONE | AddTabTypes::ADD_FORCE_INDEX;
     NavigateParams params(browser, url, ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
     params.disposition = WindowOpenDisposition::NEW_BACKGROUND_TAB;
     params.tabstrip_add_types = add_types;

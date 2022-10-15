@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,6 +32,7 @@ class UtilitySandboxedProcessLauncherDelegate
   sandbox::mojom::Sandbox GetSandboxType() override;
 
 #if BUILDFLAG(IS_WIN)
+  std::string GetSandboxTag() override;
   bool GetAppContainerId(std::string* appcontainer_id) override;
   bool DisableDefaultPolicy() override;
   bool ShouldLaunchElevated() override;

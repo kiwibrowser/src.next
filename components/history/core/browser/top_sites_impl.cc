@@ -1,17 +1,18 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/history/core/browser/top_sites_impl.h"
 
 #include <stdint.h>
-#include <algorithm>
+
 #include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/check.h"
+#include "base/containers/contains.h"
 #include "base/hash/md5.h"
 #include "base/location.h"
 #include "base/metrics/histogram_functions.h"
@@ -171,13 +172,6 @@ void TopSitesImpl::GetMostVisitedURLs(GetMostVisitedURLsCallback callback) {
   std::move(callback).Run(filtered_urls);
 }
 
-static bool Contains(const MostVisitedURLList& urls, const GURL& url) {
-  return std::find_if(urls.begin(), urls.end(),
-                      [&url](const MostVisitedURL& item) {
-                        return item.url == url;
-                      }) != urls.end();
-}
-
 void TopSitesImpl::SyncWithHistory() {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (loaded_)
@@ -185,9 +179,7 @@ void TopSitesImpl::SyncWithHistory() {
 }
 
 bool TopSitesImpl::HasBlockedUrls() const {
-  const base::Value* blocked_urls =
-      pref_service_->GetDictionary(kBlockedUrlsPrefsKey);
-  return blocked_urls && !blocked_urls->DictEmpty();
+  return !pref_service_->GetDict(kBlockedUrlsPrefsKey).empty();
 }
 
 void TopSitesImpl::AddBlockedUrl(const GURL& url) {
@@ -216,9 +208,7 @@ void TopSitesImpl::RemoveBlockedUrl(const GURL& url) {
 
 bool TopSitesImpl::IsBlocked(const GURL& url) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  const base::Value* blocked_urls =
-      pref_service_->GetDictionary(kBlockedUrlsPrefsKey);
-  return blocked_urls && blocked_urls->FindKey(GetURLHash(url));
+  return pref_service_->GetDict(kBlockedUrlsPrefsKey).contains(GetURLHash(url));
 }
 
 void TopSitesImpl::ClearBlockedUrls() {
@@ -438,7 +428,8 @@ bool TopSitesImpl::AddPrepopulatedPages(MostVisitedURLList* urls) const {
   for (const auto& prepopulated_page : prepopulated_pages_) {
     if (urls->size() >= kTopSitesNumber)
       break;
-    if (!Contains(*urls, prepopulated_page.most_visited.url)) {
+    if (!base::Contains(*urls, prepopulated_page.most_visited.url,
+                        &MostVisitedURL::url)) {
       urls->push_back(prepopulated_page.most_visited);
       added = true;
     }
@@ -517,9 +508,7 @@ void TopSitesImpl::SetTopSites(MostVisitedURLList top_sites,
 int TopSitesImpl::num_results_to_request_from_history() const {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  const base::Value* blocked_urls =
-      pref_service_->GetDictionary(kBlockedUrlsPrefsKey);
-  return kTopSitesNumber + (blocked_urls ? blocked_urls->DictSize() : 0);
+  return kTopSitesNumber + pref_service_->GetDict(kBlockedUrlsPrefsKey).size();
 }
 
 void TopSitesImpl::MoveStateToLoaded() {

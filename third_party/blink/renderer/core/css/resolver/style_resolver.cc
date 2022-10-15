@@ -30,6 +30,7 @@
 
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 
+#include "base/containers/adapters.h"
 #include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink.h"
 #include "third_party/blink/renderer/core/animation/css/compositor_keyframe_value_factory.h"
 #include "third_party/blink/renderer/core/animation/css/css_animations.h"
@@ -164,10 +165,26 @@ void SetAnimationUpdateIfNeeded(const StyleRecalcContext& style_recalc_context,
     data->SetPendingUpdate(element, state.AnimationUpdate());
 }
 
+ElementAnimations* GetElementAnimations(const StyleResolverState& state) {
+  if (!state.GetAnimatingElement())
+    return nullptr;
+  return state.GetAnimatingElement()->GetElementAnimations();
+}
+
 bool HasAnimationsOrTransitions(const StyleResolverState& state) {
   return state.Style()->Animations() || state.Style()->Transitions() ||
          (state.GetAnimatingElement() &&
           state.GetAnimatingElement()->HasAnimations());
+}
+
+bool HasTimelines(const StyleResolverState& state) {
+  if (!state.Style()->ScrollTimelineName().IsEmpty())
+    return true;
+  if (!state.Style()->ViewTimelineName().IsEmpty())
+    return true;
+  if (ElementAnimations* element_animations = GetElementAnimations(state))
+    return element_animations->CssAnimations().HasTimelines();
+  return false;
 }
 
 bool IsAnimationStyleChange(Element& element) {
@@ -503,24 +520,27 @@ static void MatchSlottedRulesForUAHost(const Element& element,
 static void MatchSlottedRules(const Element& element,
                               ElementRuleCollector& collector) {
   MatchSlottedRulesForUAHost(element, collector);
-  HTMLSlotElement* slot = element.AssignedSlot();
-  if (!slot)
-    return;
-
   HeapVector<std::pair<Member<HTMLSlotElement>, Member<ScopedStyleResolver>>>
       resolvers;
-  for (; slot; slot = slot->AssignedSlot()) {
-    if (ScopedStyleResolver* resolver =
-            slot->GetTreeScope().GetScopedStyleResolver()) {
-      resolvers.push_back(std::make_pair(slot, resolver));
+  {
+    HTMLSlotElement* slot = element.AssignedSlot();
+    if (!slot)
+      return;
+
+    for (; slot; slot = slot->AssignedSlot()) {
+      if (ScopedStyleResolver* resolver =
+              slot->GetTreeScope().GetScopedStyleResolver()) {
+        resolvers.push_back(std::make_pair(slot, resolver));
+      }
     }
   }
-  for (auto it = resolvers.rbegin(); it != resolvers.rend(); ++it) {
-    ElementRuleCollector::SlottedRulesScope scope(collector, *(*it).first);
+
+  for (const auto& [slot, resolver] : base::Reversed(resolvers)) {
+    ElementRuleCollector::SlottedRulesScope scope(collector, *slot);
     collector.ClearMatchedRules();
-    (*it).second->CollectMatchingSlottedRules(collector);
+    resolver->CollectMatchingSlottedRules(collector);
     collector.SortAndTransferMatchedRules();
-    collector.FinishAddingAuthorRulesForTreeScope((*it).first->GetTreeScope());
+    collector.FinishAddingAuthorRulesForTreeScope(slot->GetTreeScope());
   }
 }
 
@@ -724,19 +744,24 @@ void StyleResolver::MatchUARules(const Element& element,
                                  ElementRuleCollector& collector) {
   collector.SetMatchingUARules(true);
 
-  auto func = [this, &collector](RuleSet* rules) {
-    MatchRuleSet(collector, rules);
+  MatchRequest match_request;
+  auto func = [&match_request](RuleSet* rules) {
+    match_request.AddRuleset(rules, /*style_sheet=*/nullptr);
   };
   ForEachUARulesForElement(element, &collector, func);
+
+  if (!match_request.IsEmpty()) {
+    MatchRuleSets(collector, match_request);
+  }
 
   collector.FinishAddingUARules();
   collector.SetMatchingUARules(false);
 }
 
-void StyleResolver::MatchRuleSet(ElementRuleCollector& collector,
-                                 RuleSet* rules) {
+void StyleResolver::MatchRuleSets(ElementRuleCollector& collector,
+                                  const MatchRequest& match_request) {
   collector.ClearMatchedRules();
-  collector.CollectMatchingRules(MatchRequest(rules));
+  collector.CollectMatchingRules(match_request);
   collector.SortAndTransferMatchedRules();
 }
 
@@ -811,13 +836,6 @@ scoped_refptr<ComputedStyle> StyleResolver::StyleForViewport() {
   GetDocument().GetStyleEngine().ApplyVisionDeficiencyStyle(viewport_style);
 
   return viewport_style;
-}
-
-static ElementAnimations* GetElementAnimations(
-    const StyleResolverState& state) {
-  if (!state.GetAnimatingElement())
-    return nullptr;
-  return state.GetAnimatingElement()->GetElementAnimations();
 }
 
 static StyleBaseData* GetBaseData(const StyleResolverState& state) {
@@ -969,11 +987,6 @@ void StyleResolver::ApplyInheritance(Element& element,
     // the element has rules but no matched properties, we currently clone.
 
     state.SetStyle(ComputedStyle::Clone(*state.ParentStyle()));
-    state.Style()->SetInsideLink(state.ElementLinkState());
-    state.Style()->SetInForcedColorsMode(
-        style_request.originating_element_style->InForcedColorsMode());
-    state.Style()->SetForcedColorAdjust(
-        style_request.originating_element_style->ForcedColorAdjust());
   } else {
     scoped_refptr<ComputedStyle> style = CreateComputedStyle();
     style->InheritFrom(
@@ -1018,6 +1031,17 @@ void StyleResolver::InitStyleAndApplyInheritance(
   }
   state.Style()->SetStyleType(style_request.pseudo_id);
   state.Style()->SetPseudoArgument(style_request.pseudo_argument);
+
+  // For highlight inheritance, propagate link visitedness and forced-colors
+  // status from the originating element, even if we have no parent highlight
+  // ComputedStyle we can inherit from.
+  if (UsesHighlightPseudoInheritance(style_request.pseudo_id)) {
+    state.Style()->SetInsideLink(state.ElementLinkState());
+    state.Style()->SetInForcedColorsMode(
+        style_request.originating_element_style->InForcedColorsMode());
+    state.Style()->SetForcedColorAdjust(
+        style_request.originating_element_style->ForcedColorAdjust());
+  }
 
   if (!style_request.IsPseudoStyleRequest() && element.IsLink()) {
     state.Style()->SetIsLink();
@@ -1251,6 +1275,8 @@ void StyleResolver::ApplyBaseStyleNoCache(
 
   if (collector.MatchedResult().DependsOnSizeContainerQueries())
     state.Style()->SetDependsOnSizeContainerQueries(true);
+  if (collector.MatchedResult().DependsOnStyleContainerQueries())
+    state.Style()->SetDependsOnStyleContainerQueries(true);
   if (collector.MatchedResult().DependsOnStaticViewportUnits())
     state.Style()->SetHasStaticViewportUnits();
   if (collector.MatchedResult().DependsOnDynamicViewportUnits())
@@ -1529,13 +1555,6 @@ scoped_refptr<const ComputedStyle> StyleResolver::StyleForText(
   return nullptr;
 }
 
-void StyleResolver::UpdateFont(StyleResolverState& state) {
-  state.GetFontBuilder().CreateFont(state.StyleRef(), state.ParentStyle());
-  state.SetConversionFontSizes(CSSToLengthConversionData::FontSizes(
-      state.Style(), state.RootElementStyle()));
-  state.SetConversionZoom(state.Style()->EffectiveZoom());
-}
-
 void StyleResolver::AddMatchedRulesToTracker(
     const ElementRuleCollector& collector) {
   collector.AddMatchedRulesToTracker(tracker_);
@@ -1576,9 +1595,9 @@ StyleResolver::CascadedValuesForElement(Element* element, PseudoId pseudo_id) {
 Element* StyleResolver::FindContainerForElement(
     Element* element,
     const ContainerSelector& container_selector) {
-  auto context = StyleRecalcContext::FromAncestors(*element);
-  return ContainerQueryEvaluator::FindContainer(context.container,
-                                                container_selector);
+  DCHECK(element);
+  return ContainerQueryEvaluator::FindContainer(
+      element->ParentOrShadowHostElement(), container_selector);
 }
 
 RuleIndexList* StyleResolver::PseudoCSSRulesForElement(
@@ -1651,6 +1670,11 @@ bool StyleResolver::ApplyAnimatedStyle(StyleResolverState& state,
 
   if (!animating_element)
     return false;
+
+  if (HasTimelines(state)) {
+    CSSAnimations::CalculateTimelineUpdate(state.AnimationUpdate(),
+                                           *animating_element, *state.Style());
+  }
 
   if (!HasAnimationsOrTransitions(state))
     return false;
@@ -1862,7 +1886,7 @@ StyleResolver::CacheSuccess StyleResolver::ApplyMatchedCache(
         state.ParentStyle()->SetChildHasExplicitInheritance();
       is_non_inherited_cache_hit = true;
     }
-    UpdateFont(state);
+    state.UpdateFont();
   }
   // This is needed because pseudo_argument is copied to the state.Style() as
   // part of a raredata field when copying non-inherited values from the cached
@@ -2124,7 +2148,7 @@ void StyleResolver::ComputeFont(Element& element,
 
   for (const CSSProperty* property : properties) {
     if (property->IDEquals(CSSPropertyID::kLineHeight))
-      UpdateFont(state);
+      state.UpdateFont();
     // TODO(futhark): If we start supporting fonts on ShadowRoot.fonts in
     // addition to Document.fonts, we need to pass the correct TreeScope instead
     // of GetDocument() in the ScopedCSSValue below.
@@ -2151,7 +2175,7 @@ void StyleResolver::Trace(Visitor* visitor) const {
   visitor->Trace(selector_filter_);
   visitor->Trace(document_);
   visitor->Trace(tracker_);
-  visitor->Trace(canvas_formatted_text_element_);
+  visitor->Trace(formatted_text_element_);
 }
 
 bool StyleResolver::IsForcedColorsModeEnabled() const {
@@ -2437,24 +2461,24 @@ void StyleResolver::PropagateStyleToViewport() {
 #undef PROPAGATE_VALUE
 #undef PROPAGATE_FROM
 
-scoped_refptr<const ComputedStyle> StyleResolver::StyleForCanvasFormattedText(
+scoped_refptr<const ComputedStyle> StyleResolver::StyleForFormattedText(
     bool is_text_run,
     const FontDescription& default_font,
     const CSSPropertyValueSet* css_property_value_set) {
-  return StyleForCanvasFormattedText(is_text_run, &default_font,
-                                     /*parent_style*/ nullptr,
-                                     css_property_value_set);
+  return StyleForFormattedText(is_text_run, &default_font,
+                               /*parent_style*/ nullptr,
+                               css_property_value_set);
 }
 
-scoped_refptr<const ComputedStyle> StyleResolver::StyleForCanvasFormattedText(
+scoped_refptr<const ComputedStyle> StyleResolver::StyleForFormattedText(
     bool is_text_run,
     const ComputedStyle& parent_style,
     const CSSPropertyValueSet* css_property_value_set) {
-  return StyleForCanvasFormattedText(is_text_run, /*default_font*/ nullptr,
-                                     &parent_style, css_property_value_set);
+  return StyleForFormattedText(is_text_run, /*default_font*/ nullptr,
+                               &parent_style, css_property_value_set);
 }
 
-scoped_refptr<const ComputedStyle> StyleResolver::StyleForCanvasFormattedText(
+scoped_refptr<const ComputedStyle> StyleResolver::StyleForFormattedText(
     bool is_text_run,
     const FontDescription* default_font,
     const ComputedStyle* parent_style,
@@ -2476,7 +2500,7 @@ scoped_refptr<const ComputedStyle> StyleResolver::StyleForCanvasFormattedText(
     // Use a dummy/disconnected element when resolving the styles so that we
     // don't inherit anything from existing elements.
     StyleResolverState state(
-        GetDocument(), EnsureElementForCanvasFormattedText(),
+        GetDocument(), EnsureElementForFormattedText(),
         nullptr /* StyleRecalcContext */,
         StyleRequest{parent_style ? parent_style : &InitialStyle()});
     state.SetStyle(style);
@@ -2494,11 +2518,11 @@ scoped_refptr<const ComputedStyle> StyleResolver::StyleForCanvasFormattedText(
   return style;
 }
 
-Element& StyleResolver::EnsureElementForCanvasFormattedText() {
-  if (!canvas_formatted_text_element_)
-    canvas_formatted_text_element_ =
+Element& StyleResolver::EnsureElementForFormattedText() {
+  if (!formatted_text_element_)
+    formatted_text_element_ =
         MakeGarbageCollected<Element>(html_names::kSpanTag, &GetDocument());
-  return *canvas_formatted_text_element_;
+  return *formatted_text_element_;
 }
 
 scoped_refptr<const ComputedStyle> StyleResolver::ResolvePositionFallbackStyle(
@@ -2506,6 +2530,7 @@ scoped_refptr<const ComputedStyle> StyleResolver::ResolvePositionFallbackStyle(
     unsigned index) {
   const ComputedStyle& base_style = element.ComputedStyleRef();
   // TODO(crbug.com/1309178): Support tree-scoped fallback name lookup.
+  DCHECK(base_style.PositionFallback());
   StyleRulePositionFallback* position_fallback_rule =
       GetDocument().GetScopedStyleResolver()->PositionFallbackForName(
           base_style.PositionFallback());

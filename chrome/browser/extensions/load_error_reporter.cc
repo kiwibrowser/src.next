@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,7 +75,7 @@ void LoadErrorReporter::ReportError(const std::u16string& message,
 
   if (enable_noisy_errors_ && be_noisy) {
     chrome::ShowWarningMessageBox(
-        NULL,
+        nullptr,
         l10n_util::GetStringUTF16(IDS_EXTENSIONS_LOAD_ERROR_ALERT_HEADING),
         message);
   }

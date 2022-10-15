@@ -9,7 +9,7 @@
 
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/mojom/blob/blob_url_store.mojom-blink.h"
-#include "third_party/blink/public/web/web_remote_frame_client.h"
+#include "third_party/blink/public/mojom/frame/frame_replication_state.mojom-blink.h"
 #include "third_party/blink/public/web/web_view.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
 #include "third_party/blink/renderer/core/events/mouse_event.h"
@@ -39,17 +39,12 @@ bool RemoteFrameClientImpl::InShadowTree() const {
 }
 
 void RemoteFrameClientImpl::Detached(FrameDetachType type) {
-  // Alert the client that the frame is being detached.
-  WebRemoteFrameClient* client = web_frame_->Client();
-  if (!client)
-    return;
-
   // We only notify the browser process when the frame is being detached for
   // removal, not after a swap.
   if (type == FrameDetachType::kRemove)
     web_frame_->GetFrame()->GetRemoteFrameHostRemote().Detach();
 
-  client->FrameDetached(static_cast<WebRemoteFrameClient::DetachType>(type));
+  web_frame_->Close();
 
   if (web_frame_->Parent()) {
     if (type == FrameDetachType::kRemove)
@@ -68,6 +63,23 @@ void RemoteFrameClientImpl::Detached(FrameDetachType type) {
   // Clear our reference to RemoteFrame at the very end, in case the client
   // refers to it.
   web_frame_->SetCoreFrame(nullptr);
+}
+
+void RemoteFrameClientImpl::CreateRemoteChild(
+    const RemoteFrameToken& token,
+    const absl::optional<FrameToken>& opener_frame_token,
+    mojom::blink::TreeScopeType tree_scope_type,
+    mojom::blink::FrameReplicationStatePtr replication_state,
+    const base::UnguessableToken& devtools_frame_token,
+    mojom::blink::RemoteFrameInterfacesFromBrowserPtr remote_frame_interfaces) {
+  WebFrame* opener = nullptr;
+  if (opener_frame_token)
+    opener = WebFrame::FromFrameToken(opener_frame_token.value());
+  web_frame_->CreateRemoteChild(
+      tree_scope_type, token, devtools_frame_token, opener,
+      std::move(remote_frame_interfaces->frame_host),
+      std::move(remote_frame_interfaces->frame_receiver),
+      std::move(replication_state));
 }
 
 unsigned RemoteFrameClientImpl::BackForwardLength() {

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -145,9 +145,8 @@ class MenuItem {
       value_ |= context;
     }
 
-    std::unique_ptr<base::Value> ToValue() const {
-      return std::unique_ptr<base::Value>(
-          new base::Value(static_cast<int>(value_)));
+    base::Value ToValue() const {
+      return base::Value(static_cast<int>(value_));
     }
 
     bool Populate(const base::Value& value) {
@@ -217,18 +216,19 @@ class MenuItem {
   bool SetChecked(bool checked);
 
   // Converts to Value for serialization to preferences.
-  base::Value ToValue() const;
+  base::Value::Dict ToValue() const;
 
   // Returns a new MenuItem created from |value|, or NULL if there is
   // an error.
   static std::unique_ptr<MenuItem> Populate(const std::string& extension_id,
-                                            const base::Value& value,
+                                            const base::Value::Dict& value,
                                             std::string* error);
 
   // Sets any document and target URL patterns from |properties|.
-  bool PopulateURLPatterns(std::vector<std::string>* document_url_patterns,
-                           std::vector<std::string>* target_url_patterns,
-                           std::string* error);
+  bool PopulateURLPatterns(
+      const std::vector<std::string>* document_url_patterns,
+      const std::vector<std::string>* target_url_patterns,
+      std::string* error);
 
  protected:
   friend class MenuManager;
@@ -387,7 +387,7 @@ class MenuManager : public ProfileObserver,
   // Reads menu items for the extension from the state storage. Any invalid
   // items are ignored.
   void ReadFromStorage(const std::string& extension_id,
-                       std::unique_ptr<base::Value> value);
+                       absl::optional<base::Value> value);
 
   // Removes all "incognito" "split" mode context items.
   void RemoveAllIncognitoContextItems();

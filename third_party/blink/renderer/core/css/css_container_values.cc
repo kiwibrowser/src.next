@@ -15,7 +15,7 @@ CSSContainerValues::CSSContainerValues(Document& document,
                                        absl::optional<double> width,
                                        absl::optional<double> height)
     : MediaValuesDynamic(document.GetFrame()),
-      style_(container.GetComputedStyle()),
+      element_(&container),
       width_(width),
       height_(height),
       writing_mode_(container.ComputedStyleRef().GetWritingMode()),
@@ -26,6 +26,7 @@ CSSContainerValues::CSSContainerValues(Document& document,
       container_sizes_(container.ParentOrShadowHostElement()) {}
 
 void CSSContainerValues::Trace(Visitor* visitor) const {
+  visitor->Trace(element_);
   visitor->Trace(container_sizes_);
   MediaValuesDynamic::Trace(visitor);
 }
@@ -44,6 +45,10 @@ float CSSContainerValues::ExFontSize() const {
 
 float CSSContainerValues::ChFontSize() const {
   return font_sizes_.Ch();
+}
+
+float CSSContainerValues::IcFontSize() const {
+  return font_sizes_.Ic();
 }
 
 double CSSContainerValues::ContainerWidth() const {

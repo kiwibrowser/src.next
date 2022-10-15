@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,7 +49,7 @@ class ExtensionActionStorageManager : public ExtensionActionAPI::Observer,
   // Reads/Writes the ExtensionAction's default values to/from storage.
   void WriteToStorage(ExtensionAction* extension_action);
   void ReadFromStorage(const std::string& extension_id,
-                       std::unique_ptr<base::Value> value);
+                       absl::optional<base::Value> value);
 
   // Returns the Extensions StateStore for the |browser_context_|.
   // May return NULL.

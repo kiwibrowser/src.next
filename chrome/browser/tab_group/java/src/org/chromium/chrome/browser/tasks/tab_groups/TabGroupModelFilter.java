@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -107,9 +107,10 @@ public class TabGroupModelFilter extends TabModelFilter {
          * TabSelectionEditor (Group tab menu item) or using drag and drop.
          * @param tabs The list of modified {@link Tab}s.
          * @param tabOriginalIndex The original tab index for each modified tab.
-         * @param isSameGroup Whether the given list is in a group already.
+         * @param tabOriginalRootId The original root id for each modified tab.
          */
-        void didCreateGroup(List<Tab> tabs, List<Integer> tabOriginalIndex, boolean isSameGroup);
+        void didCreateGroup(
+                List<Tab> tabs, List<Integer> tabOriginalIndex, List<Integer> tabOriginalRootId);
     }
 
     /**
@@ -280,6 +281,21 @@ public class TabGroupModelFilter extends TabModelFilter {
      * @param destinationTabId The id of a {@link Tab} to get the destination group.
      */
     public void mergeTabsToGroup(int sourceTabId, int destinationTabId) {
+        mergeTabsToGroup(sourceTabId, destinationTabId, false);
+    }
+
+    /**
+     * This method merges the source group that contains the {@code sourceTabId} to the destination
+     * group that contains the {@code destinationTabId}. This method only operates if two groups are
+     * in the same {@code TabModel}.
+     *
+     * @param sourceTabId The id of the {@link Tab} to get the source group.
+     * @param destinationTabId The id of a {@link Tab} to get the destination group.
+     * @param skipUpdateTabModel True if updating the tab model will be handled elsewhere (e.g. by
+     *                           the tab strip).
+     */
+    public void mergeTabsToGroup(
+            int sourceTabId, int destinationTabId, boolean skipUpdateTabModel) {
         Tab sourceTab = TabModelUtils.getTabById(getTabModel(), sourceTabId);
         Tab destinationTab = TabModelUtils.getTabById(getTabModel(), destinationTabId);
 
@@ -292,7 +308,7 @@ public class TabGroupModelFilter extends TabModelFilter {
         List<Tab> tabsToMerge = getRelatedTabList(sourceTabId);
         int destinationIndexInTabModel = getTabModelDestinationIndex(destinationTab);
 
-        if (!needToUpdateTabModel(tabsToMerge, destinationIndexInTabModel)) {
+        if (skipUpdateTabModel || !needToUpdateTabModel(tabsToMerge, destinationIndexInTabModel)) {
             for (Observer observer : mGroupFilterObserver) {
                 observer.willMergeTabToGroup(
                         tabsToMerge.get(tabsToMerge.size() - 1), destinationGroupId);
@@ -332,6 +348,7 @@ public class TabGroupModelFilter extends TabModelFilter {
         int destinationGroupId = getRootId(destinationTab);
         int destinationIndexInTabModel = getTabModelDestinationIndex(destinationTab);
         List<Integer> originalIndexes = new ArrayList<>();
+        List<Integer> originalRootIds = new ArrayList<>();
 
         for (int i = 0; i < tabs.size(); i++) {
             Tab tab = tabs.get(i);
@@ -344,19 +361,31 @@ public class TabGroupModelFilter extends TabModelFilter {
             int index = TabModelUtils.getTabIndexById(getTabModel(), tab.getId());
             assert index != TabModel.INVALID_TAB_INDEX;
             originalIndexes.add(index);
+            originalRootIds.add(getRootId(tab));
 
             if (tab.getId() == destinationTab.getId()) continue;
 
             boolean isMergingBackward = index < destinationIndexInTabModel;
 
             setRootId(tab, destinationGroupId);
-            getTabModel().moveTab(tab.getId(),
-                    isMergingBackward ? destinationIndexInTabModel : destinationIndexInTabModel++);
+            if (index == destinationIndexInTabModel || index + 1 == destinationIndexInTabModel) {
+                // If the tab is not moved TabModelImpl will not invoke
+                // TabModelObserver#didMoveTab() and update events will not be triggered. Call the
+                // event manually.
+                didMoveTab(tab,
+                        isMergingBackward ? destinationIndexInTabModel
+                                          : destinationIndexInTabModel++,
+                        index);
+            } else {
+                getTabModel().moveTab(tab.getId(),
+                        isMergingBackward ? destinationIndexInTabModel
+                                          : destinationIndexInTabModel++);
+            }
         }
 
         if (notify) {
             for (Observer observer : mGroupFilterObserver) {
-                observer.didCreateGroup(tabs, originalIndexes, isSameGroup);
+                observer.didCreateGroup(tabs, originalIndexes, originalRootIds);
             }
         }
     }
@@ -510,6 +539,17 @@ public class TabGroupModelFilter extends TabModelFilter {
         TabGroup group = mGroupIdToGroupMap.get(groupId);
         if (group == null) return super.getRelatedTabList(TabModel.INVALID_TAB_INDEX);
         return getRelatedTabList(group.getTabIdList());
+    }
+
+    @Override
+    public List<Integer> getRelatedTabIds(int tabId) {
+        Tab tab = TabModelUtils.getTabById(getTabModel(), tabId);
+        if (tab == null) return super.getRelatedTabIds(tabId);
+
+        int groupId = getRootId(tab);
+        TabGroup group = mGroupIdToGroupMap.get(groupId);
+        if (group == null) return super.getRelatedTabIds(TabModel.INVALID_TAB_INDEX);
+        return Collections.unmodifiableList(group.getTabIdList());
     }
 
     /**
@@ -853,9 +893,19 @@ public class TabGroupModelFilter extends TabModelFilter {
         return mCurrentGroupIndex;
     }
 
+    /**
+     * @return count of @{@link TabGroup}s in model.
+     */
     @Override
     public int getCount() {
         return mGroupIdToGroupMap.size();
+    }
+
+    /**
+     * @return tab count across all @{@link TabGroup}s.
+     */
+    public int getTotalTabCount() {
+        return getTabModel().getCount();
     }
 
     @Override

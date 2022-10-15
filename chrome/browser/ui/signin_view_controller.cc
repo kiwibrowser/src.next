@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,7 +75,7 @@ void ShowTabOverwritingNTP(Browser* browser, const GURL& url) {
   params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
   params.window_action = NavigateParams::SHOW_WINDOW;
   params.user_gesture = false;
-  params.tabstrip_add_types |= TabStripModel::ADD_INHERIT_OPENER;
+  params.tabstrip_add_types |= AddTabTypes::ADD_INHERIT_OPENER;
 
   content::WebContents* contents =
       browser->tab_strip_model()->GetActiveWebContents();
@@ -234,11 +234,13 @@ void SigninViewController::ShowModalInterceptFirstRunExperienceDialog(
 #endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
 
 #if BUILDFLAG(ENABLE_DICE_SUPPORT) || BUILDFLAG(IS_CHROMEOS_LACROS)
-void SigninViewController::ShowModalProfileCustomizationDialog() {
+void SigninViewController::ShowModalProfileCustomizationDialog(
+    bool is_local_profile_creation) {
   CloseModalSignin();
   dialog_ = std::make_unique<SigninModalDialogImpl>(
       SigninViewControllerDelegate::CreateProfileCustomizationDelegate(
-          browser_, /*show_profile_switch_iph=*/true),
+          browser_, is_local_profile_creation,
+          /*show_profile_switch_iph=*/true),
       GetOnModalDialogClosedCallback());
 }
 

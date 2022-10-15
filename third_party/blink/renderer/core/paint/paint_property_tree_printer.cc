@@ -113,11 +113,11 @@ class PropertyTreePrinterTraits<ClipPaintPropertyNodeOrAlias> {
       const ObjectPaintProperties& properties,
       PropertyTreePrinter<ClipPaintPropertyNodeOrAlias>& printer) {
     printer.AddNode(properties.FragmentClip());
-    printer.AddNode(properties.PixelMovingFilterClipExpander());
     printer.AddNode(properties.ClipPathClip());
     printer.AddNode(properties.MaskClip());
     printer.AddNode(properties.CssClip());
     printer.AddNode(properties.CssClipFixedPosition());
+    printer.AddNode(properties.PixelMovingFilterClipExpander());
     printer.AddNode(properties.OverflowControlsClip());
     printer.AddNode(properties.InnerBorderRadiusClip());
     printer.AddNode(properties.OverflowClip());
@@ -217,17 +217,17 @@ namespace paint_property_tree_printer {
 
 void UpdateDebugNames(const VisualViewport& viewport) {
   if (auto* device_emulation_node = viewport.GetDeviceEmulationTransformNode())
-    device_emulation_node->SetDebugName("Device Emulation Node");
+    SetDebugName(device_emulation_node, "Device Emulation Node");
   if (auto* overscroll_effect_node =
           viewport.GetOverscrollElasticityEffectNode()) {
-    overscroll_effect_node->SetDebugName("Overscroll Elasticity Effect Node");
+    SetDebugName(overscroll_effect_node, "Overscroll Elasticity Effect Node");
   }
   if (auto* overscroll_node = viewport.GetOverscrollElasticityTransformNode())
-    overscroll_node->SetDebugName("Overscroll Elasticity Node");
-  viewport.GetPageScaleNode()->SetDebugName("VisualViewport Scale Node");
-  viewport.GetScrollTranslationNode()->SetDebugName(
-      "VisualViewport Translate Node");
-  viewport.GetScrollNode()->SetDebugName("VisualViewport Scroll Node");
+    SetDebugName(overscroll_node, "Overscroll Elasticity Node");
+  SetDebugName(viewport.GetPageScaleNode(), "VisualViewport Scale Node");
+  SetDebugName(viewport.GetScrollTranslationNode(),
+               "VisualViewport Translate Node");
+  SetDebugName(viewport.GetScrollNode(), "VisualViewport Scroll Node");
 }
 
 void UpdateDebugNames(const LayoutObject& object,
@@ -250,13 +250,13 @@ void UpdateDebugNames(const LayoutObject& object,
                object);
 
   SetDebugName(properties.FragmentClip(), "FragmentClip", object);
-  SetDebugName(properties.PixelMovingFilterClipExpander(),
-               "PixelMovingFilterClip", object);
   SetDebugName(properties.ClipPathClip(), "ClipPathClip", object);
   SetDebugName(properties.MaskClip(), "MaskClip", object);
   SetDebugName(properties.CssClip(), "CssClip", object);
   SetDebugName(properties.CssClipFixedPosition(), "CssClipFixedPosition",
                object);
+  SetDebugName(properties.PixelMovingFilterClipExpander(),
+               "PixelMovingFilterClip", object);
   SetDebugName(properties.OverflowControlsClip(), "OverflowControlsClip",
                object);
   SetDebugName(properties.InnerBorderRadiusClip(), "InnerBorderRadiusClip",

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,6 +49,16 @@ public class FaviconHelper {
          */
         @CalledByNative("FaviconImageCallback")
         public void onFaviconAvailable(Bitmap image, GURL iconUrl);
+    }
+
+    /** Similar to {@link FaviconImageCallback} but with a list of urls used in the image. */
+    public interface ComposedFaviconImageCallback {
+        /**
+         * @param image A composed image that contains some or all of the requested favicons.
+         * @param iconUrls An ordered array of the icon urls that were used.
+         */
+        @CalledByNative("ComposedFaviconImageCallback")
+        public void onComposedFaviconAvailable(Bitmap image, GURL[] iconUrls);
     }
 
     /**
@@ -200,12 +210,12 @@ public class FaviconHelper {
      * @param profile Profile used for the FaviconService construction.
      * @param urls The list of URLs whose favicon are requested to compose. Size should be 2 to 4.
      * @param desiredSizeInPixel The size of the favicon in pixel we want to get.
-     * @param faviconImageCallback A method to be called back when the result is available. Note
-     *         that this callback is not called if this method returns false.
+     * @param composedFaviconImageCallback A method to be called back when the result is available.
+     *        Note that this callback is not called if this method returns false.
      * @return True if GetLocalFaviconImageForURL is successfully called.
      */
     public boolean getComposedFaviconImage(Profile profile, @NonNull List<GURL> urls,
-            int desiredSizeInPixel, FaviconImageCallback faviconImageCallback) {
+            int desiredSizeInPixel, ComposedFaviconImageCallback composedFaviconImageCallback) {
         assert mNativeFaviconHelper != 0;
 
         if (urls.size() <= 1 || urls.size() > 4) {
@@ -214,7 +224,7 @@ public class FaviconHelper {
         }
 
         return FaviconHelperJni.get().getComposedFaviconImage(mNativeFaviconHelper, profile,
-                urls.toArray(new GURL[0]), desiredSizeInPixel, faviconImageCallback);
+                urls.toArray(new GURL[0]), desiredSizeInPixel, composedFaviconImageCallback);
     }
 
     @VisibleForTesting(otherwise = VisibleForTesting.PACKAGE_PRIVATE)
@@ -223,7 +233,7 @@ public class FaviconHelper {
         long init();
         void destroy(long nativeFaviconHelper);
         boolean getComposedFaviconImage(long nativeFaviconHelper, Profile profile, GURL[] urls,
-                int desiredSizeInDip, FaviconImageCallback faviconImageCallback);
+                int desiredSizeInDip, ComposedFaviconImageCallback composedFaviconImageCallback);
         boolean getLocalFaviconImageForURL(long nativeFaviconHelper, Profile profile,
                 String pageUrl, int desiredSizeInDip, FaviconImageCallback faviconImageCallback);
         boolean getForeignFaviconImageForURL(long nativeFaviconHelper, Profile profile,

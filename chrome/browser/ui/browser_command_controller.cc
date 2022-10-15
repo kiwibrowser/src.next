@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,12 +47,14 @@
 #include "chrome/browser/ui/web_applications/app_browser_controller.h"
 #include "chrome/browser/ui/web_applications/web_app_dialog_utils.h"
 #include "chrome/browser/ui/web_applications/web_app_launch_utils.h"
+#include "chrome/browser/ui/web_applications/web_app_tabbed_utils.h"
 #include "chrome/browser/ui/webui/inspect_ui.h"
 #include "chrome/browser/web_applications/web_app_install_params.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/content_restriction.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/common/webui_url_constants.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/dom_distiller/core/dom_distiller_features.h"
 #include "components/prefs/pref_service.h"
@@ -102,16 +104,6 @@
 
 #if defined(USE_OZONE)
 #include "ui/ozone/public/ozone_platform.h"
-#endif
-
-// TODO(https://crbug.com/1331331): Clean this up after the deprecation period.
-#if BUILDFLAG(ENABLE_PRINTING)
-#include "chrome/browser/infobars/simple_alert_infobar_creator.h"
-#include "chrome/browser/ui/accelerator_utils.h"
-#include "chrome/grit/generated_resources.h"
-#include "components/infobars/content/content_infobar_manager.h"
-#include "components/vector_icons/vector_icons.h"
-#include "ui/base/l10n/l10n_util.h"
 #endif
 
 using WebExposedIsolationLevel =
@@ -168,28 +160,6 @@ bool CanOpenFile(Browser* browser) {
 
   return true;
 }
-
-#if BUILDFLAG(ENABLE_PRINTING)
-// TODO(https://crbug.com/1331331): Clean this up after the deprecation period.
-void ShowDeprecatedBasicPrintInfoBar(Browser* browser) {
-  ui::AcceleratorProvider* provider =
-      chrome::AcceleratorProviderForBrowser(browser);
-
-  ui::Accelerator accelerator;
-  bool success =
-      provider->GetAcceleratorForCommandId(IDC_BASIC_PRINT, &accelerator);
-  DCHECK(success);
-
-  auto message = l10n_util::GetStringFUTF16(
-      IDS_PRINT_BASIC_SHORTCUT_DEPRECATION_TEXT, accelerator.GetShortcutText());
-  CreateSimpleAlertInfoBar(
-      infobars::ContentInfoBarManager::FromWebContents(
-          browser->tab_strip_model()->GetActiveWebContents()),
-      infobars::InfoBarDelegate::BASIC_PRINT_DEPRECATED_ACCELERATOR_DELEGATE,
-      &vector_icons::kWarningIcon, message,
-      /*auto_expire=*/false, /*should_animate=*/true);
-}
-#endif  // BUILDFLAG(ENABLE_PRINTING)
 
 }  // namespace
 
@@ -614,9 +584,6 @@ bool BrowserCommandController::ExecuteCommandWithDisposition(
       break;
 
 #if BUILDFLAG(ENABLE_PRINTING)
-    case IDC_BASIC_PRINT_DEPRECATED:
-      ShowDeprecatedBasicPrintInfoBar(browser_);
-      [[fallthrough]];
     case IDC_BASIC_PRINT:
       base::RecordAction(base::UserMetricsAction("Accel_Advanced_Print"));
       BasicPrint(browser_);
@@ -813,6 +780,9 @@ bool BrowserCommandController::ExecuteCommandWithDisposition(
     case IDC_MANAGE_EXTENSIONS:
       ShowExtensions(browser_, std::string());
       break;
+    case IDC_PERFORMANCE:
+      ShowSettingsSubPage(browser_, chrome::kPerformanceSubPage);
+      break;
     case IDC_OPTIONS:
       ShowSettings(browser_);
       break;
@@ -937,7 +907,7 @@ bool BrowserCommandController::ExecuteCommandWithDisposition(
       break;
     // Hosted App commands
     case IDC_COPY_URL:
-      CopyURL(browser_);
+      CopyURL(browser_->tab_strip_model()->GetActiveWebContents());
       break;
     case IDC_OPEN_IN_CHROME:
       OpenInChrome(browser_);
@@ -1156,6 +1126,7 @@ void BrowserCommandController::InitCommandState() {
   DCHECK(!profile()->IsSystemProfile())
       << "Ought to never have browser for the system profile.";
   const bool normal_window = browser_->is_type_normal();
+  command_updater_.UpdateCommandEnabled(IDC_PERFORMANCE, true);
   command_updater_.UpdateCommandEnabled(IDC_OPEN_FILE, CanOpenFile(browser_));
   UpdateCommandsForDevTools();
   command_updater_.UpdateCommandEnabled(IDC_TASK_MANAGER, CanOpenTaskManager());
@@ -1384,8 +1355,13 @@ void BrowserCommandController::UpdateCommandsForTabState() {
   bool is_isolated_app = current_web_contents->GetPrimaryMainFrame()
                              ->GetWebExposedIsolationLevel() >=
                          WebExposedIsolationLevel::kMaybeIsolatedApplication;
+  bool is_pinned_home_tab =
+      web_app::AppBrowserController::IsWebApp(browser_) &&
+      web_app::IsPinnedHomeTab(browser_->tab_strip_model(),
+                               browser_->tab_strip_model()->active_index());
   command_updater_.UpdateCommandEnabled(
-      IDC_OPEN_IN_CHROME, IsWebAppOrCustomTab() && !is_isolated_app);
+      IDC_OPEN_IN_CHROME,
+      IsWebAppOrCustomTab() && !is_isolated_app && !is_pinned_home_tab);
 
   command_updater_.UpdateCommandEnabled(
       IDC_TOGGLE_REQUEST_TABLET_SITE,
@@ -1635,8 +1611,6 @@ void BrowserCommandController::UpdatePrintingState() {
   bool print_enabled = CanPrint(browser_);
   command_updater_.UpdateCommandEnabled(IDC_PRINT, print_enabled);
 #if BUILDFLAG(ENABLE_PRINTING)
-  command_updater_.UpdateCommandEnabled(IDC_BASIC_PRINT_DEPRECATED,
-                                        CanBasicPrint(browser_));
   command_updater_.UpdateCommandEnabled(IDC_BASIC_PRINT,
                                         CanBasicPrint(browser_));
 #endif
