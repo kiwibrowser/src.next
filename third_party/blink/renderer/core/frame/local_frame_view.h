@@ -31,9 +31,9 @@
 #include "base/auto_reset.h"
 #include "base/callback_forward.h"
 #include "base/dcheck_is_on.h"
+#include "base/functional/function_ref.h"
 #include "base/gtest_prod_util.h"
 #include "base/time/time.h"
-#include "third_party/abseil-cpp/absl/functional/function_ref.h"
 #include "third_party/blink/public/common/metrics/document_update_reason.h"
 #include "third_party/blink/public/mojom/frame/lifecycle.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/frame/viewport_intersection_state.mojom-blink-forward.h"
@@ -55,6 +55,7 @@
 #include "third_party/blink/renderer/platform/graphics/paint_invalidation_reason.h"
 #include "third_party/blink/renderer/platform/graphics/subtree_paint_property_update_reason.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/scheduler/public/post_cancellable_task.h"
 #include "third_party/blink/renderer/platform/timer.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
@@ -84,9 +85,6 @@ class Cursor;
 namespace blink {
 class AXObjectCache;
 class ChromeClient;
-class DeferredShapingDisallowScope;
-class DeferredShapingMinimumTopScope;
-class DeferredShapingViewportScope;
 class DarkModeFilter;
 class DocumentLifecycle;
 class FragmentAnchor;
@@ -404,6 +402,7 @@ class CORE_EXPORT LocalFrameView final
   // schedule another animation frame here, but the layout tree should not be
   // invalidated.
   void RunPostLifecycleSteps();
+  bool InPostLifecycleSteps() const;
 
   void ScheduleVisualUpdateForPaintInvalidationIfNeeded();
 
@@ -481,35 +480,6 @@ class CORE_EXPORT LocalFrameView final
   // passed around the LocalFrameView layout methods can be true while this
   // returns false.
   bool IsSubtreeLayout() const { return !layout_subtree_root_list_.IsEmpty(); }
-
-  // The bottom position of the nearest scrollable ancestor.
-  // This returns kIndefiniteSize if the viewport bottom is not registered.
-  LayoutUnit CurrentViewportBottom() const { return current_viewport_bottom_; }
-  void SetCurrentViewportBottom(base::PassKey<DeferredShapingViewportScope>,
-                                LayoutUnit value) {
-    current_viewport_bottom_ = value;
-  }
-  // The "minimum top" position of the box which is being laid out.
-  LayoutUnit CurrentMinimumTop() const { return current_minimum_top_; }
-  void SetCurrentMinimumTop(base::PassKey<DeferredShapingMinimumTopScope>,
-                            LayoutUnit value) {
-    current_minimum_top_ = value;
-  }
-  // A flag indicating whether the current layout container supports
-  // deferred shaping.
-  bool AllowDeferredShaping() const { return allow_deferred_shaping_; }
-  void SetAllowDeferredShaping(base::PassKey<DeferredShapingDisallowScope>,
-                               bool value) {
-    allow_deferred_shaping_ = value;
-  }
-  // Disable deferred shaping on this frame persistently.
-  // This function should not be called during laying out.
-  void DisallowDeferredShaping();
-  bool DefaultAllowDeferredShaping() const {
-    return default_allow_deferred_shaping_;
-  }
-  void RequestToLockDeferred(Element& element);
-  bool LockDeferredRequested(Element& element) const;
 
   // The window that hosts the LocalFrameView. The LocalFrameView will
   // communicate scrolls and repaints to the host window in the window's
@@ -741,8 +711,7 @@ class CORE_EXPORT LocalFrameView final
   }
   void DidChangeMobileFriendliness(const MobileFriendliness& mf);
 
-  // Returns the UKM aggregator for this frame, or this frame's local root if
-  // features::kLocalFrameRootPrePostFCPMetrics is enabled, creating it if
+  // Returns the UKM aggregator for this frame's local root, creating it if
   // necessary.
   LocalFrameUkmAggregator& EnsureUkmAggregator();
   void ResetUkmAggregatorForTesting();
@@ -785,6 +754,8 @@ class CORE_EXPORT LocalFrameView final
   // Gets the xr overlay layer if present, or nullptr if there is none.
   PaintLayer* GetXROverlayLayer() const;
 
+  void PropagateCullRectNeedsUpdateForFrames();
+
   void RunPaintBenchmark(int repeat_count, cc::PaintBenchmarkResult& result);
 
   PaintController& GetPaintControllerForTesting() {
@@ -795,6 +766,10 @@ class CORE_EXPORT LocalFrameView final
     return layer_debug_info_enabled_ ||
            RuntimeEnabledFeatures::PaintUnderInvalidationCheckingEnabled();
   }
+
+  void AddPendingTransformUpdate(LayoutObject& object);
+  bool RemovePendingTransformUpdate(const LayoutObject& object);
+  void UpdateAllPendingTransforms();
 
  protected:
   void FrameRectsChanged(const gfx::Rect&) override;
@@ -970,16 +945,16 @@ class CORE_EXPORT LocalFrameView final
                                Vector<AnnotatedRegionValue>&) const;
 
   void ForAllChildViewsAndPlugins(
-      absl::FunctionRef<void(EmbeddedContentView&)>);
-  void ForAllChildLocalFrameViews(absl::FunctionRef<void(LocalFrameView&)>);
+      base::FunctionRef<void(EmbeddedContentView&)>);
+  void ForAllChildLocalFrameViews(base::FunctionRef<void(LocalFrameView&)>);
 
   enum TraversalOrder { kPreOrder, kPostOrder };
   void ForAllNonThrottledLocalFrameViews(
-      absl::FunctionRef<void(LocalFrameView&)>,
+      base::FunctionRef<void(LocalFrameView&)>,
       TraversalOrder = kPreOrder);
-  void ForAllThrottledLocalFrameViews(absl::FunctionRef<void(LocalFrameView&)>);
+  void ForAllThrottledLocalFrameViews(base::FunctionRef<void(LocalFrameView&)>);
 
-  void ForAllRemoteFrameViews(absl::FunctionRef<void(RemoteFrameView&)>);
+  void ForAllRemoteFrameViews(base::FunctionRef<void(RemoteFrameView&)>);
 
   bool UpdateViewportIntersectionsForSubtree(
       unsigned parent_flags,
@@ -987,6 +962,8 @@ class CORE_EXPORT LocalFrameView final
   void DeliverSynchronousIntersectionObservations();
 
   bool RunScrollTimelineSteps();
+
+  bool RunCSSToggleSteps();
 
   bool NotifyResizeObservers(DocumentLifecycle::LifecycleState target_state);
   bool RunResizeObserverSteps(DocumentLifecycle::LifecycleState target_state);
@@ -1046,13 +1023,8 @@ class CORE_EXPORT LocalFrameView final
 
   Member<LocalFrame> frame_;
 
-  HeapVector<Member<Element>> deferred_to_be_locked_;
-  LayoutUnit current_viewport_bottom_ = kIndefiniteSize;
-  LayoutUnit current_minimum_top_;
-  bool allow_deferred_shaping_ = false;
-  bool default_allow_deferred_shaping_ = true;
-
   bool can_have_scrollbars_;
+  bool in_post_lifecycle_steps_ = false;
 
   bool has_pending_layout_;
   LayoutSubtreeRootList layout_subtree_root_list_;
@@ -1147,8 +1119,9 @@ class CORE_EXPORT LocalFrameView final
   bool needs_focus_on_fragment_;
 
   // True if the frame has deferred commits at least once per document load.
-  // We won't defer again for the same document.
-  bool have_deferred_commits_ = false;
+  // We won't defer again for the same document. This is only meaningful for
+  // main frames.
+  bool have_deferred_main_frame_commits_ = false;
 
   bool visual_viewport_or_overlay_needs_repaint_ = false;
 
@@ -1197,6 +1170,8 @@ class CORE_EXPORT LocalFrameView final
 
   // Filter used for inverting the document background for forced darkening.
   std::unique_ptr<DarkModeFilter> dark_mode_filter_;
+
+  Member<HeapHashSet<Member<LayoutObject>>> pending_transform_updates_;
 
 #if DCHECK_IS_ON()
   bool is_updating_descendant_dependent_flags_;

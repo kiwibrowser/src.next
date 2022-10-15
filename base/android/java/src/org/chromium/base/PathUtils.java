@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,11 +18,11 @@ import androidx.annotation.NonNull;
 import androidx.annotation.RequiresApi;
 
 import org.chromium.base.annotations.CalledByNative;
-import org.chromium.base.annotations.MainDex;
 import org.chromium.base.compat.ApiHelperForM;
 import org.chromium.base.compat.ApiHelperForQ;
 import org.chromium.base.compat.ApiHelperForR;
 import org.chromium.base.task.AsyncTask;
+import org.chromium.build.annotations.MainDex;
 
 import java.io.File;
 import java.util.ArrayList;

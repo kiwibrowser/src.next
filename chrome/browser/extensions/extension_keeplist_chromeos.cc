@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,8 +25,18 @@ namespace extensions {
 
 bool ExtensionRunsInBothOSAndStandaloneBrowser(
     const std::string& extension_id) {
-  static base::NoDestructor<std::set<base::StringPiece>> keep_list(
-      {extension_misc::kGCSEExtensionId, extension_misc::kGnubbyV3ExtensionId});
+  static base::NoDestructor<std::set<base::StringPiece>> keep_list({
+      extension_misc::kGCSEExtensionId,
+      extension_misc::kGnubbyV3ExtensionId,
+  });
+  return base::Contains(*keep_list, extension_id);
+}
+
+bool ExtensionAppRunsInBothOSAndStandaloneBrowser(
+    const std::string& extension_id) {
+  static base::NoDestructor<std::set<base::StringPiece>> keep_list({
+      extension_misc::kGnubbyAppId,
+  });
   return base::Contains(*keep_list, extension_id);
 }
 
@@ -62,14 +72,15 @@ bool ExtensionAppRunsInOS(const std::string& app_id) {
   static base::NoDestructor<std::set<base::StringPiece>> keep_list({
 #if BUILDFLAG(IS_CHROMEOS_ASH)
     arc::kPlayStoreAppId, extension_misc::kFilesManagerAppId,
-        file_manager::kAudioPlayerAppId,
 #endif
 
         extension_misc::kGoogleKeepAppId, extension_misc::kCalculatorAppId,
+        extension_misc::kTextEditorAppId,
         extension_misc::kInAppPaymentsSupportAppId,
-        extension_misc::kIdentityApiUiAppId, extension_misc::kGnubbyAppId
+        extension_misc::kIdentityApiUiAppId
   });
-  return base::Contains(*keep_list, app_id);
+  return ExtensionAppRunsInBothOSAndStandaloneBrowser(app_id) ||
+         base::Contains(*keep_list, app_id);
 }
 
 }  // namespace extensions

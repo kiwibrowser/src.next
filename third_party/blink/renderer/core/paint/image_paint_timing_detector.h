@@ -31,6 +31,8 @@ class Image;
 // TODO(crbug/960502): we should limit the access of these properties.
 // TODO(yoav): Rename all mentions of "image" to "media"
 class ImageRecord : public base::SupportsWeakPtr<ImageRecord> {
+  USING_FAST_MALLOC(ImageRecord);
+
  public:
   ImageRecord(DOMNodeId new_node_id,
               const MediaTiming* new_media_timing,
@@ -71,6 +73,11 @@ class ImageRecord : public base::SupportsWeakPtr<ImageRecord> {
   bool queue_animated_paint = false;
   // LCP rect information, only populated when tracing is enabled.
   std::unique_ptr<LCPRectInfo> lcp_rect_info_;
+
+  // A non-style image, or a style image that comes from an origin-clean style.
+  // Images that come from origin-dirty styles should have some limitations on
+  // what they report.
+  bool origin_clean = true;
 };
 
 typedef std::pair<const LayoutObject*, const MediaTiming*> RecordId;

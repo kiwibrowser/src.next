@@ -1,10 +1,9 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "extensions/browser/content_script_tracker.h"
 
-#include <algorithm>
 #include <map>
 
 #include "base/containers/contains.h"
@@ -105,6 +104,8 @@ class RenderProcessHostUserData : public base::SupportsUserData::Data {
   void AddFrame(content::RenderFrameHost* frame) { frames_.insert(frame); }
   void RemoveFrame(content::RenderFrameHost* frame) { frames_.erase(frame); }
   const std::set<content::RenderFrameHost*>& frames() const { return frames_; }
+
+  const ExtensionIdSet& content_scripts() const { return content_scripts_; }
 
  private:
   explicit RenderProcessHostUserData(content::RenderProcessHost& process)
@@ -462,6 +463,18 @@ void StoreExtensionsInjectingContentScripts(
 }  // namespace
 
 // static
+ExtensionIdSet ContentScriptTracker::GetExtensionsThatRanScriptsInProcess(
+    const content::RenderProcessHost& process) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  const auto* process_data = RenderProcessHostUserData::Get(process);
+  if (!process_data)
+    return {};
+
+  return process_data->content_scripts();
+}
+
+// static
 bool ContentScriptTracker::DidProcessRunContentScriptFromExtension(
     const content::RenderProcessHost& process,
     const ExtensionId& extension_id) {
@@ -618,12 +631,11 @@ void ContentScriptTracker::WillUpdateContentScriptsInRenderer(
   auto& process_data = RenderProcessHostUserData::GetOrCreate(process);
   const std::set<content::RenderFrameHost*>& frames_in_process =
       process_data.frames();
-  bool any_frame_matches_content_scripts =
-      std::any_of(frames_in_process.begin(), frames_in_process.end(),
-                  [extension](content::RenderFrameHost* frame) {
-                    return DoContentScriptsMatch(*extension, frame,
-                                                 frame->GetLastCommittedURL());
-                  });
+  bool any_frame_matches_content_scripts = base::ranges::any_of(
+      frames_in_process, [extension](content::RenderFrameHost* frame) {
+        return DoContentScriptsMatch(*extension, frame,
+                                     frame->GetLastCommittedURL());
+      });
   if (any_frame_matches_content_scripts) {
     process_data.AddContentScript(extension->id());
   } else {

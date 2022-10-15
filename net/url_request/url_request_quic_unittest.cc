@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "net/base/features.h"
 #include "net/base/isolation_info.h"
@@ -23,6 +24,7 @@
 #include "net/cert/mock_cert_verifier.h"
 #include "net/dns/mapped_host_resolver.h"
 #include "net/dns/mock_host_resolver.h"
+#include "net/http/http_response_headers.h"
 #include "net/http/transport_security_state.h"
 #include "net/log/net_log_event_type.h"
 #include "net/log/test_net_log_util.h"
@@ -33,6 +35,7 @@
 #include "net/test/test_data_directory.h"
 #include "net/test/test_with_task_environment.h"
 #include "net/third_party/quiche/src/quiche/quic/core/quic_dispatcher.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_time.h"
 #include "net/third_party/quiche/src/quiche/quic/test_tools/crypto_test_utils.h"
 #include "net/third_party/quiche/src/quiche/quic/tools/quic_memory_cache_backend.h"
 #include "net/third_party/quiche/src/quiche/quic/tools/quic_simple_dispatcher.h"
@@ -147,6 +150,9 @@ class URLRequestQuicTest
     context_builder_->set_http_network_session_params(params);
     context_builder_->SetCertVerifier(std::move(cert_verifier));
     context_builder_->set_net_log(NetLog::Get());
+
+    scoped_feature_list_.InitAndEnableFeature(
+        TransportSecurityState::kDynamicExpectCTFeature);
   }
 
   void TearDown() override {
@@ -219,6 +225,14 @@ class URLRequestQuicTest
            std::string(path);
   }
 
+  void SetDelay(absl::string_view host,
+                absl::string_view path,
+                base::TimeDelta delay) {
+    memory_cache_backend_.SetResponseDelay(
+        host, path,
+        quic::QuicTime::Delta::FromMilliseconds(delay.InMilliseconds()));
+  }
+
  private:
   void StartQuicServer(quic::ParsedQuicVersion version) {
     // Set up in-memory cache.
@@ -274,6 +288,7 @@ class URLRequestQuicTest
   quic::QuicMemoryCacheBackend memory_cache_backend_;
   std::unique_ptr<URLRequestContextBuilder> context_builder_;
   quic::test::QuicFlagSaver flags_;  // Save/restore all QUIC flag values.
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 // A URLRequest::Delegate that checks LoadTimingInfo when response headers are
@@ -313,9 +328,9 @@ class CheckLoadTimingDelegate : public TestDelegate {
     EXPECT_EQ(load_timing_info.connect_timing.connect_end,
               load_timing_info.connect_timing.ssl_end);
     EXPECT_EQ(session_reused,
-              load_timing_info.connect_timing.dns_start.is_null());
+              load_timing_info.connect_timing.domain_lookup_start.is_null());
     EXPECT_EQ(session_reused,
-              load_timing_info.connect_timing.dns_end.is_null());
+              load_timing_info.connect_timing.domain_lookup_end.is_null());
   }
 
   bool session_reused_;
@@ -447,6 +462,25 @@ TEST_P(URLRequestQuicTest, RequestHeadersCallback) {
   ASSERT_TRUE(request->is_pending());
   delegate.RunUntilComplete();
   EXPECT_EQ(OK, delegate.request_status());
+}
+
+TEST_P(URLRequestQuicTest, DelayedResponseStart) {
+  auto context = BuildContext();
+  TestDelegate delegate;
+  std::unique_ptr<URLRequest> request =
+      CreateRequest(context.get(), GURL(UrlFromPath(kHelloPath)), &delegate);
+
+  constexpr auto delay = base::Milliseconds(300);
+
+  this->SetDelay(kTestServerHost, kHelloPath, delay);
+  request->Start();
+  ASSERT_TRUE(request->is_pending());
+  delegate.RunUntilComplete();
+  LoadTimingInfo timing_info;
+  request->GetLoadTimingInfo(&timing_info);
+  EXPECT_EQ(OK, delegate.request_status());
+  EXPECT_GE((timing_info.receive_headers_start - timing_info.request_start),
+            delay);
 }
 
 // Tests that if there's an Expect-CT failure at the QUIC layer, a report is

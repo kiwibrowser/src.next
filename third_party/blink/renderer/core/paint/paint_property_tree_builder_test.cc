@@ -128,7 +128,9 @@ void PaintPropertyTreeBuilderTest::SetUp() {
 
 INSTANTIATE_TEST_SUITE_P(All,
                          PaintPropertyTreeBuilderTest,
-                         ::testing::Values(0, kUnderInvalidationChecking));
+                         ::testing::Values(0,
+                                           kUnderInvalidationChecking,
+                                           kScrollUpdateOptimizations));
 
 TEST_P(PaintPropertyTreeBuilderTest, FixedPosition) {
   LoadTestData("fixed-position.html");
@@ -6042,11 +6044,18 @@ TEST_P(PaintPropertyTreeBuilderTest, RepeatingFixedPositionInPagedMedia) {
   EXPECT_EQ(3u, NumFragments(fixed));
   for (int i = 0; i < 3; i++) {
     const auto& fragment = FragmentAt(fixed, i);
-    // We don't composite and create PaintOffsetTranslation for the
-    // fixed-position element during printing.
-    EXPECT_EQ(PhysicalOffset(20, 400 * i - 180), fragment.PaintOffset());
-    EXPECT_FALSE(fragment.PaintProperties());
-    EXPECT_EQ(LayoutUnit(400 * i), fragment.LogicalTopInFlowThread());
+    auto* properties = fragment.PaintProperties();
+    ASSERT_TRUE(properties);
+    ASSERT_TRUE(properties->PaintOffsetTranslation());
+    if (RuntimeEnabledFeatures::LayoutNGPrintingEnabled()) {
+      EXPECT_EQ(gfx::Vector2dF(20, 20 + 400 * i),
+                properties->PaintOffsetTranslation()->Translation2D());
+    } else {
+      EXPECT_EQ(gfx::Vector2dF(20, 400 * i - 180),
+                properties->PaintOffsetTranslation()->Translation2D());
+      EXPECT_EQ(LayoutUnit(400 * i), fragment.LogicalTopInFlowThread());
+    }
+    EXPECT_EQ(PhysicalOffset(), fragment.PaintOffset());
   }
 
   EXPECT_FALSE(fixed_child->IsFixedPositionObjectInPagedMedia());
@@ -6055,11 +6064,15 @@ TEST_P(PaintPropertyTreeBuilderTest, RepeatingFixedPositionInPagedMedia) {
     const auto& fragment = FragmentAt(fixed_child, i);
     EXPECT_EQ(FragmentAt(fixed, i).PaintOffset() + PhysicalOffset(0, 10),
               fragment.PaintOffset());
-    EXPECT_EQ(LayoutUnit(i * 400), fragment.LogicalTopInFlowThread());
+    if (!RuntimeEnabledFeatures::LayoutNGPrintingEnabled())
+      EXPECT_EQ(LayoutUnit(i * 400), fragment.LogicalTopInFlowThread());
   }
 
   EXPECT_FALSE(normal->IsFixedPositionObjectInPagedMedia());
-  EXPECT_EQ(1u, NumFragments(normal));
+  if (RuntimeEnabledFeatures::LayoutNGPrintingEnabled())
+    EXPECT_EQ(3u, NumFragments(normal));
+  else
+    EXPECT_EQ(1u, NumFragments(normal));
 
   GetFrame().EndPrinting();
   UpdateAllLifecyclePhasesForTest();
@@ -6105,10 +6118,15 @@ TEST_P(PaintPropertyTreeBuilderTest,
   for (int i = 0; i < 3; i++) {
     const auto& fragment = FragmentAt(fixed, i);
     EXPECT_EQ(PhysicalOffset(), fragment.PaintOffset());
-    EXPECT_EQ(LayoutUnit(i * 400), fragment.LogicalTopInFlowThread());
     const auto* properties = fragment.PaintProperties();
-    EXPECT_EQ(gfx::Vector2dF(20, -180 + i * 400),
-              properties->PaintOffsetTranslation()->Translation2D());
+    if (RuntimeEnabledFeatures::LayoutNGPrintingEnabled()) {
+      EXPECT_EQ(gfx::Vector2dF(20, 20 + i * 400),
+                properties->PaintOffsetTranslation()->Translation2D());
+    } else {
+      EXPECT_EQ(gfx::Vector2dF(20, -180 + i * 400),
+                properties->PaintOffsetTranslation()->Translation2D());
+      EXPECT_EQ(LayoutUnit(i * 400), fragment.LogicalTopInFlowThread());
+    }
     EXPECT_EQ(gfx::Vector2dF(10, 0), properties->Transform()->Translation2D());
     EXPECT_EQ(properties->PaintOffsetTranslation(),
               properties->Transform()->Parent());
@@ -6118,7 +6136,8 @@ TEST_P(PaintPropertyTreeBuilderTest,
   for (int i = 0; i < 3; i++) {
     const auto& fragment = FragmentAt(fixed_child, i);
     EXPECT_EQ(PhysicalOffset(0, 10), fragment.PaintOffset());
-    EXPECT_EQ(LayoutUnit(i * 400), fragment.LogicalTopInFlowThread());
+    if (!RuntimeEnabledFeatures::LayoutNGPrintingEnabled())
+      EXPECT_EQ(LayoutUnit(i * 400), fragment.LogicalTopInFlowThread());
     EXPECT_EQ(FragmentAt(fixed, i).PaintProperties()->Transform(),
               &fragment.LocalBorderBoxProperties().Transform());
   }
@@ -6830,8 +6849,6 @@ TEST_P(PaintPropertyTreeBuilderTest, SimpleScrollChangeDoesNotCausePacUpdate) {
 
 TEST_P(PaintPropertyTreeBuilderTest,
        SimpleStickyTranslationChangeDoesNotCausePacUpdate) {
-  ScopedScrollUpdateOptimizationsForTest scroll_optimizations(true);
-
   SetBodyInnerHTML(R"HTML(
     <style>::webkit-scrollbar { width: 0; height: 0 }</style>
     <!-- position: relative and z-index: 1 are needed to make the scroller a
@@ -6866,7 +6883,8 @@ TEST_P(PaintPropertyTreeBuilderTest,
   UpdateAllLifecyclePhasesExceptPaint();
 
   EXPECT_EQ(gfx::Vector2dF(), sticky_translation->Translation2D());
-  EXPECT_FALSE(pac->NeedsUpdate());
+  EXPECT_EQ(!RuntimeEnabledFeatures::ScrollUpdateOptimizationsEnabled(),
+            pac->NeedsUpdate());
   EXPECT_EQ(gfx::Vector2dF(), cc_transform_node->local.To2dTranslation());
   EXPECT_TRUE(property_trees->transform_tree().needs_update());
   EXPECT_TRUE(cc_transform_node->transform_changed);
@@ -7119,9 +7137,12 @@ TEST_P(PaintPropertyTreeBuilderTest, OverflowScrollPropertyHierarchy) {
   EXPECT_EQ(middle_properties->OverflowClip(), &relative_fragment.PreClip());
 
   // The opacity on |middle-scroller| applies to all children.
-  EXPECT_EQ(middle_properties->Effect(), &fixed_fragment.PreEffect());
-  EXPECT_EQ(middle_properties->Effect(), &absolute_fragment.PreEffect());
-  EXPECT_EQ(middle_properties->Effect(), &relative_fragment.PreEffect());
+  EXPECT_EQ(middle_properties->Effect(),
+            &fixed_fragment.LocalBorderBoxProperties().Effect());
+  EXPECT_EQ(middle_properties->Effect(),
+            &absolute_fragment.LocalBorderBoxProperties().Effect());
+  EXPECT_EQ(middle_properties->Effect(),
+            &relative_fragment.LocalBorderBoxProperties().Effect());
 }
 
 TEST_P(PaintPropertyTreeBuilderTest, CompositedInline) {
@@ -7304,6 +7325,23 @@ TEST_P(PaintPropertyTreeBuilderTest, WillChangeFilterWithTransformAndOpacity) {
   EXPECT_FALSE(properties->Transform()->HasDirectCompositingReasons());
   ASSERT_TRUE(properties->Effect());
   EXPECT_FALSE(properties->Effect()->HasDirectCompositingReasons());
+}
+
+TEST_P(PaintPropertyTreeBuilderTest, EffectCanUseCurrentClipAsOutputClipCrash) {
+  SetBodyInnerHTML(R"HTML(
+      <style type="text/css">
+      .c1 { transform: rotate(180deg); }
+      .c9 { position: relative; opacity: 0.1; }
+      .c9 > .c18 { position: fixed; }
+      </style>
+      <fieldset id="f" class="c1"><samp class="c9"><footer
+       class="c18"></footer></samp></fiedlset>
+  )HTML");
+
+  EXPECT_TRUE(GetLayoutObjectByElementId("f")
+                  ->SlowFirstChild()
+                  ->FirstFragment()
+                  .HasLocalBorderBoxProperties());
 }
 
 }  // namespace blink

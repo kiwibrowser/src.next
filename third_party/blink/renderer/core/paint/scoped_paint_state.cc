@@ -85,6 +85,10 @@ void ScopedPaintState::AdjustForPaintProperties(const LayoutObject& object) {
     new_chunk_properties.SetTransform(*transform);
     needs_new_chunk_properties = true;
   }
+  DCHECK(!properties->Translate());
+  DCHECK(!properties->Rotate());
+  DCHECK(!properties->Scale());
+  DCHECK(!properties->Offset());
   if (const auto* effect = properties->Effect()) {
     // Similar to the above.
     DCHECK(!effect->HasRealEffects());
@@ -139,6 +143,34 @@ void ScopedBoxContentsPaintState::AdjustForBoxContents(const LayoutBox& box) {
     if (!PhysicalRect(fragment_to_paint_->GetContentsCullRect().Rect())
              .Contains(contents_visual_rect)) {
       box.Layer()->SetPreviousPaintResult(kMayBeClippedByCullRect);
+    }
+  }
+
+  if (input_paint_info_.phase == PaintPhase::kForeground) {
+    // We treat horizontal-scrollable scrollers like replaced objects.
+    if (auto* mf_checker = MobileFriendlinessChecker::From(box.GetDocument())) {
+      if (!box.IsLayoutView()) {
+        if (auto* scrollable_area = box.GetScrollableArea()) {
+          if (scrollable_area->MaximumScrollOffset().x() != 0) {
+            PhysicalRect content_rect = box.OverflowClipRect(paint_offset_);
+            content_rect.Intersect(
+                PhysicalRect(input_paint_info_.GetCullRect().Rect()));
+            mf_checker->NotifyPaintReplaced(
+                content_rect, input_paint_info_.context.GetPaintController()
+                                  .CurrentPaintChunkProperties()
+                                  .Transform());
+            mf_ignore_scope_.emplace(*mf_checker);
+          }
+        }
+        // Don't check mobile friendliness for beyond viewport in position:fixed
+        // boxes because they don't scroll in the viewport.
+        if (const auto* properties = fragment_to_paint_->PaintProperties()) {
+          if (const auto* translation = properties->PaintOffsetTranslation()) {
+            if (translation->ScrollTranslationForFixed())
+              mf_ignore_scope_.emplace(*mf_checker);
+          }
+        }
+      }
     }
   }
 }

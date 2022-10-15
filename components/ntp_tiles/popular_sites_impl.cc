@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -275,7 +275,7 @@ PopularSitesImpl::PopularSitesImpl(
       url_loader_factory_(std::move(url_loader_factory)),
       is_fallback_(false),
       sections_(
-          ParseSites(prefs->GetValueList(prefs::kPopularSitesJsonPref),
+          ParseSites(prefs->GetList(prefs::kPopularSitesJsonPref),
                      prefs_->GetInteger(prefs::kPopularSitesVersionPref))) {}
 
 PopularSitesImpl::~PopularSitesImpl() {}
@@ -399,9 +399,8 @@ std::string PopularSitesImpl::GetVersionToFetch() {
   return version;
 }
 
-const base::ListValue* PopularSitesImpl::GetCachedJson() {
-  return &base::Value::AsListValue(
-      *prefs_->GetList(prefs::kPopularSitesJsonPref));
+const base::Value::List& PopularSitesImpl::GetCachedJson() {
+  return prefs_->GetList(prefs::kPopularSitesJsonPref);
 }
 
 // static

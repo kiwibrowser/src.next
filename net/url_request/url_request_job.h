@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -242,7 +242,7 @@ class NET_EXPORT URLRequestJob {
   virtual void SetRequestHeadersCallback(RequestHeadersCallback callback) {}
 
   // Sets a callback that will be invoked each time the response is received
-  // from the remote party with the actual response headers recieved.
+  // from the remote party with the actual response headers received.
   virtual void SetResponseHeadersCallback(ResponseHeadersCallback callback) {}
 
   // Sets a callback that will be invoked each time a 103 Early Hints response

@@ -80,6 +80,7 @@ void LargestContentfulPaintCalculator::UpdateLargestContentfulImage(
       image_node->IsInShadowTree() ? nullptr : To<Element>(image_node);
   const AtomicString& image_id =
       image_element ? image_element->GetIdAttribute() : AtomicString();
+
   window_performance_->OnLargestContentfulPaintUpdated(
       expose_paint_time_to_api ? largest_image->paint_time : base::TimeTicks(),
       largest_image->first_size, largest_image->load_time,
@@ -89,6 +90,11 @@ void LargestContentfulPaintCalculator::UpdateLargestContentfulImage(
 
   // TODO: update trace value with animated frame data
   if (LocalDOMWindow* window = window_performance_->DomWindow()) {
+    if (!largest_image->origin_clean) {
+      UseCounter::Count(window->document(),
+                        WebFeature::kLCPCandidateImageFromOriginDirtyStyle);
+    }
+
     TRACE_EVENT_MARK_WITH_TIMESTAMP2(kTraceCategories, kLCPCandidate,
                                      largest_image->paint_time, "data",
                                      ImageCandidateTraceData(largest_image),

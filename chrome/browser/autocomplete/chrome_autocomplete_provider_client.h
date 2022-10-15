@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -107,6 +107,7 @@ class ChromeAutocompleteProviderClient : public AutocompleteProviderClient {
   void OpenIncognitoClearBrowsingDataDialog() override;
   void CloseIncognitoWindows() override;
   void PromptPageTranslation() override;
+  bool OpenJourneys(const std::string& query) override;
 
   // For testing.
   void set_storage_partition(content::StoragePartition* storage_partition) {

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,12 +65,6 @@
 namespace extensions {
 
 namespace {
-
-void AddFrameToSet(std::set<content::RenderFrameHost*>* frames,
-                   content::RenderFrameHost* rfh) {
-  if (rfh->IsRenderFrameLive())
-    frames->insert(rfh);
-}
 
 GURL CreateBlobURL(content::RenderFrameHost* frame,
                    const std::string& content) {
@@ -153,8 +147,10 @@ class NavigationCompletedObserver : public content::WebContentsObserver {
       : content::WebContentsObserver(web_contents),
         message_loop_runner_(new content::MessageLoopRunner) {
     web_contents->GetPrimaryMainFrame()->ForEachRenderFrameHost(
-        base::BindRepeating(&AddFrameToSet,
-                            base::Unretained(&live_original_frames_)));
+        [this](content::RenderFrameHost* rfh) {
+          if (rfh->IsRenderFrameLive())
+            live_original_frames_.insert(rfh);
+        });
   }
 
   NavigationCompletedObserver(const NavigationCompletedObserver&) = delete;
@@ -182,7 +178,10 @@ class NavigationCompletedObserver : public content::WebContentsObserver {
   bool AllLiveRenderFrameHostsAreCurrent() {
     std::set<content::RenderFrameHost*> current_frames;
     web_contents()->GetPrimaryMainFrame()->ForEachRenderFrameHost(
-        base::BindRepeating(&AddFrameToSet, base::Unretained(&current_frames)));
+        [&current_frames](content::RenderFrameHost* rfh) {
+          if (rfh->IsRenderFrameLive())
+            current_frames.insert(rfh);
+        });
 
     return base::STLSetDifference<std::set<content::RenderFrameHost*>>(
                live_original_frames_, current_frames)
@@ -770,7 +769,12 @@ IN_PROC_BROWSER_TEST_F(ProcessManagerBrowserTest, ExtensionProcessReuse) {
   // process, if that process is locked to a single origin. This is a regression
   // test for http://crbug.com/600441.
   for (const Extension* extension : installed_extensions) {
-    content::DOMMessageQueue queue;
+    ExtensionHost* host =
+        ProcessManager::Get(profile())->GetBackgroundHostForExtension(
+            extension->id());
+    ASSERT_TRUE(host);
+    content::DOMMessageQueue queue(host->host_contents());
+
     ExecuteScriptInBackgroundPageNoWait(
         extension->id(),
         "document.cookie = 'extension_cookie';"
@@ -1215,8 +1219,9 @@ IN_PROC_BROWSER_TEST_F(ProcessManagerBrowserTest,
       static_cast<guest_view::TestGuestViewManager*>(
           guest_view::TestGuestViewManager::FromBrowserContext(
               browser()->profile()));
-  content::WebContents* guest = guest_manager->WaitForSingleGuestCreated();
-  guest_manager->WaitUntilAttached(guest);
+  auto* guest_view = guest_manager->WaitForSingleGuestViewCreated();
+  guest_manager->WaitUntilAttached(guest_view);
+  auto* guest_rfh = guest_manager->GetLastGuestRenderFrameHostCreated();
 
   // There should be two extension frames in ProcessManager: the app's main
   // page and the background page.
@@ -1247,9 +1252,8 @@ IN_PROC_BROWSER_TEST_F(ProcessManagerBrowserTest,
   EXPECT_FALSE(policy->CanRequestURL(
       web_tab->GetPrimaryMainFrame()->GetProcess()->GetID(),
       app_origin.GetURL()));
-  EXPECT_TRUE(
-      policy->CanRequestURL(guest->GetPrimaryMainFrame()->GetProcess()->GetID(),
-                            app_origin.GetURL()));
+  EXPECT_TRUE(policy->CanRequestURL(guest_rfh->GetProcess()->GetID(),
+                                    app_origin.GetURL()));
 
   // Try navigating the web tab to each nested URL with the app's origin.  This
   // should be blocked.

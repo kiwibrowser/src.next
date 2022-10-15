@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include <stddef.h>
 
-#include <algorithm>
 #include <utility>
 
 #include "base/atomic_sequence_num.h"
@@ -628,28 +627,33 @@ void EventRouter::AddFilteredEventListener(
     regular_listener = EventListener::ForExtensionServiceWorker(
         event_name, param->get_extension_id(), process, sw_identifier->scope,
         sw_identifier->version_id, sw_identifier->thread_id,
-        filter.CreateDeepCopy());
+        base::DictionaryValue::From(
+            base::Value::ToUniquePtrValue(filter.Clone())));
     if (add_lazy_listener) {
       lazy_listener = EventListener::ForExtensionServiceWorker(
           event_name, param->get_extension_id(), nullptr, sw_identifier->scope,
           // Lazy listener, without worker version id and thread id.
           blink::mojom::kInvalidServiceWorkerVersionId, kMainThreadId,
-          filter.CreateDeepCopy());
+          base::DictionaryValue::From(
+              base::Value::ToUniquePtrValue(filter.Clone())));
     }
   } else if (param->is_extension_id()) {
-    regular_listener =
-        EventListener::ForExtension(event_name, param->get_extension_id(),
-                                    process, filter.CreateDeepCopy());
+    regular_listener = EventListener::ForExtension(
+        event_name, param->get_extension_id(), process,
+        base::DictionaryValue::From(
+            base::Value::ToUniquePtrValue(filter.Clone())));
     if (add_lazy_listener) {
-      lazy_listener =
-          EventListener::ForExtension(event_name, param->get_extension_id(),
-                                      nullptr,  // Lazy, without process.
-                                      filter.CreateDeepCopy());
+      lazy_listener = EventListener::ForExtension(
+          event_name, param->get_extension_id(),
+          nullptr,  // Lazy, without process.
+          base::DictionaryValue::From(
+              base::Value::ToUniquePtrValue(filter.Clone())));
     }
   } else if (param->is_listener_url() && !add_lazy_listener) {
-    regular_listener =
-        EventListener::ForURL(event_name, param->get_listener_url(), process,
-                              filter.CreateDeepCopy());
+    regular_listener = EventListener::ForURL(
+        event_name, param->get_listener_url(), process,
+        base::DictionaryValue::From(
+            base::Value::ToUniquePtrValue(filter.Clone())));
   } else {
     mojo::ReportBadMessage(kAddEventListenerWithInvalidParam);
     return;
@@ -679,15 +683,19 @@ void EventRouter::RemoveFilteredEventListener(
     listener = EventListener::ForExtensionServiceWorker(
         event_name, param->get_extension_id(), process, sw_identifier->scope,
         sw_identifier->version_id, sw_identifier->thread_id,
-        filter.CreateDeepCopy());
+        base::DictionaryValue::From(
+            base::Value::ToUniquePtrValue(filter.Clone())));
   } else if (param->is_extension_id()) {
-    listener =
-        EventListener::ForExtension(event_name, param->get_extension_id(),
-                                    process, filter.CreateDeepCopy());
+    listener = EventListener::ForExtension(
+        event_name, param->get_extension_id(), process,
+        base::DictionaryValue::From(
+            base::Value::ToUniquePtrValue(filter.Clone())));
 
   } else if (param->is_listener_url() && !remove_lazy_listener) {
-    listener = EventListener::ForURL(event_name, param->get_listener_url(),
-                                     process, filter.CreateDeepCopy());
+    listener = EventListener::ForURL(
+        event_name, param->get_listener_url(), process,
+        base::DictionaryValue::From(
+            base::Value::ToUniquePtrValue(filter.Clone())));
   } else {
     mojo::ReportBadMessage(kRemoveEventListenerWithInvalidParam);
     return;
@@ -720,7 +728,7 @@ std::set<std::string> EventRouter::GetRegisteredEvents(
     const std::string& extension_id,
     RegisteredEventType type) const {
   std::set<std::string> events;
-  const ListValue* events_value = NULL;
+  const ListValue* events_value = nullptr;
 
   const char* pref_key = type == RegisteredEventType::kLazy
                              ? kRegisteredLazyEvents
@@ -730,7 +738,7 @@ std::set<std::string> EventRouter::GetRegisteredEvents(
     return events;
   }
 
-  for (const base::Value& event_val : events_value->GetListDeprecated()) {
+  for (const base::Value& event_val : events_value->GetList()) {
     const std::string* event = event_val.GetIfString();
     if (event)
       events.insert(*event);
@@ -750,20 +758,20 @@ bool EventRouter::HasLazyEventListenerForTesting(
     const std::string& event_name) {
   const EventListenerMap::ListenerList& listeners =
       listeners_.GetEventListenersByName(event_name);
-  return std::any_of(listeners.begin(), listeners.end(),
-                     [](const std::unique_ptr<EventListener>& listener) {
-                       return listener->IsLazy();
-                     });
+  return base::ranges::any_of(
+      listeners, [](const std::unique_ptr<EventListener>& listener) {
+        return listener->IsLazy();
+      });
 }
 
 bool EventRouter::HasNonLazyEventListenerForTesting(
     const std::string& event_name) {
   const EventListenerMap::ListenerList& listeners =
       listeners_.GetEventListenersByName(event_name);
-  return std::any_of(listeners.begin(), listeners.end(),
-                     [](const std::unique_ptr<EventListener>& listener) {
-                       return !listener->IsLazy();
-                     });
+  return base::ranges::any_of(
+      listeners, [](const std::unique_ptr<EventListener>& listener) {
+        return !listener->IsLazy();
+      });
 }
 
 void EventRouter::RemoveFilterFromEvent(const std::string& event_name,
@@ -774,13 +782,12 @@ void EventRouter::RemoveFilterFromEvent(const std::string& event_name,
       extension_prefs_, extension_id,
       is_for_service_worker ? kFilteredServiceWorkerEvents : kFilteredEvents);
   auto filtered_events = update.Create();
-  ListValue* filter_list = NULL;
+  base::Value::List* filter_list = nullptr;
   if (!filtered_events ||
       !filtered_events->GetListWithoutPathExpansion(event_name, &filter_list)) {
     return;
   }
-  filter_list->EraseListIter(
-      base::ranges::find(filter_list->GetListDeprecated(), *filter));
+  filter_list->erase(base::ranges::find(*filter_list, *filter));
 }
 
 const DictionaryValue* EventRouter::GetFilteredEvents(
@@ -795,13 +802,19 @@ const DictionaryValue* EventRouter::GetFilteredEvents(
 }
 
 void EventRouter::BroadcastEvent(std::unique_ptr<Event> event) {
-  DispatchEventImpl(std::string(), std::move(event));
+  DispatchEventImpl(std::string(), GURL(), std::move(event));
 }
 
 void EventRouter::DispatchEventToExtension(const std::string& extension_id,
                                            std::unique_ptr<Event> event) {
   DCHECK(!extension_id.empty());
-  DispatchEventImpl(extension_id, std::move(event));
+  DispatchEventImpl(extension_id, GURL(), std::move(event));
+}
+
+void EventRouter::DispatchEventToURL(const GURL& url,
+                                     std::unique_ptr<Event> event) {
+  DCHECK(!url.is_empty());
+  DispatchEventImpl(std::string(), url, std::move(event));
 }
 
 void EventRouter::DispatchEventWithLazyListener(const std::string& extension_id,
@@ -841,6 +854,7 @@ void EventRouter::DispatchEventWithLazyListener(const std::string& extension_id,
 }
 
 void EventRouter::DispatchEventImpl(const std::string& restrict_to_extension_id,
+                                    const GURL& restrict_to_url,
                                     std::unique_ptr<Event> event) {
   DCHECK(event);
   // We don't expect to get events from a completely different browser context.
@@ -873,6 +887,10 @@ void EventRouter::DispatchEventImpl(const std::string& restrict_to_extension_id,
         restrict_to_extension_id != listener->extension_id()) {
       continue;
     }
+    if (!restrict_to_url.is_empty() &&
+        !url::IsSameOriginWith(restrict_to_url, listener->listener_url())) {
+      continue;
+    }
     if (!listener->IsLazy())
       continue;
 
@@ -884,6 +902,10 @@ void EventRouter::DispatchEventImpl(const std::string& restrict_to_extension_id,
   for (const EventListener* listener : listeners) {
     if (!restrict_to_extension_id.empty() &&
         restrict_to_extension_id != listener->extension_id()) {
+      continue;
+    }
+    if (!restrict_to_url.is_empty() &&
+        !url::IsSameOriginWith(restrict_to_url, listener->listener_url())) {
       continue;
     }
     if (listener->IsLazy())
@@ -1185,10 +1207,9 @@ void EventRouter::AddFilterToEvent(const std::string& event_name,
       is_for_service_worker ? kFilteredServiceWorkerEvents : kFilteredEvents);
   auto filtered_events = update.Create();
 
-  ListValue* filter_list = nullptr;
+  base::Value::List* filter_list = nullptr;
   if (!filtered_events->GetListWithoutPathExpansion(event_name, &filter_list)) {
-    filtered_events->SetWithoutPathExpansion(
-        event_name, std::make_unique<base::ListValue>());
+    filtered_events->SetKey(event_name, base::Value(base::Value::List()));
     filtered_events->GetListWithoutPathExpansion(event_name, &filter_list);
   }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -144,25 +144,14 @@ bool ExtensionSpecialStoragePolicy::IsStorageUnlimited(const GURL& origin) {
 bool ExtensionSpecialStoragePolicy::IsStorageSessionOnly(const GURL& origin) {
   if (!cookie_settings_)
     return false;
-  return cookie_settings_->IsCookieSessionOnly(origin);
-}
-
-network::DeleteCookiePredicate
-ExtensionSpecialStoragePolicy::CreateDeleteCookieOnExitPredicate() {
-  if (!cookie_settings_)
-    return network::DeleteCookiePredicate();
-  // Fetch the list of cookies related content_settings and bind it
-  // to CookieSettings::ShouldDeleteCookieOnExit to avoid fetching it on
-  // every call.
-  return base::BindRepeating(
-      &content_settings::CookieSettings::ShouldDeleteCookieOnExit,
-      cookie_settings_, cookie_settings_->GetCookieSettings());
+  return cookie_settings_->IsCookieSessionOnly(
+      origin, content_settings::CookieSettings::QueryReason::kSiteStorage);
 }
 
 bool ExtensionSpecialStoragePolicy::HasSessionOnlyOrigins() {
   if (!cookie_settings_)
     return false;
-  if (cookie_settings_->GetDefaultCookieSetting(NULL) ==
+  if (cookie_settings_->GetDefaultCookieSetting(nullptr) ==
       CONTENT_SETTING_SESSION_ONLY)
     return true;
   for (const ContentSettingPatternSource& entry :

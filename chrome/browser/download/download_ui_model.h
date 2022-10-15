@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,6 +55,13 @@ class DownloadUIModel {
     // Returns a string indicating the status of a completed download.
     virtual std::u16string GetCompletedStatusText() const = 0;
 
+    // Returns a string representation of the current download progress sizes.
+    // If the total size of the download is known, this string looks like:
+    // "100/200 MB" where the numerator is the transferred size and the
+    // denominator is the total size. If the total isn't known, returns the
+    // transferred size as a string (e.g.: "100 MB").
+    virtual std::u16string GetProgressSizesString() const = 0;
+
     // Returns a string indicating the status of an interrupted download.
     virtual std::u16string GetInterruptedStatusText(
         offline_items_collection::FailState fail_state) const;
@@ -72,6 +79,7 @@ class DownloadUIModel {
    public:
     std::u16string GetInProgressStatusText() const override;
     std::u16string GetCompletedStatusText() const override;
+    std::u16string GetProgressSizesString() const override;
   };
 
   // Used in Download bubble.
@@ -81,8 +89,16 @@ class DownloadUIModel {
     std::u16string GetCompletedStatusText() const override;
     std::u16string GetInterruptedStatusText(
         offline_items_collection::FailState fail_state) const override;
+    std::u16string GetProgressSizesString() const override;
 
    private:
+    FRIEND_TEST_ALL_PREFIXES(DownloadItemModelTest,
+                             GetBubbleStatusMessageWithBytes);
+
+    static std::u16string GetBubbleStatusMessageWithBytes(
+        const std::u16string& bytes_substring,
+        const std::u16string& detail_message,
+        bool is_active);
     std::u16string GetBubbleWarningStatusText() const;
   };
 
@@ -145,6 +161,9 @@ class DownloadUIModel {
                                   ui::ColorId color_id);
     BubbleUIInfo& AddPrimaryButton(DownloadCommands::Command command);
     BubbleUIInfo& AddCheckbox(const std::u16string& label);
+    // Add button to the subpage. Only two buttons are supported.
+    // The first one added is the primary, and the second one the secondary.
+    // The checkbox, if present, controls the secondary.
     BubbleUIInfo& AddSubpageButton(const std::u16string& label,
                                    DownloadCommands::Command command,
                                    bool is_prominent);
@@ -301,6 +320,13 @@ class DownloadUIModel {
   // Change what's returned by WasUINotified().
   virtual void SetWasUINotified(bool should_notify);
 
+  // Returns |true| if the download was actioned on. This governs if the
+  // download should be shown in the Download Bubble's partial view.
+  virtual bool WasActionedOn() const;
+
+  // Change what's returned by WasActionedOn().
+  virtual void SetActionedOn(bool actioned_on);
+
   // Returns |true| if the Download Bubble UI has shown this download warning.
   // By default, this value is |false| and should be changed explicitly using
   // SetWasUIWarningShown().
@@ -318,7 +344,7 @@ class DownloadUIModel {
 
   // Returns |true| if opening in the browser is preferred for this download. If
   // |false|, the download should be opened with the system default application.
-  virtual bool ShouldPreferOpeningInBrowser() const;
+  virtual bool ShouldPreferOpeningInBrowser();
 
   // Change what's returned by ShouldPreferOpeningInBrowser to |preference|.
   virtual void SetShouldPreferOpeningInBrowser(bool preference);
@@ -474,13 +500,18 @@ class DownloadUIModel {
                               DownloadCommands::Command command);
 
   // Gets the information about the download bubbles subpage.
-  BubbleUIInfo GetBubbleUIInfo() const;
+  BubbleUIInfo GetBubbleUIInfo(bool is_download_bubble_v2) const;
   BubbleUIInfo GetBubbleUIInfoForInterrupted(
       offline_items_collection::FailState fail_state) const;
-  BubbleUIInfo GetBubbleUIInfoForInProgressOrComplete() const;
+  BubbleUIInfo GetBubbleUIInfoForInProgressOrComplete(
+      bool is_download_bubble_v2) const;
+  virtual BubbleUIInfo GetBubbleUIInfoForTailoredWarning() const;
 
   // Returns |true| if this download should be displayed in the download bubble.
   virtual bool ShouldShowInBubble() const;
+
+  // Should this download trigger a tailored warning?
+  virtual bool ShouldShowTailoredWarning() const;
 
   // Ephemeral warnings are ones that are quickly removed from the bubble if the
   // user has not acted on them, and later deleted altogether. Is this that kind
@@ -498,6 +529,15 @@ class DownloadUIModel {
 
   // Whether the dropdown menu button should be shown or not.
   virtual bool ShouldShowDropdown() const;
+
+  // Determines if a download should be preferably opened in the browser instead
+  // of the platform. Use |is_filetype_handled_safely| indicating if opening a
+  // file of this type is safe in the current BrowserContext, |target_path| to
+  // see if files of this type should be opened in the browser, and set whether
+  // the download should be preferred opening in the browser.
+  virtual void DetermineAndSetShouldPreferOpeningInBrowser(
+      const base::FilePath& target_path,
+      bool is_filetype_handled_safely);
 
  protected:
   // Returns the MIME type of the download.

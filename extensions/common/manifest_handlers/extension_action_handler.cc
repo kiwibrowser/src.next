@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -123,10 +123,15 @@ bool ExtensionActionHandler::AlwaysParseForType(Manifest::Type type) const {
   return type == Manifest::TYPE_EXTENSION || type == Manifest::TYPE_USER_SCRIPT;
 }
 
+bool ExtensionActionHandler::AlwaysValidateForType(Manifest::Type type) const {
+  return type == Manifest::TYPE_EXTENSION || type == Manifest::TYPE_USER_SCRIPT;
+}
+
 base::span<const char* const> ExtensionActionHandler::Keys() const {
   static constexpr const char* kKeys[] = {
       manifest_keys::kPageAction,
       manifest_keys::kBrowserAction,
+      manifest_keys::kAction,
   };
   return kKeys;
 }

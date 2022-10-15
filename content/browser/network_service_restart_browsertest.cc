@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -1106,7 +1106,8 @@ class NetworkServiceRestartWithFirstPartySetBrowserTest
     if (IsFirstPartySetsEnabled()) {
       command_line->AppendSwitchASCII(
           network::switches::kUseFirstPartySet,
-          "https://a.test,https://b.test,https://c.test");
+          R"({"primary": "https://a.test",)"
+          R"("associatedSites": ["https://b.test","https://c.test"]})");
     }
   }
 

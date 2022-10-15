@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,8 +33,6 @@ import org.chromium.build.BuildConfig;
 public class ContextUtils {
     private static final String TAG = "ContextUtils";
     private static Context sApplicationContext;
-
-    private static boolean sSdkSandboxProcess;
 
     /**
      * Flag for {@link Context#registerReceiver}: The receiver can receive broadcasts from other
@@ -169,20 +167,14 @@ public class ContextUtils {
     }
 
     /**
-     * Set current process as SdkSandbox process or not.
-     *
-     * TODO: This method shall be removed once Android Sdk is in, refer to isSdkSandboxProcess().
-     */
-    public static void setSdkSandboxProcess(boolean sdkSandboxProcess) {
-        sSdkSandboxProcess = sdkSandboxProcess;
-    }
-
-    /**
      * @return if current process is SdkSandbox process.
      */
     public static boolean isSdkSandboxProcess() {
-        // TODO: Call android.os.Process.isSdkSandbox() directly once Android Sdk is in.
-        return sSdkSandboxProcess;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return Process.isSdkSandbox();
+        } else {
+            return false;
+        }
     }
 
     /** @return The name of the current process. E.g. "org.chromium.chrome:privileged_process0". */

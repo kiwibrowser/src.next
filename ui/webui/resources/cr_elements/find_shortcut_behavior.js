@@ -1,10 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 import {assert, assertNotReached} from '../js/assert.m.js';
 import {isMac} from '../js/cr.m.js';
-import {KeyboardShortcutList} from '../js/cr/ui/keyboard_shortcut_list.m.js';
+import {KeyboardShortcutList} from '../js/cr/ui/keyboard_shortcut_list_js.js';
 import {isTextInputElement} from '../js/util.m.js';
 
 /**

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -524,7 +524,7 @@ NET_ERROR(CERT_INVALID, -207)
 // signature algorithm.
 NET_ERROR(CERT_WEAK_SIGNATURE_ALGORITHM, -208)
 
-// -209 is availible: was CERT_NOT_IN_DNS.
+// -209 is available: was CERT_NOT_IN_DNS.
 
 // The host name specified in the certificate is not unique.
 NET_ERROR(CERT_NON_UNIQUE_NAME, -210)
@@ -718,7 +718,7 @@ NET_ERROR(QUIC_PROTOCOL_ERROR, -356)
 // The HTTP headers were truncated by an EOF.
 NET_ERROR(RESPONSE_HEADERS_TRUNCATED, -357)
 
-// The QUIC crytpo handshake failed.  This means that the server was unable
+// The QUIC crypto handshake failed.  This means that the server was unable
 // to read any requests sent, so they may be resent.
 NET_ERROR(QUIC_HANDSHAKE_FAILED, -358)
 
@@ -814,6 +814,11 @@ NET_ERROR(TOO_MANY_ACCEPT_CH_RESTARTS, -382)
 // request should be invalidated.
 NET_ERROR(INCONSISTENT_IP_ADDRESS_SPACE, -383)
 
+// The IP address space of the cached remote endpoint is blocked by private
+// network access check.
+NET_ERROR(CACHED_IP_ADDRESS_SPACE_BLOCKED_BY_PRIVATE_NETWORK_ACCESS_POLICY,
+          -384)
+
 // The cache does not have the requested entry.
 NET_ERROR(CACHE_MISS, -400)
 
@@ -857,7 +862,7 @@ NET_ERROR(CACHE_LOCK_TIMEOUT, -409)
 NET_ERROR(CACHE_AUTH_FAILURE_AFTER_READ, -410)
 
 // Internal not-quite error code for the HTTP cache. In-memory hints suggest
-// that the cache entry would not have been useable with the transaction's
+// that the cache entry would not have been usable with the transaction's
 // current configuration (e.g. load flags, mode, etc.)
 NET_ERROR(CACHE_ENTRY_NOT_SUITABLE, -411)
 

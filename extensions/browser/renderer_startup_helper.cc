@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,9 +22,9 @@
 #include "extensions/browser/extension_util.h"
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/browser/guest_view/web_view/web_view_guest.h"
+#include "extensions/browser/network_permissions_updater.h"
 #include "extensions/browser/service_worker_task_queue.h"
 #include "extensions/common/activation_sequence.h"
-#include "extensions/common/cors_util.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/common/extensions_client.h"
@@ -255,10 +255,13 @@ void RendererStartupHelper::ActivateExtensionInProcess(
   // always be called before creating URLLoaderFactory for any extension frames
   // that might be eventually hosted inside the renderer `process` (this
   // Browser-side ordering will be replicated within the NetworkService because
-  // SetCorsOriginAccessListsForOrigin and CreateURLLoaderFactory are 2 methods
+  // `SetCorsOriginAccessListsForOrigin()`, which is used in
+  // NetworkPermissionsUpdater, and `CreateURLLoaderFactory()` are 2 methods
   // of the same mojom::NetworkContext interface).
-  util::SetCorsOriginAccessListForExtension({process->GetBrowserContext()},
-                                            extension, base::DoNothing());
+  NetworkPermissionsUpdater::UpdateExtension(
+      *process->GetBrowserContext(), extension,
+      NetworkPermissionsUpdater::ContextSet::kCurrentContextOnly,
+      base::DoNothing());
 
   auto remote = process_mojo_map_.find(process);
   if (remote != process_mojo_map_.end()) {
@@ -315,7 +318,8 @@ void RendererStartupHelper::OnExtensionUnloaded(const Extension& extension) {
   }
 
   // Resets registered origin access lists in the BrowserContext asynchronously.
-  util::ResetCorsOriginAccessListForExtension(browser_context_, extension);
+  NetworkPermissionsUpdater::ResetOriginAccessForExtension(*browser_context_,
+                                                           extension);
 
   for (auto& process_extensions_pair : pending_active_extensions_)
     process_extensions_pair.second.erase(extension.id());

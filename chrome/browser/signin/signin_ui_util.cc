@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -180,14 +180,6 @@ std::u16string GetAuthenticatedUsername(Profile* profile) {
   }
 
   return base::UTF8ToUTF16(user_display_name);
-}
-
-void InitializePrefsForProfile(Profile* profile) {
-  if (profile->IsNewProfile()) {
-    // Suppresses the upgrade tutorial for a new profile.
-    profile->GetPrefs()->SetInteger(prefs::kProfileAvatarTutorialShown,
-                                    kUpgradeWelcomeTutorialShowMax + 1);
-  }
 }
 
 void ShowSigninErrorLearnMorePage(Profile* profile) {
@@ -493,13 +485,6 @@ void RecordProfileMenuViewShown(Profile* profile) {
     base::RecordAction(base::UserMetricsAction("ProfileMenu_Opened_Guest"));
   } else if (profile->IsIncognitoProfile()) {
     base::RecordAction(base::UserMetricsAction("ProfileMenu_Opened_Incognito"));
-  }
-
-  base::TimeTicks last_shown =
-      AvatarButtonUserData::GetAnimatedIdentityLastShown(profile);
-  if (!last_shown.is_null()) {
-    base::UmaHistogramLongTimes("Profile.Menu.OpenedAfterAvatarAnimation",
-                                base::TimeTicks::Now() - last_shown);
   }
 }
 

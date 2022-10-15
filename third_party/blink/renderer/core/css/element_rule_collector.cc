@@ -81,13 +81,16 @@ unsigned LinkMatchTypeFromInsideLink(EInsideLink inside_link) {
 }
 
 bool EvaluateAndAddContainerQueries(
+    const Element& matching_element,
     const ContainerQuery& container_query,
     const StyleRecalcContext& style_recalc_context,
+    ContainerSelectorCache& container_selector_cache,
     MatchResult& result) {
   for (const ContainerQuery* current = &container_query; current;
        current = current->Parent()) {
-    if (!ContainerQueryEvaluator::EvalAndAdd(style_recalc_context, *current,
-                                             result)) {
+    if (!ContainerQueryEvaluator::EvalAndAdd(
+            matching_element, style_recalc_context, *current,
+            container_selector_cache, result)) {
       return false;
     }
   }
@@ -330,16 +333,13 @@ static bool RulesApplicableInCurrentTreeScope(
 
 template <bool perf_trace_enabled>
 void ElementRuleCollector::CollectMatchingRulesForListInternal(
-    const HeapVector<RuleData>* rules,
+    base::span<const RuleData> rules,
     const MatchRequest& match_request,
     const RuleSet* rule_set,
     const CSSStyleSheet* style_sheet,
     int style_sheet_index,
     const SelectorChecker& checker,
     PartRequest* part_request) {
-  if (!rules || rules->IsEmpty())
-    return;
-
   SelectorChecker::StyleScopeFrame style_scope_frame(context_.GetElement());
 
   SelectorChecker::SelectorCheckingContext context(&context_.GetElement());
@@ -354,14 +354,15 @@ void ElementRuleCollector::CollectMatchingRulesForListInternal(
       rule_set->ContainerQueryIntervals());
   Seeker<StyleScope> scope_seeker(rule_set->ScopeIntervals());
 
-  unsigned rejected = 0;
   unsigned fast_rejected = 0;
   unsigned matched = 0;
   SelectorStatisticsCollector selector_statistics_collector;
-  if (perf_trace_enabled)
-    selector_statistics_collector.ReserveCapacity(rules->size());
+  if (perf_trace_enabled) {
+    selector_statistics_collector.ReserveCapacity(
+        static_cast<wtf_size_t>(rules.size()));
+  }
 
-  for (const auto& rule_data : *rules) {
+  for (const RuleData& rule_data : rules) {
     if (perf_trace_enabled) {
       selector_statistics_collector.EndCollectionForCurrentRule();
       selector_statistics_collector.BeginCollectionForRule(&rule_data);
@@ -385,7 +386,6 @@ void ElementRuleCollector::CollectMatchingRulesForListInternal(
     if (UNLIKELY(part_request && part_request->for_shadow_pseudo)) {
       if (!selector.IsAllowedAfterPart()) {
         DCHECK_EQ(selector.GetPseudoType(), CSSSelector::kPseudoPart);
-        rejected++;
         continue;
       }
       DCHECK_EQ(selector.Relation(), CSSSelector::kUAShadow);
@@ -399,19 +399,19 @@ void ElementRuleCollector::CollectMatchingRulesForListInternal(
     DCHECK(!context.is_inside_visited_link ||
            inside_link_ != EInsideLink::kNotInsideLink);
     if (!checker.Match(context, result)) {
-      rejected++;
       continue;
     }
     if (pseudo_style_request_.pseudo_id != kPseudoIdNone &&
         pseudo_style_request_.pseudo_id != result.dynamic_pseudo) {
-      rejected++;
       continue;
     }
     const ContainerQuery* container_query =
         container_query_seeker.Seek(rule_data.GetPosition());
     if (container_query) {
-      // TODO(crbug.com/1302630): May depend on style() queries.
-      result_.SetDependsOnSizeContainerQueries();
+      if (container_query->Selector().SelectsSizeContainers())
+        result_.SetDependsOnSizeContainerQueries();
+      if (container_query->Selector().SelectsStyleContainers())
+        result_.SetDependsOnStyleContainerQueries();
 
       // If we are matching pseudo elements like a ::before rule when computing
       // the styles of the originating element, we don't know whether the
@@ -422,9 +422,9 @@ void ElementRuleCollector::CollectMatchingRulesForListInternal(
       // elements when they depend on the originating element.
       if (pseudo_style_request_.pseudo_id != kPseudoIdNone ||
           result.dynamic_pseudo == kPseudoIdNone) {
-        if (!EvaluateAndAddContainerQueries(*container_query,
-                                            style_recalc_context_, result_)) {
-          rejected++;
+        if (!EvaluateAndAddContainerQueries(
+                context_.GetElement(), *container_query, style_recalc_context_,
+                container_selector_cache_, result_)) {
           if (AffectsAnimations(rule_data))
             result_.SetConditionallyAffectsAnimations();
           continue;
@@ -450,6 +450,7 @@ void ElementRuleCollector::CollectMatchingRulesForListInternal(
   if (!style_engine.Stats())
     return;
 
+  size_t rejected = rules.size() - fast_rejected - matched;
   INCREMENT_STYLE_STATS_COUNTER(style_engine, rules_rejected, rejected);
   INCREMENT_STYLE_STATS_COUNTER(style_engine, rules_fast_rejected,
                                 fast_rejected);
@@ -457,13 +458,20 @@ void ElementRuleCollector::CollectMatchingRulesForListInternal(
 }
 
 void ElementRuleCollector::CollectMatchingRulesForList(
-    const HeapVector<RuleData>* rules,
+    base::span<const RuleData> rules,
     const MatchRequest& match_request,
     const RuleSet* rule_set,
     const CSSStyleSheet* style_sheet,
     int style_sheet_index,
     const SelectorChecker& checker,
     PartRequest* part_request) {
+  // This is a very common case for many style sheets, and by putting it here
+  // instead of inside CollectMatchingRulesForListInternal(), we're usually
+  // inlined into the caller (which saves on stack setup and call overhead
+  // in that common case).
+  if (rules.empty())
+    return;
+
   // To reduce branching overhead for the common case, we use a template
   // parameter to eliminate branching in CollectMatchingRulesForListInternal
   // when tracing is not enabled.
@@ -610,10 +618,11 @@ void ElementRuleCollector::CollectMatchingRules(
               : attribute_name;
       for (const auto bundle : match_request.AllRuleSets()) {
         if (bundle.rule_set->HasAnyAttrRules()) {
-          const HeapVector<RuleData>* list =
+          base::span<const RuleData> list =
               bundle.rule_set->AttrRules(lower_name);
-          if (list && !bundle.rule_set->CanIgnoreEntireList(
-                          list, lower_name, attributes[attr_idx].Value())) {
+          if (!list.empty() &&
+              !bundle.rule_set->CanIgnoreEntireList(
+                  list, lower_name, attributes[attr_idx].Value())) {
             CollectMatchingRulesForList(bundle.rule_set->AttrRules(lower_name),
                                         match_request, bundle.rule_set,
                                         bundle.style_sheet,
@@ -877,7 +886,8 @@ void ElementRuleCollector::DidMatchRule(
 
       if (dynamic_pseudo == kPseudoIdHighlight) {
         DCHECK(result.custom_highlight_name);
-        style_->SetHasCustomHighlightName(result.custom_highlight_name);
+        style_->SetHasCustomHighlightName(
+            AtomicString(result.custom_highlight_name));
       }
     } else if (dynamic_pseudo == kPseudoIdFirstLine && container_query) {
       style_->SetFirstLineDependsOnSizeContainerQueries(true);

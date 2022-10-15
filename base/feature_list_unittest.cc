@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,6 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/scoped_field_trial_list_resetter.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace base {
@@ -94,6 +93,16 @@ TEST_F(FeatureListTest, InitializeFromCommandLine) {
     test::ScopedFeatureList scoped_feature_list;
     scoped_feature_list.InitWithFeatureList(std::move(feature_list));
 
+    EXPECT_EQ(test_case.expected_feature_on_state,
+              FeatureList::IsEnabled(kFeatureOnByDefault))
+        << i;
+    EXPECT_EQ(test_case.expected_feature_off_state,
+              FeatureList::IsEnabled(kFeatureOffByDefault))
+        << i;
+
+    // Reading the state of each feature again will pull it from their
+    // respective caches instead of performing the full lookup, which should
+    // yield the same result.
     EXPECT_EQ(test_case.expected_feature_on_state,
               FeatureList::IsEnabled(kFeatureOnByDefault))
         << i;
@@ -182,8 +191,9 @@ TEST_F(FeatureListTest, FieldTrialOverrides) {
     const auto& test_case = test_cases[i];
     SCOPED_TRACE(base::StringPrintf("Test[%" PRIuS "]", i));
 
-    test::ScopedFieldTrialListResetter resetter;
-    FieldTrialList field_trial_list(nullptr);
+    test::ScopedFeatureList outer_scope;
+    outer_scope.InitWithEmptyFeatureAndFieldTrialLists();
+
     auto feature_list = std::make_unique<FeatureList>();
 
     FieldTrial* trial1 = FieldTrialList::CreateFieldTrial("TrialExample1", "A");
@@ -402,8 +412,9 @@ TEST_F(FeatureListTest, AssociateReportingFieldTrial) {
                                     test_case.enable_features,
                                     test_case.disable_features));
 
-    test::ScopedFieldTrialListResetter resetter;
-    FieldTrialList field_trial_list(nullptr);
+    test::ScopedFeatureList outer_scope;
+    outer_scope.InitWithEmptyFeatureAndFieldTrialLists();
+
     auto feature_list = std::make_unique<FeatureList>();
     feature_list->InitializeFromCommandLine(test_case.enable_features,
                                             test_case.disable_features);

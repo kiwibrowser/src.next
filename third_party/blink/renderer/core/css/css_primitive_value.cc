@@ -350,6 +350,53 @@ void CSSPrimitiveValue::AccumulateLengthUnitTypes(
   To<CSSNumericLiteralValue>(this)->AccumulateLengthUnitTypes(types);
 }
 
+bool CSSPrimitiveValue::HasStaticViewportUnits(
+    const LengthTypeFlags& length_type_flags) {
+  return length_type_flags.test(CSSPrimitiveValue::kUnitTypeViewportWidth) ||
+         length_type_flags.test(CSSPrimitiveValue::kUnitTypeViewportHeight) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeViewportInlineSize) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeViewportBlockSize) ||
+         length_type_flags.test(CSSPrimitiveValue::kUnitTypeViewportMin) ||
+         length_type_flags.test(CSSPrimitiveValue::kUnitTypeViewportMax) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeSmallViewportWidth) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeSmallViewportHeight) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeSmallViewportInlineSize) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeSmallViewportBlockSize) ||
+         length_type_flags.test(CSSPrimitiveValue::kUnitTypeSmallViewportMin) ||
+         length_type_flags.test(CSSPrimitiveValue::kUnitTypeSmallViewportMax) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeLargeViewportWidth) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeLargeViewportHeight) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeLargeViewportInlineSize) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeLargeViewportBlockSize) ||
+         length_type_flags.test(CSSPrimitiveValue::kUnitTypeLargeViewportMin) ||
+         length_type_flags.test(CSSPrimitiveValue::kUnitTypeLargeViewportMax);
+}
+
+bool CSSPrimitiveValue::HasDynamicViewportUnits(
+    const LengthTypeFlags& length_type_flags) {
+  return length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeDynamicViewportWidth) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeDynamicViewportHeight) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeDynamicViewportInlineSize) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeDynamicViewportBlockSize) ||
+         length_type_flags.test(
+             CSSPrimitiveValue::kUnitTypeDynamicViewportMin) ||
+         length_type_flags.test(CSSPrimitiveValue::kUnitTypeDynamicViewportMax);
+}
+
 double CSSPrimitiveValue::ConversionToCanonicalUnitsScaleFactor(
     UnitType unit_type) {
   double factor = 1.0;
@@ -488,6 +535,9 @@ bool CSSPrimitiveValue::UnitTypeToLengthUnitType(UnitType unit_type,
     case CSSPrimitiveValue::UnitType::kChs:
       length_type = kUnitTypeZeroCharacterWidth;
       return true;
+    case CSSPrimitiveValue::UnitType::kIcs:
+      length_type = kUnitTypeIdeographicFullWidth;
+      return true;
     case CSSPrimitiveValue::UnitType::kPercentage:
       length_type = kUnitTypePercentage;
       return true;
@@ -599,6 +649,8 @@ CSSPrimitiveValue::UnitType CSSPrimitiveValue::LengthUnitTypeToUnitType(
       return CSSPrimitiveValue::UnitType::kRems;
     case kUnitTypeZeroCharacterWidth:
       return CSSPrimitiveValue::UnitType::kChs;
+    case kUnitTypeIdeographicFullWidth:
+      return CSSPrimitiveValue::UnitType::kIcs;
     case kUnitTypePercentage:
       return CSSPrimitiveValue::UnitType::kPercentage;
     case kUnitTypeViewportWidth:
@@ -685,6 +737,8 @@ const char* CSSPrimitiveValue::UnitTypeToString(UnitType type) {
       return "rem";
     case UnitType::kChs:
       return "ch";
+    case UnitType::kIcs:
+      return "ic";
     case UnitType::kPixels:
       return "px";
     case UnitType::kCentimeters:

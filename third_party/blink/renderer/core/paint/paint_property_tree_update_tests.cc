@@ -1428,19 +1428,28 @@ TEST_P(PaintPropertyTreeUpdateTest, OverflowClipUpdateForImage) {
 
   auto* target = GetDocument().getElementById("target");
   const auto* properties = PaintPropertiesForElement("target");
-  // Image elements need a clip node to clip the image to its content box.
-  EXPECT_NE(nullptr, properties);
+  // Image elements don't need a clip node if the image is clipped to its
+  // content box.
+  EXPECT_EQ(nullptr, properties);
 
   target->setAttribute(html_names::kStyleAttr, "object-fit: cover");
   UpdateAllLifecyclePhasesForTest();
   properties = PaintPropertiesForElement("target");
-  // Image elements need a clip node to clip the image to its content box.
-  EXPECT_NE(nullptr, properties);
+  // Image elements don't need a clip node if the image is clipped to its
+  // content box.
+  EXPECT_EQ(nullptr, properties);
 
   target->setAttribute(html_names::kStyleAttr, "object-fit: none");
   UpdateAllLifecyclePhasesForTest();
   properties = PaintPropertiesForElement("target");
   // Ditto.
+  EXPECT_EQ(nullptr, properties);
+
+  target->setAttribute(html_names::kStyleAttr,
+                       "overflow-clip-margin: padding-box;");
+  UpdateAllLifecyclePhasesForTest();
+  properties = PaintPropertiesForElement("target");
+  // Changing overflow-clip-margin induces a clip node.
   EXPECT_NE(nullptr, properties);
 
   target->setAttribute(html_names::kStyleAttr,
@@ -1666,7 +1675,10 @@ TEST_P(PaintPropertyTreeUpdateTest, ChangeDuringAnimation) {
   style->SetTransformOrigin(TransformOrigin(Length(70, Length::kFixed),
                                             Length(30, Length::kFixed), 0));
   target->SetStyle(std::move(style));
-  EXPECT_TRUE(target->NeedsPaintPropertyUpdate());
+  if (base::FeatureList::IsEnabled(features::kFastPathPaintPropertyUpdates))
+    EXPECT_FALSE(target->NeedsPaintPropertyUpdate());
+  else
+    EXPECT_TRUE(target->NeedsPaintPropertyUpdate());
   GetDocument().Lifecycle().AdvanceTo(DocumentLifecycle::kStyleClean);
   {
 #if DCHECK_IS_ON()
@@ -1724,24 +1736,24 @@ TEST_P(PaintPropertyTreeUpdateTest, FixedPositionCompositing) {
     <div id="fixed" style="position: fixed; top: 50px; left: 60px">Fixed</div>
   )HTML");
 
-  // Still paint properties because we composite fixed-position elements to
-  // avoid overscroll.
-  EXPECT_TRUE(PaintPropertiesForElement("fixed"));
-
-  auto* space = GetDocument().getElementById("space");
-  space->setAttribute(html_names::kStyleAttr, "height: 2000px");
-  UpdateAllLifecyclePhasesForTest();
   auto* properties = PaintPropertiesForElement("fixed");
   ASSERT_TRUE(properties);
   auto* paint_offset_translation = properties->PaintOffsetTranslation();
   ASSERT_TRUE(paint_offset_translation);
+  EXPECT_EQ(gfx::Vector2dF(60, 50), paint_offset_translation->Translation2D());
+  EXPECT_FALSE(paint_offset_translation->HasDirectCompositingReasons());
+
+  auto* space = GetDocument().getElementById("space");
+  space->setAttribute(html_names::kStyleAttr, "height: 2000px");
+  UpdateAllLifecyclePhasesForTest();
   EXPECT_EQ(gfx::Vector2dF(60, 50), paint_offset_translation->Translation2D());
   EXPECT_TRUE(paint_offset_translation->HasDirectCompositingReasons());
   EXPECT_FALSE(properties->Transform());
 
   space->setAttribute(html_names::kStyleAttr, "height: 100px");
   UpdateAllLifecyclePhasesForTest();
-  EXPECT_TRUE(PaintPropertiesForElement("fixed"));
+  EXPECT_EQ(gfx::Vector2dF(60, 50), paint_offset_translation->Translation2D());
+  EXPECT_FALSE(paint_offset_translation->HasDirectCompositingReasons());
 }
 
 TEST_P(PaintPropertyTreeUpdateTest, InlineFilterReferenceBoxChange) {
@@ -1937,6 +1949,32 @@ TEST_P(PaintPropertyTreeUpdateTest, LocalBorderBoxPropertiesChange) {
   EXPECT_TRUE(target_child_layer->SelfNeedsRepaint());
   // |under_isolate_layer|'s local border box properties didn't change.
   EXPECT_FALSE(under_isolate_layer->SelfNeedsRepaint());
+}
+
+// Test that, for simple transform updates with an existing blink transform
+// node, we can go from style change to updated blink transform node without
+// running the blink property tree builder.
+TEST_P(PaintPropertyTreeUpdateTest,
+       DirectTransformUpdateSkipsPropertyTreeBuilder) {
+  if (!base::FeatureList::IsEnabled(features::kFastPathPaintPropertyUpdates))
+    return;
+  SetBodyInnerHTML(R"HTML(
+      <div id='div' style="transform:translateX(100px)"></div>
+  )HTML");
+
+  auto* div_properties = PaintPropertiesForElement("div");
+  ASSERT_TRUE(div_properties);
+  EXPECT_EQ(100, div_properties->Transform()->Translation2D().x());
+  auto* div = GetDocument().getElementById("div");
+  EXPECT_FALSE(div->GetLayoutObject()->NeedsPaintPropertyUpdate());
+
+  div->setAttribute(html_names::kStyleAttr, "transform: translateX(200px)");
+  GetDocument().View()->UpdateLifecycleToLayoutClean(
+      DocumentUpdateReason::kTest);
+  EXPECT_FALSE(div->GetLayoutObject()->NeedsPaintPropertyUpdate());
+
+  UpdateAllLifecyclePhasesExceptPaint();
+  EXPECT_EQ(200, div_properties->Transform()->Translation2D().x());
 }
 
 }  // namespace blink

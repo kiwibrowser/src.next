@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,6 +21,8 @@
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/policy/dlp/dlp_rules_manager.h"
+#include "chrome/browser/chromeos/policy/dlp/dlp_rules_manager_factory.h"
 #include "chrome/browser/enterprise/connectors/common.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -50,6 +52,7 @@
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/ash/file_manager/fileapi_util.h"
+#include "chrome/browser/ash/policy/dlp/dlp_files_controller.h"
 #include "content/public/browser/site_instance.h"
 #endif
 
@@ -273,7 +276,7 @@ void FileSelectHelper::OnListDone(int error) {
   std::unique_ptr<ActiveDirectoryEnumeration> entry =
       std::move(directory_enumeration_);
   if (error) {
-    FileSelectionCanceled(NULL);
+    FileSelectionCanceled(nullptr);
     return;
   }
 
@@ -338,12 +341,22 @@ void FileSelectHelper::CheckIfPolicyAllowed(
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   DCHECK(render_frame_host_);
-  dlp_files_controller_.emplace();
-  dlp_files_controller_->FilterDisallowedUploads(
-      std::move(list),
-      render_frame_host_->GetMainFrame()->GetLastCommittedURL(),
-      base::BindOnce(&FileSelectHelper::PerformContentAnalysisIfNeeded,
-                     weak_ptr_factory_.GetWeakPtr()));
+  policy::DlpFilesController* files_controller = nullptr;
+  policy::DlpRulesManager* rules_manager =
+      policy::DlpRulesManagerFactory::GetForPrimaryProfile();
+  if (rules_manager)
+    files_controller = rules_manager->GetDlpFilesController();
+
+  if (files_controller) {
+    files_controller->FilterDisallowedUploads(
+        std::move(list),
+        render_frame_host_->GetMainFrame()->GetLastCommittedURL(),
+        base::BindOnce(&FileSelectHelper::PerformContentAnalysisIfNeeded,
+                       weak_ptr_factory_.GetWeakPtr()));
+  } else {
+    PerformContentAnalysisIfNeeded(std::move(list));
+  }
+
 #else
   PerformContentAnalysisIfNeeded(std::move(list));
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
@@ -351,9 +364,6 @@ void FileSelectHelper::CheckIfPolicyAllowed(
 
 void FileSelectHelper::PerformContentAnalysisIfNeeded(
     std::vector<FileChooserFileInfoPtr> list) {
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  dlp_files_controller_.reset();
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
   if (AbortIfWebContentsDestroyed())
     return;
 
@@ -643,8 +653,7 @@ void FileSelectHelper::GetSanitizedFilenameOnUIThread(
 void FileSelectHelper::CheckDownloadRequestWithSafeBrowsing(
     const base::FilePath& default_file_path,
     FileChooserParamsPtr params) {
-// Download Protection is not supported on Android.
-#if BUILDFLAG(FULL_SAFE_BROWSING)
+  // Download Protection is not supported on Android.
   safe_browsing::SafeBrowsingService* sb_service =
       g_browser_process->safe_browsing_service();
 
@@ -674,7 +683,6 @@ void FileSelectHelper::CheckDownloadRequestWithSafeBrowsing(
           &InterpretSafeBrowsingVerdict,
           base::BindOnce(&FileSelectHelper::ProceedWithSafeBrowsingVerdict,
                          this, default_file_path, std::move(params))));
-#endif
 }
 
 void FileSelectHelper::ProceedWithSafeBrowsingVerdict(
@@ -745,7 +753,7 @@ void FileSelectHelper::RunFileChooserOnUIThread(
 #if BUILDFLAG(IS_ANDROID)
       &accept_types);
 #else
-      NULL);
+      nullptr);
 #endif
 
   select_file_types_.reset();

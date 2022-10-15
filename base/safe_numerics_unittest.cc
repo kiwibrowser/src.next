@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -671,6 +671,14 @@ void TestSpecializedArithmetic(
 template <typename Dst>
 static void TestArithmetic(const char* dst, int line) {
   using DstLimits = SaturationDefaultLimits<Dst>;
+
+  // Test C++17 class template argument deduction
+  static_assert(
+      std::is_same_v<Dst, typename decltype(CheckedNumeric(Dst{0}))::type>);
+  static_assert(
+      std::is_same_v<Dst, typename decltype(ClampedNumeric(Dst{0}))::type>);
+  static_assert(
+      std::is_same_v<Dst, typename decltype(StrictNumeric(Dst{0}))::type>);
 
   EXPECT_EQ(true, CheckedNumeric<Dst>().IsValid());
   EXPECT_EQ(false, CheckedNumeric<Dst>(CheckedNumeric<Dst>(DstLimits::max()) *

@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,6 +42,12 @@ class ChromeProcessSingleton {
   // PROFILE_IN_USE if it happens to use the same profile directory.
   ProcessSingleton::NotifyResult NotifyOtherProcessOrCreate();
 
+  // Start watching for notifications from other processes. After this call,
+  // the notifications sent by other process can be processed. This call
+  // requires the browser threads (UI / IO) to be created. Requests that occur
+  // before calling StartWatching(...) will be blocked and may timeout.
+  void StartWatching();
+
   // Clear any lock state during shutdown.
   void Cleanup();
 
@@ -55,6 +61,19 @@ class ChromeProcessSingleton {
   // This only has an effect the first time it is called.
   void Unlock(
       const ProcessSingleton::NotificationCallback& notification_callback);
+
+  // Create the chrome process singleton instance for the current process.
+  static void CreateInstance(const base::FilePath& user_data_dir);
+  // Delete the chrome process singleton instance.
+  static void DeleteInstance();
+  // Retrieve the chrome process singleton instance for the current process.
+  static ChromeProcessSingleton* GetInstance();
+
+  // Setup the experiment for the early process singleton. Remove this code
+  // when the experiment is over (http://www.crbug.com/1340599).
+  static void SetupEarlySingletonFeature(const base::CommandLine& command_line);
+  static void RegisterEarlySingletonFeature();
+  static bool IsEarlySingletonFeatureEnabled();
 
  private:
   bool NotificationCallback(const base::CommandLine& command_line,

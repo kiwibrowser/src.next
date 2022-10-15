@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -144,6 +144,34 @@ class ExtensionsBrowserClient {
   // |context| is not incognito.
   virtual content::BrowserContext* GetOriginalContext(
       content::BrowserContext* context) = 0;
+
+  // The below methods include a test for the experiment
+  // `kSystemProfileSelectionDefaultNone` and will include a similar experiment
+  // for Guest Profile, these two experiment can be bypassed by setting the
+  // force_* to true. The naming of the functions follows the logic of
+  // `ProfileSelections` predefined experimental builders.
+  // - `force_guest_profile`: to force Guest Profile selection in experiment.
+  // - `force_system_profile`: to force System Profile selection in experiment.
+  //
+  // Returns the Original Profile for Regular Profile and redirects Incognito
+  // to the Original Profile.
+  // Force values to have the same behavior for Guest and System Profile.
+  virtual content::BrowserContext* GetRedirectedContextInIncognito(
+      content::BrowserContext* context,
+      bool force_guest_profile,
+      bool force_system_profile) = 0;
+  // Returns Profile for Regular and Incognito.
+  // Force values to have the same behavior for Guest and System Profile.
+  virtual content::BrowserContext* GetContextForRegularAndIncognito(
+      content::BrowserContext* context,
+      bool force_guest_profile,
+      bool force_system_profile) = 0;
+  // Returns Profile only for Original Regular profile.
+  // Force values to have the same behavior for Guest and System Profile.
+  virtual content::BrowserContext* GetRegularProfile(
+      content::BrowserContext* context,
+      bool force_guest_profile,
+      bool force_system_profile) = 0;
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   // Returns a user id hash from |context| or an empty string if no hash could
@@ -445,10 +473,10 @@ class ExtensionsBrowserClient {
       const Extension& extension) const;
 
   // Adds any hosts that should be automatically considered "granted" if
-  // requested, returning a modified permission set.
-  virtual std::unique_ptr<const PermissionSet> AddAdditionalAllowedHosts(
+  // requested to `granted_permissions`.
+  virtual void AddAdditionalAllowedHosts(
       const PermissionSet& desired_permissions,
-      const PermissionSet& granted_permissions) const;
+      PermissionSet* granted_permissions) const;
 
  private:
   std::vector<std::unique_ptr<ExtensionsBrowserAPIProvider>> providers_;

@@ -94,8 +94,11 @@ Color DarkModeColor(GraphicsContext& context,
                     const Color& color,
                     const AutoDarkMode& auto_dark_mode) {
   if (auto_dark_mode.enabled) {
-    return context.GetDarkModeFilter()->InvertColorIfNeeded(
-        color.Rgb(), auto_dark_mode.role);
+    // TODO(https://crbug.com/1351544): DarkModeFilter should operate on
+    // SkColor4f, not SkColor.
+    return Color::FromSkColor(context.GetDarkModeFilter()->InvertColorIfNeeded(
+        color.ToSkColorDeprecated(), auto_dark_mode.role,
+        auto_dark_mode.contrast_color));
   }
   return color;
 }
@@ -116,7 +119,7 @@ class GraphicsContext::DarkModeFlags final {
                 const cc::PaintFlags& flags) {
     if (auto_dark_mode.enabled) {
       dark_mode_flags_ = context->GetDarkModeFilter()->ApplyToFlagsIfNeeded(
-          flags, auto_dark_mode.role);
+          flags, auto_dark_mode.role, auto_dark_mode.contrast_color);
       if (dark_mode_flags_) {
         flags_ = &dark_mode_flags_.value();
         return;
@@ -124,8 +127,6 @@ class GraphicsContext::DarkModeFlags final {
     }
     flags_ = &flags;
   }
-
-  bool applied_dark_mode() const { return !!dark_mode_flags_; }
 
   // NOLINTNEXTLINE(google-explicit-constructor)
   operator const cc::PaintFlags&() const { return *flags_; }
@@ -551,7 +552,7 @@ void GraphicsContext::DrawLineForText(const gfx::PointF& pt,
       cc::PaintFlags flags;
       flags = ImmutableState()->FillFlags();
       // Text lines are drawn using the stroke color.
-      flags.setColor(StrokeColor().Rgb());
+      flags.setColor(StrokeColor().toSkColor4f());
       SkRect r = gfx::RectFToSkRect(
           GetRectForTextLine(pt, width, RoundDownThickness(StrokeThickness())));
       DrawRect(r, flags, auto_dark_mode);
@@ -573,7 +574,7 @@ void GraphicsContext::DrawRect(const gfx::Rect& rect,
       ImmutableState()->StrokeColor().Alpha()) {
     // Stroke a width: 1 inset border
     cc::PaintFlags flags(ImmutableState()->FillFlags());
-    flags.setColor(StrokeColor().Rgb());
+    flags.setColor(StrokeColor().toSkColor4f());
     flags.setStyle(cc::PaintFlags::kStroke_Style);
     flags.setStrokeWidth(1);
 
@@ -612,25 +613,17 @@ void GraphicsContext::DrawTextPasses(const AutoDarkMode& auto_dark_mode,
   TextDrawingModeFlags mode_flags = TextDrawingMode();
 
   if (mode_flags & kTextModeFill) {
-    const cc::PaintFlags& flags = ImmutableState()->FillFlags();
-    DarkModeFlags dark_flags(this, auto_dark_mode, flags);
-    if (UNLIKELY(ShouldDrawDarkModeTextContrastOutline(flags, dark_flags))) {
-      cc::PaintFlags outline_flags(flags);
-      outline_flags.setStyle(cc::PaintFlags::kStroke_Style);
-      outline_flags.setStrokeWidth(1);
-      draw_text(outline_flags);
-    }
-    draw_text(dark_flags);
+    draw_text(ImmutableState()->FillFlags());
   }
 
   if ((mode_flags & kTextModeStroke) && GetStrokeStyle() != kNoStroke &&
       StrokeThickness() > 0) {
-    cc::PaintFlags flags(ImmutableState()->StrokeFlags());
+    cc::PaintFlags stroke_flags(ImmutableState()->StrokeFlags());
     if (mode_flags & kTextModeFill) {
       // shadow was already applied during fill pass
-      flags.setLooper(nullptr);
+      stroke_flags.setLooper(nullptr);
     }
-    draw_text(DarkModeFlags(this, auto_dark_mode, flags));
+    draw_text(stroke_flags);
   }
 }
 
@@ -642,28 +635,10 @@ void GraphicsContext::DrawTextInternal(const Font& font,
                                        const AutoDarkMode& auto_dark_mode) {
   DrawTextPasses(auto_dark_mode, [&](const cc::PaintFlags& flags) {
     font.DrawText(canvas_, text_info, point, device_scale_factor_, node_id,
-                  flags,
+                  DarkModeFlags(this, auto_dark_mode, flags),
                   printing_ ? Font::DrawType::kGlyphsAndClusters
                             : Font::DrawType::kGlyphsOnly);
   });
-}
-
-bool GraphicsContext::ShouldDrawDarkModeTextContrastOutline(
-    const cc::PaintFlags& original_flags,
-    const DarkModeFlags& dark_flags) const {
-  if (!dark_flags.applied_dark_mode())
-    return false;
-  if (!GetCurrentDarkModeSettings().increase_text_contrast)
-    return false;
-
-  // To avoid outlining all text, only draw an outline that improves contrast.
-  // 90000 represents a difference of roughly 175 in all three channels.
-  // TODO(pdr): Calculate a contrast ratio using luminance (see:
-  // https://www.w3.org/WAI/WCAG21/Understanding/contrast-minimum.html).
-  constexpr int kMinimumDifferenceSq = 90000;
-  Color dark_color(static_cast<const cc::PaintFlags&>(dark_flags).getColor());
-  Color original_color(original_flags.getColor());
-  return DifferenceSquared(dark_color, original_color) > kMinimumDifferenceSq;
 }
 
 void GraphicsContext::DrawText(const Font& font,
@@ -748,11 +723,11 @@ void GraphicsContext::DrawImage(
     Image* image,
     Image::ImageDecodingMode decode_mode,
     const ImageAutoDarkMode& auto_dark_mode,
+    const ImagePaintTimingInfo& paint_timing_info,
     const gfx::RectF& dest,
     const gfx::RectF* src_ptr,
     SkBlendMode op,
     RespectImageOrientationEnum should_respect_image_orientation,
-    bool image_may_be_lcp_candidate,
     Image::ImageClampingMode clamping_mode) {
   if (!image)
     return;
@@ -767,28 +742,26 @@ void GraphicsContext::DrawImage(
   ImageDrawOptions draw_options(dark_mode_filter, sampling,
                                 should_respect_image_orientation, clamping_mode,
                                 decode_mode, auto_dark_mode.enabled,
-                                image_may_be_lcp_candidate);
-
+                                paint_timing_info.image_may_be_lcp_candidate);
   image->Draw(canvas_, image_flags, dest, src, draw_options);
-  paint_controller_.SetImagePainted();
+  SetImagePainted(paint_timing_info.report_paint_timing);
 }
-
 void GraphicsContext::DrawImageRRect(
     Image* image,
     Image::ImageDecodingMode decode_mode,
     const ImageAutoDarkMode& auto_dark_mode,
+    const ImagePaintTimingInfo& paint_timing_info,
     const FloatRoundedRect& dest,
     const gfx::RectF& src_rect,
     SkBlendMode op,
     RespectImageOrientationEnum respect_orientation,
-    bool image_may_be_lcp_candidate,
     Image::ImageClampingMode clamping_mode) {
   if (!image)
     return;
 
   if (!dest.IsRounded()) {
-    DrawImage(image, decode_mode, auto_dark_mode, dest.Rect(), &src_rect, op,
-              respect_orientation, image_may_be_lcp_candidate, clamping_mode);
+    DrawImage(image, decode_mode, auto_dark_mode, paint_timing_info,
+              dest.Rect(), &src_rect, op, respect_orientation, clamping_mode);
     return;
   }
 
@@ -806,9 +779,10 @@ void GraphicsContext::DrawImageRRect(
   image_flags.setColor(SK_ColorBLACK);
 
   DarkModeFilter* dark_mode_filter = GetDarkModeFilterForImage(auto_dark_mode);
-  ImageDrawOptions draw_options(
-      dark_mode_filter, sampling, respect_orientation, clamping_mode,
-      decode_mode, auto_dark_mode.enabled, image_may_be_lcp_candidate);
+  ImageDrawOptions draw_options(dark_mode_filter, sampling, respect_orientation,
+                                clamping_mode, decode_mode,
+                                auto_dark_mode.enabled,
+                                paint_timing_info.image_may_be_lcp_candidate);
 
   bool use_shader = (visible_src == src_rect) &&
                     (respect_orientation == kDoNotRespectImageOrientation ||
@@ -833,6 +807,14 @@ void GraphicsContext::DrawImageRRect(
     PaintCanvasAutoRestore auto_restore(canvas_, true);
     canvas_->clipRRect(SkRRect(dest), image_flags.isAntiAlias());
     image->Draw(canvas_, image_flags, dest.Rect(), src_rect, draw_options);
+  }
+
+  SetImagePainted(paint_timing_info.report_paint_timing);
+}
+
+void GraphicsContext::SetImagePainted(bool report_paint_timing) {
+  if (!report_paint_timing) {
+    return;
   }
 
   paint_controller_.SetImagePainted();
@@ -869,9 +851,9 @@ void GraphicsContext::DrawImageTiled(
     const gfx::RectF& dest_rect,
     const ImageTilingInfo& tiling_info,
     const ImageAutoDarkMode& auto_dark_mode,
+    const ImagePaintTimingInfo& paint_timing_info,
     SkBlendMode op,
-    RespectImageOrientationEnum respect_orientation,
-    bool image_may_be_lcp_candidate) {
+    RespectImageOrientationEnum respect_orientation) {
   if (!image)
     return;
 
@@ -882,10 +864,10 @@ void GraphicsContext::DrawImageTiled(
   ImageDrawOptions draw_options(dark_mode_filter, sampling, respect_orientation,
                                 Image::kClampImageToSourceRect,
                                 Image::kSyncDecode, auto_dark_mode.enabled,
-                                image_may_be_lcp_candidate);
+                                paint_timing_info.image_may_be_lcp_candidate);
 
   image->DrawPattern(*this, image_flags, dest_rect, tiling_info, draw_options);
-  paint_controller_.SetImagePainted();
+  SetImagePainted(paint_timing_info.report_paint_timing);
 }
 
 void GraphicsContext::DrawOval(const SkRect& oval,
@@ -948,7 +930,7 @@ void GraphicsContext::FillRect(const gfx::RectF& rect,
                                const AutoDarkMode& auto_dark_mode,
                                SkBlendMode xfer_mode) {
   cc::PaintFlags flags = ImmutableState()->FillFlags();
-  flags.setColor(color.Rgb());
+  flags.setColor(color.toSkColor4f());
   flags.setBlendMode(xfer_mode);
 
   DrawRect(gfx::RectFToSkRect(rect), flags, auto_dark_mode);
@@ -968,7 +950,7 @@ void GraphicsContext::FillRoundedRect(const FloatRoundedRect& rrect,
   }
 
   cc::PaintFlags flags = ImmutableState()->FillFlags();
-  flags.setColor(color.Rgb());
+  flags.setColor(color.toSkColor4f());
 
   DrawRRect(SkRRect(rrect), flags, auto_dark_mode);
 }
@@ -1029,7 +1011,7 @@ void GraphicsContext::FillDRRect(const FloatRoundedRect& outer,
           DarkModeFlags(this, auto_dark_mode, ImmutableState()->FillFlags()));
     } else {
       cc::PaintFlags flags(ImmutableState()->FillFlags());
-      flags.setColor(color.Rgb());
+      flags.setColor(color.toSkColor4f());
       canvas_->drawDRRect(SkRRect(outer), SkRRect(inner),
                           DarkModeFlags(this, auto_dark_mode, flags));
     }
@@ -1043,7 +1025,7 @@ void GraphicsContext::FillDRRect(const FloatRoundedRect& outer,
   stroke_r_rect.inset(stroke_width / 2, stroke_width / 2);
 
   cc::PaintFlags stroke_flags(ImmutableState()->FillFlags());
-  stroke_flags.setColor(color.Rgb());
+  stroke_flags.setColor(color.toSkColor4f());
   stroke_flags.setStyle(cc::PaintFlags::kStroke_Style);
   stroke_flags.setStrokeWidth(stroke_width);
 
@@ -1057,7 +1039,7 @@ void GraphicsContext::FillRectWithRoundedHole(
     const Color& color,
     const AutoDarkMode& auto_dark_mode) {
   cc::PaintFlags flags(ImmutableState()->FillFlags());
-  flags.setColor(color.Rgb());
+  flags.setColor(color.toSkColor4f());
   canvas_->drawDRRect(SkRRect::MakeRect(gfx::RectFToSkRect(rect)),
                       SkRRect(rounded_hole_rect),
                       DarkModeFlags(this, auto_dark_mode, flags));

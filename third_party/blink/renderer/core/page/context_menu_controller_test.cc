@@ -1832,14 +1832,15 @@ TEST_P(ContextMenuControllerTest,
 TEST_P(ContextMenuControllerTest, OpenedFromHighlight) {
   WebURL url = url_test_helpers::ToKURL("http://www.test.com/");
   frame_test_helpers::LoadHTMLString(LocalMainFrame(),
-      R"(<html><head><style>body
+                                     R"(<html><head><style>body
       {background-color:transparent}</style></head>
       <p id="one">This is a test page one</p>
       <p id="two">This is a test page two</p>
       <p id="three">This is a test page three</p>
       <p id="four">This is a test page four</p>
       </html>
-      )", url);
+      )",
+                                     url);
 
   Document* document = GetDocument();
   ASSERT_TRUE(IsA<HTMLDocument>(document));
@@ -1904,7 +1905,7 @@ TEST_P(ContextMenuControllerTest,
   EXPECT_EQ(GetDocument()->GetFrame()->Selection().SelectedText(), "is a");
 }
 
-TEST_P(ContextMenuControllerTest, CheckRendererIdFromContextMenuOnInputField) {
+TEST_P(ContextMenuControllerTest, CheckRendererIdFromContextMenuOnTextField) {
   WebURL url = url_test_helpers::ToKURL("http://www.test.com/");
   frame_test_helpers::LoadHTMLString(LocalMainFrame(),
                                      R"(<html><head><style>body
@@ -1912,8 +1913,14 @@ TEST_P(ContextMenuControllerTest, CheckRendererIdFromContextMenuOnInputField) {
       <form>
       <label for="name">Name:</label><br>
       <input type="text" id="name" name="name"><br>
+      <label for="address">Address:</label><br>
+      <textarea id="address" name="address"></textarea>
       </form>
       <p id="one">This is a test page one</p>
+      <label for="two">Two:</label><br>
+      <input type="text" id="two" name="two"><br>
+      <label for="three">Three:</label><br>
+      <textarea id="three" name="three"></textarea>
       </html>
       )",
                                      url);
@@ -1921,15 +1928,39 @@ TEST_P(ContextMenuControllerTest, CheckRendererIdFromContextMenuOnInputField) {
   Document* document = GetDocument();
   ASSERT_TRUE(IsA<HTMLDocument>(document));
 
-  Element* form_element = document->getElementById("name");
-  EXPECT_TRUE(ShowContextMenuForElement(form_element, kMenuSourceMouse));
-  ContextMenuData context_menu_data = GetWebFrameClient().GetContextMenuData();
-  EXPECT_TRUE(context_menu_data.field_renderer_id);
+  // field_id, is_form_renderer_id_present, is_field_renderer_id_present,
+  // input_field_type
+  std::vector<std::tuple<AtomicString, bool, bool,
+                         mojom::ContextMenuDataInputFieldType>>
+      expectations = {
+          // Input Text Field
+          {"name", true, true,
+           mojom::ContextMenuDataInputFieldType::kPlainText},
+          // Text Area Field
+          {"address", true, true,
+           mojom::ContextMenuDataInputFieldType::kPlainText},
+          // Non form element
+          {"one", false, false, mojom::ContextMenuDataInputFieldType::kNone},
+          // Formless Input field
+          {"two", false, true,
+           mojom::ContextMenuDataInputFieldType::kPlainText},
+          // Formless text area field
+          {"three", false, true,
+           mojom::ContextMenuDataInputFieldType::kPlainText}};
 
-  Element* non_form_element = document->getElementById("one");
-  EXPECT_TRUE(ShowContextMenuForElement(non_form_element, kMenuSourceMouse));
-  context_menu_data = GetWebFrameClient().GetContextMenuData();
-  EXPECT_FALSE(context_menu_data.field_renderer_id);
+  for (const auto& expectation : expectations) {
+    auto [field_id, is_form_renderer_id_present, is_field_renderer_id_present,
+          input_field_type] = expectation;
+    Element* form_element = document->getElementById(field_id);
+    EXPECT_TRUE(ShowContextMenuForElement(form_element, kMenuSourceMouse));
+    ContextMenuData context_menu_data =
+        GetWebFrameClient().GetContextMenuData();
+    EXPECT_EQ(context_menu_data.form_renderer_id.has_value(),
+              is_form_renderer_id_present);
+    EXPECT_EQ(context_menu_data.field_renderer_id.has_value(),
+              is_field_renderer_id_present);
+    EXPECT_EQ(context_menu_data.input_field_type, input_field_type);
+  }
 }
 
 // TODO(crbug.com/1184996): Add additional unit test for blocking frame logging.

@@ -722,6 +722,11 @@ void LayoutBox::StyleDidChange(StyleDifference diff,
     }
   }
 
+  if (old_style && old_style->IsScrollContainer() != IsScrollContainer()) {
+    if (auto* layer = EnclosingLayer())
+      layer->ScrollContainerStatusChanged();
+  }
+
   UpdateShapeOutsideInfoAfterStyleChange(*Style(), old_style);
   UpdateGridPositionAfterStyleChange(old_style);
 
@@ -995,10 +1000,6 @@ void LayoutBox::UpdateFromStyle() {
                                ShouldApplyPaintContainment()) &&
                               RespectsCSSOverflow();
   if (should_clip_overflow != HasNonVisibleOverflow()) {
-    if (GetScrollableArea()) {
-      GetScrollableArea()->InvalidateAllStickyConstraints();
-      GetScrollableArea()->InvalidateAllAnchorPositionedLayers();
-    }
     // The overflow clip paint property depends on whether overflow clip is
     // present so we need to update paint properties if this changes.
     SetNeedsPaintPropertyUpdate();
@@ -1268,14 +1269,16 @@ void LayoutBox::UpdateAfterLayout() {
 
   Document& document = GetDocument();
   document.IncLayoutCallsCounter();
-  document.GetFrame()->GetInputMethodController().DidUpdateLayout(*this);
+  GetFrame()->GetInputMethodController().DidUpdateLayout(*this);
+  if (IsPositioned())
+    GetFrame()->GetInputMethodController().DidLayoutSubtree(*this);
   if (IsLayoutNGObject())
     document.IncLayoutCallsCounterNG();
 }
 
 bool LayoutBox::ShouldUseAutoIntrinsicSize() const {
   DisplayLockContext* context = GetDisplayLockContext();
-  return context && context->IsAuto() && context->IsLocked();
+  return context && context->IsLocked();
 }
 
 bool LayoutBox::HasOverrideIntrinsicContentWidth() const {
@@ -2058,8 +2061,7 @@ bool LayoutBox::MapVisualRectToContainer(
   if (has_perspective && container_object != NearestAncestorForElement()) {
     has_perspective = false;
 
-    if (StyleRef().Preserves3D() || transform.M13() != 0.0 ||
-        transform.M23() != 0.0 || transform.M43() != 0.0) {
+    if (StyleRef().Preserves3D() || transform.Creates3D()) {
       UseCounter::Count(GetDocument(),
                         WebFeature::kDifferentPerspectiveCBOrParent);
     }
@@ -3182,6 +3184,9 @@ PhysicalOffset LayoutBox::OffsetFromContainerInternal(
     offset += To<LayoutInline>(o)->OffsetForInFlowPositionedInline(*this);
   }
 
+  if (AnchorScrollObject())
+    offset += ComputeAnchorScrollOffset();
+
   return offset;
 }
 
@@ -3794,6 +3799,8 @@ bool LayoutBox::MapToVisualRectInAncestorSpaceInternal(
     // LayoutObject::setStyle, the relative position flag on the LayoutObject
     // has been cleared, so use the one on the style().
     container_offset += OffsetForInFlowPosition();
+  } else if (UNLIKELY(AnchorScrollObject())) {
+    container_offset += ComputeAnchorScrollOffset();
   }
 
   if (skip_info.FilterSkipped()) {
@@ -7269,7 +7276,7 @@ LayoutBox::PaginationBreakability LayoutBox::GetPaginationBreakability(
       (Parent() && IsWritingModeRoot()) ||
       (IsFixedPositioned() && GetDocument().Printing() &&
        IsA<LayoutView>(Container())) ||
-      ShouldApplySizeContainment() || IsFrameSet())
+      ShouldApplySizeContainment() || IsFrameSetIncludingNG())
     return kForbidBreaks;
 
   if (engine != kUnknownFragmentationEngine) {
@@ -8074,8 +8081,17 @@ BackgroundPaintLocation LayoutBox::ComputeBackgroundPaintLocationIfComposited()
   return paint_location;
 }
 
-bool LayoutBox::IsFixedToView() const {
-  return IsFixedPositioned() && Container() == View();
+bool LayoutBox::IsFixedToView(
+    const LayoutObject* container_for_fixed_position) const {
+  if (!IsFixedPositioned())
+    return false;
+
+  const auto* container = container_for_fixed_position;
+  if (!container)
+    container = Container();
+  else
+    DCHECK_EQ(container, Container());
+  return container->IsLayoutView();
 }
 
 PhysicalRect LayoutBox::ComputeStickyConstrainingRect() const {
@@ -8109,21 +8125,49 @@ const LayoutObject* LayoutBox::AnchorScrollObject() const {
   if (!anchor_query)
     return nullptr;
 
-  if (const auto& reference =
-          anchor_query->anchor_references.find(StyleRef().AnchorScroll());
-      reference != anchor_query->anchor_references.end()) {
-    return reference->value->fragment->GetLayoutObject();
+  if (const NGPhysicalFragment* fragment =
+          anchor_query->Fragment(StyleRef().AnchorScroll())) {
+    return fragment->GetLayoutObject();
   }
   return nullptr;
 }
 
-const LayoutBlock* LayoutBox::AnchorScrollContainer() const {
+const LayoutBox* LayoutBox::AnchorScrollContainer() const {
   if (const LayoutObject* object = AnchorScrollObject()) {
-    const LayoutBlock* scroller = object->EnclosingScrollportBox();
-    if (scroller != EnclosingScrollportBox())
+    const LayoutBox* scroller = object->ContainingScrollContainer();
+    if (scroller != ContainingScrollContainer())
       return scroller;
   }
   return nullptr;
+}
+
+LayoutBox::AnchorScrollData LayoutBox::ComputeAnchorScrollData() const {
+  if (!AnchorScrollContainer())
+    return AnchorScrollData();
+
+  const PaintLayer* inner_most_scroll_container_layer =
+      AnchorScrollContainer()->Layer();
+  const PaintLayer* outer_most_scroll_container_layer =
+      inner_most_scroll_container_layer;
+  gfx::Vector2dF accumulated_scroll_offset(0, 0);
+  gfx::Vector2d accumulated_scroll_origin(0, 0);
+  for (const PaintLayer* layer = inner_most_scroll_container_layer; layer;
+       layer = layer->ContainingScrollContainerLayer()) {
+    if (layer == Layer()->ContainingScrollContainerLayer())
+      break;
+    accumulated_scroll_offset += layer->GetScrollableArea()->GetScrollOffset();
+    accumulated_scroll_origin +=
+        layer->GetScrollableArea()->ScrollOrigin().OffsetFromOrigin();
+    outer_most_scroll_container_layer = layer;
+  }
+
+  return {inner_most_scroll_container_layer, outer_most_scroll_container_layer,
+          accumulated_scroll_offset, accumulated_scroll_origin};
+}
+
+PhysicalOffset LayoutBox::ComputeAnchorScrollOffset() const {
+  return -PhysicalOffset::FromVector2dFFloor(
+      ComputeAnchorScrollData().accumulated_scroll_offset);
 }
 
 }  // namespace blink

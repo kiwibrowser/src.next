@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,7 +39,7 @@ class BreadcrumbManagerBrowserAgentTest : public BrowserWithTestWindowTest {
   }
 
   std::list<std::string> GetEvents() const {
-    return breadcrumb_service_->GetEvents(/*event_count_limit=*/0);
+    return breadcrumb_service_->GetEvents();
   }
 
  private:

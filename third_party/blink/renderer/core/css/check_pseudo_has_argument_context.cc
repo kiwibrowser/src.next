@@ -4,26 +4,33 @@
 
 #include "third_party/blink/renderer/core/css/check_pseudo_has_argument_context.h"
 
+#include "third_party/blink/renderer/core/css/check_pseudo_has_fast_reject_filter.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 
 namespace blink {
 
-namespace {
-
-inline const CSSSelector* GetCurrentRelationAndNextCompound(
+const CSSSelector*
+CheckPseudoHasArgumentContext::GetCurrentRelationAndNextCompound(
     const CSSSelector* compound_selector,
     CSSSelector::RelationType& relation) {
   DCHECK(compound_selector);
-  for (; compound_selector;
-       compound_selector = compound_selector->TagHistory()) {
-    relation = compound_selector->Relation();
-    if (relation != CSSSelector::kSubSelector)
-      return compound_selector->TagHistory();
+  const CSSSelector* next_compound = nullptr;
+  CheckPseudoHasFastRejectFilter::CompoundContext compound_context;
+  for (const CSSSelector* simple_selector = compound_selector; simple_selector;
+       simple_selector = simple_selector->TagHistory()) {
+    if (simple_selector->GetPseudoType() == CSSSelector::kPseudoHover)
+      compound_context.contains_hover = true;
+    relation = simple_selector->Relation();
+    if (relation == CSSSelector::kSubSelector)
+      continue;
+    next_compound = simple_selector->TagHistory();
+    break;
   }
-  return nullptr;
-}
+  CheckPseudoHasFastRejectFilter::CollectPseudoHasArgumentHashesFromCompound(
+      pseudo_has_argument_hashes_, compound_selector, compound_context);
 
-}  // namespace
+  return next_compound;
+}
 
 CheckPseudoHasArgumentContext::CheckPseudoHasArgumentContext(
     const CSSSelector* selector)
@@ -34,12 +41,6 @@ CheckPseudoHasArgumentContext::CheckPseudoHasArgumentContext(
   bool contains_child_or_descendant_combinator = false;
   bool sibling_combinator_at_leftmost = false;
 
-  // The explicit ':scope' in ':has' argument selector is not considered
-  // for getting the depth and adjacent distance.
-  // TODO(blee@igalia.com) Need to clarify the :scope dependency in relative
-  // selector definition.
-  // - spec : https://www.w3.org/TR/selectors-4/#relative
-  // - csswg issue : https://github.com/w3c/csswg-drafts/issues/6399
   for (selector = GetCurrentRelationAndNextCompound(selector, relation);
        selector;
        selector = GetCurrentRelationAndNextCompound(selector, relation)) {
@@ -100,6 +101,8 @@ CheckPseudoHasArgumentContext::CheckPseudoHasArgumentContext(
     }
   }
   DCHECK_NE(leftmost_relation_, CSSSelector::kSubSelector);
+  DCHECK_LE(adjacent_distance_limit_, kInfiniteAdjacentDistance);
+  DCHECK_LE(depth_limit_, kInfiniteDepth);
 
   switch (leftmost_relation_) {
     case CSSSelector::kRelativeDescendant:

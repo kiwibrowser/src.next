@@ -435,17 +435,20 @@ void StyleSheetContents::ParseAuthorStyleSheet(
 
   const auto* context =
       MakeGarbageCollected<CSSParserContext>(ParserContext(), this);
-  CSSParser::ParseSheet(context, this, sheet_text,
-                        CSSDeferPropertyParsing::kYes);
+  CSSParser::ParseSheet(
+      context, this, sheet_text, CSSDeferPropertyParsing::kYes, true,
+      sheet_text.IsNull() ? nullptr : cached_style_sheet->TakeTokenizer());
 }
 
-ParseSheetResult StyleSheetContents::ParseString(const String& sheet_text,
-                                                 bool allow_import_rules) {
+ParseSheetResult StyleSheetContents::ParseString(
+    const String& sheet_text,
+    bool allow_import_rules,
+    std::unique_ptr<CachedCSSTokenizer> tokenizer) {
   const auto* context =
       MakeGarbageCollected<CSSParserContext>(ParserContext(), this);
   return CSSParser::ParseSheet(context, this, sheet_text,
-                               CSSDeferPropertyParsing::kNo,
-                               allow_import_rules);
+                               CSSDeferPropertyParsing::kNo, allow_import_rules,
+                               std::move(tokenizer));
 }
 
 bool StyleSheetContents::IsLoading() const {
@@ -594,7 +597,6 @@ static bool ChildRulesHaveFailedOrCanceledSubresources(
       case StyleRuleBase::kKeyframes:
       case StyleRuleBase::kKeyframe:
       case StyleRuleBase::kLayerStatement:
-      case StyleRuleBase::kScrollTimeline:
       case StyleRuleBase::kSupports:
       case StyleRuleBase::kViewport:
       case StyleRuleBase::kFontPaletteValues:

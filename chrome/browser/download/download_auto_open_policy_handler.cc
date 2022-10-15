@@ -1,4 +1,4 @@
-// Copyright (c) 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,8 +35,9 @@ bool DownloadAutoOpenPolicyHandler::CheckPolicySettings(
     // If it's empty or malformed, then mark it as an error.
     if (extension.empty() ||
         *extension.begin() == base::FilePath::kExtensionSeparator) {
-      errors->AddError(policy::key::kAutoOpenFileTypes, i,
-                       IDS_POLICY_VALUE_FORMAT_ERROR);
+      errors->AddError(policy::key::kAutoOpenFileTypes,
+                       IDS_POLICY_INVALID_FILE_EXTENSION_ERROR,
+                       policy::PolicyErrorPath{i});
     }
   }
 

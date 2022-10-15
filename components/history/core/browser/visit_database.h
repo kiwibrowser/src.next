@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -311,13 +311,18 @@ class VisitDatabase {
   // A subprocedure in the process of migration to version 40.
   bool GetAllVisitedURLRowidsForMigrationToVersion40(
       std::vector<URLID>* visited_url_rowids_sorted);
+
+  // Called by the derived classes to migrate the older visits table which
+  // doesn't have the `is_known_to_sync` column.
+  bool MigrateVisitsAddIsKnownToSyncColumn();
 };
 
 // Columns, in order, of the visit table.
 #define HISTORY_VISIT_ROW_FIELDS                                        \
   " id,url,visit_time,from_visit,transition,segment_id,visit_duration," \
   "incremented_omnibox_typed_score,opener_visit,originator_cache_guid," \
-  "originator_visit_id,originator_from_visit,originator_opener_visit "
+  "originator_visit_id,originator_from_visit,originator_opener_visit,"  \
+  "is_known_to_sync "
 
 }  // namespace history
 

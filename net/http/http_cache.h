@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,21 +35,15 @@
 #include "net/base/net_errors.h"
 #include "net/base/net_export.h"
 #include "net/base/request_priority.h"
+#include "net/disk_cache/disk_cache.h"
 #include "net/http/http_transaction_factory.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 class GURL;
 
 namespace base::android {
 class ApplicationStatusListener;
 }  // namespace base::android
-
-namespace disk_cache {
-class Backend;
-struct BackendResult;
-class BackendFileOperationsFactory;
-class Entry;
-class EntryResult;
-}  // namespace disk_cache
 
 namespace net {
 
@@ -258,8 +252,11 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
   // Get the URL from the entry's cache key.
   static std::string GetResourceURLFromHttpCacheKey(const std::string& key);
 
-  // Generates the cache key for a request.
-  static std::string GenerateCacheKey(
+  // Generates the cache key for a request. Returns nullopt if the cache is
+  // configured to be split by the NetworkIsolationKey, and the
+  // NetworkIsolationKey is transient, in which case nothing should generally be
+  // stored to disk.
+  static absl::optional<std::string> GenerateCacheKey(
       const GURL& url,
       int load_flags,
       const NetworkIsolationKey& network_isolation_key,
@@ -267,7 +264,7 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
       bool is_subframe_document_resource,
       bool use_single_keyed_cache,
       const std::string& single_key_checksum);
-  static std::string GenerateCacheKeyForRequest(
+  static absl::optional<std::string> GenerateCacheKeyForRequest(
       const HttpRequestInfo* request,
       bool use_single_keyed_cache = false);
 
@@ -282,12 +279,6 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
 
   // Resets g_init_cache and g_enable_split_cache for tests.
   static void ClearGlobalsForTesting();
-
-  Error CheckResourceExistence(const GURL& url,
-                               const base::StringPiece method,
-                               const NetworkIsolationKey& network_isolation_key,
-                               bool is_subframe,
-                               base::OnceCallback<void(Error)>);
 
  private:
   // Types --------------------------------------------------------------------
@@ -369,7 +360,9 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
 
     bool TransactionInReaders(Transaction* transaction) const;
 
-    const raw_ptr<disk_cache::Entry, DanglingUntriaged> disk_entry;
+    disk_cache::Entry* GetEntry() { return disk_entry.get(); }
+
+    disk_cache::ScopedEntryPtr disk_entry;
 
     // Indicates if the disk_entry was opened or not (i.e.: created).
     // It is set to true when a transaction is added to an entry so that other,
@@ -400,6 +393,8 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
 
     // True if entry is doomed.
     bool doomed = false;
+
+    absl::optional<bool> writers_done_writing_to_entry_history;
   };
 
   using ActiveEntriesMap =
@@ -649,9 +644,6 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
 
   // Processes the backend creation notification.
   void OnBackendCreated(int result, PendingOp* pending_op);
-
-  void ResourceExistenceCheckCallback(base::OnceCallback<void(Error)> callback,
-                                      disk_cache::EntryResult entry_result);
 
   // Constants ----------------------------------------------------------------
 

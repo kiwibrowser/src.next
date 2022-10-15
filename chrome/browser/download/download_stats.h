@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -132,8 +132,9 @@ void RecordDangerousDownloadWarningShown(
 void RecordOpenedDangerousConfirmDialog(
     download::DownloadDangerType danger_type);
 
-// Record how a download was opened.
-void RecordDownloadOpenMethod(ChromeDownloadOpenMethod open_method);
+// Record that a download was opened.
+void RecordDownloadOpen(ChromeDownloadOpenMethod open_method,
+                        const std::string& mime_type_string);
 
 // Record if the database is available to provide the next download id before
 // starting all downloads.

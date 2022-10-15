@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,7 +45,7 @@
 #include "components/captive_portal/core/buildflags.h"
 #include "components/no_state_prefetch/browser/no_state_prefetch_manager.h"
 #include "components/prefs/pref_service.h"
-#include "components/url_param_filter/content/cross_otr_observer.h"
+#include "components/url_param_filter/content/cross_otr_web_contents_observer.h"
 #include "content/public/browser/browser_url_handler.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
@@ -289,12 +289,10 @@ std::pair<Browser*, int> GetBrowserAndTabForDisposition(
       return {GetOrCreateBrowser(profile, params.user_gesture), -1};
     case WindowOpenDisposition::NEW_PICTURE_IN_PICTURE:
 #if !BUILDFLAG(IS_CHROMEOS_LACROS)
-      // Out of paranoia, check that the PictureInPictureV2 feature is actually
-      // enabled as a browser feature before allowing the browser to create an
-      // always-on-top window.  This helps protect against a compromised
-      // renderer. TODO(https://crbug.com/1285144): Remove this check once
-      // the feature is no longer experimental.
-      if (!base::FeatureList::IsEnabled(features::kPictureInPictureV2))
+      // We may receive a PiP request with the feature disabled if the user has
+      // explicitly turned on the Blink feature without turning on the
+      // browser-side feature.
+      if (!base::FeatureList::IsEnabled(features::kDocumentPictureInPictureAPI))
         return {nullptr, -1};
 
       // Picture in picture windows may not be opened by other picture in
@@ -306,8 +304,6 @@ std::pair<Browser*, int> GetBrowserAndTabForDisposition(
         Browser::CreateParams browser_params(Browser::TYPE_PICTURE_IN_PICTURE,
                                              profile, params.user_gesture);
         browser_params.trusted_source = params.trusted_source;
-        browser_params.picture_in_picture_window_title =
-            params.source_contents->GetLastCommittedURL().GetContent();
         if (params.contents_to_insert) {
           browser_params.initial_bounds =
               CalculateInitialPictureInPictureWindowBounds(
@@ -402,7 +398,7 @@ void NormalizeDisposition(NavigateParams* params) {
       // Disposition trumps add types. ADD_ACTIVE is a default, so we need to
       // remove it if disposition implies the tab is going to open in the
       // background.
-      params->tabstrip_add_types &= ~TabStripModel::ADD_ACTIVE;
+      params->tabstrip_add_types &= ~AddTabTypes::ADD_ACTIVE;
       break;
 
     case WindowOpenDisposition::NEW_PICTURE_IN_PICTURE:
@@ -420,7 +416,7 @@ void NormalizeDisposition(NavigateParams* params) {
     }
     case WindowOpenDisposition::NEW_FOREGROUND_TAB:
     case WindowOpenDisposition::SINGLETON_TAB:
-      params->tabstrip_add_types |= TabStripModel::ADD_ACTIVE;
+      params->tabstrip_add_types |= AddTabTypes::ADD_ACTIVE;
       break;
 
     default:
@@ -578,7 +574,7 @@ std::unique_ptr<content::WebContents> CreateTargetContents(
         ->set_is_captive_portal_window();
   }
 #endif
-  url_param_filter::CrossOtrObserver::MaybeCreateForWebContents(
+  url_param_filter::CrossOtrWebContentsObserver::MaybeCreateForWebContents(
       target_contents.get(),
       params.privacy_sensitivity ==
           NavigateParams::PrivacySensitivity::CROSS_OTR,
@@ -717,12 +713,9 @@ base::WeakPtr<content::NavigationHandle> Navigate(NavigateParams* params) {
     return nullptr;
   }
   // If Lacros comes here with an internal os:// redirect scheme to Ash, and Ash
-  // does not accept the URL, we convert it into a Lacros chrome:// url instead.
-  // This will most likely end in a 404 inside the Lacros browser. Note that we
-  // do not want to create a "404 SWA application".
+  // does not accept the URL, we convert it into a blocked url instead.
   if (crosapi::gurl_os_handler_utils::IsAshOsUrl(params->url)) {
-    params->url =
-        crosapi::gurl_os_handler_utils::GetChromeUrlFromSystemUrl(params->url);
+    params->url = GURL(content::kBlockedURL);
   }
 #endif
 
@@ -806,7 +799,7 @@ base::WeakPtr<content::NavigationHandle> Navigate(NavigateParams* params) {
   if (params->source_contents &&
       (params->disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB ||
        params->disposition == WindowOpenDisposition::NEW_WINDOW) &&
-      (params->tabstrip_add_types & TabStripModel::ADD_INHERIT_OPENER))
+      (params->tabstrip_add_types & AddTabTypes::ADD_INHERIT_OPENER))
     params->source_contents->Focus();
 
   if (params->source_contents == contents_to_navigate_or_insert) {
@@ -821,7 +814,7 @@ base::WeakPtr<content::NavigationHandle> Navigate(NavigateParams* params) {
     // If some non-default value is set for the index, we should tell the
     // TabStripModel to respect it.
     if (params->tabstrip_index != -1)
-      params->tabstrip_add_types |= TabStripModel::ADD_FORCE_INDEX;
+      params->tabstrip_add_types |= AddTabTypes::ADD_FORCE_INDEX;
 
     // Maybe notify that an open operation has been done from a gesture.
     // TODO(crbug.com/1129028): preferably pipe this information through the

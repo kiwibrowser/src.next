@@ -86,6 +86,8 @@ FlexItem::FlexItem(const FlexLayoutAlgorithm* algorithm,
                    LayoutUnit cross_axis_border_padding,
                    NGPhysicalBoxStrut physical_margins,
                    NGBoxStrut scrollbars,
+                   WritingMode baseline_writing_mode,
+                   BaselineGroup baseline_group,
                    bool depends_on_min_max_sizes)
     : algorithm_(algorithm),
       line_number_(0),
@@ -100,6 +102,8 @@ FlexItem::FlexItem(const FlexLayoutAlgorithm* algorithm,
       cross_axis_border_padding_(cross_axis_border_padding),
       physical_margins_(physical_margins),
       scrollbars_(scrollbars),
+      baseline_writing_direction_({baseline_writing_mode, TextDirection::kLtr}),
+      baseline_group_(baseline_group),
       depends_on_min_max_sizes_(depends_on_min_max_sizes),
       frozen_(false),
       needs_relayout_for_stretch_(false),
@@ -145,6 +149,21 @@ LayoutUnit FlexItem::FlowAwareMarginBefore() const {
   return LayoutUnit();
 }
 
+LayoutUnit FlexItem::FlowAwareMarginAfter() const {
+  switch (algorithm_->GetTransformedWritingMode()) {
+    case TransformedWritingMode::kTopToBottomWritingMode:
+      return physical_margins_.bottom;
+    case TransformedWritingMode::kBottomToTopWritingMode:
+      return physical_margins_.top;
+    case TransformedWritingMode::kLeftToRightWritingMode:
+      return physical_margins_.right;
+    case TransformedWritingMode::kRightToLeftWritingMode:
+      return physical_margins_.left;
+  }
+  NOTREACHED();
+  return LayoutUnit();
+}
+
 LayoutUnit FlexItem::MarginBlockEnd() const {
   NGBoxStrut margins = physical_margins_.ConvertToLogical(
       algorithm_->Style()->GetWritingDirection());
@@ -161,7 +180,7 @@ LayoutUnit FlexItem::CrossAxisMarginExtent() const {
                                         : physical_margins_.HorizontalSum();
 }
 
-LayoutUnit FlexItem::MarginBoxAscent() const {
+LayoutUnit FlexItem::MarginBoxAscent(bool is_wrap_reverse) const {
   if (box_) {
     LayoutUnit ascent(box_->FirstLineBoxBaseline());
     if (ascent == -1)
@@ -170,11 +189,19 @@ LayoutUnit FlexItem::MarginBoxAscent() const {
   }
 
   DCHECK(layout_result_);
-  return FlowAwareMarginBefore() +
-         NGBoxFragment(
-             algorithm_->StyleRef().GetWritingDirection(),
-             To<NGPhysicalBoxFragment>(layout_result_->PhysicalFragment()))
-             .BaselineOrSynthesize(algorithm_->StyleRef().GetFontBaseline());
+  NGBoxFragment baseline_fragment(
+      baseline_writing_direction_,
+      To<NGPhysicalBoxFragment>(layout_result_->PhysicalFragment()));
+
+  const auto font_baseline = algorithm_->StyleRef().GetFontBaseline();
+  LayoutUnit baseline =
+      baseline_fragment.FirstBaselineOrSynthesize(font_baseline);
+  if (is_wrap_reverse)
+    baseline = baseline_fragment.BlockSize() - baseline;
+
+  return baseline_group_ == BaselineGroup::kMajor
+             ? FlowAwareMarginBefore() + baseline
+             : FlowAwareMarginAfter() + baseline;
 }
 
 LayoutUnit FlexItem::AvailableAlignmentSpace() const {
@@ -292,8 +319,7 @@ void FlexItem::Trace(Visitor* visitor) const {
 // static
 LayoutUnit FlexItem::AlignmentOffset(LayoutUnit available_free_space,
                                      ItemPosition position,
-                                     LayoutUnit ascent,
-                                     LayoutUnit max_ascent,
+                                     LayoutUnit baseline_offset,
                                      bool is_wrap_reverse,
                                      bool is_deprecated_webkit_box) {
   switch (position) {
@@ -331,24 +357,10 @@ LayoutUnit FlexItem::AlignmentOffset(LayoutUnit available_free_space,
       return is_deprecated_webkit_box ? result.ClampNegativeToZero() : result;
     }
     case ItemPosition::kBaseline:
-      // FIXME: If we get here in columns, we want the use the descent, except
-      // we currently can't get the ascent/descent of orthogonal children.
-      // https://bugs.webkit.org/show_bug.cgi?id=98076
-      return max_ascent - ascent;
     case ItemPosition::kLastBaseline:
-      // TODO(crbug.com/885175): Implement last baseline.
-      break;
+      return baseline_offset;
   }
   return LayoutUnit();
-}
-
-bool FlexItem::HasAutoMarginsInCrossAxis(const ComputedStyle& item_style,
-                                         FlexLayoutAlgorithm* algorithm) {
-  if (algorithm->IsHorizontalFlow()) {
-    return item_style.MarginTop().IsAuto() ||
-           item_style.MarginBottom().IsAuto();
-  }
-  return item_style.MarginLeft().IsAuto() || item_style.MarginRight().IsAuto();
 }
 
 void FlexLine::FreezeViolations(ViolationsVector& violations) {
@@ -505,6 +517,7 @@ void FlexLine::ComputeLineItemsPosition(LayoutUnit main_axis_start_offset,
                                         LayoutUnit& cross_axis_offset) {
   const auto& style = algorithm_->StyleRef();
   const bool is_webkit_box = style.IsDeprecatedWebkitBox();
+  const bool is_wrap_reverse = style.FlexWrap() == EFlexWrap::kWrapReverse;
 
   main_axis_offset_ = main_axis_start_offset;
   // Recalculate the remaining free space. The adjustment for flex factors
@@ -549,7 +562,9 @@ void FlexLine::ComputeLineItemsPosition(LayoutUnit main_axis_start_offset,
       main_axis_offset += available_free_space;
   }
 
-  LayoutUnit max_descent;  // Used when align-items: baseline.
+  LayoutUnit max_major_descent;
+  LayoutUnit max_minor_descent;
+
   LayoutUnit max_child_cross_axis_extent;
   for (wtf_size_t i = 0; i < line_items_.size(); ++i) {
     FlexItem& flex_item = line_items_[i];
@@ -557,17 +572,22 @@ void FlexLine::ComputeLineItemsPosition(LayoutUnit main_axis_start_offset,
     flex_item.UpdateAutoMarginsInMainAxis(auto_margin_offset);
 
     LayoutUnit child_cross_axis_margin_box_extent;
-    if (flex_item.Alignment() == ItemPosition::kBaseline &&
-        !FlexItem::HasAutoMarginsInCrossAxis(flex_item.style_, algorithm_)) {
-      LayoutUnit ascent = flex_item.MarginBoxAscent();
+    if (flex_item.Alignment() == ItemPosition::kBaseline) {
+      LayoutUnit ascent = flex_item.MarginBoxAscent(is_wrap_reverse);
       LayoutUnit descent =
           (flex_item.CrossAxisMarginExtent() + flex_item.cross_axis_size_) -
           ascent;
-
-      max_ascent_ = std::max(max_ascent_, ascent);
-      max_descent = std::max(max_descent, descent);
-
-      child_cross_axis_margin_box_extent = max_ascent_ + max_descent;
+      if (flex_item.baseline_group_ == BaselineGroup::kMajor) {
+        max_major_ascent_ = std::max(max_major_ascent_, ascent);
+        max_major_descent = std::max(max_major_descent, descent);
+        child_cross_axis_margin_box_extent =
+            max_major_ascent_ + max_major_descent;
+      } else {
+        max_minor_ascent_ = std::max(max_minor_ascent_, ascent);
+        max_minor_descent = std::max(max_minor_descent, descent);
+        child_cross_axis_margin_box_extent =
+            max_minor_ascent_ + max_minor_descent;
+      }
     } else {
       child_cross_axis_margin_box_extent =
           flex_item.cross_axis_size_ + flex_item.CrossAxisMarginExtent();
@@ -786,11 +806,17 @@ bool FlexLayoutAlgorithm::ShouldApplyMinSizeAutoForChild(
   if (child.ShouldApplySizeContainment())
     return false;
 
-  bool is_replaced_element_respecting_overflow = false;
-  if (auto* element = DynamicTo<Element>(child.GetNode())) {
-    is_replaced_element_respecting_overflow =
-        element->IsReplacedElementRespectingCSSOverflow();
-  }
+  // All replaced elements (except SVG) use a default value of 'visible' for
+  // overflow. This feature switches this to 'clip' via UA stylesheet. In order
+  // to ensure backwards compatibility with the existing behaviour, 'clip' is
+  // treated similar to 'visible' for deciding whether 'auto' applies to compute
+  // the minimum bounds for these elements.
+  //
+  // The above is also consistent with the spec:
+  // https://drafts.csswg.org/css-flexbox/#min-size-auto
+  bool is_replaced_element_respecting_overflow =
+      RuntimeEnabledFeatures::CSSOverflowForReplacedElementsEnabled() &&
+      child.IsLayoutReplaced();
 
   return MainAxisOverflowForChild(child) == EOverflow::kVisible ||
          (is_replaced_element_respecting_overflow &&
@@ -864,14 +890,9 @@ void FlexLayoutAlgorithm::AlignFlexLines(
 }
 
 void FlexLayoutAlgorithm::AlignChildren() {
-  // Keep track of the space between the baseline edge and the after edge of
-  // the box for each line.
-  Vector<LayoutUnit> min_margin_after_baselines;
-
+  const bool is_webkit_box = StyleRef().IsDeprecatedWebkitBox();
+  const bool is_wrap_reverse = StyleRef().FlexWrap() == EFlexWrap::kWrapReverse;
   for (FlexLine& line_context : flex_lines_) {
-    LayoutUnit min_margin_after_baseline = LayoutUnit::Max();
-    LayoutUnit max_ascent = line_context.max_ascent_;
-
     for (FlexItem& flex_item : line_context.line_items_) {
       if (flex_item.UpdateAutoMarginsInCrossAxis(
               flex_item.AvailableAlignmentSpace().ClampNegativeToZero()))
@@ -883,37 +904,21 @@ void FlexLayoutAlgorithm::AlignChildren() {
         flex_item.needs_relayout_for_stretch_ = true;
       }
       LayoutUnit available_space = flex_item.AvailableAlignmentSpace();
-      LayoutUnit offset = FlexItem::AlignmentOffset(
-          available_space, position, flex_item.MarginBoxAscent(), max_ascent,
-          StyleRef().FlexWrap() == EFlexWrap::kWrapReverse,
-          StyleRef().IsDeprecatedWebkitBox());
+      LayoutUnit baseline_offset;
+      if (position == ItemPosition::kBaseline) {
+        bool is_major = flex_item.baseline_group_ == BaselineGroup::kMajor;
+        LayoutUnit ascent = flex_item.MarginBoxAscent(is_wrap_reverse);
+        LayoutUnit max_ascent = is_major ? line_context.max_major_ascent_
+                                         : line_context.max_minor_ascent_;
+
+        LayoutUnit baseline_delta = max_ascent - ascent;
+        baseline_offset =
+            is_major ? baseline_delta : available_space - baseline_delta;
+      }
+      LayoutUnit offset =
+          FlexItem::AlignmentOffset(available_space, position, baseline_offset,
+                                    is_wrap_reverse, is_webkit_box);
       flex_item.offset_->cross_axis_offset += offset;
-      if (position == ItemPosition::kBaseline &&
-          StyleRef().FlexWrap() == EFlexWrap::kWrapReverse) {
-        min_margin_after_baseline =
-            std::min(min_margin_after_baseline,
-                     flex_item.AvailableAlignmentSpace() - offset);
-      }
-    }
-    min_margin_after_baselines.push_back(min_margin_after_baseline);
-  }
-
-  if (StyleRef().FlexWrap() != EFlexWrap::kWrapReverse)
-    return;
-
-  // wrap-reverse flips the cross axis start and end. For baseline alignment,
-  // this means we need to align the after edge of baseline elements with the
-  // after edge of the flex line.
-  wtf_size_t line_number = 0;
-  for (FlexLine& line_context : flex_lines_) {
-    LayoutUnit min_margin_after_baseline =
-        min_margin_after_baselines[line_number++];
-    for (FlexItem& flex_item : line_context.line_items_) {
-      if (flex_item.Alignment() == ItemPosition::kBaseline &&
-          !FlexItem::HasAutoMarginsInCrossAxis(flex_item.style_, this) &&
-          min_margin_after_baseline) {
-        flex_item.offset_->cross_axis_offset += min_margin_after_baseline;
-      }
     }
   }
 }
@@ -1117,9 +1122,19 @@ ItemPosition FlexLayoutAlgorithm::TranslateItemPosition(
     }
   }
 
-  if (align == ItemPosition::kBaseline &&
-      IsHorizontalFlow(flexbox_style) != child_style.IsHorizontalWritingMode())
-    align = ItemPosition::kFlexStart;
+  if (align == ItemPosition::kBaseline) {
+    if (IsHorizontalFlow(flexbox_style)) {
+      if (child_style.MarginTop().IsAuto() ||
+          child_style.MarginBottom().IsAuto()) {
+        align = ItemPosition::kFlexStart;
+      }
+    } else {
+      if (child_style.MarginLeft().IsAuto() ||
+          child_style.MarginRight().IsAuto()) {
+        align = ItemPosition::kFlexStart;
+      }
+    }
+  }
 
   if (flexbox_style.FlexWrap() == EFlexWrap::kWrapReverse) {
     if (align == ItemPosition::kFlexStart)

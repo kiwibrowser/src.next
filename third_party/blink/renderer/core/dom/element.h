@@ -73,6 +73,7 @@ class ContainerQueryEvaluator;
 class CSSPropertyName;
 class CSSPropertyValueSet;
 class CSSStyleDeclaration;
+class CSSToggleMap;
 class CustomElementDefinition;
 class DOMRect;
 class DOMRectList;
@@ -377,6 +378,8 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   Element* OffsetParent();
   int clientLeft();
   int clientTop();
+  int ClientLeftNoLayout() const;
+  int ClientTopNoLayout() const;
   int clientWidth();
   int clientHeight();
   double scrollLeft();
@@ -392,16 +395,28 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   void scrollTo(const ScrollToOptions*);
   LayoutBox* GetLayoutBoxForScrolling() const override;
 
-  gfx::Rect BoundsInViewport() const;
+  // Returns the bounds of this Element, unclipped, in the coordinate space of
+  // the local root's widget. That is, in the outermost main frame, this will
+  // scale and transform the bounds by the visual viewport transform (i.e.
+  // pinch-zoom). In a local root that isn't main (i.e. a remote frame), the
+  // returned bounds are unscaled by the visual viewport and are relative to
+  // the local root frame.
+  gfx::Rect BoundsInWidget() const;
+
+  // Same as above but for outline rects.
+  Vector<gfx::Rect> OutlineRectsInWidget(
+      DocumentUpdateReason reason = DocumentUpdateReason::kUnknown) const;
+
   // Returns an intersection rectangle of the bounds rectangle and the visual
   // viewport's rectangle in the visual viewport's coordinate space.
   // Applies ancestors' frames' clipping, but does not (yet) apply (overflow)
   // element clipping (crbug.com/889840).
   gfx::Rect VisibleBoundsInVisualViewport() const;
-  Vector<gfx::Rect> OutlineRectsInVisualViewport(
-      DocumentUpdateReason reason = DocumentUpdateReason::kUnknown) const;
 
   DOMRectList* getClientRects();
+  // Returns a rectangle in zoomed pixel units.
+  gfx::RectF GetBoundingClientRectNoLifecycleUpdateNoAdjustment() const;
+  // Returns a rectangle in CSS pixel units.  i.e. ignorign zoom.
   gfx::RectF GetBoundingClientRectNoLifecycleUpdate() const;
   DOMRect* getBoundingClientRect();
 
@@ -570,9 +585,11 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // attributes in a start tag were added to the element.
   virtual void ParseAttribute(const AttributeModificationParams&);
 
+  void DefaultEventHandler(Event&) override;
+
   // Popup API related functions.
   void UpdatePopupAttribute(String);
-  bool HasValidPopupAttribute() const;
+  bool HasPopupAttribute() const;
   PopupData* GetPopupData() const;
   PopupValueType PopupType() const;
   bool popupOpen() const;
@@ -581,7 +598,7 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   void HidePopUpInternal(HidePopupFocusBehavior focus_behavior,
                          HidePopupForcingLevel forcing_level);
   void PopupHideFinishIfNeeded();
-  static const Element* NearestOpenAncestralPopup(const Node* node,
+  static const Element* NearestOpenAncestralPopup(const Node& node,
                                                   bool inclusive = false);
   // Retrieves the element pointed to by this element's 'anchor' content
   // attribute, if that element exists, and if this element is a pop-up.
@@ -596,8 +613,6 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
                                  HidePopupFocusBehavior,
                                  HidePopupForcingLevel,
                                  HidePopupIndependence);
-  void MaybeTriggerHoverPopup(Element* popup_element);
-  void HandlePopupHovered(bool hovered);
 
   // TODO(crbug.com/1197720): The popup position should be provided by the new
   // anchored positioning scheme.
@@ -636,7 +651,11 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
 
   const ComputedStyle* ParentComputedStyle() const;
 
-  void RecalcStyle(const StyleRecalcChange, const StyleRecalcContext&);
+  // Returns a StyleRecalcChange to be combined with the outer
+  // StyleRecalcChange. This is used to recalculate the style of subsequent
+  // siblings.
+  StyleRecalcChange RecalcStyle(const StyleRecalcChange,
+                                const StyleRecalcContext&);
   void RecalcStyleForTraversalRootAncestor();
   void RebuildLayoutTreeForTraversalRootAncestor() {
     RebuildFirstLetterLayoutTree();
@@ -687,6 +706,10 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
 
   // Returns a pointer to the crop-ID if one was set; nullptr otherwise.
   const RegionCaptureCropId* GetRegionCaptureCropId() const;
+
+  // Support for all elements with region capture is currently experimental.
+  // TODO(crbug.com/1332641): Remove this after support is stable.
+  virtual bool IsSupportedByRegionCapture() const;
 
   ShadowRoot* attachShadow(const ShadowRootInit*, ExceptionState&);
 
@@ -1123,8 +1146,8 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   bool ActivateDisplayLockIfNeeded(DisplayLockActivationReason reason);
 
   ContainerQueryData* GetContainerQueryData() const;
-  void SetContainerQueryEvaluator(ContainerQueryEvaluator*);
   ContainerQueryEvaluator* GetContainerQueryEvaluator() const;
+  ContainerQueryEvaluator& EnsureContainerQueryEvaluator();
   bool SkippedContainerStyleRecalc() const;
 
   virtual void SetActive(bool active);
@@ -1143,6 +1166,8 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // For font-related style invalidation.
   void SetScrollbarPseudoElementStylesDependOnFontMetrics(bool);
 
+  bool AffectedBySubjectHas() const;
+  void SetAffectedBySubjectHas();
   bool AffectedByNonSubjectHas() const;
   void SetAffectedByNonSubjectHas();
   bool AncestorsOrAncestorSiblingsAffectedByHas() const;
@@ -1162,6 +1187,8 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   void SetAncestorsOrSiblingsAffectedByFocusVisibleInHas();
   bool AffectedByLogicalCombinationsInHas() const;
   void SetAffectedByLogicalCombinationsInHas();
+  bool AffectedByMultipleHas() const;
+  void SetAffectedByMultipleHas();
 
   void SaveIntrinsicSize(ResizeObserverSize* size);
   const ResizeObserverSize* LastIntrinsicSize() const;
@@ -1189,12 +1216,12 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
 
   bool IsDocumentElement() const;
 
-  // Not all Elements are presently supported by the Region Capture feature.
-  // Those that are override and this method and return true.
-  // TODO(crbug.com/1332641): Remove this after adding support for all subtypes.
-  virtual bool IsSupportedByRegionCapture() const { return false; }
-
   bool IsReplacedElementRespectingCSSOverflow() const;
+
+  CSSToggleMap* toggles() { return &EnsureToggleMap(); }
+
+  CSSToggleMap* GetToggleMap();
+  CSSToggleMap& EnsureToggleMap();
 
  protected:
   const ElementData* GetElementData() const { return element_data_.Get(); }
@@ -1245,13 +1272,15 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   // This method cannot be moved to LayoutObject because some focusable nodes
   // don't have layoutObjects. e.g., HTMLOptionElement.
   virtual bool IsFocusableStyle() const;
-  // Contains the base logic for IsFocusableStyle. Doesn't require the node to
-  // have an up-to-date LayoutObject, it's up to the caller to pass the right
-  // one as an argument.
-  bool IsBaseElementFocusableStyle(const LayoutObject*) const;
+  // Contains the base logic for IsFocusableStyle.
+  bool IsBaseElementFocusableStyle() const;
   // Similar to IsFocusableStyle, except that it will ensure that any deferred
   // work to create layout objects is completed (e.g. in display-locked trees).
   bool IsFocusableStyleAfterUpdate() const;
+
+  // Is the node descendant of this in something clickable/activatable, such
+  // that we shouldn't handle events targeting it?
+  bool IsClickableControl(Node*);
 
   // ClassAttributeChanged() and UpdateClassList() exist to share code between
   // ParseAttribute (called via setAttribute()) and SvgAttributeChanged (called
@@ -1367,7 +1396,7 @@ class CORE_EXPORT Element : public ContainerNode, public Animatable {
   };
 
   // Special focus handling for popups.
-  Element* GetPopupFocusableArea(bool autofocus_only) const;
+  Element* GetPopupFocusableArea() const;
 
   void UpdateFirstLetterPseudoElement(StyleUpdatePhase,
                                       const StyleRecalcContext&);

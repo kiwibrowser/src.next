@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@
 #include "extensions/common/extension_id.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_constants.h"
+#include "url/url_constants.h"
 
 namespace extensions {
 
@@ -54,7 +55,8 @@ std::unique_ptr<WebAccessibleResourcesInfo> ParseResourceStringList(
     std::u16string* error) {
   WebAccessibleResourcesMv2ManifestKeys manifest_keys;
   if (!WebAccessibleResourcesMv2ManifestKeys::ParseFromDictionary(
-          extension.manifest()->available_values(), &manifest_keys, error)) {
+          extension.manifest()->available_values().GetDict(), &manifest_keys,
+          error)) {
     return nullptr;
   }
 
@@ -91,7 +93,8 @@ std::unique_ptr<WebAccessibleResourcesInfo> ParseEntryList(
 
   WebAccessibleResourcesManifestKeys manifest_keys;
   if (!WebAccessibleResourcesManifestKeys::ParseFromDictionary(
-          extension.manifest()->available_values(), &manifest_keys, error)) {
+          extension.manifest()->available_values().GetDict(), &manifest_keys,
+          error)) {
     return nullptr;
   }
 
@@ -170,8 +173,15 @@ bool WebAccessibleResourcesInfo::IsResourceWebAccessible(
     const Extension* extension,
     const std::string& relative_path,
     const absl::optional<url::Origin>& initiator_origin) {
-  auto initiator_url =
-      initiator_origin.has_value() ? initiator_origin->GetURL() : GURL();
+  GURL initiator_url;
+  if (initiator_origin) {
+    if (initiator_origin->opaque()) {
+      initiator_url =
+          initiator_origin->GetTupleOrPrecursorTupleIfOpaque().GetURL();
+    } else {
+      initiator_url = initiator_origin->GetURL();
+    }
+  }
   const WebAccessibleResourcesInfo* info = GetResourcesInfo(extension);
   if (!info) {  // No web-accessible resources
     return false;
@@ -183,6 +193,7 @@ bool WebAccessibleResourcesInfo::IsResourceWebAccessible(
       if (extension->manifest_version() < 3)
         return true;
 
+      // Match patterns.
       if (entry.matches.MatchesURL(initiator_url))
         return true;
       if (initiator_url.SchemeIs(extensions::kExtensionScheme) &&

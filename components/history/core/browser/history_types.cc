@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/check.h"
 #include "base/notreached.h"
+#include "base/ranges/algorithm.h"
 #include "components/history/core/browser/page_usage_data.h"
 
 namespace history {
@@ -276,26 +277,27 @@ HistoryAddPageArgs::HistoryAddPageArgs()
                          SOURCE_BROWSED,
                          false,
                          true,
-                         false,
+                         absl::nullopt,
                          absl::nullopt,
                          absl::nullopt,
                          absl::nullopt) {}
 
-HistoryAddPageArgs::HistoryAddPageArgs(const GURL& url,
-                                       base::Time time,
-                                       ContextID context_id,
-                                       int nav_entry_id,
-                                       const GURL& referrer,
-                                       const RedirectList& redirects,
-                                       ui::PageTransition transition,
-                                       bool hidden,
-                                       VisitSource source,
-                                       bool did_replace_entry,
-                                       bool consider_for_ntp_most_visited,
-                                       bool floc_allowed,
-                                       absl::optional<std::u16string> title,
-                                       absl::optional<Opener> opener,
-                                       absl::optional<int64_t> bookmark_id)
+HistoryAddPageArgs::HistoryAddPageArgs(
+    const GURL& url,
+    base::Time time,
+    ContextID context_id,
+    int nav_entry_id,
+    const GURL& referrer,
+    const RedirectList& redirects,
+    ui::PageTransition transition,
+    bool hidden,
+    VisitSource source,
+    bool did_replace_entry,
+    bool consider_for_ntp_most_visited,
+    absl::optional<std::u16string> title,
+    absl::optional<Opener> opener,
+    absl::optional<int64_t> bookmark_id,
+    absl::optional<VisitContextAnnotations::OnVisitFields> context_annotations)
     : url(url),
       time(time),
       context_id(context_id),
@@ -307,10 +309,10 @@ HistoryAddPageArgs::HistoryAddPageArgs(const GURL& url,
       visit_source(source),
       did_replace_entry(did_replace_entry),
       consider_for_ntp_most_visited(consider_for_ntp_most_visited),
-      floc_allowed(floc_allowed),
       title(title),
       opener(opener),
-      bookmark_id(bookmark_id) {}
+      bookmark_id(bookmark_id),
+      context_annotations(std::move(context_annotations)) {}
 
 HistoryAddPageArgs::HistoryAddPageArgs(const HistoryAddPageArgs& other) =
     default;
@@ -400,6 +402,46 @@ DeletionInfo& DeletionInfo::operator=(DeletionInfo&& rhs) noexcept = default;
 
 // Clusters --------------------------------------------------------------------
 
+VisitContextAnnotations::VisitContextAnnotations() = default;
+
+VisitContextAnnotations::VisitContextAnnotations(
+    const VisitContextAnnotations& other) = default;
+
+VisitContextAnnotations::~VisitContextAnnotations() = default;
+
+bool VisitContextAnnotations::operator==(
+    const VisitContextAnnotations& other) const {
+  return on_visit == other.on_visit &&
+         omnibox_url_copied == other.omnibox_url_copied &&
+         is_existing_part_of_tab_group == other.is_existing_part_of_tab_group &&
+         is_placed_in_tab_group == other.is_placed_in_tab_group &&
+         is_existing_bookmark == other.is_existing_bookmark &&
+         is_new_bookmark == other.is_new_bookmark &&
+         is_ntp_custom_link == other.is_ntp_custom_link &&
+         duration_since_last_visit == other.duration_since_last_visit &&
+         page_end_reason == other.page_end_reason &&
+         total_foreground_duration == other.total_foreground_duration;
+}
+
+bool VisitContextAnnotations::operator!=(
+    const VisitContextAnnotations& other) const {
+  return !(*this == other);
+}
+
+bool VisitContextAnnotations::OnVisitFields::operator==(
+    const VisitContextAnnotations::OnVisitFields& other) const {
+  return browser_type == other.browser_type && window_id == other.window_id &&
+         tab_id == other.tab_id && task_id == other.task_id &&
+         root_task_id == other.root_task_id &&
+         parent_task_id == other.parent_task_id &&
+         response_code == other.response_code;
+}
+
+bool VisitContextAnnotations::OnVisitFields::operator!=(
+    const VisitContextAnnotations::OnVisitFields& other) const {
+  return !(*this == other);
+}
+
 AnnotatedVisit::AnnotatedVisit() = default;
 AnnotatedVisit::AnnotatedVisit(URLRow url_row,
                                VisitRow visit_row,
@@ -480,18 +522,34 @@ Cluster::Cluster(int64_t cluster_id,
                  const base::flat_map<std::u16string, ClusterKeywordData>&
                      keyword_to_data_map,
                  bool should_show_on_prominent_ui_surfaces,
-                 absl::optional<std::u16string> label)
+                 absl::optional<std::u16string> label,
+                 absl::optional<std::u16string> raw_label,
+                 query_parser::Snippet::MatchPositions label_match_positions,
+                 std::vector<std::string> related_searches,
+                 float search_match_score)
     : cluster_id(cluster_id),
       visits(visits),
       keyword_to_data_map(keyword_to_data_map),
       should_show_on_prominent_ui_surfaces(
           should_show_on_prominent_ui_surfaces),
-      label(label) {}
+      label(label),
+      raw_label(raw_label),
+      label_match_positions(label_match_positions),
+      related_searches(related_searches),
+      search_match_score(search_match_score) {}
 Cluster::Cluster(const Cluster&) = default;
 Cluster::Cluster(Cluster&&) = default;
 Cluster& Cluster::operator=(const Cluster&) = default;
 Cluster& Cluster::operator=(Cluster&&) = default;
 Cluster::~Cluster() = default;
+
+const ClusterVisit& Cluster::GetMostRecentVisit() const {
+  return *base::ranges::max_element(
+      visits, [](auto time1, auto time2) { return time1 < time2; },
+      [](const auto& cluster_visit) {
+        return cluster_visit.annotated_visit.visit_row.visit_time;
+      });
+}
 
 std::vector<std::u16string> Cluster::GetKeywords() const {
   std::vector<std::u16string> keywords;
@@ -500,22 +558,5 @@ std::vector<std::u16string> Cluster::GetKeywords() const {
   }
   return keywords;
 }
-
-ClusterRow::ClusterRow() = default;
-ClusterRow::ClusterRow(int64_t cluster_id) : cluster_id(cluster_id) {}
-ClusterRow::ClusterRow(const ClusterRow&) = default;
-ClusterRow& ClusterRow::operator=(const ClusterRow&) = default;
-ClusterRow::~ClusterRow() = default;
-
-ClusterIdsAndAnnotatedVisitsResult::ClusterIdsAndAnnotatedVisitsResult() =
-    default;
-ClusterIdsAndAnnotatedVisitsResult::ClusterIdsAndAnnotatedVisitsResult(
-    std::vector<int64_t> cluster_ids,
-    std::vector<AnnotatedVisit> annotated_visits)
-    : cluster_ids(cluster_ids), annotated_visits(annotated_visits) {}
-ClusterIdsAndAnnotatedVisitsResult::ClusterIdsAndAnnotatedVisitsResult(
-    const ClusterIdsAndAnnotatedVisitsResult&) = default;
-ClusterIdsAndAnnotatedVisitsResult::~ClusterIdsAndAnnotatedVisitsResult() =
-    default;
 
 }  // namespace history

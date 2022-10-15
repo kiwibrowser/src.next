@@ -11,7 +11,10 @@ namespace blink {
 
 Color StyleColor::Resolve(Color current_color,
                           mojom::blink::ColorScheme color_scheme,
+                          bool* is_current_color,
                           bool is_forced_color) const {
+  if (is_current_color)
+    *is_current_color = IsCurrentColor();
   if (IsCurrentColor())
     return current_color;
   if (EffectiveColorKeyword() != CSSValueID::kInvalid ||
@@ -23,8 +26,10 @@ Color StyleColor::Resolve(Color current_color,
 Color StyleColor::ResolveWithAlpha(Color current_color,
                                    mojom::blink::ColorScheme color_scheme,
                                    int alpha,
+                                   bool* is_current_color,
                                    bool is_forced_color) const {
-  Color color = Resolve(current_color, color_scheme, is_forced_color);
+  Color color =
+      Resolve(current_color, color_scheme, is_current_color, is_forced_color);
   return Color(color.Red(), color.Green(), color.Blue(), alpha);
 }
 
@@ -33,7 +38,7 @@ Color StyleColor::ColorFromKeyword(CSSValueID keyword,
   if (const char* value_name = getValueName(keyword)) {
     if (const NamedColor* named_color =
             FindColor(value_name, static_cast<wtf_size_t>(strlen(value_name))))
-      return Color(named_color->argb_value);
+      return Color::FromRGBA32(named_color->argb_value);
   }
   return LayoutTheme::GetTheme().SystemColor(keyword, color_scheme);
 }
@@ -61,7 +66,13 @@ bool StyleColor::IsColorKeyword(CSSValueID id) {
   //   '-webkit-focus-ring-color'
   //   '-internal-quirk-inherit'
   //
-  return (id >= CSSValueID::kAqua && id <= CSSValueID::kInternalQuirkInherit) ||
+  // css-text-decor
+  // <https://github.com/w3c/csswg-drafts/issues/7522>
+  //   '-internal-spelling-error-color'
+  //   '-internal-grammar-error-color'
+  //
+  return (id >= CSSValueID::kAqua &&
+          id <= CSSValueID::kInternalGrammarErrorColor) ||
          (id >= CSSValueID::kAliceblue && id <= CSSValueID::kYellowgreen) ||
          id == CSSValueID::kMenu;
 }
@@ -84,6 +95,8 @@ bool StyleColor::IsSystemColor(CSSValueID id) {
     case CSSValueID::kGraytext:
     case CSSValueID::kHighlight:
     case CSSValueID::kHighlighttext:
+    case CSSValueID::kInternalGrammarErrorColor:
+    case CSSValueID::kInternalSpellingErrorColor:
     case CSSValueID::kLinktext:
     case CSSValueID::kMark:
     case CSSValueID::kMarktext:

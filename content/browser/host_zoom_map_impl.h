@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,6 +47,8 @@ class CONTENT_EXPORT HostZoomMapImpl : public HostZoomMap {
                                     double level) override;
   bool UsesTemporaryZoomLevel(int render_process_id,
                               int render_view_id) override;
+  void SetNoLongerUsesTemporaryZoomLevel(int render_process_id,
+                                         int render_view_id);
   void SetTemporaryZoomLevel(int render_process_id,
                              int render_view_id,
                              double level) override;
@@ -79,6 +81,12 @@ class CONTENT_EXPORT HostZoomMapImpl : public HostZoomMap {
   void WillCloseRenderView(int render_process_id, int render_view_id);
 
   void SetClockForTesting(base::Clock* clock) override;
+
+#if BUILDFLAG(IS_ANDROID)
+  void SetDefaultZoomLevelPrefCallback(
+      HostZoomMap::DefaultZoomChangedCallback callback) override;
+  HostZoomMap::DefaultZoomChangedCallback* GetDefaultZoomLevelPrefCallback();
+#endif
 
  private:
   struct ZoomLevel {
@@ -120,6 +128,11 @@ class CONTENT_EXPORT HostZoomMapImpl : public HostZoomMap {
   // Callbacks called when zoom level changes.
   base::RepeatingCallbackList<void(const ZoomLevelChange&)>
       zoom_level_changed_callbacks_;
+
+#if BUILDFLAG(IS_ANDROID)
+  // Callback called when Java-side UI updates the default zoom level.
+  HostZoomMap::DefaultZoomChangedCallback default_zoom_level_pref_callback_;
+#endif
 
   // Copy of the pref data.
   HostZoomLevels host_zoom_levels_;

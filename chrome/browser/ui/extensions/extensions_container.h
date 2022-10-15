@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,11 @@
 #include "base/callback_forward.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 #include "chrome/browser/ui/extensions/extension_popup_types.h"
+#include "chrome/browser/ui/toolbar/toolbar_action_hover_card_types.h"
 
 class ToolbarActionViewController;
 class ToolbarActionsBarBubbleDelegate;
+class ToolbarActionView;
 
 // An interface for containers in the toolbar that host extensions.
 class ExtensionsContainer {
@@ -75,6 +77,11 @@ class ExtensionsContainer {
 
   // Whether there are any Extensions registered with the ExtensionsContainer.
   virtual bool HasAnyExtensions() const = 0;
+
+  // Updates the hover card for `action_view` based on `update_type`.
+  virtual void UpdateToolbarActionHoverCard(
+      ToolbarActionView* action_view,
+      ToolbarActionHoverCardUpdateType update_type) = 0;
 };
 
 #endif  // CHROME_BROWSER_UI_EXTENSIONS_EXTENSIONS_CONTAINER_H_

@@ -21,21 +21,6 @@
 
 namespace blink {
 
-namespace {
-class AutoSignal {
- public:
-  explicit AutoSignal(base::WaitableEvent* event) : event_(event) {
-    DCHECK(event);
-  }
-  AutoSignal(const AutoSignal&) = delete;
-  AutoSignal& operator=(const AutoSignal&) = delete;
-  ~AutoSignal() { event_->Signal(); }
-
- private:
-  base::WaitableEvent* event_;
-};
-}  // namespace
-
 // static
 std::unique_ptr<PlatformPaintWorkletLayerPainter>
 PaintWorkletPaintDispatcher::CreateCompositorThreadPainter(
@@ -95,7 +80,7 @@ void PaintWorkletPaintDispatcher::DispatchWorklets(
   ongoing_jobs_ = std::move(worklet_job_map);
 
   scoped_refptr<base::SingleThreadTaskRunner> runner =
-      Thread::Current()->GetTaskRunner();
+      Thread::Current()->GetDeprecatedTaskRunner();
   WTF::CrossThreadClosure on_done = CrossThreadBindRepeating(
       [](base::WeakPtr<PaintWorkletPaintDispatcher> dispatcher,
          scoped_refptr<base::SingleThreadTaskRunner> runner) {

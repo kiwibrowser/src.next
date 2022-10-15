@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,8 +26,6 @@ export interface ServiceInterface extends ActivityLogDelegate,
   notifyDragInstallInProgress(): void;
   loadUnpackedFromDrag(): Promise<boolean>;
   installDroppedFile(): void;
-  getItemStateChangedTarget():
-      ChromeEvent<(data: chrome.developerPrivate.EventData) => void>;
   getProfileStateChangedTarget():
       ChromeEvent<(info: chrome.developerPrivate.ProfileInfo) => void>;
   getProfileConfiguration(): Promise<chrome.developerPrivate.ProfileInfo>;
@@ -479,20 +477,19 @@ export class Service implements ServiceInterface {
   }
 
   addUserSpecifiedSites(
-      siteSet: chrome.developerPrivate.UserSiteSet,
+      siteSet: chrome.developerPrivate.SiteSet,
       hosts: string[]): Promise<void> {
     return new Promise(function(resolve) {
-      chrome.developerPrivate.addUserSpecifiedSites(
-          {siteList: siteSet, hosts}, resolve);
+      chrome.developerPrivate.addUserSpecifiedSites({siteSet, hosts}, resolve);
     });
   }
 
   removeUserSpecifiedSites(
-      siteSet: chrome.developerPrivate.UserSiteSet,
+      siteSet: chrome.developerPrivate.SiteSet,
       hosts: string[]): Promise<void> {
     return new Promise(function(resolve) {
       chrome.developerPrivate.removeUserSpecifiedSites(
-          {siteList: siteSet, hosts}, resolve);
+          {siteSet, hosts}, resolve);
     });
   }
 
@@ -505,6 +502,13 @@ export class Service implements ServiceInterface {
 
   getUserSiteSettingsChangedTarget() {
     return chrome.developerPrivate.onUserSiteSettingsChanged;
+  }
+
+  setShowAccessRequestsInToolbar(id: string, showRequests: boolean) {
+    chrome.developerPrivate.updateExtensionConfiguration({
+      extensionId: id,
+      showAccessRequestsInToolbar: showRequests,
+    });
   }
 
   static getInstance(): ServiceInterface {

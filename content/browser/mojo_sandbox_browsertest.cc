@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,7 +54,7 @@ class MojoSandboxTest : public ContentBrowserTest {
 
   mojo::Remote<mojom::TestService> BindTestService() {
     mojo::Remote<mojom::TestService> test_service;
-    host_->GetChildProcess()->BindReceiver(
+    host_->GetChildProcess()->BindServiceInterface(
         test_service.BindNewPipeAndPassReceiver());
     return test_service;
   }

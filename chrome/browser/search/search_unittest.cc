@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -393,11 +393,11 @@ TEST_F(SearchTest, IsNTPOrRelatedURL) {
   EXPECT_FALSE(IsNTPOrRelatedURL(search_url_with_search_terms, profile()));
   EXPECT_FALSE(IsNTPOrRelatedURL(search_url_without_search_terms, profile()));
 
-  EXPECT_FALSE(IsNTPOrRelatedURL(ntp_url, NULL));
-  EXPECT_FALSE(IsNTPOrRelatedURL(remote_ntp_url, NULL));
-  EXPECT_FALSE(IsNTPOrRelatedURL(remote_ntp_service_worker_url, NULL));
-  EXPECT_FALSE(IsNTPOrRelatedURL(search_url_with_search_terms, NULL));
-  EXPECT_FALSE(IsNTPOrRelatedURL(search_url_without_search_terms, NULL));
+  EXPECT_FALSE(IsNTPOrRelatedURL(ntp_url, nullptr));
+  EXPECT_FALSE(IsNTPOrRelatedURL(remote_ntp_url, nullptr));
+  EXPECT_FALSE(IsNTPOrRelatedURL(remote_ntp_service_worker_url, nullptr));
+  EXPECT_FALSE(IsNTPOrRelatedURL(search_url_with_search_terms, nullptr));
+  EXPECT_FALSE(IsNTPOrRelatedURL(search_url_without_search_terms, nullptr));
 }
 
 // Tests whether a |url| corresponds to a New Tab page.

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,8 +29,8 @@
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_constants.h"
+#include "content/public/common/content_plugin_info.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/pepper_plugin_info.h"
 #include "content/public/common/process_type.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "sandbox/policy/mojom/sandbox.mojom.h"
@@ -90,7 +90,7 @@ PpapiPluginProcessHost::~PpapiPluginProcessHost() {
 
 // static
 PpapiPluginProcessHost* PpapiPluginProcessHost::CreatePluginHost(
-    const PepperPluginInfo& info,
+    const ContentPluginInfo& info,
     const base::FilePath& profile_data_directory,
     const absl::optional<url::Origin>& origin_lock) {
   PpapiPluginProcessHost* plugin_host =
@@ -170,7 +170,7 @@ void PpapiPluginProcessHost::OpenChannelToPlugin(Client* client) {
 }
 
 PpapiPluginProcessHost::PpapiPluginProcessHost(
-    const PepperPluginInfo& info,
+    const ContentPluginInfo& info,
     const base::FilePath& profile_data_directory,
     const absl::optional<url::Origin>& origin_lock)
     : profile_data_directory_(profile_data_directory),
@@ -200,7 +200,7 @@ PpapiPluginProcessHost::PpapiPluginProcessHost(
     network_observer_ = std::make_unique<PluginNetworkObserver>(this);
 }
 
-bool PpapiPluginProcessHost::Init(const PepperPluginInfo& info) {
+bool PpapiPluginProcessHost::Init(const ContentPluginInfo& info) {
   plugin_path_ = info.path;
   if (info.name.empty()) {
     process_->SetName(plugin_path_.BaseName().LossyDisplayName());

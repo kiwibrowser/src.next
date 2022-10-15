@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -302,13 +302,12 @@ bool Manifest::ValidateManifest(
   }
 
   // Also generate warnings for keys that are not features.
-  for (base::DictionaryValue::Iterator it(*value_); !it.IsAtEnd();
-       it.Advance()) {
-    if (!manifest_feature_provider->GetFeature(it.key())) {
+  for (const auto item : value_->GetDict()) {
+    if (!manifest_feature_provider->GetFeature(item.first)) {
       warnings->push_back(InstallWarning(
           ErrorUtils::FormatErrorMessage(
-              manifest_errors::kUnrecognizedManifestKey, it.key()),
-          it.key()));
+              manifest_errors::kUnrecognizedManifestKey, item.first),
+          item.first));
     }
   }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,6 @@
 #include "chrome/browser/extensions/api/permissions/permissions_api_helpers.h"
 #include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
-#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/scripting_permissions_modifier.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/api/permissions.h"
@@ -53,16 +52,6 @@ namespace extensions {
 namespace permissions = api::permissions;
 
 namespace {
-
-std::unique_ptr<PermissionsUpdater::Delegate>& GetDelegateWrapper() {
-  static base::NoDestructor<std::unique_ptr<PermissionsUpdater::Delegate>>
-      delegate_wrapper;
-  return *delegate_wrapper;
-}
-
-PermissionsUpdater::Delegate* GetDelegate() {
-  return GetDelegateWrapper().get();
-}
 
 // A helper class to watch profile lifetime.
 class PermissionsUpdaterShutdownNotifierFactory
@@ -180,6 +169,7 @@ void PermissionsUpdater::NetworkPermissionsUpdateHelper::UpdatePermissions(
   // NotifyPermissionsUpdated if the profile is still valid.
   NetworkPermissionsUpdater::UpdateExtension(
       *browser_context, *extension,
+      NetworkPermissionsUpdater::ContextSet::kAllRelatedContexts,
       base::BindOnce(&NetworkPermissionsUpdateHelper::OnOriginAccessUpdated,
                      helper->weak_factory_.GetWeakPtr()));
 }
@@ -239,12 +229,6 @@ PermissionsUpdater::PermissionsUpdater(content::BrowserContext* browser_context,
     : browser_context_(browser_context), init_flag_(init_flag) {}
 
 PermissionsUpdater::~PermissionsUpdater() {}
-
-// static
-void PermissionsUpdater::SetPlatformDelegate(
-    std::unique_ptr<Delegate> delegate) {
-  GetDelegateWrapper() = std::move(delegate);
-}
 
 void PermissionsUpdater::GrantOptionalPermissions(
     const Extension& extension,
@@ -575,9 +559,6 @@ void PermissionsUpdater::InitializePermissions(const Extension* extension) {
       permissions_manager->GetEffectivePermissionsToGrant(*extension,
                                                           *desired_permissions);
 
-  if (GetDelegate())
-    GetDelegate()->InitializePermissions(extension, &granted_permissions);
-
   if ((init_flag_ & INIT_FLAG_TRANSIENT) == 0) {
     // Set the desired permissions in prefs.
     // - For new installs, this initializes the desired active permissions.
@@ -650,29 +631,27 @@ void PermissionsUpdater::NotifyPermissionsUpdated(
     return;
   }
 
-  UpdatedExtensionPermissionsInfo::Reason reason;
+  PermissionsManager::UpdateReason reason;
   events::HistogramValue histogram_value = events::UNKNOWN;
-  const char* event_name = NULL;
+  const char* event_name = nullptr;
   Profile* profile = Profile::FromBrowserContext(browser_context);
 
   if (event_type == REMOVED) {
-    reason = UpdatedExtensionPermissionsInfo::REMOVED;
+    reason = PermissionsManager::UpdateReason::kRemoved;
     histogram_value = events::PERMISSIONS_ON_REMOVED;
     event_name = permissions::OnRemoved::kEventName;
   } else if (event_type == ADDED) {
-    reason = UpdatedExtensionPermissionsInfo::ADDED;
+    reason = PermissionsManager::UpdateReason::kAdded;
     histogram_value = events::PERMISSIONS_ON_ADDED;
     event_name = permissions::OnAdded::kEventName;
   } else {
     DCHECK_EQ(POLICY, event_type);
-    reason = UpdatedExtensionPermissionsInfo::POLICY;
+    reason = PermissionsManager::UpdateReason::kPolicy;
   }
 
   // Notify other APIs or interested parties.
-  UpdatedExtensionPermissionsInfo info =
-      UpdatedExtensionPermissionsInfo(extension.get(), *changed, reason);
   PermissionsManager::Get(browser_context)
-      ->NotifyExtensionPermissionsUpdated(info);
+      ->NotifyExtensionPermissionsUpdated(*extension, *changed, reason);
 
   // Send the new permissions to the renderers.
   for (RenderProcessHost::iterator host_iterator(
@@ -707,7 +686,7 @@ void PermissionsUpdater::NotifyPermissionsUpdated(
     base::Value::List event_args;
     std::unique_ptr<api::permissions::Permissions> permissions =
         PackPermissionSet(*changed);
-    event_args.Append(base::Value::FromUniquePtrValue(permissions->ToValue()));
+    event_args.Append(permissions->ToValue());
     auto event = std::make_unique<Event>(
         histogram_value, event_name, std::move(event_args), browser_context);
     event_router->DispatchEventToExtension(extension->id(), std::move(event));

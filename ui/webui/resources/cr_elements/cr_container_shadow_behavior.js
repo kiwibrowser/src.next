@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,17 +35,17 @@
  */
 
 // clang-format off
-// #import {assert} from '../js/assert.m.js';
+import {assert} from '../js/assert.m.js';
 // clang-format on
 
 /** @enum {string} */
-/* #export */ const CrContainerShadowSide = {
+export const CrContainerShadowSide = {
   TOP: 'top',
   BOTTOM: 'bottom',
 };
 
 /** @polymerBehavior */
-/* #export */ const CrContainerShadowBehavior = {
+export const CrContainerShadowBehavior = {
   /** @private {?IntersectionObserver} */
   intersectionObserver_: null,
 
@@ -171,7 +171,7 @@
 };
 
 /** @interface */
-/* #export */ class CrContainerShadowBehaviorInterface {
+export class CrContainerShadowBehaviorInterface {
   /**
    * @param {boolean} enable
    */

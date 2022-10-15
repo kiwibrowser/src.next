@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -144,6 +144,13 @@ CreateCorsOriginAccessBlockList(const Extension& extension) {
   block_list.push_back(network::mojom::CorsOriginPattern::New(
       webstore_launch_url.scheme(), webstore_launch_url.host(), /*port=*/0,
       network::mojom::CorsDomainMatchMode::kAllowSubdomains,
+      network::mojom::CorsPortMatchMode::kAllowAnyPort,
+      network::mojom::CorsOriginAccessMatchPriority::kHighPriority));
+
+  GURL new_webstore_launch_url = extension_urls::GetNewWebstoreLaunchURL();
+  block_list.push_back(network::mojom::CorsOriginPattern::New(
+      new_webstore_launch_url.scheme(), new_webstore_launch_url.host(),
+      /*port=*/0, network::mojom::CorsDomainMatchMode::kAllowSubdomains,
       network::mojom::CorsPortMatchMode::kAllowAnyPort,
       network::mojom::CorsOriginAccessMatchPriority::kHighPriority));
 

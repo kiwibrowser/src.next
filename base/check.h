@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "base/base_export.h"
 #include "base/compiler_specific.h"
 #include "base/dcheck_is_on.h"
+#include "base/debug/debugging_buildflags.h"
 #include "base/immediate_crash.h"
 
 // This header defines the CHECK, DCHECK, and DPCHECK macros.
@@ -87,7 +88,7 @@ class BASE_EXPORT CheckError {
   // Stream for adding optional details to the error message.
   std::ostream& stream();
 
-  NOMERGE ~CheckError();
+  NOMERGE NOT_TAIL_CALLED ~CheckError();
 
   CheckError(const CheckError&) = delete;
   CheckError& operator=(const CheckError&) = delete;
@@ -98,7 +99,8 @@ class BASE_EXPORT CheckError {
   LogMessage* const log_message_;
 };
 
-#if defined(OFFICIAL_BUILD) && defined(NDEBUG)
+#if defined(OFFICIAL_BUILD) && defined(NDEBUG) && \
+    !BUILDFLAG(DCHECK_IS_CONFIGURABLE)
 
 // Discard log strings to reduce code bloat.
 //

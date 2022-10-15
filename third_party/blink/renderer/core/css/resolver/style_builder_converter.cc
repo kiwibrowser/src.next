@@ -2110,7 +2110,7 @@ static const CSSValue& ComputeRegisteredPropertyValue(
                 : mojom::blink::ColorScheme::kLight;
       Color color = document.GetTextLinkColors().ColorFromCSSValue(
           value, Color(), scheme, false);
-      return *cssvalue::CSSColor::Create(color.Rgb());
+      return *cssvalue::CSSColor::Create(color);
     }
   }
 
@@ -2123,9 +2123,18 @@ static const CSSValue& ComputeRegisteredPropertyValue(
 const CSSValue& StyleBuilderConverter::ConvertRegisteredPropertyInitialValue(
     const Document& document,
     const CSSValue& value) {
+  CSSToLengthConversionData::FontSizes font_sizes;
+  CSSToLengthConversionData::ViewportSize viewport_size(
+      document.GetLayoutView());
+  CSSToLengthConversionData::ContainerSizes container_sizes;
+  CSSToLengthConversionData conversion_data(
+      /* style */ nullptr, WritingMode::kHorizontalTb, font_sizes,
+      viewport_size, container_sizes,
+      /* zoom */ 1.0f);
+
   return ComputeRegisteredPropertyValue(
-      document, nullptr /* state */, CSSToLengthConversionData(), value,
-      document.BaseURL(), document.Encoding());
+      document, nullptr /* state */, conversion_data, value, document.BaseURL(),
+      document.Encoding());
 }
 
 const CSSValue& StyleBuilderConverter::ConvertRegisteredPropertyValue(
@@ -2160,6 +2169,10 @@ StyleBuilderConverter::ConvertRegisteredPropertyVariableData(
 
   Vector<String> backing_strings;
   backing_strings.push_back(text);
+  // CSSTokenizer may allocate new strings for some tokens (e.g. for escapes)
+  // and produce tokens that point to those strings. We need to retain those
+  // strings (if any) as well.
+  backing_strings.AppendVector(tokenizer.StringPool());
 
   const bool has_font_units = false;
   const bool has_root_font_units = false;
@@ -2387,7 +2400,7 @@ scoped_refptr<ToggleGroupList> StyleBuilderConverter::ConvertToggleGroup(
   return result;
 }
 scoped_refptr<ToggleRootList> StyleBuilderConverter::ConvertToggleRoot(
-    const StyleResolverState& state,
+    const StyleResolverState& state_unused,
     const CSSValue& value) {
   if (const auto* ident = DynamicTo<CSSIdentifierValue>(value)) {
     DCHECK_EQ(ident->GetValueID(), CSSValueID::kNone);
@@ -2411,11 +2424,11 @@ scoped_refptr<ToggleRootList> StyleBuilderConverter::ConvertToggleRoot(
       if (const auto* states_list = DynamicTo<CSSValueList>(state_value)) {
         ++index;
         found_states = true;
-        DCHECK_LE(1u, states_list->length());
+        DCHECK_LE(2u, states_list->length());
         ToggleRoot::States::NamesType states_vec;
         states_vec.ReserveInitialCapacity(states_list->length());
-        for (const auto& item : *states_list) {
-          states_vec.push_back(To<CSSCustomIdentValue>(*item).Value());
+        for (const auto& state : *states_list) {
+          states_vec.push_back(To<CSSCustomIdentValue>(*state).Value());
         }
         states = ToggleRoot::States(std::move(states_vec));
       } else if (const auto* maximum_state_number =
@@ -2522,21 +2535,22 @@ scoped_refptr<ToggleTriggerList> StyleBuilderConverter::ConvertToggleTrigger(
       }
     }
 
-    ToggleTrigger::State value(1);
+    ToggleTrigger::State trigger_value(1);
     if (item_list->length() == 3u) {
       const CSSValue& target_value = item_list->Item(2);
       if (const auto* target_ident =
               DynamicTo<CSSCustomIdentValue>(target_value)) {
-        value = ToggleTrigger::State(target_ident->Value());
+        trigger_value = ToggleTrigger::State(target_ident->Value());
       } else {
         const auto& target_number = To<CSSPrimitiveValue>(target_value);
-        value = ToggleTrigger::State(target_number.GetValue<uint32_t>());
+        trigger_value =
+            ToggleTrigger::State(target_number.GetValue<uint32_t>());
       }
     } else {
       DCHECK_NE(mode, ToggleTriggerMode::kSet);
     }
 
-    result->Append(ToggleTrigger(name, mode, value));
+    result->Append(ToggleTrigger(name, mode, trigger_value));
   }
   return result;
 }
@@ -2558,10 +2572,10 @@ StyleBuilderConverter::ConvertOverflowClipMargin(StyleResolverState& state,
   }
 
   if (css_value_list.length() > 1) {
-    const auto& value = css_value_list.Item(1);
-    DCHECK(value.IsPrimitiveValue());
+    const auto& primitive_value = css_value_list.Item(1);
+    DCHECK(primitive_value.IsPrimitiveValue());
     DCHECK(!length_value);
-    length_value = &To<CSSPrimitiveValue>(value);
+    length_value = &To<CSSPrimitiveValue>(primitive_value);
   }
 
   auto reference_box = StyleOverflowClipMargin::ReferenceBox::kPaddingBox;
@@ -2586,6 +2600,49 @@ StyleBuilderConverter::ConvertOverflowClipMargin(StyleResolverState& state,
     margin = StyleBuilderConverter::ConvertLayoutUnit(state, *length_value);
   }
   return StyleOverflowClipMargin(reference_box, margin);
+}
+
+Vector<TimelineAxis> StyleBuilderConverter::ConvertViewTimelineAxis(
+    StyleResolverState& state,
+    const CSSValue& value) {
+  Vector<TimelineAxis> axes;
+  for (const Member<const CSSValue>& item : To<CSSValueList>(value)) {
+    axes.push_back(To<CSSIdentifierValue>(*item).ConvertTo<TimelineAxis>());
+  }
+  return axes;
+}
+
+namespace {
+
+TimelineInset ConvertSingleTimelineInset(StyleResolverState& state,
+                                         const CSSValue& value) {
+  const CSSValuePair& pair = To<CSSValuePair>(value);
+  Length start =
+      StyleBuilderConverter::ConvertLengthOrAuto(state, pair.First());
+  Length end = StyleBuilderConverter::ConvertLengthOrAuto(state, pair.Second());
+  return TimelineInset(start, end);
+}
+
+}  // namespace
+
+Vector<TimelineInset> StyleBuilderConverter::ConvertViewTimelineInset(
+    StyleResolverState& state,
+    const CSSValue& value) {
+  Vector<TimelineInset> insets;
+  for (const Member<const CSSValue>& item : To<CSSValueList>(value)) {
+    insets.push_back(ConvertSingleTimelineInset(state, *item));
+  }
+  return insets;
+}
+
+Vector<AtomicString> StyleBuilderConverter::ConvertViewTimelineName(
+    StyleResolverState& state,
+    const CSSValue& value) {
+  Vector<AtomicString> names;
+  for (const Member<const CSSValue>& item : To<CSSValueList>(value)) {
+    names.push_back(ConvertNoneOrCustomIdent(state, *item));
+  }
+  return names;
 }
 
 }  // namespace blink

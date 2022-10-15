@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "base/cancelable_callback.h"
-#include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
@@ -36,7 +35,6 @@ class IdentityManager;
 extern const int kDiceTokenFetchTimeoutSeconds;
 // Exposed for testing.
 extern const int kLockAccountReconcilorTimeoutHours;
-extern const base::Feature kSupportOAuthOutageInDice;
 
 // Delegate interface for processing a dice request.
 class ProcessDiceHeaderDelegate {

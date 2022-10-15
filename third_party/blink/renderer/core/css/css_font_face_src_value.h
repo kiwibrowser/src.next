@@ -81,10 +81,28 @@ class CORE_EXPORT CSSFontFaceSrcValue : public CSSValue {
         is_ad_related_(is_ad_related) {}
 
   const String& GetResource() const { return absolute_resource_; }
-  const String& Format() const { return format_; }
   bool IsLocal() const { return is_local_; }
 
+  /* Format is serialized as string, so we can set this to string internally. It
+   * does not affect functionality downstream - i.e. the font face is handled
+   * the same way whatsoever, if the format is supported. */
   void SetFormat(const String& format) { format_ = format; }
+
+  /* Only supported technologies need to be listed here, as we can reject other
+   * font face source component values, hence remove SVG and incremental for
+   * now, compare https://drafts.csswg.org/css-fonts-4/#font-face-src-parsing */
+  enum class FontTechnology {
+    kTechnologyFeaturesAAT,
+    kTechnologyFeaturesOT,
+    kTechnologyCOLRv0,
+    kTechnologyCOLRv1,
+    kTechnologySBIX,
+    kTechnologyCDBT,
+    kTechnologyVariations,
+    kTechnologyPalettes,
+    kTechnologyUnknown
+  };
+  void AppendTechnology(FontTechnology technology);
 
   bool IsSupportedFormat() const;
 
@@ -112,6 +130,8 @@ class CORE_EXPORT CSSFontFaceSrcValue : public CSSValue {
   const scoped_refptr<const DOMWrapperWorld> world_;
   const OriginClean origin_clean_;
   bool is_ad_related_;
+
+  Vector<FontTechnology> technologies_;
 
   class FontResourceHelper : public GarbageCollected<FontResourceHelper>,
                              public FontResourceClient {

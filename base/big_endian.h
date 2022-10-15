@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -138,8 +138,8 @@ class BASE_EXPORT BigEndianWriter {
   bool Write(T v);
 
   // TODO(crbug.com/1298696): Breaks net_unittests.
-  raw_ptr<char, DanglingUntriagedDegradeToNoOpWhenMTE> ptr_;
-  raw_ptr<char, DanglingUntriagedDegradeToNoOpWhenMTE> end_;
+  raw_ptr<char, DegradeToNoOpWhenMTE> ptr_;
+  raw_ptr<char, DegradeToNoOpWhenMTE> end_;
 };
 
 }  // namespace base

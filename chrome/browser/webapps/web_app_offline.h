@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,11 @@ content::mojom::AlternativeErrorPageOverrideInfoPtr GetOfflinePageInfo(
     const GURL& url,
     content::RenderFrameHost* render_frame_host,
     content::BrowserContext* browser_context);
+
+// Tracks how long the offline page is showing and the reason why it gets
+// closed (e.g. page is refreshed after coming back online or web contents gets
+// destroyed).
+void TrackOfflinePageVisibility(content::RenderFrameHost* render_frame_host);
 
 }  // namespace web_app
 

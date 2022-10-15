@@ -357,6 +357,18 @@
     <message name="IDS_AUTOFILL_CARD_UNMASK_PROMPT_INSTRUCTIONS_EXPIRED_LOCAL_CARD" desc="Text explaining what the user should do in the card unmasking dialog to update an expired card.  Appears specifically for local cards already stored on the device.">
       Enter the expiration date and CVC for <ph name="CREDIT_CARD">$1<ex>Visa - 5679</ex></ph> to update your card details. Once you confirm, your card details will be shared with this site.
     </message>
+    <message name="IDS_AUTOFILL_CARD_UNMASK_PROMPT_CVC_FIELD_TITLE" desc="The name of the field for credit card verification code in the card unmasking dialog. The text field where this is presented can be very narrow, so please prefer to translate this to the most common abbreviated form. [CHAR_LIMIT=4]">
+      CVC
+    </message>
+    <message name="IDS_AUTOFILL_CARD_UNMASK_PROMPT_UPDATE_CARD_MESSAGE_LINK" desc="Text explaining the user they can update their credit card expiration date if they received a new card after the old one expired. The text also contains a link that when tapped displays the form to update the expiration date.">
+      New card? <ph name="BEGIN_LINK">BEGIN_LINK</ph>Enter Card Details<ph name="END_LINK">END_LINK</ph>
+    </message>
+    <message name="IDS_AUTOFILL_CARD_UNMASK_PROMPT_EXPIRATION_DATE_FIELD_TITLE" desc="The name of the field for the expiration date of the credit card in the card unmasking dialog.">
+      Expiration Date
+    </message>
+    <message name="IDS_AUTOFILL_CARD_UNMASK_PROMPT_ERROR_ALERT_TITLE" desc="Text to be displayed as the title of the error alert in the card unmasking dialog.">
+      Something Went Wrong
+    </message>
   </if>
   <if expr="is_ios">
     <if expr="_google_chrome">
@@ -608,6 +620,12 @@
     <message name="IDS_AUTOFILL_VIRTUAL_CARD_NUMBER_SNACKBAR_ACTION_TEXT" desc="Text to be displayed as the snackbar action shown after a virtual card number id autofilled.">
       View card
     </message>
+    <message name="IDS_AUTOFILL_VIRTUAL_CARD_ENROLLMENT_ELIGIBLE_TEXT" desc="Text to be displayed in the Settings page as label for cards that are not enrolled into virtual card number, but are eligible." formatter_data="android_java">
+      Virtual card available
+    </message>
+    <message name="IDS_AUTOFILL_VIRTUAL_CARD_ENROLLED_TEXT" desc="Text to be displayed in the Settings page as label for cards that are enrolled into virtual card number." formatter_data="android_java">
+      Virtual card turned on
+    </message>
   </if>
   <!-- virtual cards related strings - end -->
 
@@ -669,15 +687,17 @@
     See promo code details
   </message>
   <if expr="not is_ios and not is_android">
-    <message name="IDS_AUTOFILL_OFFERS_REMINDER_DESCRIPTION_TEXT" desc="Secondary explanatory text for the Desktop bubble shown on the merchant website when an offer is available to use.">
-      Pay with <ph name="CARD_DETAIL">$1<ex>Visa - 1234</ex></ph> at checkout
-    </message>
     <message name="IDS_AUTOFILL_OFFERS_REMINDER_ICON_TOOLTIP_TEXT" desc="The tooltip text for the offer icon in the location bar.">
       Offer available
     </message>
   </if>
+  <if expr="not is_ios">
+    <message name="IDS_AUTOFILL_OFFERS_REMINDER_DESCRIPTION_TEXT" desc="Secondary explanatory text for the Desktop bubble and Android message shown on the merchant website when an offer is available to use.">
+      Pay with <ph name="CARD_DETAIL">$1<ex>Visa - 1234</ex></ph> at checkout
+    </message>
+  </if>
   <if expr="is_android">
-    <message name="IDS_AUTOFILL_OFFERS_REMINDER_DESCRIPTION_TEXT" desc="Secondary explanatory text for the infobar shown on the merchant website when an offer is available to use." formatter_data="android_java">
+    <message name="IDS_AUTOFILL_OFFERS_REMINDER_INFOBAR_DESCRIPTION_TEXT" desc="Secondary explanatory text for the infobar shown on the merchant website when an offer is available to use." formatter_data="android_java">
       Pay with <ph name="CARD_DETAIL">%1$s<ex>Visa - 1234</ex></ph> at checkout.
     </message>
     <message name="IDS_AUTOFILL_OFFERS_REMINDER_DEEP_LINK_TEXT" desc="Text to be linked to take the user to the offer in the Google Pay app." formatter_data="android_java">
@@ -685,9 +705,6 @@
     </message>
     <message name="IDS_AUTOFILL_OFFERS_MESSAGE_TITLE" desc="Title of the message shown on the merchant website when a GPay-activated card linked offer is available to use.">
       Google Pay offer available
-    </message>
-    <message name="IDS_AUTOFILL_OFFERS_MESSAGE_DESCRIPTION_TEXT" desc="Secondary explanatory text for the message shown on the merchant website when an offer is available to use.">
-      Check out with <ph name="CARD_DETAIL">$1<ex>Visa - 1234</ex></ph> to use offer
     </message>
     <message name="IDS_AUTOFILL_OFFERS_MESSAGE_PRIMARY_BUTTON_TEXT" desc="Text for the primary button of the message shown on the merchant website when a GPay-activated card linked offer is available to use.">
       Details
@@ -706,7 +723,7 @@
     <message name="IDS_AUTOFILL_PROMO_CODE_OFFER_BUTTON_TOOLTIP_CLICKED" desc="The tooltip message for a button containing a copyable promo code in the merchant promo code offer notification bubble on Desktop. This message is shown when the button is hovered over and if the button has been clicked.">
       Copied to clipboard
     </message>
-    <message name="IDS_AUTOFILL_GPAY_PROMO_CODE_OFFERS_REMINDER_VALUE_PROP_TEXT" desc="The first line of the GPay promo ocde notification bubble, consisting of the value prop text and a see details link">
+    <message name="IDS_AUTOFILL_GPAY_PROMO_CODE_OFFERS_REMINDER_VALUE_PROP_TEXT" desc="The first line of the GPay promo code notification bubble, consisting of the value prop text and a see details link">
       <ph name="VALUE_PROP">$1<ex>5% off on shoes. Up to $50.</ex></ph> <ph name="DETAILS">$2<ex>See Details</ex></ph>
     </message>
   </if>

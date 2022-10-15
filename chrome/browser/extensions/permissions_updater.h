@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,17 +26,6 @@ class URLPatternSet;
 // and notifies interested parties of the changes.
 class PermissionsUpdater {
  public:
-  // Platform specific delegate.
-  class Delegate {
-   public:
-    virtual ~Delegate() {}
-    // Platform specific initialization of |extension|'s permissions (does any
-    // necessary filtering of permissions or similar).
-    virtual void InitializePermissions(
-        const Extension* extension,
-        std::unique_ptr<const PermissionSet>* granted_permissions) = 0;
-  };
-
   // If INIT_FLAG_TRANSIENT is specified, this updater is being used for an
   // extension that is not actually installed (and instead is just being
   // initialized e.g. to display the permission warnings in an install prompt).
@@ -72,11 +61,6 @@ class PermissionsUpdater {
   PermissionsUpdater& operator=(const PermissionsUpdater&) = delete;
 
   ~PermissionsUpdater();
-
-  // Sets a delegate to provide platform-specific logic. This should be set
-  // during startup (to ensure all extensions are initialized through the
-  // delegate).
-  static void SetPlatformDelegate(std::unique_ptr<Delegate> delegate);
 
   // Grants |permissions| that were defined as optional in the manifest to
   // |extension|, updating the active permission set and notifying any

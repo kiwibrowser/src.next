@@ -104,7 +104,7 @@ class CORE_EXPORT EmptyChromeClient : public ChromeClient {
   void Show(LocalFrame& frame,
             LocalFrame& opener_frame,
             NavigationPolicy navigation_policy,
-            const gfx::Rect& initial_rect,
+            const mojom::blink::WindowFeatures& window_features,
             bool consumed_user_gesture) override {}
   void DidOverscroll(const gfx::Vector2dF&,
                      const gfx::Vector2dF&,
@@ -113,13 +113,11 @@ class CORE_EXPORT EmptyChromeClient : public ChromeClient {
   void SetOverscrollBehavior(LocalFrame& frame,
                              const cc::OverscrollBehavior&) override {}
   void BeginLifecycleUpdates(LocalFrame& main_frame) override {}
-  void RegisterForDeferredCommitObservation(DeferredCommitObserver*) override {}
-  void UnregisterFromDeferredCommitObservation(
-      DeferredCommitObserver*) override {}
-  void OnDeferCommitsChanged(
-      bool,
-      cc::PaintHoldingReason,
-      absl::optional<cc::PaintHoldingCommitTrigger>) override {}
+  void RegisterForCommitObservation(CommitObserver*) override {}
+  void UnregisterFromCommitObservation(CommitObserver*) override {}
+  void WillCommitCompositorFrame() override {}
+  std::unique_ptr<cc::ScopedPauseRendering> PauseRendering(
+      LocalFrame&) override;
   bool StartDeferringCommits(LocalFrame& main_frame,
                              base::TimeDelta timeout,
                              cc::PaintHoldingReason reason) override;
@@ -129,7 +127,8 @@ class CORE_EXPORT EmptyChromeClient : public ChromeClient {
                      const WebDragData&,
                      DragOperationsMask,
                      const SkBitmap& drag_image,
-                     const gfx::Point& drag_image_offset) override {}
+                     const gfx::Vector2d& cursor_offset,
+                     const gfx::Rect& drag_obj_rect) override {}
   bool AcceptsLoadDrops() const override { return true; }
   bool ShouldReportDetailedMessageForSourceAndSeverity(
       LocalFrame&,
@@ -236,6 +235,7 @@ class CORE_EXPORT EmptyChromeClient : public ChromeClient {
   void SetNeedsUnbufferedInputForDebugger(LocalFrame*, bool) override {}
   void RequestUnbufferedInputEvents(LocalFrame*) override {}
   void SetTouchAction(LocalFrame*, TouchAction) override {}
+  void SetPanAction(LocalFrame*, mojom::blink::PanAction pan_action) override {}
   void DidAssociateFormControlsAfterLoad(LocalFrame*) override {}
   String AcceptLanguages() override;
   void RegisterPopupOpeningObserver(PopupOpeningObserver*) override {}

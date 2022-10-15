@@ -28,6 +28,7 @@
 #include "third_party/blink/renderer/core/svg/graphics/svg_image.h"
 #include "third_party/blink/renderer/core/timing/dom_window_performance.h"
 #include "third_party/blink/renderer/platform/graphics/bitmap_image.h"
+#include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
 #include "third_party/blink/renderer/platform/graphics/paint/float_clip_rect.h"
 #include "third_party/blink/renderer/platform/graphics/paint/geometry_mapper.h"
@@ -59,17 +60,11 @@ bool IsBackgroundImageContentful(const LayoutObject& object,
     return false;
   }
 
-  // Generated images are excluded here, as they are likely to serve for
-  // background purpose.
-
-  // TODO(yoav): Instead of verifying through negating all the other types, it'd
-  // be more readable and safer to verify against generated images directly. Add
-  // `IsGeneratedImage` and test for it directly.
   DCHECK(!image.IsSVGImage());
-  return (image.IsBitmapImage() || image.IsStaticBitmapImage() ||
-          image.IsPlaceholderImage() ||
-          (base::FeatureList::IsEnabled(features::kIncludeBackgroundSVGInLCP) &&
-           image.IsSVGImageForContainer()));
+  if (!base::FeatureList::IsEnabled(features::kIncludeBackgroundSVGInLCP) &&
+      image.IsSVGImageForContainer())
+    return false;
+  return true;
 }
 
 }  // namespace
@@ -110,6 +105,8 @@ void PaintTimingDetector::NotifyPaintFinished() {
   if (window) {
     DOMWindowPerformance::performance(*window)->OnPaintFinished();
   }
+  if (Document* document = frame_view_->GetFrame().GetDocument())
+    document->OnPaintFinished();
 }
 
 // static
@@ -369,9 +366,20 @@ gfx::RectF PaintTimingDetector::CalculateVisualRect(
                                                 ->FirstFragment()
                                                 .LocalBorderBoxProperties(),
                                             float_clip_visual_rect);
-  if (local_root.IsMainFrame()) {
+  if (local_root.IsOutermostMainFrame()) {
     return BlinkSpaceToDIPs(float_clip_visual_rect.Rect());
   }
+
+  // TODO(crbug.com/1346602): Enabling frames from a fenced frame tree to map
+  // to the outermost main frame enables fenced content to learn about its
+  // position in the embedder which can be used to communicate from embedder to
+  // embeddee. For now, return the rect in the local root (not great for remote
+  // frames) to avoid introducing a side channel but this will require design
+  // work to fix in the long term.
+  if (local_root.IsInFencedFrameTree()) {
+    return BlinkSpaceToDIPs(float_clip_visual_rect.Rect());
+  }
+
   // OOPIF. The final rect lives in the iframe's root frame space. We need to
   // project it to the top frame space.
   auto layout_visual_rect =

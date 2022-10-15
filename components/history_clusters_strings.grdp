@@ -30,6 +30,12 @@
   <message name="IDS_HISTORY_CLUSTERS_LOAD_MORE_BUTTON_LABEL" desc="A label for the button that loads more history clusters at the bottom of the history clusters list.">
     Load more
   </message>
+  <message name="IDS_HISTORY_CLUSTERS_NO_RESULTS" desc="Text shown when no history cluster entries are found.">
+    No results
+  </message>
+  <message name="IDS_HISTORY_CLUSTERS_NO_SEARCH_RESULTS" desc="Text used to denote that there are no search results for a search term in history clusters.">
+    No search results
+  </message>
   <message name="IDS_HISTORY_CLUSTERS_OPEN_ALL_IN_TABGROUP" desc="Label of the item in drop-down menu that allows the user to open a group of urls in a tab group."
     formatter_data="android_java">
     Open all in new tab group
@@ -57,6 +63,9 @@
   </message>
   <message name="IDS_HISTORY_CLUSTERS_SAVED_IN_TABGROUP_LABEL" desc="A label indicating whether a history item was added to a tab group.">
     Saved in tab group
+  </message>
+  <message name="IDS_HISTORY_CLUSTERS_SEARCH_PROMPT" desc="A placeholder for the search bar in the side panel.">
+    Search History
   </message>
   <message name="IDS_HISTORY_CLUSTERS_COPY_LINK" desc="Label of the item in drop-down menu that allows the user to copy a link.">
     Copy Link Address

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,8 @@
 #define CHROME_BROWSER_EXTENSIONS_SITE_PERMISSIONS_HELPER_H_
 
 #include "base/memory/raw_ptr.h"
+#include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
+#include "extensions/browser/permissions_manager.h"
 
 class Profile;
 class GURL;
@@ -64,6 +66,13 @@ class SitePermissionsHelper {
                         content::WebContents* web_contents,
                         SitePermissionsHelper::SiteAccess new_access);
 
+  // Updates the user site settings pointed to by `web_contents` to
+  // `site_setting` for `action_ids`.
+  void UpdateUserSiteSettings(
+      const base::flat_set<ToolbarActionsModel::ActionId>& action_ids,
+      content::WebContents* web_contents,
+      PermissionsManager::UserSiteSetting site_setting);
+
   // Returns whether `site_access` option can be selected for `extension` in
   // `url`.
   bool CanSelectSiteAccess(const Extension& extension,
@@ -84,6 +93,14 @@ class SitePermissionsHelper {
   // actually be given access when it tries to run.
   bool HasActiveTabAndCanAccess(const Extension& extension,
                                 const GURL& url) const;
+
+  // Returns true if `extension_id` can show site access requests in the
+  // toolbar.
+  bool ShowAccessRequestsInToolbar(const std::string& extension_id);
+
+  // Sets whether `extenson_id` can show site access requests in the toolbar.
+  void SetShowAccessRequestsInToolbar(const std::string& extension_id,
+                                      bool show_access_requests_in_toolbar);
 
  private:
   raw_ptr<Profile> profile_;

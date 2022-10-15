@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,6 +27,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/task_runner_util.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -320,18 +321,16 @@ void WebstoreInstaller::Start() {
   }
   InstallVerifier::Get(profile_)->AddProvisional(ids);
 
-  std::string name;
-  if (!approval_->manifest->available_values().GetString(manifest_keys::kName,
-                                                         &name)) {
+  const std::string* name =
+      approval_->manifest->available_values().GetDict().FindString(
+          manifest_keys::kName);
+  if (!name) {
     NOTREACHED();
   }
   extensions::InstallTracker* tracker =
       extensions::InstallTrackerFactory::GetForBrowserContext(profile_);
   extensions::InstallObserver::ExtensionInstallParams params(
-      id_,
-      name,
-      approval_->installing_icon,
-      approval_->manifest->is_app(),
+      id_, *name, approval_->installing_icon, approval_->manifest->is_app(),
       approval_->manifest->is_platform_app());
   tracker->OnBeginExtensionInstall(params);
 

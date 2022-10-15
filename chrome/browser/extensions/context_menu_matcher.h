@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,6 +48,8 @@ class ContextMenuMatcher {
 
   ContextMenuMatcher(const ContextMenuMatcher&) = delete;
   ContextMenuMatcher& operator=(const ContextMenuMatcher&) = delete;
+
+  ~ContextMenuMatcher();
 
   // This is a helper function to append items for one particular extension.
   // The |index| parameter is used for assigning id's, and is incremented for

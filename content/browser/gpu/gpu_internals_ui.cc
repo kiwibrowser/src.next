@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -425,6 +425,9 @@ base::Value::List GetDisplayInfo() {
       }
     }
     display_info.Append(display::BuildGpuInfoEntry(
+        "Color volume", skia::SkColorSpacePrimariesToString(
+                            display.color_spaces().GetPrimaries())));
+    display_info.Append(display::BuildGpuInfoEntry(
         "SDR white level in nits",
         base::NumberToString(display.color_spaces().GetSDRMaxLuminanceNits())));
     display_info.Append(display::BuildGpuInfoEntry(
@@ -720,10 +723,8 @@ class GpuMessageHandler
   void OnCallAsync(const base::Value::List& list);
 
   // Submessages dispatched from OnCallAsync
-  std::unique_ptr<base::Value> OnRequestClientInfo(
-      std::vector<base::Value> list);
-  std::unique_ptr<base::ListValue> OnRequestLogMessages(
-      std::vector<base::Value> list);
+  base::Value::Dict OnRequestClientInfo();
+  base::Value::List OnRequestLogMessages();
 
  private:
   // True if observing the GpuDataManager (re-attaching as observer would
@@ -760,38 +761,27 @@ void GpuMessageHandler::RegisterMessages() {
 }
 
 void GpuMessageHandler::OnCallAsync(const base::Value::List& args_list) {
-  DCHECK_GE(args_list.size(), static_cast<size_t>(2));
+  DCHECK_GE(args_list.size(), 2u);
+  DCHECK(args_list[1].is_string()) << "submessage isn't string";
+
   // unpack args into requestId, submessage and submessageArgs
   const base::Value& requestId = args_list[0];
   std::string submessage;
-  if (args_list[1].is_string())
-    submessage = args_list[1].GetString();
-  else
-    DCHECK(false) << "submessage isn't string";
-
-  std::vector<base::Value> submessageArgs;
-  for (size_t i = 2; i < args_list.size(); ++i) {
-    submessageArgs.push_back(args_list[i].Clone());
-  }
+  submessage = args_list[1].GetString();
 
   // call the submessage handler
-  std::unique_ptr<base::Value> ret;
   if (submessage == "requestClientInfo") {
-    ret = OnRequestClientInfo(std::move(submessageArgs));
+    web_ui()->CallJavascriptFunctionUnsafe("browserBridge.onCallAsyncReply",
+                                           requestId, OnRequestClientInfo());
   } else if (submessage == "requestLogMessages") {
-    ret = OnRequestLogMessages(std::move(submessageArgs));
+    web_ui()->CallJavascriptFunctionUnsafe("browserBridge.onCallAsyncReply",
+                                           requestId, OnRequestLogMessages());
   } else {  // unrecognized submessage
     NOTREACHED();
-    return;
-  }
 
-  // call BrowserBridge.onCallAsyncReply with result
-  if (ret) {
-    web_ui()->CallJavascriptFunctionUnsafe("browserBridge.onCallAsyncReply",
-                                           requestId, *ret);
-  } else {
     web_ui()->CallJavascriptFunctionUnsafe("browserBridge.onCallAsyncReply",
                                            requestId);
+    return;
   }
 }
 
@@ -818,8 +808,7 @@ void GpuMessageHandler::OnBrowserBridgeInitialized(
   OnGpuInfoUpdate();
 }
 
-std::unique_ptr<base::Value> GpuMessageHandler::OnRequestClientInfo(
-    std::vector<base::Value> args) {
+base::Value::Dict GpuMessageHandler::OnRequestClientInfo() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   base::Value::Dict dict;
@@ -839,11 +828,10 @@ std::unique_ptr<base::Value> GpuMessageHandler::OnRequestClientInfo(
            std::string("Skia/" STRINGIZE(SK_MILESTONE) " " SKIA_COMMIT_HASH));
   dict.Set("revision_identifier", GPU_LISTS_VERSION);
 
-  return std::make_unique<base::Value>(std::move(dict));
+  return dict;
 }
 
-std::unique_ptr<base::ListValue> GpuMessageHandler::OnRequestLogMessages(
-    std::vector<base::Value> args) {
+base::Value::List GpuMessageHandler::OnRequestLogMessages() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   return GpuDataManagerImpl::GetInstance()->GetLogMessages();
@@ -900,7 +888,7 @@ void GpuMessageHandler::OnGpuInfoUpdate() {
 
   // Send GPU Info to javascript.
   web_ui()->CallJavascriptFunctionUnsafe("browserBridge.onGpuInfoUpdate",
-                                         base::Value(std::move(gpu_info_val)));
+                                         std::move(gpu_info_val));
 }
 
 void GpuMessageHandler::OnGpuSwitched(gl::GpuPreference active_gpu_heuristic) {

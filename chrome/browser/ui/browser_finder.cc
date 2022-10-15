@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "components/tab_groups/tab_group_id.h"
 #include "content/public/browser/navigation_controller.h"
+#include "ui/base/interaction/element_identifier.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 
@@ -132,7 +133,7 @@ Browser* FindBrowserMatching(const T& begin,
     if (BrowserMatches(*i, profile, window_feature, match_types, display_id))
       return *i;
   }
-  return NULL;
+  return nullptr;
 }
 
 Browser* FindBrowserWithTabbedOrAnyType(
@@ -143,7 +144,7 @@ Browser* FindBrowserWithTabbedOrAnyType(
     int64_t display_id = display::kInvalidDisplayId) {
   BrowserList* browser_list_impl = BrowserList::GetInstance();
   if (!browser_list_impl)
-    return NULL;
+    return nullptr;
   uint32_t match_types = kMatchAny;
   if (match_tabbed)
     match_types |= kMatchNormal;
@@ -219,17 +220,17 @@ Browser* FindBrowserWithID(SessionID desired_id) {
     if (browser->session_id() == desired_id)
       return browser;
   }
-  return NULL;
+  return nullptr;
 }
 
 Browser* FindBrowserWithWindow(gfx::NativeWindow window) {
   if (!window)
-    return NULL;
+    return nullptr;
   for (auto* browser : *BrowserList::GetInstance()) {
     if (browser->window() && browser->window()->GetNativeWindow() == window)
       return browser;
   }
-  return NULL;
+  return nullptr;
 }
 
 Browser* FindBrowserWithActiveWindow() {
@@ -257,6 +258,15 @@ Browser* FindBrowserWithGroup(tab_groups::TabGroupId group, Profile* profile) {
   return nullptr;
 }
 
+Browser* FindBrowserWithUiElementContext(ui::ElementContext context) {
+  for (auto* browser : *BrowserList::GetInstance()) {
+    if (browser->window()->GetElementContext() == context) {
+      return browser;
+    }
+  }
+  return nullptr;
+}
+
 Browser* FindLastActiveWithProfile(Profile* profile) {
   BrowserList* list = BrowserList::GetInstance();
   // We are only interested in last active browsers, so we don't fall back to
@@ -270,7 +280,7 @@ Browser* FindLastActive() {
   BrowserList* browser_list_impl = BrowserList::GetInstance();
   if (browser_list_impl)
     return browser_list_impl->GetLastActive();
-  return NULL;
+  return nullptr;
 }
 
 size_t GetTotalBrowserCount() {

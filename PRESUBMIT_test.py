@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -799,7 +799,7 @@ class IncludeGuardTest(unittest.TestCase):
           '#ifndef CHROME_ODL_H_',
           '#define CHROME_ODL_H_',
           '#endif  // CHROME_ODL_H_',
-        ]),
+        ], action='M'),
         # Using a Blink style include guard outside Blink is wrong.
         MockAffectedFile('content/NotInBlink.h', [
           '#ifndef NotInBlink_h',
@@ -821,8 +821,9 @@ class IncludeGuardTest(unittest.TestCase):
           'struct McBoatFace;',
           '#endif  // WrongInBlink_h',
         ]),
-        # Using a bad include guard in Blink is not accepted even if
-        # it's an old file.
+        # Using a bad include guard in Blink is not supposed to be accepted even
+        # if it's an old file. However the current presubmit has accepted this
+        # for a while.
         MockAffectedFile('third_party/blink/StillInBlink.h', [
           '// New contents',
           '#ifndef AcceptedInBlink_h',
@@ -835,7 +836,7 @@ class IncludeGuardTest(unittest.TestCase):
           '#define AcceptedInBlink_h',
           'struct McBoatFace;',
           '#endif  // AcceptedInBlink_h',
-        ]),
+        ], action='M'),
         # Using a non-Chromium include guard in third_party
         # (outside blink) is accepted.
         MockAffectedFile('third_party/foo/some_file.h', [
@@ -935,7 +936,7 @@ class AccessibilityRelnotesFieldTest(unittest.TestCase):
 
   # The relnotes footer is not required for changes which do not touch any
   # accessibility directories.
-  def testIgnoresNonAccesssibilityCode(self):
+  def testIgnoresNonAccessibilityCode(self):
     mock_input_api = MockInputApi()
     mock_output_api = MockOutputApi()
 
@@ -1031,7 +1032,7 @@ class AccessibilityRelnotesFieldTest(unittest.TestCase):
         MockAffectedFile('ui/accessibility/foo.bar', ['']),
     ]
     mock_input_api.change.DescriptionText = lambda : ('Description:\n' +
-        'ax-relnotes= this is a valid format for accessibiliy relnotes')
+        'ax-relnotes= this is a valid format for accessibility relnotes')
 
     msgs = PRESUBMIT.CheckAccessibilityRelnotesField(
         mock_input_api, mock_output_api)
@@ -1643,13 +1644,13 @@ class LogUsageTest(unittest.TestCase):
       MockAffectedFile('HasTooLongTag.java', [
         'import org.chromium.base.Log;',
         'some random stuff',
-        'private static final String TAG = "21_charachers_long___";',
+        'private static final String TAG = "21_characters_long___";',
         'Log.d(TAG, "foo");',
       ]),
       MockAffectedFile('HasTooLongTagWithNoLogCallsInDiff.java', [
         'import org.chromium.base.Log;',
         'some random stuff',
-        'private static final String TAG = "21_charachers_long___";',
+        'private static final String TAG = "21_characters_long___";',
       ]),
     ]
 
@@ -2440,7 +2441,7 @@ class IpcSecurityOwnerTest(_SecurityOwnersTestCase):
         'Review from an owner in ipc/SECURITY_OWNERS is required for the '
         'following newly-added files:', results[0].message)
 
-  def testmissingSecurityApprovalAtRealCommit(self):
+  def testMissingSecurityApprovalAtRealCommit(self):
     mock_input_api = self._createMockInputApi()
     new_owners_file_path = mock_input_api.os_path.join(
         'services', 'goat', 'public', 'OWNERS')
@@ -2963,6 +2964,18 @@ class NewImagesWarningTest(unittest.TestCase):
     results = PRESUBMIT._CheckNewImagesWarning(mock_input_api, MockOutputApi())
     self.assertEqual(0, len(results))
 
+class ProductIconsTest(unittest.TestCase):
+  def test(self):
+    mock_input_api = MockInputApi()
+    mock_input_api.files = [
+      MockFile('components/vector_icons/google_jetpack.icon', []),
+      MockFile('components/vector_icons/generic_jetpack.icon', []),
+    ]
+
+    results = PRESUBMIT.CheckNoProductIconsAddedToPublicRepo(mock_input_api, MockOutputApi())
+    self.assertEqual(1, len(results))
+    self.assertEqual(1, len(results[0].items))
+    self.assertTrue('google_jetpack.icon' in results[0].items[0])
 
 class CheckUniquePtrTest(unittest.TestCase):
   def testTruePositivesNullptr(self):
@@ -3297,8 +3310,7 @@ class StringTest(unittest.TestCase):
                        self.NEW_GRD_CONTENTS1, action='M'),
       MockAffectedFile('part.grdp', self.NEW_GRDP_CONTENTS1,
                        self.NEW_GRDP_CONTENTS1, action='M')])
-    warnings = PRESUBMIT.CheckStrings(input_api,
-                                                      MockOutputApi())
+    warnings = PRESUBMIT.CheckStrings(input_api, MockOutputApi())
     self.assertEqual(0, len(warnings))
 
     # Add two new strings. Should have two warnings.
@@ -3307,8 +3319,7 @@ class StringTest(unittest.TestCase):
                        self.NEW_GRD_CONTENTS1, action='M'),
       MockAffectedFile('part.grdp', self.NEW_GRDP_CONTENTS2,
                        self.NEW_GRDP_CONTENTS1, action='M')])
-    warnings = PRESUBMIT.CheckStrings(input_api,
-                                                      MockOutputApi())
+    warnings = PRESUBMIT.CheckStrings(input_api, MockOutputApi())
     self.assertEqual(1, len(warnings))
     self.assertEqual(self.GENERATE_SIGNATURES_MESSAGE, warnings[0].message)
     self.assertEqual('error', warnings[0].type)
@@ -3323,8 +3334,7 @@ class StringTest(unittest.TestCase):
                        self.OLD_GRD_CONTENTS, action='M'),
       MockAffectedFile('part.grdp', self.NEW_GRDP_CONTENTS2,
                        self.OLD_GRDP_CONTENTS, action='M')])
-    warnings = PRESUBMIT.CheckStrings(input_api,
-                                                      MockOutputApi())
+    warnings = PRESUBMIT.CheckStrings(input_api, MockOutputApi())
     self.assertEqual(1, len(warnings))
     self.assertEqual('error', warnings[0].type)
     self.assertEqual(self.GENERATE_SIGNATURES_MESSAGE, warnings[0].message)
@@ -3389,8 +3399,7 @@ class StringTest(unittest.TestCase):
         MockAffectedFile(
             os.path.join('test_grd', 'IDS_TEST1.png'), 'binary', action='A')
     ])
-    warnings = PRESUBMIT.CheckStrings(input_api,
-                                                      MockOutputApi())
+    warnings = PRESUBMIT.CheckStrings(input_api, MockOutputApi())
     self.assertEqual(2, len(warnings))
     self.assertEqual('error', warnings[0].type)
     self.assertEqual(self.DO_NOT_UPLOAD_PNG_MESSAGE, warnings[0].message)
@@ -3426,8 +3435,7 @@ class StringTest(unittest.TestCase):
             os.path.join('part_grdp', 'IDS_PART_TEST1.png'), 'binary',
             action='A')
     ])
-    warnings = PRESUBMIT.CheckStrings(input_api,
-                                                      MockOutputApi())
+    warnings = PRESUBMIT.CheckStrings(input_api, MockOutputApi())
     self.assertEqual(2, len(warnings))
     self.assertEqual('error', warnings[0].type)
     self.assertEqual(self.DO_NOT_UPLOAD_PNG_MESSAGE, warnings[0].message)
@@ -3473,8 +3481,7 @@ class StringTest(unittest.TestCase):
             'binary',
             action='A'),
     ])
-    warnings = PRESUBMIT.CheckStrings(input_api,
-                                                      MockOutputApi())
+    warnings = PRESUBMIT.CheckStrings(input_api, MockOutputApi())
     self.assertEqual([], warnings)
 
   def testScreenshotsRemovedWithSha1(self):
@@ -3501,8 +3508,7 @@ class StringTest(unittest.TestCase):
         MockFile(os.path.join('part_grdp', 'IDS_PART_TEST2.png.sha1'),
                  'binary', '')
     ])
-    warnings = PRESUBMIT.CheckStrings(input_api,
-                                                      MockOutputApi())
+    warnings = PRESUBMIT.CheckStrings(input_api, MockOutputApi())
     self.assertEqual(1, len(warnings))
     self.assertEqual('error', warnings[0].type)
     self.assertEqual(self.REMOVE_SIGNATURES_MESSAGE, warnings[0].message)
@@ -3542,8 +3548,7 @@ class StringTest(unittest.TestCase):
             'old_contents',
             action='D')
     ])
-    warnings = PRESUBMIT.CheckStrings(input_api,
-                                                      MockOutputApi())
+    warnings = PRESUBMIT.CheckStrings(input_api, MockOutputApi())
     self.assertEqual(1, len(warnings))
     self.assertEqual('error', warnings[0].type)
     self.assertEqual(self.REMOVE_SIGNATURES_MESSAGE, warnings[0].message)
@@ -3582,8 +3587,7 @@ class StringTest(unittest.TestCase):
             'binary',
             action='D')
     ])
-    warnings = PRESUBMIT.CheckStrings(input_api,
-                                                      MockOutputApi())
+    warnings = PRESUBMIT.CheckStrings(input_api, MockOutputApi())
     self.assertEqual([], warnings)
 
   def testIcuSyntax(self):
@@ -3819,7 +3823,7 @@ class DISABLETypoInTest(unittest.TestCase):
           msg=('expected foo_unittest.cc in message but got %s in test %s' %
                (results[0].message, test)))
 
-  def testIngoreNotTestFiles(self):
+  def testIgnoreNotTestFiles(self):
     mock_input_api = MockInputApi()
     mock_input_api.files = [
         MockFile('some/path/foo.cc', 'TEST_F(FoobarTest, DISABLE_Foo)'),
@@ -3829,7 +3833,7 @@ class DISABLETypoInTest(unittest.TestCase):
                                                    MockOutputApi())
     self.assertEqual(0, len(results))
 
-  def testIngoreDeletedFiles(self):
+  def testIgnoreDeletedFiles(self):
     mock_input_api = MockInputApi()
     mock_input_api.files = [
         MockFile('some/path/foo.cc', 'TEST_F(FoobarTest, Foo)', action='D'),
@@ -4080,7 +4084,7 @@ class CheckForUseOfChromeAppsDeprecationsTest(unittest.TestCase):
     ]
     mock_output_api = MockOutputApi()
     errors = PRESUBMIT.CheckForUseOfChromeAppsDeprecations(mock_input_api,
-                                                     mock_output_api)
+                                                           mock_output_api)
     self.assertEqual(1, len(errors))
     self.assertTrue( self.ERROR_MSG_PIECE in errors[0].message)
     self.assertTrue( 'foo.NMF' in errors[0].message)
@@ -4103,7 +4107,7 @@ class CheckForUseOfChromeAppsDeprecationsTest(unittest.TestCase):
     ]
     mock_output_api = MockOutputApi()
     errors = PRESUBMIT.CheckForUseOfChromeAppsDeprecations(mock_input_api,
-                                                     mock_output_api)
+                                                           mock_output_api)
     self.assertEqual(1, len(errors))
     self.assertTrue( self.ERROR_MSG_PIECE in errors[0].message)
     self.assertTrue( 'manifest.json' in errors[0].message)
@@ -4126,7 +4130,7 @@ class CheckForUseOfChromeAppsDeprecationsTest(unittest.TestCase):
     ]
     mock_output_api = MockOutputApi()
     errors = PRESUBMIT.CheckForUseOfChromeAppsDeprecations(mock_input_api,
-                                                     mock_output_api)
+                                                           mock_output_api)
     self.assertEqual(0, len(errors))
 
   def testWarningPPAPI(self):
@@ -4147,7 +4151,7 @@ class CheckForUseOfChromeAppsDeprecationsTest(unittest.TestCase):
     ]
     mock_output_api = MockOutputApi()
     errors = PRESUBMIT.CheckForUseOfChromeAppsDeprecations(mock_input_api,
-                                                     mock_output_api)
+                                                           mock_output_api)
     self.assertEqual(1, len(errors))
     self.assertTrue( self.ERROR_MSG_PIECE in errors[0].message)
     self.assertTrue( 'foo.hpp' in errors[0].message)
@@ -4170,7 +4174,7 @@ class CheckForUseOfChromeAppsDeprecationsTest(unittest.TestCase):
     ]
     mock_output_api = MockOutputApi()
     errors = PRESUBMIT.CheckForUseOfChromeAppsDeprecations(mock_input_api,
-                                                     mock_output_api)
+                                                           mock_output_api)
     self.assertEqual(0, len(errors))
 
 class CheckDeprecationOfPreferencesTest(unittest.TestCase):
@@ -4301,7 +4305,7 @@ class CheckDeprecationOfPreferencesTest(unittest.TestCase):
         'Discovered possible removal of preference registrations' in
         errors[0].message)
 
-  # Check that the presubmit fails if a marker line in brower_prefs.cc is
+  # Check that the presubmit fails if a marker line in browser_prefs.cc is
   # deleted.
   def testDeletedMarkerRaisesError(self):
     mock_input_api = MockInputApi()
@@ -4325,40 +4329,31 @@ class CheckDeprecationOfPreferencesTest(unittest.TestCase):
 
 class MPArchApiUsage(unittest.TestCase):
   def _assert_notify(
-      self, expected_uses, msg, local_path, new_contents):
+      self, expected_uses, expect_fyi, msg, local_path, new_contents):
     mock_input_api = MockInputApi()
     mock_output_api = MockOutputApi()
     mock_input_api.files = [
         MockFile(local_path, new_contents),
     ]
     result = PRESUBMIT.CheckMPArchApiUsage(mock_input_api, mock_output_api)
+
+    watchlist_email = ('mparch-reviews+watchfyi@chromium.org'
+        if expect_fyi else 'mparch-reviews+watch@chromium.org')
     self.assertEqual(
-        bool(expected_uses),
-        'mparch-reviews+watch@chromium.org' in mock_output_api.more_cc,
+        bool(expected_uses or expect_fyi),
+        watchlist_email in mock_output_api.more_cc,
         msg)
     if expected_uses:
         self.assertEqual(1, len(result), msg)
         self.assertEqual(result[0].type, 'notify', msg)
         self.assertEqual(sorted(result[0].items), sorted(expected_uses), msg)
+    else:
+        self.assertEqual(0, len(result), msg)
 
   def testNotify(self):
     self._assert_notify(
-        ['WebContentsObserver', 'WebContentsUserData'],
-        'Introduce WCO and WCUD',
-        'chrome/my_feature.h',
-        ['class MyFeature',
-         '    : public content::WebContentsObserver,',
-         '      public content::WebContentsUserData<MyFeature> {};',
-        ])
-    self._assert_notify(
-        ['DidFinishNavigation'],
-        'Introduce WCO override',
-        'chrome/my_feature.h',
-        ['void DidFinishNavigation(',
-         '    content::NavigationHandle* navigation_handle) override;',
-        ])
-    self._assert_notify(
         ['IsInMainFrame'],
+        False,
         'Introduce IsInMainFrame',
         'chrome/my_feature.cc',
         ['void DoSomething(content::NavigationHandle* navigation_handle) {',
@@ -4368,6 +4363,7 @@ class MPArchApiUsage(unittest.TestCase):
         ])
     self._assert_notify(
         ['FromRenderFrameHost'],
+        False,
         'Introduce WC::FromRenderFrameHost',
         'chrome/my_feature.cc',
         ['void DoSomething(content::RenderFrameHost* rfh) {',
@@ -4376,9 +4372,29 @@ class MPArchApiUsage(unittest.TestCase):
          '}',
         ])
 
+  def testFyi(self):
+    self._assert_notify(
+        [],
+        True,
+        'Introduce WCO and WCUD',
+        'chrome/my_feature.h',
+        ['class MyFeature',
+         '    : public content::WebContentsObserver,',
+         '      public content::WebContentsUserData<MyFeature> {};',
+        ])
+    self._assert_notify(
+        [],
+        True,
+        'Introduce WCO override',
+        'chrome/my_feature.h',
+        ['void DidFinishNavigation(',
+         '    content::NavigationHandle* navigation_handle) override;',
+        ])
+
   def testNoNotify(self):
     self._assert_notify(
         [],
+        False,
         'No API usage',
         'chrome/my_feature.cc',
         ['void DoSomething() {',
@@ -4389,6 +4405,7 @@ class MPArchApiUsage(unittest.TestCase):
     # to share a name with a content API.
     self._assert_notify(
         [],
+        False,
         'Uninteresting top level directory',
         'third_party/my_dep/my_code.cc',
         ['bool HasParent(Node* node) {',
@@ -4398,10 +4415,11 @@ class MPArchApiUsage(unittest.TestCase):
     # We're not concerned with usage in test code.
     self._assert_notify(
         [],
+        False,
         'Usage in test code',
         'chrome/my_feature_unittest.cc',
         ['TEST_F(MyFeatureTest, DoesSomething) {',
-         '  EXPECT_TRUE(web_contents()->GetMainFrame());',
+         '  EXPECT_TRUE(rfh()->GetMainFrame());',
          '}',
         ])
 

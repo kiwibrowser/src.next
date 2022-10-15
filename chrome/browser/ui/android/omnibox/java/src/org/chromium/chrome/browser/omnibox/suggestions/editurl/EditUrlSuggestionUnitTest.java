@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -293,8 +293,8 @@ public final class EditUrlSuggestionUnitTest {
         actions.get(ACTION_COPY).callback.run();
         verify(mClipboardManager, times(1)).setPrimaryClip(argument.capture());
 
-        ClipData clip = new ClipData(
-                "url", new String[] {"text/x-moz-url"}, new ClipData.Item(WEB_URL.getSpec()));
+        ClipData clip = new ClipData("url", new String[] {"text/x-moz-url", "text/plain"},
+                new ClipData.Item(WEB_URL.getSpec()));
 
         // ClipData doesn't implement equals, but their string representations matching should be
         // good enough.

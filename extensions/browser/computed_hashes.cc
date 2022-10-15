@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -134,7 +134,7 @@ absl::optional<ComputedHashes> ComputedHashes::CreateFromFile(
   }
 
   ComputedHashes::Data data;
-  for (const base::Value& file_hash : all_hashes->GetListDeprecated()) {
+  for (const base::Value& file_hash : all_hashes->GetList()) {
     if (!file_hash.is_dict()) {
       *status = Status::PARSE_FAILED;
       return absl::nullopt;
@@ -170,7 +170,7 @@ absl::optional<ComputedHashes> ComputedHashes::CreateFromFile(
         base::FilePath::FromUTF8Unsafe(*relative_path_utf8);
     std::vector<std::string> hashes;
 
-    for (const base::Value& value : block_hashes->GetListDeprecated()) {
+    for (const base::Value& value : block_hashes->GetList()) {
       if (!value.is_string()) {
         *status = Status::PARSE_FAILED;
         return absl::nullopt;

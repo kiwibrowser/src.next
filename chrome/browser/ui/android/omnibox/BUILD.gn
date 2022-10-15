@@ -1,4 +1,4 @@
-# Copyright 2021 The Chromium Authors. All rights reserved.
+# Copyright 2021 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -26,6 +26,7 @@ android_library("java") {
     "java/src/org/chromium/chrome/browser/omnibox/LocationBarPhone.java",
     "java/src/org/chromium/chrome/browser/omnibox/LocationBarTablet.java",
     "java/src/org/chromium/chrome/browser/omnibox/NewTabPageDelegate.java",
+    "java/src/org/chromium/chrome/browser/omnibox/OmniboxFeatures.java",
     "java/src/org/chromium/chrome/browser/omnibox/OmniboxFocusReason.java",
     "java/src/org/chromium/chrome/browser/omnibox/OmniboxPrerender.java",
     "java/src/org/chromium/chrome/browser/omnibox/OmniboxStub.java",
@@ -59,6 +60,7 @@ android_library("java") {
     "java/src/org/chromium/chrome/browser/omnibox/suggestions/AutocompleteDelegate.java",
     "java/src/org/chromium/chrome/browser/omnibox/suggestions/AutocompleteMediator.java",
     "java/src/org/chromium/chrome/browser/omnibox/suggestions/CachedZeroSuggestionsManager.java",
+    "java/src/org/chromium/chrome/browser/omnibox/suggestions/DropdownCommonProperties.java",
     "java/src/org/chromium/chrome/browser/omnibox/suggestions/DropdownItemProcessor.java",
     "java/src/org/chromium/chrome/browser/omnibox/suggestions/DropdownItemViewInfo.java",
     "java/src/org/chromium/chrome/browser/omnibox/suggestions/DropdownItemViewInfoListBuilder.java",
@@ -140,6 +142,7 @@ android_library("java") {
     "//base:jni_java",
     "//build/android:build_java",
     "//chrome/browser/android/lifecycle:java",
+    "//chrome/browser/back_press/android:java",
     "//chrome/browser/browser_controls/android:java",
     "//chrome/browser/commerce/merchant_viewer/android:java",
     "//chrome/browser/device:java",
@@ -330,6 +333,7 @@ android_resources("java_resources") {
     "java/res/layout/url_action_container.xml",
     "java/res/values/colors.xml",
     "java/res/values/dimens.xml",
+    "java/res/values/drawables.xml",
     "java/res/values/ids.xml",
     "java/res/values/styles.xml",
   ]
@@ -401,6 +405,7 @@ robolectric_library("junit") {
     "java/src/org/chromium/chrome/browser/omnibox/suggestions/DropdownItemViewInfoListBuilderUnitTest.java",
     "java/src/org/chromium/chrome/browser/omnibox/suggestions/DropdownItemViewInfoListManagerUnitTest.java",
     "java/src/org/chromium/chrome/browser/omnibox/suggestions/FaviconFetcherUnitTest.java",
+    "java/src/org/chromium/chrome/browser/omnibox/suggestions/OmniboxSuggestionsDropdownUnitTest.java",
     "java/src/org/chromium/chrome/browser/omnibox/suggestions/answer/AnswerSuggestionProcessorUnitTest.java",
     "java/src/org/chromium/chrome/browser/omnibox/suggestions/answer/AnswerTextNewLayoutUnitTest.java",
     "java/src/org/chromium/chrome/browser/omnibox/suggestions/base/BaseSuggestionProcessorUnitTest.java",
@@ -411,6 +416,7 @@ robolectric_library("junit") {
     "java/src/org/chromium/chrome/browser/omnibox/suggestions/base/SimpleVerticalLayoutViewTest.java",
     "java/src/org/chromium/chrome/browser/omnibox/suggestions/base/SuggestionSpannableUnitTest.java",
     "java/src/org/chromium/chrome/browser/omnibox/suggestions/basic/BasicSuggestionProcessorUnitTest.java",
+    "java/src/org/chromium/chrome/browser/omnibox/suggestions/carousel/BaseCarouselSuggestionProcessorUnitTest.java",
     "java/src/org/chromium/chrome/browser/omnibox/suggestions/carousel/BaseCarouselSuggestionSelectionManagerUnitTest.java",
     "java/src/org/chromium/chrome/browser/omnibox/suggestions/carousel/BaseCarouselSuggestionViewBinderUnitTest.java",
     "java/src/org/chromium/chrome/browser/omnibox/suggestions/clipboard/ClipboardSuggestionProcessorUnitTest.java",
@@ -461,6 +467,7 @@ robolectric_library("junit") {
     "//components/omnibox/browser:junit_test_support",
     "//components/permissions/android:java",
     "//components/search_engines/android:java",
+    "//components/security_state/core:security_state_enums_java",
     "//components/signin/public/android:java",
     "//components/signin/public/android:signin_java_test_support",
     "//content/public/android:content_java",
@@ -471,12 +478,14 @@ robolectric_library("junit") {
     "//third_party/androidx:androidx_annotation_annotation_java",
     "//third_party/androidx:androidx_recyclerview_recyclerview_java",
     "//third_party/androidx:androidx_test_core_java",
+    "//third_party/androidx:androidx_test_ext_junit_java",
     "//third_party/androidx:androidx_test_runner_java",
     "//third_party/hamcrest:hamcrest_core_java",
     "//third_party/hamcrest:hamcrest_library_java",
     "//third_party/junit",
     "//third_party/metrics_proto:metrics_proto_java",
     "//third_party/mockito:mockito_java",
+    "//ui/android:ui_java_test_support",
     "//ui/android:ui_no_recycler_view_java",
     "//ui/android:ui_recycler_view_java",
     "//url:gurl_java",

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -139,7 +139,7 @@ class ExtensionUserScriptLoader : public UserScriptLoader {
     // Deserializes `value` into a UserScriptList and calls `callback` with that
     // list.
     void OnDynamicScriptsReadFromStorage(DynamicScriptsReadCallback callback,
-                                         std::unique_ptr<base::Value> value);
+                                         absl::optional<base::Value> value);
 
     raw_ptr<content::BrowserContext> browser_context_;
 

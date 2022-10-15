@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -102,6 +102,18 @@ void OfflineItemModel::SetWasUINotified(bool was_ui_notified) {
   OfflineItemModelData* data =
       manager_->GetOrCreateOfflineItemModelData(offline_item_->id);
   data->was_ui_notified_ = was_ui_notified;
+}
+
+bool OfflineItemModel::WasActionedOn() const {
+  const OfflineItemModelData* data =
+      manager_->GetOrCreateOfflineItemModelData(offline_item_->id);
+  return data->actioned_on_;
+}
+
+void OfflineItemModel::SetActionedOn(bool actioned_on) {
+  OfflineItemModelData* data =
+      manager_->GetOrCreateOfflineItemModelData(offline_item_->id);
+  data->actioned_on_ = actioned_on;
 }
 
 base::FilePath OfflineItemModel::GetFileNameToReportUser() const {

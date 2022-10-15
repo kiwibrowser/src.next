@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -97,8 +97,8 @@
 #include "net/cookies/cookie_store_test_helpers.h"
 #include "net/cookies/test_cookie_access_delegate.h"
 #include "net/disk_cache/disk_cache.h"
-#include "net/dns/host_resolver_results.h"
 #include "net/dns/mock_host_resolver.h"
+#include "net/dns/public/host_resolver_results.h"
 #include "net/dns/public/secure_dns_policy.h"
 #include "net/http/http_byte_range.h"
 #include "net/http/http_cache.h"
@@ -1081,8 +1081,8 @@ LoadTimingInfo NormalLoadTimingInfo(base::TimeTicks now,
 
   LoadTimingInfo::ConnectTiming& connect_timing = load_timing.connect_timing;
   if (connect_time_flags & CONNECT_TIMING_HAS_DNS_TIMES) {
-    connect_timing.dns_start = now + base::Days(3);
-    connect_timing.dns_end = now + base::Days(4);
+    connect_timing.domain_lookup_start = now + base::Days(3);
+    connect_timing.domain_lookup_end = now + base::Days(4);
   }
   connect_timing.connect_start = now + base::Days(5);
   if (connect_time_flags & CONNECT_TIMING_HAS_SSL_TIMES) {
@@ -1161,10 +1161,10 @@ TEST_F(URLRequestLoadTimingTest, InterceptLoadTiming) {
             load_timing_result.proxy_resolve_start);
   EXPECT_EQ(job_load_timing.proxy_resolve_end,
             load_timing_result.proxy_resolve_end);
-  EXPECT_EQ(job_load_timing.connect_timing.dns_start,
-            load_timing_result.connect_timing.dns_start);
-  EXPECT_EQ(job_load_timing.connect_timing.dns_end,
-            load_timing_result.connect_timing.dns_end);
+  EXPECT_EQ(job_load_timing.connect_timing.domain_lookup_start,
+            load_timing_result.connect_timing.domain_lookup_start);
+  EXPECT_EQ(job_load_timing.connect_timing.domain_lookup_end,
+            load_timing_result.connect_timing.domain_lookup_end);
   EXPECT_EQ(job_load_timing.connect_timing.connect_start,
             load_timing_result.connect_timing.connect_start);
   EXPECT_EQ(job_load_timing.connect_timing.connect_end,
@@ -1192,10 +1192,10 @@ TEST_F(URLRequestLoadTimingTest, InterceptLoadTimingProxy) {
             load_timing_result.proxy_resolve_start);
   EXPECT_EQ(job_load_timing.proxy_resolve_end,
             load_timing_result.proxy_resolve_end);
-  EXPECT_EQ(job_load_timing.connect_timing.dns_start,
-            load_timing_result.connect_timing.dns_start);
-  EXPECT_EQ(job_load_timing.connect_timing.dns_end,
-            load_timing_result.connect_timing.dns_end);
+  EXPECT_EQ(job_load_timing.connect_timing.domain_lookup_start,
+            load_timing_result.connect_timing.domain_lookup_start);
+  EXPECT_EQ(job_load_timing.connect_timing.domain_lookup_end,
+            load_timing_result.connect_timing.domain_lookup_end);
   EXPECT_EQ(job_load_timing.connect_timing.connect_start,
             load_timing_result.connect_timing.connect_start);
   EXPECT_EQ(job_load_timing.connect_timing.connect_end,
@@ -1222,8 +1222,8 @@ TEST_F(URLRequestLoadTimingTest, InterceptLoadTimingEarlyProxyResolution) {
       NormalLoadTimingInfo(now, CONNECT_TIMING_HAS_DNS_TIMES, true);
   job_load_timing.proxy_resolve_start = now - base::Days(6);
   job_load_timing.proxy_resolve_end = now - base::Days(5);
-  job_load_timing.connect_timing.dns_start = now - base::Days(4);
-  job_load_timing.connect_timing.dns_end = now - base::Days(3);
+  job_load_timing.connect_timing.domain_lookup_start = now - base::Days(4);
+  job_load_timing.connect_timing.domain_lookup_end = now - base::Days(3);
   job_load_timing.connect_timing.connect_start = now - base::Days(2);
   job_load_timing.connect_timing.connect_end = now - base::Days(1);
 
@@ -1237,9 +1237,9 @@ TEST_F(URLRequestLoadTimingTest, InterceptLoadTimingEarlyProxyResolution) {
   EXPECT_EQ(load_timing_result.request_start,
             load_timing_result.proxy_resolve_end);
   EXPECT_EQ(load_timing_result.request_start,
-            load_timing_result.connect_timing.dns_start);
+            load_timing_result.connect_timing.domain_lookup_start);
   EXPECT_EQ(load_timing_result.request_start,
-            load_timing_result.connect_timing.dns_end);
+            load_timing_result.connect_timing.domain_lookup_end);
   EXPECT_EQ(load_timing_result.request_start,
             load_timing_result.connect_timing.connect_start);
   EXPECT_EQ(load_timing_result.request_start,
@@ -9112,7 +9112,16 @@ class FailingHttpTransactionFactory : public HttpTransactionFactory {
 // This currently only happens when in suspend mode and there's no cache, but
 // just use a special HttpTransactionFactory, to avoid depending on those
 // behaviors.
-TEST_F(URLRequestTestHTTP, NetworkCancelAfterCreateTransactionFailsTest) {
+//
+// Flaky crash: https://crbug.com/1348418
+#if BUILDFLAG(IS_CHROMEOS)
+#define MAYBE_NetworkCancelAfterCreateTransactionFailsTest \
+  DISABLED_NetworkCancelAfterCreateTransactionFailsTest
+#else
+#define MAYBE_NetworkCancelAfterCreateTransactionFailsTest \
+  NetworkCancelAfterCreateTransactionFailsTest
+#endif
+TEST_F(URLRequestTestHTTP, MAYBE_NetworkCancelAfterCreateTransactionFailsTest) {
   auto context_builder = CreateTestURLRequestContextBuilder();
   context_builder->SetCreateHttpTransactionFactoryCallback(
       base::BindOnce([](HttpNetworkSession* session) {
@@ -10720,9 +10729,9 @@ class HTTPSCertNetFetchingTest : public HTTPSRequestTest {
 };
 
 // The test EV policy OID used for generated certs.
-static const char kOCSPTestCertPolicy[] = "1.3.6.1.4.1.11129.2.4.1";
+static const char kEVTestCertPolicy[] = "1.3.6.1.4.1.11129.2.4.1";
 
-class HTTPSOCSPTest : public HTTPSCertNetFetchingTest {
+class HTTPSEVTest : public HTTPSCertNetFetchingTest {
  public:
   void SetUp() override {
     HTTPSCertNetFetchingTest::SetUp();
@@ -10734,19 +10743,22 @@ class HTTPSOCSPTest : public HTTPSCertNetFetchingTest {
     ev_test_policy_ = std::make_unique<ScopedTestEVPolicy>(
         EVRootCAMetadata::GetInstance(),
         X509Certificate::CalculateFingerprint256(root_cert->cert_buffer()),
-        kOCSPTestCertPolicy);
+        kEVTestCertPolicy);
   }
 
   void TearDown() override { HTTPSCertNetFetchingTest::TearDown(); }
 
+ private:
+  std::unique_ptr<ScopedTestEVPolicy> ev_test_policy_;
+};
+
+class HTTPSOCSPTest : public HTTPSCertNetFetchingTest {
+ public:
   CertVerifier::Config GetCertVerifierConfig() override {
     CertVerifier::Config config;
     config.enable_rev_checking = true;
     return config;
   }
-
- private:
-  std::unique_ptr<ScopedTestEVPolicy> ev_test_policy_;
 };
 
 static bool UsingBuiltinCertVerifier() {
@@ -10755,6 +10767,10 @@ static bool UsingBuiltinCertVerifier() {
 #else
 #if BUILDFLAG(BUILTIN_CERT_VERIFIER_FEATURE_SUPPORTED)
   if (base::FeatureList::IsEnabled(features::kCertVerifierBuiltinFeature))
+    return true;
+#endif
+#if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
+  if (base::FeatureList::IsEnabled(features::kChromeRootStoreUsed))
     return true;
 #endif
   return false;
@@ -10794,7 +10810,7 @@ static bool SystemUsesChromiumEVMetadata() {
 
 static bool SystemSupportsOCSP() {
 #if BUILDFLAG(IS_ANDROID)
-  // TODO(jnd): http://crbug.com/117478 - EV verification is not yet supported.
+  // Unsupported, see http://crbug.com/117478.
   return false;
 #else
   return true;
@@ -10821,17 +10837,13 @@ static bool SystemSupportsCRLSets() {
 #endif
 }
 
-TEST_F(HTTPSOCSPTest, Valid) {
-  if (!SystemSupportsOCSP()) {
-    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
+TEST_F(HTTPSEVTest, EVCheckNoOCSP) {
+  if (!SystemUsesChromiumEVMetadata()) {
+    LOG(WARNING) << "Skipping test because system doesn't support EV";
     return;
   }
-
   EmbeddedTestServer::ServerCertificateConfig cert_config;
-  cert_config.policy_oids = {kOCSPTestCertPolicy};
-  cert_config.ocsp_config = EmbeddedTestServer::OCSPConfig(
-      {{OCSPRevocationStatus::GOOD,
-        EmbeddedTestServer::OCSPConfig::SingleResponse::Date::kValid}});
+  cert_config.policy_oids = {kEVTestCertPolicy};
 
   CertStatus cert_status;
   DoConnection(cert_config, &cert_status);
@@ -10840,6 +10852,25 @@ TEST_F(HTTPSOCSPTest, Valid) {
 
   EXPECT_EQ(SystemUsesChromiumEVMetadata(),
             static_cast<bool>(cert_status & CERT_STATUS_IS_EV));
+
+  EXPECT_FALSE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+}
+
+TEST_F(HTTPSOCSPTest, Valid) {
+  if (!SystemSupportsOCSP()) {
+    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
+    return;
+  }
+
+  EmbeddedTestServer::ServerCertificateConfig cert_config;
+  cert_config.ocsp_config = EmbeddedTestServer::OCSPConfig(
+      {{OCSPRevocationStatus::GOOD,
+        EmbeddedTestServer::OCSPConfig::SingleResponse::Date::kValid}});
+
+  CertStatus cert_status;
+  DoConnection(cert_config, &cert_status);
+
+  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
 
   EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
 }
@@ -10851,7 +10882,6 @@ TEST_F(HTTPSOCSPTest, Revoked) {
   }
 
   EmbeddedTestServer::ServerCertificateConfig cert_config;
-  cert_config.policy_oids = {kOCSPTestCertPolicy};
   cert_config.ocsp_config = EmbeddedTestServer::OCSPConfig(
       {{OCSPRevocationStatus::REVOKED,
         EmbeddedTestServer::OCSPConfig::SingleResponse::Date::kValid}});
@@ -10871,7 +10901,6 @@ TEST_F(HTTPSOCSPTest, Invalid) {
   }
 
   EmbeddedTestServer::ServerCertificateConfig cert_config;
-  cert_config.policy_oids = {kOCSPTestCertPolicy};
   cert_config.ocsp_config = EmbeddedTestServer::OCSPConfig(
       EmbeddedTestServer::OCSPConfig::ResponseType::kInvalidResponse);
 
@@ -10892,7 +10921,6 @@ TEST_F(HTTPSOCSPTest, IntermediateValid) {
   }
 
   EmbeddedTestServer::ServerCertificateConfig cert_config;
-  cert_config.policy_oids = {kOCSPTestCertPolicy};
   cert_config.intermediate = EmbeddedTestServer::IntermediateType::kInHandshake;
   cert_config.ocsp_config = EmbeddedTestServer::OCSPConfig(
       {{OCSPRevocationStatus::GOOD,
@@ -10905,9 +10933,6 @@ TEST_F(HTTPSOCSPTest, IntermediateValid) {
   DoConnection(cert_config, &cert_status);
 
   EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
-
-  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
-            static_cast<bool>(cert_status & CERT_STATUS_IS_EV));
 
   EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
 }
@@ -10919,7 +10944,6 @@ TEST_F(HTTPSOCSPTest, IntermediateResponseOldButStillValid) {
   }
 
   EmbeddedTestServer::ServerCertificateConfig cert_config;
-  cert_config.policy_oids = {kOCSPTestCertPolicy};
   cert_config.intermediate = EmbeddedTestServer::IntermediateType::kInHandshake;
   cert_config.ocsp_config = EmbeddedTestServer::OCSPConfig(
       {{OCSPRevocationStatus::GOOD,
@@ -10927,17 +10951,25 @@ TEST_F(HTTPSOCSPTest, IntermediateResponseOldButStillValid) {
   // Use an OCSP response for the intermediate that would be too old for a leaf
   // cert, but is still valid for an intermediate.
   cert_config.intermediate_ocsp_config = EmbeddedTestServer::OCSPConfig(
-      {{OCSPRevocationStatus::GOOD,
+      {{OCSPRevocationStatus::REVOKED,
         EmbeddedTestServer::OCSPConfig::SingleResponse::Date::kLong}});
 
   CertStatus cert_status;
   DoConnection(cert_config, &cert_status);
 
-  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
-
-  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
-            static_cast<bool>(cert_status & CERT_STATUS_IS_EV));
-
+  if (UsingBuiltinCertVerifier()) {
+    EXPECT_EQ(CERT_STATUS_REVOKED, cert_status & CERT_STATUS_ALL_ERRORS);
+  } else {
+#if BUILDFLAG(IS_WIN)
+    // TODO(mattm): Seems to be flaky on Windows. Either returns
+    // CERT_STATUS_UNABLE_TO_CHECK_REVOCATION (which gets masked off due to
+    // soft-fail), or CERT_STATUS_REVOKED.
+    EXPECT_THAT(cert_status & CERT_STATUS_ALL_ERRORS,
+                AnyOf(0u, CERT_STATUS_REVOKED));
+#else
+    EXPECT_EQ(CERT_STATUS_REVOKED, cert_status & CERT_STATUS_ALL_ERRORS);
+#endif
+  }
   EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
 }
 
@@ -10948,28 +10980,29 @@ TEST_F(HTTPSOCSPTest, IntermediateResponseTooOld) {
   }
 
   EmbeddedTestServer::ServerCertificateConfig cert_config;
-  cert_config.policy_oids = {kOCSPTestCertPolicy};
   cert_config.intermediate = EmbeddedTestServer::IntermediateType::kInHandshake;
   cert_config.ocsp_config = EmbeddedTestServer::OCSPConfig(
       {{OCSPRevocationStatus::GOOD,
         EmbeddedTestServer::OCSPConfig::SingleResponse::Date::kValid}});
   cert_config.intermediate_ocsp_config = EmbeddedTestServer::OCSPConfig(
-      {{OCSPRevocationStatus::GOOD,
+      {{OCSPRevocationStatus::REVOKED,
         EmbeddedTestServer::OCSPConfig::SingleResponse::Date::kLonger}});
 
   CertStatus cert_status;
   DoConnection(cert_config, &cert_status);
 
   if (UsingBuiltinCertVerifier()) {
-    // The builtin verifier enforces the baseline requirements for max age of an
-    // intermediate's OCSP response, so the connection is considered non-EV.
     EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
-    EXPECT_EQ(0u, cert_status & CERT_STATUS_IS_EV);
   } else {
-    // The platform verifiers are more lenient.
-    EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
-    EXPECT_EQ(SystemUsesChromiumEVMetadata(),
-              static_cast<bool>(cert_status & CERT_STATUS_IS_EV));
+#if BUILDFLAG(IS_WIN)
+    // TODO(mattm): Seems to be flaky on Windows. Either returns
+    // CERT_STATUS_UNABLE_TO_CHECK_REVOCATION (which gets masked off due to
+    // soft-fail), or CERT_STATUS_REVOKED.
+    EXPECT_THAT(cert_status & CERT_STATUS_ALL_ERRORS,
+                AnyOf(0u, CERT_STATUS_REVOKED));
+#else
+    EXPECT_EQ(CERT_STATUS_REVOKED, cert_status & CERT_STATUS_ALL_ERRORS);
+#endif
   }
   EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
 }
@@ -10981,7 +11014,6 @@ TEST_F(HTTPSOCSPTest, IntermediateRevoked) {
   }
 
   EmbeddedTestServer::ServerCertificateConfig cert_config;
-  cert_config.policy_oids = {kOCSPTestCertPolicy};
   cert_config.intermediate = EmbeddedTestServer::IntermediateType::kInHandshake;
   cert_config.ocsp_config = EmbeddedTestServer::OCSPConfig(
       {{OCSPRevocationStatus::GOOD,
@@ -10993,6 +11025,9 @@ TEST_F(HTTPSOCSPTest, IntermediateRevoked) {
   CertStatus cert_status;
   DoConnection(cert_config, &cert_status);
 
+  if (UsingBuiltinCertVerifier()) {
+    EXPECT_EQ(CERT_STATUS_REVOKED, cert_status & CERT_STATUS_ALL_ERRORS);
+  } else {
 #if BUILDFLAG(IS_WIN)
   // TODO(mattm): Seems to be flaky on Windows. Either returns
   // CERT_STATUS_UNABLE_TO_CHECK_REVOCATION (which gets masked off due to
@@ -11002,7 +11037,7 @@ TEST_F(HTTPSOCSPTest, IntermediateRevoked) {
 #else
   EXPECT_EQ(CERT_STATUS_REVOKED, cert_status & CERT_STATUS_ALL_ERRORS);
 #endif
-  EXPECT_EQ(0u, cert_status & CERT_STATUS_IS_EV);
+  }
   EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
 }
 
@@ -11014,7 +11049,6 @@ TEST_F(HTTPSOCSPTest, ValidStapled) {
   }
 
   EmbeddedTestServer::ServerCertificateConfig cert_config;
-  cert_config.policy_oids = {kOCSPTestCertPolicy};
 
   // AIA OCSP url is included, but does not return a successful ocsp response.
   cert_config.ocsp_config = EmbeddedTestServer::OCSPConfig(
@@ -11028,10 +11062,6 @@ TEST_F(HTTPSOCSPTest, ValidStapled) {
   DoConnection(cert_config, &cert_status);
 
   EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
-
-  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
-            static_cast<bool>(cert_status & CERT_STATUS_IS_EV));
-
   EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
 }
 
@@ -11043,7 +11073,6 @@ TEST_F(HTTPSOCSPTest, RevokedStapled) {
   }
 
   EmbeddedTestServer::ServerCertificateConfig cert_config;
-  cert_config.policy_oids = {kOCSPTestCertPolicy};
 
   // AIA OCSP url is included, but does not return a successful ocsp response.
   cert_config.ocsp_config = EmbeddedTestServer::OCSPConfig(
@@ -11057,7 +11086,6 @@ TEST_F(HTTPSOCSPTest, RevokedStapled) {
   DoConnection(cert_config, &cert_status);
 
   EXPECT_EQ(CERT_STATUS_REVOKED, cert_status & CERT_STATUS_ALL_ERRORS);
-  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
   EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
 }
 
@@ -11069,7 +11097,6 @@ TEST_F(HTTPSOCSPTest, OldStapledAndInvalidAIA) {
   }
 
   EmbeddedTestServer::ServerCertificateConfig cert_config;
-  cert_config.policy_oids = {kOCSPTestCertPolicy};
 
   // Stapled response indicates good, but is too old.
   cert_config.stapled_ocsp_config = EmbeddedTestServer::OCSPConfig(
@@ -11084,7 +11111,6 @@ TEST_F(HTTPSOCSPTest, OldStapledAndInvalidAIA) {
   DoConnection(cert_config, &cert_status);
 
   EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
-  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
   EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
 }
 
@@ -11096,7 +11122,6 @@ TEST_F(HTTPSOCSPTest, OldStapledButValidAIA) {
   }
 
   EmbeddedTestServer::ServerCertificateConfig cert_config;
-  cert_config.policy_oids = {kOCSPTestCertPolicy};
 
   // Stapled response indicates good, but response is too old.
   cert_config.stapled_ocsp_config = EmbeddedTestServer::OCSPConfig(
@@ -11112,8 +11137,6 @@ TEST_F(HTTPSOCSPTest, OldStapledButValidAIA) {
   DoConnection(cert_config, &cert_status);
 
   EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
-  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
-            static_cast<bool>(cert_status & CERT_STATUS_IS_EV));
   EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
 }
 
@@ -11325,7 +11348,6 @@ TEST_P(HTTPSOCSPVerifyTest, VerifyResult) {
   OCSPVerifyTestData test = GetParam();
 
   EmbeddedTestServer::ServerCertificateConfig cert_config;
-  cert_config.policy_oids = {kOCSPTestCertPolicy};
   cert_config.stapled_ocsp_config = test.ocsp_config;
 
   SSLInfo ssl_info;
@@ -11394,6 +11416,55 @@ class HTTPSHardFailTest : public HTTPSOCSPTest {
   }
 };
 
+TEST_F(HTTPSHardFailTest, Valid) {
+  if (!SystemSupportsOCSP()) {
+    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
+    return;
+  }
+
+  if (!SystemSupportsHardFailRevocationChecking()) {
+    LOG(WARNING) << "Skipping test because system doesn't support hard fail "
+                 << "revocation checking";
+    return;
+  }
+
+  EmbeddedTestServer::ServerCertificateConfig cert_config;
+  cert_config.ocsp_config = EmbeddedTestServer::OCSPConfig(
+      {{OCSPRevocationStatus::GOOD,
+        EmbeddedTestServer::OCSPConfig::SingleResponse::Date::kValid}});
+
+  CertStatus cert_status;
+  DoConnection(cert_config, &cert_status);
+
+  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
+  EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+}
+
+TEST_F(HTTPSHardFailTest, Revoked) {
+  if (!SystemSupportsOCSP()) {
+    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
+    return;
+  }
+
+  if (!SystemSupportsHardFailRevocationChecking()) {
+    LOG(WARNING) << "Skipping test because system doesn't support hard fail "
+                 << "revocation checking";
+    return;
+  }
+
+  EmbeddedTestServer::ServerCertificateConfig cert_config;
+  cert_config.ocsp_config = EmbeddedTestServer::OCSPConfig(
+      {{OCSPRevocationStatus::REVOKED,
+        EmbeddedTestServer::OCSPConfig::SingleResponse::Date::kValid}});
+
+  CertStatus cert_status;
+  DoConnection(cert_config, &cert_status);
+
+  EXPECT_EQ(CERT_STATUS_REVOKED, cert_status & CERT_STATUS_ALL_ERRORS);
+  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
+  EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+}
+
 TEST_F(HTTPSHardFailTest, FailsOnOCSPInvalid) {
   if (!SystemSupportsOCSP()) {
     LOG(WARNING) << "Skipping test because system doesn't support OCSP";
@@ -11407,7 +11478,6 @@ TEST_F(HTTPSHardFailTest, FailsOnOCSPInvalid) {
   }
 
   EmbeddedTestServer::ServerCertificateConfig cert_config;
-  cert_config.policy_oids = {kOCSPTestCertPolicy};
   cert_config.ocsp_config = EmbeddedTestServer::OCSPConfig(
       EmbeddedTestServer::OCSPConfig::ResponseType::kInvalidResponse);
 
@@ -11416,86 +11486,188 @@ TEST_F(HTTPSHardFailTest, FailsOnOCSPInvalid) {
 
   EXPECT_EQ(CERT_STATUS_UNABLE_TO_CHECK_REVOCATION,
             cert_status & CERT_STATUS_ALL_ERRORS);
-
-  // Without a positive OCSP response, we shouldn't show the EV status.
-  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
   EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
 }
 
-class HTTPSEVCRLSetTest : public HTTPSOCSPTest {
- protected:
-  CertVerifier::Config GetCertVerifierConfig() override {
-    CertVerifier::Config config;
-    return config;
-  }
-};
-
-TEST_F(HTTPSEVCRLSetTest, MissingCRLSetAndInvalidOCSP) {
+TEST_F(HTTPSHardFailTest, IntermediateResponseOldButStillValid) {
   if (!SystemSupportsOCSP()) {
     LOG(WARNING) << "Skipping test because system doesn't support OCSP";
     return;
   }
 
+  if (!SystemSupportsHardFailRevocationChecking()) {
+    LOG(WARNING) << "Skipping test because system doesn't support hard fail "
+                 << "revocation checking";
+    return;
+  }
+
   EmbeddedTestServer::ServerCertificateConfig cert_config;
-  cert_config.policy_oids = {kOCSPTestCertPolicy};
+  cert_config.intermediate = EmbeddedTestServer::IntermediateType::kInHandshake;
   cert_config.ocsp_config = EmbeddedTestServer::OCSPConfig(
-      EmbeddedTestServer::OCSPConfig::ResponseType::kInvalidResponse);
+      {{OCSPRevocationStatus::GOOD,
+        EmbeddedTestServer::OCSPConfig::SingleResponse::Date::kValid}});
+  // Use an OCSP response for the intermediate that would be too old for a leaf
+  // cert, but is still valid for an intermediate.
+  cert_config.intermediate_ocsp_config = EmbeddedTestServer::OCSPConfig(
+      {{OCSPRevocationStatus::GOOD,
+        EmbeddedTestServer::OCSPConfig::SingleResponse::Date::kLong}});
 
   CertStatus cert_status;
   DoConnection(cert_config, &cert_status);
 
   EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
-  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
-  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
-            static_cast<bool>(cert_status & CERT_STATUS_REV_CHECKING_ENABLED));
+  EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
 }
 
-TEST_F(HTTPSEVCRLSetTest, MissingCRLSetAndRevokedOCSP) {
+TEST_F(HTTPSHardFailTest, IntermediateResponseTooOld) {
   if (!SystemSupportsOCSP()) {
     LOG(WARNING) << "Skipping test because system doesn't support OCSP";
     return;
   }
 
+  if (!SystemSupportsHardFailRevocationChecking()) {
+    LOG(WARNING) << "Skipping test because system doesn't support hard fail "
+                 << "revocation checking";
+    return;
+  }
+
   EmbeddedTestServer::ServerCertificateConfig cert_config;
-  cert_config.policy_oids = {kOCSPTestCertPolicy};
+  cert_config.intermediate = EmbeddedTestServer::IntermediateType::kInHandshake;
   cert_config.ocsp_config = EmbeddedTestServer::OCSPConfig(
+      {{OCSPRevocationStatus::GOOD,
+        EmbeddedTestServer::OCSPConfig::SingleResponse::Date::kValid}});
+  // Use an OCSP response for the intermediate that is too old.
+  cert_config.intermediate_ocsp_config = EmbeddedTestServer::OCSPConfig(
+      {{OCSPRevocationStatus::GOOD,
+        EmbeddedTestServer::OCSPConfig::SingleResponse::Date::kLonger}});
+
+  CertStatus cert_status;
+  DoConnection(cert_config, &cert_status);
+
+  if (UsingBuiltinCertVerifier()) {
+    EXPECT_EQ(CERT_STATUS_UNABLE_TO_CHECK_REVOCATION,
+              cert_status & CERT_STATUS_ALL_ERRORS);
+  } else {
+    // Platform verifier are more lenient.
+    EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
+  }
+
+  EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+}
+
+TEST_F(HTTPSHardFailTest, ValidStapled) {
+  if (!SystemSupportsOCSPStapling()) {
+    LOG(WARNING)
+        << "Skipping test because system doesn't support OCSP stapling";
+    return;
+  }
+
+  if (!SystemSupportsHardFailRevocationChecking()) {
+    LOG(WARNING) << "Skipping test because system doesn't support hard fail "
+                 << "revocation checking";
+    return;
+  }
+
+  EmbeddedTestServer::ServerCertificateConfig cert_config;
+
+  // AIA OCSP url is included, but does not return a successful ocsp response.
+  cert_config.ocsp_config = EmbeddedTestServer::OCSPConfig(
+      EmbeddedTestServer::OCSPConfig::ResponseType::kTryLater);
+
+  cert_config.stapled_ocsp_config = EmbeddedTestServer::OCSPConfig(
+      {{OCSPRevocationStatus::GOOD,
+        EmbeddedTestServer::OCSPConfig::SingleResponse::Date::kValid}});
+
+  CertStatus cert_status;
+  DoConnection(cert_config, &cert_status);
+
+  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
+  EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+}
+
+TEST_F(HTTPSHardFailTest, RevokedStapled) {
+  if (!SystemSupportsOCSPStapling()) {
+    LOG(WARNING)
+        << "Skipping test because system doesn't support OCSP stapling";
+    return;
+  }
+
+  if (!SystemSupportsHardFailRevocationChecking()) {
+    LOG(WARNING) << "Skipping test because system doesn't support hard fail "
+                 << "revocation checking";
+    return;
+  }
+
+  EmbeddedTestServer::ServerCertificateConfig cert_config;
+
+  // AIA OCSP url is included, but does not return a successful ocsp response.
+  cert_config.ocsp_config = EmbeddedTestServer::OCSPConfig(
+      EmbeddedTestServer::OCSPConfig::ResponseType::kTryLater);
+
+  cert_config.stapled_ocsp_config = EmbeddedTestServer::OCSPConfig(
       {{OCSPRevocationStatus::REVOKED,
         EmbeddedTestServer::OCSPConfig::SingleResponse::Date::kValid}});
 
   CertStatus cert_status;
   DoConnection(cert_config, &cert_status);
 
-  // The CertVerifyProc implementations handle revocation on the EV
-  // verification differently. Some will return a revoked error, others will
-  // return the non-EV verification result. For example on NSS it's not
-  // possible to determine whether the EV verification attempt failed because
-  // of actual revocation or because there was an OCSP failure.
-  if (UsingBuiltinCertVerifier()) {
-    // TODO(https://crbug.com/410574): Handle this in builtin verifier too?
-    EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
-  } else {
-#if BUILDFLAG(IS_APPLE)
-    EXPECT_EQ(CERT_STATUS_REVOKED, cert_status & CERT_STATUS_ALL_ERRORS);
-#elif BUILDFLAG(IS_WIN)
-    EXPECT_EQ(CERT_STATUS_REVOKED, cert_status & CERT_STATUS_ALL_ERRORS);
-#else
-    EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
-#endif
-  }
-
-  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
-  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
-            static_cast<bool>(cert_status & CERT_STATUS_REV_CHECKING_ENABLED));
+  EXPECT_EQ(CERT_STATUS_REVOKED, cert_status & CERT_STATUS_ALL_ERRORS);
+  EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
 }
 
-TEST_F(HTTPSEVCRLSetTest, MissingCRLSetAndGoodOCSP) {
-  if (!SystemSupportsOCSP()) {
-    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
+TEST_F(HTTPSHardFailTest, OldStapledAndInvalidAIA) {
+  if (!SystemSupportsOCSPStapling()) {
+    LOG(WARNING)
+        << "Skipping test because system doesn't support OCSP stapling";
+    return;
+  }
+
+  if (!SystemSupportsHardFailRevocationChecking()) {
+    LOG(WARNING) << "Skipping test because system doesn't support hard fail "
+                 << "revocation checking";
     return;
   }
 
   EmbeddedTestServer::ServerCertificateConfig cert_config;
-  cert_config.policy_oids = {kOCSPTestCertPolicy};
+
+  // Stapled response indicates good, but is too old.
+  cert_config.stapled_ocsp_config = EmbeddedTestServer::OCSPConfig(
+      {{OCSPRevocationStatus::GOOD,
+        EmbeddedTestServer::OCSPConfig::SingleResponse::Date::kOld}});
+
+  // AIA OCSP url is included, but does not return a successful ocsp response.
+  cert_config.ocsp_config = EmbeddedTestServer::OCSPConfig(
+      EmbeddedTestServer::OCSPConfig::ResponseType::kTryLater);
+
+  CertStatus cert_status;
+  DoConnection(cert_config, &cert_status);
+
+  EXPECT_EQ(CERT_STATUS_UNABLE_TO_CHECK_REVOCATION,
+            cert_status & CERT_STATUS_ALL_ERRORS);
+  EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+}
+
+TEST_F(HTTPSHardFailTest, OldStapledButValidAIA) {
+  if (!SystemSupportsOCSPStapling()) {
+    LOG(WARNING)
+        << "Skipping test because system doesn't support OCSP stapling";
+    return;
+  }
+
+  if (!SystemSupportsHardFailRevocationChecking()) {
+    LOG(WARNING) << "Skipping test because system doesn't support hard fail "
+                 << "revocation checking";
+    return;
+  }
+
+  EmbeddedTestServer::ServerCertificateConfig cert_config;
+
+  // Stapled response indicates good, but response is too old.
+  cert_config.stapled_ocsp_config = EmbeddedTestServer::OCSPConfig(
+      {{OCSPRevocationStatus::GOOD,
+        EmbeddedTestServer::OCSPConfig::SingleResponse::Date::kOld}});
+
+  // AIA OCSP url is included, and returns a successful ocsp response.
   cert_config.ocsp_config = EmbeddedTestServer::OCSPConfig(
       {{OCSPRevocationStatus::GOOD,
         EmbeddedTestServer::OCSPConfig::SingleResponse::Date::kValid}});
@@ -11504,94 +11676,7 @@ TEST_F(HTTPSEVCRLSetTest, MissingCRLSetAndGoodOCSP) {
   DoConnection(cert_config, &cert_status);
 
   EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
-
-  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
-            static_cast<bool>(cert_status & CERT_STATUS_IS_EV));
-  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
-            static_cast<bool>(cert_status & CERT_STATUS_REV_CHECKING_ENABLED));
-}
-
-TEST_F(HTTPSEVCRLSetTest, ExpiredCRLSet) {
-  if (!SystemSupportsOCSP()) {
-    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
-    return;
-  }
-
-  EmbeddedTestServer::ServerCertificateConfig cert_config;
-  cert_config.policy_oids = {kOCSPTestCertPolicy};
-  cert_config.ocsp_config = EmbeddedTestServer::OCSPConfig(
-      EmbeddedTestServer::OCSPConfig::ResponseType::kInvalidResponse);
-
-  CertVerifier::Config cert_verifier_config = GetCertVerifierConfig();
-  cert_verifier_config.crl_set = CRLSet::ExpiredCRLSetForTesting();
-  context_->cert_verifier()->SetConfig(cert_verifier_config);
-
-  CertStatus cert_status;
-  DoConnection(cert_config, &cert_status);
-
-  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
-  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
-  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
-            static_cast<bool>(cert_status & CERT_STATUS_REV_CHECKING_ENABLED));
-}
-
-TEST_F(HTTPSEVCRLSetTest, FreshCRLSetCovered) {
-  if (!SystemSupportsOCSP()) {
-    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
-    return;
-  }
-
-  EmbeddedTestServer::ServerCertificateConfig cert_config;
-  cert_config.policy_oids = {kOCSPTestCertPolicy};
-  cert_config.ocsp_config = EmbeddedTestServer::OCSPConfig(
-      EmbeddedTestServer::OCSPConfig::ResponseType::kInvalidResponse);
-
-  CertVerifier::Config cert_verifier_config = GetCertVerifierConfig();
-  SHA256HashValue root_cert_spki_hash;
-  ASSERT_TRUE(GetTestRootCertSPKIHash(&root_cert_spki_hash));
-  cert_verifier_config.crl_set =
-      CRLSet::ForTesting(false, &root_cert_spki_hash, "", "", {});
-  context_->cert_verifier()->SetConfig(cert_verifier_config);
-
-  CertStatus cert_status;
-  DoConnection(cert_config, &cert_status);
-
-  // With a fresh CRLSet that covers the issuing certificate, we shouldn't do a
-  // revocation check for EV.
-  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
-  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
-            static_cast<bool>(cert_status & CERT_STATUS_IS_EV));
-  EXPECT_FALSE(
-      static_cast<bool>(cert_status & CERT_STATUS_REV_CHECKING_ENABLED));
-}
-
-TEST_F(HTTPSEVCRLSetTest, FreshCRLSetNotCovered) {
-  if (!SystemSupportsOCSP()) {
-    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
-    return;
-  }
-
-  EmbeddedTestServer::ServerCertificateConfig cert_config;
-  cert_config.policy_oids = {kOCSPTestCertPolicy};
-  cert_config.ocsp_config = EmbeddedTestServer::OCSPConfig(
-      EmbeddedTestServer::OCSPConfig::ResponseType::kInvalidResponse);
-
-  CertVerifier::Config cert_verifier_config = GetCertVerifierConfig();
-  cert_verifier_config.crl_set = CRLSet::EmptyCRLSetForTesting();
-  context_->cert_verifier()->SetConfig(cert_verifier_config);
-
-  CertStatus cert_status = 0;
-  DoConnection(cert_config, &cert_status);
-
-  // Even with a fresh CRLSet, we should still do online revocation checks when
-  // the certificate chain isn't covered by the CRLSet, which it isn't in this
-  // test. Since the online revocation check returns an invalid OCSP response,
-  // the result should be non-EV but with REV_CHECKING_ENABLED status set to
-  // indicate online revocation checking was attempted.
-  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
-  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
-  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
-            static_cast<bool>(cert_status & CERT_STATUS_REV_CHECKING_ENABLED));
+  EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
 }
 
 class HTTPSCRLSetTest : public HTTPSCertNetFetchingTest {};

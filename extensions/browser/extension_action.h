@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/containers/contains.h"
+#include "base/values.h"
 #include "extensions/common/api/extension_action/action_info.h"
 #include "extensions/common/constants.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -102,7 +103,7 @@ class ExtensionAction {
   // Tries to parse |*icon| from a dictionary {"19": imageData19, "38":
   // imageData38}, and returns the result of the parsing attempt.
   static IconParseResult ParseIconFromCanvasDictionary(
-      const base::DictionaryValue& dict,
+      const base::Value::Dict& dict,
       gfx::ImageSkia* icon);
 
   // Gets the icon that has been set using |SetIcon| for the tab.

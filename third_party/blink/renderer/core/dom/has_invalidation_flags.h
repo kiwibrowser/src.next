@@ -12,7 +12,7 @@ namespace blink {
 // The flags can be categorized 3 types.
 //
 // 1. Flags for the :has() anchor elements.
-//    - AffectedBySubjectHas (defined at computed style extra flags)
+//    - AffectedBySubjectHas
 //        Indicates that this element may match a subject :has() selector, which
 //        means we need to invalidate the element when the :has() state changes.
 //    - AffectedByNonSubjectHas
@@ -25,6 +25,21 @@ namespace blink {
 //        change mutation, if an element doesn't have the flag set, the element
 //        will not be invalidated or scheduled on even if the element has the
 //        AffectedBySubjectHas or AffectedByNonSubjectHas flag set.
+//    - AffectedByMultipleHas
+//        Indicate that this element can be affected by multiple :has() pseudo
+//        classes.
+//        SelectorChecker uses CheckPseudoHasFastRejectFilter to preemtively
+//        skip non-matching :has() pseudo class checks only if there are
+//        multiple :has() to check on the same anchor element. SelectorChecker
+//        would not use the reject filter for a single :has() because it would
+//        have worse performance caused by the bloom filter memory allocation
+//        and the tree traversal for collecting element identifier hashes.
+//        To avoid the unnecessary overhead, bloom filter creation and element
+//        identifier hash collection are performed on the second check, and at
+//        this time AffectedByMultipleHas flag is set.
+//        This flag is used to determine whether SelectorChecker can use the
+//        reject filter even if on the first check since the flag indicates that
+//        there can be additional checks on the same anchor element.
 //
 //    SelectorChecker::CheckPseudoClass() set the flags on an element when it
 //    checks a :has() pseudo class on the element.
@@ -176,6 +191,7 @@ enum SiblingsAffectedByHasFlags : unsigned {
 };
 
 struct HasInvalidationFlags {
+  unsigned affected_by_subject_has : 1;
   unsigned affected_by_non_subject_has : 1;
   unsigned affected_by_pseudos_in_has : 1;
 
@@ -188,15 +204,19 @@ struct HasInvalidationFlags {
   unsigned ancestors_or_siblings_affected_by_focus_visible_in_has : 1;
   unsigned affected_by_logical_combinations_in_has : 1;
 
+  unsigned affected_by_multiple_has : 1;
+
   HasInvalidationFlags()
-      : affected_by_non_subject_has(false),
+      : affected_by_subject_has(false),
+        affected_by_non_subject_has(false),
         affected_by_pseudos_in_has(false),
         siblings_affected_by_has(0),
         ancestors_or_ancestor_siblings_affected_by_has(false),
         ancestors_or_siblings_affected_by_hover_in_has(false),
         ancestors_or_siblings_affected_by_active_in_has(false),
         ancestors_or_siblings_affected_by_focus_in_has(false),
-        ancestors_or_siblings_affected_by_focus_visible_in_has(false) {}
+        ancestors_or_siblings_affected_by_focus_visible_in_has(false),
+        affected_by_multiple_has(false) {}
 };
 
 }  // namespace blink

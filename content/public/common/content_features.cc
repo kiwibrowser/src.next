@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -203,9 +203,6 @@ const base::Feature kClearCrossSiteCrossBrowsingContextGroupWindowName{
     "ClearCrossSiteCrossBrowsingContextGroupWindowName",
     base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kClickPointerEvent{"ClickPointerEvent",
-                                       base::FEATURE_ENABLED_BY_DEFAULT};
-
 const base::Feature kCompositeBGColorAnimation{
     "CompositeBGColorAnimation", base::FEATURE_DISABLED_BY_DEFAULT};
 
@@ -352,6 +349,15 @@ const char kFedCmIframeSupportFieldTrialParamName[] = "IframeSupport";
 const base::Feature kFedCmManifestValidation{"FedCmManifestValidation",
                                              base::FEATURE_ENABLED_BY_DEFAULT};
 
+// Enables usage of the FedCM API with multiple identity providers at the same
+// time.
+const base::Feature kFedCmMultipleIdentityProviders{
+    "FedCmMultipleIdentityProviders", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Field trial boolean parameter which indicates whether IdpSigninStatus API is
+// used in FedCM API.
+const char kFedCmIdpSigninStatusFieldTrialParamName[] = "IdpSigninStatus";
+
 // Enables usage of First Party Sets to determine cookie availability.
 constexpr base::Feature kFirstPartySets{"FirstPartySets",
                                         base::FEATURE_DISABLED_BY_DEFAULT};
@@ -360,6 +366,11 @@ constexpr base::Feature kFirstPartySets{"FirstPartySets",
 // feature.
 const base::FeatureParam<bool> kFirstPartySetsIsDogfooder{
     &kFirstPartySets, "FirstPartySetsIsDogfooder", false};
+
+// Controls how many sites are allowed to be in the Associated subset (ignoring
+// ccTLD aliases).
+const base::FeatureParam<int> kFirstPartySetsMaxAssociatedSites{
+    &kFirstPartySets, "FirstPartySetsMaxAssociatedSites", 3};
 
 // Whether to initialize the font manager when the renderer starts on a
 // background thread.
@@ -469,6 +480,13 @@ const base::Feature kInstalledAppsInCbd{"InstalledAppsInCbd",
 const base::Feature kIsolatedWebApps{"IsolatedWebApps",
                                      base::FEATURE_DISABLED_BY_DEFAULT};
 
+// Enables process isolation of fenced content (content inside fenced frames)
+// from non-fenced content. See
+// https://github.com/WICG/fenced-frame/blob/master/explainer/process_isolation.md
+// for rationale and more details.
+const base::Feature kIsolateFencedFrames{"IsolateFencedFrames",
+                                         base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Alternative to switches::kIsolateOrigins, for turning on origin isolation.
 // List of origins to isolate has to be specified via
 // kIsolateOriginsFieldTrialParamName.
@@ -485,7 +503,8 @@ const base::Feature kIsolateSandboxedIframes{"IsolateSandboxedIframes",
 const base::FeatureParam<IsolateSandboxedIframesGrouping>::Option
     isolated_sandboxed_iframes_grouping_types[] = {
         {IsolateSandboxedIframesGrouping::kPerSite, "per-site"},
-        {IsolateSandboxedIframesGrouping::kPerOrigin, "per-origin"}};
+        {IsolateSandboxedIframesGrouping::kPerOrigin, "per-origin"},
+        {IsolateSandboxedIframesGrouping::kPerDocument, "per-document"}};
 const base::FeatureParam<IsolateSandboxedIframesGrouping>
     kIsolateSandboxedIframesGroupingParam{
         &kIsolateSandboxedIframes, "grouping",
@@ -531,6 +550,11 @@ const base::Feature kLogJsConsoleMessages {
       base::FEATURE_ENABLED_BY_DEFAULT
 #endif
 };
+
+// Configures whether we set a lower limit for renderers that do not have a main
+// frame, similar to the limit that is already done for backgrounded renderers.
+const base::Feature kLowerMemoryLimitForNonMainRenderers{
+    "LowerMemoryLimitForNonMainRenderers", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // The MBI mode controls whether or not communication over the
 // AgentSchedulingGroup is ordered with respect to the render-process-global
@@ -663,14 +687,14 @@ const base::Feature kPepper3DImageChromium{"Pepper3DImageChromium",
 const base::Feature kPepperCrossOriginRedirectRestriction{
     "PepperCrossOriginRedirectRestriction", base::FEATURE_ENABLED_BY_DEFAULT};
 
-// A browser-side equivalent of the Blink feature "PictureInPictureV2". This is
-// used for sanity checks to ensure that the feature can't be enabled by a
-// compromised renderer despite the Blink flag not being enabled.
+// A browser-side equivalent of the Blink feature "DocumentPictureInPictureAPI".
+// This is used for sanity checks to ensure that the feature can't be enabled by
+// a compromised renderer despite the Blink flag not being enabled.
 //
 // Tracking bug: https://crbug.com/1269059
 // Removal bug (when no longer experimental): https://crbug.com/1285144
-const base::Feature kPictureInPictureV2{"PictureInPictureV2",
-                                        base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kDocumentPictureInPictureAPI{
+    "DocumentPictureInPictureAPI", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Enables process sharing for sites that do not require a dedicated process
 // by using a default SiteInstance. Default SiteInstances will only be used
@@ -695,6 +719,15 @@ const base::Feature kHighPriorityBeforeUnload{
 // Preload cookie database on NetworkContext creation.
 const base::Feature kPreloadCookies{"PreloadCookies",
                                     base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Prerender2 holdback feature disables prerendering on all predictors. This is
+// useful in comparing the impact of blink::features::kPrerender2 experiment
+// with and without Prerendering.
+
+// Please note this feature is only used for experimental purposes, please don't
+// enable this feature by default.
+const base::Feature kPrerender2Holdback{"Prerender2Holdback",
+                                        base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Enables exposure of ads APIs in the renderer: Attribution Reporting,
 // FLEDGE, Topics.
@@ -784,6 +817,20 @@ const base::Feature kRenderDocument{"RenderDocument",
 const base::Feature kSkipEarlyCommitPendingForCrashedFrame{
     "SkipEarlyCommitPendingForCrashedFrame", base::FEATURE_DISABLED_BY_DEFAULT};
 
+// Enables skipping the service worker fetch handler if the fetch handler is
+// identified as ignorable.
+const base::Feature kServiceWorkerSkipIgnorableFetchHandler{
+    "ServiceWorkerSkipIgnorableFetchHandler",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+// This feature param controls if the empty service worker fetch handler is
+// skipped.
+constexpr base::FeatureParam<bool> kSkipEmptyFetchHandler{
+    &kServiceWorkerSkipIgnorableFetchHandler,
+    "SkipEmptyFetchHandler",
+    false,
+};
+
 // Run video capture service in the Browser process as opposed to a dedicated
 // utility process
 const base::Feature kRunVideoCaptureServiceInBrowserProcess{
@@ -825,10 +872,9 @@ const base::Feature kSendBeaconThrowForBlobWithNonSimpleType{
 const base::Feature kServiceWorkerPaymentApps{"ServiceWorkerPaymentApps",
                                               base::FEATURE_ENABLED_BY_DEFAULT};
 
-// Enable the basic-card payment method from the PaymentRequest API. This has
-// been disabled since M100 and is soon to be removed: crbug.com/1209835.
-const base::Feature kPaymentRequestBasicCard{"PaymentRequestBasicCard",
-                                             base::FEATURE_DISABLED_BY_DEFAULT};
+// Enable connect-src CSP directive for the Web Payment API.
+const base::Feature kWebPaymentAPICSP{"WebPaymentAPICSP",
+                                      base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Use this feature to experiment terminating a service worker when it doesn't
 // control any clients: https://crbug.com/1043845.
@@ -852,25 +898,24 @@ const base::Feature kSharedArrayBufferOnDesktop{
 const base::Feature kSignedExchangeReportingForDistributors{
     "SignedExchangeReportingForDistributors", base::FEATURE_ENABLED_BY_DEFAULT};
 
-// Subresource prefetching+loading via Signed HTTP Exchange
-// https://www.chromestatus.com/feature/5126805474246656
-const base::Feature kSignedExchangeSubresourcePrefetch{
-    "SignedExchangeSubresourcePrefetch", base::FEATURE_ENABLED_BY_DEFAULT};
-
 // Origin-Signed HTTP Exchanges (for WebPackage Loading)
 // https://www.chromestatus.com/feature/5745285984681984
 const base::Feature kSignedHTTPExchange{"SignedHTTPExchange",
                                         base::FEATURE_ENABLED_BY_DEFAULT};
 
-// Whether to send a ping to the inner URL upon navigation or not.
-const base::Feature kSignedHTTPExchangePingValidity{
-    "SignedHTTPExchangePingValidity", base::FEATURE_DISABLED_BY_DEFAULT};
-
 // Delays RenderProcessHost shutdown by a few seconds to allow the subframe's
 // process to be potentially reused. This aims to reduce process churn in
 // navigations where the source and destination share subframes.
-const base::Feature kSubframeShutdownDelay{"SubframeShutdownDelay",
-                                           base::FEATURE_DISABLED_BY_DEFAULT};
+// This is enabled only on platforms where the behavior leads to performance
+// gains, i.e., those where process startup is expensive.
+const base::Feature kSubframeShutdownDelay {
+  "SubframeShutdownDelay",
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
+      base::FEATURE_ENABLED_BY_DEFAULT
+#else
+      base::FEATURE_DISABLED_BY_DEFAULT
+#endif  // BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
+};
 const base::FeatureParam<SubframeShutdownDelayType>::Option delay_types[] = {
     {SubframeShutdownDelayType::kConstant, "constant"},
     {SubframeShutdownDelayType::kConstantLong, "constant-long"},
@@ -1012,10 +1057,6 @@ const base::Feature kTouchpadOverscrollHistoryNavigation {
 const base::Feature kTreatBootstrapAsDefault{"TreatBootstrapAsDefault",
                                              base::FEATURE_ENABLED_BY_DEFAULT};
 
-// Controls whether the Trusted Types API is available.
-const base::Feature kTrustedDOMTypes{"TrustedDOMTypes",
-                                     base::FEATURE_ENABLED_BY_DEFAULT};
-
 // This feature is for a reverse Origin Trial, enabling SharedArrayBuffer for
 // sites as they migrate towards requiring cross-origin isolation for these
 // features.
@@ -1044,6 +1085,10 @@ const base::Feature kVideoPlaybackQuality{"VideoPlaybackQuality",
 // Enables future V8 VM features
 const base::Feature kV8VmFuture{"V8VmFuture",
                                 base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Enables experimental JavaScript shared memory features.
+const base::Feature kJavaScriptExperimentalSharedMemory{
+    "JavaScriptExperimentalSharedMemory", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Enable window controls overlays for desktop PWAs
 const base::Feature kWebAppWindowControlsOverlay{
@@ -1173,6 +1218,11 @@ const base::Feature kWebXrArModule{"WebXRARModule",
                                    base::FEATURE_ENABLED_BY_DEFAULT};
 
 #if BUILDFLAG(IS_ANDROID)
+// Allows the experimental approach of proactively generating an accessibility
+// tree asynchronously off the main thread, before the framework requests it.
+const base::Feature kAccessibilityAsyncTreeConstruction{
+    "AccessibilityAsyncTreeConstruction", base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Allows the use of page zoom in place of accessibility text autosizing, and
 // updated UI to replace existing Chrome Accessibility Settings.
 const base::Feature kAccessibilityPageZoom{"AccessibilityPageZoom",
@@ -1184,9 +1234,21 @@ const base::Feature kBackgroundMediaRendererHasModerateBinding{
     "BackgroundMediaRendererHasModerateBinding",
     base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Coalesce independent begin frame by ignoring begin frame that is out of date.
-const base::Feature kCoalesceIndependentBeginFrame{
-    "CoalesceIndependentBeginFrame", base::FEATURE_DISABLED_BY_DEFAULT};
+// When this feature is enabled a cap is placed on the number of bindings held
+// by the BindingManager.
+const base::Feature kBindingManagerConnectionLimit{
+    "BindingManagerConnectionLimit", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// When this feature is enabled the BindingManager for non-low-end devices will
+// use a not perceptible binding for background renderers on Android Q+.
+const base::Feature kBindingManagerUseNotPerceptibleBinding{
+    "BindingManagerUseNotPerceptibleBinding",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Reduce the priority of GPU process when in background so it is more likely
+// to be killed first if the OS needs more memory.
+const base::Feature kReduceGpuPriorityOnBackground{
+    "ReduceGpuPriorityOnBackground", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Allows the use of an experimental feature to drop any AccessibilityEvents
 // that are not relevant to currently enabled accessibility services.
@@ -1215,6 +1277,10 @@ const base::Feature kWarmUpNetworkProcess{"WarmUpNetworkProcess",
 // using the kEnableExperimentalWebPlatformFeatures flag.
 // https://w3c.github.io/web-nfc/
 const base::Feature kWebNfc{"WebNFC", base::FEATURE_ENABLED_BY_DEFAULT};
+
+// Throttle begin frame if Android WebView isn't getting draws.
+const base::Feature kWebViewThrottleBackgroundBeginFrame{
+    "WebViewThrottleBackgroundBeginFrame", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // When the context menu is triggered, the browser allows motion in a small
 // region around the initial touch location menu to allow for finger jittering.

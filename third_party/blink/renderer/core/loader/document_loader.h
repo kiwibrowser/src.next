@@ -32,6 +32,7 @@
 
 #include <memory>
 
+#include "base/feature_list.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/time/time.h"
 #include "base/unguessable_token.h"
@@ -56,7 +57,6 @@
 #include "third_party/blink/public/web/web_history_commit_type.h"
 #include "third_party/blink/public/web/web_navigation_params.h"
 #include "third_party/blink/public/web/web_navigation_type.h"
-#include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/weak_identifier_map.h"
 #include "third_party/blink/renderer/core/frame/dactyloscoper.h"
@@ -70,6 +70,7 @@
 #include "third_party/blink/renderer/core/loader/preload_helper.h"
 #include "third_party/blink/renderer/core/page/viewport_description.h"
 #include "third_party/blink/renderer/core/permissions_policy/policy_helper.h"
+#include "third_party/blink/renderer/platform/bindings/source_location.h"
 #include "third_party/blink/renderer/platform/exported/wrapped_resource_response.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/loader/fetch/client_hints_preferences.h"
@@ -85,6 +86,7 @@
 #include "third_party/blink/renderer/platform/weborigin/referrer.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
+
 namespace base {
 class TickClock;
 }
@@ -392,6 +394,23 @@ class CORE_EXPORT DocumentLoader : public GarbageCollected<DocumentLoader>,
     return fenced_frame_reporting_;
   }
 
+  // Detect if the page is reloaded or after form submitted. This method is
+  // called in order to disable some interventions or optimizations based on the
+  // heuristic that the user might reload the page when interventions cause
+  // problems. Also, the user is likely to avoid reloading the page when they
+  // submit forms. So this method is useful to skip interventions in the
+  // following conditions.
+  // - Reload a page.
+  // - Submit a form.
+  // - Resubmit a form.
+  // The reason why we use DocumentLoader::GetNavigationType() instead of
+  // DocumentLoader::LoadType() is that DocumentLoader::LoadType() is reset to
+  // WebFrameLoadType::kStandard on DidFinishNavigation(). When JavaScript adds
+  // iframes after navigation, DocumentLoader::LoadType() always returns
+  // WebFrameLoadType::kStandard. DocumentLoader::GetNavigationType() doesn't
+  // have this problem.
+  bool IsReloadedOrFormSubmitted() const;
+
  protected:
   // Based on its MIME type, if the main document's response corresponds to an
   // MHTML archive, then every resources will be loaded from this archive.
@@ -499,15 +518,15 @@ class CORE_EXPORT DocumentLoader : public GarbageCollected<DocumentLoader>,
       const WebVector<network::mojom::WebClientHintsType>&
           enabled_client_hints);
 
-  // For SignedExchangeSubresourcePrefetch feature. If the page was loaded from
-  // a signed exchage which has "allowed-alt-sxg" link headers in the inner
-  // response and PrefetchedSignedExchanges were passed from the previous page,
-  // initializes a PrefetchedSignedExchangeManager which will hold the
-  // subresource signed exchange related headers ("alternate" link header in the
-  // outer response and "allowed-alt-sxg" link header in the inner response of
-  // the page's signed exchange), and the passed PrefetchedSignedExchanges.
-  // The created PrefetchedSignedExchangeManager will be used to load the
-  // prefetched signed exchanges for matching requests.
+  // If the page was loaded from a signed exchange which has "allowed-alt-sxg"
+  // link headers in the inner response and PrefetchedSignedExchanges were
+  // passed from the previous page, initializes a
+  // PrefetchedSignedExchangeManager which will hold the subresource signed
+  // exchange related headers ("alternate" link header in the outer response and
+  // "allowed-alt-sxg" link header in the inner response of the page's signed
+  // exchange), and the passed PrefetchedSignedExchanges. The created
+  // PrefetchedSignedExchangeManager will be used to load the prefetched signed
+  // exchanges for matching requests.
   void InitializePrefetchedSignedExchangeManager();
 
   bool IsJavaScriptURLOrXSLTCommit() const {
@@ -713,6 +732,9 @@ class CORE_EXPORT DocumentLoader : public GarbageCollected<DocumentLoader>,
   bool waiting_for_code_cache_ = false;
 
   std::unique_ptr<ExtraData> extra_data_;
+
+  // Reduced accept language for top-level frame.
+  const AtomicString reduced_accept_language_;
 };
 
 DECLARE_WEAK_IDENTIFIER_MAP(DocumentLoader);

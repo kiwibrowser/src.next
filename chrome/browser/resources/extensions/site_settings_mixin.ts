@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,11 +18,9 @@ type Constructor<T> = new (...args: any[]) => T;
 export interface SiteSettingsDelegate {
   getUserSiteSettings(): Promise<chrome.developerPrivate.UserSiteSettings>;
   addUserSpecifiedSites(
-      siteSet: chrome.developerPrivate.UserSiteSet,
-      hosts: string[]): Promise<void>;
+      siteSet: chrome.developerPrivate.SiteSet, hosts: string[]): Promise<void>;
   removeUserSpecifiedSites(
-      siteSet: chrome.developerPrivate.UserSiteSet,
-      hosts: string[]): Promise<void>;
+      siteSet: chrome.developerPrivate.SiteSet, hosts: string[]): Promise<void>;
   getUserAndExtensionSitesByEtld():
       Promise<chrome.developerPrivate.SiteGroup[]>;
   getUserSiteSettingsChangedTarget():

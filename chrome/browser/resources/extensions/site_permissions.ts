@@ -1,10 +1,10 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 import 'chrome://resources/cr_elements/cr_link_row/cr_link_row.js';
-import 'chrome://resources/cr_elements/shared_style_css.m.js';
-import 'chrome://resources/cr_elements/shared_vars_css.m.js';
+import 'chrome://resources/cr_elements/cr_shared_style.css.js';
+import 'chrome://resources/cr_elements/cr_shared_vars.css.js';
 import './strings.m.js';
 import './shared_style.css.js';
 import './shared_vars.css.js';
@@ -37,9 +37,9 @@ export class ExtensionsSitePermissionsElement extends
 
   static get properties() {
     return {
-      userSiteSetEnum_: {
+      siteSetEnum_: {
         type: Object,
-        value: chrome.developerPrivate.UserSiteSet,
+        value: chrome.developerPrivate.SiteSet,
       },
     };
   }

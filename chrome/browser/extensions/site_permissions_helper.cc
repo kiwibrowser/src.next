@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,15 @@
 #include "url/gurl.h"
 
 namespace extensions {
+
+namespace {
+
+// A preference indicating if the extension can show site access requests
+// directly in the toolbar next to the omnibox.
+constexpr const char kPrefShowAccessRequestsInToolbar[] =
+    "show_access_requests_in_toolbar";
+
+}  // namespace
 
 SitePermissionsHelper::SitePermissionsHelper(Profile* profile)
     : profile_(profile) {}
@@ -108,6 +117,22 @@ void SitePermissionsHelper::UpdateSiteAccess(
   runner->HandlePageAccessModified(&extension, current_access, new_access);
 }
 
+void SitePermissionsHelper::UpdateUserSiteSettings(
+    const base::flat_set<ToolbarActionsModel::ActionId>& action_ids,
+    content::WebContents* web_contents,
+    extensions::PermissionsManager::UserSiteSetting site_setting) {
+  DCHECK(web_contents);
+
+  ExtensionActionRunner* runner =
+      ExtensionActionRunner::GetForWebContents(web_contents);
+  if (!runner)
+    return;
+
+  runner->HandleUserSiteSettingModified(
+      action_ids, web_contents->GetPrimaryMainFrame()->GetLastCommittedOrigin(),
+      site_setting);
+}
+
 bool SitePermissionsHelper::CanSelectSiteAccess(const Extension& extension,
                                                 const GURL& url,
                                                 SiteAccess site_access) const {
@@ -165,6 +190,25 @@ bool SitePermissionsHelper::HasActiveTabAndCanAccess(const Extension& extension,
                                                         /*error=*/nullptr) &&
          (!url.SchemeIsFile() ||
           util::AllowFileAccess(extension.id(), profile_));
+}
+
+bool SitePermissionsHelper::ShowAccessRequestsInToolbar(
+    const std::string& extension_id) {
+  // By default, extensions requesting access should be visible in toolbar,
+  // otherwise the user would most likely never grant the extensions access.
+  bool show_access_requests = true;
+
+  ExtensionPrefs::Get(profile_)->ReadPrefAsBoolean(
+      extension_id, kPrefShowAccessRequestsInToolbar, &show_access_requests);
+  return show_access_requests;
+}
+
+void SitePermissionsHelper::SetShowAccessRequestsInToolbar(
+    const std::string& extension_id,
+    bool show_access_requests_in_toolbar) {
+  ExtensionPrefs::Get(profile_)->UpdateExtensionPref(
+      extension_id, kPrefShowAccessRequestsInToolbar,
+      std::make_unique<base::Value>(show_access_requests_in_toolbar));
 }
 
 }  // namespace extensions

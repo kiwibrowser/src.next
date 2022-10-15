@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,13 @@
 #include "base/strings/string_util.h"
 
 namespace net {
+
+SchemeHostPortMatcher::SchemeHostPortMatcher() = default;
+SchemeHostPortMatcher::SchemeHostPortMatcher(SchemeHostPortMatcher&& rhs) =
+    default;
+SchemeHostPortMatcher& SchemeHostPortMatcher::operator=(
+    SchemeHostPortMatcher&& rhs) = default;
+SchemeHostPortMatcher::~SchemeHostPortMatcher() = default;
 
 // Declares SchemeHostPortMatcher::kParseRuleListDelimiterList[], not a
 // redefinition. This is needed for link.

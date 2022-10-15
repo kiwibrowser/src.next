@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -98,7 +98,7 @@ class DownloadDangerPromptTest : public InProcessBrowserTest {
         &download(), browser_to_use->profile(), nullptr);
     did_receive_callback_ = false;
     expected_action_ = expected_action;
-    SetUpDownloadItemExpectations(danger_type, token);
+    SetUpDownloadItemExpectations(danger_type, token, download_verdict);
     SetUpSafeBrowsingReportExpectations(
         expected_action == DownloadDangerPrompt::ACCEPT, download_verdict,
         token, from_download_api, browser_to_use);
@@ -137,13 +137,15 @@ class DownloadDangerPromptTest : public InProcessBrowserTest {
  private:
   void SetUpDownloadItemExpectations(
       const download::DownloadDangerType& danger_type,
-      const std::string& token) {
+      const std::string& token,
+      const ClientDownloadResponse::Verdict& download_verdict) {
     EXPECT_CALL(download_, GetFileNameToReportUser())
         .WillRepeatedly(Return(base::FilePath(FILE_PATH_LITERAL("evil.exe"))));
     EXPECT_CALL(download_, GetDangerType()).WillRepeatedly(Return(danger_type));
     auto token_obj =
-        std::make_unique<DownloadProtectionService::DownloadPingToken>(token);
-    download_.SetUserData(DownloadProtectionService::kDownloadPingTokenKey,
+        std::make_unique<DownloadProtectionService::DownloadProtectionData>(
+            token, download_verdict, ClientDownloadResponse::TailoredVerdict());
+    download_.SetUserData(DownloadProtectionService::kDownloadProtectionDataKey,
                           std::move(token_obj));
   }
 

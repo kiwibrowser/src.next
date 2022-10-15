@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,6 +46,19 @@ class ProfilePicker {
   };
   using FirstRunExitedCallback =
       base::OnceCallback<void(FirstRunExitStatus status,
+                              base::OnceClosure callback)>;
+
+  // Added for bug investigation purposes.
+  // TODO(crbug.com/1340791): Remove this once the source of the bug is found.
+  enum class FirstRunExitSource {
+    kParamDestructor = 0,
+    kControllerDestructor = 1,
+    kFlowFinished = 2,
+    kReusingWindow = 3,
+  };
+  using DebugFirstRunExitedCallback =
+      base::OnceCallback<void(FirstRunExitStatus status,
+                              FirstRunExitSource source,
                               base::OnceClosure callback)>;
 #endif
 
@@ -147,6 +160,7 @@ class ProfilePicker {
     // intent to quit will be assumed and `first_run_exited_callback_` will be
     // called by the destructor with quit-related arguments.
     void NotifyFirstRunExited(FirstRunExitStatus exit_status,
+                              FirstRunExitSource exit_source,
                               base::OnceClosure maybe_callback);
 #endif
 

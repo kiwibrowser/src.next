@@ -31,17 +31,24 @@ class PLATFORM_EXPORT DarkModeFilter {
   explicit DarkModeFilter(const DarkModeSettings& settings);
   ~DarkModeFilter();
 
-  enum class ElementRole { kForeground, kListSymbol, kBackground, kSVG };
+  enum class ElementRole {
+    kForeground,
+    kListSymbol,
+    kBackground,
+    kSVG,
+    kBorder
+  };
   enum class ImageType { kNone, kIcon, kSeparator, kPhoto };
 
-  static ElementRole BorderElementRole(SkColor border_color,
-                                       SkColor background_color);
-
   SkColor InvertColorIfNeeded(SkColor color, ElementRole element_role);
+  SkColor InvertColorIfNeeded(SkColor color,
+                              ElementRole role,
+                              SkColor contrast_background);
 
   absl::optional<cc::PaintFlags> ApplyToFlagsIfNeeded(
       const cc::PaintFlags& flags,
-      ElementRole element_role);
+      ElementRole role,
+      SkColor contrast_background);
 
   size_t GetInvertedColorCacheSizeForTesting();
 
@@ -71,6 +78,10 @@ class PLATFORM_EXPORT DarkModeFilter {
     std::unique_ptr<DarkModeColorFilter> color_filter;
     sk_sp<SkColorFilter> image_filter;
   };
+
+  SkColor AdjustDarkenColor(SkColor color,
+                            DarkModeFilter::ElementRole role,
+                            SkColor contrast_background);
 
   bool ShouldApplyToColor(SkColor color, ElementRole role);
 

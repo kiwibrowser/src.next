@@ -121,6 +121,7 @@ class CORE_EXPORT CSSPrimitiveValue : public CSSValue {
 
     kRems,
     kChs,
+    kIcs,
     kUserUnits,  // The SVG term for unitless lengths
     // Angle units
     kDegrees,
@@ -188,6 +189,7 @@ class CORE_EXPORT CSSPrimitiveValue : public CSSValue {
     kUnitTypeContainerBlockSize,
     kUnitTypeContainerMin,
     kUnitTypeContainerMax,
+    kUnitTypeIdeographicFullWidth,
 
     // This value must come after the last length unit type to enable iteration
     // over the length unit types.
@@ -234,6 +236,11 @@ class CORE_EXPORT CSSPrimitiveValue : public CSSValue {
   using LengthTypeFlags = std::bitset<kLengthUnitTypeCount>;
   void AccumulateLengthUnitTypes(LengthTypeFlags& types) const;
 
+  // v*, sv*, lv*
+  static bool HasStaticViewportUnits(const LengthTypeFlags&);
+  // dv*
+  static bool HasDynamicViewportUnits(const LengthTypeFlags&);
+
   enum UnitCategory {
     kUNumber,
     kUPercent,
@@ -277,7 +284,8 @@ class CORE_EXPORT CSSPrimitiveValue : public CSSValue {
   static inline bool IsRelativeUnit(UnitType type) {
     return type == UnitType::kPercentage || type == UnitType::kEms ||
            type == UnitType::kExs || type == UnitType::kRems ||
-           type == UnitType::kChs || IsViewportPercentageLength(type) ||
+           type == UnitType::kChs || type == UnitType::kIcs ||
+           IsViewportPercentageLength(type) ||
            IsContainerPercentageLength(type);
   }
   bool IsLength() const;

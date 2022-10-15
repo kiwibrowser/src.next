@@ -55,6 +55,7 @@ class ScrollbarLayerBase;
 }
 
 namespace blink {
+
 enum class PaintPropertyChangeType : unsigned char;
 class EffectPaintPropertyNode;
 class GraphicsContext;
@@ -66,6 +67,8 @@ class ScrollPaintPropertyNode;
 class TracedValue;
 class TransformPaintPropertyNode;
 struct PaintPropertyTreeBuilderFragmentContext;
+
+enum class OverscrollType { kNone, kTransform, kFilter };
 
 // Represents the visual viewport the user is currently seeing the page through.
 // This class corresponds to the InnerViewport on the compositor. It is a
@@ -212,6 +215,7 @@ class CORE_EXPORT VisualViewport : public GarbageCollected<VisualViewport>,
   gfx::Vector2d MinimumScrollOffsetInt() const override;
   gfx::Vector2d MaximumScrollOffsetInt() const override;
   ScrollOffset MaximumScrollOffset() const override;
+  ScrollOffset MaximumScrollOffsetAtScale(float scale) const;
   // Note: Because scrollbars are conceptually owned by the LayoutView,
   // ContentsSize includes the main frame's scrollbars. This is necessary for
   // correct cc Layer sizing.
@@ -266,12 +270,15 @@ class CORE_EXPORT VisualViewport : public GarbageCollected<VisualViewport>,
   // for viewing websites that are not optimized for mobile devices.
   bool ShouldDisableDesktopWorkarounds() const;
 
-  TransformPaintPropertyNode* GetDeviceEmulationTransformNode() const;
-  TransformPaintPropertyNode* GetOverscrollElasticityTransformNode() const;
-  EffectPaintPropertyNode* GetOverscrollElasticityEffectNode() const;
-  TransformPaintPropertyNode* GetPageScaleNode() const;
-  TransformPaintPropertyNode* GetScrollTranslationNode() const;
-  ScrollPaintPropertyNode* GetScrollNode() const;
+  const TransformPaintPropertyNode* GetDeviceEmulationTransformNode() const;
+  const TransformPaintPropertyNode* GetOverscrollElasticityTransformNode()
+      const;
+  const EffectPaintPropertyNode* GetOverscrollElasticityEffectNode() const;
+  const TransformPaintPropertyNode* GetPageScaleNode() const;
+  const TransformPaintPropertyNode* GetScrollTranslationNode() const;
+  const ScrollPaintPropertyNode* GetScrollNode() const;
+
+  const TransformPaintPropertyNode* TransformNodeForViewportScrollbars() const;
 
   // Create/update the page scale translation, viewport scroll, and viewport
   // translation property nodes. Returns the maximum paint property change
@@ -303,6 +310,12 @@ class CORE_EXPORT VisualViewport : public GarbageCollected<VisualViewport>,
   // values. Only a <portal> or outermost main frame can have an active
   // viewport.
   bool IsActiveViewport() const;
+
+  OverscrollType GetOverscrollType() const { return overscroll_type_; }
+  void SetOverscrollTypeForTesting(OverscrollType type) {
+    overscroll_type_ = type;
+    SetNeedsPaintPropertyUpdate();
+  }
 
  private:
   bool DidSetScaleOrLocation(float scale,
@@ -392,6 +405,8 @@ class CORE_EXPORT VisualViewport : public GarbageCollected<VisualViewport>,
   CompositorElementId elasticity_effect_node_id_;
 
   bool needs_paint_property_update_;
+
+  OverscrollType overscroll_type_;
 };
 
 }  // namespace blink

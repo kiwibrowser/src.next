@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -165,7 +165,7 @@ static const MimeInfo kPrimaryMappings[] = {
     {"image/jpeg", "jpeg,jpg"},
     {"image/jxl", "jxl"},
     {"image/png", "png"},
-    {"image/apng", "png"},
+    {"image/apng", "png,apng"},
     {"image/svg+xml", "svg,svgz"},
     {"image/webp", "webp"},
     {"multipart/related", "mht,mhtml"},

@@ -325,7 +325,8 @@ INSTANTIATE_PAINT_TEST_SUITE_P(ScrollbarsTestWithVirtualTimer);
   } while (false)
 
 TEST_P(ScrollbarsTest, DocumentStyleRecalcPreservesScrollbars) {
-  v8::HandleScope handle_scope(v8::Isolate::GetCurrent());
+  v8::HandleScope handle_scope(
+      WebView().GetPage()->GetAgentGroupScheduler().Isolate());
   WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
@@ -509,7 +510,8 @@ TEST_P(ScrollbarsTest, BodyBackgroundChangesOverlayColorTheme) {
   // are enabled.
   ENABLE_OVERLAY_SCROLLBARS(true);
 
-  v8::HandleScope handle_scope(v8::Isolate::GetCurrent());
+  v8::HandleScope handle_scope(
+      WebView().GetPage()->GetAgentGroupScheduler().Isolate());
   WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
@@ -1718,7 +1720,8 @@ TEST_P(ScrollbarAppearanceTest, ThemeEngineDefinesMinimumThumbLength) {
   ScopedStubThemeEngine scoped_theme;
   ENABLE_OVERLAY_SCROLLBARS(UsesOverlayScrollbars());
 
-  v8::HandleScope handle_scope(v8::Isolate::GetCurrent());
+  v8::HandleScope handle_scope(
+      WebView().GetPage()->GetAgentGroupScheduler().Isolate());
   WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
@@ -1744,7 +1747,8 @@ TEST_P(ScrollbarAppearanceTest, HugeScrollingThumbPosition) {
   ScopedStubThemeEngine scoped_theme;
   ENABLE_OVERLAY_SCROLLBARS(UsesOverlayScrollbars());
 
-  v8::HandleScope handle_scope(v8::Isolate::GetCurrent());
+  v8::HandleScope handle_scope(
+      WebView().GetPage()->GetAgentGroupScheduler().Isolate());
   WebView().MainFrameViewWidget()->Resize(gfx::Size(1000, 1000));
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
@@ -2159,6 +2163,37 @@ TEST_P(ScrollbarsTest, AutosizeAlmostRemovableScrollbar) {
     EXPECT_EQ(445, frame_view->Width());
     EXPECT_EQ(600, frame_view->Height());
   }
+}
+
+TEST_P(ScrollbarsTest, AutosizeExpandingContentScrollable) {
+  ENABLE_OVERLAY_SCROLLBARS(true);
+
+  SimRequest resource("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  resource.Complete(R"HTML(
+    <style>
+    body { margin: 0 }
+    #spacer { width: 100px; height: 100px; }
+    </style>
+    <div id="spacer"></div>
+  )HTML");
+  test::RunPendingTasks();
+
+  LocalFrameView* frame_view = WebView().MainFrameImpl()->GetFrameView();
+  ScrollableArea* layout_viewport = frame_view->LayoutViewport();
+
+  WebView().EnableAutoResizeMode(gfx::Size(800, 600), gfx::Size(800, 600));
+  Compositor().BeginFrame();
+
+  // Not scrollable due to no overflow.
+  EXPECT_FALSE(layout_viewport->UserInputScrollable(kVerticalScrollbar));
+
+  GetDocument().getElementById("spacer")->setAttribute(html_names::kStyleAttr,
+                                                       "height: 900px");
+  Compositor().BeginFrame();
+
+  // Now scrollable due to overflow.
+  EXPECT_TRUE(layout_viewport->UserInputScrollable(kVerticalScrollbar));
 }
 
 TEST_P(ScrollbarsTest,

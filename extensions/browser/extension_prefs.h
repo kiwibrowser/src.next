@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -143,12 +143,12 @@ class ExtensionPrefs : public KeyedService {
 
     // Returns a mutable value for the key (ownership remains with the prefs),
     // if one exists. Otherwise, returns NULL.
-    base::ListValue* Get();
+    base::Value::List* Get();
 
     // Creates and returns a mutable value for the key (the prefs own the new
     // value), if one does not already exist. Otherwise, returns the current
     // value.
-    base::ListValue* Create();
+    base::Value::List* Ensure();
 
    private:
     std::unique_ptr<prefs::ScopedDictionaryPrefUpdate> update_;
@@ -201,11 +201,6 @@ class ExtensionPrefs : public KeyedService {
   // ExtensionService::IsExtensionEnabled instead.
   // Note that blocklisted extensions are NOT marked as disabled!
   bool IsExtensionDisabled(const std::string& id) const;
-
-  // Get/Set the order that the browser actions appear in the toolbar.
-  // TODO(devlin): Remove this. The pref is no longer used.
-  ExtensionIdList GetToolbarOrder() const;
-  void SetToolbarOrder(const ExtensionIdList& extension_ids);
 
   // Get/Set the set of extensions that are pinned to the toolbar. Only used
   // when the experiment ExtensionsMenu is active."
@@ -355,9 +350,13 @@ class ExtensionPrefs : public KeyedService {
                       base::StringPiece pref_key,
                       const base::ListValue** out_value) const;
 
+  // DEPRECATED: prefer ReadPrefAsDict() instead.
   bool ReadPrefAsDictionary(const std::string& extension_id,
                             base::StringPiece pref_key,
                             const base::DictionaryValue** out_value) const;
+
+  const base::Value::Dict* ReadPrefAsDict(const std::string& extension_id,
+                                          base::StringPiece pref_key) const;
 
   // Interprets the list pref, |pref_key| in |extension_id|'s preferences, as a
   // URLPatternSet. The |valid_schemes| specify how to parse the URLPatterns.
@@ -468,7 +467,7 @@ class ExtensionPrefs : public KeyedService {
   // Returns the granted permission set for the extension with |extension_id|,
   // and NULL if no preferences were found for |extension_id|.
   // This passes ownership of the returned set to the caller.
-  std::unique_ptr<const PermissionSet> GetGrantedPermissions(
+  std::unique_ptr<PermissionSet> GetGrantedPermissions(
       const std::string& extension_id) const;
 
   // Adds |permissions| to the granted permissions set for the extension with
@@ -489,7 +488,7 @@ class ExtensionPrefs : public KeyedService {
   // because the user may have withheld certain permissions, as well as because
   // of possible enterprise policy settings. Use `PermissionsData` to determine
   // the current effective permissions of an extension.
-  std::unique_ptr<const PermissionSet> GetDesiredActivePermissions(
+  std::unique_ptr<PermissionSet> GetDesiredActivePermissions(
       const std::string& extension_id) const;
 
   // Sets the desired active permissions for the given `extension_id` to
@@ -519,7 +518,7 @@ class ExtensionPrefs : public KeyedService {
   // as those granted through the permissions API or the runtime host
   // permissions feature). Note that, similar to granted permissions, this can
   // include permissions granted to the extension, even if they are not active.
-  std::unique_ptr<const PermissionSet> GetRuntimeGrantedPermissions(
+  std::unique_ptr<PermissionSet> GetRuntimeGrantedPermissions(
       const ExtensionId& extension_id) const;
 
   // Adds to the set of runtime-granted permissions.
@@ -798,8 +797,7 @@ class ExtensionPrefs : public KeyedService {
       bool extensions_disabled,
       const std::vector<EarlyExtensionPrefsObserver*>& early_observers);
 
-  // Gets or sets profile wide ExtensionPrefs.
-  const base::Value* GetPref(const PrefMap& pref) const;
+  // Sets profile wide ExtensionPrefs.
   void SetPref(const PrefMap& pref, std::unique_ptr<base::Value> value);
 
   // Updates ExtensionPrefs for a specific extension.
@@ -820,7 +818,7 @@ class ExtensionPrefs : public KeyedService {
   // |extension| dictionary.
   std::unique_ptr<ExtensionInfo> GetInstalledInfoHelper(
       const std::string& extension_id,
-      const base::Value* extension,
+      const base::Value::Dict& extension,
       bool include_component_extensions) const;
 
   // Read the boolean preference entry and return true if the preference exists
@@ -830,7 +828,7 @@ class ExtensionPrefs : public KeyedService {
 
   // Interprets |pref_key| in |extension_id|'s preferences as an
   // PermissionSet, and passes ownership of the set to the caller.
-  std::unique_ptr<const PermissionSet> ReadPrefAsPermissionSet(
+  std::unique_ptr<PermissionSet> ReadPrefAsPermissionSet(
       const std::string& extension_id,
       base::StringPiece pref_key) const;
 
@@ -853,6 +851,11 @@ class ExtensionPrefs : public KeyedService {
   // Returns an immutable dictionary for extension |id|'s prefs, or NULL if it
   // doesn't exist.
   const base::DictionaryValue* GetExtensionPref(const std::string& id) const;
+
+  // Returns an immutable base::Value for extension |id|'s prefs, or nullptr if
+  // it doesn't exist.
+  const base::Value* GetPrefAsValue(const std::string& extension_id,
+                                    base::StringPiece pref_key) const;
 
   // Modifies the extensions disable reasons to add a new reason, remove an
   // existing reason, or clear all reasons. Notifies observers if the set of

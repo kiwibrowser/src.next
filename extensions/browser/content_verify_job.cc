@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -204,7 +204,7 @@ bool ContentVerifyJob::FinishBlock() {
 
   int block = current_block_++;
 
-  const std::string* expected_hash = NULL;
+  const std::string* expected_hash = nullptr;
   if (!hash_reader_->GetHashForBlock(block, &expected_hash) ||
       *expected_hash != final) {
     return false;

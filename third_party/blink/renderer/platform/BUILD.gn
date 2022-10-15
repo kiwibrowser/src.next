@@ -45,6 +45,7 @@ blink_python_runner("runtime_enabled_features") {
              "../build/scripts/templates/runtime_enabled_features.cc.tmpl",
              "../build/scripts/templates/runtime_enabled_features.h.tmpl",
              "../build/scripts/templates/runtime_enabled_features_test_helpers.h.tmpl",
+             "../build/scripts/templates/web_runtime_features_base.cc.tmpl",
            ]
 
   build_scripts_output_dir = "$blink_platform_output_dir/../build/scripts"
@@ -52,6 +53,7 @@ blink_python_runner("runtime_enabled_features") {
     "$blink_platform_output_dir/runtime_enabled_features.cc",
     "$blink_platform_output_dir/runtime_enabled_features.h",
     "$blink_platform_output_dir/testing/runtime_enabled_features_test_helpers.h",
+    "$blink_platform_output_dir/exported/web_runtime_features_base.cc",
     "$build_scripts_output_dir/runtime_enabled_features.pickle",
   ]
 
@@ -421,8 +423,12 @@ component("platform") {
     "bindings/script_state.h",
     "bindings/script_wrappable.cc",
     "bindings/script_wrappable.h",
+    "bindings/source_location.cc",
+    "bindings/source_location.h",
     "bindings/string_resource.cc",
     "bindings/string_resource.h",
+    "bindings/thread_debugger.cc",
+    "bindings/thread_debugger.h",
     "bindings/to_v8.h",
     "bindings/trace_wrapper_v8_reference.h",
     "bindings/trace_wrapper_v8_string.cc",
@@ -619,6 +625,7 @@ component("platform") {
     "fonts/generic_font_family_settings.h",
     "fonts/glyph_metrics_map.h",
     "fonts/lock_for_parallel_text_shaping.h",
+    "fonts/ng_text_fragment_paint_info.cc",
     "fonts/ng_text_fragment_paint_info.h",
     "fonts/opentype/font_format_check.cc",
     "fonts/opentype/font_format_check.h",
@@ -1008,6 +1015,7 @@ component("platform") {
     "graphics/paint/paint_canvas.h",
     "graphics/paint/paint_chunk.cc",
     "graphics/paint/paint_chunk.h",
+    "graphics/paint/paint_chunk_subset.cc",
     "graphics/paint/paint_chunk_subset.h",
     "graphics/paint/paint_chunker.cc",
     "graphics/paint/paint_chunker.h",
@@ -1224,7 +1232,6 @@ component("platform") {
     "mojo/heap_mojo_wrapper_mode.h",
     "mojo/kurl_mojom_traits.h",
     "mojo/mojo_binding_context.h",
-    "mojo/mojo_helper.h",
     "mojo/security_origin_mojom_traits.h",
     "mojo/shared_storage_mojom_traits.cc",
     "mojo/shared_storage_mojom_traits.h",
@@ -1387,7 +1394,6 @@ component("platform") {
     "text/text_direction.h",
     "text/text_encoding_detector.cc",
     "text/text_encoding_detector.h",
-    "text/text_justify.h",
     "text/text_run.cc",
     "text/text_run.h",
     "text/text_run_iterator.h",
@@ -1947,15 +1953,15 @@ test("blink_platform_unittests") {
   deps = [ ":blink_platform_unittests_sources" ]
 
   if (is_fuchsia) {
+    use_cfv1 = false
+    additional_manifest_fragments = [
+      "//build/config/fuchsia/test/test_fonts.shard.test-cml",
+      "//build/config/fuchsia/test/mark_vmo_executable.shard.test-cml",
+    ]
+
     # Oilpan reuses V8's v8::PageAllocator which generally requires JIT
     # permissions.
-    # TODO(https://crbug.com/1287051): Requires fuchsia.sys.Launcher.
-    use_cfv2 = false
-    additional_manifest_fragments =
-        [ "//build/config/fuchsia/test/jit_capabilities.test-cmx" ]
-
-    # Use the following when switching to CFv2:
-    # test_runner_shard = "//build/config/fuchsia/test/elf_test_ambient_exec_runner.shard.test-cml"
+    test_runner_shard = "//build/config/fuchsia/test/elf_test_ambient_exec_runner.shard.test-cml"
   }
 
   if (is_android) {
@@ -2105,6 +2111,7 @@ source_set("blink_platform_unittests_sources") {
     "mediastream/media_stream_audio_processor_options_test.cc",
     "mediastream/media_stream_audio_test.cc",
     "mediastream/media_stream_source_test.cc",
+    "mediastream/transferred_media_stream_component_test.cc",
     "mediastream/webrtc_uma_histograms_test.cc",
     "mhtml/mhtml_parser_test.cc",
     "mojo/big_string_mojom_traits_test.cc",
@@ -2248,7 +2255,6 @@ source_set("blink_platform_unittests_sources") {
     "//services/viz/public/mojom",
     "//skia",
     "//skia:skcms",
-    "//skia:test_fonts",
     "//testing/gmock",
     "//testing/gtest",
     "//third_party:freetype_harfbuzz",
@@ -2284,6 +2290,12 @@ source_set("blink_platform_unittests_sources") {
   defines = [ "INSIDE_BLINK" ]
   if (use_minikin_hyphenation) {
     defines += [ "USE_MINIKIN_HYPHENATION" ]
+  }
+
+  if (is_fuchsia) {
+    deps += [ "//skia:test_fonts_cfv2" ]
+  } else {
+    deps += [ "//skia:test_fonts" ]
   }
 }
 
@@ -2398,7 +2410,6 @@ test("blink_fuzzer_unittests") {
     ":test_support",
     "//base/test:test_support",
     "//mojo/core/embedder:embedder",
-    "//skia:test_fonts",
     "//third_party/blink/public:test_support",
   ]
 
@@ -2411,9 +2422,15 @@ test("blink_fuzzer_unittests") {
   }
 
   if (is_fuchsia) {
-    use_cfv2 = false
-    additional_manifest_fragments =
-        [ "//build/config/fuchsia/test/jit_capabilities.test-cmx" ]
+    use_cfv1 = false
+    deps += [ "//skia:test_fonts_cfv2" ]
+    test_runner_shard = "//build/config/fuchsia/test/elf_test_ambient_exec_runner.shard.test-cml"
+    additional_manifest_fragments = [
+      "//build/config/fuchsia/test/test_fonts.shard.test-cml",
+      "//build/config/fuchsia/test/mark_vmo_executable.shard.test-cml",
+    ]
+  } else {
+    deps += [ "//skia:test_fonts" ]
   }
 }
 
@@ -2617,6 +2634,7 @@ source_set("unit_tests") {
     "graphics/gpu/drawing_buffer_software_rendering_test.cc",
     "graphics/image_decoding_store_test.cc",
     "graphics/image_frame_generator_test.cc",
+    "graphics/offscreen_canvas_placeholder_test.cc",
     "graphics/paint_worklet_paint_dispatcher_test.cc",
     "graphics/test/stub_image.h",
 

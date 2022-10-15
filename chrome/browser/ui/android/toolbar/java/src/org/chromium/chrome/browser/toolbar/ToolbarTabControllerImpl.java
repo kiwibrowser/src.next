@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,13 +13,10 @@ import org.chromium.base.supplier.ObservableSupplier;
 import org.chromium.base.supplier.ObservableSupplierImpl;
 import org.chromium.base.supplier.Supplier;
 import org.chromium.chrome.browser.back_press.BackPressManager;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObserver;
-import org.chromium.chrome.browser.tabmodel.TabModelObserver;
-import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.toolbar.bottom.BottomControlsCoordinator;
 import org.chromium.chrome.browser.ui.native_page.NativePage;
 import org.chromium.components.embedder_support.util.UrlConstants;
@@ -42,12 +39,12 @@ public class ToolbarTabControllerImpl implements ToolbarTabController {
     private final ObservableSupplier<BottomControlsCoordinator> mBottomControlsCoordinatorSupplier;
     private final Supplier<String> mHomepageUrlSupplier;
     private final Runnable mOnSuccessRunnable;
-    private final ObservableSupplier<TabModelSelector> mTabModelSelectorSupplier;
+    private final Callback<Tab> mOnActivityTabCallback = this::onActivityTabChanged;
+    private final ObservableSupplier<Tab> mActivityTabSupplier;
     private final ObservableSupplierImpl<Boolean> mBackPressChangedSupplier =
             new ObservableSupplierImpl<>();
-    private final Callback<TabModelSelector> mTabModelSelectorAvailableCallback;
+    private Tab mOldTab;
     private final Callback<BottomControlsCoordinator> mBottomControlsCoordinatorAvailableCallback;
-    private @Nullable TabModelObserver mTabModelObserver;
 
     /**
      *
@@ -58,27 +55,27 @@ public class ToolbarTabControllerImpl implements ToolbarTabController {
      * @param homepageUrlSupplier Supplier for the homepage URL.
      * @param onSuccessRunnable Runnable that is invoked when the active tab is asked to perform the
      *         corresponding ToolbarTabController action; it is not invoked if the tab cannot
-     * @param tabModelSelectorSupplier Supplier of {@link TabModelSelector}.
+     * @param activityTabSupplier Supplier of the current activity tab, which should return null
+     *                            in non-browsing mode.
      */
     public ToolbarTabControllerImpl(Supplier<Tab> tabSupplier,
             Supplier<Boolean> overrideHomePageSupplier, Supplier<Tracker> trackerSupplier,
             ObservableSupplier<BottomControlsCoordinator> bottomControlsCoordinatorSupplier,
             Supplier<String> homepageUrlSupplier, Runnable onSuccessRunnable,
-            ObservableSupplier<TabModelSelector> tabModelSelectorSupplier) {
+            ObservableSupplier<Tab> activityTabSupplier) {
         mTabSupplier = tabSupplier;
         mOverrideHomePageSupplier = overrideHomePageSupplier;
         mTrackerSupplier = trackerSupplier;
         mBottomControlsCoordinatorSupplier = bottomControlsCoordinatorSupplier;
         mHomepageUrlSupplier = homepageUrlSupplier;
         mOnSuccessRunnable = onSuccessRunnable;
-        mTabModelSelectorSupplier = tabModelSelectorSupplier;
-        onBackPressedChanged();
-        mTabModelSelectorAvailableCallback = this::onTabModelSelectorAvailable;
+        mActivityTabSupplier = activityTabSupplier;
         mBottomControlsCoordinatorAvailableCallback = this::onBottomControlsCoordinatorAvailable;
         if (BackPressManager.isEnabled()) {
-            tabModelSelectorSupplier.addObserver(mTabModelSelectorAvailableCallback);
+            activityTabSupplier.addObserver(mOnActivityTabCallback);
             bottomControlsCoordinatorSupplier.addObserver(
                     mBottomControlsCoordinatorAvailableCallback);
+            onBackPressedChanged();
         }
     }
 
@@ -88,8 +85,10 @@ public class ToolbarTabControllerImpl implements ToolbarTabController {
         if (controlsCoordinator != null && controlsCoordinator.onBackPressed()) {
             return true;
         }
-
         Tab tab = mTabSupplier.get();
+        if (BackPressManager.isEnabled()) {
+            tab = mActivityTabSupplier.get();
+        }
         if (tab != null && tab.canGoBack()) {
             NativePage nativePage = tab.getNativePage();
             if (nativePage != null) {
@@ -134,13 +133,11 @@ public class ToolbarTabControllerImpl implements ToolbarTabController {
         RecordUserAction.record("Home");
         recordHomeButtonUserPerProfileType();
         if (mOverrideHomePageSupplier.get()) {
-            if (ChromeFeatureList.isEnabled(ChromeFeatureList.TOOLBAR_IPH_ANDROID)) {
-                // While some other element is handling the routing of this click event, something
-                // still needs to notify the event. This approach allows consolidation of events for
-                // the home button.
-                Tracker tracker = mTrackerSupplier.get();
-                if (tracker != null) tracker.notifyEvent(EventConstants.HOMEPAGE_BUTTON_CLICKED);
-            }
+            // While some other element is handling the routing of this click event, something
+            // still needs to notify the event. This approach allows consolidation of events for
+            // the home button.
+            Tracker tracker = mTrackerSupplier.get();
+            if (tracker != null) tracker.notifyEvent(EventConstants.HOMEPAGE_BUTTON_CLICKED);
             return;
         }
         Tab currentTab = mTabSupplier.get();
@@ -165,6 +162,7 @@ public class ToolbarTabControllerImpl implements ToolbarTabController {
     @Override
     public void handleBackPress() {
         boolean ret = back();
+        onBackPressedChanged();
         assert ret;
     }
 
@@ -176,18 +174,13 @@ public class ToolbarTabControllerImpl implements ToolbarTabController {
     @Override
     public void destroy() {
         if (BackPressManager.isEnabled()) {
-            if (mTabModelObserver != null && mTabModelSelectorSupplier.get() != null) {
-                mTabModelSelectorSupplier.get()
-                        .getTabModelFilterProvider()
-                        .removeTabModelFilterObserver(mTabModelObserver);
-            }
+            mActivityTabSupplier.removeObserver(mOnActivityTabCallback);
             mBottomControlsCoordinatorSupplier.removeObserver(
                     mBottomControlsCoordinatorAvailableCallback);
         }
     }
 
-    private void onTabModelSelectorAvailable(TabModelSelector tabModelSelector) {
-        onBackPressedChanged();
+    private void onActivityTabChanged(@Nullable Tab tab) {
         final WebContentsObserver webContentsObserver = new WebContentsObserver() {
             @Override
             public void navigationEntryCommitted(LoadCommittedDetails details) {
@@ -210,47 +203,54 @@ public class ToolbarTabControllerImpl implements ToolbarTabController {
             }
         };
 
-        mTabModelObserver = new TabModelObserver() {
-            Tab mOldTab;
-            final TabObserver mTabObserver = new EmptyTabObserver() {
-                @Override
-                public void webContentsWillSwap(Tab tab) {
-                    if (tab.getWebContents() != null) {
-                        tab.getWebContents().removeObserver(webContentsObserver);
-                    }
+        final TabObserver mTabObserver = new EmptyTabObserver() {
+            @Override
+            public void webContentsWillSwap(Tab tab) {
+                if (tab.getWebContents() != null) {
+                    tab.getWebContents().removeObserver(webContentsObserver);
                 }
-
-                @Override
-                public void onWebContentsSwapped(
-                        Tab tab, boolean didStartLoad, boolean didFinishLoad) {
-                    if (tab.getWebContents() != null) {
-                        tab.getWebContents().addObserver(webContentsObserver);
-                    }
-                }
-
-                @Override
-                public void onDestroyed(Tab tab) {
-                    if (tab.getWebContents() != null) {
-                        tab.getWebContents().removeObserver(webContentsObserver);
-                    }
-                }
-            };
+                onBackPressedChanged();
+            }
 
             @Override
-            public void didSelectTab(Tab tab, int type, int lastId) {
-                onBackPressedChanged();
-                if (mOldTab != null && mOldTab.getWebContents() != null) {
-                    mOldTab.getWebContents().removeObserver(webContentsObserver);
-                }
+            public void onWebContentsSwapped(Tab tab, boolean didStartLoad, boolean didFinishLoad) {
                 if (tab.getWebContents() != null) {
                     tab.getWebContents().addObserver(webContentsObserver);
                 }
-                mOldTab = tab;
-                tab.addObserver(mTabObserver);
+                onBackPressedChanged();
+            }
+
+            @Override
+            public void onDestroyed(Tab tab) {
+                if (tab.getWebContents() != null) {
+                    tab.getWebContents().removeObserver(webContentsObserver);
+                }
+                onBackPressedChanged();
+            }
+
+            @Override
+            public void onContentChanged(Tab tab) {
+                if (tab.getWebContents() != null) {
+                    tab.getWebContents().addObserver(webContentsObserver);
+                }
+                onBackPressedChanged();
             }
         };
-        tabModelSelector.getTabModelFilterProvider().addTabModelFilterObserver(mTabModelObserver);
-        mTabModelSelectorSupplier.removeObserver(mTabModelSelectorAvailableCallback);
+
+        if (mOldTab != null) {
+            mOldTab.removeObserver(mTabObserver);
+            if (mOldTab.getWebContents() != null) {
+                mOldTab.getWebContents().removeObserver(webContentsObserver);
+            }
+        }
+        if (tab != null) {
+            if (tab.getWebContents() != null) {
+                tab.getWebContents().addObserver(webContentsObserver);
+            }
+            tab.addObserver(mTabObserver);
+            mOldTab = tab;
+        }
+        onBackPressedChanged();
     }
 
     private void onBottomControlsCoordinatorAvailable(
@@ -268,12 +268,8 @@ public class ToolbarTabControllerImpl implements ToolbarTabController {
                 return;
             }
         }
-        Tab tab = mTabSupplier.get();
-        if (tab != null && tab.canGoBack()) {
-            mBackPressChangedSupplier.set(true);
-            return;
-        }
-        mBackPressChangedSupplier.set(false);
+        Tab tab = mActivityTabSupplier.get();
+        mBackPressChangedSupplier.set(tab != null && tab.canGoBack());
     }
 
     /** Record that homepage button was used for IPH reasons */

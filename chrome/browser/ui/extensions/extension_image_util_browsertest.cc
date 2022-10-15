@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,9 @@
 #include "ui/color/color_provider.h"
 #include "ui/native_theme/native_theme.h"
 
-#if BUILDFLAG(USE_GTK)
+#if BUILDFLAG(IS_LINUX)
 #include "ui/linux/linux_ui.h"
+#include "ui/linux/linux_ui_getter.h"
 #endif
 
 namespace {
@@ -32,10 +33,9 @@ using ImageUtilTest = extensions::ExtensionBrowserTest;
 IN_PROC_BROWSER_TEST_F(ImageUtilTest, CheckDefaultToolbarColor) {
   // This test relies on being run with the default light mode system theme.
   ui::NativeTheme::GetInstanceForNativeUi()->set_use_dark_colors(false);
-#if BUILDFLAG(USE_GTK)
-  ui::LinuxUi::instance()->SetUseSystemThemeCallback(
-      base::BindRepeating([](aura::Window* window) { return false; }));
-#endif  // BUILDFLAG(USE_GTK)
+#if BUILDFLAG(IS_LINUX)
+  ui::LinuxUiGetter::set_instance(nullptr);
+#endif  // BUILDFLAG(IS_LINUX)
   ui::NativeTheme::GetInstanceForNativeUi()->NotifyOnNativeThemeUpdated();
 
   EXPECT_EQ(extensions::image_util::kDefaultToolbarColor,

@@ -13,10 +13,12 @@
 
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
+#include "base/test/scoped_feature_list.h"
 #include "testing/perf/perf_result_reporter.h"
 #include "testing/perf/perf_test.h"
 #include "third_party/blink/public/platform/web_back_forward_cache_loader_helper.h"
 #include "third_party/blink/renderer/core/css/container_query_data.h"
+#include "third_party/blink/renderer/core/css/parser/css_tokenizer.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
@@ -38,6 +40,12 @@ namespace blink {
 static std::unique_ptr<DummyPageHolder> LoadDumpedPage(
     const base::Value::Dict& dict,
     perf_test::PerfResultReporter& reporter) {
+  const std::string parse_iterations_str =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          "style-parse-iterations");
+  int parse_iterations =
+      parse_iterations_str.empty() ? 1 : stoi(parse_iterations_str);
+
   auto page = std::make_unique<DummyPageHolder>(
       gfx::Size(800, 600), nullptr,
       MakeGarbageCollected<NoNetworkLocalFrameClient>());
@@ -52,12 +60,42 @@ static std::unique_ptr<DummyPageHolder> LoadDumpedPage(
   int num_sheets = 0;
   int num_bytes = 0;
 
+  // If --pre-tokenize is given, we do all the tokenization outside of
+  // the timer (simulating the case where it's already tokenized for us
+  // on a different thread).
+  const bool pre_tokenize =
+      base::CommandLine::ForCurrentProcess()->HasSwitch("pre-tokenize");
+  std::vector<std::unique_ptr<CachedCSSTokenizer>> tokenizers;
+  base::ElapsedTimer tokenize_timer;
+  for (const base::Value& sheet_json : *dict.FindList("stylesheets")) {
+    const base::Value::Dict& sheet_dict = sheet_json.GetDict();
+    if (pre_tokenize) {
+      tokenizers.push_back(CSSTokenizer::CreateCachedTokenizer(
+          WTF::String(*sheet_dict.FindString("text"))));
+      // Extra tokenizers are just a copy of the first.
+      for (int i = 1; i < parse_iterations; ++i) {
+        tokenizers.push_back(tokenizers.back()->DuplicateForTesting());
+      }
+    } else {
+      for (int i = 0; i < parse_iterations; ++i) {
+        tokenizers.push_back(nullptr);
+      }
+    }
+  }
+  base::TimeDelta tokenize_time = tokenize_timer.Elapsed();
+
   base::ElapsedTimer parse_timer;
+  int tokenizer_idx = 0;
   for (const base::Value& sheet_json : *dict.FindList("stylesheets")) {
     const base::Value::Dict& sheet_dict = sheet_json.GetDict();
     auto* sheet = MakeGarbageCollected<StyleSheetContents>(
         MakeGarbageCollected<CSSParserContext>(document));
-    sheet->ParseString(WTF::String(*sheet_dict.FindString("text")));
+
+    for (int i = 0; i < parse_iterations; ++i) {
+      sheet->ParseString(WTF::String(*sheet_dict.FindString("text")),
+                         /*allow_import_rules=*/true,
+                         std::move(tokenizers[tokenizer_idx++]));
+    }
     if (*sheet_dict.FindString("type") == "user") {
       engine.InjectSheet("", sheet, WebCssOrigin::kUser);
     } else {
@@ -74,6 +112,11 @@ static std::unique_ptr<DummyPageHolder> LoadDumpedPage(
   reporter.RegisterFyiMetric("SheetSize", "kB");
   reporter.AddResult("SheetSize", static_cast<double>(num_bytes / 1024));
 
+  if (pre_tokenize) {
+    reporter.RegisterImportantMetric("TokenizeTime", "us");
+    reporter.AddResult("TokenizeTime", tokenize_time);
+  }
+
   reporter.RegisterImportantMetric("ParseTime", "us");
   reporter.AddResult("ParseTime", parse_time);
 
@@ -81,6 +124,18 @@ static std::unique_ptr<DummyPageHolder> LoadDumpedPage(
 }
 
 static void MeasureStyleForDumpedPage(const char* filename, const char* label) {
+  base::test::ScopedFeatureList feature_list;
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          "disable-parser-selector-arena")) {
+    feature_list.InitWithFeatures(
+        /*enabled_features=*/{},
+        /*disabled_features=*/{blink::features::kCSSParserSelectorArena});
+  } else {
+    feature_list.InitWithFeatures(
+        /*enabled_features=*/{blink::features::kCSSParserSelectorArena},
+        /*disabled_features=*/{});
+  }
+
   // Running more than once is useful for profiling. (If this flag does not
   // exist, it will return the empty string.)
   const std::string recalc_iterations_str =

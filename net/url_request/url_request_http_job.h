@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,7 +24,7 @@
 #include "net/base/privacy_mode.h"
 #include "net/cookies/cookie_inclusion_status.h"
 #include "net/cookies/cookie_partition_key.h"
-#include "net/cookies/first_party_set_metadata.h"
+#include "net/first_party_sets/first_party_set_metadata.h"
 #include "net/http/http_request_info.h"
 #include "net/socket/connection_attempts.h"
 #include "net/url_request/url_request_job.h"
@@ -232,7 +232,6 @@ class NET_EXPORT_PRIVATE URLRequestHttpJob : public URLRequestJob {
   RequestPriority priority_ = DEFAULT_PRIORITY;
 
   HttpRequestInfo request_info_;
-  raw_ptr<const HttpResponseInfo, DanglingUntriaged> response_info_ = nullptr;
 
   // Used for any logic, e.g. DNS-based scheme upgrade, that needs to synthesize
   // response info to override the real response info. Transaction should be
@@ -247,6 +246,12 @@ class NET_EXPORT_PRIVATE URLRequestHttpJob : public URLRequestJob {
   bool read_in_progress_ = false;
 
   std::unique_ptr<HttpTransaction> transaction_;
+
+  // This needs to be declared after `transaction_` and
+  // `override_response_info_` because `response_info_` holds a pointer that's
+  // itself owned by one of those, so `response_info_` needs to be destroyed
+  // first.
+  raw_ptr<const HttpResponseInfo> response_info_ = nullptr;
 
   // This is used to supervise traffic and enforce exponential
   // back-off. May be NULL.

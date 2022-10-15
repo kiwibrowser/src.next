@@ -38,13 +38,11 @@ class GpuMemoryBuffer;
 
 }  // namespace gfx
 
-namespace gpu {
-namespace raster {
+namespace gpu::raster {
 
 class RasterInterface;
 
-}  // namespace raster
-}  // namespace gpu
+}  // namespace gpu::raster
 
 namespace viz {
 
@@ -65,12 +63,34 @@ class StaticBitmapImage;
 class PLATFORM_EXPORT CanvasResource
     : public WTF::ThreadSafeRefCounted<CanvasResource> {
  public:
+  using ReleaseCallback = base::OnceCallback<void(
+      scoped_refptr<blink::CanvasResource>&& canvas_resource,
+      const gpu::SyncToken& sync_token,
+      bool is_lost)>;
+
+  using LastUnrefCallback = base::OnceCallback<void(
+      scoped_refptr<blink::CanvasResource> canvas_resource)>;
+
   virtual ~CanvasResource();
+
+  // Non-virtual override of ThreadSafeRefCounted::Release
+  void Release();
+
+  // Set a callback that will be invoked as the last outstanding reference to
+  // this CanvasResource goes out of scope.  This provides a last chance hook
+  // to intercept a canvas before it get destroyed. For resources that need to
+  // be destroyed on their thread of origin, this hook can be used to return
+  // resources to their creators.
+  void SetLastUnrefCallback(LastUnrefCallback callback) {
+    last_unref_callback_ = std::move(callback);
+  }
 
   // We perform a lazy copy on write if the canvas content needs to be updated
   // while its current resource is in use. In order to avoid re-allocating
   // resources, its preferable to reuse a resource if its no longer in use.
-  // This API indicates whether a resource can be recycled.
+  // This API indicates whether a resource can be recycled.  This method does
+  // not however check whether the resource is still in use (e.g. has
+  // outstanding references).
   virtual bool IsRecycleable() const = 0;
 
   // Returns true if rendering to the resource is accelerated.
@@ -121,7 +141,7 @@ class PLATFORM_EXPORT CanvasResource
   // Provides a TransferableResource representation of this resource to share it
   // with the compositor.
   bool PrepareTransferableResource(viz::TransferableResource*,
-                                   viz::ReleaseCallback*,
+                                   ReleaseCallback*,
                                    MailboxSyncMode);
 
   // Issues a wait for this sync token on the context used by this resource for
@@ -226,6 +246,7 @@ class PLATFORM_EXPORT CanvasResource
   base::WeakPtr<CanvasResourceProvider> provider_;
   SkColorInfo info_;
   cc::PaintFlags::FilterQuality filter_quality_;
+  LastUnrefCallback last_unref_callback_;
 #if DCHECK_IS_ON()
   bool did_call_on_destroy_ = false;
 #endif
@@ -279,6 +300,8 @@ class PLATFORM_EXPORT CanvasResourceSharedImage : public CanvasResource {
   virtual bool HasReadAccess() const = 0;
   virtual bool IsLost() const = 0;
   virtual void CopyRenderingResultsToGpuMemoryBuffer(const sk_sp<SkImage>&) = 0;
+  virtual void OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
+                            size_t bytes_per_pixel) const {}
 
  protected:
   CanvasResourceSharedImage(base::WeakPtr<CanvasResourceProvider>,
@@ -339,6 +362,8 @@ class PLATFORM_EXPORT CanvasResourceRasterSharedImage final
   bool IsLost() const final { return owning_thread_data().is_lost; }
   void CopyRenderingResultsToGpuMemoryBuffer(const sk_sp<SkImage>& image) final;
   const gpu::Mailbox& GetOrCreateGpuMailbox(MailboxSyncMode) override;
+  void OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
+                    size_t bytes_per_pixel) const override;
 
  private:
   // These members are either only accessed on the owning thread, or are only

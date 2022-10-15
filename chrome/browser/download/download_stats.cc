@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,10 +39,16 @@ void RecordOpenedDangerousConfirmDialog(
       download::DOWNLOAD_DANGER_TYPE_MAX);
 }
 
-void RecordDownloadOpenMethod(ChromeDownloadOpenMethod open_method) {
+void RecordDownloadOpen(ChromeDownloadOpenMethod open_method,
+                        const std::string& mime_type_string) {
   base::RecordAction(base::UserMetricsAction("Download.Open"));
   base::UmaHistogramEnumeration("Download.OpenMethod", open_method,
                                 DOWNLOAD_OPEN_METHOD_LAST_ENTRY);
+  download::DownloadContent download_content =
+      download::DownloadContentFromMimeType(
+          mime_type_string, /*record_content_subcategory=*/false);
+  base::UmaHistogramEnumeration("Download.Open.ContentType", download_content,
+                                download::DownloadContent::MAX);
 }
 
 void RecordDatabaseAvailability(bool is_available) {

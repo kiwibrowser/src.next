@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,9 +24,12 @@ class BrowserContext;
 }  // namespace content
 
 #if BUILDFLAG(IS_CHROMEOS)
+namespace ash {
+class PolicyCertificateProvider;
+}
+
 namespace chromeos {
 class CertificateProvider;
-class PolicyCertificateProvider;
 }
 #endif
 
@@ -126,8 +129,7 @@ class CertificateManagerModel {
   struct Params {
 #if BUILDFLAG(IS_CHROMEOS)
     // May be nullptr.
-    raw_ptr<chromeos::PolicyCertificateProvider> policy_certs_provider =
-        nullptr;
+    raw_ptr<ash::PolicyCertificateProvider> policy_certs_provider = nullptr;
     // May be nullptr.
     std::unique_ptr<chromeos::CertificateProvider>
         extension_certificate_provider;
@@ -241,9 +243,9 @@ class CertificateManagerModel {
                     net::CertType type,
                     net::NSSCertDatabase::TrustBits trust_bits);
 
-  // Delete the cert.  Returns true on success.  |cert| is still valid when this
-  // function returns.
-  bool Delete(CERTCertificate* cert);
+  // Remove the cert from the cert database.
+  void RemoveFromDatabase(net::ScopedCERTCertificate cert,
+                          base::OnceCallback<void(bool /*success*/)> callback);
 
  private:
   // Called when one of the |certs_sources_| has been updated. Will notify the

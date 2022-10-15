@@ -38,7 +38,6 @@
 #include "third_party/blink/public/web/web_settings.h"
 #include "third_party/blink/renderer/bindings/core/v8/js_based_event_listener.h"
 #include "third_party/blink/renderer/bindings/core/v8/js_event_listener.h"
-#include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_union_addeventlisteneroptions_boolean.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_union_boolean_eventlisteneroptions.h"
 #include "third_party/blink/renderer/core/dom/abort_signal.h"
@@ -58,6 +57,7 @@
 #include "third_party/blink/renderer/core/pointer_type_names.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/bindings/source_location.h"
 #include "third_party/blink/renderer/platform/bindings/v8_dom_activity_logger.h"
 #include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
@@ -419,6 +419,22 @@ bool EventTarget::AddEventListenerInternal(
   if (options->hasSignal() && options->signal()->aborted())
     return false;
 
+  // It doesn't make sense to add an event listener without an ExecutionContext
+  // and some code below here assumes we have one.
+  auto* execution_context = GetExecutionContext();
+  if (!execution_context)
+    return false;
+
+  // Consider `Permissions-Policy: unload`.
+  if (event_type == event_type_names::kUnload &&
+      RuntimeEnabledFeatures::PermissionsPolicyUnloadEnabled(
+          execution_context) &&
+      !execution_context->IsFeatureEnabled(
+          mojom::blink::PermissionsPolicyFeature::kUnload,
+          ReportOptions::kReportOnFailure)) {
+    return false;
+  }
+
   // Unload/Beforeunload handlers are not allowed in fenced frames.
   if (event_type == event_type_names::kUnload ||
       event_type == event_type_names::kBeforeunload) {
@@ -505,6 +521,11 @@ void EventTarget::AddedEventListener(
         UseCounter::Count(*document, WebFeature::kSlotChangeEventAddListener);
       } else if (event_type == event_type_names::kBeforematch) {
         UseCounter::Count(*document, WebFeature::kBeforematchHandlerRegistered);
+      } else if (event_type ==
+                 event_type_names::kContentvisibilityautostatechanged) {
+        UseCounter::Count(
+            *document,
+            WebFeature::kContentVisibilityAutoStateChangedHandlerRegistered);
       }
     }
   }

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@ import androidx.annotation.Nullable;
 
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.MathUtils;
+import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -53,10 +54,30 @@ public class TabUtils {
     @Retention(RetentionPolicy.SOURCE)
     public @interface UseDesktopUserAgentCaller {
         int ON_MENU_OR_KEYBOARD_ACTION = 0;
-        int LOAD_IF_NEEDED = 1;
-        int RELOAD = 2;
-        int RELOAD_IGNORING_CACHE = 3;
-        int OTHER = 4;
+        int LOAD_IF_NEEDED = 100;
+        int RELOAD = 200;
+        int RELOAD_IGNORING_CACHE = 300;
+        int OTHER = 400;
+    }
+
+    /**
+     * Define the callers of TabImpl#loadIfNeeded.
+     */
+    @IntDef({LoadIfNeededCaller.SET_TAB, LoadIfNeededCaller.ON_ACTIVITY_SHOWN,
+            LoadIfNeededCaller.ON_ACTIVITY_SHOWN_THEN_SHOW, LoadIfNeededCaller.REQUEST_TO_SHOW_TAB,
+            LoadIfNeededCaller.REQUEST_TO_SHOW_TAB_THEN_SHOW,
+            LoadIfNeededCaller.ON_FINISH_NATIVE_INITIALIZATION,
+            LoadIfNeededCaller.MAYBE_SHOW_GLOBAL_SETTING_OPT_IN_MESSAGE, LoadIfNeededCaller.OTHER})
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface LoadIfNeededCaller {
+        int SET_TAB = 0;
+        int ON_ACTIVITY_SHOWN = 1;
+        int ON_ACTIVITY_SHOWN_THEN_SHOW = 2;
+        int REQUEST_TO_SHOW_TAB = 3;
+        int REQUEST_TO_SHOW_TAB_THEN_SHOW = 4;
+        int ON_FINISH_NATIVE_INITIALIZATION = 5;
+        int MAYBE_SHOW_GLOBAL_SETTING_OPT_IN_MESSAGE = 6;
+        int OTHER = 7;
     }
 
     // Do not instantiate this class.
@@ -82,6 +103,8 @@ public class TabUtils {
      * @param context The application context.
      * @return The estimated prerender size in pixels.
      */
+    // status_bar_height is not a public framework resource, so we have to getIdentifier()
+    @SuppressWarnings("DiscouragedApi")
     public static Rect estimateContentSize(Context context) {
         // The size is estimated as:
         // X = screenSizeX
@@ -115,8 +138,8 @@ public class TabUtils {
      * @param forcedByUser Whether this was triggered by users action.
      * @param caller The caller of this method.
      */
-    public static void switchUserAgent(Tab tab, boolean switchToDesktop, boolean forcedByUser,
-            @UseDesktopUserAgentCaller int caller) {
+    public static void switchUserAgent(
+            Tab tab, boolean switchToDesktop, boolean forcedByUser, int caller) {
         final boolean reloadOnChange = !tab.isNativePage();
         tab.getWebContents().getNavigationController().setUseDesktopUserAgent(
                 switchToDesktop, reloadOnChange, caller);
@@ -169,14 +192,13 @@ public class TabUtils {
     /**
      * Read Request Desktop Site ContentSettings.
      * @param profile The profile used to retrieve ContentSettings.
-     * @param webContents The webContents used to retrieve Url for site level setting.
+     * @param url The Url used to retrieve site level ContentSettings.
      * @return Whether Request Desktop Site is enabled in ContentSettings.
      */
     public static boolean readRequestDesktopSiteContentSettings(
-            Profile profile, WebContents webContents) {
+            Profile profile, @Nullable GURL url) {
         if (ContentFeatureList.isEnabled(ContentFeatureList.REQUEST_DESKTOP_SITE_EXCEPTIONS)) {
-            return webContents != null
-                    && TabUtils.isDesktopSiteEnabled(profile, webContents.getVisibleUrl());
+            return url != null && TabUtils.isDesktopSiteEnabled(profile, url);
         } else {
             return TabUtils.isDesktopSiteGlobalEnabled(profile);
         }
@@ -233,6 +255,19 @@ public class TabUtils {
         return WebsitePreferenceBridge.getContentSetting(
                        profile, ContentSettingsType.REQUEST_DESKTOP_SITE, url, url)
                 == ContentSettingValues.ALLOW;
+    }
+
+    /**
+     * Return whether hardware keyboard is available, including QWERTY and 12Key keyboards.
+     * @param tab The tab used to retrieve context for keyboard configuration.
+     * TODO(shuyng): Create ConfigurationChangedObserver to update the current value in C++; to
+     * avoid extra JNI request on each navigation.
+     */
+    @CalledByNative
+    public static boolean isHardwareKeyboardAvailable(Tab tab) {
+        int keyboard = tab.getContext().getResources().getConfiguration().keyboard;
+        return keyboard == Configuration.KEYBOARD_QWERTY
+                || keyboard == Configuration.KEYBOARD_12KEY;
     }
 
     /**

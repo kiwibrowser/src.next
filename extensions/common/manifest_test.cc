@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -58,7 +58,7 @@ base::Value LoadManifestFile(const base::FilePath& manifest_path,
     base::DictionaryValue* manifest_dictionary = nullptr;
     manifest->GetAsDictionary(&manifest_dictionary);
     extension_l10n_util::LocalizeExtension(
-        extension_path, manifest_dictionary,
+        extension_path, &manifest_dictionary->GetDict(),
         extension_l10n_util::GzippedMessagesPermission::kDisallow, error);
   }
 

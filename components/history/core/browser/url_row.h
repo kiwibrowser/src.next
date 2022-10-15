@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -235,13 +235,23 @@ struct VisitContentModelAnnotations {
 
 // A structure containing the annotations made to page content for a visit.
 struct VisitContentAnnotations {
+  // Values are persisted; do not reorder or reuse, and only add new values at
+  // the end.
+  enum class PasswordState {
+    kUnknown = 0,
+    kNoPasswordField = 1,
+    kHasPasswordField = 2,
+  };
+
   VisitContentAnnotations();
   VisitContentAnnotations(VisitContentAnnotationFlags annotation_flags,
                           VisitContentModelAnnotations model_annotations,
                           const std::vector<std::string>& related_searches,
                           const GURL& search_normalized_url,
                           const std::u16string& search_terms,
-                          const std::string& alternative_title);
+                          const std::string& alternative_title,
+                          const std::string& page_language,
+                          PasswordState password_state);
   VisitContentAnnotations(const VisitContentAnnotations& other);
   ~VisitContentAnnotations();
 
@@ -254,6 +264,12 @@ struct VisitContentAnnotations {
   std::u16string search_terms;
   // Alternative page title for the visit.
   std::string alternative_title;
+  // Language of the content on the page, as an ISO 639 language code (usually
+  // two letters). May be "und" if the language couldn't be determined.
+  std::string page_language;
+  // Whether a password form was found on the page - see also
+  // sessions::SerializedNavigationEntry::PasswordState.
+  PasswordState password_state = PasswordState::kUnknown;
 };
 
 class URLResult : public URLRow {

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -97,7 +97,7 @@ void DownloadShelfUIControllerDelegate::OnNewDownloadReady(
       web_contents = inspected;
   }
   Browser* browser =
-      web_contents ? chrome::FindBrowserWithWebContents(web_contents) : NULL;
+      web_contents ? chrome::FindBrowserWithWebContents(web_contents) : nullptr;
 
   // As a last resort, use the last active browser for this profile. Not ideal,
   // but better than not showing the download at all.
@@ -129,6 +129,7 @@ class DownloadBubbleUIControllerDelegate
  private:
   // DownloadUIController::Delegate
   void OnNewDownloadReady(download::DownloadItem* item) override;
+  void OnButtonClicked() override;
 
   raw_ptr<Profile> profile_;
 };
@@ -172,12 +173,27 @@ void DownloadBubbleUIControllerDelegate::OnNewDownloadReady(
   }
 }
 
+void DownloadBubbleUIControllerDelegate::OnButtonClicked() {
+  BrowserList* browser_list = BrowserList::GetInstance();
+  if (!browser_list)
+    return;
+
+  for (auto* browser : *browser_list) {
+    if (browser && browser->window() &&
+        browser->window()->GetDownloadBubbleUIController()) {
+      browser->window()->GetDownloadBubbleUIController()->HandleButtonPressed();
+    }
+  }
+}
+
 #endif  // BUILDFLAG(IS_ANDROID)
 
 } // namespace
 
 DownloadUIController::Delegate::~Delegate() {
 }
+
+void DownloadUIController::Delegate::OnButtonClicked() {}
 
 DownloadUIController::DownloadUIController(content::DownloadManager* manager,
                                            std::unique_ptr<Delegate> delegate)
@@ -211,6 +227,10 @@ DownloadUIController::DownloadUIController(content::DownloadManager* manager,
 }
 
 DownloadUIController::~DownloadUIController() {
+}
+
+void DownloadUIController::OnButtonClicked() {
+  delegate_->OnButtonClicked();
 }
 
 void DownloadUIController::OnDownloadCreated(content::DownloadManager* manager,

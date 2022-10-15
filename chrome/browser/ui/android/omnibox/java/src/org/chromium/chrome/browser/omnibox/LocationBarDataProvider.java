@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -131,4 +131,16 @@ public interface LocationBarDataProvider {
     /** Returns the resource ID of the content description for the security icon. */
     @StringRes
     int getSecurityIconContentDescriptionResourceId();
+
+    /** Returns the standard color to use for the suggestrions dropdown background.*/
+    int getDropdownStandardBackgroundColor();
+
+    /** Returns the incognito color to use for the suggestrions dropdown background.*/
+    int getDropdownIncognitoBackgroundColor();
+
+    /** Returns the standard color to use for each individual suggestion background.*/
+    int getSuggestionStandardBackgroundColor();
+
+    /** Returns the incognito color to use for each individual suggestion background.*/
+    int getSuggestionIncognitoBackgroundColor();
 }

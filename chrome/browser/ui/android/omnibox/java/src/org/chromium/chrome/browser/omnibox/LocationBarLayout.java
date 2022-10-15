@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -166,12 +166,6 @@ public class LocationBarLayout extends FrameLayout {
     public View getSecurityIconView() {
         return mStatusCoordinator.getSecurityIconView();
     }
-
-    /**
-     * Specify whether location bar should present icons when focused.
-     * @param showIcon True if we should show the icons when the url is focused.
-     */
-    protected void setShowIconsWhenUrlFocused(boolean showIcon) {}
 
     /**
      * @return The margin to be applied to the URL bar based on the buttons currently visible next

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -138,8 +138,6 @@ class ChromeDownloadManagerDelegate
       content::CheckDownloadAllowedCallback check_download_allowed_cb) override;
   download::QuarantineConnectionCallback GetQuarantineConnectionCallback()
       override;
-  std::unique_ptr<download::DownloadItemRenameHandler>
-  GetRenameHandlerForDownload(download::DownloadItem* download_item) override;
   void CheckSavePackageAllowed(
       download::DownloadItem* download_item,
       base::flat_map<base::FilePath, base::FilePath> save_package_files,
@@ -193,6 +191,9 @@ class ChromeDownloadManagerDelegate
   // on when the scheduled time arrives.
   void ScheduleCancelForEphemeralWarning(const std::string& guid);
 #endif
+
+  // Returns true if |path| should open in the browser.
+  virtual bool IsOpenInBrowserPreferreredForFile(const base::FilePath& path);
 
  protected:
   virtual safe_browsing::DownloadProtectionService*
@@ -289,9 +290,6 @@ class ChromeDownloadManagerDelegate
       uint32_t download_id,
       content::DownloadTargetCallback callback,
       std::unique_ptr<DownloadTargetInfo> target_info);
-
-  // Returns true if |path| should open in the browser.
-  bool IsOpenInBrowserPreferreredForFile(const base::FilePath& path);
 
   void MaybeSendDangerousDownloadOpenedReport(download::DownloadItem* download,
                                               bool show_download_in_folder);

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -128,7 +128,8 @@ class SigninViewController {
 #if BUILDFLAG(ENABLE_DICE_SUPPORT) || BUILDFLAG(IS_CHROMEOS_LACROS)
   // Shows the modal profile customization dialog as a browser-modal dialog on
   // top of the |browser_|'s window.
-  void ShowModalProfileCustomizationDialog();
+  void ShowModalProfileCustomizationDialog(
+      bool is_local_profile_creation = false);
 
   // Shows the modal sign-in email confirmation dialog as a tab-modal dialog on
   // top of the currently displayed WebContents in |browser_|.
@@ -182,6 +183,8 @@ class SigninViewController {
                            EnterpriseConfirmationDefaultFocus);
   FRIEND_TEST_ALL_PREFIXES(SigninViewControllerDelegateViewsBrowserTest,
                            CloseImmediately);
+  FRIEND_TEST_ALL_PREFIXES(ProfilePickerLocalProfileCreationDialogBrowserTest,
+                           CreateLocalProfile);
   friend class login_ui_test_utils::SigninViewControllerTestUtil;
   friend class SigninReauthViewControllerBrowserTest;
   friend class SigninInterceptFirstRunExperienceDialogBrowserTest;

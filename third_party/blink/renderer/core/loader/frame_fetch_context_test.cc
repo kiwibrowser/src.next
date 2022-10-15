@@ -1330,7 +1330,8 @@ TEST_F(FrameFetchContextTest, AddResourceTimingWhenDetached) {
   scoped_refptr<ResourceTimingInfo> info =
       ResourceTimingInfo::Create("type", base::TimeTicks() + base::Seconds(0.3),
                                  mojom::blink::RequestContextType::UNSPECIFIED,
-                                 network::mojom::RequestDestination::kEmpty);
+                                 network::mojom::RequestDestination::kEmpty,
+                                 network::mojom::RequestMode::kSameOrigin);
 
   dummy_page_holder = nullptr;
 
@@ -1376,6 +1377,26 @@ TEST_F(FrameFetchContextTest, PopulateResourceRequestWhenDetached) {
   GetFetchContext()->PopulateResourceRequest(ResourceType::kRaw, resource_width,
                                              request, options);
   // Should not crash.
+}
+
+// TODO(victortan) Add corresponding web platform tests once feature on.
+TEST_F(FrameFetchContextTest, SetReduceAcceptLanguageWhenDetached) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(
+      network::features::kReduceAcceptLanguage);
+
+  const KURL url("https://www.example.com/");
+  ResourceRequest request(url);
+
+  FetchParameters::ResourceWidth resource_width;
+  ResourceLoaderOptions options(/*world=*/nullptr);
+
+  document->GetFrame()->SetReducedAcceptLanguage("en-GB");
+  dummy_page_holder = nullptr;
+
+  GetFetchContext()->PopulateResourceRequest(ResourceType::kRaw, resource_width,
+                                             request, options);
+  EXPECT_EQ("en-GB", request.HttpHeaderField("Accept-Language"));
 }
 
 TEST_F(FrameFetchContextTest, SetFirstPartyCookieWhenDetached) {

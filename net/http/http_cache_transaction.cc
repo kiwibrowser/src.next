@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <utility>
 
 #include "base/auto_reset.h"
@@ -52,6 +53,7 @@
 #include "net/http/http_log_util.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_request_info.h"
+#include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
 #include "net/http/http_util.h"
 #include "net/http/webfonts_histogram.h"
@@ -96,6 +98,14 @@ enum ExternallyConditionalizedType {
   EXTERNALLY_CONDITIONALIZED_CACHE_USABLE,
   EXTERNALLY_CONDITIONALIZED_MISMATCHED_VALIDATORS,
   EXTERNALLY_CONDITIONALIZED_MAX
+};
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class RestrictedPrefetchReused {
+  kNotReused = 0,
+  kReused = 1,
+  kMaxValue = kReused
 };
 
 void RecordPervasivePayloadIndex(const char* histogram_name, int index) {
@@ -371,6 +381,7 @@ int HttpCache::Transaction::TransitionToReadingState() {
       // is reading the auth response from the network.
       // TODO(http://crbug.com/740947) to get rid of this state in future.
       next_state_ = STATE_NETWORK_READ;
+
       return OK;
     }
 
@@ -412,7 +423,7 @@ int HttpCache::Transaction::TransitionToReadingState() {
   // Full request.
   // If it's a writer and a full request then it may read from the cache if its
   // offset is behind the current offset else from the network.
-  int disk_entry_size = entry_->disk_entry->GetDataSize(kResponseContentIndex);
+  int disk_entry_size = entry_->GetEntry()->GetDataSize(kResponseContentIndex);
   if (read_offset_ == disk_entry_size || entry_->writers->network_read_only()) {
     next_state_ = STATE_NETWORK_READ_CACHE_WRITE;
   } else {
@@ -1043,7 +1054,7 @@ int HttpCache::Transaction::DoGetBackendComplete(int result) {
     // DoCacheReadResponseComplete(), even though `request_` will still have a
     // checksum. So it needs to be passed explicitly.
     cache_key_ =
-        cache_->GenerateCacheKeyForRequest(request_, use_single_keyed_cache_);
+        *cache_->GenerateCacheKeyForRequest(request_, use_single_keyed_cache_);
 
     // Requested cache access mode.
     if (effective_load_flags_ & LOAD_ONLY_FROM_CACHE) {
@@ -1483,8 +1494,8 @@ int HttpCache::Transaction::DoAddToEntryComplete(int result) {
   // TODO(crbug.com/713354) Access timestamp for histograms only if entry is
   // already written, to avoid data race since cache thread can also access
   // this.
-  if (!cache_->IsWritingInProgress(entry_))
-    open_entry_last_used_ = entry_->disk_entry->GetLastUsed();
+  if (!cache_->IsWritingInProgress(entry()))
+    open_entry_last_used_ = entry_->GetEntry()->GetLastUsed();
 
   // TODO(jkarlin): We should either handle the case or DCHECK.
   if (result != OK) {
@@ -1544,11 +1555,11 @@ int HttpCache::Transaction::DoCacheReadResponse() {
   DCHECK(entry_);
   TransitionToState(STATE_CACHE_READ_RESPONSE_COMPLETE);
 
-  io_buf_len_ = entry_->disk_entry->GetDataSize(kResponseInfoIndex);
+  io_buf_len_ = entry_->GetEntry()->GetDataSize(kResponseInfoIndex);
   read_buf_ = base::MakeRefCounted<IOBuffer>(io_buf_len_);
 
   net_log_.BeginEvent(NetLogEventType::HTTP_CACHE_READ_INFO);
-  return entry_->disk_entry->ReadData(kResponseInfoIndex, 0, read_buf_.get(),
+  return entry_->GetEntry()->ReadData(kResponseInfoIndex, 0, read_buf_.get(),
                                       io_buf_len_, io_callback_);
 }
 
@@ -1591,8 +1602,8 @@ int HttpCache::Transaction::DoCacheReadResponseComplete(int result) {
   // TODO(crbug.com/713354) Only get data size if there is no other transaction
   // currently writing the response body due to the data race mentioned in the
   // associated bug.
-  if (!cache_->IsWritingInProgress(entry_)) {
-    int current_size = entry_->disk_entry->GetDataSize(kResponseContentIndex);
+  if (!cache_->IsWritingInProgress(entry())) {
+    int current_size = entry_->GetEntry()->GetDataSize(kResponseContentIndex);
     int64_t full_response_length = response_.headers->GetContentLength();
 
     // Some resources may have slipped in as truncated when they're not.
@@ -1645,6 +1656,11 @@ int HttpCache::Transaction::DoCacheReadResponseComplete(int result) {
         request_->load_flags & LOAD_CAN_USE_RESTRICTED_PREFETCH) {
       updated_prefetch_response_->restricted_prefetch = false;
     }
+
+    base::UmaHistogramEnumeration("HttpCache.RestrictedPrefetchReuse",
+                                  restricted_prefetch_reuse
+                                      ? RestrictedPrefetchReused::kReused
+                                      : RestrictedPrefetchReused::kNotReused);
 
     TransitionToState(STATE_WRITE_UPDATED_PREFETCH_RESPONSE);
     return OK;
@@ -1724,7 +1740,7 @@ int HttpCache::Transaction::DoCacheDispatchValidation() {
 
 int HttpCache::Transaction::DoCacheQueryData() {
   TransitionToState(STATE_CACHE_QUERY_DATA_COMPLETE);
-  return entry_->disk_entry->ReadyForSparseIO(io_callback_);
+  return entry_->GetEntry()->ReadyForSparseIO(io_callback_);
 }
 
 int HttpCache::Transaction::DoCacheQueryDataComplete(int result) {
@@ -1745,7 +1761,7 @@ int HttpCache::Transaction::DoStartPartialCacheValidation() {
   }
 
   TransitionToState(STATE_COMPLETE_PARTIAL_CACHE_VALIDATION);
-  return partial_->ShouldValidateCache(entry_->disk_entry, io_callback_);
+  return partial_->ShouldValidateCache(entry_->GetEntry(), io_callback_);
 }
 
 int HttpCache::Transaction::DoCompletePartialCacheValidation(int result) {
@@ -1761,7 +1777,7 @@ int HttpCache::Transaction::DoCompletePartialCacheValidation(int result) {
     return result;
   }
 
-  partial_->PrepareCacheValidation(entry_->disk_entry,
+  partial_->PrepareCacheValidation(entry_->GetEntry(),
                                    &custom_request_->extra_headers);
 
   if (reading_ && partial_->IsCurrentRangeCached()) {
@@ -2217,7 +2233,7 @@ int HttpCache::Transaction::DoTruncateCachedData() {
     return OK;
   net_log_.BeginEvent(NetLogEventType::HTTP_CACHE_WRITE_DATA);
   // Truncate the stream.
-  return entry_->disk_entry->WriteData(kResponseContentIndex, /*offset=*/0,
+  return entry_->GetEntry()->WriteData(kResponseContentIndex, /*offset=*/0,
                                        /*buf=*/nullptr, /*buf_len=*/0,
                                        io_callback_, /*truncate=*/true);
 }
@@ -2449,6 +2465,10 @@ int HttpCache::Transaction::DoNetworkReadComplete(int result) {
 }
 
 int HttpCache::Transaction::DoCacheReadData() {
+  if (entry_) {
+    DCHECK(InWriters() || entry_->TransactionInReaders(this));
+  }
+
   TRACE_EVENT_WITH_FLOW2(
       "net", "HttpCacheTransaction::DoCacheReadData", TRACE_ID_LOCAL(trace_id_),
       TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "read_offset",
@@ -2464,16 +2484,20 @@ int HttpCache::Transaction::DoCacheReadData() {
 
   net_log_.BeginEvent(NetLogEventType::HTTP_CACHE_READ_DATA);
   if (partial_) {
-    return partial_->CacheRead(entry_->disk_entry, read_buf_.get(),
+    return partial_->CacheRead(entry_->GetEntry(), read_buf_.get(),
                                read_buf_len_, io_callback_);
   }
 
-  return entry_->disk_entry->ReadData(kResponseContentIndex, read_offset_,
+  return entry_->GetEntry()->ReadData(kResponseContentIndex, read_offset_,
                                       read_buf_.get(), read_buf_len_,
                                       io_callback_);
 }
 
 int HttpCache::Transaction::DoCacheReadDataComplete(int result) {
+  if (entry_) {
+    DCHECK(InWriters() || entry_->TransactionInReaders(this));
+  }
+
   TRACE_EVENT_WITH_FLOW1("net", "HttpCacheTransaction::DoCacheReadDataComplete",
                          TRACE_ID_LOCAL(trace_id_),
                          TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT,
@@ -2839,9 +2863,9 @@ int HttpCache::Transaction::BeginPartialCacheValidation() {
 int HttpCache::Transaction::ValidateEntryHeadersAndContinue() {
   DCHECK_EQ(mode_, READ_WRITE);
 
-  if (!partial_->UpdateFromStoredHeaders(response_.headers.get(),
-                                         entry_->disk_entry, truncated_,
-                                         cache_->IsWritingInProgress(entry_))) {
+  if (!partial_->UpdateFromStoredHeaders(
+          response_.headers.get(), entry_->GetEntry(), truncated_,
+          cache_->IsWritingInProgress(entry()))) {
     return DoRestartPartialRequest();
   }
 
@@ -2934,6 +2958,77 @@ int HttpCache::Transaction::RestartNetworkRequestWithAuth(
   return rv;
 }
 
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class PrefetchReuseState : uint8_t {
+  kNone = 0,
+
+  // Bit 0 represents if it's reused first time
+  kFirstReuse = 1 << 0,
+
+  // Bit 1 represents if it's reused within the time window
+  kReusedWithinTimeWindow = 1 << 1,
+
+  // Bit 2-3 represents the freshness based on cache headers
+  kFresh = 0 << 2,
+  kAlwaysValidate = 1 << 2,
+  kExpired = 2 << 2,
+  kStale = 3 << 2,
+
+  // histograms require a named max value
+  kBitMaskForAllAttributes = kStale | kReusedWithinTimeWindow | kFirstReuse,
+  kMaxValue = kBitMaskForAllAttributes
+};
+
+namespace {
+std::underlying_type<PrefetchReuseState>::type to_underlying(
+    PrefetchReuseState state) {
+  DCHECK_LE(PrefetchReuseState::kNone, state);
+  DCHECK_LE(state, PrefetchReuseState::kMaxValue);
+
+  return static_cast<std::underlying_type<PrefetchReuseState>::type>(state);
+}
+
+PrefetchReuseState to_reuse_state(
+    std::underlying_type<PrefetchReuseState>::type value) {
+  PrefetchReuseState state = static_cast<PrefetchReuseState>(value);
+  DCHECK_LE(PrefetchReuseState::kNone, state);
+  DCHECK_LE(state, PrefetchReuseState::kMaxValue);
+  return state;
+}
+}  // namespace
+
+PrefetchReuseState ComputePrefetchReuseState(ValidationType type,
+                                             bool first_reuse,
+                                             bool reused_within_time_window,
+                                             bool validate_flag) {
+  std::underlying_type<PrefetchReuseState>::type reuse_state =
+      to_underlying(PrefetchReuseState::kNone);
+
+  if (first_reuse)
+    reuse_state |= to_underlying(PrefetchReuseState::kFirstReuse);
+
+  if (reused_within_time_window)
+    reuse_state |= to_underlying(PrefetchReuseState::kReusedWithinTimeWindow);
+
+  if (validate_flag)
+    reuse_state |= to_underlying(PrefetchReuseState::kAlwaysValidate);
+  else {
+    switch (type) {
+      case VALIDATION_SYNCHRONOUS:
+        reuse_state |= to_underlying(PrefetchReuseState::kExpired);
+        break;
+      case VALIDATION_ASYNCHRONOUS:
+        reuse_state |= to_underlying(PrefetchReuseState::kStale);
+        break;
+      case VALIDATION_NONE:
+        reuse_state |= to_underlying(PrefetchReuseState::kFresh);
+        break;
+    }
+  }
+  return to_reuse_state(reuse_state);
+}
+
 ValidationType HttpCache::Transaction::RequiresValidation() {
   // TODO(darin): need to do more work here:
   //  - make sure we have a matching request method
@@ -2951,29 +3046,48 @@ ValidationType HttpCache::Transaction::RequiresValidation() {
   if (effective_load_flags_ & LOAD_SKIP_CACHE_VALIDATION)
     return VALIDATION_NONE;
 
-  base::TimeDelta response_time_in_cache =
-      cache_->clock_->Now() - response_.response_time;
-  if (response_.unused_since_prefetch &&
-      !(effective_load_flags_ & LOAD_PREFETCH) &&
-      (response_time_in_cache < base::Minutes(kPrefetchReuseMins)) &&
-      (response_time_in_cache >= base::TimeDelta())) {
-    // The first use of a resource after prefetch within a short window skips
-    // validation.
-    return VALIDATION_NONE;
-  }
-
-  if (effective_load_flags_ & LOAD_VALIDATE_CACHE) {
-    validation_cause_ = VALIDATION_CAUSE_VALIDATE_FLAG;
-    return VALIDATION_SYNCHRONOUS;
-  }
-
   if (method_ == "PUT" || method_ == "DELETE" || method_ == "PATCH")
     return VALIDATION_SYNCHRONOUS;
 
+  bool validate_flag = effective_load_flags_ & LOAD_VALIDATE_CACHE;
+
   ValidationType validation_required_by_headers =
-      response_.headers->RequiresValidation(response_.request_time,
-                                            response_.response_time,
-                                            cache_->clock_->Now());
+      validate_flag ? VALIDATION_SYNCHRONOUS
+                    : response_.headers->RequiresValidation(
+                          response_.request_time, response_.response_time,
+                          cache_->clock_->Now());
+
+  base::TimeDelta response_time_in_cache =
+      cache_->clock_->Now() - response_.response_time;
+
+  if (!(effective_load_flags_ & LOAD_PREFETCH) &&
+      (response_time_in_cache >= base::TimeDelta())) {
+    bool reused_within_time_window =
+        response_time_in_cache < base::Minutes(kPrefetchReuseMins);
+    bool first_reuse = response_.unused_since_prefetch;
+
+    base::UmaHistogramLongTimes("HttpCache.PrefetchReuseTime",
+                                response_time_in_cache);
+    if (first_reuse) {
+      base::UmaHistogramLongTimes("HttpCache.PrefetchFirstReuseTime",
+                                  response_time_in_cache);
+    }
+
+    base::UmaHistogramEnumeration(
+        "HttpCache.PrefetchReuseState",
+        ComputePrefetchReuseState(validation_required_by_headers, first_reuse,
+                                  reused_within_time_window, validate_flag));
+    // The first use of a resource after prefetch within a short window skips
+    // validation.
+    if (first_reuse && reused_within_time_window) {
+      return VALIDATION_NONE;
+    }
+  }
+
+  if (validate_flag) {
+    validation_cause_ = VALIDATION_CAUSE_VALIDATE_FLAG;
+    return VALIDATION_SYNCHRONOUS;
+  }
 
   if (validation_required_by_headers != VALIDATION_NONE) {
     HttpResponseHeaders::FreshnessLifetimes lifetimes =
@@ -3291,6 +3405,15 @@ int HttpCache::Transaction::DoConnectedCallback() {
 
 int HttpCache::Transaction::DoConnectedCallbackComplete(int result) {
   if (result != OK) {
+    if (result ==
+        ERR_CACHED_IP_ADDRESS_SPACE_BLOCKED_BY_PRIVATE_NETWORK_ACCESS_POLICY) {
+      DoomInconsistentEntry();
+      UpdateCacheEntryStatus(CacheEntryStatus::ENTRY_OTHER);
+      TransitionToState(reading_ ? STATE_SEND_REQUEST
+                                 : STATE_HEADERS_PHASE_CANNOT_PROCEED);
+      return OK;
+    }
+
     if (result == ERR_INCONSISTENT_IP_ADDRESS_SPACE) {
       DoomInconsistentEntry();
     } else {
@@ -3636,7 +3759,7 @@ HttpTransaction* HttpCache::Transaction::network_transaction() {
 //
 bool HttpCache::Transaction::CanResume(bool has_data) {
   // Double check that there is something worth keeping.
-  if (has_data && !entry_->disk_entry->GetDataSize(kResponseContentIndex))
+  if (has_data && !entry_->GetEntry()->GetDataSize(kResponseContentIndex))
     return false;
 
   if (method_ != "GET")
@@ -3966,20 +4089,22 @@ void HttpCache::Transaction::ChecksumHeaders() {
       "upgrade",
       "vary",
   });
-  // Iterate the response headers looking for matches.
-  size_t iter = 0;
-  std::string name;
-  std::string value;
   // Pairs of (lower_case_header_name, header_value).
   std::vector<std::pair<std::string, std::string>> filtered_headers;
   // It's good to set the initial allocation size of the vector to the
   // expected size to avoid a lot of reallocations. This value was chosen as
   // it is a nice round number.
   filtered_headers.reserve(16);
-  while (response_.headers->EnumerateHeaderLines(&iter, &name, &value)) {
-    std::string lowered_name = base::ToLowerASCII(name);
-    if (kHeadersToInclude.contains(lowered_name)) {
-      filtered_headers.emplace_back(lowered_name, value);
+  {
+    // Iterate the response headers looking for matches.
+    size_t iter = 0;
+    std::string name;
+    std::string value;
+    while (response_.headers->EnumerateHeaderLines(&iter, &name, &value)) {
+      std::string lowered_name = base::ToLowerASCII(name);
+      if (kHeadersToInclude.contains(lowered_name)) {
+        filtered_headers.emplace_back(lowered_name, value);
+      }
     }
   }
   std::sort(filtered_headers.begin(), filtered_headers.end());

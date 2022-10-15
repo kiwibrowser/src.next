@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,7 +48,7 @@ const ActiveInstallData* InstallTracker::GetActiveInstall(
     const std::string& extension_id) const {
   auto install_data = active_installs_.find(extension_id);
   if (install_data == active_installs_.end())
-    return NULL;
+    return nullptr;
   else
     return &(install_data->second);
 }

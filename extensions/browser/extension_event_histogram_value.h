@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -516,6 +516,7 @@ enum HistogramValue {
   ACCESSIBILITY_PRIVATE_ON_PUMPKIN_INSTALLED = 494,
   ENTERPRISE_REMOTE_APPS_ON_REMOTE_APP_LAUNCHED = 495,
   INPUT_METHOD_PRIVATE_ON_CARET_BOUNDS_CHANGED = 496,
+  PASSWORDS_PRIVATE_ON_PASSWORD_MANAGER_AUTH_TIMEOUT = 497,
   // Last entry: Add new entries above, then run:
   // tools/metrics/histograms/update_extension_histograms.py
   ENUM_BOUNDARY
