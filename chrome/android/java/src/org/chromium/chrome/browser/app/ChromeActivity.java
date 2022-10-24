@@ -2842,7 +2842,6 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
 
         if (id == R.id.exit_id) {
             RecordUserAction.record("MobileMenuExit");
-            getTabModelSelector().closeAllTabs();
             ApplicationLifetime.terminate(false);
         }
 
