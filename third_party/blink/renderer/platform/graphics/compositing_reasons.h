@@ -37,9 +37,8 @@ using CompositingReasons = uint64_t;
   V(ActiveBackdropFilterAnimation)                                            \
   V(AffectedByOuterViewportBoundsDelta)                                       \
   V(FixedPosition)                                                            \
-  V(UndoOverscroll)                                                           \
+  V(FixedToViewport)                                                          \
   V(StickyPosition)                                                           \
-  V(AnchorScroll)                                                             \
   V(OverflowScrolling)                                                        \
   V(WillChangeTransform)                                                      \
   V(WillChangeScale)                                                          \
@@ -125,8 +124,8 @@ class PLATFORM_EXPORT CompositingReason {
     kPreventingSubpixelAccumulationReasons =
         kWillChangeTransform | kWillChangeScale | kWillChangeRotate,
     kDirectReasonsForPaintOffsetTranslationProperty =
-        kFixedPosition | kAffectedByOuterViewportBoundsDelta | kUndoOverscroll |
-        kVideo | kCanvas | kPlugin | kIFrame,
+        kFixedPosition | kAffectedByOuterViewportBoundsDelta |
+        kFixedToViewport | kVideo | kCanvas | kPlugin | kIFrame,
     // TODO(dbaron): kWillChangeOther probably shouldn't be in this list.
     kDirectReasonsForTransformProperty =
         k3DTransform | kTrivial3DTransform | kWillChangeTransform |

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,10 +32,7 @@ class PackExtensionTest : public testing::Test {
     base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
     command_line.AppendSwitchPath(switches::kPackExtension,
                                   temp_dir.GetPath().Append(path.BaseName()));
-    std::string error_message;
-    bool result = startup_helper_.PackExtension(command_line, &error_message);
-    EXPECT_EQ(result, error_message.empty()) << error_message;
-    return result;
+    return startup_helper_.PackExtension(command_line);
   }
 
   content::BrowserTaskEnvironment task_environment_;

@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -153,7 +153,7 @@ bool TestExtensionSystem::is_ready() const {
 }
 
 ContentVerifier* TestExtensionSystem::content_verifier() {
-  return nullptr;
+  return NULL;
 }
 
 std::unique_ptr<ExtensionSet> TestExtensionSystem::GetDependentExtensions(

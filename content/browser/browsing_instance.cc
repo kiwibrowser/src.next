@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,13 +26,11 @@ int BrowsingInstance::next_browsing_instance_id_ = 1;
 BrowsingInstance::BrowsingInstance(
     BrowserContext* browser_context,
     const WebExposedIsolationInfo& web_exposed_isolation_info,
-    bool is_guest,
-    bool is_fenced)
+    bool is_guest)
     : isolation_context_(
           BrowsingInstanceId::FromUnsafeValue(next_browsing_instance_id_++),
           BrowserOrResourceContext(browser_context),
-          is_guest,
-          is_fenced),
+          is_guest),
       active_contents_count_(0u),
       default_site_instance_(nullptr),
       web_exposed_isolation_info_(web_exposed_isolation_info) {

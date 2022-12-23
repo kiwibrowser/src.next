@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors
+// Copyright 2016 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
  * Any containers with the 'scrollable' attribute set will have the following
  * classes toggled appropriately: can-scroll, is-scrolled, scrolled-to-bottom.
  * These classes are used to style the container div and list elements
- * appropriately, see cr_shared_style.css.
+ * appropriately, see shared_style_css.html.
  *
  * The associated HTML should look something like:
  *   <div id="container" scrollable>
@@ -32,35 +32,38 @@
  * NOTE: If 'container' is not fixed size, it is important to call
  * updateScrollableContents() when [[items]] changes, otherwise the container
  * will not be sized correctly.
- *
- * NOTE: This file is deprecated in favor of cr_scrollable_mixin.ts. Don't use
- * it in new code.
  */
 
 // clang-format off
-import {beforeNextRender, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-
-import 'chrome://resources/polymer/v3_0/iron-list/iron-list.js';
+// #import {beforeNextRender, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+// #import 'chrome://resources/polymer/v3_0/iron-list/iron-list.js';
 // clang-format on
 
 /** @polymerBehavior */
-export const CrScrollableBehavior = {
+/* #export */ const CrScrollableBehavior = {
 
   /** @private {number|null} */
   intervalId_: null,
 
   ready() {
-    beforeNextRender(this, () => {
+    const readyAsync = () => {
       this.requestUpdateScroll();
 
       // Listen to the 'scroll' event for each scrollable container.
-      const scrollableElements =
-          this.shadowRoot.querySelectorAll('[scrollable]');
+      const scrollableElements = this.root.querySelectorAll('[scrollable]');
       for (let i = 0; i < scrollableElements.length; i++) {
         scrollableElements[i].addEventListener(
             'scroll', this.updateScrollEvent_.bind(this));
       }
-    });
+    };
+
+    // TODO(dpapad): Remove Polymer 1 codepath when Polymer 2 migration has
+    // completed.
+    if (Polymer.DomIf) {
+      Polymer.RenderStatus.beforeNextRender(this, readyAsync);
+      return;
+    }
+    readyAsync();
   },
 
   detached() {
@@ -81,7 +84,7 @@ export const CrScrollableBehavior = {
 
     this.requestUpdateScroll();
 
-    const nodeList = this.shadowRoot.querySelectorAll('[scrollable] iron-list');
+    const nodeList = this.root.querySelectorAll('[scrollable] iron-list');
     if (!nodeList.length) {
       return;
     }
@@ -133,8 +136,7 @@ export const CrScrollableBehavior = {
    */
   requestUpdateScroll() {
     requestAnimationFrame(function() {
-      const scrollableElements =
-          this.shadowRoot.querySelectorAll('[scrollable]');
+      const scrollableElements = this.root.querySelectorAll('[scrollable]');
       for (let i = 0; i < scrollableElements.length; i++) {
         this.updateScroll_(/** @type {!HTMLElement} */ (scrollableElements[i]));
       }
@@ -189,7 +191,7 @@ export const CrScrollableBehavior = {
   },
 };
 
-export class CrScrollableBehaviorInterface {
+/* #export */ class CrScrollableBehaviorInterface {
   updateScrollableContents() {}
   requestUpdateScroll() {}
 }

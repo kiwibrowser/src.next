@@ -131,7 +131,7 @@ TEST_F(ElementTest, OffsetTopAndLeftCorrectForStickyElementsAfterInsertion) {
   EXPECT_EQ(DocumentLifecycle::kLayoutClean, document.Lifecycle().GetState());
 }
 
-TEST_F(ElementTest, BoundsInWidgetCorrectForStickyElementsAfterInsertion) {
+TEST_F(ElementTest, BoundsInViewportCorrectForStickyElementsAfterInsertion) {
   Document& document = GetDocument();
   SetBodyContent(R"HTML(
     <style>body { margin: 0 }
@@ -154,7 +154,7 @@ TEST_F(ElementTest, BoundsInWidgetCorrectForStickyElementsAfterInsertion) {
 
   // The sticky element should remain at (0, 25) relative to the viewport due to
   // the constraints.
-  gfx::Rect bounds_in_viewport = sticky->BoundsInWidget();
+  gfx::Rect bounds_in_viewport = sticky->BoundsInViewport();
   EXPECT_EQ(0, bounds_in_viewport.y());
   EXPECT_EQ(25, bounds_in_viewport.x());
 
@@ -166,7 +166,7 @@ TEST_F(ElementTest, BoundsInWidgetCorrectForStickyElementsAfterInsertion) {
 
   // Requesting the bounds in viewport should cause both layout and compositing
   // inputs clean to be run, and the sticky result shouldn't change.
-  bounds_in_viewport = sticky->BoundsInWidget();
+  bounds_in_viewport = sticky->BoundsInViewport();
   EXPECT_EQ(DocumentLifecycle::kLayoutClean, document.Lifecycle().GetState());
   EXPECT_EQ(0, bounds_in_viewport.y());
   EXPECT_EQ(25, bounds_in_viewport.x());
@@ -185,11 +185,11 @@ TEST_F(ElementTest, OutlineRectsIncludesImgChildren) {
   ASSERT_TRUE(img);
 
   // The a element should include the image in computing its bounds.
-  gfx::Rect img_bounds_in_viewport = img->BoundsInWidget();
+  gfx::Rect img_bounds_in_viewport = img->BoundsInViewport();
   EXPECT_EQ(220, img_bounds_in_viewport.width());
   EXPECT_EQ(147, img_bounds_in_viewport.height());
 
-  Vector<gfx::Rect> a_outline_rects = a->OutlineRectsInWidget();
+  Vector<gfx::Rect> a_outline_rects = a->OutlineRectsInVisualViewport();
   EXPECT_EQ(2u, a_outline_rects.size());
 
   gfx::Rect a_outline_rect;
@@ -307,7 +307,7 @@ TEST_F(ElementTest, GetBoundingClientRectForSVG) {
   EXPECT_EQ(100, rect_bounding_client_rect->top());
   EXPECT_EQ(100, rect_bounding_client_rect->width());
   EXPECT_EQ(71, rect_bounding_client_rect->height());
-  EXPECT_EQ(gfx::Rect(10, 100, 100, 71), rect->BoundsInWidget());
+  EXPECT_EQ(gfx::Rect(10, 100, 100, 71), rect->BoundsInViewport());
 
   // TODO(pdr): Should we should be excluding the stroke (here, and below)?
   // See: https://github.com/w3c/svgwg/issues/339 and Element::ClientQuads.
@@ -317,9 +317,8 @@ TEST_F(ElementTest, GetBoundingClientRectForSVG) {
   EXPECT_EQ(100, stroke_bounding_client_rect->top());
   EXPECT_EQ(100, stroke_bounding_client_rect->width());
   EXPECT_EQ(71, stroke_bounding_client_rect->height());
-  // TODO(pdr): BoundsInWidget is not web exposed and should include
-  // stroke.
-  EXPECT_EQ(gfx::Rect(10, 100, 100, 71), stroke->BoundsInWidget());
+  // TODO(pdr): BoundsInViewport is not web exposed and should include stroke.
+  EXPECT_EQ(gfx::Rect(10, 100, 100, 71), stroke->BoundsInViewport());
 
   Element* stroke_transformed = document.getElementById("stroke_transformed");
   DOMRect* stroke_transformedbounding_client_rect =
@@ -328,9 +327,9 @@ TEST_F(ElementTest, GetBoundingClientRectForSVG) {
   EXPECT_EQ(105, stroke_transformedbounding_client_rect->top());
   EXPECT_EQ(100, stroke_transformedbounding_client_rect->width());
   EXPECT_EQ(71, stroke_transformedbounding_client_rect->height());
-  // TODO(pdr): BoundsInWidget is not web exposed and should include
-  // stroke.
-  EXPECT_EQ(gfx::Rect(13, 105, 100, 71), stroke_transformed->BoundsInWidget());
+  // TODO(pdr): BoundsInViewport is not web exposed and should include stroke.
+  EXPECT_EQ(gfx::Rect(13, 105, 100, 71),
+            stroke_transformed->BoundsInViewport());
 
   Element* foreign = document.getElementById("foreign");
   DOMRect* foreign_bounding_client_rect = foreign->getBoundingClientRect();
@@ -338,7 +337,7 @@ TEST_F(ElementTest, GetBoundingClientRectForSVG) {
   EXPECT_EQ(100, foreign_bounding_client_rect->top());
   EXPECT_EQ(100, foreign_bounding_client_rect->width());
   EXPECT_EQ(71, foreign_bounding_client_rect->height());
-  EXPECT_EQ(gfx::Rect(10, 100, 100, 71), foreign->BoundsInWidget());
+  EXPECT_EQ(gfx::Rect(10, 100, 100, 71), foreign->BoundsInViewport());
 
   Element* foreign_transformed = document.getElementById("foreign_transformed");
   DOMRect* foreign_transformed_bounding_client_rect =
@@ -347,7 +346,8 @@ TEST_F(ElementTest, GetBoundingClientRectForSVG) {
   EXPECT_EQ(105, foreign_transformed_bounding_client_rect->top());
   EXPECT_EQ(100, foreign_transformed_bounding_client_rect->width());
   EXPECT_EQ(71, foreign_transformed_bounding_client_rect->height());
-  EXPECT_EQ(gfx::Rect(13, 105, 100, 71), foreign_transformed->BoundsInWidget());
+  EXPECT_EQ(gfx::Rect(13, 105, 100, 71),
+            foreign_transformed->BoundsInViewport());
 
   Element* svg = document.getElementById("svg");
   DOMRect* svg_bounding_client_rect = svg->getBoundingClientRect();
@@ -355,7 +355,7 @@ TEST_F(ElementTest, GetBoundingClientRectForSVG) {
   EXPECT_EQ(100, svg_bounding_client_rect->top());
   EXPECT_EQ(100, svg_bounding_client_rect->width());
   EXPECT_EQ(71, svg_bounding_client_rect->height());
-  EXPECT_EQ(gfx::Rect(10, 100, 100, 71), svg->BoundsInWidget());
+  EXPECT_EQ(gfx::Rect(10, 100, 100, 71), svg->BoundsInViewport());
 
   Element* svg_stroke = document.getElementById("svg_stroke");
   DOMRect* svg_stroke_bounding_client_rect =
@@ -364,9 +364,8 @@ TEST_F(ElementTest, GetBoundingClientRectForSVG) {
   EXPECT_EQ(100, svg_stroke_bounding_client_rect->top());
   EXPECT_EQ(100, svg_stroke_bounding_client_rect->width());
   EXPECT_EQ(71, svg_stroke_bounding_client_rect->height());
-  // TODO(pdr): BoundsInWidget is not web exposed and should include
-  // stroke.
-  EXPECT_EQ(gfx::Rect(10, 100, 100, 71), svg_stroke->BoundsInWidget());
+  // TODO(pdr): BoundsInViewport is not web exposed and should include stroke.
+  EXPECT_EQ(gfx::Rect(10, 100, 100, 71), svg_stroke->BoundsInViewport());
 }
 
 TEST_F(ElementTest, PartAttribute) {

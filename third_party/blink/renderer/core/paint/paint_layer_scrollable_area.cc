@@ -206,6 +206,9 @@ void PaintLayerScrollableArea::DisposeImpl() {
 
   non_composited_main_thread_scrolling_reasons_ = 0;
 
+  if (ScrollingCoordinator* scrolling_coordinator = GetScrollingCoordinator())
+    scrolling_coordinator->WillDestroyScrollableArea(this);
+
   if (!GetLayoutBox()->DocumentBeingDestroyed()) {
     if (auto* element = DynamicTo<Element>(GetLayoutBox()->GetNode()))
       element->SetSavedLayerScrollOffset(scroll_offset_);
@@ -1494,7 +1497,6 @@ void PaintLayerScrollableArea::ComputeScrollbarExistence(
       !CanHaveOverflowScrollbars(*GetLayoutBox()) ||
       GetLayoutBox()->GetFrame()->GetSettings()->GetHideScrollbars() ||
       GetLayoutBox()->IsLayoutNGFieldset() ||
-      GetLayoutBox()->IsLayoutNGFrameSet() ||
       GetLayoutBox()->StyleRef().ScrollbarWidth() == EScrollbarWidth::kNone) {
     needs_horizontal_scrollbar = false;
     needs_vertical_scrollbar = false;
@@ -1862,8 +1864,9 @@ bool PaintLayerScrollableArea::ShouldOverflowControlsPaintAsOverlay() const {
 
   // The global root scrollbars and corner also paint as overlay so that they
   // appear on top of all content within the viewport. This is important since
-  // these scrollbar's transform state is
-  // VisualViewport::TransformNodeForViewportScrollbars().
+  // these scrollbar's transform parent is the 'overscroll elasticity'
+  // transform node of the visual viewport, i.e. they don't move during elastic
+  // overscroll or on pinch zoom.
   return GetLayoutBox() && GetLayoutBox()->IsGlobalRootScroller();
 }
 
@@ -2071,11 +2074,6 @@ void PaintLayerScrollableArea::AddStickyLayer(PaintLayer* layer) {
   EnsureRareData().sticky_layers_.insert(layer);
 }
 
-void PaintLayerScrollableArea::RemoveStickyLayer(PaintLayer* layer) {
-  if (rare_data_)
-    rare_data_->sticky_layers_.erase(layer);
-}
-
 void PaintLayerScrollableArea::InvalidateAllStickyConstraints() {
   // Don't clear StickyConstraints for each LayoutObject of each layer in
   // sticky_layers_ because sticky_layers_ may contain stale pointers.
@@ -2103,9 +2101,10 @@ void PaintLayerScrollableArea::InvalidatePaintForStickyDescendants() {
   }
 }
 
-bool PaintLayerScrollableArea::AddAnchorPositionedLayer(PaintLayer* layer) {
+void PaintLayerScrollableArea::AddAnchorPositionedLayer(PaintLayer* layer) {
   auto add_result = EnsureRareData().anchor_positioned_layers_.insert(layer);
-  return add_result.is_new_entry;
+  if (add_result.is_new_entry)
+    layer->GetLayoutObject().SetNeedsPaintPropertyUpdate();
 }
 
 void PaintLayerScrollableArea::InvalidateAllAnchorPositionedLayers() {

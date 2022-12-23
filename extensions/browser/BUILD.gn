@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors
+# Copyright 2014 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -262,6 +262,8 @@ source_set("browser_sources") {
     "crx_file_info.cc",
     "crx_file_info.h",
     "deferred_start_render_host.h",
+    "device_local_account_util.cc",
+    "device_local_account_util.h",
     "disable_reason.h",
     "error_map.cc",
     "error_map.h",
@@ -332,8 +334,6 @@ source_set("browser_sources") {
     "extension_prefs.h",
     "extension_prefs_factory.cc",
     "extension_prefs_factory.h",
-    "extension_prefs_helper.cc",
-    "extension_prefs_helper.h",
     "extension_prefs_observer.h",
     "extension_prefs_scope.h",
     "extension_protocols.cc",
@@ -723,6 +723,8 @@ source_set("browser_tests") {
     "//extensions/shell:browser_tests",
     "//net:test_support",
     "//services/device/public/cpp:test_support",
+    "//services/device/public/cpp/hid",
+    "//services/device/public/cpp/hid:test_support",
     "//services/device/public/mojom",
     "//services/network:test_support",
     "//services/service_manager/public/cpp",
@@ -738,14 +740,14 @@ source_set("browser_tests") {
     ]
 
     deps += [
-      "//chromeos/ash/components/audio",
-      "//chromeos/ash/components/dbus:test_support",
+      "//ash/components/audio",
       "//chromeos/ash/components/dbus/audio",
       "//chromeos/ash/components/dbus/cec_service",
       "//chromeos/ash/components/dbus/media_analytics",
       "//chromeos/ash/components/dbus/media_analytics:media_perception_proto",
       "//chromeos/ash/components/dbus/upstart",
       "//chromeos/ash/components/network",
+      "//chromeos/dbus:test_support",
       "//chromeos/dbus/permission_broker",
       "//chromeos/dbus/power",
       "//chromeos/dbus/power:power_manager_proto",
@@ -986,13 +988,12 @@ source_set("unit_tests") {
       "//chrome/browser/ash/crosapi:browser_util",
       "//chrome/common:constants",
       "//chromeos:test_support",
-      "//chromeos/ash/components/dbus:test_support",
       "//chromeos/ash/components/dbus/audio",
       "//chromeos/ash/components/dbus/media_analytics",
       "//chromeos/ash/components/dbus/media_analytics:media_perception_proto",
-      "//chromeos/ash/components/dbus/shill",
       "//chromeos/ash/components/dbus/upstart",
       "//chromeos/ash/components/network:test_support",
+      "//chromeos/dbus:test_support",
       "//chromeos/dbus/permission_broker",
       "//chromeos/dbus/power",
       "//chromeos/login/login_state",

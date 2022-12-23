@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors
+// Copyright 2016 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,7 +32,7 @@ DownloadInfo::DownloadInfo(const GURL& url,
                            const std::string& original_mime_type,
                            const std::string& user_agent,
                            const std::string& cookie,
-                           const GURL& referer)
+                           const std::string& referer)
     : url(url),
       original_url(original_url),
       content_disposition(content_disposition),

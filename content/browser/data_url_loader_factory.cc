@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -88,8 +88,7 @@ void DataURLLoaderFactory::CreateLoaderAndStart(
     return;
   }
 
-  client_remote->OnReceiveResponse(std::move(response), std::move(consumer),
-                                   absl::nullopt);
+  client_remote->OnReceiveResponse(std::move(response), std::move(consumer));
 
   auto write_data = std::make_unique<WriteData>();
   write_data->client = std::move(client_remote);

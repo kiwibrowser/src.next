@@ -4,7 +4,6 @@
 
 #include "third_party/blink/renderer/core/css/css_computed_style_declaration.h"
 
-#include "third_party/blink/renderer/core/dom/dom_token_list.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
@@ -16,9 +15,7 @@ class CSSComputedStyleDeclarationTest : public PageTestBase {};
 
 TEST_F(CSSComputedStyleDeclarationTest, CleanAncestorsNoRecalc) {
   GetDocument().body()->setInnerHTML(R"HTML(
-    <div>
-      <div id=dirty></div>
-    </div>
+    <div id=dirty></div>
     <div>
       <div id=target style='color:green'></div>
     </div>
@@ -39,9 +36,7 @@ TEST_F(CSSComputedStyleDeclarationTest, CleanAncestorsNoRecalc) {
 
 TEST_F(CSSComputedStyleDeclarationTest, CleanShadowAncestorsNoRecalc) {
   GetDocument().body()->setInnerHTML(R"HTML(
-    <div>
-      <div id=dirty></div>
-    </div>
+    <div id=dirty></div>
     <div id=host></div>
   )HTML");
 
@@ -67,46 +62,48 @@ TEST_F(CSSComputedStyleDeclarationTest, CleanShadowAncestorsNoRecalc) {
   EXPECT_TRUE(GetDocument().NeedsLayoutTreeUpdate());
 }
 
-TEST_F(CSSComputedStyleDeclarationTest, AdjacentInvalidation) {
+TEST_F(CSSComputedStyleDeclarationTest, NeedsAdjacentStyleRecalc) {
   GetDocument().body()->setInnerHTML(R"HTML(
     <style>
-      #b { color: red; }
-      .test + #b { color: green; }
+      #a + #b { color: green }
     </style>
-    <div>
+    <div id="container" style="display:none">
       <span id="a"></span>
-      <span id="b"></span>
+      <span id="b">
+        <span id="c"></span>
+        <span id="d"></span>
+      </span>
     </div>
-    <div id="c"></div>
   )HTML");
 
   UpdateAllLifecyclePhasesForTest();
 
   EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdate());
 
-  Element* a = GetDocument().getElementById("a");
-  Element* b = GetDocument().getElementById("b");
-  Element* c = GetDocument().getElementById("c");
+  Element* container = GetDocument().getElementById("container");
+  Element* c_span = GetDocument().getElementById("c");
+  Element* d_span = GetDocument().getElementById("d");
+
+  d_span->setAttribute("style", "color:pink");
 
   EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdate());
-  EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdateForNode(*a));
-  EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdateForNode(*b));
-  EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdateForNode(*c));
+  EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdateForNode(*d_span));
+  EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdateForNode(*c_span));
+  EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdateForNode(*c_span, true));
+  EXPECT_FALSE(container->NeedsAdjacentStyleRecalc());
 
-  auto* computed = MakeGarbageCollected<CSSComputedStyleDeclaration>(b);
-
-  EXPECT_EQ("rgb(255, 0, 0)",
-            computed->GetPropertyValue(CSSPropertyID::kColor));
-
-  a->classList().Add("test");
-
-  EXPECT_TRUE(GetDocument().NeedsLayoutTreeUpdate());
-  EXPECT_TRUE(GetDocument().NeedsLayoutTreeUpdateForNode(*a));
-  EXPECT_TRUE(GetDocument().NeedsLayoutTreeUpdateForNode(*b));
-  EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdateForNode(*c));
+  auto* computed = MakeGarbageCollected<CSSComputedStyleDeclaration>(c_span);
 
   EXPECT_EQ("rgb(0, 128, 0)",
             computed->GetPropertyValue(CSSPropertyID::kColor));
+
+  d_span->setAttribute("style", "color:green");
+
+  EXPECT_TRUE(GetDocument().NeedsLayoutTreeUpdate());
+  EXPECT_TRUE(GetDocument().NeedsLayoutTreeUpdateForNode(*d_span));
+  EXPECT_TRUE(GetDocument().NeedsLayoutTreeUpdateForNode(*c_span));
+  EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdateForNode(*c_span, true));
+  EXPECT_TRUE(container->NeedsAdjacentStyleRecalc());
 }
 
 TEST_F(CSSComputedStyleDeclarationTest,

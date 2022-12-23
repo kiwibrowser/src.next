@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,20 +26,11 @@ import java.util.List;
  */
 class TabSelectionEditorToolbar extends SelectableListToolbar<Integer> {
     private static final List<Integer> sEmptyIntegerList = Collections.emptyList();
-    private Button mActionButton;
+    private Button mGroupButton;
     private Integer mActionButtonDescriptionResourceId;
     @ColorInt
     private int mBackgroundColor;
     private int mActionButtonEnablingThreshold = 2;
-    private RelatedTabCountProvider mRelatedTabCountProvider;
-
-    public interface RelatedTabCountProvider {
-        /**
-         * @param tabIds the selected items.
-         * @returns the count of tabs including related tabs.
-         */
-        int getRelatedTabCount(List<Integer> tabIds);
-    }
 
     public TabSelectionEditorToolbar(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -50,7 +41,7 @@ class TabSelectionEditorToolbar extends SelectableListToolbar<Integer> {
         super.onFinishInflate();
 
         showNavigationButton();
-        mActionButton = (Button) findViewById(R.id.action_button);
+        mGroupButton = (Button) findViewById(R.id.action_button);
         mNumberRollView.setStringForZero(R.string.tab_selection_editor_toolbar_select_tabs);
     }
 
@@ -72,7 +63,7 @@ class TabSelectionEditorToolbar extends SelectableListToolbar<Integer> {
         super.onSelectionStateChange(selectedItems);
         int selectedItemsSize = selectedItems.size();
         boolean enabled = selectedItemsSize >= mActionButtonEnablingThreshold;
-        mActionButton.setEnabled(enabled);
+        mGroupButton.setEnabled(enabled);
 
         String contentDescription = null;
         if (enabled && mActionButtonDescriptionResourceId != null) {
@@ -80,12 +71,7 @@ class TabSelectionEditorToolbar extends SelectableListToolbar<Integer> {
                     mActionButtonDescriptionResourceId, selectedItemsSize, selectedItemsSize);
         }
 
-        mActionButton.setContentDescription(contentDescription);
-
-        if (mRelatedTabCountProvider == null) return;
-
-        int selectedCount = mRelatedTabCountProvider.getRelatedTabCount(selectedItems);
-        mNumberRollView.setNumber(selectedCount, /*animate=*/true);
+        mGroupButton.setContentDescription(contentDescription);
     }
 
     @Override
@@ -107,12 +93,12 @@ class TabSelectionEditorToolbar extends SelectableListToolbar<Integer> {
     }
 
     /**
-     * Sets a {@link android.view.View.OnClickListener} to respond to {@code mActionButton} clicking
+     * Sets a {@link android.view.View.OnClickListener} to respond to {@code mGroupButton} clicking
      * event.
      * @param listener The listener to set.
      */
     public void setActionButtonOnClickListener(OnClickListener listener) {
-        mActionButton.setOnClickListener(listener);
+        mGroupButton.setOnClickListener(listener);
     }
 
     /**
@@ -120,7 +106,7 @@ class TabSelectionEditorToolbar extends SelectableListToolbar<Integer> {
      * @param tint New {@link ColorStateList} to use.
      */
     public void setButtonTint(ColorStateList tint) {
-        mActionButton.setTextColor(tint);
+        mGroupButton.setTextColor(tint);
         TintedDrawable navigation = (TintedDrawable) getNavigationIcon();
         navigation.setTint(tint);
     }
@@ -146,7 +132,7 @@ class TabSelectionEditorToolbar extends SelectableListToolbar<Integer> {
      * @param text The text to display.
      */
     public void setActionButtonText(String text) {
-        mActionButton.setText(text);
+        mGroupButton.setText(text);
     }
 
     /**
@@ -168,21 +154,5 @@ class TabSelectionEditorToolbar extends SelectableListToolbar<Integer> {
             : "Quantity strings (plurals) with one integer format argument is needed";
 
         mActionButtonDescriptionResourceId = template;
-    }
-
-    /**
-     * Set visibility of the action button.
-     * @param visibility The visibility state.
-     */
-    public void setActionButtonVisibility(int visibility) {
-        mActionButton.setVisibility(visibility);
-    }
-
-    /**
-     * Set provider for related tab count.
-     * @param relatedTabCountProvider The provider to call to get the related tab count.
-     */
-    public void setRelatedTabCountProvider(RelatedTabCountProvider relatedTabCountProvider) {
-        mRelatedTabCountProvider = relatedTabCountProvider;
     }
 }

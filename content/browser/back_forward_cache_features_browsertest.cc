@@ -1,12 +1,11 @@
-// Copyright 2021 The Chromium Authors
+// Copyright 2021 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "content/browser/back_forward_cache_browsertest.h"
-
-#include "base/containers/contains.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
+#include "content/browser/back_forward_cache_browsertest.h"
+
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "content/browser/generic_sensor/sensor_provider_proxy_impl.h"
@@ -1555,18 +1554,23 @@ IN_PROC_BROWSER_TEST_F(BackForwardCacheBrowserTest,
   // blocklist we care about.
   base::HistogramBase::Sample sample = base::HistogramBase::Sample(
       blink::scheduler::WebSchedulerTrackedFeature::kPaymentManager);
-  std::vector<base::Bucket> blocklist_values = histogram_tester().GetAllSamples(
+  std::vector<base::Bucket> blocklist_values = histogram_tester_.GetAllSamples(
       "BackForwardCache.HistoryNavigationOutcome."
       "BlocklistedFeature");
-  EXPECT_TRUE(base::Contains(blocklist_values, sample, &base::Bucket::min));
+  auto it = std::find_if(
+      blocklist_values.begin(), blocklist_values.end(),
+      [sample](const base::Bucket& bucket) { return bucket.min == sample; });
+  EXPECT_TRUE(it != blocklist_values.end());
 
   std::vector<base::Bucket> all_sites_blocklist_values =
-      histogram_tester().GetAllSamples(
+      histogram_tester_.GetAllSamples(
           "BackForwardCache.AllSites.HistoryNavigationOutcome."
           "BlocklistedFeature");
 
-  EXPECT_TRUE(
-      base::Contains(all_sites_blocklist_values, sample, &base::Bucket::min));
+  auto all_sites_it = std::find_if(
+      all_sites_blocklist_values.begin(), all_sites_blocklist_values.end(),
+      [sample](const base::Bucket& bucket) { return bucket.min == sample; });
+  EXPECT_TRUE(all_sites_it != all_sites_blocklist_values.end());
 }
 
 // Pages with acquired keyboard lock should not enter BackForwardCache.
@@ -2144,7 +2148,7 @@ INSTANTIATE_TEST_SUITE_P(All,
                          AppBannerBackForwardCacheBrowserTest,
                          testing::Bool());
 
-// TODO(crbug.com/1317431): WebSQL does not work on Fuchsia.
+// https://crbug.com/1317431: WebSQL does not work on Fuchsia.
 #if BUILDFLAG(IS_FUCHSIA)
 #define MAYBE_DoesNotCacheIfWebDatabase DISABLED_DoesNotCacheIfWebDatabase
 #else

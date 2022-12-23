@@ -336,13 +336,6 @@ class StyleBuilderConverter {
   static absl::optional<StyleOverflowClipMargin> ConvertOverflowClipMargin(
       StyleResolverState&,
       const CSSValue&);
-
-  static Vector<TimelineAxis> ConvertViewTimelineAxis(StyleResolverState&,
-                                                      const CSSValue&);
-  static Vector<TimelineInset> ConvertViewTimelineInset(StyleResolverState&,
-                                                        const CSSValue&);
-  static Vector<AtomicString> ConvertViewTimelineName(StyleResolverState&,
-                                                      const CSSValue&);
 };
 
 template <typename T>

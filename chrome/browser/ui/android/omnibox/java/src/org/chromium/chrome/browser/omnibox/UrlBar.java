@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors
+// Copyright 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,9 +42,7 @@ import org.chromium.base.SysUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.compat.ApiHelperForO;
 import org.chromium.base.metrics.RecordUserAction;
-import org.chromium.chrome.browser.back_press.BackPressManager;
 import org.chromium.components.browser_ui.share.ShareHelper;
-import org.chromium.components.browser_ui.util.FirstDrawDetector;
 import org.chromium.ui.KeyboardVisibilityDelegate;
 import org.chromium.ui.base.WindowDelegate;
 
@@ -64,12 +62,7 @@ public abstract class UrlBar extends AutocompleteEditText {
     private static final int MAX_DISPLAYABLE_LENGTH = 4000;
     private static final int MAX_DISPLAYABLE_LENGTH_LOW_END = 1000;
 
-    // Stylus handwriting: Setting this ime option instructs stylus writing service to restrict
-    // capturing writing events slightly outside the Url bar area. This is needed to prevent stylus
-    // handwriting in inputs in web content area that are very close to url bar area, from being
-    // committed to Url bar's Edit text. Ex: google.com search field.
-    private static final String IME_OPTION_RESTRICT_STYLUS_WRITING_AREA =
-            "restrictDirectWritingArea=true";
+    private boolean mFirstDrawComplete;
 
     /**
      * The text direction of the URL or query: LAYOUT_DIRECTION_LOCALE, LAYOUT_DIRECTION_LTR, or
@@ -214,14 +207,6 @@ public abstract class UrlBar extends AutocompleteEditText {
         // the first draw.
         setFocusable(false);
         setFocusableInTouchMode(false);
-        // Use a global draw instead of View#onDraw in case this View is not visible.
-        FirstDrawDetector.waitForFirstDraw(this, () -> {
-            // We have now avoided the first draw problem (see the comments above) so we want to
-            // make the URL bar focusable so that touches etc. activate it.
-            setFocusable(mAllowFocus);
-            setFocusableInTouchMode(mAllowFocus);
-        });
-
         setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI
                 | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
 
@@ -256,9 +241,10 @@ public abstract class UrlBar extends AutocompleteEditText {
                     }
                 }, ThreadUtils.getUiThreadHandler());
         mGestureDetector.setOnDoubleTapListener(null);
-        mKeyboardHideHelper = new KeyboardHideHelper(this, () -> {
-            if (mUrlBarDelegate != null && !BackPressManager.isEnabled()) {
-                mUrlBarDelegate.backKeyPressed();
+        mKeyboardHideHelper = new KeyboardHideHelper(this, new Runnable() {
+            @Override
+            public void run() {
+                if (mUrlBarDelegate != null) mUrlBarDelegate.backKeyPressed();
             }
         });
 
@@ -288,10 +274,6 @@ public abstract class UrlBar extends AutocompleteEditText {
         mTextContextMenuDelegate = delegate;
     }
 
-    /**
-     * When predictive back gesture is enabled, keycode_back will not be sent from Android OS
-     * starting from T. {@link LocationBarMediator} will intercept the back press instead.
-     */
     @Override
     public boolean onKeyPreIme(int keyCode, KeyEvent event) {
         if (KeyEvent.KEYCODE_BACK == keyCode && event.getAction() == KeyEvent.ACTION_UP) {
@@ -321,12 +303,6 @@ public abstract class UrlBar extends AutocompleteEditText {
             mPendingScroll = false;
         }
         fixupTextDirection();
-    }
-
-    @Override
-    public void onFinishInflate() {
-        super.onFinishInflate();
-        setPrivateImeOptions(IME_OPTION_RESTRICT_STYLUS_WRITING_AREA);
     }
 
     /**
@@ -500,6 +476,16 @@ public abstract class UrlBar extends AutocompleteEditText {
     @Override
     public void onDraw(Canvas canvas) {
         super.onDraw(canvas);
+
+        if (!mFirstDrawComplete) {
+            mFirstDrawComplete = true;
+
+            // We have now avoided the first draw problem (see the comment in
+            // the constructor) so we want to make the URL bar focusable so that
+            // touches etc. activate it.
+            setFocusable(mAllowFocus);
+            setFocusableInTouchMode(mAllowFocus);
+        }
 
         // Notify listeners if the URL's direction has changed.
         updateUrlDirection();

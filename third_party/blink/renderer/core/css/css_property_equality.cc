@@ -179,6 +179,10 @@ bool CSSPropertyEquality::PropertiesEqual(const PropertyHandle& property,
       return a.GridTemplateRows() == b.GridTemplateRows();
     case CSSPropertyID::kHeight:
       return a.Height() == b.Height();
+    case CSSPropertyID::kHoverPopUpDelay:
+      return a.HoverPopUpDelay() == b.HoverPopUpDelay();
+    case CSSPropertyID::kHoverPopUpHideDelay:
+      return a.HoverPopUpHideDelay() == b.HoverPopUpHideDelay();
     case CSSPropertyID::kLeft:
       return a.Left() == b.Left();
     case CSSPropertyID::kLetterSpacing:
@@ -210,7 +214,7 @@ bool CSSPropertyEquality::PropertiesEqual(const PropertyHandle& property,
     case CSSPropertyID::kObjectPosition:
       return a.ObjectPosition() == b.ObjectPosition();
     case CSSPropertyID::kObjectViewBox:
-      return base::ValuesEquivalent(a.ObjectViewBox(), b.ObjectViewBox());
+      return a.ObjectViewBox() == b.ObjectViewBox();
     case CSSPropertyID::kOffsetAnchor:
       return a.OffsetAnchor() == b.OffsetAnchor();
     case CSSPropertyID::kOffsetDistance:

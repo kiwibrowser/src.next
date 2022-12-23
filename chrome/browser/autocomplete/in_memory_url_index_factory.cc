@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors
+// Copyright 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,10 @@
 #include "base/memory/singleton.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/keyed_service/core/service_access_type.h"
 #include "components/omnibox/browser/in_memory_url_index.h"
 #include "content/public/common/url_constants.h"
@@ -25,9 +27,9 @@ InMemoryURLIndexFactory* InMemoryURLIndexFactory::GetInstance() {
 }
 
 InMemoryURLIndexFactory::InMemoryURLIndexFactory()
-    : ProfileKeyedServiceFactory(
+    : BrowserContextKeyedServiceFactory(
           "InMemoryURLIndex",
-          ProfileSelections::BuildRedirectedInIncognito()) {
+          BrowserContextDependencyManager::GetInstance()) {
   DependsOn(BookmarkModelFactory::GetInstance());
   DependsOn(HistoryServiceFactory::GetInstance());
   DependsOn(TemplateURLServiceFactory::GetInstance());
@@ -50,6 +52,11 @@ KeyedService* InMemoryURLIndexFactory::BuildServiceInstanceFor(
                            profile->GetPath(), chrome_schemes_to_whitelist);
   in_memory_url_index->Init();
   return in_memory_url_index;
+}
+
+content::BrowserContext* InMemoryURLIndexFactory::GetBrowserContextToUse(
+    content::BrowserContext* context) const {
+  return chrome::GetBrowserContextRedirectedInIncognito(context);
 }
 
 bool InMemoryURLIndexFactory::ServiceIsNULLWhileTesting() const {

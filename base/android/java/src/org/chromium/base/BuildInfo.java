@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,6 @@ import android.os.Build;
 import android.text.TextUtils;
 
 import androidx.annotation.OptIn;
-import androidx.annotation.VisibleForTesting;
 import androidx.core.os.BuildCompat;
 
 import org.chromium.base.annotations.CalledByNative;
@@ -63,19 +62,12 @@ public class BuildInfo {
     public final String resourcesVersion;
     /** Whether we're running on Android TV or not */
     public final boolean isTV;
-    /** Whether we're running on an Android Automotive OS device or not. */
-    public final boolean isAutomotive;
 
     private static class Holder { private static BuildInfo sInstance = new BuildInfo(); }
 
     @CalledByNative
     private static String[] getAll() {
-        return BuildInfo.getInstance().getAllProperties();
-    }
-
-    /** Returns a serialized string array of all properties of this class. */
-    @VisibleForTesting
-    String[] getAllProperties() {
+        BuildInfo buildInfo = getInstance();
         String hostPackageName = ContextUtils.getApplicationContext().getPackageName();
         return new String[] {
                 Build.BRAND,
@@ -87,26 +79,25 @@ public class BuildInfo {
                 Build.TYPE,
                 Build.BOARD,
                 hostPackageName,
-                String.valueOf(hostVersionCode),
-                hostPackageLabel,
-                packageName,
-                String.valueOf(versionCode),
-                versionName,
-                androidBuildFingerprint,
-                gmsVersionCode,
-                installerPackageName,
-                abiString,
+                String.valueOf(buildInfo.hostVersionCode),
+                buildInfo.hostPackageLabel,
+                buildInfo.packageName,
+                String.valueOf(buildInfo.versionCode),
+                buildInfo.versionName,
+                buildInfo.androidBuildFingerprint,
+                buildInfo.gmsVersionCode,
+                buildInfo.installerPackageName,
+                buildInfo.abiString,
                 sFirebaseAppId,
-                customThemes,
-                resourcesVersion,
+                buildInfo.customThemes,
+                buildInfo.resourcesVersion,
                 String.valueOf(
                         ContextUtils.getApplicationContext().getApplicationInfo().targetSdkVersion),
                 isDebugAndroid() ? "1" : "0",
-                isTV ? "1" : "0",
+                buildInfo.isTV ? "1" : "0",
                 Build.VERSION.INCREMENTAL,
                 Build.HARDWARE,
                 isAtLeastT() ? "1" : "0",
-                isAutomotive ? "1" : "0",
         };
     }
 
@@ -145,8 +136,7 @@ public class BuildInfo {
         return Holder.sInstance;
     }
 
-    @VisibleForTesting
-    BuildInfo() {
+    private BuildInfo() {
         sInitialized = true;
         try {
             Context appContext = ContextUtils.getApplicationContext();
@@ -225,18 +215,6 @@ public class BuildInfo {
             isTV = uiModeManager != null
                     && uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION;
 
-            boolean isAutomotive;
-            try {
-                isAutomotive = pm.hasSystemFeature(PackageManager.FEATURE_AUTOMOTIVE);
-            } catch (SecurityException e) {
-                Log.e(TAG, "Unable to query for Automotive system feature", e);
-
-                // `hasSystemFeature` can possibly throw an exception on modified instances of
-                // Android. In this case, assume the device is not a car since automotive vehicles
-                // should not have such a modification.
-                isAutomotive = false;
-            }
-            this.isAutomotive = isAutomotive;
         } catch (NameNotFoundException e) {
             throw new RuntimeException(e);
         }
@@ -270,16 +248,14 @@ public class BuildInfo {
         // Logic for pre-API-finalization:
         // return BuildCompat.isAtLeastT() && target == Build.VERSION_CODES.CUR_DEVELOPMENT;
 
-        // Logic for after API finalization but before public SDK release has to
-        // just hardcode the appropriate SDK integer. This will include Android
-        // builds with the finalized SDK, and also pre-API-finalization builds
-        // (because CUR_DEVELOPMENT == 10000).
-        // return target >= 33;
+        // Logic for smooth transition period so that both pre-finalization and final SDKs
+        // will return true, assuming T will be API 33.
+        // Keeping this until we upstream the public SDK is a reasonable transition period.
+        return target >= 33 ||
+                (BuildCompat.isAtLeastT() && target == Build.VERSION_CODES.CUR_DEVELOPMENT);
 
-        // Once the public SDK is upstreamed we can use the defined constant,
-        // deprecate this, then eventually inline this at all callsites and
-        // remove it.
-        return target >= Build.VERSION_CODES.TIRAMISU;
+        // Logic for public SDK release:
+        // return target >= Build.VERSION_CODES.TIRAMISU;
     }
 
     public static void setFirebaseAppId(String id) {

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors
+// Copyright 2020 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 
 #include "base/unguessable_token.h"
 #include "net/base/net_export.h"
-#include "net/base/network_anonymization_key.h"
 #include "net/base/network_isolation_key.h"
 #include "net/cookies/site_for_cookies.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -121,16 +120,6 @@ class NET_EXPORT IsolationInfo {
       absl::optional<std::set<SchemefulSite>> party_context = absl::nullopt,
       const base::UnguessableToken* nonce = nullptr);
 
-  // Create and IsolationInfo from the context of a double key. This should only
-  // be used when we don't have access to the frame_origin because the
-  // IsolationInfo is being created from an existing double keyed IsolationInfo.
-  static IsolationInfo CreateDoubleKey(
-      RequestType request_type,
-      const url::Origin& top_frame_origin,
-      const SiteForCookies& site_for_cookies,
-      absl::optional<std::set<SchemefulSite>> party_context = absl::nullopt,
-      const base::UnguessableToken* nonce = nullptr);
-
   // Create an IsolationInfos that may not be fully correct - in particular,
   // the SiteForCookies will always set to null, and if the NetworkIsolationKey
   // only has a top frame origin, the frame origin will either be set to the top
@@ -188,10 +177,6 @@ class NET_EXPORT IsolationInfo {
     return network_isolation_key_;
   }
 
-  const NetworkAnonymizationKey& network_anonymization_key() const {
-    return network_anonymization_key_;
-  }
-
   const absl::optional<base::UnguessableToken>& nonce() const { return nonce_; }
 
   // The value that should be consulted for the third-party cookie blocking
@@ -201,11 +186,6 @@ class NET_EXPORT IsolationInfo {
   // WARNING: This value must only be used for the third-party cookie blocking
   //          policy. It MUST NEVER be used for any kind of SECURITY check.
   const SiteForCookies& site_for_cookies() const { return site_for_cookies_; }
-
-  // Do not use outside of testing. Returns the `frame_origin_` if
-  // `kForceIsolationInfoFrameOriginToTopLevelFrame` is disabled. Else it
-  // returns the `top_frame_origin_` value.
-  const absl::optional<url::Origin>& frame_origin_for_testing() const;
 
   // Return |party_context| which exclude the top frame origin and the frame
   // origin.
@@ -218,18 +198,9 @@ class NET_EXPORT IsolationInfo {
 
   bool IsEqualForTesting(const IsolationInfo& other) const;
 
-  NetworkAnonymizationKey CreateNetworkAnonymizationKeyForIsolationInfo(
-      const absl::optional<url::Origin>& top_frame_origin,
-      const absl::optional<url::Origin>& frame_origin,
-      const base::UnguessableToken* nonce) const;
-
   // Serialize the `IsolationInfo` into a string. Fails if transient, returning
   // an empty string.
   std::string Serialize() const;
-
-  // Returns true if the IsolationInfo has a triple keyed scheme. This
-  // means both `frame_site_` and `top_frame_site_` are populated.
-  static bool IsFrameSiteEnabled();
 
  private:
   IsolationInfo(RequestType request_type,
@@ -246,9 +217,7 @@ class NET_EXPORT IsolationInfo {
 
   // This can be deduced from the two origins above, but keep a cached version
   // to avoid repeated eTLD+1 calculations, when this is using eTLD+1.
-  NetworkIsolationKey network_isolation_key_;
-
-  NetworkAnonymizationKey network_anonymization_key_;
+  net::NetworkIsolationKey network_isolation_key_;
 
   SiteForCookies site_for_cookies_;
 

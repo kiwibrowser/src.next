@@ -32,7 +32,6 @@
 #include "third_party/blink/renderer/core/css/inline_css_style_declaration.h"
 #include "third_party/blink/renderer/core/display_lock/display_lock_context.h"
 #include "third_party/blink/renderer/core/dom/attr.h"
-#include "third_party/blink/renderer/core/dom/css_toggle_map.h"
 #include "third_party/blink/renderer/core/dom/dataset_dom_string_map.h"
 #include "third_party/blink/renderer/core/dom/dom_token_list.h"
 #include "third_party/blink/renderer/core/dom/focusgroup_flags.h"
@@ -99,7 +98,6 @@ class ElementSuperRareData : public GarbageCollected<ElementSuperRareData> {
     }
     return accessible_node_;
   }
-  void ClearAccessibleNode() { accessible_node_.Clear(); }
 
   DisplayLockContext* EnsureDisplayLockContext(Element* element) {
     if (!display_lock_context_) {
@@ -165,18 +163,9 @@ class ElementSuperRareData : public GarbageCollected<ElementSuperRareData> {
   PopupData& EnsurePopupData();
   void RemovePopupData();
 
-  CSSToggleMap* GetToggleMap() const { return toggle_map_.Get(); }
-  CSSToggleMap& EnsureToggleMap(Element* owner_element);
-
   FocusgroupFlags GetFocusgroupFlags() const { return focusgroup_flags_; }
 
   void SetFocusgroupFlags(FocusgroupFlags flags) { focusgroup_flags_ = flags; }
-  bool AffectedBySubjectHas() const {
-    return has_invalidation_flags_.affected_by_subject_has;
-  }
-  void SetAffectedBySubjectHas() {
-    has_invalidation_flags_.affected_by_subject_has = true;
-  }
   bool AffectedByNonSubjectHas() const {
     return has_invalidation_flags_.affected_by_non_subject_has;
   }
@@ -244,12 +233,6 @@ class ElementSuperRareData : public GarbageCollected<ElementSuperRareData> {
   void SetAffectedByLogicalCombinationsInHas() {
     has_invalidation_flags_.affected_by_logical_combinations_in_has = true;
   }
-  bool AffectedByMultipleHas() const {
-    return has_invalidation_flags_.affected_by_multiple_has;
-  }
-  void SetAffectedByMultipleHas() {
-    has_invalidation_flags_.affected_by_multiple_has = true;
-  }
 
   void Trace(blink::Visitor*) const;
 
@@ -269,7 +252,6 @@ class ElementSuperRareData : public GarbageCollected<ElementSuperRareData> {
   AtomicString is_value_;
   Member<ResizeObserverSize> last_intrinsic_size_;
   Member<PopupData> popup_data_;
-  Member<CSSToggleMap> toggle_map_;
   FocusgroupFlags focusgroup_flags_ = FocusgroupFlags::kNone;
   HasInvalidationFlags has_invalidation_flags_;
 };
@@ -440,12 +422,6 @@ class ElementRareData final : public NodeRareData {
   void SetScrollbarPseudoElementStylesDependOnFontMetrics(bool value) {
     scrollbar_pseudo_element_styles_depend_on_font_metrics_ = value;
   }
-  bool AffectedBySubjectHas() const {
-    return super_rare_data_ ? super_rare_data_->AffectedBySubjectHas() : false;
-  }
-  void SetAffectedBySubjectHas() {
-    EnsureSuperRareData().SetAffectedBySubjectHas();
-  }
   bool AffectedByNonSubjectHas() const {
     return super_rare_data_ ? super_rare_data_->AffectedByNonSubjectHas()
                             : false;
@@ -520,12 +496,6 @@ class ElementRareData final : public NodeRareData {
   void SetAffectedByLogicalCombinationsInHas() {
     EnsureSuperRareData().SetAffectedByLogicalCombinationsInHas();
   }
-  bool AffectedByMultipleHas() const {
-    return super_rare_data_ ? super_rare_data_->AffectedByMultipleHas() : false;
-  }
-  void SetAffectedByMultipleHas() {
-    EnsureSuperRareData().SetAffectedByMultipleHas();
-  }
 
   AccessibleNode* GetAccessibleNode() const {
     if (super_rare_data_)
@@ -534,10 +504,6 @@ class ElementRareData final : public NodeRareData {
   }
   AccessibleNode* EnsureAccessibleNode(Element* owner_element) {
     return EnsureSuperRareData().EnsureAccessibleNode(owner_element);
-  }
-  void ClearAccessibleNode() {
-    if (super_rare_data_)
-      super_rare_data_->ClearAccessibleNode();
   }
 
   AttrNodeList& EnsureAttrNodeList();
@@ -575,13 +541,6 @@ class ElementRareData final : public NodeRareData {
   }
   PopupData& EnsurePopupData();
   void RemovePopupData();
-
-  CSSToggleMap* GetToggleMap() const {
-    if (super_rare_data_)
-      return super_rare_data_->GetToggleMap();
-    return nullptr;
-  }
-  CSSToggleMap& EnsureToggleMap(Element* owner_element);
 
   DisplayLockContext* EnsureDisplayLockContext(Element* element) {
     return EnsureSuperRareData().EnsureDisplayLockContext(element);

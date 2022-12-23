@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors
+// Copyright 2016 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -785,7 +785,8 @@ IN_PROC_BROWSER_TEST_F(FindRequestManagerTest,
   options->run_synchronously_for_testing = true;
   Find("result", options->Clone());
   delegate()->WaitForFinalReply();
-  EXPECT_EQ(19, delegate()->GetFindResults().number_of_matches);
+  FindResults results = delegate()->GetFindResults();
+  EXPECT_EQ(19, results.number_of_matches);
 
   contents()->RequestFindMatchRects(-1);
   delegate()->WaitForMatchRects();
@@ -815,7 +816,8 @@ IN_PROC_BROWSER_TEST_F(FindRequestManagerTest,
     Find("result", options->Clone());
     delegate()->WaitForFinalReply();
 
-    EXPECT_EQ(19, delegate()->GetFindResults().number_of_matches);
+    FindResults results = delegate()->GetFindResults();
+    EXPECT_EQ(19, results.number_of_matches);
 
     // Request the find match rects.
     contents()->RequestFindMatchRects(-1);
@@ -1623,7 +1625,7 @@ INSTANTIATE_TEST_SUITE_P(
 // new results from the new document when we navigate the subframe that
 // hasn't finished the find-in-page session to the new document.
 // TODO(crbug.com/1311444): Fix flakiness and reenable the test.
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC)
 #define MAYBE_NavigateFrameDuringFind DISABLED_NavigateFrameDuringFind
 #else
 #define MAYBE_NavigateFrameDuringFind NavigateFrameDuringFind

@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,7 @@
 
 namespace content {
 class BrowserChildProcessHostImpl;
-struct ContentPluginInfo;
+struct PepperPluginInfo;
 
 // Process host for PPAPI plugin processes.
 class PpapiPluginProcessHost : public BrowserChildProcessHostDelegate,
@@ -67,15 +67,15 @@ class PpapiPluginProcessHost : public BrowserChildProcessHostDelegate,
   ~PpapiPluginProcessHost() override;
 
   static PpapiPluginProcessHost* CreatePluginHost(
-      const ContentPluginInfo& info,
+      const PepperPluginInfo& info,
       const base::FilePath& profile_data_directory,
       const absl::optional<url::Origin>& origin_lock);
 
   // Notification that a PP_Instance has been created and the associated
-  // renderer related data including the RenderFrame/Process pair for the given
+  // renderer related data including the RenderView/Process pair for the given
   // plugin. This is necessary so that when the plugin calls us with a
-  // PP_Instance we can find the `RenderFrame` associated with it without
-  // trusting the plugin.
+  // PP_Instance we can find the RenderView associated with it without trusting
+  // the plugin.
   static void DidCreateOutOfProcessInstance(
       int plugin_process_id,
       int32_t pp_instance,
@@ -114,13 +114,13 @@ class PpapiPluginProcessHost : public BrowserChildProcessHostDelegate,
 
   // Constructors for plugin process hosts.
   // You must call Init before doing anything else.
-  PpapiPluginProcessHost(const ContentPluginInfo& info,
+  PpapiPluginProcessHost(const PepperPluginInfo& info,
                          const base::FilePath& profile_data_directory,
                          const absl::optional<url::Origin>& origin_lock);
 
   // Actually launches the process with the given plugin info. Returns true
   // on success (the process was spawned).
-  bool Init(const ContentPluginInfo& info);
+  bool Init(const PepperPluginInfo& info);
 
   void RequestPluginChannel(Client* client);
 

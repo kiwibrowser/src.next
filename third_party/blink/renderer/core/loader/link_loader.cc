@@ -116,9 +116,8 @@ bool LinkLoader::LoadLink(const LinkLoadParameters& params,
     return false;
   }
 
-  if (!pending_preload_ ||
-      (params.reason != LinkLoadParameters::Reason::kMediaChange ||
-       !pending_preload_->MatchesMedia())) {
+  if (params.reason != LinkLoadParameters::Reason::kMediaChange ||
+      (pending_preload_ && !pending_preload_->MatchesMedia())) {
     Abort();
     pending_preload_ = MakeGarbageCollected<PendingLinkPreload>(document, this);
   }

@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,10 +25,12 @@
 #include "build/build_config.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/plugin_list.h"
+#include "content/browser/ppapi_plugin_process_host.h"
 #include "content/browser/process_lock.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/common/content_switches_internal.h"
+#include "content/common/pepper_plugin_list.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
@@ -38,20 +40,13 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_constants.h"
-#include "content/public/common/content_plugin_info.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/webplugininfo.h"
+#include "ppapi/shared_impl/ppapi_permissions.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 
-#if BUILDFLAG(ENABLE_PPAPI)
-#include "content/browser/ppapi_plugin_process_host.h"
-#include "content/common/pepper_plugin_list.h"
-#include "ppapi/shared_impl/ppapi_permissions.h"
-#endif  // BUILDFLAG(ENABLE_PPAPI)
-
 namespace content {
-
 namespace {
 
 // Callback set on the PluginList to assert that plugin loading happens on the
@@ -59,21 +54,6 @@ namespace {
 void WillLoadPluginsCallback(base::SequenceChecker* sequence_checker) {
   DCHECK(sequence_checker->CalledOnValidSequence());
 }
-
-#if BUILDFLAG(ENABLE_PPAPI)
-int CountPpapiPluginProcessesForProfile(
-    const base::FilePath& plugin_path,
-    const base::FilePath& profile_data_directory) {
-  int count = 0;
-  for (PpapiPluginProcessHostIterator iter; !iter.Done(); ++iter) {
-    if (iter->plugin_path() == plugin_path &&
-        iter->profile_data_directory() == profile_data_directory) {
-      ++count;
-    }
-  }
-  return count;
-}
-#endif  // BUILDFLAG(ENABLE_PPAPI)
 
 }  // namespace
 
@@ -111,10 +91,9 @@ void PluginServiceImpl::Init() {
   PluginList::Singleton()->set_will_load_plugins_callback(base::BindRepeating(
       &WillLoadPluginsCallback, &plugin_list_sequence_checker_));
 
-  RegisterPlugins();
+  RegisterPepperPlugins();
 }
 
-#if BUILDFLAG(ENABLE_PPAPI)
 PpapiPluginProcessHost* PluginServiceImpl::FindPpapiPluginProcess(
     const base::FilePath& plugin_path,
     const base::FilePath& profile_data_directory,
@@ -127,6 +106,19 @@ PpapiPluginProcessHost* PluginServiceImpl::FindPpapiPluginProcess(
     }
   }
   return nullptr;
+}
+
+int PluginServiceImpl::CountPpapiPluginProcessesForProfile(
+    const base::FilePath& plugin_path,
+    const base::FilePath& profile_data_directory) {
+  int count = 0;
+  for (PpapiPluginProcessHostIterator iter; !iter.Done(); ++iter) {
+    if (iter->plugin_path() == plugin_path &&
+        iter->profile_data_directory() == profile_data_directory) {
+      ++count;
+    }
+  }
+  return count;
 }
 
 PpapiPluginProcessHost* PluginServiceImpl::FindOrStartPpapiPluginProcess(
@@ -142,7 +134,7 @@ PpapiPluginProcessHost* PluginServiceImpl::FindOrStartPpapiPluginProcess(
   }
 
   // Validate that the plugin is actually registered.
-  const ContentPluginInfo* info = GetRegisteredPluginInfo(plugin_path);
+  const PepperPluginInfo* info = GetRegisteredPpapiPluginInfo(plugin_path);
   if (!info) {
     VLOG(1) << "Unable to find ppapi plugin registration for: "
             << plugin_path.MaybeAsASCII();
@@ -187,7 +179,6 @@ void PluginServiceImpl::OpenChannelToPpapiPlugin(
     client->OnPpapiChannelOpened(IPC::ChannelHandle(), base::kNullProcessId, 0);
   }
 }
-#endif  // BUILDFLAG(ENABLE_PPAPI)
 
 bool PluginServiceImpl::GetPluginInfoArray(
     const GURL& url,
@@ -199,7 +190,7 @@ bool PluginServiceImpl::GetPluginInfoArray(
       url, mime_type, allow_wildcard, plugins, actual_mime_types);
 }
 
-bool PluginServiceImpl::GetPluginInfo(content::BrowserContext* browser_context,
+bool PluginServiceImpl::GetPluginInfo(int render_process_id,
                                       const GURL& url,
                                       const std::string& mime_type,
                                       bool allow_wildcard,
@@ -209,14 +200,13 @@ bool PluginServiceImpl::GetPluginInfo(content::BrowserContext* browser_context,
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   std::vector<WebPluginInfo> plugins;
   std::vector<std::string> mime_types;
-
-  bool stale =
-      GetPluginInfoArray(url, mime_type, allow_wildcard, &plugins, &mime_types);
+  bool stale = GetPluginInfoArray(
+      url, mime_type, allow_wildcard, &plugins, &mime_types);
   if (is_stale)
     *is_stale = stale;
 
   for (size_t i = 0; i < plugins.size(); ++i) {
-    if (!filter_ || filter_->IsPluginAvailable(browser_context, plugins[i])) {
+    if (!filter_ || filter_->IsPluginAvailable(render_process_id, plugins[i])) {
       *info = plugins[i];
       if (actual_mime_type)
         *actual_mime_type = mime_types[i];
@@ -269,25 +259,20 @@ void PluginServiceImpl::GetPlugins(GetPluginsCallback callback) {
       std::move(callback));
 }
 
-void PluginServiceImpl::RegisterPlugins() {
-#if BUILDFLAG(ENABLE_PPAPI)
-  ComputePepperPluginList(&plugins_);
-#else
-  GetContentClient()->AddPlugins(&plugins_);
-#endif  // BUILDFLAG(ENABLE_PPAPI)
-  for (const auto& plugin : plugins_)
+void PluginServiceImpl::RegisterPepperPlugins() {
+  ComputePepperPluginList(&ppapi_plugins_);
+  for (const auto& plugin : ppapi_plugins_)
     RegisterInternalPlugin(plugin.ToWebPluginInfo(), /*add_at_beginning=*/true);
 }
 
 // There should generally be very few plugins so a brute-force search is fine.
-const ContentPluginInfo* PluginServiceImpl::GetRegisteredPluginInfo(
+const PepperPluginInfo* PluginServiceImpl::GetRegisteredPpapiPluginInfo(
     const base::FilePath& plugin_path) {
-  for (auto& plugin : plugins_) {
+  for (auto& plugin : ppapi_plugins_) {
     if (plugin.path == plugin_path)
       return &plugin;
   }
 
-#if BUILDFLAG(ENABLE_PPAPI)
   // We did not find the plugin in our list. But wait! the plugin can also
   // be a latecomer, as it happens with pepper flash. This information
   // can be obtained from the PluginList singleton and we can use it to
@@ -296,14 +281,11 @@ const ContentPluginInfo* PluginServiceImpl::GetRegisteredPluginInfo(
   WebPluginInfo webplugin_info;
   if (!GetPluginInfoByPath(plugin_path, &webplugin_info))
     return nullptr;
-  ContentPluginInfo new_pepper_info;
+  PepperPluginInfo new_pepper_info;
   if (!MakePepperPluginInfo(webplugin_info, &new_pepper_info))
     return nullptr;
-  plugins_.push_back(new_pepper_info);
-  return &plugins_.back();
-#else
-  return nullptr;
-#endif  // BUILDFLAG(ENABLE_PPAPI)
+  ppapi_plugins_.push_back(new_pepper_info);
+  return &ppapi_plugins_.back();
 }
 
 void PluginServiceImpl::SetFilter(PluginServiceFilter* filter) {

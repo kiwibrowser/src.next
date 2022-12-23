@@ -131,13 +131,8 @@ class FocusNavigation : public GarbageCollected<FocusNavigation> {
     return nullptr;
   }
 
-  // Owner of a FocusNavigation:
-  // - If node in slot scope, is the assigned slot (found by traversing
-  //   ancestors)
-  // - If node in slot fallback content scope, is the parent or shadowHost
-  //   element
-  // - If node in shadow tree scope, is the parent or shadowHost element
-  // - If node in frame scope, is the iframe node
+  // Owner is the slot node for slot scope and slot fallback contents scope, the
+  // shadow host for shadow tree scope and the iframe node for frame scope.
   Element* FindOwner(ContainerNode& node) {
     auto result = owner_map_.find(&node);
     if (result != owner_map_.end())
@@ -147,12 +142,8 @@ class FocusNavigation : public GarbageCollected<FocusNavigation> {
     // the slot node have assigned nodes.
 
     Element* owner = nullptr;
-    Element* owner_slot = nullptr;
-    if (Element* element = DynamicTo<Element>(node))
-      owner_slot = SlotScopedTraversal::FindScopeOwnerSlot(*element);
-
-    if (owner_slot)
-      owner = owner_slot;
+    if (node.AssignedSlot())
+      owner = node.AssignedSlot();
     else if (IsA<HTMLSlotElement>(node.parentNode()))
       owner = node.ParentOrShadowHostElement();
     else if (&node == node.ContainingTreeScope().RootNode())

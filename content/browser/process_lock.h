@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors
+// Copyright 2021 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -107,23 +107,12 @@ class CONTENT_EXPORT ProcessLock {
            site_info_->requires_origin_keyed_process();
   }
 
-  // True if this ProcessLock is for a sandboxed iframe without
-  // allow-same-origin.
+  // True if this ProcessLock is for a origin-restricted sandboxed iframe.
   // TODO(wjmaclean): This function's return type could mutate to an enum in
   // future if required for sandboxed iframes that are restricted with different
   // sandbox flags.
   bool is_sandboxed() const {
     return site_info_.has_value() && site_info_->is_sandboxed();
-  }
-
-  // If this ProcessLock is for a sandboxed iframe without allow-same-origin,
-  // and per-document grouping has been enabled for kIsolateSandboxedIframes,
-  // then each SiteInfo will have a unique sandbox id encoded as part of the
-  // lock. If per-document grouping is not enabled, this returns
-  // UrlInfo::kInvalidUniqueSandboxId.
-  int unique_sandbox_id() const {
-    return (site_info_.has_value() ? site_info_->unique_sandbox_id()
-                                   : UrlInfo::kInvalidUniqueSandboxId);
   }
 
   // Returns whether this ProcessLock is specific to PDF contents.
@@ -138,12 +127,6 @@ class CONTENT_EXPORT ProcessLock {
   // This may be false for other types of GuestView.
   bool is_guest() const {
     return site_info_.has_value() && site_info_->is_guest();
-  }
-
-  // Returns whether this ProcessLock is used for a process that exclusively
-  // hosts content inside a <fencedframe>.
-  bool is_fenced() const {
-    return site_info_.has_value() && site_info_->is_fenced();
   }
 
   // Returns the StoragePartitionConfig that corresponds to the SiteInfo the

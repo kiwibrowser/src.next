@@ -299,7 +299,6 @@ void ScopedStyleResolver::AddPositionFallbackRules(const RuleSet& rule_set) {
 
 StyleRulePositionFallback* ScopedStyleResolver::PositionFallbackForName(
     const AtomicString& fallback_name) {
-  DCHECK(fallback_name);
   auto iter = position_fallback_rule_map_.find(fallback_name);
   if (iter != position_fallback_rule_map_.end())
     return iter->value;

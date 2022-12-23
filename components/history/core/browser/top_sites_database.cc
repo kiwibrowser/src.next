@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,17 +11,19 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/check_op.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/strings/string_piece.h"
+#include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/top_sites.h"
 #include "sql/database.h"
 #include "sql/recovery.h"
 #include "sql/statement.h"
-#include "sql/transaction.h"
+#include "third_party/sqlite/sqlite3.h"
 
 namespace history {
 
@@ -60,8 +62,8 @@ static const int kDeprecatedVersionNumber = 2;  // and earlier.
 static const int kRankOfNewURL = -1;
 
 bool InitTables(sql::Database* db) {
-  static constexpr char kTopSitesSql[] =
-      "CREATE TABLE IF NOT EXISTS top_sites("
+  static const char kTopSitesSql[] =
+      "CREATE TABLE IF NOT EXISTS top_sites ("
       "url LONGVARCHAR PRIMARY KEY,"
       "url_rank INTEGER,"
       "title LONGVARCHAR,"
@@ -123,10 +125,10 @@ void FixTopSitesTable(sql::Database* db, int version) {
   // Forced sites are only present in version 3.
   if (version == 3) {
     // Enforce invariant separating forced and non-forced thumbnails.
-    static constexpr char kFixRankSql[] =
+    static const char kFixRankSql[] =
         "DELETE FROM thumbnails "
-        "WHERE(url_rank=-1 AND last_forced=0)"
-        "OR(url_rank<>-1 AND last_forced<>0)";
+        "WHERE (url_rank = -1 AND last_forced = 0) "
+        "OR (url_rank <> -1 AND last_forced <> 0)";
     std::ignore = db->Execute(kFixRankSql);
     if (db->GetLastChangeCount() > 0)
       RecordRecoveryEvent(RECOVERY_EVENT_INVARIANT_RANK);
@@ -136,9 +138,9 @@ void FixTopSitesTable(sql::Database* db, int version) {
   const char* kTableName = (version == 3 ? "thumbnails" : "top_sites");
 
   // Enforce invariant that url is in its own redirects.
-  static constexpr char kFixRedirectsSql[] =
+  static const char kFixRedirectsSql[] =
       "DELETE FROM %s "
-      "WHERE url<>substr(redirects,-length(url),length(url))";
+      "WHERE url <> substr(redirects, -length(url), length(url))";
   std::ignore =
       db->Execute(base::StringPrintf(kFixRedirectsSql, kTableName).c_str());
   if (db->GetLastChangeCount() > 0)
@@ -149,14 +151,14 @@ void FixTopSitesTable(sql::Database* db, int version) {
   // It can be done with a temporary table and a subselect, but doing it
   // manually is easier to follow.  Another option would be to somehow integrate
   // the renumbering into the table recovery code.
-  static constexpr char kByRankSql[] =
-      "SELECT url_rank,rowid FROM %s WHERE url_rank<>-1 "
+  static const char kByRankSql[] =
+      "SELECT url_rank, rowid FROM %s WHERE url_rank <> -1 "
       "ORDER BY url_rank";
   sql::Statement select_statement(db->GetUniqueStatement(
       base::StringPrintf(kByRankSql, kTableName).c_str()));
 
-  static constexpr char kAdjustRankSql[] =
-      "UPDATE %s SET url_rank=? WHERE rowid=?";
+  static const char kAdjustRankSql[] =
+      "UPDATE %s SET url_rank = ? WHERE rowid = ?";
   sql::Statement update_statement(db->GetUniqueStatement(
       base::StringPrintf(kAdjustRankSql, kTableName).c_str()));
 
@@ -278,27 +280,16 @@ void DatabaseErrorCallback(sql::Database* db,
     DLOG(FATAL) << db->GetErrorMessage();
 }
 
-std::unique_ptr<sql::Database> CreateDB(const base::FilePath& db_name) {
-  // Settings copied from FaviconDatabase.
-  auto db = std::make_unique<sql::Database>(sql::DatabaseOptions{
-      .exclusive_locking = true, .page_size = 4096, .cache_size = 32});
-  db->set_histogram_tag("TopSites");
-  db->set_error_callback(
-      base::BindRepeating(&DatabaseErrorCallback, db.get(), db_name));
-
-  if (!db->Open(db_name))
-    return nullptr;
-  return db;
-}
-
 }  // namespace
 
 // static
 const int TopSitesDatabase::kRankOfNonExistingURL = -2;
 
-TopSitesDatabase::TopSitesDatabase() = default;
+TopSitesDatabase::TopSitesDatabase() {
+}
 
-TopSitesDatabase::~TopSitesDatabase() = default;
+TopSitesDatabase::~TopSitesDatabase() {
+}
 
 bool TopSitesDatabase::Init(const base::FilePath& db_name) {
   // Retry failed InitImpl() in case the recovery system fixed things.
@@ -369,24 +360,26 @@ bool TopSitesDatabase::InitImpl(const base::FilePath& db_name) {
     return false;
 
   // Initialization is complete.
-  return transaction.Commit();
+  if (!transaction.Commit())
+    return false;
+
+  return true;
 }
 
 void TopSitesDatabase::ApplyDelta(const TopSitesDelta& delta) {
   sql::Transaction transaction(db_.get());
-  // TODO: consider returning early if `Begin()` returns false.
   transaction.Begin();
 
-  for (const auto& deleted : delta.deleted) {
-    if (!RemoveURLNoTransaction(deleted))
+  for (size_t i = 0; i < delta.deleted.size(); ++i) {
+    if (!RemoveURLNoTransaction(delta.deleted[i]))
       return;
   }
 
-  for (const auto& added : delta.added)
-    SetSiteNoTransaction(added.url, added.rank);
+  for (size_t i = 0; i < delta.added.size(); ++i)
+    SetSiteNoTransaction(delta.added[i].url, delta.added[i].rank);
 
-  for (const auto& moved : delta.moved)
-    UpdateSiteRankNoTransaction(moved.url, moved.rank);
+  for (size_t i = 0; i < delta.moved.size(); ++i)
+    UpdateSiteRankNoTransaction(delta.moved[i].url, delta.moved[i].rank);
 
   transaction.Commit();
 }
@@ -395,6 +388,7 @@ bool TopSitesDatabase::UpgradeToVersion3() {
   // Add 'last_forced' column.
   if (!db_->Execute(
           "ALTER TABLE thumbnails ADD last_forced INTEGER DEFAULT 0")) {
+    NOTREACHED();
     return false;
   }
   meta_table_.SetVersionNumber(3);
@@ -404,20 +398,17 @@ bool TopSitesDatabase::UpgradeToVersion3() {
 bool TopSitesDatabase::UpgradeToVersion4() {
   // Rename table to "top_sites" and retain only the url, url_rank, title, and
   // redirects columns. Also, remove any remaining forced sites.
-
-  static constexpr char kInsertSql[] =
+  const char* statement =
       // The top_sites table is created before the version upgrade.
       "INSERT INTO top_sites SELECT "
-      "url,url_rank,title,redirects FROM thumbnails";
-  if (!db_->Execute(kInsertSql))
+      "url,url_rank,title,redirects FROM thumbnails;"
+      "DROP TABLE thumbnails;"
+      // Remove any forced sites.
+      "DELETE FROM top_sites WHERE (url_rank = -1);";
+  if (!db_->Execute(statement)) {
+    NOTREACHED();
     return false;
-
-  if (!db_->Execute("DROP TABLE thumbnails"))
-    return false;
-
-  // Remove any forced sites.
-  if (!db_->Execute("DELETE FROM top_sites WHERE url_rank=-1"))
-    return false;
+  }
 
   meta_table_.SetVersionNumber(4);
   return true;
@@ -426,7 +417,7 @@ bool TopSitesDatabase::UpgradeToVersion4() {
 void TopSitesDatabase::GetSites(MostVisitedURLList* urls) {
   sql::Statement statement(
       db_->GetCachedStatement(SQL_FROM_HERE,
-                              "SELECT url,title "
+                              "SELECT url, url_rank, title "
                               "FROM top_sites ORDER BY url_rank"));
 
   if (!statement.is_valid()) {
@@ -438,8 +429,11 @@ void TopSitesDatabase::GetSites(MostVisitedURLList* urls) {
 
   while (statement.Step()) {
     // Results are sorted by url_rank.
-    urls->emplace_back(GURL(statement.ColumnString(0)),
-                       /*title=*/statement.ColumnString16(1));
+    MostVisitedURL url;
+    GURL gurl(statement.ColumnString(0));
+    url.url = gurl;
+    url.title = statement.ColumnString16(2);
+    urls->push_back(url);
   }
 }
 
@@ -458,8 +452,8 @@ void TopSitesDatabase::AddSite(const MostVisitedURL& url, int new_rank) {
   sql::Statement statement(
       db_->GetCachedStatement(SQL_FROM_HERE,
                               "INSERT OR REPLACE INTO top_sites "
-                              "(url,url_rank,title)"
-                              "VALUES(?,?,?)"));
+                              "(url, url_rank, title) "
+                              "VALUES (?, ?, ?)"));
   statement.BindString(0, url.url.spec());
   statement.BindInt(1, kRankOfNewURL);
   statement.BindString16(2, url.title);
@@ -473,12 +467,9 @@ void TopSitesDatabase::AddSite(const MostVisitedURL& url, int new_rank) {
 bool TopSitesDatabase::UpdateSite(const MostVisitedURL& url) {
   sql::Statement statement(db_->GetCachedStatement(SQL_FROM_HERE,
                                                    "UPDATE top_sites SET "
-                                                   "title=? "
-                                                   "WHERE url=?"));
+                                                   "title = ? "
+                                                   "WHERE url = ?"));
   statement.BindString16(0, url.title);
-  // TODO: is it intentional that only one of the parameters is bound here?
-  // Per https://www.sqlite.org/c3ref/bind_blob.html unbounded parameters are
-  // interpreted as NULL.
 
   return statement.Run();
 }
@@ -487,7 +478,7 @@ int TopSitesDatabase::GetURLRank(const MostVisitedURL& url) {
   sql::Statement select_statement(
       db_->GetCachedStatement(SQL_FROM_HERE,
                               "SELECT url_rank "
-                              "FROM top_sites WHERE url=?"));
+                              "FROM top_sites WHERE url = ?"));
   select_statement.BindString(0, url.url.spec());
   if (select_statement.Step())
     return select_statement.ColumnInt(0);
@@ -505,9 +496,6 @@ void TopSitesDatabase::UpdateSiteRankNoTransaction(const MostVisitedURL& url,
     return;
   }
 
-  // TODO: consider returning early if any of the `Run()` calls below return
-  // false.
-
   // Shift the ranks.
   if (prev_rank == kRankOfNewURL) {
     // Starting from new_rank, shift up.
@@ -516,8 +504,8 @@ void TopSitesDatabase::UpdateSiteRankNoTransaction(const MostVisitedURL& url,
     sql::Statement shift_statement(
         db_->GetCachedStatement(SQL_FROM_HERE,
                                 "UPDATE top_sites "
-                                "SET url_rank=url_rank+1 "
-                                "WHERE url_rank>=?"));
+                                "SET url_rank = url_rank + 1 "
+                                "WHERE url_rank >= ?"));
     shift_statement.BindInt(0, new_rank);
     shift_statement.Run();
   } else if (prev_rank > new_rank) {
@@ -527,8 +515,8 @@ void TopSitesDatabase::UpdateSiteRankNoTransaction(const MostVisitedURL& url,
     sql::Statement shift_statement(
         db_->GetCachedStatement(SQL_FROM_HERE,
                                 "UPDATE top_sites "
-                                "SET url_rank=url_rank+1 "
-                                "WHERE url_rank>=? AND url_rank<?"));
+                                "SET url_rank = url_rank + 1 "
+                                "WHERE url_rank >= ? AND url_rank < ?"));
     shift_statement.BindInt(0, new_rank);
     shift_statement.BindInt(1, prev_rank);
     shift_statement.Run();
@@ -539,8 +527,8 @@ void TopSitesDatabase::UpdateSiteRankNoTransaction(const MostVisitedURL& url,
     sql::Statement shift_statement(
         db_->GetCachedStatement(SQL_FROM_HERE,
                                 "UPDATE top_sites "
-                                "SET url_rank=url_rank-1 "
-                                "WHERE url_rank>? AND url_rank<=?"));
+                                "SET url_rank = url_rank - 1 "
+                                "WHERE url_rank > ? AND url_rank <= ?"));
     shift_statement.BindInt(0, prev_rank);
     shift_statement.BindInt(1, new_rank);
     shift_statement.Run();
@@ -549,8 +537,8 @@ void TopSitesDatabase::UpdateSiteRankNoTransaction(const MostVisitedURL& url,
   // Set the url's new_rank.
   sql::Statement set_statement(db_->GetCachedStatement(SQL_FROM_HERE,
                                                        "UPDATE top_sites "
-                                                       "SET url_rank=? "
-                                                       "WHERE url=?"));
+                                                       "SET url_rank = ? "
+                                                       "WHERE url == ?"));
   set_statement.BindInt(0, new_rank);
   set_statement.BindString(1, url.url.spec());
   set_statement.Run();
@@ -565,18 +553,32 @@ bool TopSitesDatabase::RemoveURLNoTransaction(const MostVisitedURL& url) {
   sql::Statement shift_statement(
       db_->GetCachedStatement(SQL_FROM_HERE,
                               "UPDATE top_sites "
-                              "SET url_rank=url_rank-1 "
-                              "WHERE url_rank>?"));
+                              "SET url_rank = url_rank - 1 "
+                              "WHERE url_rank > ?"));
   shift_statement.BindInt(0, old_rank);
 
   if (!shift_statement.Run())
     return false;
 
   sql::Statement delete_statement(db_->GetCachedStatement(
-      SQL_FROM_HERE, "DELETE FROM top_sites WHERE url=?"));
+      SQL_FROM_HERE, "DELETE FROM top_sites WHERE url = ?"));
   delete_statement.BindString(0, url.url.spec());
 
   return delete_statement.Run();
+}
+
+std::unique_ptr<sql::Database> TopSitesDatabase::CreateDB(
+    const base::FilePath& db_name) {
+  // Settings copied from FaviconDatabase.
+  auto db = std::make_unique<sql::Database>(sql::DatabaseOptions{
+      .exclusive_locking = true, .page_size = 4096, .cache_size = 32});
+  db->set_histogram_tag("TopSites");
+  db->set_error_callback(
+      base::BindRepeating(&DatabaseErrorCallback, db.get(), db_name));
+
+  if (!db->Open(db_name))
+    return nullptr;
+  return db;
 }
 
 }  // namespace history

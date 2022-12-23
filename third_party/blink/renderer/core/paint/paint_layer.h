@@ -340,10 +340,15 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
                HitTestResult&,
                const PhysicalRect& hit_test_area);
 
+  bool IntersectsDamageRect(const PhysicalRect& layer_bounds,
+                            const PhysicalRect& damage_rect,
+                            const PhysicalOffset& offset_from_root) const;
+
   // Bounding box relative to some ancestor layer. Pass offsetFromRoot if known.
   PhysicalRect PhysicalBoundingBox(
       const PhysicalOffset& offset_from_root) const;
   PhysicalRect PhysicalBoundingBox(const PaintLayer* ancestor_layer) const;
+  PhysicalRect FragmentsBoundingBox(const PaintLayer* ancestor_layer) const;
 
   // Static position is set in parent's coordinate space.
   LayoutUnit StaticInlinePosition() const { return static_inline_position_; }
@@ -489,7 +494,6 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   }
   void SetNeedsVisualOverflowRecalc();
   void SetNeedsCompositingInputsUpdate();
-  void ScrollContainerStatusChanged();
 
   // Returns the nearest ancestor layer (in containing block hierarchy,
   // not including this layer) that is a scroll container. It's nullptr for
@@ -563,7 +567,6 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   void SetNeedsCullRectUpdate();
   void SetForcesChildrenCullRectUpdate();
   void MarkCompositingContainerChainForNeedsCullRectUpdate();
-  void SetDescendantNeedsCullRectUpdate();
   void ClearNeedsCullRectUpdate() {
     needs_cull_rect_update_ = false;
     forces_children_cull_rect_update_ = false;
@@ -623,7 +626,7 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
                       : PhysicalOffset();
   }
 
-  bool KnownToClipSubtreeToPaddingBox() const;
+  bool KnownToClipSubtree() const;
 
   void Trace(Visitor*) const override;
 
@@ -654,9 +657,6 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
                         const FragmentData* root_fragment = nullptr) const;
 
   struct HitTestRecursionData {
-    STACK_ALLOCATED();
-
-   public:
     const PhysicalRect& rect;
     // Whether location.Intersects(rect) returns true.
     const HitTestLocation& location;
@@ -750,11 +750,6 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   // the flag is set, the descendant-dependent tree walk as well.
   void MarkAncestorChainForFlagsUpdate(
       DescendantDependentFlagsUpdateFlag = kNeedsDescendantDependentUpdate);
-
-  // For transform updates we use a fast path that will not change
-  // NeedsPaintPropertyUpdate, but still need to set
-  // NeedsDescendantDependentFlagsUpdate to true, and will use this function.
-  void SetNeedsDescendantDependentFlagsUpdate();
 
   void UpdateTransform(const ComputedStyle* old_style,
                        const ComputedStyle& new_style);

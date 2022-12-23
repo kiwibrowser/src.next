@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors
+// Copyright 2022 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,14 +26,17 @@ namespace net {
 // will always be populated.
 
 // `frame_site` represents the SchemefulSite of the requestor frame. This will
-// be empty when kEnableDoubleKeyNetworkAnonymizationKey is enabled.
+// be empty when the feature flag to enable double keyed NetworkAnonymizationKey
+// is enabled. TODO @brgoldstein create feature flag to enable double keyed
+// NetworkAnonymizationKeys.
 
 //`is_cross_site` is an expiremental boolean that will be used with the
 //`top_frame_site` to create a partition key that separates the
-//`top_frame_site`s first party partition from any cross-site iframes. This will
-// be used only when `kEnableCrossSiteFlagNetworkAnonymizationKey` is enabled.
-// When `kEnableCrossSiteFlagNetworkAnonymizationKey` is disabled,
-// `is_cross_site_` will be an empty optional.
+//`top_frame_site`s first party partition from
+// any cross-site iframes. This will be used only when the feature flag to
+// enable double keyed NetworkAnonymizationKey's is enabled and the feature flag
+// to enable cross-site subframe partitioning is enabled. TODO: brgoldstein add
+// these feature flags.
 
 // The following show how the `is_cross_site` boolean is populated for the
 // innermost frame in the chain.
@@ -56,8 +59,8 @@ class NET_EXPORT NetworkAnonymizationKey {
  public:
   NetworkAnonymizationKey(
       const SchemefulSite& top_frame_site,
-      const absl::optional<SchemefulSite>& frame_site = absl::nullopt,
-      const absl::optional<bool> is_cross_site = absl::nullopt,
+      const absl::optional<SchemefulSite>& frame_site,
+      bool is_cross_site = false,
       const absl::optional<base::UnguessableToken> nonce = absl::nullopt);
 
   // Construct an empty key.
@@ -111,48 +114,21 @@ class NET_EXPORT NetworkAnonymizationKey {
   bool IsTransient() const;
 
   // Getters for the top frame, frame site, nonce and is cross site flag.
+  // TODO @brgoldstein: create feature flags to wrap these properties so that
+  // the key can be modified for experimentation.
   const absl::optional<SchemefulSite>& GetTopFrameSite() const {
     return top_frame_site_;
   }
 
-  const absl::optional<SchemefulSite>& GetFrameSite() const;
-
-  // Do not use outside of testing. Returns the `frame_site_` if neither
-  // `kEnableCrossSiteFlagNetworkAnonymizationKey` or
-  // `kEnableDoubleKeyNetworkAnonymizationKey` are enabled. Else it
-  // returns nullopt.
-  const absl::optional<SchemefulSite>& GetFrameSiteForTesting() const {
+  const absl::optional<SchemefulSite>& GetFrameSite() const {
     return frame_site_;
   }
 
-  bool GetIsCrossSite() const;
+  const absl::optional<bool>& GetIsCrossSite() const { return is_cross_site_; }
 
   const absl::optional<base::UnguessableToken>& GetNonce() const {
     return nonce_;
   }
-
-  // Returns true if the NetworkAnonymizationKey has a triple keyed scheme. This
-  // means the values of the NetworkAnonymizationKey are as follows:
-  // `top_frame_site` -> the schemeful site of the top level page.
-  // `frame_site ` -> the schemeful site of the requestor frame
-  // `is_cross_site` -> nullopt
-  static bool IsFrameSiteEnabled();
-
-  // Returns true if the NetworkAnonymizationKey has a double keyed scheme. This
-  // means the values of the NetworkAnonymizationKey are as follows:
-  // `top_frame_site` -> the schemeful site of the top level page.
-  // `frame_site ` -> nullopt
-  // `is_cross_site` -> nullopt
-  static bool IsDoubleKeySchemeEnabled();
-
-  // Returns true if the NetworkAnonymizationKey has a <double keyed +
-  // is_cross_site> scheme. This means the values of the NetworkAnonymizationKey
-  // are as follows:
-  // `top_frame_site` -> the schemeful site of the top level page.
-  // `frame_site ` -> nullopt
-  // `is_cross_site` -> a boolean indicating if the requestor frame site is
-  // cross site from the top level site.
-  static bool IsCrossSiteFlagSchemeEnabled();
 
  private:
   std::string GetSiteDebugString(

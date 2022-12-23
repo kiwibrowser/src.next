@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors
+// Copyright 2017 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_EXTENSIONS_CHROME_APP_ICON_SERVICE_FACTORY_H_
 
 #include "base/memory/singleton.h"
-#include "chrome/browser/profiles/profile_keyed_service_factory.h"
+#include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 
 namespace extensions {
 
@@ -14,7 +14,7 @@ class ChromeAppIconService;
 
 // Factory to create ChromeAppIconService. Use helper
 // ChromeAppIconService::Get(context) to access the service.
-class ChromeAppIconServiceFactory : public ProfileKeyedServiceFactory {
+class ChromeAppIconServiceFactory : public BrowserContextKeyedServiceFactory {
  public:
   ChromeAppIconServiceFactory(const ChromeAppIconServiceFactory&) = delete;
   ChromeAppIconServiceFactory& operator=(const ChromeAppIconServiceFactory&) =
@@ -32,6 +32,8 @@ class ChromeAppIconServiceFactory : public ProfileKeyedServiceFactory {
   ~ChromeAppIconServiceFactory() override;
 
   KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
+  content::BrowserContext* GetBrowserContextToUse(
       content::BrowserContext* context) const override;
 };
 

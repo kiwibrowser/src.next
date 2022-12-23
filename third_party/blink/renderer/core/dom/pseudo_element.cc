@@ -133,29 +133,12 @@ const QualifiedName& PseudoElementTagName(PseudoId pseudo_id) {
   return name;
 }
 
-AtomicString PseudoElement::PseudoElementNameForEvents(Element* element) {
-  DCHECK(element);
-  auto pseudo_id = element->GetPseudoId();
-  switch (pseudo_id) {
-    case kPseudoIdNone:
-      return g_null_atom;
-    case kPseudoIdPageTransitionContainer:
-    case kPseudoIdPageTransitionImageWrapper:
-    case kPseudoIdPageTransitionIncomingImage:
-    case kPseudoIdPageTransitionOutgoingImage: {
-      auto* pseudo = To<PseudoElement>(element);
-      DCHECK(pseudo);
-      StringBuilder builder;
-      builder.Append(PseudoElementTagName(pseudo_id).LocalName());
-      builder.Append("(");
-      builder.Append(pseudo->document_transition_tag());
-      builder.Append(")");
-      return AtomicString(builder.ReleaseString());
-    }
-    default:
-      break;
-  }
-  return PseudoElementTagName(pseudo_id).LocalName();
+const AtomicString& PseudoElement::PseudoElementNameForEvents(
+    PseudoId pseudo_id) {
+  if (pseudo_id == kPseudoIdNone)
+    return g_null_atom;
+  else
+    return PseudoElementTagName(pseudo_id).LocalName();
 }
 
 bool PseudoElement::IsWebExposed(PseudoId pseudo_id, const Node* parent) {
@@ -163,6 +146,14 @@ bool PseudoElement::IsWebExposed(PseudoId pseudo_id, const Node* parent) {
     case kPseudoIdMarker:
       if (parent && parent->IsPseudoElement())
         return RuntimeEnabledFeatures::CSSMarkerNestedPseudoElementEnabled();
+      return true;
+    case kPseudoIdPageTransition:
+    case kPseudoIdPageTransitionContainer:
+    case kPseudoIdPageTransitionImageWrapper:
+    case kPseudoIdPageTransitionIncomingImage:
+    case kPseudoIdPageTransitionOutgoingImage:
+      // These elements are generated only when DocumentTransition feature is
+      // enabled.
       return true;
     default:
       return true;

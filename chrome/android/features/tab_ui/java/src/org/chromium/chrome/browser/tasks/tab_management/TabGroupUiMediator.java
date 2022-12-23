@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -204,7 +204,7 @@ public class TabGroupUiMediator implements SnackbarManager.SnackbarController, B
             }
 
             @Override
-            public void willCloseTab(Tab tab, boolean animate, boolean didCloseAlone) {
+            public void willCloseTab(Tab tab, boolean animate) {
                 if (!mIsTabGroupUiVisible) return;
                 // The strip should hide when users close the second-to-last tab in strip. The
                 // tabCountToHide for group is 1 because tab group status is updated with this

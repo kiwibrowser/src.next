@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include "chrome/browser/extensions/extension_install_prompt_test_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/test/browser_test.h"
@@ -47,7 +46,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionInstallPromptBrowserTest,
 
   ExtensionInstallPrompt prompt(web_contents);
   tab_strip_model->CloseWebContentsAt(web_contents_index,
-                                      TabCloseTypes::CLOSE_NONE);
+                                      TabStripModel::CLOSE_NONE);
   content::RunAllPendingInMessageLoop();
 
   base::RunLoop run_loop;
@@ -95,7 +94,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionInstallPromptBrowserTest, NoParent) {
 
   ScopedTestDialogAutoConfirm auto_confirm(ScopedTestDialogAutoConfirm::ACCEPT);
 
-  ExtensionInstallPrompt prompt(browser()->profile(), nullptr);
+  ExtensionInstallPrompt prompt(browser()->profile(), NULL);
   base::RunLoop run_loop;
   ExtensionInstallPromptTestHelper helper(run_loop.QuitClosure());
   prompt.ShowDialog(

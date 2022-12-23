@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors
+// Copyright 2017 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,9 +32,9 @@
 #include "sandbox/policy/switches.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
-#if BUILDFLAG(ENABLE_PPAPI)
+#if BUILDFLAG(ENABLE_PLUGINS)
 #include "content/public/browser/plugin_service.h"
-#include "content/public/common/webplugininfo.h"
+#include "content/public/common/pepper_plugin_info.h"
 #endif
 
 namespace content {
@@ -165,7 +165,7 @@ void SetupNetworkSandboxParameters(sandbox::SeatbeltExecClient* client) {
   }
 }
 
-#if BUILDFLAG(ENABLE_PPAPI)
+#if BUILDFLAG(ENABLE_PLUGINS)
 void SetupPPAPISandboxParameters(sandbox::SeatbeltExecClient* client) {
   SetupCommonSandboxParameters(client);
 
@@ -229,7 +229,7 @@ void SetupSandboxParameters(sandbox::mojom::Sandbox sandbox_type,
     case sandbox::mojom::Sandbox::kNetwork:
       SetupNetworkSandboxParameters(client);
       break;
-#if BUILDFLAG(ENABLE_PPAPI)
+#if BUILDFLAG(ENABLE_PLUGINS)
     case sandbox::mojom::Sandbox::kPpapi:
       SetupPPAPISandboxParameters(client);
       break;
@@ -240,8 +240,6 @@ void SetupSandboxParameters(sandbox::mojom::Sandbox sandbox_type,
       break;
     // Setup parameters for sandbox types handled by embedders below.
     case sandbox::mojom::Sandbox::kScreenAI:
-      AddDarwinDirs(client);
-      [[fallthrough]];
     case sandbox::mojom::Sandbox::kSpeechRecognition:
       SetupCommonSandboxParameters(client);
       CHECK(GetContentClient()->browser()->SetupEmbedderSandboxParameters(

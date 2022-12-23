@@ -29,52 +29,40 @@ class CORE_EXPORT CullRectUpdater {
   STACK_ALLOCATED();
 
  public:
-  explicit CullRectUpdater(PaintLayer& starting_layer);
+  explicit CullRectUpdater(PaintLayer& starting_layer)
+      : starting_layer_(starting_layer) {}
 
   void Update();
 
   static void PaintPropertiesChanged(const LayoutObject&,
-                                     const PaintPropertiesChangeInfo&);
+                                     PaintLayer& painting_layer,
+                                     const PaintPropertiesChangeInfo&,
+                                     const gfx::Vector2dF& old_scroll_offset);
 
  private:
   friend class OverriddenCullRectScope;
 
-  struct ContainerInfo {
-    const PaintLayer* container = nullptr;
-    bool subtree_is_out_of_cull_rect = false;
-    bool subtree_should_use_infinite_cull_rect = false;
-    bool force_proactive_update = false;
-    bool force_update_children = false;
-
-    STACK_ALLOCATED();
-  };
-
-  struct Context {
-    ContainerInfo current;
-    ContainerInfo absolute;
-    ContainerInfo fixed;
-
-    STACK_ALLOCATED();
-  };
-
   void UpdateInternal(const CullRect& input_cull_rect);
-  void UpdateRecursively(const Context&, PaintLayer&);
+  void UpdateRecursively(PaintLayer&,
+                         const PaintLayer& parent_painting_layer,
+                         bool force_update_self);
   // Returns true if the contents cull rect changed which requires forced update
   // for children.
-  bool UpdateForSelf(Context&, PaintLayer&);
-  void UpdateForDescendants(const Context&, PaintLayer&);
-  CullRect ComputeFragmentCullRect(Context&,
-                                   PaintLayer&,
+  bool UpdateForSelf(PaintLayer&, const PaintLayer& parent_painting_layer);
+  void UpdateForDescendants(PaintLayer&, bool force_update_children);
+  CullRect ComputeFragmentCullRect(PaintLayer&,
                                    const FragmentData& fragment,
                                    const FragmentData& parent_fragment);
-  CullRect ComputeFragmentContentsCullRect(Context&,
-                                           PaintLayer&,
+  CullRect ComputeFragmentContentsCullRect(PaintLayer&,
                                            const FragmentData& fragment,
                                            const CullRect& cull_rect);
-  bool ShouldProactivelyUpdate(const Context&, const PaintLayer&) const;
+  bool ShouldProactivelyUpdate(const PaintLayer&) const;
 
   PaintLayer& starting_layer_;
   PropertyTreeState root_state_ = PropertyTreeState::Uninitialized();
+  bool force_proactive_update_ = false;
+  bool subtree_is_out_of_cull_rect_ = false;
+  bool subtree_should_use_infinite_cull_rect_ = false;
 };
 
 // Used when painting with a custom top-level cull rect, e.g. when printing a

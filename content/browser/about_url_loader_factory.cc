@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,7 +39,7 @@ void AboutURLLoaderFactory::CreateLoaderAndStart(
   }
 
   client_remote->OnReceiveResponse(std::move(response_head),
-                                   std::move(consumer), absl::nullopt);
+                                   std::move(consumer));
   client_remote->OnComplete(network::URLLoaderCompletionStatus(net::OK));
 }
 

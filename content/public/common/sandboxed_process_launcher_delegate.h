@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,7 +30,6 @@ class CONTENT_EXPORT SandboxedProcessLauncherDelegate
 
 #if BUILDFLAG(IS_WIN)
   // SandboxDelegate:
-  std::string GetSandboxTag() override;
   bool DisableDefaultPolicy() override;
   bool GetAppContainerId(std::string* appcontainer_id) override;
   bool PreSpawnTarget(sandbox::TargetPolicy* policy) override;

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -134,12 +134,9 @@ class ResultRecordingClient : public network::mojom::URLLoaderClient {
     real_client_->OnReceiveEarlyHints(std::move(early_hints));
   }
 
-  void OnReceiveResponse(
-      network::mojom::URLResponseHeadPtr response_head,
-      mojo::ScopedDataPipeConsumerHandle body,
-      absl::optional<mojo_base::BigBuffer> cached_metadata) override {
-    real_client_->OnReceiveResponse(std::move(response_head), std::move(body),
-                                    std::move(cached_metadata));
+  void OnReceiveResponse(network::mojom::URLResponseHeadPtr response_head,
+                         mojo::ScopedDataPipeConsumerHandle body) override {
+    real_client_->OnReceiveResponse(std::move(response_head), std::move(body));
   }
 
   void OnReceiveRedirect(
@@ -153,6 +150,10 @@ class ResultRecordingClient : public network::mojom::URLLoaderClient {
                         OnUploadProgressCallback ack_callback) override {
     real_client_->OnUploadProgress(current_position, total_size,
                                    std::move(ack_callback));
+  }
+
+  void OnReceiveCachedMetadata(mojo_base::BigBuffer data) override {
+    real_client_->OnReceiveCachedMetadata(std::move(data));
   }
 
   void OnTransferSizeUpdated(int32_t transfer_size_diff) override {
@@ -745,8 +746,7 @@ class ExtensionURLLoader : public network::mojom::URLLoader {
       return;
     }
 
-    client_->OnReceiveResponse(std::move(head), std::move(consumer_handle),
-                               absl::nullopt);
+    client_->OnReceiveResponse(std::move(head), std::move(consumer_handle));
 
     CompleteRequestAndDeleteThis(net::OK);
   }
@@ -1081,10 +1081,11 @@ CreateExtensionURLLoaderFactory(int render_process_id, int render_frame_id) {
   content::RenderProcessHost* process_host =
       content::RenderProcessHost::FromID(render_process_id);
   content::BrowserContext* browser_context = process_host->GetBrowserContext();
+  bool is_web_view_request =
+      WebViewGuest::FromFrameID(render_process_id, render_frame_id) != nullptr;
+
   content::RenderFrameHost* rfh =
       content::RenderFrameHost::FromID(render_process_id, render_frame_id);
-  bool is_web_view_request = WebViewGuest::FromRenderFrameHost(rfh) != nullptr;
-
   ukm::SourceIdObj ukm_source_id = ukm::kInvalidSourceIdObj;
   if (rfh)
     ukm_source_id = ukm::SourceIdObj::FromInt64(rfh->GetPageUkmSourceId());

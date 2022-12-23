@@ -28,7 +28,7 @@ namespace blink {
 
 enum class DocumentUpdateReason;
 
-// This class aggregates and records time based UKM and UMA metrics
+// This class aggregaties and records time based UKM and UMA metrics
 // for LocalFrameView. The simplest way to use it is via the
 // SCOPED_UMA_AND_UKM_TIMER macro combined with
 // LocalFrameView::RecordEndOfFrameMetrics.
@@ -111,7 +111,7 @@ enum class DocumentUpdateReason;
 // }
 //
 // |ukm_enum| should be an entry in LocalFrameUkmAggregator's enum of
-// metric names (which in turn corresponds to names from ukm.xml).
+// metric names (which in turn corresponds to names in from ukm.xml).
 #define SCOPED_UMA_AND_UKM_TIMER(aggregator, ukm_enum) \
   auto scoped_ukm_hierarchical_timer =                 \
       aggregator.GetScopedTimer(static_cast<size_t>(ukm_enum));
@@ -253,7 +253,7 @@ class CORE_EXPORT LocalFrameUkmAggregator
     void StartInterval(int64_t metric_index);
 
    private:
-    void Record(bool should_record_prev_metric, bool should_record_next_metric);
+    void Record();
     scoped_refptr<LocalFrameUkmAggregator> aggregator_;
     base::TimeTicks start_time_;
     int64_t metric_index_ = -1;
@@ -265,9 +265,6 @@ class CORE_EXPORT LocalFrameUkmAggregator
   ~LocalFrameUkmAggregator();
 
   const base::TickClock* GetClock() const { return clock_; }
-
-  // For performance reasons, we don't record all metrics for all frames.
-  bool ShouldMeasureMetric(int64_t metric_id) const;
 
   // Create a scoped timer with the index of the metric. Note the index must
   // correspond to the matching index in metric_names.
@@ -314,6 +311,10 @@ class CORE_EXPORT LocalFrameUkmAggregator
   // Inform the aggregator that we have reached First Contentful Paint.
   // The UKM event for the pre-FCP period will be recorded and UMA for
   // aggregated contributions to FCP are reported.
+  // TODO(crbug.com/1330675): This is called for the main frame or local frame
+  // roots only, depending on features::kLocalFrameRootPrePostFCPMetrics. When
+  // the experiment finishes, we should let only local frame roots use this
+  // class.
   void DidReachFirstContentfulPaint();
 
   bool InMainFrameUpdate() { return in_main_frame_update_; }
@@ -325,10 +326,6 @@ class CORE_EXPORT LocalFrameUkmAggregator
   std::unique_ptr<cc::BeginMainFrameMetrics> GetBeginMainFrameMetrics();
 
   bool IsBeforeFCPForTesting() const;
-
-  void SetIntersectionObserverSamplePeriod(size_t period) {
-    intersection_observer_sample_period_ = period;
-  }
 
  private:
   struct AbsoluteMetricRecord {
@@ -420,13 +417,6 @@ class CORE_EXPORT LocalFrameUkmAggregator
     kMustNotChooseNextFrame
   };
   SampleControlForTest next_frame_sample_control_for_test_ = kNoPreference;
-
-  // When they are collected, the overhead of granular IntersectionObserver
-  // metrics is a large part of overall LocalFrameUkmAggregator overhead. The
-  // granular metrics are useful for pinpointing regressions, but we can get
-  // most of the benefit even if we downsample them. This value controls how
-  // frequently we collect granular IntersectionObserver metrics.
-  size_t intersection_observer_sample_period_ = 1;
 };
 
 }  // namespace blink

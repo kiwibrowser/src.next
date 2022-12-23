@@ -24,7 +24,6 @@ class CORE_EXPORT CSSLengthResolver {
   virtual float RemFontSize() const = 0;
   virtual float ExFontSize() const = 0;
   virtual float ChFontSize() const = 0;
-  virtual float IcFontSize() const = 0;
 
   // Other sizes must not be pre-zoomed.
   virtual double ViewportWidth() const = 0;

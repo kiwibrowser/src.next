@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,7 +45,7 @@ bool AbortOnEndInterceptor(URLLoaderInterceptor::RequestParams* params) {
            producer_handle->WriteData(body.data(), &bytes_written,
                                       MOJO_WRITE_DATA_FLAG_ALL_OR_NONE));
   params->client->OnReceiveResponse(std::move(response),
-                                    std::move(consumer_handle), absl::nullopt);
+                                    std::move(consumer_handle));
 
   params->client->OnComplete(
       network::URLLoaderCompletionStatus(net::ERR_CONNECTION_ABORTED));

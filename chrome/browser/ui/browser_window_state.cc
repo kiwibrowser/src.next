@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -106,16 +106,18 @@ std::unique_ptr<DictionaryPrefUpdate> GetWindowPlacementDictionaryReadWrite(
   return std::make_unique<WindowPlacementPrefUpdate>(prefs, window_name);
 }
 
-const base::Value::Dict* GetWindowPlacementDictionaryReadOnly(
+const base::Value* GetWindowPlacementDictionaryReadOnly(
     const std::string& window_name,
     PrefService* prefs) {
   DCHECK(!window_name.empty());
   if (prefs->FindPreference(window_name))
-    return &prefs->GetDict(window_name);
+    return prefs->GetDictionary(window_name);
 
-  const base::Value::Dict& app_windows =
-      prefs->GetDict(prefs::kAppWindowPlacement);
-  return app_windows.FindDict(window_name);
+  const base::Value* app_windows =
+      prefs->GetDictionary(prefs::kAppWindowPlacement);
+  if (!app_windows)
+    return nullptr;
+  return app_windows->FindDictKey(window_name);
 }
 
 bool ShouldSaveWindowPlacement(const Browser* browser) {

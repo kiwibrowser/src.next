@@ -43,8 +43,8 @@
 #include "third_party/blink/public/common/permissions_policy/permissions_policy_features.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/fenced_frame/fenced_frame.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/frame/frame.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/frame/frame_owner_properties.mojom-blink-forward.h"
-#include "third_party/blink/public/mojom/frame/remote_frame.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/input/scroll_direction.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/timing/resource_timing.mojom-blink-forward.h"
@@ -270,9 +270,9 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
     return lifecycle_.GetState() == FrameLifecycle::kDetached;
   }
 
-  // Whether the frame is considered to be an ad frame by Ad Tagging. Returns
-  // true for both root and child ad frames.
-  virtual bool IsAdFrame() const = 0;
+  // Whether the frame is considered to be an ad subframe by Ad Tagging. Returns
+  // true for both root and child ad subframes.
+  virtual bool IsAdSubframe() const = 0;
 
   // Called to make a frame inert or non-inert. A frame is inert when there
   // is a modal dialog displayed within an ancestor frame, and this frame
@@ -354,8 +354,8 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   // Called when the focus controller changes the focus to this frame.
   virtual void DidFocus() = 0;
 
-  virtual gfx::Size GetOutermostMainFrameSize() const = 0;
-  virtual gfx::Point GetOutermostMainFrameScrollPosition() const = 0;
+  virtual gfx::Size GetMainFrameViewportSize() const = 0;
+  virtual gfx::Point GetMainFrameScrollPosition() const = 0;
 
   // Sets this frame's opener to another frame, or disowned the opener
   // if opener is null. See http://html.spec.whatwg.org/#dom-opener.

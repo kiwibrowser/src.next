@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -127,7 +127,7 @@ class IsolatedAppTest : public ExtensionBrowserTest {
       if (installed_app && installed_app->is_app())
         return installed_app;
     }
-    return nullptr;
+    return NULL;
   }
 
  private:

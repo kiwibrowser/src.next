@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -499,7 +499,14 @@ IN_PROC_BROWSER_TEST_F(AppBackgroundPageApiTest, OpenTwoPagesWithManifest) {
   UnloadExtension(extension->id());
 }
 
-IN_PROC_BROWSER_TEST_F(AppBackgroundPageApiTest, OpenPopupFromBGPage) {
+// TODO(https://crbug.com/1124033): Fails on LaCrOS bot.
+// TODO(https://crbug.com/1186442): Fails on linux-ozone-rel bot.
+#if BUILDFLAG(IS_CHROMEOS_LACROS) || BUILDFLAG(IS_LINUX)
+#define MAYBE_OpenPopupFromBGPage DISABLED_OpenPopupFromBGPage
+#else
+#define MAYBE_OpenPopupFromBGPage OpenPopupFromBGPage
+#endif
+IN_PROC_BROWSER_TEST_F(AppBackgroundPageApiTest, MAYBE_OpenPopupFromBGPage) {
   std::string app_manifest = base::StringPrintf(
       "{"
       "  \"name\": \"App\","

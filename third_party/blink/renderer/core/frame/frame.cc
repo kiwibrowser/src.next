@@ -34,10 +34,10 @@
 
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/fenced_frame/fenced_frame.mojom-blink.h"
-#include "third_party/blink/public/mojom/frame/frame.mojom-blink.h"
 #include "third_party/blink/public/mojom/frame/frame_owner_properties.mojom-blink.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
+#include "third_party/blink/public/web/web_remote_frame_client.h"
 #include "third_party/blink/renderer/bindings/core/v8/window_proxy_manager.h"
 #include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
 #include "third_party/blink/renderer/core/dom/document_type.h"
@@ -790,7 +790,7 @@ bool Frame::SwapImpl(
     provisional_frame_ = nullptr;
   }
 
-  v8::HandleScope handle_scope(page->GetAgentGroupScheduler().Isolate());
+  v8::HandleScope handle_scope(v8::Isolate::GetCurrent());
   WindowProxyManager::GlobalProxyVector global_proxies;
   GetWindowProxyManager()->ReleaseGlobalProxies(global_proxies);
 
@@ -929,5 +929,10 @@ void Frame::DetachFromParent() {
   }
   Parent()->RemoveChild(this);
 }
+
+STATIC_ASSERT_ENUM(FrameDetachType::kRemove,
+                   WebRemoteFrameClient::DetachType::kRemove);
+STATIC_ASSERT_ENUM(FrameDetachType::kSwap,
+                   WebRemoteFrameClient::DetachType::kSwap);
 
 }  // namespace blink

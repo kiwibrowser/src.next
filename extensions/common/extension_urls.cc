@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,7 +27,6 @@ bool IsSourceFromAnExtension(const std::u16string& source) {
 namespace extension_urls {
 
 const char kChromeWebstoreBaseURL[] = "https://chrome.google.com/webstore";
-const char kNewChromeWebstoreBaseURL[] = "https://webstore.google.com/";
 const char kChromeWebstoreUpdateURL[] =
     "https://clients2.google.com/service/update2/crx";
 
@@ -36,13 +35,6 @@ GURL GetWebstoreLaunchURL() {
   if (client)
     return client->GetWebstoreBaseURL();
   return GURL(kChromeWebstoreBaseURL);
-}
-
-GURL GetNewWebstoreLaunchURL() {
-  extensions::ExtensionsClient* client = extensions::ExtensionsClient::Get();
-  if (client)
-    return client->GetNewWebstoreBaseURL();
-  return GURL(kNewChromeWebstoreBaseURL);
 }
 
 // TODO(csharrison,devlin): Migrate the following methods to return
@@ -78,16 +70,6 @@ GURL GetWebstoreReportAbuseUrl(const std::string& extension_id,
   return GURL(base::StringPrintf("%s/report/%s?utm_source=%s",
                                  GetWebstoreLaunchURL().spec().c_str(),
                                  extension_id.c_str(), referrer_id.c_str()));
-}
-
-bool IsWebstoreDomain(const GURL& url) {
-  return url.DomainIs(GetWebstoreLaunchURL().host()) ||
-         url.DomainIs(GetNewWebstoreLaunchURL().host());
-}
-
-bool IsWebstoreOrigin(const url::Origin& origin) {
-  return origin.IsSameOriginWith(GetWebstoreLaunchURL()) ||
-         origin.IsSameOriginWith(GetNewWebstoreLaunchURL());
 }
 
 bool IsWebstoreUpdateUrl(const GURL& update_url) {

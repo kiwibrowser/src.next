@@ -192,9 +192,6 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
 
   void AddConsoleMessageImpl(ConsoleMessage*, bool discard_duplicates) final;
 
-  scoped_refptr<base::SingleThreadTaskRunner>
-  GetAgentGroupSchedulerCompositorTaskRunner() final;
-
   // UseCounter orverrides:
   void CountUse(mojom::WebFeature feature) final;
 
@@ -469,7 +466,7 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   void DidBufferLoadWhileInBackForwardCache(size_t num_bytes);
 
   // Whether the window is anonymous or not.
-  bool anonymouslyFramed() const;
+  bool isAnonymouslyFramed() const;
 
   bool IsInFencedFrame() const override;
 
@@ -502,10 +499,6 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   void Dispose();
 
   void DispatchLoadEvent();
-
-  // Is this a Document Picture in Picture window?
-  bool IsPictureInPictureWindow() const;
-  void SetIsPictureInPictureWindow();
 
   // Return the viewport size including scrollbars.
   gfx::Size GetViewportSize() const;
@@ -607,10 +600,6 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   Member<Fence> fence_;
 
   Member<CloseWatcher::WatcherStack> closewatcher_stack_;
-
-  // If set, this window is a Document Picture in Picture window.
-  // https://github.com/steimelchrome/document-pip-explainer/blob/main/explainer.md
-  bool is_picture_in_picture_window_ = false;
 };
 
 template <>

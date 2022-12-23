@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors
+// Copyright 2020 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -352,6 +352,6 @@ void SigninReauthViewController::ShowGaiaReauthPageInNewTab() {
   nav_params.window_action = NavigateParams::SHOW_WINDOW;
   nav_params.trusted_source = false;
   nav_params.user_gesture = true;
-  nav_params.tabstrip_add_types |= AddTabTypes::ADD_INHERIT_OPENER;
+  nav_params.tabstrip_add_types |= TabStripModel::ADD_INHERIT_OPENER;
   Navigate(&nav_params);
 }

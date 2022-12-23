@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors
+// Copyright 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,7 +44,7 @@ import org.chromium.chrome.browser.signin.services.SigninManager;
 import org.chromium.chrome.browser.suggestions.SuggestionsMetrics;
 import org.chromium.chrome.browser.ui.native_page.TouchEnabledDelegate;
 import org.chromium.chrome.browser.ui.signin.PersonalizedSigninPromoView;
-import org.chromium.chrome.browser.ui.signin.SyncPromoController;
+import org.chromium.chrome.browser.ui.signin.SigninPromoController;
 import org.chromium.chrome.browser.xsurface.FeedLaunchReliabilityLogger;
 import org.chromium.chrome.browser.xsurface.FeedLaunchReliabilityLogger.StreamType;
 import org.chromium.components.browser_ui.widget.listmenu.ListMenu;
@@ -52,6 +52,7 @@ import org.chromium.components.browser_ui.widget.listmenu.ListMenuItemProperties
 import org.chromium.components.feed.proto.wire.ReliabilityLoggingEnums.DiscoverLaunchResult;
 import org.chromium.components.prefs.PrefService;
 import org.chromium.components.search_engines.TemplateUrlService.TemplateUrlServiceObserver;
+import org.chromium.components.signin.identitymanager.ConsentLevel;
 import org.chromium.components.signin.identitymanager.IdentityManager;
 import org.chromium.components.signin.identitymanager.PrimaryAccountChangeEvent;
 import org.chromium.components.signin.metrics.SigninAccessPoint;
@@ -159,7 +160,7 @@ public class FeedSurfaceMediator
             // blocking the UI thread for several seconds if the accounts cache is not populated
             // yet.
             if (isVisible()) {
-                mSyncPromoController.setUpSyncPromoView(mProfileDataCache,
+                mSigninPromoController.setUpSyncPromoView(mProfileDataCache,
                         mCoordinator.getSigninPromoView().findViewById(
                                 R.id.signin_promo_view_container),
                         this::onDismissPromo);
@@ -637,9 +638,9 @@ public class FeedSurfaceMediator
      * @return Whether the SignPromo should be visible.
      */
     private boolean shouldShowSigninPromo() {
-        SyncPromoController.resetNTPSyncPromoLimitsIfHiddenForTooLong();
+        SigninPromoController.resetNTPSyncPromoLimitsIfHiddenForTooLong();
         if (!SignInPromo.shouldCreatePromo()
-                || !SyncPromoController.canShowSyncPromo(
+                || !SigninPromoController.canShowSyncPromo(
                         SigninAccessPoint.NTP_CONTENT_SUGGESTIONS)) {
             return false;
         }
@@ -687,7 +688,7 @@ public class FeedSurfaceMediator
     }
 
     private void setHeaderIndicatorState(boolean suggestionsVisible) {
-        boolean isSignedIn = FeedServiceBridge.isSignedIn();
+        boolean isSignedIn = isSignedIn();
         boolean isTabMode = isSignedIn && FeedFeatures.isWebFeedUIEnabled() && suggestionsVisible;
         // If we're in tab mode now, make sure webfeed tab is set up.
         if (isTabMode) {
@@ -781,6 +782,10 @@ public class FeedSurfaceMediator
         }
     }
 
+    private boolean isSignedIn() {
+        return mSigninManager.getIdentityManager().hasPrimaryAccount(ConsentLevel.SYNC);
+    }
+
     /**
      * Callback on section header toggled. This will update the visibility of the Feed and the
      * expand icon on the section header view.
@@ -812,8 +817,7 @@ public class FeedSurfaceMediator
                 TemplateUrlServiceFactory.get().isDefaultSearchEngineGoogle();
         final int sectionHeaderStringId;
 
-        if (ChromeFeatureList.isEnabled(ChromeFeatureList.WEB_FEED)
-                && FeedServiceBridge.isSignedIn() && isExpanded) {
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.WEB_FEED) && isSignedIn() && isExpanded) {
             sectionHeaderStringId = R.string.ntp_discover_on;
         } else if (isDefaultSearchEngineGoogle) {
             sectionHeaderStringId =
@@ -829,7 +833,7 @@ public class FeedSurfaceMediator
     private ModelList buildMenuItems() {
         ModelList itemList = new ModelList();
         int iconId = 0;
-        if (FeedServiceBridge.isSignedIn()) {
+        if (isSignedIn()) {
             if (ChromeFeatureList.isEnabled(ChromeFeatureList.WEB_FEED)) {
                 itemList.add(buildMenuListItem(
                         R.string.ntp_manage_feed, R.id.ntp_feed_header_menu_item_manage, iconId));

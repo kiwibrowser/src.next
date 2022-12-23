@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -105,8 +105,6 @@ class IconWithBadgeImageSource : public gfx::CanvasImageSource {
 
   // Whether or not to paint a decoration to indicate that the extension has
   // had actions blocked.
-  // TODO(crbug.com/1352298): Remove once kExtensionsMenuAccessControl is rolled
-  // out.
   bool paint_blocked_actions_decoration_ = false;
 };
 

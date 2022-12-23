@@ -84,16 +84,14 @@ class StyleEnvironmentVariablesTest : public PageTestBase {
     ASSERT_EQ(url.GetString(), GetDocument().Url().GetString());
   }
 
-  String GetRootVariableValue(UADefinedVariable name) {
+  const String& GetRootVariableValue(UADefinedVariable name) {
     CSSVariableData* data =
         StyleEnvironmentVariables::GetRootInstance().ResolveVariable(
             StyleEnvironmentVariables::GetVariableName(
                 name, /*feature_context=*/nullptr),
             {});
     EXPECT_NE(nullptr, data);
-    Vector<String> backing_strings;
-    data->AppendBackingStrings(backing_strings);
-    return backing_strings[0];
+    return data->BackingStrings()[0];
   }
 
   void SetVariableOnRoot(const AtomicString& name, const String& value) {
@@ -449,8 +447,9 @@ TEST_F(StyleEnvironmentVariablesTest, RecordUseCounter_SafeAreaInsetTop) {
 }
 
 TEST_F(StyleEnvironmentVariablesTest, KeyboardInset_AfterLoad) {
-  // This test asserts that the keyboard inset environment variables are loaded
-  // by default.
+  // This test asserts that the keyboard inset environment variables should be
+  // loaded by default when the VirtualKeyboard runtime flag is set.
+  ScopedVirtualKeyboardForTest scoped_feature(true);
   CSSVariableData* data =
       StyleEnvironmentVariables::GetRootInstance().ResolveVariable(
           StyleEnvironmentVariables::GetVariableName(

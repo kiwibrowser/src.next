@@ -352,7 +352,7 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
   using DisplayItemClient::Invalidate;
   using DisplayItemClient::IsValid;
 
-  DOMNodeId OwnerNodeId() const override;
+  DOMNodeId OwnerNodeId() const final;
 
  public:
   String DebugName() const final;
@@ -415,23 +415,6 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
   LayoutObject* PreviousInPostOrder(const LayoutObject* stay_within) const;
   LayoutObject* PreviousInPostOrderBeforeChildren(
       const LayoutObject* stay_within) const;
-
-  // The depth of the tree.
-  wtf_size_t Depth() const;
-
-  struct CommonAncestorData {
-    STACK_ALLOCATED();
-
-   public:
-    // The last object before reaching the common ancestor from |this| and
-    // |other|.
-    LayoutObject* last = nullptr;
-    LayoutObject* other_last = nullptr;
-  };
-  LayoutObject* CommonAncestor(const LayoutObject& other,
-                               CommonAncestorData* data = nullptr) const;
-
-  bool IsBeforeInPreOrder(const LayoutObject& other) const;
 
   LayoutObject* LastLeafChild() const;
 
@@ -615,22 +598,11 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
     if (!style.OverflowClipMargin())
       return false;
 
-    // Replaced elements have a used value of 'clip' for all overflow values
-    // except visible. See discussion at
-    // https://github.com/w3c/csswg-drafts/issues/7714#issuecomment-1248761712.
-    bool is_overflow_clip = false;
-    if (IsLayoutReplaced() &&
-        RuntimeEnabledFeatures::CSSOverflowForReplacedElementsEnabled()) {
-      is_overflow_clip = style.OverflowX() != EOverflow::kVisible &&
-                         style.OverflowY() != EOverflow::kVisible;
-    } else {
-      is_overflow_clip = style.OverflowX() == EOverflow::kClip &&
-                         style.OverflowY() == EOverflow::kClip;
-    }
-
     // In all other cases, we apply overflow-clip-margin when we clip to
     // overflow clip edge, meaning we have overflow: clip or paint containment.
-    return is_overflow_clip || ShouldApplyPaintContainment();
+    return (style.OverflowX() == EOverflow::kClip &&
+            style.OverflowY() == EOverflow::kClip) ||
+           ShouldApplyPaintContainment();
   }
 
   inline bool IsEligibleForPaintOrLayoutContainment() const {
@@ -876,14 +848,6 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
   bool IsFrameSet() const {
     NOT_DESTROYED();
     return IsOfType(kLayoutObjectFrameSet);
-  }
-  bool IsLayoutNGFrameSet() const {
-    NOT_DESTROYED();
-    return IsOfType(kLayoutObjectNGFrameSet);
-  }
-  bool IsFrameSetIncludingNG() const {
-    NOT_DESTROYED();
-    return IsFrameSet() || IsLayoutNGFrameSet();
   }
   bool IsInsideListMarkerForCustomContent() const {
     NOT_DESTROYED();
@@ -2077,7 +2041,6 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
   }
   void SetNeedsCollectInlines(bool b) {
     NOT_DESTROYED();
-    DCHECK(!GetDocument().InPostLifecycleSteps());
     bitfields_.SetNeedsCollectInlines(b);
   }
 
@@ -2451,7 +2414,7 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
 
   const LayoutBlock* InclusiveContainingBlock() const;
 
-  const LayoutBox* ContainingScrollContainer() const;
+  const LayoutBlock* EnclosingScrollportBox() const;
 
   bool CanContainAbsolutePositionObjects() const {
     NOT_DESTROYED();
@@ -2504,7 +2467,7 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
   // space of the ancestor.
   // Otherwise:
   //   If TraverseDocumentBoundaries is specified, the result will be in the
-  //   space of the outermost root frame.
+  //   space of the local root frame.
   //   Otherwise, the result will be in the space of the containing frame.
   // This method supports kUseGeometryMapperMode.
   PhysicalRect LocalToAncestorRect(const PhysicalRect& rect,
@@ -3325,7 +3288,6 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
     // Same as LayoutObject::SetNeedsPaintPropertyUpdate(), but does not mark
     // ancestors as having a descendant needing a paint property update.
     void SetOnlyThisNeedsPaintPropertyUpdate() {
-      DCHECK(!layout_object_.GetDocument().InPostLifecycleSteps());
       layout_object_.bitfields_.SetNeedsPaintPropertyUpdate(true);
     }
 
@@ -3564,13 +3526,13 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
     bitfields_.SetIsLayoutNGObjectForListMarkerImage(b);
   }
 
-  bool IsLayoutNGObjectForFormattedText() const {
+  bool IsLayoutNGObjectForCanvasFormattedText() const {
     NOT_DESTROYED();
-    return bitfields_.IsLayoutNGObjectForFormattedText();
+    return bitfields_.IsLayoutNGObjectForCanvasFormattedText();
   }
-  void SetIsLayoutNGObjectForFormattedText(bool b) {
+  void SetIsLayoutNGObjectForCanvasFormattedText(bool b) {
     NOT_DESTROYED();
-    bitfields_.SetIsLayoutNGObjectForFormattedText(b);
+    bitfields_.SetIsLayoutNGObjectForCanvasFormattedText(b);
   }
 
   bool PreviousVisibilityVisible() const {
@@ -3646,7 +3608,6 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
     kLayoutObjectNGCustom,
     kLayoutObjectNGFieldset,
     kLayoutObjectNGFlexibleBox,
-    kLayoutObjectNGFrameSet,
     kLayoutObjectNGGrid,
     kLayoutObjectNGInsideListMarker,
     kLayoutObjectNGListItem,
@@ -4042,7 +4003,7 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
           is_table_column_constraints_dirty_(false),
           is_grid_placement_dirty_(true),
           transform_affects_vector_effect_(false),
-          is_layout_ng_object_for_formatted_text(false),
+          is_layout_ng_object_for_canvas_formatted_text(false),
           should_skip_next_layout_shift_tracking_(true),
           should_assume_paint_offset_translation_for_layout_shift_tracking_(
               false),
@@ -4367,8 +4328,8 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
     // included).
     ADD_BOOLEAN_BITFIELD(transform_affects_vector_effect_,
                          TransformAffectsVectorEffect);
-    ADD_BOOLEAN_BITFIELD(is_layout_ng_object_for_formatted_text,
-                         IsLayoutNGObjectForFormattedText);
+    ADD_BOOLEAN_BITFIELD(is_layout_ng_object_for_canvas_formatted_text,
+                         IsLayoutNGObjectForCanvasFormattedText);
 
     // Whether to skip layout shift tracking in the next paint invalidation.
     // See PaintInvalidator::UpdateLayoutShiftTracking().
@@ -4518,24 +4479,20 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
   }
   void SetNeedsPositionedMovementLayout(bool b) {
     NOT_DESTROYED();
-    DCHECK(!GetDocument().InPostLifecycleSteps());
     bitfields_.SetNeedsPositionedMovementLayout(b);
   }
   void SetNormalChildNeedsLayout(bool b) {
     NOT_DESTROYED();
-    DCHECK(!GetDocument().InPostLifecycleSteps());
     bitfields_.SetNormalChildNeedsLayout(b);
     if (b)
       bitfields_.SetIsTableColumnsConstraintsDirty(true);
   }
   void SetPosChildNeedsLayout(bool b) {
     NOT_DESTROYED();
-    DCHECK(!GetDocument().InPostLifecycleSteps());
     bitfields_.SetPosChildNeedsLayout(b);
   }
   void SetNeedsSimplifiedNormalFlowLayout(bool b) {
     NOT_DESTROYED();
-    DCHECK(!GetDocument().InPostLifecycleSteps());
     bitfields_.SetNeedsSimplifiedNormalFlowLayout(b);
   }
 
@@ -4704,7 +4661,6 @@ inline void LayoutObject::SetNeedsPositionedMovementLayout() {
 
 inline void LayoutObject::SetIsInLayoutNGInlineFormattingContext(
     bool new_value) {
-  DCHECK(!GetDocument().InPostLifecycleSteps());
   if (IsInLayoutNGInlineFormattingContext() == new_value)
     return;
   InLayoutNGInlineFormattingContextWillChange(new_value);
@@ -4716,7 +4672,6 @@ inline void LayoutObject::SetIsInLayoutNGInlineFormattingContext(
 }
 
 inline void LayoutObject::SetHasBoxDecorationBackground(bool b) {
-  DCHECK(!GetDocument().InPostLifecycleSteps());
   if (b == bitfields_.HasBoxDecorationBackground())
     return;
 

@@ -1,4 +1,4 @@
-# Copyright 2013 The Chromium Authors
+# Copyright (c) 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -209,7 +209,6 @@ component("net") {
     "base/network_delegate.h",
     "base/network_delegate_impl.cc",
     "base/network_delegate_impl.h",
-    "base/network_handle.h",
     "base/network_interfaces.cc",
     "base/network_interfaces.h",
     "base/network_isolation_key.cc",
@@ -434,8 +433,12 @@ component("net") {
     "cookies/cookie_store.h",
     "cookies/cookie_util.cc",
     "cookies/cookie_util.h",
+    "cookies/first_party_set_metadata.cc",
+    "cookies/first_party_set_metadata.h",
     "cookies/parsed_cookie.cc",
     "cookies/parsed_cookie.h",
+    "cookies/same_party_context.cc",
+    "cookies/same_party_context.h",
     "cookies/site_for_cookies.cc",
     "cookies/site_for_cookies.h",
     "cookies/static_cookie_policy.cc",
@@ -538,16 +541,6 @@ component("net") {
     "filter/gzip_source_stream.h",
     "filter/source_stream.cc",
     "filter/source_stream.h",
-    "first_party_sets/first_party_set_entry.cc",
-    "first_party_sets/first_party_set_entry.h",
-    "first_party_sets/first_party_set_metadata.cc",
-    "first_party_sets/first_party_set_metadata.h",
-    "first_party_sets/first_party_sets_context_config.cc",
-    "first_party_sets/first_party_sets_context_config.h",
-    "first_party_sets/public_sets.cc",
-    "first_party_sets/public_sets.h",
-    "first_party_sets/same_party_context.cc",
-    "first_party_sets/same_party_context.h",
     "http/alternative_service.cc",
     "http/alternative_service.h",
     "http/bidirectional_stream.cc",
@@ -1018,6 +1011,8 @@ component("net") {
     "url_request/url_request_context_getter.cc",
     "url_request/url_request_context_getter.h",
     "url_request/url_request_context_getter_observer.h",
+    "url_request/url_request_context_storage.cc",
+    "url_request/url_request_context_storage.h",
     "url_request/url_request_error_job.cc",
     "url_request/url_request_error_job.h",
     "url_request/url_request_filter.cc",
@@ -1196,10 +1191,6 @@ component("net") {
       "base/network_interfaces_linux.h",
       "base/platform_mime_util_linux.cc",
     ]
-  }
-
-  if (is_chromeos) {
-    deps += [ "//third_party/xdg_shared_mime_info" ]
   }
 
   if (is_mac) {
@@ -4158,7 +4149,6 @@ test("net_unittests") {
     "extras/sqlite/sqlite_persistent_cookie_store_unittest.cc",
     "filter/filter_source_stream_unittest.cc",
     "filter/gzip_source_stream_unittest.cc",
-    "first_party_sets/public_sets_unittest.cc",
     "http/alternative_service_unittest.cc",
     "http/bidirectional_stream_unittest.cc",
     "http/broken_alternative_services_unittest.cc",
@@ -4456,6 +4446,10 @@ test("net_unittests") {
     sources += [ "base/sockaddr_util_posix_unittest.cc" ]
   }
 
+  if (is_posix || is_fuchsia) {
+    sources += [ "socket/udp_socket_posix_unittest.cc" ]
+  }
+
   if (is_android || is_chromeos_ash) {
     sources += [ "base/network_change_notifier_posix_unittest.cc" ]
   }
@@ -4549,9 +4543,9 @@ test("net_unittests") {
       "//third_party/fuchsia-sdk/sdk/pkg/fidl_cpp",
     ]
     sources += [ "base/network_change_notifier_fuchsia_unittest.cc" ]
-    use_cfv1 = false
+    use_cfv2 = false
     additional_manifest_fragments =
-        [ "//build/config/fuchsia/test/network.shard.test-cml" ]
+        [ "//build/config/fuchsia/test/network_capabilities.test-cmx" ]
   }
 
   if (use_nss_certs) {

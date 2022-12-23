@@ -38,6 +38,7 @@ class CORE_EXPORT NamedPagesMapper {
   // name, it means that no break is inserted there.
   void NameFirstPage(const AtomicString& page_name);
 
+  const AtomicString& LastPageName() const { return entries_.back().page_name; }
   const AtomicString& NamedPageAtIndex(int page_index) const;
 
  private:

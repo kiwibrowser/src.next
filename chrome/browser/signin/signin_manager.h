@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors
+// Copyright 2020 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include <memory>
 
+#include "base/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
@@ -37,20 +38,6 @@ struct CoreAccountId;
 
 class PrefService;
 
-// See `SigninManager::CreateAccountSelectionInProgressHandle()`.
-class AccountSelectionInProgressHandle {
- public:
-  AccountSelectionInProgressHandle(const AccountSelectionInProgressHandle&) =
-      delete;
-  AccountSelectionInProgressHandle& operator=(
-      const AccountSelectionInProgressHandle&) = delete;
-
-  virtual ~AccountSelectionInProgressHandle() = default;
-
- protected:
-  AccountSelectionInProgressHandle() = default;
-};
-
 class SigninManager : public KeyedService,
                       public signin::IdentityManager::Observer {
  public:
@@ -71,11 +58,6 @@ class SigninManager : public KeyedService,
       base::OnceCallback<void(const CoreAccountId&)> on_completion_callback =
           base::DoNothing());
 #endif
-
-  // Returns a scoped handle that prevents `SigninManager` from changing the
-  // unconsented primary account.
-  virtual std::unique_ptr<AccountSelectionInProgressHandle>
-  CreateAccountSelectionInProgressHandle();
 
  private:
   // Updates the cached version of unconsented primary account and notifies the
@@ -120,8 +102,6 @@ class SigninManager : public KeyedService,
 
   void OnSigninAllowedPrefChanged();
 
-  void OnAccountSelectionInProgressHandleDestroyed();
-
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
   void OnSigninHelperLacrosComplete(
       base::OnceCallback<void(const CoreAccountId&)> on_completion_callback,
@@ -136,11 +116,6 @@ class SigninManager : public KeyedService,
 
   // Helper object to listen for changes to the signin allowed preference.
   BooleanPrefMember signin_allowed_;
-
-  // The number of handles currently active, that indicates the number of UIs
-  // currently manipulating the unconsented primary account.
-  // We should not reset the UPA while it's not `0`.
-  int live_account_selection_handles_count_ = 0;
 
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
   std::unique_ptr<SigninHelperLacros> signin_helper_lacros_;

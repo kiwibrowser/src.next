@@ -76,10 +76,6 @@ class PLATFORM_EXPORT WebGraphicsContext3DVideoFramePool {
                          const gfx::ColorSpace& dst_color_space,
                          FrameReadyCallback callback);
 
-  // This is a helper function to get whether GpuMemoryBuffer readback from
-  // texture is enabled.
-  static bool IsGpuMemoryBufferReadbackFromTextureEnabled();
-
  private:
   base::WeakPtr<blink::WebGraphicsContext3DProviderWrapper>
       weak_context_provider_;

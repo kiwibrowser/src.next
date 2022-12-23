@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,8 +18,8 @@
 #include "net/base/net_export.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_inclusion_status.h"
+#include "net/cookies/same_party_context.h"
 #include "net/cookies/site_for_cookies.h"
-#include "net/first_party_sets/same_party_context.h"
 #include "net/proxy_resolution/proxy_retry_info.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
@@ -79,10 +79,12 @@ class NET_EXPORT NetworkDelegate {
   bool AnnotateAndMoveUserBlockedCookies(
       const URLRequest& request,
       CookieAccessResultList& maybe_included_cookies,
-      CookieAccessResultList& excluded_cookies);
+      CookieAccessResultList& excluded_cookies,
+      bool allowed_from_caller);
   bool CanSetCookie(const URLRequest& request,
                     const net::CanonicalCookie& cookie,
-                    CookieOptions* options);
+                    CookieOptions* options,
+                    bool allowed_from_caller);
 
   // PrivacySetting is kStateDisallowed iff the given |url| has to be
   // requested over connection that is not tracked by the server.
@@ -247,14 +249,19 @@ class NET_EXPORT NetworkDelegate {
   virtual bool OnAnnotateAndMoveUserBlockedCookies(
       const URLRequest& request,
       net::CookieAccessResultList& maybe_included_cookies,
-      net::CookieAccessResultList& excluded_cookies) = 0;
+      net::CookieAccessResultList& excluded_cookies,
+      bool allowed_from_caller) = 0;
 
   // Called when a cookie is set to allow the network delegate to block access
   // to the cookie. This method will never be invoked when
   // LOAD_DO_NOT_SAVE_COOKIES is specified.
+  // The |allowed_from_caller| param is used to pass whether this operation is
+  // allowed from any higher level delegates (for example, in a
+  // LayeredNetworkDelegate). Any custom logic should be ANDed with this bool.
   virtual bool OnCanSetCookie(const URLRequest& request,
                               const CanonicalCookie& cookie,
-                              CookieOptions* options) = 0;
+                              CookieOptions* options,
+                              bool allowed_from_caller) = 0;
 
   virtual PrivacySetting OnForcePrivacyMode(
       const GURL& url,

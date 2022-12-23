@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,13 +28,14 @@ class HistoryBackendObserver {
 
   virtual ~HistoryBackendObserver() = default;
 
-  // Called when the user visits an URL.
+  // Called when user visits an URL.
   //
-  // The row IDs will be set to the values that are currently in effect in the
+  // The `row` ID will be set to the value that is currently in effect in the
   // main history database.
   virtual void OnURLVisited(HistoryBackend* history_backend,
-                            const URLRow& url_row,
-                            const VisitRow& visit_row) = 0;
+                            ui::PageTransition transition,
+                            const URLRow& row,
+                            base::Time visit_time) = 0;
 
   // Called when a URL has been added or modified.
   //

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -262,8 +262,7 @@ IN_PROC_BROWSER_TEST_F(BrowserGpuChannelHostFactoryTest,
       content::GpuBrowsertestCreateContext(GetGpuChannel());
   ContextLostRunLoop run_loop(provider.get());
   ASSERT_EQ(provider->BindToCurrentThread(), gpu::ContextResult::kSuccess);
-  GpuProcessHost::CallOnIO(FROM_HERE, GPU_PROCESS_KIND_SANDBOXED,
-                           false /* force_create */,
+  GpuProcessHost::CallOnIO(GPU_PROCESS_KIND_SANDBOXED, false /* force_create */,
                            base::BindOnce([](GpuProcessHost* host) {
                              if (host)
                                host->gpu_service()->Crash();

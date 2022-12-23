@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors
+// Copyright 2022 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@ import android.content.Context;
 
 import androidx.appcompat.content.res.AppCompatResources;
 
-import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.tab_ui.R;
 import org.chromium.ui.modelutil.PropertyModel;
 
@@ -20,6 +19,8 @@ import org.chromium.ui.modelutil.PropertyModel;
 public class IncognitoReauthPromoViewModel {
     /**
      * Create a {@link PropertyModel} for incognito re-auth promo card.
+     *
+     * TODO(crbug.com/1227656): Build the property model to actually design the re-auth promo card.
      *
      * @param context The {@link Context} to use.
      * @param uiDismissActionProvider The {@link MessageCardView.DismissActionProvider} to set.
@@ -45,19 +46,12 @@ public class IncognitoReauthPromoViewModel {
                 .with(MessageCardViewProperties.MESSAGE_TYPE,
                         MessageService.MessageType.INCOGNITO_REAUTH_PROMO_MESSAGE)
                 .with(MessageCardViewProperties.ACTION_TEXT, actionText)
-                .with(MessageCardViewProperties.UI_ACTION_PROVIDER, data.getReviewActionProvider())
                 .with(MessageCardViewProperties.DESCRIPTION_TEXT, descriptionText)
                 .with(MessageCardViewProperties.SECONDARY_ACTION_TEXT, dismissActionText)
                 .with(MessageCardViewProperties.SECONDARY_ACTION_BUTTON_CLICK_HANDLER,
                         view -> {
                             data.getDismissActionProvider().dismiss(
                                     MessageService.MessageType.INCOGNITO_REAUTH_PROMO_MESSAGE);
-                            RecordHistogram.recordEnumeratedHistogram(
-                                    "Android.IncognitoReauth.PromoAcceptedOrDismissed",
-                                    IncognitoReauthPromoMessageService
-                                            .IncognitoReauthPromoActionType.NO_THANKS,
-                                    IncognitoReauthPromoMessageService
-                                            .IncognitoReauthPromoActionType.NUM_ENTRIES);
                         })
                 .with(MessageCardViewProperties.SHOULD_KEEP_AFTER_REVIEW, false)
                 .with(MessageCardViewProperties.ICON_WIDTH_IN_PIXELS,

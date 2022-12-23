@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -652,11 +652,11 @@ base::FilePath DownloadPrefs::SanitizeDownloadTargetPath(
   }
 
   // Allow removable media.
-  if (ash::CrosDisksClient::GetRemovableDiskMountPoint().IsParent(path))
+  if (chromeos::CrosDisksClient::GetRemovableDiskMountPoint().IsParent(path))
     return path;
 
   // Allow paths under the Android files mount point.
-  if (base::FilePath(file_manager::util::GetAndroidFilesPath()).IsParent(path))
+  if (base::FilePath(file_manager::util::kAndroidFilesPath).IsParent(path))
     return path;
 
   // Allow Linux files mount point and subdirs.
@@ -684,7 +684,7 @@ void DownloadPrefs::UpdateAutoOpenByPolicy() {
 
   PrefService* prefs = profile_->GetPrefs();
   for (const auto& extension :
-       prefs->GetList(prefs::kDownloadExtensionsToOpenByPolicy)) {
+       prefs->GetValueList(prefs::kDownloadExtensionsToOpenByPolicy)) {
     base::FilePath::StringType extension_string =
         StringToFilePathString(extension.GetString());
     auto_open_by_policy_.insert(extension_string);
@@ -696,7 +696,8 @@ void DownloadPrefs::UpdateAllowedURLsForOpenByPolicy() {
       std::make_unique<policy::URLBlocklist>();
 
   PrefService* prefs = profile_->GetPrefs();
-  const auto& list = prefs->GetList(prefs::kDownloadAllowedURLsForOpenByPolicy);
+  const auto& list =
+      prefs->GetValueList(prefs::kDownloadAllowedURLsForOpenByPolicy);
 
   // We only need to configure |allowed_urls| if something is set by policy,
   // otherwise the default object does what we want.

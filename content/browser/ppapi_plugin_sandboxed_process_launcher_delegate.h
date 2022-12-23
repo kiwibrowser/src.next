@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors
+// Copyright (c) 2021 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,7 +29,6 @@ class CONTENT_EXPORT PpapiPluginSandboxedProcessLauncherDelegate
   ~PpapiPluginSandboxedProcessLauncherDelegate() override = default;
 
 #if BUILDFLAG(IS_WIN)
-  std::string GetSandboxTag() override;
   bool PreSpawnTarget(sandbox::TargetPolicy* policy) override;
 #endif  // BUILDFLAG(IS_WIN)
 

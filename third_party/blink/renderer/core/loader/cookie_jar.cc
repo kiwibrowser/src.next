@@ -4,7 +4,6 @@
 
 #include "third_party/blink/renderer/core/loader/cookie_jar.h"
 
-#include "base/debug/dump_without_crashing.h"
 #include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
@@ -95,14 +94,11 @@ void CookieJar::SetCookie(const String& value) {
 
   base::ElapsedTimer timer;
   bool requested = RequestRestrictedCookieManagerIfNeeded();
-  bool site_for_cookies_ok = true;
-  bool top_frame_origin_ok = true;
   backend_->SetCookieFromString(
       cookie_url, document_->SiteForCookies(), document_->TopFrameOrigin(),
       value,
       RuntimeEnabledFeatures::PartitionedCookiesEnabled(
-          document_->GetExecutionContext()),
-      &site_for_cookies_ok, &top_frame_origin_ok);
+          document_->GetExecutionContext()));
   last_operation_was_set_ = true;
   LogCookieHistogram("Blink.SetCookieTime.", requested, timer.Elapsed());
 
@@ -110,38 +106,6 @@ void CookieJar::SetCookie(const String& value) {
   // deprecated
   if (value.Find(ContainsTruncatingChar) != kNotFound) {
     document_->CountDeprecation(WebFeature::kCookieWithTruncatingChar);
-  }
-
-  static bool reported = false;
-  if (!site_for_cookies_ok) {
-    if (!reported) {
-      reported = true;
-      SCOPED_CRASH_KEY_STRING256("RCM", "document-site_for_cookies",
-                                 document_->SiteForCookies().ToDebugString());
-      SCOPED_CRASH_KEY_STRING256(
-          "RCM", "document-top_frame_origin",
-          document_->TopFrameOrigin()->ToUrlOrigin().GetDebugString());
-      // Only origin here, since url is probably way too sensitive.
-      SCOPED_CRASH_KEY_STRING256(
-          "RCM", "document-origin",
-          url::Origin::Create(GURL(cookie_url)).GetDebugString());
-      base::debug::DumpWithoutCrashing();
-    }
-  }
-  if (!top_frame_origin_ok) {
-    if (!reported) {
-      reported = true;
-      SCOPED_CRASH_KEY_STRING256("RCM", "document-site_for_cookies",
-                                 document_->SiteForCookies().ToDebugString());
-      SCOPED_CRASH_KEY_STRING256(
-          "RCM", "document-top_frame_origin",
-          document_->TopFrameOrigin()->ToUrlOrigin().GetDebugString());
-      // Only origin here, since url is probably way too sensitive.
-      SCOPED_CRASH_KEY_STRING256(
-          "RCM", "document-origin",
-          url::Origin::Create(GURL(cookie_url)).GetDebugString());
-      base::debug::DumpWithoutCrashing();
-    }
   }
 }
 

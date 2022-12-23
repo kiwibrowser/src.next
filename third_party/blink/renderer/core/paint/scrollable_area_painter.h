@@ -31,12 +31,18 @@ class ScrollableAreaPainter {
   ScrollableAreaPainter(const ScrollableAreaPainter&) = delete;
   ScrollableAreaPainter& operator=(const ScrollableAreaPainter&) = delete;
 
-  // Returns true if the overflow controls are painted.
-  bool PaintOverflowControls(const PaintInfo&,
+  void PaintOverflowControls(const PaintInfo&,
                              const gfx::Vector2d& paint_offset);
+  void PaintScrollbar(GraphicsContext&,
+                      Scrollbar&,
+                      const gfx::Vector2d& paint_offset,
+                      const CullRect&);
   void PaintResizer(GraphicsContext&,
                     const gfx::Vector2d& paint_offset,
                     const CullRect&);
+  void PaintScrollCorner(GraphicsContext&,
+                         const gfx::Vector2d& paint_offset,
+                         const CullRect&);
 
   // Records a scroll hit test data to force main thread handling of events
   // in the expanded resizer touch area.
@@ -44,14 +50,6 @@ class ScrollableAreaPainter {
                                       const PhysicalOffset& paint_offset);
 
  private:
-  void PaintScrollbar(GraphicsContext&,
-                      Scrollbar&,
-                      const gfx::Vector2d& paint_offset,
-                      const CullRect&);
-  void PaintScrollCorner(GraphicsContext&,
-                         const gfx::Vector2d& paint_offset,
-                         const CullRect&);
-
   void DrawPlatformResizerImage(GraphicsContext&,
                                 const gfx::Rect& resizer_corner_rect);
 

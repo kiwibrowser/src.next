@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors
+// Copyright 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,8 +24,6 @@ extern const base::Feature kColorProviderRedirectionForThemeProvider;
 
 extern const base::Feature kDestroyProfileOnBrowserClose;
 extern const base::Feature kDestroySystemProfiles;
-
-extern const base::Feature kDevToolsTabTarget;
 
 extern const base::Feature kNukeProfileBeforeCreateMultiAsync;
 
@@ -73,8 +71,6 @@ extern const base::Feature kKeyPinningComponentUpdater;
 #if BUILDFLAG(IS_WIN)
 extern const base::Feature kAppBoundEncryptionMetrics;
 #endif
-
-extern const base::Feature kFlexOrgManagementDisclosure;
 
 }  // namespace features
 

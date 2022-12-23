@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,13 +65,11 @@ class DownloadItemModel : public DownloadUIModel,
   bool ShouldNotifyUI() const override;
   bool WasUINotified() const override;
   void SetWasUINotified(bool should_notify) override;
-  bool WasActionedOn() const override;
-  void SetActionedOn(bool actioned_on) override;
   bool WasUIWarningShown() const override;
   void SetWasUIWarningShown(bool should_notify) override;
   absl::optional<base::Time> GetEphemeralWarningUiShownTime() const override;
   void SetEphemeralWarningUiShownTime(absl::optional<base::Time> time) override;
-  bool ShouldPreferOpeningInBrowser() override;
+  bool ShouldPreferOpeningInBrowser() const override;
   void SetShouldPreferOpeningInBrowser(bool preference) override;
   safe_browsing::DownloadFileType::DangerLevel GetDangerLevel() const override;
   void SetDangerLevel(
@@ -118,8 +116,6 @@ class DownloadItemModel : public DownloadUIModel,
                         DownloadCommands::Command command) const override;
   void ExecuteCommand(DownloadCommands* download_commands,
                       DownloadCommands::Command command) override;
-  BubbleUIInfo GetBubbleUIInfoForTailoredWarning() const override;
-  bool ShouldShowTailoredWarning() const override;
   bool ShouldShowInBubble() const override;
   bool IsEphemeralWarning() const override;
 #endif
@@ -130,9 +126,6 @@ class DownloadItemModel : public DownloadUIModel,
 #endif
 
   bool ShouldShowDropdown() const override;
-  void DetermineAndSetShouldPreferOpeningInBrowser(
-      const base::FilePath& target_path,
-      bool is_filetype_handled_safely) override;
 
   // download::DownloadItem::Observer implementation.
   void OnDownloadUpdated(download::DownloadItem* download) override;

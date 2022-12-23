@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -77,6 +77,8 @@ using content::NavigationEntry;
 using content::WebContents;
 
 namespace extensions {
+
+const char kIsPrerender2DisabledKey[] = "extensions.prerender2.browsercontext";
 
 namespace {
 
@@ -181,15 +183,25 @@ void DisableBackForwardCacheIfNecessary(
   }
 }
 
-void MaybeDisablePrerender2(const ExtensionSet& enabled_extensions,
-                            content::WebContents* web_contents) {
+// TODO(https://crbug.com/1344511): Current code is overly complex and circular;
+// TabHelper sets a bit on the WebContents so that the WebContents can call into
+// the Browser so that the Browser can check the bit that was set by TabHelper.
+// Instead, 1) Having extensions code directly disable Prerender2 on a
+// WebContents (just expose a DisablePrerender2 method), or 2) Having the
+// browser code just ask extensions if Prerender2 should be enabled (and
+// avoiding setting any bit on the WebContents).
+// See also Devlin's comment on patchset 10 at https://crrev.com/c/3762942.
+void UpdatePrerender2DisabledKey(const ExtensionSet& enabled_extensions,
+                                 content::WebContents* web_contents) {
   if (ProcessDisabledExtensions(
           "prerender2", enabled_extensions, web_contents->GetBrowserContext(),
           AreAllExtensionsAllowedForPrerender2(web_contents),
           BlockedExtensionListForPrerender2(web_contents))) {
-    web_contents->DisablePrerender2();
+    web_contents->GetBrowserContext()->SetUserData(
+        kIsPrerender2DisabledKey,
+        std::make_unique<base::SupportsUserData::Data>());
   } else {
-    web_contents->ResetPrerender2Disabled();
+    web_contents->GetBrowserContext()->RemoveUserData(kIsPrerender2DisabledKey);
   }
 }
 
@@ -210,7 +222,7 @@ TabHelper::TabHelper(content::WebContents* web_contents)
   CreateSessionServiceTabHelper(web_contents);
   // The Unretained() is safe because ForEachRenderFrameHost() is synchronous.
   web_contents->ForEachRenderFrameHost(
-      [this](content::RenderFrameHost* host) { SetTabId(host); });
+      base::BindRepeating(&TabHelper::SetTabId, base::Unretained(this)));
   active_tab_permission_granter_ = std::make_unique<ActiveTabPermissionGranter>(
       web_contents, sessions::SessionTabHelper::IdForTab(web_contents).id(),
       profile_);
@@ -380,7 +392,7 @@ void TabHelper::OnContentScriptsExecuting(
 
 const Extension* TabHelper::GetExtension(const ExtensionId& extension_app_id) {
   if (extension_app_id.empty())
-    return nullptr;
+    return NULL;
 
   content::BrowserContext* context = web_contents()->GetBrowserContext();
   return ExtensionRegistry::Get(context)->enabled_extensions().GetByID(
@@ -429,7 +441,7 @@ void TabHelper::OnExtensionLoaded(content::BrowserContext* browser_context,
   web_contents()->GetController().GetBackForwardCache().Flush();
 
   // Update a setting to disable Prerender2 based on loaded Extensions.
-  MaybeDisablePrerender2(
+  UpdatePrerender2DisabledKey(
       ExtensionRegistry::Get(browser_context)->enabled_extensions(),
       web_contents());
 }
@@ -442,7 +454,7 @@ void TabHelper::OnExtensionUnloaded(content::BrowserContext* browser_context,
   web_contents()->GetController().GetBackForwardCache().Flush();
 
   // Update a setting to disable Prerender2 based on loaded Extensions.
-  MaybeDisablePrerender2(
+  UpdatePrerender2DisabledKey(
       ExtensionRegistry::Get(browser_context)->enabled_extensions(),
       web_contents());
 

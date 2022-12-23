@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors
+// Copyright (c) 2016 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,8 +22,8 @@ namespace net {
 
 namespace {
 
-// Returns a human readable integer from a handles::NetworkHandle.
-int HumanReadableNetworkHandle(handles::NetworkHandle network) {
+// Returns a human readable integer from a NetworkHandle.
+int HumanReadableNetworkHandle(NetworkChangeNotifier::NetworkHandle network) {
 #if BUILDFLAG(IS_ANDROID)
   // On Marshmallow, demunge the NetID to undo munging done in java
   // Network.getNetworkHandle() by shifting away 0xfacade from
@@ -39,7 +39,8 @@ int HumanReadableNetworkHandle(handles::NetworkHandle network) {
 // Return a dictionary of values that provide information about a
 // network-specific change. This also includes relevant current state
 // like the default network, and the types of active networks.
-base::Value NetworkSpecificNetLogParams(handles::NetworkHandle network) {
+base::Value NetworkSpecificNetLogParams(
+    NetworkChangeNotifier::NetworkHandle network) {
   base::Value::Dict dict;
   dict.Set("changed_network_handle", HumanReadableNetworkHandle(network));
   dict.Set("changed_network_type",
@@ -50,7 +51,7 @@ base::Value NetworkSpecificNetLogParams(handles::NetworkHandle network) {
       HumanReadableNetworkHandle(NetworkChangeNotifier::GetDefaultNetwork()));
   NetworkChangeNotifier::NetworkList networks;
   NetworkChangeNotifier::GetConnectedNetworks(&networks);
-  for (handles::NetworkHandle active_network : networks) {
+  for (NetworkChangeNotifier::NetworkHandle active_network : networks) {
     dict.Set(
         "current_active_networks." +
             base::NumberToString(HumanReadableNetworkHandle(active_network)),
@@ -62,7 +63,7 @@ base::Value NetworkSpecificNetLogParams(handles::NetworkHandle network) {
 
 void NetLogNetworkSpecific(NetLog* net_log,
                            NetLogEventType type,
-                           handles::NetworkHandle network) {
+                           NetworkChangeNotifier::NetworkHandle network) {
   if (!net_log)
     return;
 
@@ -120,7 +121,7 @@ void LoggingNetworkChangeObserver::OnNetworkChanged(
 }
 
 void LoggingNetworkChangeObserver::OnNetworkConnected(
-    handles::NetworkHandle network) {
+    NetworkChangeNotifier::NetworkHandle network) {
   VLOG(1) << "Observed network " << network << " connect";
 
   NetLogNetworkSpecific(net_log_, NetLogEventType::SPECIFIC_NETWORK_CONNECTED,
@@ -128,7 +129,7 @@ void LoggingNetworkChangeObserver::OnNetworkConnected(
 }
 
 void LoggingNetworkChangeObserver::OnNetworkDisconnected(
-    handles::NetworkHandle network) {
+    NetworkChangeNotifier::NetworkHandle network) {
   VLOG(1) << "Observed network " << network << " disconnect";
 
   NetLogNetworkSpecific(
@@ -136,7 +137,7 @@ void LoggingNetworkChangeObserver::OnNetworkDisconnected(
 }
 
 void LoggingNetworkChangeObserver::OnNetworkSoonToDisconnect(
-    handles::NetworkHandle network) {
+    NetworkChangeNotifier::NetworkHandle network) {
   VLOG(1) << "Observed network " << network << " soon to disconnect";
 
   NetLogNetworkSpecific(
@@ -144,7 +145,7 @@ void LoggingNetworkChangeObserver::OnNetworkSoonToDisconnect(
 }
 
 void LoggingNetworkChangeObserver::OnNetworkMadeDefault(
-    handles::NetworkHandle network) {
+    NetworkChangeNotifier::NetworkHandle network) {
   VLOG(1) << "Observed network " << network << " made the default network";
 
   NetLogNetworkSpecific(

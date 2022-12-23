@@ -122,7 +122,8 @@ bool FrameViewAutoSizeInfo::AutoSizeIfNeeded() {
     vertical_scrollbar_mode = mojom::blink::ScrollbarMode::kAlwaysOn;
   }
 
-  bool change_size = (new_size != size);
+  if (new_size == size)
+    return false;
 
   // While loading only allow the size to increase (to avoid twitching during
   // intermediate smaller states) unless autoresize has just been turned on or
@@ -131,23 +132,18 @@ bool FrameViewAutoSizeInfo::AutoSizeIfNeeded() {
       size.width() <= max_auto_size_.width() &&
       !frame_view_->GetFrame().GetDocument()->LoadEventFinished() &&
       (new_size.height() < size.height() || new_size.width() < size.width())) {
-    change_size = false;
+    return false;
   }
 
-  if (change_size)
-    frame_view_->Resize(new_size.width(), new_size.height());
-
+  frame_view_->Resize(new_size.width(), new_size.height());
   // Force the scrollbar state to avoid the scrollbar code adding them and
   // causing them to be needed. For example, a vertical scrollbar may cause
   // text to wrap and thus increase the height (which is the only reason the
   // scollbar is needed).
-  //
-  // Note: since the overflow may have changed, we need to do this even if the
-  // size of the frame isn't changing.
   frame_view_->GetLayoutView()->SetAutosizeScrollbarModes(
       horizontal_scrollbar_mode, vertical_scrollbar_mode);
 
-  return change_size;
+  return true;
 }
 
 void FrameViewAutoSizeInfo::Clear() {

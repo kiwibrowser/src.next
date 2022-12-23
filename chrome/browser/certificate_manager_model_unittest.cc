@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors
+// Copyright 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include "base/observer_list.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/test_future.h"
 #include "build/chromeos_buildflags.h"
 #include "content/public/test/browser_task_environment.h"
 #include "crypto/scoped_test_nss_db.h"
@@ -207,7 +206,8 @@ TEST_F(CertificateManagerModelTest, ListsClientCertsFromPlatform) {
 #if BUILDFLAG(IS_CHROMEOS)
 namespace {
 
-class FakePolicyCertificateProvider : public ash::PolicyCertificateProvider {
+class FakePolicyCertificateProvider
+    : public chromeos::PolicyCertificateProvider {
  public:
   void AddPolicyProvidedCertsObserver(Observer* observer) override {
     observer_list_.AddObserver(observer);
@@ -521,11 +521,7 @@ TEST_F(CertificateManagerModelChromeOSTest,
   // certificate should be visible afterwards.
   base::RunLoop run_loop;
   fake_observer_->RunOnNextRefresh(run_loop.QuitClosure());
-  base::test::TestFuture<bool> remove_result;
-  certificate_manager_model_->RemoveFromDatabase(
-      net::x509_util::DupCERTCertificate(platform_cert),
-      remove_result.GetCallback());
-  EXPECT_TRUE(remove_result.Get());
+  certificate_manager_model_->Delete(platform_cert);
   run_loop.Run();
 
   {
@@ -648,10 +644,7 @@ TEST_F(CertificateManagerModelChromeOSTest,
   // certificate should be visible afterwards.
   base::RunLoop run_loop;
   fake_observer_->RunOnNextRefresh(run_loop.QuitClosure());
-  base::test::TestFuture<bool> remove_result;
-  certificate_manager_model_->RemoveFromDatabase(
-      std::move(platform_client_cert), remove_result.GetCallback());
-  EXPECT_TRUE(remove_result.Get());
+  certificate_manager_model_->Delete(platform_client_cert.get());
   run_loop.Run();
 
   {

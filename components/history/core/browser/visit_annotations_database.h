@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors
+// Copyright 2021 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,13 +51,6 @@ class VisitAnnotationsDatabase {
       VisitID visit_id,
       const VisitContentAnnotations& visit_content_annotations);
 
-  // Updates an existing row. The new information is set on the row, using the
-  // VisitID as the key. The context annotations for the visit must exist.
-  // Ignores failures.
-  void UpdateContextAnnotationsForVisit(
-      VisitID visit_id,
-      const VisitContextAnnotations& visit_context_annotations);
-
   // Query for a `VisitContentAnnotations` given `visit_id`. If it's found and
   // valid, this method returns true, and `out_content_annotations` is filled.
   // Otherwise, this returns false, and `out_content_annotations` is unchanged.
@@ -83,9 +76,8 @@ class VisitAnnotationsDatabase {
   // entries for any `Cluster` that it failed to add.
   void AddClusters(const std::vector<Cluster>& clusters);
 
-  // Get a `Cluster`. Does not include the cluster's `visits` or
-  // `keyword_to_data_map`.
-  Cluster GetCluster(int64_t cluster_id);
+  // Get recent `Cluster`s' IDs newer than `minimum_time`.
+  std::vector<int64_t> GetRecentClusterIds(base::Time minimum_time);
 
   // Get the most recent clusters within the constraints. The most recent visit
   // of a cluster represents the cluster's time.
@@ -96,20 +88,8 @@ class VisitAnnotationsDatabase {
   // Get `VisitID`s in a cluster.
   std::vector<VisitID> GetVisitIdsInCluster(int64_t cluster_id);
 
-  // Get a `ClusterVisit`.
-  ClusterVisit GetClusterVisit(VisitID visit_id);
-
-  // Get `VisitID`s for duplicate cluster visits.
-  std::vector<VisitID> GetDuplicateClusterVisitIdsForClusterVisit(
-      int64_t visit_id);
-
-  // Return the ID of the cluster containing `visit_id`. Returns 0 if `visit_id`
-  // is not in a cluster.`
-  int64_t GetClusterIdContainingVisit(VisitID visit_id);
-
-  // Return the keyword data associated with `cluster_id`.
-  base::flat_map<std::u16string, ClusterKeywordData> GetClusterKeywords(
-      int64_t cluster_id);
+  // Return whether `visit_id` belongs to any cluster.
+  bool IsVisitClustered(VisitID visit_id);
 
   // Delete `Cluster`s from the table.
   void DeleteClusters(const std::vector<int64_t>& cluster_ids);
@@ -160,30 +140,6 @@ class VisitAnnotationsDatabase {
   // Called by the derived classes to migrate the older content_annotations
   // table by adding the alternative_title column.
   bool MigrateContentAnnotationsAddAlternativeTitle();
-
-  // Called by the derived classes to delete the 'clusters' and
-  // 'clusters_and_visits' tables so they can be recreated with updated columns.
-  bool MigrateClustersAddColumns();
-
-  // Called by the derived classes to migrate the older context_annotations
-  // table by adding various columns that are (for now) needed by Sync:
-  // In context_annotations:
-  // * browser_type
-  // * window_id and tab_id
-  // * task_id, root_task_id, and parent_task_id
-  // * response_code
-  // In content_annotations:
-  // * page_language
-  // * password_state
-  bool MigrateAnnotationsAddColumnsForSync();
-
- private:
-  // Helper to create the 'clusters' table and avoid duplicating the code.
-  bool CreateClustersTable();
-
-  // Helper to create the 'clusters_and_visits' table and avoid duplicating the
-  // code.
-  bool CreateClustersAndVisitsTableAndIndex();
 };
 
 }  // namespace history

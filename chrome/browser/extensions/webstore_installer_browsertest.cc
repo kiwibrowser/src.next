@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -170,9 +170,7 @@ IN_PROC_BROWSER_TEST_F(WebstoreInstallerBrowserTest, SimultaneousInstall) {
   std::unique_ptr<WebstoreInstaller::Approval> approval =
       WebstoreInstaller::Approval::CreateWithNoInstallPrompt(
           browser()->profile(), kTestExtensionId,
-          base::DictionaryValue::From(
-              base::Value::ToUniquePtrValue(manifest->Clone())),
-          false);
+          std::unique_ptr<base::DictionaryValue>(manifest->DeepCopy()), false);
 
   // Create and run a WebstoreInstaller.
   base::RunLoop run_loop;

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors
+// Copyright (c) 2016 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -251,16 +251,14 @@ void HttpStreamFactory::JobController::OnRequestComplete() {
     dns_alpn_h3_job_.reset();
   } else {
     if (bound_job_->job_type() == MAIN) {
-      bound_job_ = nullptr;
       main_job_.reset();
     } else if (bound_job_->job_type() == ALTERNATIVE) {
-      bound_job_ = nullptr;
       alternative_job_.reset();
     } else {
       DCHECK(bound_job_->job_type() == DNS_ALPN_H3);
-      bound_job_ = nullptr;
       dns_alpn_h3_job_.reset();
     }
+    bound_job_ = nullptr;
   }
   MaybeNotifyFactoryOfCompletion();
 }
@@ -817,7 +815,7 @@ int HttpStreamFactory::JobController::DoCreateJobs() {
     DCHECK_NE(quic_version, quic::ParsedQuicVersion::Unsupported());
   }
   const bool dns_alpn_h3_job_enabled =
-      session_->params().use_dns_https_svcb_alpn &&
+      base::FeatureList::IsEnabled(features::kUseDnsHttpsSvcbAlpn) &&
       base::EqualsCaseInsensitiveASCII(origin_url.scheme(),
                                        url::kHttpsScheme) &&
       session_->IsQuicEnabled() && proxy_info_.is_direct() &&
@@ -1338,7 +1336,7 @@ void HttpStreamFactory::JobController::ReportAlternateProtocolUsage(
   if (job == dns_alpn_h3_job_.get()) {
     if (job->using_existing_quic_session()) {
       HistogramAlternateProtocolUsage(
-          ALTERNATE_PROTOCOL_USAGE_DNS_ALPN_H3_JOB_WON_WITHOUT_RACE,
+          ALTERNATE_PROTOCOL_USAGE_DNS_ALPN_H3_JOB_WON_WITOUT_RACE,
           is_google_host);
       return;
     }

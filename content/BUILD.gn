@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors
+# Copyright 2014 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -69,7 +69,7 @@ content_shared_components = [
   "//content/public/utility:utility_sources",
 ]
 
-if (enable_ppapi) {
+if (enable_plugins) {
   content_shared_components += [ "//content/ppapi_plugin:ppapi_plugin_sources" ]
 }
 
@@ -114,10 +114,8 @@ grit("dev_ui_content_resources") {
     "dev_ui_content_resources.pak",
   ]
   deps = [
-    "//content/browser/aggregation_service:mojo_bindings_webui_js",
     "//content/browser/attribution_reporting:mojo_bindings_webui_js",
     "//content/browser/preloading/prerender:mojo_bindings_webui_js",
-    "//content/browser/resources/aggregation_service:build_ts",
     "//content/browser/resources/attribution_reporting:build_ts",
     "//content/browser/resources/gpu:html_wrapper_files",
     "//content/browser/resources/process:build_ts",

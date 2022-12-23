@@ -1,10 +1,10 @@
-// Copyright 2020 The Chromium Authors
+// Copyright 2020 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.omnibox.suggestions;
 
-import org.chromium.build.annotations.MockedInTests;
+import org.chromium.base.annotations.MockedInTests;
 import org.chromium.ui.modelutil.PropertyModel;
 
 /**
@@ -42,9 +42,4 @@ public interface DropdownItemProcessor {
      * Signals that the dropdown list is about to be populated with new content.
      */
     default void onSuggestionsReceived() {}
-
-    /**
-     * Return if the suggestion view can have background rounding.
-     */
-    boolean allowBackgroundRounding();
 }

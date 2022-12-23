@@ -10,14 +10,12 @@ void PropertyRegistry::RegisterProperty(const AtomicString& name,
                                         PropertyRegistration& registration) {
   DCHECK(!IsInRegisteredPropertySet(name));
   registered_properties_.Set(name, &registration);
-  registered_viewport_unit_flags_ |= registration.GetViewportUnitFlags();
   version_++;
 }
 
 void PropertyRegistry::DeclareProperty(const AtomicString& name,
                                        PropertyRegistration& registration) {
   declared_properties_.Set(name, &registration);
-  declared_viewport_unit_flags_ |= registration.GetViewportUnitFlags();
   version_++;
 }
 
@@ -25,7 +23,6 @@ void PropertyRegistry::RemoveDeclaredProperties() {
   if (declared_properties_.IsEmpty())
     return;
   declared_properties_.clear();
-  declared_viewport_unit_flags_ = 0;
   version_++;
 }
 

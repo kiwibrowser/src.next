@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -241,9 +241,8 @@ class HttpResponseBodyDrainerTest : public TestWithTaskEnvironment {
         ssl_config_service_(std::make_unique<SSLConfigServiceDefaults>()),
         http_server_properties_(std::make_unique<HttpServerProperties>()),
         session_(CreateNetworkSession()),
-        mock_stream_(new MockHttpStream(&result_waiter_)) {
-    drainer_ = std::make_unique<HttpResponseBodyDrainer>(mock_stream_);
-  }
+        mock_stream_(new MockHttpStream(&result_waiter_)),
+        drainer_(new HttpResponseBodyDrainer(mock_stream_)) {}
 
   ~HttpResponseBodyDrainerTest() override = default;
 
@@ -271,27 +270,27 @@ class HttpResponseBodyDrainerTest : public TestWithTaskEnvironment {
   MockClientSocketFactory socket_factory_;
   const std::unique_ptr<HttpNetworkSession> session_;
   CloseResultWaiter result_waiter_;
-  const raw_ptr<MockHttpStream> mock_stream_;  // Owned by |drainer_|.
-  std::unique_ptr<HttpResponseBodyDrainer> drainer_;
+  const raw_ptr<MockHttpStream> mock_stream_;       // Owned by |drainer_|.
+  const raw_ptr<HttpResponseBodyDrainer> drainer_;  // Deletes itself.
 };
 
 TEST_F(HttpResponseBodyDrainerTest, DrainBodySyncSingleOK) {
   mock_stream_->set_num_chunks(1);
   mock_stream_->set_sync();
-  session_->StartResponseDrainer(std::move(drainer_));
+  drainer_->Start(session_.get());
   EXPECT_FALSE(result_waiter_.WaitForResult());
 }
 
 TEST_F(HttpResponseBodyDrainerTest, DrainBodySyncOK) {
   mock_stream_->set_num_chunks(3);
   mock_stream_->set_sync();
-  session_->StartResponseDrainer(std::move(drainer_));
+  drainer_->Start(session_.get());
   EXPECT_FALSE(result_waiter_.WaitForResult());
 }
 
 TEST_F(HttpResponseBodyDrainerTest, DrainBodyAsyncOK) {
   mock_stream_->set_num_chunks(3);
-  session_->StartResponseDrainer(std::move(drainer_));
+  drainer_->Start(session_.get());
   EXPECT_FALSE(result_waiter_.WaitForResult());
 }
 
@@ -301,7 +300,7 @@ TEST_F(HttpResponseBodyDrainerTest, DrainBodyAsyncOK) {
 TEST_F(HttpResponseBodyDrainerTest, DrainBodyAsyncEmptyChunk) {
   mock_stream_->set_num_chunks(4);
   mock_stream_->set_is_last_chunk_zero_size();
-  session_->StartResponseDrainer(std::move(drainer_));
+  drainer_->Start(session_.get());
   EXPECT_FALSE(result_waiter_.WaitForResult());
 }
 
@@ -309,28 +308,28 @@ TEST_F(HttpResponseBodyDrainerTest, DrainBodySyncEmptyChunk) {
   mock_stream_->set_num_chunks(4);
   mock_stream_->set_sync();
   mock_stream_->set_is_last_chunk_zero_size();
-  session_->StartResponseDrainer(std::move(drainer_));
+  drainer_->Start(session_.get());
   EXPECT_FALSE(result_waiter_.WaitForResult());
 }
 
 TEST_F(HttpResponseBodyDrainerTest, DrainBodySizeEqualsDrainBuffer) {
   mock_stream_->set_num_chunks(
       HttpResponseBodyDrainer::kDrainBodyBufferSize / kMagicChunkSize);
-  session_->StartResponseDrainer(std::move(drainer_));
+  drainer_->Start(session_.get());
   EXPECT_FALSE(result_waiter_.WaitForResult());
 }
 
 TEST_F(HttpResponseBodyDrainerTest, DrainBodyTimeOut) {
   mock_stream_->set_num_chunks(2);
   mock_stream_->set_stall_reads_forever();
-  session_->StartResponseDrainer(std::move(drainer_));
+  drainer_->Start(session_.get());
   EXPECT_TRUE(result_waiter_.WaitForResult());
 }
 
 TEST_F(HttpResponseBodyDrainerTest, CancelledBySession) {
   mock_stream_->set_num_chunks(2);
   mock_stream_->set_stall_reads_forever();
-  session_->StartResponseDrainer(std::move(drainer_));
+  drainer_->Start(session_.get());
   // HttpNetworkSession should delete |drainer_|.
 }
 
@@ -340,14 +339,14 @@ TEST_F(HttpResponseBodyDrainerTest, DrainBodyTooLarge) {
   too_many_chunks += 1;  // Now it's too large.
 
   mock_stream_->set_num_chunks(too_many_chunks);
-  session_->StartResponseDrainer(std::move(drainer_));
+  drainer_->Start(session_.get());
   EXPECT_TRUE(result_waiter_.WaitForResult());
 }
 
 TEST_F(HttpResponseBodyDrainerTest, DrainBodyCantReuse) {
   mock_stream_->set_num_chunks(1);
   mock_stream_->set_can_reuse_connection(false);
-  session_->StartResponseDrainer(std::move(drainer_));
+  drainer_->Start(session_.get());
   EXPECT_TRUE(result_waiter_.WaitForResult());
 }
 

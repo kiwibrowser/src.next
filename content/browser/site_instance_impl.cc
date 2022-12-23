@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -124,17 +124,14 @@ scoped_refptr<SiteInstanceImpl> SiteInstanceImpl::Create(
   DCHECK(browser_context);
   return base::WrapRefCounted(new SiteInstanceImpl(new BrowsingInstance(
       browser_context, WebExposedIsolationInfo::CreateNonIsolated(),
-      /*is_guest=*/false, /*is_fenced=*/false)));
+      /*is_guest=*/false)));
 }
 
 // static
 scoped_refptr<SiteInstanceImpl> SiteInstanceImpl::CreateForUrlInfo(
     BrowserContext* browser_context,
     const UrlInfo& url_info,
-    bool is_guest,
-    bool is_fenced) {
-  DCHECK(url_info.is_sandboxed ||
-         url_info.unique_sandbox_id == UrlInfo::kInvalidUniqueSandboxId);
+    bool is_guest) {
   CHECK(!is_guest || url_info.storage_partition_config.has_value());
 
   if (is_guest && !SiteIsolationPolicy::IsSiteIsolationForGuestsEnabled()) {
@@ -150,7 +147,7 @@ scoped_refptr<SiteInstanceImpl> SiteInstanceImpl::CreateForUrlInfo(
       new BrowsingInstance(browser_context,
                            url_info.web_exposed_isolation_info.value_or(
                                WebExposedIsolationInfo::CreateNonIsolated()),
-                           is_guest, is_fenced));
+                           is_guest));
 
   // Note: The |allow_default_instance| value used here MUST match the value
   // used in DoesSiteForURLMatch().
@@ -163,8 +160,7 @@ scoped_refptr<SiteInstanceImpl> SiteInstanceImpl::CreateForServiceWorker(
     BrowserContext* browser_context,
     const UrlInfo& url_info,
     bool can_reuse_process,
-    bool is_guest,
-    bool is_fenced) {
+    bool is_guest) {
   DCHECK(!url_info.url.SchemeIs(kChromeErrorScheme));
   DCHECK(url_info.storage_partition_config.has_value());
   scoped_refptr<SiteInstanceImpl> site_instance;
@@ -178,7 +174,7 @@ scoped_refptr<SiteInstanceImpl> SiteInstanceImpl::CreateForServiceWorker(
         new BrowsingInstance(browser_context,
                              url_info.web_exposed_isolation_info.value_or(
                                  WebExposedIsolationInfo::CreateNonIsolated()),
-                             is_guest, is_fenced));
+                             is_guest));
 
     // We do NOT want to allow the default site instance here because workers
     // need to be kept separate from other sites.
@@ -210,15 +206,12 @@ scoped_refptr<SiteInstanceImpl> SiteInstanceImpl::CreateForGuest(
   DCHECK(browser_context);
   DCHECK(!partition_config.is_default());
 
-  // TODO(crbug.com/1340662): Figure out if is_fenced needs to be set here for
-  // fenced frames inside guests.
   auto guest_site_info =
       SiteInfo::CreateForGuest(browser_context, partition_config);
   scoped_refptr<SiteInstanceImpl> site_instance =
       base::WrapRefCounted(new SiteInstanceImpl(new BrowsingInstance(
           browser_context, guest_site_info.web_exposed_isolation_info(),
-          /*is_guest=*/true,
-          /*is_fenced=*/false)));
+          /*is_guest=*/true)));
 
   site_instance->SetSiteInfoInternal(guest_site_info);
   return site_instance;
@@ -235,24 +228,15 @@ scoped_refptr<SiteInstanceImpl> SiteInstanceImpl::CreateForFencedFrame(
                           embedder_site_instance->GetStoragePartitionConfig());
   }
 
-  bool should_isolate_fenced_frames =
-      SiteIsolationPolicy::IsProcessIsolationForFencedFramesEnabled();
-  scoped_refptr<SiteInstanceImpl> site_instance =
-      base::WrapRefCounted(new SiteInstanceImpl(new BrowsingInstance(
-          browser_context, embedder_site_instance->GetWebExposedIsolationInfo(),
-          embedder_site_instance->IsGuest(),
-          /*is_fenced=*/should_isolate_fenced_frames)));
-
   // Give the new fenced frame SiteInstance the same site url as its embedder's
   // SiteInstance to allow it to reuse its embedder's process. We avoid doing
   // this in the default SiteInstance case as the url will be invalid; process
   // reuse will still happen below though, as the embedder's SiteInstance's
   // process will not be locked to any site.
-  // Note: Even when process isolation for fenced frames is enabled, we will
-  // still be able to reuse the embedder's process below, because we set its
-  // SiteInfo to be the embedder's SiteInfo, and |is_fenced| will be false. The
-  // process will change after the first navigation (the new SiteInstance will
-  // have a SiteInfo with is_fenced set to true).
+  scoped_refptr<SiteInstanceImpl> site_instance =
+      base::WrapRefCounted(new SiteInstanceImpl(new BrowsingInstance(
+          browser_context, embedder_site_instance->GetWebExposedIsolationInfo(),
+          embedder_site_instance->IsGuest())));
   if (!embedder_site_instance->IsDefaultSiteInstance()) {
     site_instance->SetSite(embedder_site_instance->GetSiteInfo());
   }
@@ -270,7 +254,7 @@ SiteInstanceImpl::CreateReusableInstanceForTesting(
   // This will create a new SiteInstance and BrowsingInstance.
   scoped_refptr<BrowsingInstance> instance(new BrowsingInstance(
       browser_context, WebExposedIsolationInfo::CreateNonIsolated(),
-      /*is_guest=*/false, /*is_fenced=*/false));
+      /*is_guest=*/false));
   auto site_instance = instance->GetSiteInstanceForURL(
       UrlInfo(UrlInfoInit(url)), /* allow_default_instance */ false);
   site_instance->set_process_reuse_policy(
@@ -285,8 +269,7 @@ scoped_refptr<SiteInstanceImpl> SiteInstanceImpl::CreateForTesting(
   DCHECK(browser_context);
   return SiteInstanceImpl::CreateForUrlInfo(browser_context,
                                             UrlInfo::CreateForTesting(url),
-                                            /*is_guest=*/false,
-                                            /*is_fenced=*/false);
+                                            /*is_guest=*/false);
 }
 
 // static
@@ -512,14 +495,15 @@ void SiteInstanceImpl::SetSiteInfoInternal(const SiteInfo& site_info) {
     url::Origin origin(url::Origin::Create(site_info_.process_lock_url()));
     // This is one of two places that origins can be marked as opted-in, the
     // other is
-    // NavigationRequest::AddSameProcessOriginAgentClusterStateIfNecessary().
+    // NavigationRequest::AddSameProcessOriginAgentClusterOptInIfNecessary().
     // This site handles the case where OAC isolation gets a separate process.
     // In future, when SiteInstance Groups are complete, this may revert to
     // being the only call site.
-    policy->AddOriginIsolationStateForBrowsingInstance(
+    policy->AddIsolatedOriginForBrowsingInstance(
         browsing_instance_->isolation_context(), origin,
         true /* is_origin_agent_cluster */,
-        true /* requires_origin_keyed_process */);
+        true /* requires_origin_keyed_process */,
+        ChildProcessSecurityPolicy::IsolatedOriginSource::WEB_TRIGGERED);
   }
 
   if (site_info_.does_site_request_dedicated_process_for_coop()) {
@@ -536,8 +520,10 @@ void SiteInstanceImpl::SetSiteInfoInternal(const SiteInfo& site_info) {
     GURL site(SiteInfo::GetSiteForOrigin(origin));
     ChildProcessSecurityPolicyImpl* policy =
         ChildProcessSecurityPolicyImpl::GetInstance();
-    policy->AddCoopIsolatedOriginForBrowsingInstance(
+    policy->AddIsolatedOriginForBrowsingInstance(
         browsing_instance_->isolation_context(), url::Origin::Create(site),
+        false /* is_origin_agent_cluster */,
+        false /* requires_origin_keyed_process */,
         ChildProcessSecurityPolicy::IsolatedOriginSource::WEB_TRIGGERED);
   }
 
@@ -692,16 +678,6 @@ size_t SiteInstanceImpl::GetRelatedActiveContentsCount() {
   return browsing_instance_->active_contents_count();
 }
 
-namespace {
-
-bool SandboxConfigurationsMatch(const SiteInfo& site_info,
-                                const UrlInfo& url_info) {
-  return site_info.is_sandboxed() == url_info.is_sandboxed &&
-         site_info.unique_sandbox_id() == url_info.unique_sandbox_id;
-}
-
-}  // namespace
-
 bool SiteInstanceImpl::IsSuitableForUrlInfo(const UrlInfo& url_info) {
   const GURL& url = url_info.url;
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -721,9 +697,8 @@ bool SiteInstanceImpl::IsSuitableForUrlInfo(const UrlInfo& url_info) {
   if (url.IsAboutBlank() && !site_info_.is_error_page())
     return true;
 
-  // The is_sandboxed flags and unique_sandbox_ids must match for this to be a
-  // suitable SiteInstance.
-  if (!SandboxConfigurationsMatch(GetSiteInfo(), url_info))
+  // The is_sandboxed flags must match for this to be a suitable SiteInstance.
+  if (GetSiteInfo().is_sandboxed() != url_info.is_sandboxed)
     return false;
 
   // If the site URL is an extension (e.g., for hosted apps or WebUI) but the
@@ -829,8 +804,7 @@ scoped_refptr<SiteInstance> SiteInstance::CreateForURL(
   DCHECK(browser_context);
   return SiteInstanceImpl::CreateForUrlInfo(browser_context,
                                             UrlInfo(UrlInfoInit(url)),
-                                            /*is_guest=*/false,
-                                            /*is_fenced=*/false);
+                                            /*is_guest=*/false);
 }
 
 // static
@@ -956,9 +930,7 @@ bool SiteInstanceImpl::IsNavigationSameSite(
     const url::Origin& last_committed_origin,
     bool for_outermost_main_frame,
     const UrlInfo& dest_url_info) {
-  // The is_sandboxed flags and unique_sandbox_ids must match for this to be a
-  // same-site navigation.
-  if (!SandboxConfigurationsMatch(GetSiteInfo(), dest_url_info))
+  if (GetSiteInfo().is_sandboxed() != dest_url_info.is_sandboxed)
     return false;
 
   const GURL& dest_url = dest_url_info.url;
@@ -1179,10 +1151,10 @@ bool SiteInstanceImpl::DoesSiteInfoForURLMatch(const UrlInfo& url_info) {
   return site_info_.IsExactMatch(site_info);
 }
 
-void SiteInstanceImpl::RegisterAsDefaultOriginIsolation(
+void SiteInstanceImpl::PreventOptInOriginIsolation(
     const url::Origin& previously_visited_origin) {
   auto* policy = ChildProcessSecurityPolicyImpl::GetInstance();
-  policy->AddDefaultIsolatedOriginIfNeeded(
+  policy->AddNonIsolatedOriginIfNeeded(
       GetIsolationContext(), previously_visited_origin,
       true /* is_global_walk_or_frame_removal */);
 }
@@ -1408,50 +1380,16 @@ int SiteInstanceImpl::EstimateOriginAgentClusterOverheadForMetrics() {
 }
 
 scoped_refptr<SiteInstanceImpl>
-SiteInstanceImpl::GetCompatibleSandboxedSiteInstance(
-    const UrlInfo& url_info,
-    const url::Origin& parent_origin) {
+SiteInstanceImpl::GetCompatibleSandboxedSiteInstance() {
   DCHECK(!IsDefaultSiteInstance());
   DCHECK(has_site_);
-  DCHECK(!GetSiteInfo().is_sandboxed());
-  DCHECK(url_info.url.IsAboutSrcdoc());
+  const SiteInfo& site_info = GetSiteInfo();
+  DCHECK(!site_info.is_sandboxed());
 
-  UrlInfo sandboxed_url_info = url_info;
-  // Since the input `url_info` has a srcdoc url, using the url as-is will
-  // result in a SiteInfo that's not very specific, so we need something more
-  // meaningful. Ideally we'd use the UrlInfo used to load the parent, but we
-  // don't have that anymore, so we use the parent's origin which should be
-  // close enough. We use GetTupleOrPrecursorTupleIfOpaque in case
-  // `parent_origin` is opaque.
-  sandboxed_url_info.url =
-      parent_origin.GetTupleOrPrecursorTupleIfOpaque().GetURL();
-  // The `url_info` should already have its is_sandboxed flag set if we're here.
-  DCHECK(sandboxed_url_info.is_sandboxed);
-  DCHECK(!sandboxed_url_info.origin);
-  // At this point assume all other fields in the input `url_info` are correct.
-  auto sandboxed_site_info =
-      SiteInfo::Create(GetIsolationContext(), sandboxed_url_info);
-
-  auto result =
-      browsing_instance_->GetSiteInstanceForSiteInfo(sandboxed_site_info);
+  auto result = browsing_instance_->GetSiteInstanceForSiteInfo(
+      site_info.SandboxedClone());
   result->original_url_ = original_url_;
   return result;
-}
-
-RenderProcessHost* SiteInstanceImpl::GetDefaultProcessForBrowsingInstance() {
-  if (SiteInstanceImpl* default_instance =
-          browsing_instance_->default_site_instance()) {
-    DCHECK(base::FeatureList::IsEnabled(
-        features::kProcessSharingWithDefaultSiteInstances));
-    return default_instance->HasProcess() ? default_instance->GetProcess()
-                                          : nullptr;
-  }
-  if (browsing_instance_->site_instance_group_manager().default_process()) {
-    DCHECK(base::FeatureList::IsEnabled(
-        features::kProcessSharingWithStrictSiteInstances));
-    return browsing_instance_->site_instance_group_manager().default_process();
-  }
-  return nullptr;
 }
 
 }  // namespace content

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors
+// Copyright 2017 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@ export enum SourceType {
   POLICY = 'policy',
   SIDELOADED = 'sideloaded',
   UNPACKED = 'unpacked',
-  INSTALLED_BY_DEFAULT = 'installed-by-default',
   UNKNOWN = 'unknown',
 }
 
@@ -94,8 +93,6 @@ export function getItemSource(item: chrome.developerPrivate.ExtensionInfo):
       return SourceType.UNKNOWN;
     case chrome.developerPrivate.Location.FROM_STORE:
       return SourceType.WEBSTORE;
-    case chrome.developerPrivate.Location.INSTALLED_BY_DEFAULT:
-      return SourceType.INSTALLED_BY_DEFAULT;
     default:
       assertNotReached(item.location);
   }
@@ -111,8 +108,6 @@ export function getItemSourceString(source: SourceType): string {
       return loadTimeData.getString('itemSourceUnpacked');
     case SourceType.WEBSTORE:
       return loadTimeData.getString('itemSourceWebstore');
-    case SourceType.INSTALLED_BY_DEFAULT:
-      return loadTimeData.getString('itemSourceInstalledByDefault');
     case SourceType.UNKNOWN:
       // Nothing to return. Calling code should use
       // chrome.developerPrivate.ExtensionInfo's |locationText| instead.

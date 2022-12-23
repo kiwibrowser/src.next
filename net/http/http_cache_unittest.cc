@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -825,7 +825,7 @@ class HttpSplitCacheKeyTest : public HttpCacheTest {
     request_info.method = "GET";
     request_info.network_isolation_key = net::NetworkIsolationKey(site, site);
     MockHttpCache cache;
-    return *cache.http_cache()->GenerateCacheKeyForRequest(&request_info);
+    return cache.http_cache()->GenerateCacheKeyForRequest(&request_info);
   }
 };
 
@@ -1050,73 +1050,6 @@ TEST_F(HttpCacheTest,
     // Used the cache entry only.
     EXPECT_THAT(connected_handler.transports(),
                 ElementsAre(CachedTestTransportInfo()));
-  }
-
-  {
-    // Request the same resource once more, observe that it is not read from
-    // cache.
-    ConnectedHandler connected_handler;
-
-    std::unique_ptr<HttpTransaction> transaction;
-    EXPECT_THAT(cache.CreateTransaction(&transaction), IsOk());
-    ASSERT_THAT(transaction, NotNull());
-
-    transaction->SetConnectedCallback(connected_handler.Callback());
-
-    TestCompletionCallback callback;
-    ASSERT_THAT(
-        transaction->Start(&request, callback.callback(), NetLogWithSource()),
-        IsError(ERR_IO_PENDING));
-    EXPECT_THAT(callback.WaitForResult(), IsOk());
-
-    // Used the network only.
-    EXPECT_THAT(connected_handler.transports(),
-                ElementsAre(TestTransportInfo()));
-  }
-}
-
-// This test verifies that when the callback passed to SetConnectedCallback()
-// returns
-// `ERR_CACHED_IP_ADDRESS_SPACE_BLOCKED_BY_PRIVATE_NETWORK_ACCESS_POLICY`, the
-// cache entry is invalidated, and we'll retry the connection from the network.
-TEST_F(
-    HttpCacheTest,
-    SimpleGET_ConnectedCallbackOnCacheHitReturnPrivateNetworkAccessBlockedError) {
-  MockHttpCache cache;
-
-  ScopedMockTransaction mock_transaction(kSimpleGET_Transaction);
-  mock_transaction.transport_info = TestTransportInfo();
-
-  // Populate the cache.
-  RunTransactionTest(cache.http_cache(), mock_transaction);
-
-  MockHttpRequest request(kSimpleGET_Transaction);
-
-  {
-    // Attempt to read from cache entry, but abort transaction due to a
-    // connected callback error.
-    ConnectedHandler connected_handler;
-    connected_handler.set_result(
-        ERR_CACHED_IP_ADDRESS_SPACE_BLOCKED_BY_PRIVATE_NETWORK_ACCESS_POLICY);
-
-    std::unique_ptr<HttpTransaction> transaction;
-    EXPECT_THAT(cache.CreateTransaction(&transaction), IsOk());
-    ASSERT_THAT(transaction, NotNull());
-
-    transaction->SetConnectedCallback(connected_handler.Callback());
-
-    TestCompletionCallback callback;
-    ASSERT_THAT(
-        transaction->Start(&request, callback.callback(), NetLogWithSource()),
-        IsError(ERR_IO_PENDING));
-    EXPECT_THAT(
-        callback.WaitForResult(),
-        IsError(
-            ERR_CACHED_IP_ADDRESS_SPACE_BLOCKED_BY_PRIVATE_NETWORK_ACCESS_POLICY));
-
-    // Used the cache entry only.
-    EXPECT_THAT(connected_handler.transports(),
-                ElementsAre(CachedTestTransportInfo(), TestTransportInfo()));
   }
 
   {
@@ -5403,7 +5336,7 @@ TEST_F(HttpCacheTest, SimpleGET_ManyWriters_CancelFirst) {
   // All would have been added to writers.
   base::RunLoop().RunUntilIdle();
   std::string cache_key =
-      *cache.http_cache()->GenerateCacheKeyForRequest(&request);
+      cache.http_cache()->GenerateCacheKeyForRequest(&request);
   EXPECT_EQ(kNumTransactions, cache.GetCountWriterTransactions(cache_key));
 
   // The second transaction skipped validation, thus only one network
@@ -8378,7 +8311,7 @@ TEST_F(HttpCacheTest, Sparse_WaitForEntry) {
   disk_cache::Entry* entry;
   MockHttpRequest request(transaction);
   std::string cache_key =
-      *cache.http_cache()->GenerateCacheKeyForRequest(&request);
+      cache.http_cache()->GenerateCacheKeyForRequest(&request);
   ASSERT_TRUE(cache.OpenBackendEntry(cache_key, &entry));
   entry->CancelSparseIO();
 
@@ -10986,7 +10919,7 @@ TEST_F(HttpCacheTest, SplitCacheWithNetworkIsolationKey) {
   // Now make a request with an opaque subframe site.  It shouldn't be
   // cached.
   trans_info.network_isolation_key = NetworkIsolationKey(site_a, site_data);
-  EXPECT_EQ(absl::nullopt, trans_info.network_isolation_key.ToCacheKeyString());
+  EXPECT_TRUE(trans_info.network_isolation_key.ToString().empty());
   RunTransactionTestWithRequest(cache.http_cache(), kSimpleGET_Transaction,
                                 trans_info, &response);
   EXPECT_FALSE(response.was_cached);
@@ -11210,7 +11143,7 @@ TEST_F(HttpCacheTest, SplitCache) {
   // Now make a request with an opaque top frame origin.  It shouldn't be
   // cached.
   trans_info.network_isolation_key = NetworkIsolationKey(site_data, site_data);
-  EXPECT_EQ(absl::nullopt, trans_info.network_isolation_key.ToCacheKeyString());
+  EXPECT_TRUE(trans_info.network_isolation_key.ToString().empty());
   RunTransactionTestWithRequest(cache.http_cache(), kSimpleGET_Transaction,
                                 trans_info, &response);
   EXPECT_FALSE(response.was_cached);
@@ -13586,7 +13519,8 @@ class HttpCacheSingleKeyedCacheTest : public HttpCacheTest {
       const MockTransaction& trans_info,
       const NetworkIsolationKey& network_isolation_key,
       const std::string& checksum) {
-    ScopedMockTransaction transaction(trans_info);
+    MockTransaction transaction(trans_info);
+    AddMockTransaction(&transaction);
 
     MockHttpRequest request(transaction);
     request.network_isolation_key = network_isolation_key;

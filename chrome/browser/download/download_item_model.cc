@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/observer_list.h"
-#include "base/run_loop.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/supports_user_data.h"
@@ -29,7 +28,6 @@
 #include "chrome/browser/download/download_history.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/download/download_stats.h"
-#include "chrome/browser/download/download_target_determiner.h"
 #include "chrome/browser/download/offline_item_utils.h"
 #include "chrome/browser/enterprise/connectors/common.h"
 #include "chrome/browser/enterprise/connectors/connectors_manager.h"
@@ -47,8 +45,6 @@
 #include "components/safe_browsing/content/browser/web_ui/safe_browsing_ui.h"
 #include "components/safe_browsing/content/common/file_type_policies.h"
 #include "components/safe_browsing/content/common/proto/download_file_types.pb.h"
-#include "components/safe_browsing/core/common/features.h"
-#include "components/vector_icons/vector_icons.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_item_utils.h"
@@ -58,7 +54,6 @@
 
 #if !BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/ui/browser.h"
-#include "ui/views/vector_icons.h"
 #endif
 
 using download::DownloadItem;
@@ -66,7 +61,6 @@ using MixedContentStatus = download::DownloadItem::MixedContentStatus;
 using safe_browsing::DownloadFileType;
 using ReportThreatDetailsResult =
     safe_browsing::PingManager::ReportThreatDetailsResult;
-using TailoredVerdict = safe_browsing::ClientDownloadResponse::TailoredVerdict;
 
 namespace {
 
@@ -99,7 +93,7 @@ class DownloadItemModelData : public base::SupportsUserData::Data {
 
   // Whether the download should be opened in the browser vs. the system handler
   // for the file type.
-  absl::optional<bool> should_prefer_opening_in_browser_;
+  bool should_prefer_opening_in_browser_;
 
   // Danger level of the file determined based on the file type and whether
   // there was a user action associated with the download.
@@ -116,9 +110,6 @@ class DownloadItemModelData : public base::SupportsUserData::Data {
   // persist on restart, though ephemeral warning downloads are canceled by
   // then as all in-progress downloads are.
   absl::optional<base::Time> ephemeral_warning_ui_shown_time_;
-
-  // Was the UI actioned on.
-  bool actioned_on_ = false;
 
  private:
   DownloadItemModelData();
@@ -140,7 +131,7 @@ DownloadItemModelData* DownloadItemModelData::GetOrCreate(
     DownloadItem* download) {
   DownloadItemModelData* data =
       static_cast<DownloadItemModelData*>(download->GetUserData(kKey));
-  if (data == nullptr) {
+  if (data == NULL) {
     data = new DownloadItemModelData();
     data->should_show_in_shelf_ = !download->IsTransient();
     download->SetUserData(kKey, base::WrapUnique(data));
@@ -151,6 +142,7 @@ DownloadItemModelData* DownloadItemModelData::GetOrCreate(
 DownloadItemModelData::DownloadItemModelData()
     : should_show_in_shelf_(true),
       was_ui_notified_(false),
+      should_prefer_opening_in_browser_(false),
       danger_level_(DownloadFileType::NOT_DANGEROUS),
       is_being_revived_(false) {}
 
@@ -419,16 +411,6 @@ void DownloadItemModel::SetWasUINotified(bool was_ui_notified) {
   data->was_ui_notified_ = was_ui_notified;
 }
 
-bool DownloadItemModel::WasActionedOn() const {
-  const DownloadItemModelData* data = DownloadItemModelData::Get(download_);
-  return data && data->actioned_on_;
-}
-
-void DownloadItemModel::SetActionedOn(bool actioned_on) {
-  DownloadItemModelData* data = DownloadItemModelData::GetOrCreate(download_);
-  data->actioned_on_ = actioned_on;
-}
-
 bool DownloadItemModel::WasUIWarningShown() const {
   const DownloadItemModelData* data = DownloadItemModelData::Get(download_);
   return data && data->was_ui_warning_shown_;
@@ -452,29 +434,9 @@ void DownloadItemModel::SetEphemeralWarningUiShownTime(
   data->ephemeral_warning_ui_shown_time_ = ephemeral_warning_ui_shown_time;
 }
 
-bool DownloadItemModel::ShouldPreferOpeningInBrowser() {
-  const DownloadItemModelData* data =
-      DownloadItemModelData::GetOrCreate(download_);
-#if !BUILDFLAG(IS_ANDROID)
-  if (!data->should_prefer_opening_in_browser_ && IsBubbleV2Enabled()) {
-    base::FilePath path = GetTargetFilePath();
-    std::string mime_type = GetMimeType();
-    base::RunLoop run_loop;
-    DownloadTargetDeterminer::DetermineIfHandledSafelyHelper(
-        download_, path, mime_type,
-        base::BindOnce(
-            [](base::OnceClosure quit_run_loop,
-               base::WeakPtr<DownloadUIModel> model, const base::FilePath& path,
-               bool is_handled_safely) {
-              model->DetermineAndSetShouldPreferOpeningInBrowser(
-                  path, is_handled_safely);
-              std::move(quit_run_loop).Run();
-            },
-            run_loop.QuitClosure(), GetWeakPtr(), path));
-    run_loop.Run();
-  }
-#endif  // !BUILDFLAG(IS_ANDROID)
-  return data->should_prefer_opening_in_browser_.value_or(false);
+bool DownloadItemModel::ShouldPreferOpeningInBrowser() const {
+  const DownloadItemModelData* data = DownloadItemModelData::Get(download_);
+  return data && data->should_prefer_opening_in_browser_;
 }
 
 void DownloadItemModel::SetShouldPreferOpeningInBrowser(bool preference) {
@@ -686,8 +648,7 @@ void DownloadItemModel::OpenUsingPlatformHandler() {
   if (!delegate)
     return;
   delegate->OpenDownloadUsingPlatformHandler(download_);
-  RecordDownloadOpen(DOWNLOAD_OPEN_METHOD_USER_PLATFORM,
-                     download_->GetMimeType());
+  RecordDownloadOpenMethod(DOWNLOAD_OPEN_METHOD_USER_PLATFORM);
 }
 
 #if !BUILDFLAG(IS_ANDROID)
@@ -835,14 +796,25 @@ void DownloadItemModel::ExecuteCommand(DownloadCommands* download_commands,
                download::IsDownloadBubbleEnabled(profile()));
         safe_browsing::SafeBrowsingService* sb_service =
             g_browser_process->safe_browsing_service();
-        if (sb_service) {
-          bool is_successful = sb_service->SendDownloadReport(
-              download_,
-              safe_browsing::ClientSafeBrowsingReportRequest::
-                  DANGEROUS_DOWNLOAD_WARNING,
-              /*did_proceed=*/true, /*show_download_in_folder=*/absl::nullopt);
-          DCHECK(is_successful);
-        }
+        // Compiles the dangerous download warning report.
+        auto report =
+            std::make_unique<safe_browsing::ClientSafeBrowsingReportRequest>();
+        report->set_type(safe_browsing::ClientSafeBrowsingReportRequest::
+                             DANGEROUS_DOWNLOAD_WARNING);
+        report->set_download_verdict(
+            safe_browsing::DownloadDangerTypeToDownloadResponseVerdict(
+                GetDangerType()));
+        report->set_url(GetURL().spec());
+        report->set_did_proceed(true);
+        std::string token =
+            safe_browsing::DownloadProtectionService::GetDownloadPingToken(
+                download_);
+        if (!token.empty())
+          report->set_token(token);
+
+        ReportThreatDetailsResult result =
+            sb_service->SendDownloadReport(profile(), std::move(report));
+        DCHECK(result == ReportThreatDetailsResult::SUCCESS);
       }
 #endif
       download_->ValidateDangerousDownload();
@@ -895,14 +867,7 @@ void DownloadItemModel::ExecuteCommand(DownloadCommands* download_commands,
       ChromeDownloadManagerDelegate* delegate =
           download_core_service->GetDownloadManagerDelegate();
       DCHECK(delegate);
-
-      // Create an analysis settings object for UploadForDeepScanning().
-      // Make sure it specifies a cloud analysis is required and does not
-      // specify a DM token, which is what triggers an APP scan.
       enterprise_connectors::AnalysisSettings settings;
-      settings.cloud_or_local_settings =
-          enterprise_connectors::CloudOrLocalAnalysisSettings(
-              enterprise_connectors::CloudAnalysisSettings());
       settings.tags = {{"malware", enterprise_connectors::TagSettings()}};
       protection_service->UploadForDeepScanning(
           download_,
@@ -914,81 +879,6 @@ void DownloadItemModel::ExecuteCommand(DownloadCommands* download_commands,
           safe_browsing::DownloadCheckResult::UNKNOWN, std::move(settings));
       break;
   }
-}
-
-DownloadItemModel::BubbleUIInfo
-DownloadItemModel::GetBubbleUIInfoForTailoredWarning() const {
-  download::DownloadDangerType danger_type = GetDangerType();
-  TailoredVerdict tailored_verdict = safe_browsing::DownloadProtectionService::
-      GetDownloadProtectionTailoredVerdict(download_);
-
-  // Suspicious archives
-  if (danger_type == download::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT &&
-      tailored_verdict.tailored_verdict_type() ==
-          TailoredVerdict::SUSPICIOUS_ARCHIVE) {
-    return DownloadUIModel::BubbleUIInfo(
-               l10n_util::GetStringUTF16(
-                   IDS_DOWNLOAD_BUBBLE_SUBPAGE_SUMMARY_SUSPICIOUS_ARCHIVE))
-        .AddIconAndColor(views::kInfoIcon, ui::kColorAlertMediumSeverity)
-        .AddPrimaryButton(DownloadCommands::Command::DISCARD)
-        .AddSubpageButton(l10n_util::GetStringUTF16(IDS_DOWNLOAD_BUBBLE_DELETE),
-                          DownloadCommands::Command::DISCARD,
-                          /*is_prominent=*/true)
-        .AddSubpageButton(
-            l10n_util::GetStringUTF16(IDS_DOWNLOAD_BUBBLE_CONTINUE),
-            DownloadCommands::Command::KEEP,
-            /*is_prominent=*/false);
-  }
-
-  // Cookie theft
-  if (danger_type ==
-          download::DOWNLOAD_DANGER_TYPE_DANGEROUS_ACCOUNT_COMPROMISE &&
-      tailored_verdict.tailored_verdict_type() ==
-          TailoredVerdict::COOKIE_THEFT) {
-    // TODO(crbug.com/1351925): Check the adjustments field and add the account
-    // information in the subpage summary.
-    return DownloadUIModel::BubbleUIInfo(
-               l10n_util::GetStringUTF16(
-                   IDS_DOWNLOAD_BUBBLE_SUBPAGE_SUMMARY_COOKIE_THEFT))
-        .AddIconAndColor(vector_icons::kNotSecureWarningIcon,
-                         ui::kColorAlertHighSeverity)
-        .AddPrimaryButton(DownloadCommands::Command::DISCARD)
-        .AddSubpageButton(l10n_util::GetStringUTF16(IDS_DOWNLOAD_BUBBLE_DELETE),
-                          DownloadCommands::Command::DISCARD,
-                          /*is_prominent=*/true);
-  }
-
-  NOTREACHED();
-  return DownloadUIModel::BubbleUIInfo();
-}
-
-bool DownloadItemModel::ShouldShowTailoredWarning() const {
-  if (!IsBubbleV2Enabled() ||
-      !base::FeatureList::IsEnabled(safe_browsing::kDownloadTailoredWarnings)) {
-    return false;
-  }
-
-  static const struct ValidCombination {
-    download::DownloadDangerType danger_type;
-    TailoredVerdict::TailoredVerdictType tailored_verdict_type;
-  } kValidTailoredWarningCombinations[]{
-      {download::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT,
-       TailoredVerdict::SUSPICIOUS_ARCHIVE},
-      {download::DOWNLOAD_DANGER_TYPE_DANGEROUS_ACCOUNT_COMPROMISE,
-       TailoredVerdict::COOKIE_THEFT}};
-
-  download::DownloadDangerType danger_type = GetDangerType();
-  TailoredVerdict tailored_verdict = safe_browsing::DownloadProtectionService::
-      GetDownloadProtectionTailoredVerdict(download_);
-  for (const auto& combination : kValidTailoredWarningCombinations) {
-    if (danger_type == combination.danger_type &&
-        tailored_verdict.tailored_verdict_type() ==
-            combination.tailored_verdict_type) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 bool DownloadItemModel::ShouldShowInBubble() const {
@@ -1143,34 +1033,4 @@ bool DownloadItemModel::ShouldShowDropdown() const {
   }
 
   return true;
-}
-
-void DownloadItemModel::DetermineAndSetShouldPreferOpeningInBrowser(
-    const base::FilePath& target_path,
-    bool is_filetype_handled_safely) {
-  DownloadCoreService* download_core_service =
-      DownloadCoreServiceFactory::GetForBrowserContext(
-          content::DownloadItemUtils::GetBrowserContext(download_));
-  if (!download_core_service)
-    return;
-
-  ChromeDownloadManagerDelegate* delegate =
-      download_core_service->GetDownloadManagerDelegate();
-  if (!delegate)
-    return;
-
-  if (!target_path.empty() &&
-      delegate->IsOpenInBrowserPreferreredForFile(target_path) &&
-      is_filetype_handled_safely) {
-    SetShouldPreferOpeningInBrowser(true);
-    return;
-  }
-
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
-  if (download_->GetOriginalMimeType() == "application/x-x509-user-cert") {
-    SetShouldPreferOpeningInBrowser(true);
-    return;
-  }
-#endif
-  SetShouldPreferOpeningInBrowser(false);
 }

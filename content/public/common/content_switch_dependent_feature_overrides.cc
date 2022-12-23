@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,7 +75,13 @@ GetSwitchDependentFeatureOverrides(const base::CommandLine& command_line) {
      std::cref(blink::features::kPrefersColorSchemeClientHintHeader),
      base::FeatureList::OVERRIDE_ENABLE_FEATURE},
     {switches::kEnableExperimentalWebPlatformFeatures,
+     std::cref(blink::features::kViewportHeightClientHintHeader),
+     base::FeatureList::OVERRIDE_ENABLE_FEATURE},
+    {switches::kEnableExperimentalWebPlatformFeatures,
      std::cref(blink::features::kClientHintsMetaHTTPEquivAcceptCH),
+     base::FeatureList::OVERRIDE_ENABLE_FEATURE},
+    {switches::kEnableExperimentalWebPlatformFeatures,
+     std::cref(blink::features::kClientHintsMetaNameAcceptCH),
      base::FeatureList::OVERRIDE_ENABLE_FEATURE},
     {switches::kEnableExperimentalWebPlatformFeatures,
      std::cref(blink::features::kClientHintsMetaEquivDelegateCH),
@@ -90,7 +96,7 @@ GetSwitchDependentFeatureOverrides(const base::CommandLine& command_line) {
      std::cref(blink::features::kEditContext),
      base::FeatureList::OVERRIDE_ENABLE_FEATURE},
     {switches::kEnableExperimentalWebPlatformFeatures,
-     std::cref(blink::features::kPendingBeaconAPI),
+     std::cref(network::features::kReduceAcceptLanguage),
      base::FeatureList::OVERRIDE_ENABLE_FEATURE},
 
     // Overrides for --enable-experimental-cookie-features.
@@ -140,11 +146,6 @@ GetSwitchDependentFeatureOverrides(const base::CommandLine& command_line) {
     // Override for --reduce-user-agent-platform-oscpu.
     {switches::kReduceUserAgentPlatformOsCpu,
      std::cref(blink::features::kReduceUserAgentPlatformOsCpu),
-     base::FeatureList::OVERRIDE_ENABLE_FEATURE},
-
-    // Override for --reduce-accept-language.
-    {switches::kReduceAcceptLanguage,
-     std::cref(network::features::kReduceAcceptLanguage),
      base::FeatureList::OVERRIDE_ENABLE_FEATURE},
   };
 

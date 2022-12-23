@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -92,11 +92,7 @@ class Handler : public content::WebContentsObserver {
         continue;
       }
 
-      // `frame_id` can be a FrameTreeNodeId of the primary main frame. In such
-      // cases, ExtensionApiFrameIdMap::GetFrameId(frame) resolves the given
-      // `frame` as 0. To keep the original ID as is, pass `frame_id` and use it
-      // directly to prepare a relevant FrameResult.
-      PushPendingRenderFrame(frame, frame_id);
+      pending_render_frames_.push_back(frame);
     }
 
     // If there is a single frame specified (and it was valid), we consider it
@@ -108,14 +104,32 @@ class Handler : public content::WebContentsObserver {
     // `pending_render_frames_` and add them if they are alive (and not already
     // contained in `pending_frames`).
     if (scope == ScriptExecutor::INCLUDE_SUB_FRAMES) {
+      auto append_frame = [](content::WebContents* web_contents,
+                             std::vector<raw_ptr<content::RenderFrameHost>>*
+                                 pending_frames,
+                             content::RenderFrameHost* frame) {
+        // Avoid inner web contents. If we need to execute scripts on
+        // inner WebContents this class needs to be updated.
+        // See crbug.com/1301320.
+        if (content::WebContents::FromRenderFrameHost(frame) != web_contents) {
+          return content::RenderFrameHost::FrameIterationAction::kSkipChildren;
+        }
+        if (!frame->IsRenderFrameLive() ||
+            base::Contains(*pending_frames, frame)) {
+          return content::RenderFrameHost::FrameIterationAction::kContinue;
+        }
+
+        pending_frames->push_back(frame);
+        return content::RenderFrameHost::FrameIterationAction::kContinue;
+      };
+
       // We iterate over the requested frames. Note we can't use an iterator
       // as the for loop will mutate `pending_render_frames_`.
-      const size_t requested_frame_count = pending_render_frames_.size();
+      size_t requested_frame_count = pending_render_frames_.size();
       for (size_t i = 0; i < requested_frame_count; ++i) {
         pending_render_frames_.at(i)->ForEachRenderFrameHost(
-            [this](content::RenderFrameHost* frame) {
-              MaybeAddSubFrame(frame);
-            });
+            base::BindRepeating(append_frame, web_contents,
+                                &pending_render_frames_));
       }
     }
 
@@ -156,40 +170,6 @@ class Handler : public content::WebContentsObserver {
                                 "Frame with ID %d was removed.");
     if (pending_render_frames_.empty())
       Finish();
-  }
-
-  content::RenderFrameHost::FrameIterationAction MaybeAddSubFrame(
-      content::RenderFrameHost* frame) {
-    // Avoid inner web contents. If we need to execute scripts on inner
-    // WebContents this class needs to be updated.
-    // See https://crbug.com/1301320.
-    if (content::WebContents::FromRenderFrameHost(frame) != web_contents()) {
-      return content::RenderFrameHost::FrameIterationAction::kSkipChildren;
-    }
-    if (!frame->IsRenderFrameLive() ||
-        base::Contains(pending_render_frames_, frame)) {
-      return content::RenderFrameHost::FrameIterationAction::kContinue;
-    }
-
-    PushPendingRenderFrame(frame, ExtensionApiFrameIdMap::GetFrameId(frame));
-    return content::RenderFrameHost::FrameIterationAction::kContinue;
-  }
-
-  void PushPendingRenderFrame(raw_ptr<content::RenderFrameHost> frame,
-                              int frame_id) {
-    pending_render_frames_.push_back(frame);
-
-    // Preallocate the results to hold the initial `frame_id` and `document_id`.
-    // As the primary main frame uses a magic number 0 for the `frame_id`, it
-    // can be changed if the primary page is changed. It happens on pre-rendered
-    // page activation or portal page activation on MPArch. The `document_id`
-    // can be stale if navigation happens and the same renderer is reused in the
-    // case, e.g. navigation from about:blank, or same-origin navigation.
-    ScriptExecutor::FrameResult result;
-    result.frame_id = frame_id;
-    result.document_id = ExtensionApiFrameIdMap::GetDocumentId(frame);
-    DCHECK(!base::Contains(results_, frame->GetFrameToken()));
-    results_[frame->GetFrameToken()] = std::move(result);
   }
 
   void AddWillNotInjectResult(
@@ -236,6 +216,18 @@ class Handler : public content::WebContentsObserver {
                        content::RenderFrameHost* frame) {
     DCHECK(frame->IsRenderFrameLive());
     DCHECK(base::Contains(pending_render_frames_, frame));
+
+    // Preallocate the results to hold the initial `frame_id` and `document_id`.
+    // As the primary main frame uses a magic number 0 for the `frame_id`, it
+    // can be changed if the primary page is changed. It happens on pre-rendered
+    // page activation or portal page activation on MPArch. The `document_id`
+    // can be stale if navigation happens and the same renderer is reused in the
+    // case, e.g. navigation from about:blank, or same-origin navigation.
+    ScriptExecutor::FrameResult result;
+    result.frame_id = ExtensionApiFrameIdMap::GetFrameId(frame);
+    result.document_id = ExtensionApiFrameIdMap::GetDocumentId(frame);
+    DCHECK(!base::Contains(results_, frame->GetFrameToken()));
+    results_[frame->GetFrameToken()] = std::move(result);
 
     ContentScriptTracker::WillExecuteCode(pass_key, frame, host_id_);
     ExtensionWebContentsObserver::GetForWebContents(web_contents())

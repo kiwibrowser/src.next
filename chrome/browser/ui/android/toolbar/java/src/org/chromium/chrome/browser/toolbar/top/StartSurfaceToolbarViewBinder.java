@@ -1,11 +1,10 @@
-// Copyright 2019 The Chromium Authors
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser.toolbar.top;
 
 import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.ACCESSIBILITY_ENABLED;
-import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.ALPHA;
 import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.BUTTONS_CLICKABLE;
 import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.GRID_TAB_SWITCHER_ENABLED;
 import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.IDENTITY_DISC_AT_START;
@@ -20,6 +19,7 @@ import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarPropert
 import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.IS_INCOGNITO;
 import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.IS_NEW_TAB_ENABLED;
 import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.IS_VISIBLE;
+import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.LOGO_IS_VISIBLE;
 import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.MENU_IS_VISIBLE;
 import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.NEW_TAB_BUTTON_HIGHLIGHT;
 import static org.chromium.chrome.browser.toolbar.top.StartSurfaceToolbarProperties.NEW_TAB_CLICK_HANDLER;
@@ -59,6 +59,8 @@ class StartSurfaceToolbarViewBinder {
             view.updateIncognito(model.get(IS_INCOGNITO));
         } else if (propertyKey == IS_VISIBLE) {
             view.setToolbarVisibility(model.get(IS_VISIBLE));
+        } else if (propertyKey == LOGO_IS_VISIBLE) {
+            view.setLogoVisibility(model.get(LOGO_IS_VISIBLE));
         } else if (propertyKey == MENU_IS_VISIBLE) {
             view.setMenuButtonVisibility(model.get(MENU_IS_VISIBLE));
         } else if (propertyKey == NEW_TAB_CLICK_HANDLER) {
@@ -73,8 +75,6 @@ class StartSurfaceToolbarViewBinder {
             view.setNewTabViewTextVisibility(model.get(NEW_TAB_VIEW_TEXT_IS_VISIBLE));
         } else if (propertyKey == TRANSLATION_Y) {
             view.setTranslationY(model.get(TRANSLATION_Y));
-        } else if (propertyKey == ALPHA) {
-            view.setAlpha(model.get(ALPHA));
         } else if (propertyKey == TAB_SWITCHER_BUTTON_IS_VISIBLE) {
             view.setTabSwitcherButtonVisibility(model.get(TAB_SWITCHER_BUTTON_IS_VISIBLE));
         } else if (propertyKey == INCOGNITO_TAB_COUNT_PROVIDER) {

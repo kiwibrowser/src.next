@@ -25,9 +25,6 @@ struct PhysicalOffset;
 struct SVGTextFragment;
 
 struct SVGTextFragmentWithRange {
-  DISALLOW_NEW();
-
- public:
   SVGTextFragmentWithRange(const SVGTextFragment& fragment,
                            int start_position,
                            int end_position)

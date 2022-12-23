@@ -40,7 +40,6 @@
 #include "third_party/blink/renderer/core/events/current_input_event.h"
 #include "third_party/blink/renderer/core/events/mouse_event.h"
 #include "third_party/blink/renderer/core/page/create_window.h"
-#include "third_party/blink/renderer/platform/weborigin/kurl.h"
 
 namespace blink {
 
@@ -245,7 +244,7 @@ TEST_F(NavigationPolicyTest, NoOpener) {
   for (const auto& test : kCases) {
     EXPECT_EQ(test.policy,
               NavigationPolicyForCreateWindow(GetWindowFeaturesFromString(
-                  test.feature_string, /*dom_window=*/nullptr, KURL())))
+                  test.feature_string, nullptr /* dom_window */)))
         << "Testing '" << test.feature_string << "'";
   }
 }
@@ -271,7 +270,7 @@ TEST_F(NavigationPolicyTest, NoOpenerAndNoReferrer) {
   for (const auto& test : kCases) {
     EXPECT_EQ(test.policy,
               NavigationPolicyForCreateWindow(GetWindowFeaturesFromString(
-                  test.feature_string, /*dom_window=*/nullptr, KURL())))
+                  test.feature_string, nullptr /* dom_window */)))
         << "Testing '" << test.feature_string << "'";
   }
 }
@@ -296,7 +295,7 @@ TEST_F(NavigationPolicyTest, NoReferrer) {
   for (const auto& test : kCases) {
     EXPECT_EQ(test.policy,
               NavigationPolicyForCreateWindow(GetWindowFeaturesFromString(
-                  test.feature_string, /*dom_window=*/nullptr, KURL())))
+                  test.feature_string, nullptr /* dom_window */)))
         << "Testing '" << test.feature_string << "'";
   }
 }

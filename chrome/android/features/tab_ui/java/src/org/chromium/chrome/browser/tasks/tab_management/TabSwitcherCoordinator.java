@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -137,11 +137,6 @@ public class TabSwitcherCoordinator
     private final ViewGroup mRootView;
     private TabContentManager mTabContentManager;
     private IncognitoReauthPromoMessageService mIncognitoReauthPromoMessageService;
-    /**
-     * TODO(crbug.com/1227656): Refactor this to pass a supplier instead to ensure we re-use the
-     * same instance of {@link IncognitoReauthManager} across the codebase.
-     */
-    private IncognitoReauthManager mIncognitoReauthManager;
 
     private final MenuOrKeyboardActionController
             .MenuOrKeyboardActionHandler mTabSwitcherMenuActionHandler =
@@ -239,7 +234,7 @@ public class TabSwitcherCoordinator
             mTabListCoordinator = new TabListCoordinator(mode, activity, tabModelSelector,
                     mMultiThumbnailCardProvider, titleProvider, true, mMediator, null,
                     TabProperties.UiType.CLOSABLE, null, this, container, true, COMPONENT_NAME,
-                    mRootView, null);
+                    mRootView);
             mContainerViewChangeProcessor = PropertyModelChangeProcessor.create(containerViewModel,
                     mTabListCoordinator.getContainerView(), TabListContainerViewBinder::bind);
 
@@ -442,13 +437,11 @@ public class TabSwitcherCoordinator
 
                 if (IncognitoReauthManager.isIncognitoReauthFeatureAvailable()
                         && mIncognitoReauthPromoMessageService == null) {
-                    mIncognitoReauthManager = new IncognitoReauthManager();
                     mIncognitoReauthPromoMessageService = new IncognitoReauthPromoMessageService(
                             MessageService.MessageType.INCOGNITO_REAUTH_PROMO_MESSAGE,
                             Profile.getLastUsedRegularProfile(), mActivity,
-                            SharedPreferencesManager.getInstance(), mIncognitoReauthManager,
-                            mSnackbarManager, TabUiFeatureUtilities::isTabToGtsAnimationEnabled,
-                            mLifecycleDispatcher);
+                            SharedPreferencesManager.getInstance(), mSnackbarManager,
+                            TabUiFeatureUtilities::isTabToGtsAnimationEnabled);
                     mMessageCardProviderCoordinator.subscribeMessageService(
                             mIncognitoReauthPromoMessageService);
                 }
@@ -484,7 +477,7 @@ public class TabSwitcherCoordinator
         int selectionEditorMode = mMode == TabListMode.CAROUSEL ? TabListMode.GRID : mMode;
         mTabSelectionEditorCoordinator =
                 new TabSelectionEditorCoordinator(context, mCoordinatorView, mTabModelSelector,
-                        tabContentManager, selectionEditorMode, mRootView, /*displayGroups=*/false);
+                        tabContentManager, selectionEditorMode, mRootView);
     }
 
     private void setUpPriceTracking(Context context, ModalDialogManager modalDialogManager) {
@@ -803,11 +796,6 @@ public class TabSwitcherCoordinator
     @Override
     public void softCleanup() {
         mTabListCoordinator.softCleanup();
-    }
-
-    @Override
-    public void hardCleanup() {
-        mTabListCoordinator.hardCleanup();
     }
 
     // ResetHandler implementation.

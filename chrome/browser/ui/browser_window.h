@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 
 #include "base/callback_forward.h"
 #include "base/callback_helpers.h"
-#include "base/feature_list.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/apps/intent_helper/apps_navigation_types.h"
@@ -57,6 +56,10 @@ class DownloadBubbleUIController;
 namespace autofill {
 class AutofillBubbleHandler;
 }  // namespace autofill
+
+namespace base {
+struct Feature;
+}
 
 namespace content {
 class WebContents;
@@ -459,13 +462,16 @@ class BrowserWindow : public ui::BaseWindow {
       translate::TranslateStep step,
       const std::string& source_language,
       const std::string& target_language,
-      translate::TranslateErrors error_type,
+      translate::TranslateErrors::Type error_type,
       bool is_user_gesture) = 0;
 
   // Shows the Partial Translate bubble.
-  virtual void StartPartialTranslate(const std::string& source_language,
-                                     const std::string& target_language,
-                                     const std::u16string& text_selection) = 0;
+  virtual void ShowPartialTranslateBubble(
+      PartialTranslateBubbleModel::ViewState view_state,
+      const std::string& source_language,
+      const std::string& target_language,
+      const std::u16string& text_selection,
+      translate::TranslateErrors::Type error_type) = 0;
 
   // Shows the one-click sign in confirmation UI. |email| holds the full email
   // address of the account that has signed in.
@@ -575,18 +581,16 @@ class BrowserWindow : public ui::BaseWindow {
   virtual user_education::FeaturePromoController*
   GetFeaturePromoController() = 0;
 
-  // Returns whether the promo associated with `iph_feature` is running.
-  //
-  // Includes promos with visible bubbles and those which have been continued
-  // with CloseFeaturePromoAndContinue() and are still running in the
-  // background.
-  virtual bool IsFeaturePromoActive(const base::Feature& iph_feature) const = 0;
+  // Returns whether the promo bubble associated with `iph_feature` is visible.
+  // If `include_continued_promos` is true, will also return true if
+  // CloseFeaturePromoAndContinue() has been called to hide the bubble but the
+  // promo is still running in the background.
+  virtual bool IsFeaturePromoActive(
+      const base::Feature& iph_feature,
+      bool include_continued_promos = false) const = 0;
 
   // Maybe shows an in-product help promo. Returns true if the promo is shown.
   // In cases where there is no promo controller, immediately returns false.
-  //
-  // If this feature promo is likely to be shown at browser startup, prefer
-  // calling MaybeShowStartupFeaturePromo() instead.
   virtual bool MaybeShowFeaturePromo(
       const base::Feature& iph_feature,
       user_education::FeaturePromoSpecification::StringReplacements
@@ -594,40 +598,16 @@ class BrowserWindow : public ui::BaseWindow {
       user_education::FeaturePromoController::BubbleCloseCallback
           close_callback = base::DoNothing()) = 0;
 
-  // Maybe shows an in-product help promo at startup, whenever the Feature
-  // Engagement system is fully initialized. If the promo cannot be queued for
-  // whatever reason, fails and returns false. The promo may still not run if it
-  // is excluded for other reasons (e.g. another promo starts first; its Feature
-  // Engagement conditions are not satisfied).
-  //
-  // On success, when the FE system is initialized (which might be immediately),
-  // `promo_callback` is called with the result of whether the promo was
-  // actually shown. Since `promo_callback` could be called any time, make sure
-  // that you will not experience any race conditions or UAFs if the calling
-  // object goes out of scope.
-  //
-  // If your promo is not likely to be shown at browser startup, prefer using
-  // MaybeShowFeaturePromo() - which always runs synchronously - instead.
-  virtual bool MaybeShowStartupFeaturePromo(
-      const base::Feature& iph_feature,
-      user_education::FeaturePromoSpecification::StringReplacements
-          body_text_replacements = {},
-      user_education::FeaturePromoController::StartupPromoCallback
-          promo_callback = base::DoNothing(),
-      user_education::FeaturePromoController::BubbleCloseCallback
-          close_callback = base::DoNothing()) = 0;
-
-  // Closes the in-product help promo for `iph_feature` if it is showing or
-  // cancels a pending startup promo; returns true if a promo bubble was
-  // actually closed.
+  // Closes the in-product help promo for `iph_feature` if it is showing;
+  // returns true if the promo was closed, false if it was not showing.
   virtual bool CloseFeaturePromo(const base::Feature& iph_feature) = 0;
 
   // Closes the bubble for a feature promo but continues the promo; returns a
   // handle that can be used to end the promo when it is destructed. The handle
   // will be valid (i.e. have a true boolean value) if the promo was showing,
   // invalid otherwise.
-  virtual user_education::FeaturePromoHandle CloseFeaturePromoAndContinue(
-      const base::Feature& iph_feature) = 0;
+  virtual user_education::FeaturePromoController::PromoHandle
+  CloseFeaturePromoAndContinue(const base::Feature& iph_feature) = 0;
 
   // Records that the user has engaged with a particular feature that has an
   // associated promo; this information is used to determine whether to show
@@ -639,10 +619,6 @@ class BrowserWindow : public ui::BaseWindow {
 
   // Shows an Incognito history disclaimer dialog.
   virtual void ShowIncognitoHistoryDisclaimerDialog() = 0;
-
-  // Returns true when the borderless mode should be displayed instead
-  // of a full titlebar. This is only supported for desktop web apps.
-  virtual bool IsBorderlessModeEnabled() const = 0;
 
  protected:
   friend class BrowserCloseManager;

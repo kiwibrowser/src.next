@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -184,12 +184,13 @@ TEST_F(ExtensionGarbageCollectorChromeOSUnitTest, SharedExtensions) {
 
   EXPECT_TRUE(base::PathExists(path_id2_1));
 
-  const base::Value::Dict& shared_extensions =
-      testing_local_state_.Get()->GetDict(
+  const base::Value* shared_extensions =
+      testing_local_state_.Get()->GetDictionary(
           ExtensionAssetsManagerChromeOS::kSharedExtensions);
+  ASSERT_TRUE(shared_extensions);
 
-  EXPECT_FALSE(shared_extensions.Find(kExtensionId1));
-  EXPECT_TRUE(shared_extensions.Find(kExtensionId2));
+  EXPECT_FALSE(shared_extensions->FindKey(kExtensionId1));
+  EXPECT_TRUE(shared_extensions->FindKey(kExtensionId2));
 }
 
 }  // namespace extensions

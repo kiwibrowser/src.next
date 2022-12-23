@@ -1,4 +1,4 @@
-# Copyright 2020 The Chromium Authors
+# Copyright 2020 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -21,8 +21,6 @@ android_library("java") {
     "java/src/org/chromium/chrome/browser/tab/TabHidingType.java",
     "java/src/org/chromium/chrome/browser/tab/TabIdManager.java",
     "java/src/org/chromium/chrome/browser/tab/TabLifecycle.java",
-    "java/src/org/chromium/chrome/browser/tab/TabObscuringHandler.java",
-    "java/src/org/chromium/chrome/browser/tab/TabObscuringHandlerSupplier.java",
     "java/src/org/chromium/chrome/browser/tab/TabObserver.java",
     "java/src/org/chromium/chrome/browser/tab/TabResolver.java",
     "java/src/org/chromium/chrome/browser/tab/TabState.java",
@@ -55,7 +53,6 @@ android_library("java") {
     "java/src/org/chromium/chrome/browser/tab/state/PersistedTabDataStorageFactory.java",
     "java/src/org/chromium/chrome/browser/tab/state/PriceDropMetricsLogger.java",
     "java/src/org/chromium/chrome/browser/tab/state/SerializedCriticalPersistedTabData.java",
-    "java/src/org/chromium/chrome/browser/tab/state/Serializer.java",
     "java/src/org/chromium/chrome/browser/tab/state/ShoppingPersistedTabData.java",
     "java/src/org/chromium/chrome/browser/tab/state/StorePersistedTabData.java",
   ]
@@ -131,7 +128,6 @@ generate_jni("jni_headers") {
   sources = [
     "java/src/org/chromium/chrome/browser/tab/TrustedCdn.java",
     "java/src/org/chromium/chrome/browser/tab/WebContentsStateBridge.java",
-    "java/src/org/chromium/chrome/browser/tab/state/CriticalPersistedTabData.java",
     "java/src/org/chromium/chrome/browser/tab/state/LevelDBPersistedDataStorage.java",
   ]
 }
@@ -140,6 +136,7 @@ proto_java_library("critical_persisted_tab_data_proto_java") {
   proto_path = "java/src/org/chromium/chrome/browser/tab/state/proto"
   sources = [
     "$proto_path/coupon_persisted_tab_data.proto",
+    "$proto_path/critical_persisted_tab_data.proto",
     "$proto_path/shopping_persisted_tab_data.proto",
     "$proto_path/store_persisted_tab_data.proto",
   ]

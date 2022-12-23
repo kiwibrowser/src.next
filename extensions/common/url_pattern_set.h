@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,17 @@
 #include <stddef.h>
 
 #include <iosfwd>
+#include <memory>
 #include <set>
 
-#include "base/values.h"
 #include "extensions/common/url_pattern.h"
 
 class GURL;
+
+namespace base {
+class ListValue;
+class Value;
+}
 
 namespace url {
 class Origin;
@@ -127,24 +132,20 @@ class URLPatternSet {
   // Test if the extent matches all URLs (for example, <all_urls>).
   bool MatchesAllURLs() const;
 
-  // Returns true if any pattern in this set matches the host in |test|, plus
-  // all subdomains of |test| if |require_match_subdomains| is true,
-  bool MatchesHost(const GURL& test, bool require_match_subdomains) const;
-
   bool MatchesSecurityOrigin(const GURL& origin) const;
 
   // Returns true if there is a single URL that would be in two extents.
   bool OverlapsWith(const URLPatternSet& other) const;
 
   // Converts to and from Value for serialization to preferences.
-  base::Value::List ToValue() const;
-  bool Populate(const base::Value::List& value,
+  std::unique_ptr<base::ListValue> ToValue() const;
+  bool Populate(const base::ListValue& value,
                 int valid_schemes,
                 bool allow_file_access,
                 std::string* error);
 
   // Converts to and from a vector of strings.
-  std::vector<std::string> ToStringVector() const;
+  std::unique_ptr<std::vector<std::string>> ToStringVector() const;
   bool Populate(const std::vector<std::string>& patterns,
                 int valid_schemes,
                 bool allow_file_access,

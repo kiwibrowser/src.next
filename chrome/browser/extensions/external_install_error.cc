@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -191,7 +191,7 @@ void ExternalInstallMenuAlert::ShowBubbleView(Browser* browser) {
 }
 
 GlobalErrorBubbleViewBase* ExternalInstallMenuAlert::GetBubbleView() {
-  return nullptr;
+  return NULL;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -405,7 +405,7 @@ void ExternalInstallError::ShowDialog(Browser* browser) {
   DCHECK(install_ui_.get());
   DCHECK(prompt_.get());
   DCHECK(browser);
-  content::WebContents* web_contents = nullptr;
+  content::WebContents* web_contents = NULL;
   web_contents = browser->tab_strip_model()->GetActiveWebContents();
   manager_->DidChangeInstallAlertVisibility(this, true);
   ExtensionInstallPrompt::GetDefaultShowDialogCallback().Run(
@@ -428,12 +428,12 @@ void ExternalInstallError::OnWebstoreRequestFailure(
 void ExternalInstallError::OnWebstoreResponseParseSuccess(
     const std::string& extension_id,
     std::unique_ptr<base::DictionaryValue> webstore_data) {
+  std::string localized_user_count;
   absl::optional<double> average_rating =
       webstore_data->FindDoubleKey(kAverageRatingKey);
   absl::optional<int> rating_count = webstore_data->FindIntKey(kRatingCountKey);
-  const std::string* localized_user_count =
-      webstore_data->GetDict().FindString(kUsersKey);
-  if (!localized_user_count || !average_rating || !rating_count) {
+  if (!webstore_data->GetString(kUsersKey, &localized_user_count) ||
+      !average_rating || !rating_count) {
     // If we don't get a valid webstore response, short circuit, and continue
     // to show a prompt without webstore data.
     OnFetchComplete();
@@ -445,9 +445,8 @@ void ExternalInstallError::OnWebstoreResponseParseSuccess(
   absl::optional<bool> show_user_count =
       webstore_data->FindBoolKey(kShowUserCountKey);
 
-  prompt_->SetWebstoreData(*localized_user_count,
-                           show_user_count.value_or(true), *average_rating,
-                           *rating_count);
+  prompt_->SetWebstoreData(localized_user_count, show_user_count.value_or(true),
+                           *average_rating, *rating_count);
   OnFetchComplete();
 }
 

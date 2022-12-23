@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors
+// Copyright 2020 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,10 +37,10 @@ void RegisterPoliciesForChannelAssociatedInterfaces(
       .SetAssociatedPolicy<subresource_filter::mojom::SubresourceFilterHost>(
           content::MojoBinderAssociatedPolicy::kGrant);
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-  // LocalFrameHost supports content scripts related APIs, which are
-  // RequestScriptInjectionPermission, GetInstallState, SendRequestIPC, and
-  // notifying CSS selector updates. These APIs are used by Chrome Extensions
-  // under proper permission managements beyond the page boundaries.
+  // TODO(https://crbug.com/1278141): Revisit this decision after Prerender2
+  // support desktops.
+  // TODO(https://crbug.com/1259007): Introduce kExperimentalGrant and
+  // replace kGrant with kExperimentalGrant.
   if (blink::features::IsPrerender2Enabled()) {
     policy_map.SetAssociatedPolicy<extensions::mojom::LocalFrameHost>(
         content::MojoBinderAssociatedPolicy::kGrant);

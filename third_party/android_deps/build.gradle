@@ -40,7 +40,7 @@ dependencies {
     // Note about the configuration names: they are defined in buildSrc/ChromiumPlugin
 
     // Replacement for com.android.support:design
-    compile 'com.google.android.material:material:1.7.0-alpha02'
+    compile 'com.google.android.material:material:1.6.0-alpha01'
 
     compile 'com.google.android.play:core:1.10.0'
 
@@ -175,7 +175,7 @@ dependencies {
     buildCompileNoDeps "com.android.tools.layoutlib:layoutlib-api:${androidToolsVersion}"
     buildCompile 'org.jetbrains.kotlin:kotlin-stdlib:1.4.32'
 
-    androidTestCompile 'com.google.android.apps.common.testing.accessibility.framework:accessibility-test-framework:4.0.0'
+    androidTestCompile 'com.google.android.apps.common.testing.accessibility.framework:accessibility-test-framework:3.1.2'
     // accessibility-test-framework:3.1.2 depends on jsoup 1.12, which has a security
     // vulnerability, so grab a later version.
     androidTestCompile 'org.jsoup:jsoup:1.14.3'
@@ -183,9 +183,7 @@ dependencies {
     // Version 1.2 is needed by espresso-web, but we'll newer 1.2.1.
     androidTestCompile 'org.ccil.cowan.tagsoup:tagsoup:1.2.1'
 
-    androidTestCompile "org.mockito:mockito-core:4.7.0"
-
-    String robolectricVersion = '4.8.1'
+    String robolectricVersion = '4.7.3'
     // Use testCompile to avoid having support_android = true set on
     // robolectric dependencies.
     testCompile "org.robolectric:robolectric:${robolectricVersion}"

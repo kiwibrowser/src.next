@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,7 +33,6 @@
 #include "components/favicon_base/favicon_usage_data.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/keyword_id.h"
-#include "components/history/core/browser/url_row.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "sql/init_status.h"
 #include "ui/base/page_transition_types.h"
@@ -168,6 +167,11 @@ class HistoryService : public KeyedService {
   // should be the unique ID of the current navigation entry in the given
   // process.
   //
+  // `floc_allowed` indicates whether this URL visit can be included in FLoC
+  // computation. See VisitRow::floc_allowed for details.
+  // TODO(yaoxia): Remove the floc_allowed param from this API as well as from
+  // HistoryAddPageArgs. This bit will never be set at this point.
+  //
   // TODO(avi): This is no longer true. 'page id' was removed years ago, and
   // their uses replaced by globally-unique nav_entry_ids. Is ContextID still
   // needed? https://crbug.com/859902
@@ -190,7 +194,8 @@ class HistoryService : public KeyedService {
                const RedirectList& redirects,
                ui::PageTransition transition,
                VisitSource visit_source,
-               bool did_replace_entry);
+               bool did_replace_entry,
+               bool floc_allowed);
 
   // For adding pages to history where no tracking information can be done.
   void AddPage(const GURL& url, base::Time time, VisitSource visit_source);
@@ -221,25 +226,6 @@ class HistoryService : public KeyedService {
   void SetBrowsingTopicsAllowed(ContextID context_id,
                                 int nav_entry_id,
                                 const GURL& url);
-
-  // Updates the history database by setting the detected language of the page
-  // content.
-  // The page can be identified by the combination of the context id, the
-  // navigation entry id and the url. No-op if the page is not found.
-  void SetPageLanguageForVisit(ContextID context_id,
-                               int nav_entry_id,
-                               const GURL& url,
-                               const std::string& page_language);
-
-  // Updates the history database by setting the "password state", i.e. whether
-  // a password form was found on the page.
-  // The page can be identified by the combination of the context id, the
-  // navigation entry id and the url. No-op if the page is not found.
-  void SetPasswordStateForVisit(
-      ContextID context_id,
-      int nav_entry_id,
-      const GURL& url,
-      VisitContentAnnotations::PasswordState password_state);
 
   // Updates the history database with the content model annotations for the
   // visit.
@@ -550,10 +536,8 @@ class HistoryService : public KeyedService {
 
   // Clusters ------------------------------------------------------------------
 
-  // Sets or updates all on-close fields of the `VisitContextAnnotations`
-  // for the visit with the given `visit_id`. The on-visit fields remain
-  // unchanged.
-  void SetOnCloseContextAnnotationsForVisit(
+  // Add a `AnnotatedVisitRow`.
+  void AddContextAnnotationsForVisit(
       VisitID visit_id,
       const VisitContextAnnotations& visit_context_annotations);
 
@@ -735,10 +719,12 @@ class HistoryService : public KeyedService {
 
   // Observers ----------------------------------------------------------------
 
-  // Notify all HistoryServiceObservers registered that there's a `new_visit`
-  // for `url_row`. This happens when the user visited the URL on this machine,
-  // or if Sync has brought over a remote visit onto this device.
-  void NotifyURLVisited(const URLRow& url_row, const VisitRow& new_visit);
+  // Notify all HistoryServiceObservers registered that user is visiting a URL.
+  // The `row` ID will be set to the value that is currently in effect in the
+  // main history database.
+  void NotifyURLVisited(ui::PageTransition transition,
+                        const URLRow& row,
+                        base::Time visit_time);
 
   // Notify all HistoryServiceObservers registered that URLs have been added or
   // modified. `changed_urls` contains the list of affects URLs.

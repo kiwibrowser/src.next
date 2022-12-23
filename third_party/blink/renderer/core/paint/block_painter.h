@@ -41,8 +41,6 @@ class BlockPainter {
  private:
   void PaintBlockFlowContents(const PaintInfo&, const PhysicalOffset&);
   void PaintCarets(const PaintInfo&, const PhysicalOffset& paint_offset);
-  bool PaintOverflowControls(const PaintInfo&,
-                             const PhysicalOffset& paint_offset);
 
   bool ShouldPaint(const ScopedPaintState&) const;
 

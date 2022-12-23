@@ -25,7 +25,6 @@
 
 #include "third_party/blink/renderer/core/frame/history.h"
 
-#include "base/metrics/histogram_functions.h"
 #include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-shared.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -302,20 +301,8 @@ void History::StateObjectAdded(scoped_refptr<SerializedScriptValue> data,
   }
 
   KURL full_url = UrlForState(url_string);
-  bool can_change = CanChangeToUrlForHistoryApi(
-      full_url, DomWindow()->GetSecurityOrigin(), DomWindow()->Url());
-
-  if (DomWindow()->GetSecurityOrigin()->IsGrantedUniversalAccess()) {
-    // Log the case when 'pushState'/'replaceState' is allowed only because
-    // of IsGrantedUniversalAccess ie there is no other condition which should
-    // allow the change (!can_change).
-    base::UmaHistogramBoolean(
-        "Android.WebView.UniversalAccess.OriginUrlMismatchInHistoryUtil",
-        !can_change);
-    can_change = true;
-  }
-
-  if (!can_change) {
+  if (!CanChangeToUrlForHistoryApi(full_url, DomWindow()->GetSecurityOrigin(),
+                                   DomWindow()->Url())) {
     // We can safely expose the URL to JavaScript, as a) no redirection takes
     // place: JavaScript already had this URL, b) JavaScript can only access a
     // same-origin History object.
@@ -339,9 +326,9 @@ void History::StateObjectAdded(scoped_refptr<SerializedScriptValue> data,
   }
 
   if (auto* navigation_api = NavigationApi::navigation(*DomWindow())) {
-    auto* params = MakeGarbageCollected<NavigateEventDispatchParams>(
-        full_url, NavigateEventType::kHistoryApi, type);
-    params->state_object = data.get();
+    NavigationApi::DispatchParams params(full_url,
+                                         NavigateEventType::kHistoryApi, type);
+    params.state_object = data.get();
     if (navigation_api->DispatchNavigateEvent(params) !=
         NavigationApi::DispatchResult::kContinue) {
       return;

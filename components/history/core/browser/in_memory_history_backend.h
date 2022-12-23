@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -73,9 +73,10 @@ class InMemoryHistoryBackend : public HistoryServiceObserver {
   friend class InMemoryHistoryBackendTest;
 
   // HistoryServiceObserver:
-  void OnURLVisited(history::HistoryService* history_service,
-                    const history::URLRow& url_row,
-                    const history::VisitRow& new_visit) override;
+  void OnURLVisited(HistoryService* history_service,
+                    ui::PageTransition transition,
+                    const URLRow& row,
+                    base::Time visit_time) override;
   void OnURLsModified(HistoryService* history_service,
                       const URLRows& changed_urls) override;
   void OnURLsDeleted(HistoryService* history_service,

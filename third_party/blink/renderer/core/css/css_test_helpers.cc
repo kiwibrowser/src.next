@@ -71,22 +71,22 @@ CSSStyleSheet* CreateStyleSheet(Document& document) {
       document, NullURL(), TextPosition::MinimumPosition(), UTF8Encoding());
 }
 
-PropertyRegistration* CreatePropertyRegistration(const String& name,
-                                                 String syntax,
-                                                 const CSSValue* initial_value,
-                                                 bool is_inherited) {
-  auto syntax_definition = CSSSyntaxStringParser(syntax).Parse();
+PropertyRegistration* CreatePropertyRegistration(const String& name) {
+  auto syntax_definition = CSSSyntaxStringParser("*").Parse();
   DCHECK(syntax_definition);
-  DCHECK(syntax_definition->IsUniversal() || initial_value);
   return MakeGarbageCollected<PropertyRegistration>(
-      AtomicString(name), *syntax_definition, is_inherited, initial_value);
+      AtomicString(name), *syntax_definition, false /* inherits */,
+      nullptr /* initial */, nullptr /* initial_variable_data */);
 }
 
 PropertyRegistration* CreateLengthRegistration(const String& name, int px) {
+  auto syntax_definition = CSSSyntaxStringParser("<length>").Parse();
+  DCHECK(syntax_definition);
   const CSSValue* initial =
       CSSNumericLiteralValue::Create(px, CSSPrimitiveValue::UnitType::kPixels);
-  return CreatePropertyRegistration(name, "<length>", initial,
-                                    false /* is_inherited */);
+  return MakeGarbageCollected<PropertyRegistration>(
+      AtomicString(name), *syntax_definition, false /* inherits */, initial,
+      CreateVariableData(initial->CssText()));
 }
 
 void RegisterProperty(Document& document,
@@ -223,10 +223,9 @@ CSSSelectorList ParseSelectorList(const String& string) {
   CSSTokenizer tokenizer(string);
   const auto tokens = tokenizer.TokenizeToEOF();
   CSSParserTokenRange range(tokens);
-  Arena arena;
-  CSSSelectorVector<> vector =
-      CSSSelectorParser<>::ParseSelector(range, context, sheet, arena);
-  return CSSSelectorList::AdoptSelectorVector</*UseArena=*/true>(vector);
+  CSSSelectorVector vector =
+      CSSSelectorParser::ParseSelector(range, context, sheet);
+  return CSSSelectorList::AdoptSelectorVector(vector);
 }
 
 }  // namespace css_test_helpers

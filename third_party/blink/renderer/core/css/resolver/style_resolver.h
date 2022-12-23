@@ -50,6 +50,7 @@ class Element;
 class Interpolation;
 class MatchResult;
 class PropertyHandle;
+class RuleSet;
 class StyleCascade;
 class StyleRecalcContext;
 class StyleRuleUsageTracker;
@@ -95,11 +96,11 @@ class CORE_EXPORT StyleResolver final : public GarbageCollected<StyleResolver> {
       const AtomicString& page_name);
   scoped_refptr<const ComputedStyle> StyleForText(Text*);
   scoped_refptr<ComputedStyle> StyleForViewport();
-  scoped_refptr<const ComputedStyle> StyleForFormattedText(
+  scoped_refptr<const ComputedStyle> StyleForCanvasFormattedText(
       bool is_text_run,
       const ComputedStyle& parent_style,
       const CSSPropertyValueSet* css_property_value_set);
-  scoped_refptr<const ComputedStyle> StyleForFormattedText(
+  scoped_refptr<const ComputedStyle> StyleForCanvasFormattedText(
       bool is_text_run,
       const FontDescription& default_font,
       const CSSPropertyValueSet* css_property_value_set);
@@ -224,6 +225,9 @@ class CORE_EXPORT StyleResolver final : public GarbageCollected<StyleResolver> {
                            StyleCascade& cascade,
                            ActiveInterpolationsMap& interpolations);
 
+  // FIXME: This should probably go away, folded into FontBuilder.
+  void UpdateFont(StyleResolverState&);
+
   void AddMatchedRulesToTracker(const ElementRuleCollector&);
 
   void CollectPseudoRulesForElement(const Element&,
@@ -231,7 +235,7 @@ class CORE_EXPORT StyleResolver final : public GarbageCollected<StyleResolver> {
                                     PseudoId,
                                     const AtomicString& document_transition_tag,
                                     unsigned rules_to_include);
-  void MatchRuleSets(ElementRuleCollector&, const MatchRequest&);
+  void MatchRuleSet(ElementRuleCollector&, RuleSet*);
   void MatchUARules(const Element&, ElementRuleCollector&);
   void MatchUserRules(ElementRuleCollector&);
   void MatchPresentationalHints(StyleResolverState&, ElementRuleCollector&);
@@ -311,9 +315,9 @@ class CORE_EXPORT StyleResolver final : public GarbageCollected<StyleResolver> {
 
   Member<StyleRuleUsageTracker> tracker_;
 
-  // This is a dummy/disconnected element that we use for FormattedText
-  // style computations; see `EnsureElementForFormattedText`.
-  Member<Element> formatted_text_element_;
+  // This is a dummy/disconnected element that we use for CanvasFormattedText
+  // style computations; see `EnsureElementForCanvasFormattedText`.
+  Member<Element> canvas_formatted_text_element_;
 
   bool print_media_type_ = false;
   bool was_viewport_resized_ = false;
@@ -322,8 +326,8 @@ class CORE_EXPORT StyleResolver final : public GarbageCollected<StyleResolver> {
   friend class StyleResolverTest;
   FRIEND_TEST_ALL_PREFIXES(StyleResolverTest, TreeScopedReferences);
 
-  Element& EnsureElementForFormattedText();
-  scoped_refptr<const ComputedStyle> StyleForFormattedText(
+  Element& EnsureElementForCanvasFormattedText();
+  scoped_refptr<const ComputedStyle> StyleForCanvasFormattedText(
       bool is_text_run,
       const FontDescription* default_font,
       const ComputedStyle* parent_style,

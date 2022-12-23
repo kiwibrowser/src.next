@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -266,8 +266,7 @@ bool UnpackedInstaller::LoadExtension(mojom::ManifestLocation location,
 
   return extension() &&
          extension_l10n_util::ValidateExtensionLocales(
-             extension_path_, extension()->manifest()->value()->GetDict(),
-             error) &&
+             extension_path_, extension()->manifest()->value(), error) &&
          IndexAndPersistRulesIfNeeded(error);
 }
 

@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors
+# Copyright 2014 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -147,7 +147,6 @@ android_library("content_full_java") {
     "//build/android:build_java",
     "//components/download/public/common:public_java",
     "//components/payments/mojom:mojom_java",
-    "//content/public/common:common_java",
     "//content/public/common:trust_tokens_mojo_bindings_java",
     "//device/bluetooth:java",
     "//device/gamepad:java",
@@ -240,7 +239,6 @@ android_library("content_full_java") {
     "java/src/org/chromium/content/browser/accessibility/AccessibilityActionAndEventTracker.java",
     "java/src/org/chromium/content/browser/accessibility/AccessibilityDelegate.java",
     "java/src/org/chromium/content/browser/accessibility/AccessibilityEventDispatcher.java",
-    "java/src/org/chromium/content/browser/accessibility/AccessibilityHistogramRecorder.java",
     "java/src/org/chromium/content/browser/accessibility/AccessibilityNodeInfoUtils.java",
     "java/src/org/chromium/content/browser/accessibility/BrowserAccessibilityState.java",
     "java/src/org/chromium/content/browser/accessibility/OViewStructureBuilder.java",
@@ -392,14 +390,12 @@ java_cpp_enum("content_public_android_java_enums_srcjar") {
   sources = [
     "//content/browser/android/select_popup.cc",
     "//content/public/browser/android/child_process_importance.h",
-    "//content/public/browser/android/message_payload_type.h",
     "//content/public/browser/android/motion_event_action.h",
     "//content/public/browser/bluetooth_scanning_prompt.h",
     "//content/public/browser/browser_task_traits.h",
     "//content/public/browser/browsing_data_remover.h",
     "//content/public/browser/invalidate_type.h",
     "//content/public/browser/navigation_controller.h",
-    "//content/public/browser/overlay_window.h",
     "//content/public/browser/render_frame_host.h",
     "//content/public/browser/visibility.h",
     "//content/public/common/console_message_level.h",
@@ -626,7 +622,6 @@ robolectric_binary("content_junit_tests") {
     "junit/src/org/chromium/content/browser/BindingManagerTest.java",
     "junit/src/org/chromium/content/browser/ChildProcessConnectionMetricsUnitTest.java",
     "junit/src/org/chromium/content/browser/ChildProcessRankingTest.java",
-    "junit/src/org/chromium/content/browser/GestureListenerManagerImplUnitTest.java",
     "junit/src/org/chromium/content/browser/ScreenOrientationProviderImplTest.java",
     "junit/src/org/chromium/content/browser/SpareChildConnectionTest.java",
     "junit/src/org/chromium/content/browser/UiThreadTaskTraitsImplTest.java",
@@ -643,7 +638,6 @@ robolectric_binary("content_junit_tests") {
     "junit/src/org/chromium/content/browser/selection/SelectionPopupControllerTest.java",
     "junit/src/org/chromium/content/browser/selection/SmartSelectionEventProcessorTest.java",
     "junit/src/org/chromium/content/browser/sms/SmsProviderGmsTest.java",
-    "junit/src/org/chromium/content/browser/webcontents/WebContentsImplTest.java",
     "junit/src/org/chromium/content_public/browser/MessagePayloadTest.java",
   ]
 
@@ -653,7 +647,6 @@ robolectric_binary("content_junit_tests") {
     "//base:base_java_process_launcher_test_support",
     "//base:base_java_test_support",
     "//base:base_junit_test_support",
-    "//content/public/common:common_java",
     "//content/public/test/android:content_java_test_support",
     "//media/mojo/mojom:mojom_java",
     "//mojo/public/java:base_java",
@@ -663,7 +656,6 @@ robolectric_binary("content_junit_tests") {
     "//third_party/androidx:androidx_test_core_java",
     "//third_party/androidx:androidx_test_runner_java",
     "//third_party/blink/public/mojom:android_mojo_bindings_java",
-    "//third_party/blink/public/mojom:mojom_platform_java",
     "//third_party/hamcrest:hamcrest_java",
     "//third_party/junit",
     "//third_party/mockito:mockito_java",

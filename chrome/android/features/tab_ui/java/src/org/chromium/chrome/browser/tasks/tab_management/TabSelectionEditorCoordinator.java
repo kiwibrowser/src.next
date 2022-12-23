@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,10 +20,8 @@ import org.chromium.base.TraceEvent;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.chrome.browser.tasks.pseudotab.PseudoTab;
 import org.chromium.chrome.browser.tasks.tab_management.TabListCoordinator.TabListMode;
 import org.chromium.chrome.tab_ui.R;
 import org.chromium.components.browser_ui.widget.gesture.BackPressHandler;
@@ -79,22 +77,11 @@ class TabSelectionEditorCoordinator {
          * @param actionButtonEnablingThreshold The minimum threshold to enable the action button.
          *         If it's -1 use the default value.
          * @param navigationProvider The {@link TabSelectionEditorNavigationProvider} that specifies
-         *         the back action.
          */
         void configureToolbar(@Nullable String actionButtonText,
                 @Nullable Integer actionButtonDescriptionResourceId,
                 @Nullable TabSelectionEditorActionProvider actionProvider,
                 int actionButtonEnablingThreshold,
-                @Nullable TabSelectionEditorNavigationProvider navigationProvider);
-
-        /**
-         * Configure the Toolbar for TabSelectionEditor with multiple actions. Requires
-         * {@link ChromeFeatureList.TAB_SELECTION_EDITOR_V2} to be enabled.
-         * @param actions The {@link TabSelectionEditorAction} to make available.
-         * @param navigationProvider The {@link TabSelectionEditorNavigationProvider} that specifies
-         *         the back action.
-         */
-        void configureToolbarWithMenuItems(List<TabSelectionEditorAction> actions,
                 @Nullable TabSelectionEditorNavigationProvider navigationProvider);
 
         /**
@@ -137,35 +124,23 @@ class TabSelectionEditorCoordinator {
 
     public TabSelectionEditorCoordinator(Context context, ViewGroup parentView,
             TabModelSelector tabModelSelector, TabContentManager tabContentManager,
-            @TabListMode int mode, ViewGroup rootView, boolean displayGroups) {
+            @TabListMode int mode, ViewGroup rootView) {
         try (TraceEvent e = TraceEvent.scoped("TabSelectionEditorCoordinator.constructor")) {
             mContext = context;
             mParentView = parentView;
             mTabModelSelector = tabModelSelector;
             assert mode == TabListCoordinator.TabListMode.GRID
                     || mode == TabListCoordinator.TabListMode.LIST;
-            assert !displayGroups
-                    || (displayGroups
-                            && ChromeFeatureList.isEnabled(
-                                    ChromeFeatureList.TAB_SELECTION_EDITOR_V2));
 
             mTabSelectionEditorLayout =
                     LayoutInflater.from(context)
                             .inflate(R.layout.tab_selection_editor_layout, parentView, false)
                             .findViewById(R.id.selectable_list);
 
-            TabListMediator.ThumbnailProvider thumbnailProvider = displayGroups
-                    ? new MultiThumbnailCardProvider(context, tabContentManager, tabModelSelector)
-                    : tabContentManager::getTabThumbnailWithCallback;
-            PseudoTab.TitleProvider titleProvider = displayGroups ? this::getTitle : null;
-
-            // TODO(ckitagawa): Lazily instantiate the TabSelectionEditorCoordinator. When doing so,
-            // the Coordinator hosting the TabSelectionEditorCoordinator could share and reconfigure
-            // its TabListCoordinator to work with the editor as an optimization.
             mTabListCoordinator = new TabListCoordinator(mode, context, mTabModelSelector,
-                    thumbnailProvider, titleProvider, displayGroups, null, null,
+                    tabContentManager::getTabThumbnailWithCallback, null, false, null, null,
                     TabProperties.UiType.SELECTABLE, this::getSelectionDelegate, null,
-                    mTabSelectionEditorLayout, false, COMPONENT_NAME, rootView, null);
+                    mTabSelectionEditorLayout, false, COMPONENT_NAME, rootView);
 
             // Note: The TabSelectionEditorCoordinator is always created after native is
             // initialized.
@@ -207,8 +182,7 @@ class TabSelectionEditorCoordinator {
                     mModel, mTabSelectionEditorLayout, TabSelectionEditorLayoutBinder::bind, false);
 
             mTabSelectionEditorMediator = new TabSelectionEditorMediator(mContext,
-                    mTabModelSelector, this::resetWithListOfTabs, mModel, mSelectionDelegate,
-                    mTabSelectionEditorLayout.getToolbar(), displayGroups);
+                    mTabModelSelector, this::resetWithListOfTabs, mModel, mSelectionDelegate);
         }
     }
 
@@ -223,25 +197,14 @@ class TabSelectionEditorCoordinator {
      * Resets {@link TabListCoordinator} with the provided list.
      * @param tabs List of {@link Tab}s to reset.
      * @param preSelectedCount First {@code preSelectedCount} {@code tabs} are pre-selected.
-     * @param quickMode whether to use quick mode.
      */
-    void resetWithListOfTabs(@Nullable List<Tab> tabs, int preSelectedCount, boolean quickMode) {
-        mTabListCoordinator.resetWithListOfTabs(
-                PseudoTab.getListOfPseudoTab(tabs), quickMode, /*mruMode=*/false);
+    void resetWithListOfTabs(@Nullable List<Tab> tabs, int preSelectedCount) {
+        mTabListCoordinator.resetWithListOfTabs(tabs);
 
         if (tabs != null && preSelectedCount > 0 && preSelectedCount < tabs.size()) {
             mTabListCoordinator.addSpecialListItem(preSelectedCount, TabProperties.UiType.DIVIDER,
                     new PropertyModel.Builder(CARD_TYPE).with(CARD_TYPE, OTHERS).build());
         }
-    }
-
-    private String getTitle(Context context, PseudoTab tab) {
-        int numRelatedTabs = PseudoTab.getRelatedTabs(context, tab, mTabModelSelector).size();
-
-        if (numRelatedTabs == 1) return tab.getTitle();
-
-        return context.getResources().getQuantityString(
-                R.plurals.bottom_tab_grid_title_placeholder, numRelatedTabs, numRelatedTabs);
     }
 
     /**

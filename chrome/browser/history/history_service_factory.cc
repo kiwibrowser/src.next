@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/history/chrome_history_client.h"
+#include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/history/content/browser/content_visit_delegate.h"
@@ -13,6 +14,7 @@
 #include "components/history/core/browser/history_database_params.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/common/pref_names.h"
+#include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/keyed_service/core/service_access_type.h"
 #include "components/prefs/pref_service.h"
 
@@ -86,9 +88,9 @@ HistoryServiceFactory::GetDefaultFactory() {
 }
 
 HistoryServiceFactory::HistoryServiceFactory()
-    : ProfileKeyedServiceFactory(
+    : BrowserContextKeyedServiceFactory(
           "HistoryService",
-          ProfileSelections::BuildRedirectedInIncognito()) {
+          BrowserContextDependencyManager::GetInstance()) {
   DependsOn(BookmarkModelFactory::GetInstance());
 }
 
@@ -98,6 +100,11 @@ HistoryServiceFactory::~HistoryServiceFactory() {
 KeyedService* HistoryServiceFactory::BuildServiceInstanceFor(
     content::BrowserContext* context) const {
   return BuildHistoryService(context).release();
+}
+
+content::BrowserContext* HistoryServiceFactory::GetBrowserContextToUse(
+    content::BrowserContext* context) const {
+  return chrome::GetBrowserContextRedirectedInIncognito(context);
 }
 
 bool HistoryServiceFactory::ServiceIsNULLWhileTesting() const {

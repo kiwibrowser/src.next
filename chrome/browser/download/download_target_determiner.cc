@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -578,12 +578,14 @@ DownloadTargetDeterminer::DoRequestConfirmation() {
 
 void DownloadTargetDeterminer::RequestConfirmationDone(
     DownloadConfirmationResult result,
-    const base::FilePath& virtual_path) {
+    const base::FilePath& virtual_path,
+    absl::optional<download::DownloadSchedule> download_schedule) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!download_->IsTransient());
   DVLOG(20) << "User selected path:" << virtual_path.AsUTF8Unsafe();
 #if BUILDFLAG(IS_ANDROID)
   is_checking_dialog_confirmed_path_ = false;
+  download_schedule_ = std::move(download_schedule);
 #endif
   if (result == DownloadConfirmationResult::CANCELED) {
     RecordDownloadCancelReason(DownloadCancelReason::kTargetConfirmationResult);
@@ -708,7 +710,7 @@ enum ActionOnStalePluginList {
   IGNORE_IF_STALE_PLUGIN_LIST
 };
 
-void IsHandledBySafePlugin(content::BrowserContext* browser_context,
+void IsHandledBySafePlugin(int render_process_id,
                            const GURL& url,
                            const std::string& mime_type,
                            ActionOnStalePluginList stale_plugin_action,
@@ -724,7 +726,7 @@ void IsHandledBySafePlugin(content::BrowserContext* browser_context,
   content::PluginService* plugin_service =
       content::PluginService::GetInstance();
   bool plugin_found =
-      plugin_service->GetPluginInfo(browser_context, url, mime_type, false,
+      plugin_service->GetPluginInfo(render_process_id, url, mime_type, false,
                                     &is_stale, &plugin_info, &actual_mime_type);
   if (is_stale && stale_plugin_action == RETRY_IF_STALE_PLUGIN_LIST) {
     // The GetPlugins call causes the plugin list to be refreshed. Once that's
@@ -732,39 +734,24 @@ void IsHandledBySafePlugin(content::BrowserContext* browser_context,
     // after a single retry in order to avoid retrying indefinitely.
     plugin_service->GetPlugins(base::BindOnce(
         &InvokeClosureAfterGetPluginCallback,
-        base::BindOnce(&IsHandledBySafePlugin, browser_context, url, mime_type,
-                       IGNORE_IF_STALE_PLUGIN_LIST, std::move(callback))));
+        base::BindOnce(&IsHandledBySafePlugin, render_process_id, url,
+                       mime_type, IGNORE_IF_STALE_PLUGIN_LIST,
+                       std::move(callback))));
     return;
   }
   // In practice, we assume that retrying once is enough.
   DCHECK(!is_stale);
+  bool is_handled_safely =
+      plugin_found &&
+      (plugin_info.type == WebPluginInfo::PLUGIN_TYPE_PEPPER_IN_PROCESS ||
+       plugin_info.type == WebPluginInfo::PLUGIN_TYPE_PEPPER_OUT_OF_PROCESS ||
+       plugin_info.type == WebPluginInfo::PLUGIN_TYPE_BROWSER_PLUGIN);
   content::GetUIThreadTaskRunner({})->PostTask(
-      FROM_HERE,
-      base::BindOnce(std::move(callback), /*is_handled_safely=*/plugin_found));
+      FROM_HERE, base::BindOnce(std::move(callback), is_handled_safely));
 }
 
 }  // namespace
 #endif  // BUILDFLAG(ENABLE_PLUGINS)
-
-void DownloadTargetDeterminer::DetermineIfHandledSafelyHelper(
-    download::DownloadItem* download,
-    const base::FilePath& local_path,
-    const std::string& mime_type,
-    base::OnceCallback<void(bool)> callback) {
-  if (blink::IsSupportedMimeType(mime_type)) {
-    std::move(callback).Run(true);
-    return;
-  }
-
-#if BUILDFLAG(ENABLE_PLUGINS)
-  IsHandledBySafePlugin(content::DownloadItemUtils::GetBrowserContext(download),
-                        net::FilePathToFileURL(local_path), mime_type,
-                        RETRY_IF_STALE_PLUGIN_LIST, std::move(callback));
-
-#else
-  std::move(callback).Run(false);
-#endif
-}
 
 DownloadTargetDeterminer::Result
     DownloadTargetDeterminer::DoDetermineIfHandledSafely() {
@@ -778,13 +765,30 @@ DownloadTargetDeterminer::Result
   if (mime_type_.empty())
     return CONTINUE;
 
-  DetermineIfHandledSafelyHelper(
-      download_, local_path_, mime_type_,
+  if (blink::IsSupportedMimeType(mime_type_)) {
+    is_filetype_handled_safely_ = true;
+    return CONTINUE;
+  }
+
+#if BUILDFLAG(ENABLE_PLUGINS)
+  int render_process_id = -1;
+  content::WebContents* web_contents =
+      content::DownloadItemUtils::GetWebContents(download_);
+  if (web_contents)
+    render_process_id =
+        web_contents->GetPrimaryMainFrame()->GetProcess()->GetID();
+  IsHandledBySafePlugin(
+      render_process_id, net::FilePathToFileURL(local_path_), mime_type_,
+      RETRY_IF_STALE_PLUGIN_LIST,
       base::BindOnce(&DownloadTargetDeterminer::DetermineIfHandledSafelyDone,
                      weak_ptr_factory_.GetWeakPtr()));
   return QUIT_DOLOOP;
+#else
+  return CONTINUE;
+#endif
 }
 
+#if BUILDFLAG(ENABLE_PLUGINS)
 void DownloadTargetDeterminer::DetermineIfHandledSafelyDone(
     bool is_handled_safely) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -793,6 +797,7 @@ void DownloadTargetDeterminer::DetermineIfHandledSafelyDone(
   is_filetype_handled_safely_ = is_handled_safely;
   DoLoop();
 }
+#endif
 
 DownloadTargetDeterminer::Result
     DownloadTargetDeterminer::DoDetermineIfAdobeReaderUpToDate() {
@@ -1041,6 +1046,7 @@ void DownloadTargetDeterminer::ScheduleCallbackAndDeleteSelf(
   target_info->mime_type = mime_type_;
   target_info->is_filetype_handled_safely = is_filetype_handled_safely_;
   target_info->mixed_content_status = mixed_content_status_;
+  target_info->download_schedule = std::move(download_schedule_);
 #if BUILDFLAG(IS_ANDROID)
   // If |virtual_path_| is content URI, there is no need to prompt the user.
   if (local_path_.IsContentUri() && !virtual_path_.IsContentUri()) {

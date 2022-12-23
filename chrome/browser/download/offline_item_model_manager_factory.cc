@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors
+// Copyright 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,8 @@
 
 #include "base/memory/singleton.h"
 #include "chrome/browser/download/offline_item_model_manager.h"
+#include "chrome/browser/profiles/incognito_helpers.h"
+#include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "content/public/browser/browser_context.h"
 
 // static
@@ -21,13 +23,18 @@ OfflineItemModelManager* OfflineItemModelManagerFactory::GetForBrowserContext(
 }
 
 OfflineItemModelManagerFactory::OfflineItemModelManagerFactory()
-    : ProfileKeyedServiceFactory(
+    : BrowserContextKeyedServiceFactory(
           "OfflineItemModelManager",
-          ProfileSelections::BuildForRegularAndIncognito()) {}
+          BrowserContextDependencyManager::GetInstance()) {}
 
 OfflineItemModelManagerFactory::~OfflineItemModelManagerFactory() = default;
 
 KeyedService* OfflineItemModelManagerFactory::BuildServiceInstanceFor(
     content::BrowserContext* context) const {
   return new OfflineItemModelManager(context);
+}
+
+content::BrowserContext* OfflineItemModelManagerFactory::GetBrowserContextToUse(
+    content::BrowserContext* context) const {
+  return chrome::GetBrowserContextOwnInstanceInIncognito(context);
 }

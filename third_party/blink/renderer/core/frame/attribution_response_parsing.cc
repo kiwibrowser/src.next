@@ -19,6 +19,8 @@
 #include "third_party/blink/public/mojom/conversions/attribution_data_host.mojom-blink.h"
 #include "third_party/blink/renderer/platform/json/json_parser.h"
 #include "third_party/blink/renderer/platform/json/json_values.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
+#include "third_party/blink/renderer/platform/network/http_names.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/text/ascii_ctype.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -125,16 +127,14 @@ bool ParseAttributionFilterData(
     WTF::Vector<String> values;
 
     for (wtf_size_t j = 0; j < num_values; ++j) {
-      String value_str;
-      if (!array->at(j)->AsString(&value_str))
+      String value;
+      if (!array->at(j)->AsString(&value))
         return false;
 
-      if (value_str.CharactersSizeInBytes() >
-          kMaxBytesPerAttributionFilterString) {
+      if (value.CharactersSizeInBytes() > kMaxBytesPerAttributionFilterString)
         return false;
-      }
 
-      values.push_back(std::move(value_str));
+      values.push_back(std::move(value));
     }
 
     filter_data.filter_values.insert(entry.first, std::move(values));
@@ -210,6 +210,17 @@ bool ParseSourceRegistrationHeader(
   if (!object)
     return false;
 
+  String event_id_string;
+  if (!object->GetString("source_event_id", &event_id_string))
+    return false;
+  bool event_id_is_valid = false;
+  uint64_t event_id = event_id_string.ToUInt64Strict(&event_id_is_valid);
+
+  // For source registrations where there is no mechanism to raise an error,
+  // such as on an img element, it is more useful to log the source with
+  // default data so that a reporting origin can learn the failure mode.
+  source_data.source_event_id = event_id_is_valid ? event_id : 0;
+
   String destination_string;
   if (!object->GetString("destination", &destination_string))
     return false;
@@ -219,15 +230,7 @@ bool ParseSourceRegistrationHeader(
     return false;
   source_data.destination = std::move(destination);
 
-  // Treat invalid source_event_id, expiry, priority, and debug key as if they
-  // were not set.
-
-  if (String s; object->GetString("source_event_id", &s)) {
-    bool valid = false;
-    uint64_t source_event_id = s.ToUInt64Strict(&valid);
-    if (valid)
-      source_data.source_event_id = source_event_id;
-  }
+  // Treat invalid expiry, priority, and debug key as if they were not set.
 
   if (String s; object->GetString("priority", &s)) {
     bool valid = false;
@@ -294,15 +297,18 @@ bool ParseEventTriggerData(
     mojom::blink::EventTriggerDataPtr event_trigger =
         mojom::blink::EventTriggerData::New();
 
-    // Treat invalid trigger data, priority and deduplication key as if they
-    // were not set.
+    String trigger_data_string;
+    // A valid header must declare data for each sub-item.
+    if (!object_val->GetString("trigger_data", &trigger_data_string))
+      return false;
+    bool trigger_data_is_valid = false;
+    uint64_t trigger_data_value =
+        trigger_data_string.ToUInt64Strict(&trigger_data_is_valid);
 
-    if (String s; object_val->GetString("trigger_data", &s)) {
-      bool valid = false;
-      uint64_t trigger_data = s.ToUInt64Strict(&valid);
-      if (valid)
-        event_trigger->data = trigger_data;
-    }
+    // Default invalid data values to 0 so a report will get sent.
+    event_trigger->data = trigger_data_is_valid ? trigger_data_value : 0;
+
+    // Treat invalid priority and deduplication key as if they were not set.
 
     if (String s; object_val->GetString("priority", &s)) {
       bool valid = false;
@@ -504,6 +510,25 @@ bool ParseTriggerRegistrationHeader(
     trigger_data.debug_key = ParseDebugKey(s);
 
   return true;
+}
+
+mojom::blink::AttributionTriggerDataPtr ParseAttributionTriggerData(
+    const ResourceResponse& response) {
+  auto trigger_data = mojom::blink::AttributionTriggerData::New();
+
+  // Verify the current url is trustworthy and capable of registering triggers.
+  scoped_refptr<const SecurityOrigin> reporting_origin =
+      SecurityOrigin::Create(response.CurrentRequestUrl());
+  if (!reporting_origin->IsPotentiallyTrustworthy())
+    return nullptr;
+  trigger_data->reporting_origin = std::move(reporting_origin);
+
+  const AtomicString& trigger_json = response.HttpHeaderField(
+      http_names::kAttributionReportingRegisterTrigger);
+  if (!ParseTriggerRegistrationHeader(trigger_json, *trigger_data))
+    return nullptr;
+
+  return trigger_data;
 }
 
 }  // namespace blink::attribution_response_parsing

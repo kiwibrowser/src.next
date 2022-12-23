@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,6 @@
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/browser/ui/tabs/tab_group.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -142,11 +141,11 @@ WebContents* AddRestoredTabImpl(std::unique_ptr<WebContents> web_contents,
                                 bool from_session_restore) {
   TabStripModel* const tab_strip_model = browser->tab_strip_model();
 
-  int add_types = select ? AddTabTypes::ADD_ACTIVE : AddTabTypes::ADD_NONE;
+  int add_types = select ? TabStripModel::ADD_ACTIVE : TabStripModel::ADD_NONE;
   if (pin) {
     tab_index =
         std::min(tab_index, tab_strip_model->IndexOfFirstNonPinnedTab());
-    add_types |= AddTabTypes::ADD_PINNED;
+    add_types |= TabStripModel::ADD_PINNED;
   }
 
   const absl::optional<tab_groups::TabGroupId> surrounding_group =
@@ -293,8 +292,8 @@ WebContents* ReplaceRestoredTab(
   int insertion_index = tab_strip->active_index();
   tab_strip->InsertWebContentsAt(
       insertion_index + 1, std::move(web_contents),
-      AddTabTypes::ADD_ACTIVE | AddTabTypes::ADD_INHERIT_OPENER);
-  tab_strip->CloseWebContentsAt(insertion_index, TabCloseTypes::CLOSE_NONE);
+      TabStripModel::ADD_ACTIVE | TabStripModel::ADD_INHERIT_OPENER);
+  tab_strip->CloseWebContentsAt(insertion_index, TabStripModel::CLOSE_NONE);
 
   LoadRestoredTabIfVisible(browser, raw_web_contents);
 

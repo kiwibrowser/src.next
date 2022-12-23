@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors
+// Copyright 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -1539,7 +1539,8 @@ public class SelectionPopupControllerImpl extends ActionModeCallbackHelper
     private boolean isShareAvailable() {
         Intent intent = new Intent(Intent.ACTION_SEND);
         intent.setType("text/plain");
-        return PackageManagerUtils.canResolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY);
+        return !PackageManagerUtils.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+                        .isEmpty();
     }
 
     // The callback class that delivers the result from a SmartSelectionClient.

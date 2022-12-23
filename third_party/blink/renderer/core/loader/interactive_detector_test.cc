@@ -155,11 +155,6 @@ class InteractiveDetectorTest : public testing::Test,
     return detector_->ComputeTotalBlockingTime();
   }
 
-  scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner() {
-    return dummy_page_holder_->GetDocument().GetTaskRunner(
-        TaskType::kUserInteraction);
-  }
-
   ScopedTestingPlatformSupport<TestingPlatformSupportWithMockScheduler>
       platform_;
 
@@ -500,7 +495,7 @@ TEST_F(InteractiveDetectorTest, TaskLongerThan5sBlocksTTI) {
   SimulateFCPDetected(t0 + base::Seconds(3), t0 + base::Seconds(4));
 
   // Post a task with 6 seconds duration.
-  GetTaskRunner()->PostTask(
+  Thread::Current()->GetTaskRunner()->PostTask(
       FROM_HERE, WTF::Bind(&InteractiveDetectorTest::DummyTaskWithDuration,
                            WTF::Unretained(this), 6.0));
 
@@ -519,7 +514,7 @@ TEST_F(InteractiveDetectorTest, LongTaskAfterTTIDoesNothing) {
   SimulateFCPDetected(t0 + base::Seconds(3), t0 + base::Seconds(4));
 
   // Long task 1.
-  GetTaskRunner()->PostTask(
+  Thread::Current()->GetTaskRunner()->PostTask(
       FROM_HERE, WTF::Bind(&InteractiveDetectorTest::DummyTaskWithDuration,
                            WTF::Unretained(this), 0.1));
 
@@ -531,7 +526,7 @@ TEST_F(InteractiveDetectorTest, LongTaskAfterTTIDoesNothing) {
   EXPECT_EQ(GetInteractiveTime(), long_task_1_end_time);
 
   // Long task 2.
-  GetTaskRunner()->PostTask(
+  Thread::Current()->GetTaskRunner()->PostTask(
       FROM_HERE, WTF::Bind(&InteractiveDetectorTest::DummyTaskWithDuration,
                            WTF::Unretained(this), 0.1));
 

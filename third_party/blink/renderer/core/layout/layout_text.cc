@@ -192,7 +192,7 @@ LayoutText::LayoutText(Node* node, scoped_refptr<StringImpl> str)
   // Call GetSecureTextTimers() and GetSelectionDisplayItemClientMap() to ensure
   // map exists. They are called in pre-finalizer where allocation is not
   // allowed.
-  // TODO(yukiy): Remove these if FormattedTextRun::Dispose() can be
+  // TODO(yukiy): Remove these if CanvasFormattedTextRun::Dispose() can be
   // removed.
   GetSecureTextTimers();
   GetSelectionDisplayItemClientMap();
@@ -1854,6 +1854,57 @@ void LayoutText::LogicalStartingPointAndHeight(
     logical_starting_point = {text_box->LogicalLeft(), text_box->LogicalTop()};
     logical_height = LastTextBox()->LogicalBottom() - text_box->LogicalTop();
   }
+}
+
+LayoutUnit LayoutText::PhysicalAreaSize() const {
+  NOT_DESTROYED();
+  // This is not accurate when |this| starts or ends at the middle of a line,
+  // but we prefer performance over accuracy.
+  if (IsInLayoutNGInlineFormattingContext()) {
+    NGInlineCursor cursor;
+    cursor.MoveTo(*this);
+    if (!cursor)
+      return LayoutUnit(0);
+    PhysicalRect rect = cursor.Current().RectInContainerFragment();
+    cursor.MoveToLastForSameLayoutObject();
+    rect.Unite(cursor.Current().RectInContainerFragment());
+    return rect.Width() * rect.Height();
+  }
+
+  if (const auto* first_text_box = FirstTextBox()) {
+    if (const auto* last_text_box = LastTextBox()) {
+      LayoutUnit width =
+          std::max(first_text_box->LogicalRight(),
+                   last_text_box->LogicalRight()) -
+          std::min(first_text_box->LogicalLeft(), last_text_box->LogicalLeft());
+      LayoutUnit height =
+          last_text_box->LogicalBottom() - first_text_box->LogicalTop();
+      return width * height;
+    }
+  }
+  return LayoutUnit(0);
+}
+
+LayoutUnit LayoutText::PhysicalRightOffset() const {
+  NOT_DESTROYED();
+  // This is not accurate when |this| starts or ends at the middle of a line,
+  // but we prefer performance over accuracy.
+  if (IsInLayoutNGInlineFormattingContext()) {
+    NGInlineCursor cursor;
+    cursor.MoveTo(*this);
+    if (!cursor)
+      return LayoutUnit(0);
+    PhysicalRect rect = cursor.Current().RectInContainerFragment();
+    return rect.offset.left + rect.size.width;
+  }
+
+  if (const auto* first_text_box = FirstTextBox()) {
+    if (const auto* last_text_box = LastTextBox()) {
+      return std::max(first_text_box->FrameRect().MaxX(),
+                      last_text_box->FrameRect().MaxX());
+    }
+  }
+  return LayoutUnit(0);
 }
 
 bool LayoutText::CanOptimizeSetText() const {

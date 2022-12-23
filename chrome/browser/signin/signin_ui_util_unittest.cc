@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors
+// Copyright 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,6 @@
 #include "chrome/browser/signin/signin_promo.h"
 #include "chrome/browser/signin/signin_ui_delegate.h"
 #include "chrome/browser/signin/signin_util.h"
-#include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -322,7 +321,7 @@ TEST_F(SigninUiUtilTest, EnableSyncWithAccountThatNeedsReauth) {
               active_contents->GetVisibleURL());
     tab_strip->CloseWebContentsAt(
         tab_strip->GetIndexOfWebContents(active_contents),
-        TabCloseTypes::CLOSE_USER_GESTURE);
+        TabStripModel::CLOSE_USER_GESTURE);
   }
 }
 

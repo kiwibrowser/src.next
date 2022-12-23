@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -134,17 +134,13 @@ VisitContentAnnotations::VisitContentAnnotations(
     const std::vector<std::string>& related_searches,
     const GURL& search_normalized_url,
     const std::u16string& search_terms,
-    const std::string& alternative_title,
-    const std::string& page_language,
-    PasswordState password_state)
+    const std::string& alternative_title)
     : annotation_flags(annotation_flags),
       model_annotations(model_annotations),
       related_searches(related_searches),
       search_normalized_url(search_normalized_url),
       search_terms(search_terms),
-      alternative_title(alternative_title),
-      page_language(page_language),
-      password_state(password_state) {}
+      alternative_title(alternative_title) {}
 VisitContentAnnotations::VisitContentAnnotations() = default;
 VisitContentAnnotations::VisitContentAnnotations(
     const VisitContentAnnotations&) = default;

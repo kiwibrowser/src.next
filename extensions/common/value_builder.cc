@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,8 +16,7 @@ namespace extensions {
 DictionaryBuilder::DictionaryBuilder() : dict_(new base::DictionaryValue) {}
 
 DictionaryBuilder::DictionaryBuilder(const base::DictionaryValue& init)
-    : dict_(base::DictionaryValue::From(
-          base::Value::ToUniquePtrValue(init.Clone()))) {}
+    : dict_(init.CreateDeepCopy()) {}
 
 DictionaryBuilder::~DictionaryBuilder() {}
 

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,10 @@
 #include <memory>
 #include <utility>
 
+#include "ash/components/account_manager/account_manager_factory.h"
 #include "ash/components/arc/enterprise/arc_data_snapshotd_manager.h"
 #include "ash/components/arc/enterprise/snapshot_hours_policy_service.h"
+#include "ash/components/geolocation/simple_geolocation_provider.h"
 #include "ash/components/timezone/timezone_resolver.h"
 #include "base/bind.h"
 #include "base/check_op.h"
@@ -35,9 +37,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/component_updater/metadata_table_chromeos.h"
 #include "chrome/common/chrome_switches.h"
-#include "chromeos/ash/components/account_manager/account_manager_factory.h"
-#include "chromeos/ash/components/dbus/debug_daemon/debug_daemon_client.h"
-#include "chromeos/ash/components/geolocation/simple_geolocation_provider.h"
+#include "chromeos/dbus/debug_daemon/debug_daemon_client.h"
 #include "components/keep_alive_registry/keep_alive_types.h"
 #include "components/keep_alive_registry/scoped_keep_alive.h"
 #include "components/keyed_service/content/browser_context_keyed_service_shutdown_notifier_factory.h"
@@ -161,7 +161,7 @@ void BrowserProcessPlatformPart::InitializeSchedulerConfigurationManager() {
   DCHECK(!scheduler_configuration_manager_);
   scheduler_configuration_manager_ =
       std::make_unique<ash::SchedulerConfigurationManager>(
-          ash::DebugDaemonClient::Get(), g_browser_process->local_state());
+          chromeos::DebugDaemonClient::Get(), g_browser_process->local_state());
 }
 
 void BrowserProcessPlatformPart::ShutdownSchedulerConfigurationManager() {

@@ -7,7 +7,6 @@
 #include <memory>
 
 #include "base/memory/ptr_util.h"
-#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/resources/grit/blink_resources.h"
 #include "third_party/blink/renderer/core/dom/dom_token_list.h"
@@ -154,7 +153,7 @@ void ValidationMessageOverlayDelegate::CreatePage(const FrameOverlay& overlay) {
       nullptr, FrameInsertType::kInsertInConstructor, LocalFrameToken(),
       nullptr, nullptr);
   frame->SetView(MakeGarbageCollected<LocalFrameView>(*frame, view_size));
-  frame->Init(/*opener=*/nullptr, /*policy_container=*/nullptr, StorageKey());
+  frame->Init(/*opener=*/nullptr, /*policy_container=*/nullptr);
   frame->View()->SetCanHaveScrollbars(false);
   frame->View()->SetBaseBackgroundColor(Color::kTransparent);
   page_->GetVisualViewport().SetSize(view_size);

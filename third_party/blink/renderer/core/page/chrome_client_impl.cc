@@ -44,7 +44,6 @@
 #include "third_party/blink/public/common/page/page_zoom.h"
 #include "third_party/blink/public/common/widget/constants.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
-#include "third_party/blink/public/mojom/window_features/window_features.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/web/blink.h"
@@ -185,7 +184,7 @@ ChromeClientImpl::~ChromeClientImpl() {
 void ChromeClientImpl::Trace(Visitor* visitor) const {
   visitor->Trace(popup_opening_observers_);
   visitor->Trace(external_date_time_chooser_);
-  visitor->Trace(commit_observers_);
+  visitor->Trace(deferred_commit_observers_);
   ChromeClient::Trace(visitor);
 }
 
@@ -268,11 +267,10 @@ void ChromeClientImpl::StartDragging(LocalFrame* frame,
                                      const WebDragData& drag_data,
                                      DragOperationsMask mask,
                                      const SkBitmap& drag_image,
-                                     const gfx::Vector2d& cursor_offset,
-                                     const gfx::Rect& drag_obj_rect) {
+                                     const gfx::Point& drag_image_offset) {
   WebLocalFrameImpl* web_frame = WebLocalFrameImpl::FromFrame(frame);
-  web_frame->LocalRootFrameWidget()->StartDragging(
-      drag_data, mask, drag_image, cursor_offset, drag_obj_rect);
+  web_frame->LocalRootFrameWidget()->StartDragging(drag_data, mask, drag_image,
+                                                   drag_image_offset);
 }
 
 bool ChromeClientImpl::AcceptsLoadDrops() const {
@@ -288,22 +286,22 @@ Page* ChromeClientImpl::CreateWindowDelegate(
     network::mojom::blink::WebSandboxFlags sandbox_flags,
     const SessionStorageNamespaceId& session_storage_namespace_id,
     bool& consumed_user_gesture) {
-  if (!frame->GetPage() || frame->GetPage()->Paused())
+  DCHECK(web_view_);
+  if (!web_view_->Client())
     return nullptr;
 
-  WebLocalFrameImpl* web_frame = WebLocalFrameImpl::FromFrame(frame);
-  if (!web_frame)
+  if (!frame->GetPage() || frame->GetPage()->Paused())
     return nullptr;
 
   NotifyPopupOpeningObservers();
   const AtomicString& frame_name =
       !EqualIgnoringASCIICase(name, "_blank") ? name : g_empty_atom;
-  WebViewImpl* new_view =
-      static_cast<WebViewImpl*>(web_frame->Client()->CreateNewWindow(
-          WrappedResourceRequest(r.GetResourceRequest()), features, frame_name,
-          static_cast<WebNavigationPolicy>(r.GetNavigationPolicy()),
-          sandbox_flags, session_storage_namespace_id, consumed_user_gesture,
-          r.Impression(), r.GetPictureInPictureWindowOptions()));
+  WebViewImpl* new_view = To<WebViewImpl>(web_view_->Client()->CreateView(
+      WebLocalFrameImpl::FromFrame(frame),
+      WrappedResourceRequest(r.GetResourceRequest()), features, frame_name,
+      static_cast<WebNavigationPolicy>(r.GetNavigationPolicy()), sandbox_flags,
+      session_storage_namespace_id, consumed_user_gesture, r.Impression(),
+      r.GetPictureInPictureWindowOptions()));
   if (!new_view)
     return nullptr;
   return new_view->GetPage();
@@ -356,11 +354,11 @@ void ChromeClientImpl::SetOverscrollBehavior(
 void ChromeClientImpl::Show(LocalFrame& frame,
                             LocalFrame& opener_frame,
                             NavigationPolicy navigation_policy,
-                            const mojom::blink::WindowFeatures& window_features,
+                            const gfx::Rect& initial_rect,
                             bool user_gesture) {
   DCHECK(web_view_);
   const gfx::Rect rect_adjusted_for_minimum =
-      AdjustWindowRectForMinimum(window_features.bounds);
+      AdjustWindowRectForMinimum(initial_rect);
   const gfx::Rect adjusted_rect =
       AdjustWindowRectForDisplay(rect_adjusted_for_minimum, frame);
   // Request the unadjusted rect if the browser may honor cross-screen bounds.
@@ -1047,38 +1045,35 @@ void ChromeClientImpl::BeginLifecycleUpdates(LocalFrame& main_frame) {
   web_view_->StopDeferringMainFrameUpdate();
 }
 
-void ChromeClientImpl::RegisterForCommitObservation(CommitObserver* observer) {
-  commit_observers_.insert(observer);
+void ChromeClientImpl::RegisterForDeferredCommitObservation(
+    DeferredCommitObserver* observer) {
+  deferred_commit_observers_.insert(observer);
 }
 
-void ChromeClientImpl::UnregisterFromCommitObservation(
-    CommitObserver* observer) {
-  commit_observers_.erase(observer);
+void ChromeClientImpl::UnregisterFromDeferredCommitObservation(
+    DeferredCommitObserver* observer) {
+  deferred_commit_observers_.erase(observer);
 }
 
-void ChromeClientImpl::WillCommitCompositorFrame() {
+void ChromeClientImpl::OnDeferCommitsChanged(
+    bool defer_status,
+    cc::PaintHoldingReason reason,
+    absl::optional<cc::PaintHoldingCommitTrigger> trigger) {
+  DCHECK(defer_status || trigger);
   // Make a copy since callbacks may modify the set as we're iterating it.
-  auto observers = commit_observers_;
-  for (auto& observer : observers)
-    observer->WillCommitCompositorFrame();
-}
-
-std::unique_ptr<cc::ScopedPauseRendering> ChromeClientImpl::PauseRendering(
-    LocalFrame& frame) {
-  // If |frame| corresponds to an iframe this implies a transition in an iframe
-  // will pause rendering for the all ancestor frames (including the main frame)
-  // hosted in this process.
-  // TODO(khushalsagar): We need to switch to a different render-blocking
-  // mechanism for nested frames.
-  return WebLocalFrameImpl::FromFrame(frame)
-      ->FrameWidgetImpl()
-      ->PauseRendering();
+  auto observers = deferred_commit_observers_;
+  for (auto& observer : observers) {
+    if (defer_status)
+      observer->WillStartDeferringCommits(reason);
+    else
+      observer->WillStopDeferringCommits(*trigger);
+  }
 }
 
 bool ChromeClientImpl::StartDeferringCommits(LocalFrame& main_frame,
                                              base::TimeDelta timeout,
                                              cc::PaintHoldingReason reason) {
-  DCHECK(main_frame.IsLocalRoot());
+  DCHECK(main_frame.IsMainFrame());
   return WebLocalFrameImpl::FromFrame(main_frame)
       ->FrameWidgetImpl()
       ->StartDeferringCommits(timeout, reason);
@@ -1087,7 +1082,7 @@ bool ChromeClientImpl::StartDeferringCommits(LocalFrame& main_frame,
 void ChromeClientImpl::StopDeferringCommits(
     LocalFrame& main_frame,
     cc::PaintHoldingCommitTrigger trigger) {
-  DCHECK(main_frame.IsLocalRoot());
+  DCHECK(main_frame.IsMainFrame());
   WebLocalFrameImpl::FromFrame(main_frame)
       ->FrameWidgetImpl()
       ->StopDeferringCommits(trigger);
@@ -1148,17 +1143,6 @@ void ChromeClientImpl::SetTouchAction(LocalFrame* frame,
     return;
 
   widget->ProcessTouchAction(touch_action);
-}
-
-void ChromeClientImpl::SetPanAction(LocalFrame* frame,
-                                    mojom::blink::PanAction pan_action) {
-  DCHECK(frame);
-  WebLocalFrameImpl* web_frame = WebLocalFrameImpl::FromFrame(frame);
-  WebFrameWidgetImpl* widget = web_frame->LocalRootFrameWidget();
-  if (!widget)
-    return;
-
-  widget->SetPanAction(pan_action);
 }
 
 void ChromeClientImpl::DidAssociateFormControlsAfterLoad(LocalFrame* frame) {

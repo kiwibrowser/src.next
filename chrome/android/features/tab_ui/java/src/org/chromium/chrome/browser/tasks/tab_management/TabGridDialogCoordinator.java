@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -87,7 +87,7 @@ public class TabGridDialogCoordinator implements TabGridDialogMediator.DialogCon
                     activity, tabModelSelector, tabContentManager::getTabThumbnailWithCallback,
                     null, false, gridCardOnClickListenerProvider,
                     mMediator.getTabGridDialogHandler(), TabProperties.UiType.CLOSABLE, null, null,
-                    containerView, false, mComponentName, rootView, null);
+                    containerView, false, mComponentName, rootView);
             TabListRecyclerView recyclerView = mTabListCoordinator.getContainerView();
 
             TabGroupUiToolbarView toolbarView =
@@ -115,7 +115,7 @@ public class TabGridDialogCoordinator implements TabGridDialogMediator.DialogCon
                                                      : TabListCoordinator.TabListMode.GRID;
                 mTabSelectionEditorCoordinator = new TabSelectionEditorCoordinator(context,
                         mDialogView.findViewById(R.id.dialog_container_view), tabModelSelector,
-                        tabContentManager, mode, mRootView, false);
+                        tabContentManager, mode, mRootView);
 
                 controller = mTabSelectionEditorCoordinator.getController();
             } else {
@@ -165,16 +165,12 @@ public class TabGridDialogCoordinator implements TabGridDialogMediator.DialogCon
     @Override
     public void hideDialog(boolean showAnimation) {
         mMediator.hideDialog(showAnimation);
+        mTabListCoordinator.postHiding();
     }
 
     @Override
     public void prepareDialog() {
         mTabListCoordinator.prepareTabGridDialogView();
-    }
-
-    @Override
-    public void postHiding() {
-        mTabListCoordinator.postHiding();
     }
 
     @Override

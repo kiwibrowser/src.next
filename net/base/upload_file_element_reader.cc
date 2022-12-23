@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/task/task_runner.h"
+#include "base/task/task_runner_util.h"
 #include "net/base/file_stream.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"

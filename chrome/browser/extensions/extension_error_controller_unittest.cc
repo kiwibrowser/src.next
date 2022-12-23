@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,7 +52,7 @@ class MockExtensionErrorUI : public ExtensionErrorUI {
 // only ever have one (since this is a single-profile test), and this avoids
 // the need for any kind of accessor to the ErrorController from
 // ExtensionService.
-MockExtensionErrorUI* g_error_ui = nullptr;
+MockExtensionErrorUI* g_error_ui = NULL;
 
 MockExtensionErrorUI::MockExtensionErrorUI(ExtensionErrorUI::Delegate* delegate)
     : delegate_(delegate) {
@@ -62,7 +62,7 @@ MockExtensionErrorUI::MockExtensionErrorUI(ExtensionErrorUI::Delegate* delegate)
 }
 
 MockExtensionErrorUI::~MockExtensionErrorUI() {
-  g_error_ui = nullptr;
+  g_error_ui = NULL;
 }
 
 void MockExtensionErrorUI::CloseUI() {

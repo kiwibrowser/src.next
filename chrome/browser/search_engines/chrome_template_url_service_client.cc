@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,23 +53,24 @@ void ChromeTemplateURLServiceClient::SetKeywordSearchTermsForURL(
 void ChromeTemplateURLServiceClient::AddKeywordGeneratedVisit(const GURL& url) {
   if (history_service_)
     history_service_->AddPage(
-        url, base::Time::Now(), /*context_id=*/nullptr, /*nav_entry_id=*/0,
+        url, base::Time::Now(), /*context_id=*/NULL, /*nav_entry_id=*/0,
         /*referrer=*/GURL(), history::RedirectList(),
         ui::PAGE_TRANSITION_KEYWORD_GENERATED, history::SOURCE_BROWSED,
-        /*did_replace_entry=*/false);
+        /*did_replace_entry=*/false, /*publicly_routable=*/false);
 }
 
 void ChromeTemplateURLServiceClient::OnURLVisited(
     history::HistoryService* history_service,
-    const history::URLRow& url_row,
-    const history::VisitRow& new_visit) {
+    ui::PageTransition transition,
+    const history::URLRow& row,
+    base::Time visit_time) {
   DCHECK_EQ(history_service_, history_service);
   if (!owner_)
     return;
 
   TemplateURLService::URLVisitedDetails visited_details;
-  visited_details.url = url_row.url();
-  visited_details.is_keyword_transition = ui::PageTransitionCoreTypeIs(
-      new_visit.transition, ui::PAGE_TRANSITION_KEYWORD);
+  visited_details.url = row.url();
+  visited_details.is_keyword_transition =
+      ui::PageTransitionCoreTypeIs(transition, ui::PAGE_TRANSITION_KEYWORD);
   owner_->OnHistoryURLVisited(visited_details);
 }

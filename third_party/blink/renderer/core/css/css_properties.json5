@@ -622,22 +622,22 @@
       valid_type: "bool",
     },
 
-    // - valid_for_formatted_text: true
+    // - valid_for_canvas_formatted_text: true
     //
     // Whether the property can be used to style the top-level container
     // (similar to display:block, but supporting fewer properties), in the
     // experimental API to bring multiline text rendering to HTML canvas.
     // https://github.com/WICG/canvas-formatted-text/
-    valid_for_formatted_text: {
+    valid_for_canvas_formatted_text: {
       default: false,
       valid_type: "bool",
     },
 
-    // - valid_for_formatted_text_run: true
+    // - valid_for_canvas_formatted_text_run: true
     //
     // Whether the property can be used to style individual text runs, in the
     // experimental API to bring multiline text rendering to HTML canvas.
-    valid_for_formatted_text_run: {
+    valid_for_canvas_formatted_text_run: {
       default: false,
       valid_type: "bool",
     },
@@ -901,8 +901,8 @@
       valid_for_marker: true,
       valid_for_highlight_legacy: true,
       valid_for_highlight: true,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
       is_highlight_colors: true,
     },
     {
@@ -919,8 +919,8 @@
       style_builder_custom_functions: ["value"],
       priority: "High",
       valid_for_marker: true,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
     },
     {
       name: "font-family",
@@ -938,8 +938,8 @@
       valid_for_cue: true,
       valid_for_marker: true,
       tree_scoped_value: true,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
     },
     {
       name: "font-kerning",
@@ -954,8 +954,8 @@
       valid_for_first_letter: true,
       valid_for_first_line: true,
       valid_for_marker: true,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
     },
     {
       name: "font-optical-sizing",
@@ -1002,8 +1002,8 @@
       valid_for_first_line: true,
       valid_for_cue: true,
       valid_for_marker: true,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
     },
     {
       name: "font-size-adjust",
@@ -1040,8 +1040,8 @@
       valid_for_first_line: true,
       valid_for_cue: true,
       valid_for_marker: true,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
     },
     {
       name: "font-style",
@@ -1058,8 +1058,8 @@
       valid_for_first_line: true,
       valid_for_cue: true,
       valid_for_marker: true,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
     },
     {
       name: "font-variant-ligatures",
@@ -1080,8 +1080,8 @@
       valid_for_first_letter: true,
       valid_for_first_line: true,
       valid_for_marker: true,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
     },
     {
       name: "font-variant-caps",
@@ -1099,8 +1099,8 @@
       valid_for_first_letter: true,
       valid_for_first_line: true,
       valid_for_marker: true,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
     },
     {
       name: "font-variant-east-asian",
@@ -1118,8 +1118,8 @@
       valid_for_first_letter: true,
       valid_for_first_line: true,
       valid_for_marker: true,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
     },
     {
       name: "font-variant-numeric",
@@ -1138,8 +1138,8 @@
       valid_for_first_letter: true,
       valid_for_first_line: true,
       valid_for_marker: true,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
     },
     {
       name: "font-weight",
@@ -1157,8 +1157,8 @@
       valid_for_first_line: true,
       valid_for_cue: true,
       valid_for_marker: true,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
     },
     {
       name: "font-synthesis-weight",
@@ -1217,8 +1217,8 @@
       valid_for_first_line: true,
       valid_for_marker: true,
       computable: false,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
     },
     {
       name: "font-variation-settings",
@@ -1236,8 +1236,8 @@
       valid_for_cue: true,
       valid_for_marker: true,
       computable: false,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
     },
     {
       name: "-webkit-font-smoothing",
@@ -1296,7 +1296,7 @@
       style_builder_custom_functions: ["initial", "inherit", "value"],
       priority: "High",
       computable: false,
-      valid_for_formatted_text: true,
+      valid_for_canvas_formatted_text: true,
     },
     {
       name: "-webkit-text-orientation",
@@ -1319,7 +1319,7 @@
       type_name: "WritingMode",
       style_builder_custom_functions: ["initial", "inherit", "value"],
       priority: "High",
-      valid_for_formatted_text: true,
+      valid_for_canvas_formatted_text: true,
     },
     {
       name: "-webkit-writing-mode",
@@ -2359,9 +2359,9 @@
     {
       name: "container-type",
       property_methods: ["ParseSingleValue", "CSSValueFromComputedStyleInternal"],
-      keywords: ["normal", "inline-size", "size"],
+      keywords: ["normal", "inline-size", "size", "style"],
       field_group: "*",
-      field_size: 2,
+      field_size: 3,
       field_template: "primitive",
       default_value: "kContainerTypeNormal",
       type_name: "unsigned",
@@ -2811,8 +2811,34 @@
         resolver: "vertical",
       },
       supports_incremental_style: true,
-      valid_for_formatted_text: true,
+      valid_for_canvas_formatted_text: true,
       valid_for_position_fallback: true,
+    },
+    {
+      name: "hover-pop-up-delay",
+      runtime_flag: "HTMLPopupAttribute",
+      property_methods: ["ParseSingleValue", "CSSValueFromComputedStyleInternal"],
+      field_group: "*",
+      field_template: "primitive",
+      type_name: "float",
+      interpolable: true,
+      typedom_types: ["Time"],
+      converter: "ConvertTimeValue",
+      default_value: "0.5",
+      supports_incremental_style: true,
+    },
+    {
+      name: "hover-pop-up-hide-delay",
+      runtime_flag: "HTMLPopupAttribute",
+      property_methods: ["ParseSingleValue", "CSSValueFromComputedStyleInternal"],
+      field_group: "*",
+      field_template: "primitive",
+      type_name: "float",
+      interpolable: true,
+      typedom_types: ["Time"],
+      converter: "ConvertTimeValue",
+      default_value: "HUGE_VALF",
+      supports_incremental_style: true,
     },
     {
       name: "hyphens",
@@ -3690,6 +3716,7 @@
       field_template: "external",
       keywords: ["auto"],
       typedom_types: ["Keyword"],
+      runtime_flag: "NamedPages",
       computable: false,
     },
     {
@@ -3701,6 +3728,7 @@
       field_size: 2,
       default_value: "PageOrientation::kUpright",
       include_paths: ["third_party/blink/public/common/css/page_orientation.h"],
+      runtime_flag: "NamedPages",
       computable: false,
     },
     {
@@ -3815,7 +3843,7 @@
       name: "content-visibility",
       property_methods: ["ParseSingleValue", "CSSValueFromComputedStyleInternal"],
       field_template: "keyword",
-      keywords: ["visible", "auto", "hidden"],
+      keywords: ["visible", "auto", "hidden", "hidden-matchable"],
       default_value: "visible",
       typedom_types: ["Keyword"],
       computable: false,
@@ -3902,6 +3930,7 @@
         "auto", "stable", "both-edges"
       ],
       typedom_types: ["Keyword"],
+      runtime_flag: "ScrollbarGutter",
     },
     {
       name: "scrollbar-width",
@@ -3920,7 +3949,6 @@
       field_group: "*",
       field_size: 2, // FIXME: Convert this to a keyword field
       field_template: "primitive",
-      include_paths: ["third_party/blink/public/mojom/scroll/scroll_enums.mojom-blink.h"],
       default_value: "mojom::blink::ScrollBehavior::kAuto",
       type_name: "mojom::blink::ScrollBehavior",
       keywords: ["auto", "smooth"],
@@ -4184,28 +4212,6 @@
       computable: false,
     },
     {
-      name: "scroll-timeline-axis",
-      property_methods: ["ParseSingleValue", "CSSValueFromComputedStyleInternal", "InitialValue"],
-      field_group: "*->timeline",
-      field_template: "primitive",
-      field_size: 2,
-      type_name: "TimelineAxis",
-      default_value: "TimelineAxis::kBlock",
-      keywords: ["block", "inline", "vertical", "horizontal"],
-      typedom_types: ["Keyword"],
-      runtime_flag: "CSSScrollTimeline",
-    },
-    {
-      name: "scroll-timeline-name",
-      property_methods: ["ParseSingleValue", "CSSValueFromComputedStyleInternal", "InitialValue"],
-      field_group: "*->timeline",
-      field_template: "external",
-      default_value: "g_null_atom",
-      type_name: "AtomicString",
-      converter: "ConvertNoneOrCustomIdent",
-      runtime_flag: "CSSScrollTimeline",
-    },
-    {
       name: "shape-image-threshold",
       property_methods: ["ParseSingleValue", "CSSValueFromComputedStyleInternal"],
       interpolable: true,
@@ -4452,7 +4458,7 @@
       default_value: "start",
       getter: "GetTextAlign",
       style_builder_custom_functions: ["value"],
-      valid_for_formatted_text: true,
+      valid_for_canvas_formatted_text: true,
     },
     {
       name: "text-align-last",
@@ -4486,7 +4492,7 @@
       name_for_methods: "TextCombine",
       valid_for_marker: true,
       computable: false,
-      valid_for_formatted_text: true,
+      valid_for_canvas_formatted_text: true,
     },
     {
       name: "text-decoration-color",
@@ -4508,8 +4514,8 @@
       valid_for_highlight_legacy: true,
       valid_for_highlight: true,
       supports_incremental_style: true,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
     },
     {
       name: "text-decoration-line",
@@ -4526,8 +4532,8 @@
       valid_for_cue: true,
       valid_for_highlight_legacy: true,
       valid_for_highlight: true,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
     },
     {
       name: "text-decoration-skip-ink",
@@ -4544,8 +4550,8 @@
       valid_for_marker: true,
       valid_for_highlight_legacy: true,
       valid_for_highlight: true,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
     },
     {
       name: "text-decoration-style",
@@ -4560,8 +4566,8 @@
       valid_for_cue: true,
       valid_for_highlight_legacy: true,
       valid_for_highlight: true,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
     },
     {
       name: "text-decoration-thickness",
@@ -4580,8 +4586,8 @@
       valid_for_highlight_legacy: true,
       valid_for_highlight: true,
       computable: false,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
     },
     {
       name: "text-indent",
@@ -4595,6 +4601,23 @@
       typedom_types: ["Length", "Percentage"],
     },
     {
+      name: "text-justify",
+      property_methods: ["CSSValueFromComputedStyleInternal"],
+      inherited: true,
+      runtime_flag: "CSS3Text",
+      field_group: "*",
+      field_template: "keyword",
+      include_paths: ["third_party/blink/renderer/platform/text/text_justify.h"],
+      keywords: ["auto", "none", "inter-word", "distribute"],
+      default_value: "auto",
+      getter: "GetTextJustify",
+      type_name: "TextJustify",
+      typedom_types: ["Keyword"],
+      valid_for_first_letter: true,
+      valid_for_first_line: true,
+      valid_for_canvas_formatted_text: true,
+    },
+    {
       name: "text-overflow",
       property_methods: ["CSSValueFromComputedStyleInternal"],
       field_group: "*",
@@ -4602,7 +4625,7 @@
       keywords: ["clip", "ellipsis"],
       typedom_types: ["Keyword"],
       default_value: "clip",
-      valid_for_formatted_text: true,
+      valid_for_canvas_formatted_text: true,
     },
     {
       name: "text-shadow",
@@ -4624,8 +4647,8 @@
       valid_for_marker: true,
       valid_for_highlight_legacy: true,
       valid_for_highlight: true,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
     },
     {
       name: "text-size-adjust",
@@ -4654,8 +4677,8 @@
       valid_for_first_letter: true,
       valid_for_first_line: true,
       valid_for_marker: true,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
     },
     {
       name: "text-underline-offset",
@@ -4671,8 +4694,8 @@
       valid_for_first_letter: true,
       valid_for_first_line: true,
       computable: false,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
     },
     {
       name: "text-underline-position",
@@ -4689,8 +4712,8 @@
       typedom_types: ["Keyword"],
       valid_for_first_letter: true,
       valid_for_first_line: true,
-      valid_for_formatted_text: true,
-      valid_for_formatted_text_run: true,
+      valid_for_canvas_formatted_text: true,
+      valid_for_canvas_formatted_text_run: true,
     },
     {
       name: "toggle-group",
@@ -4903,40 +4926,6 @@
       keywords: ["baseline", "sub", "super", "text-top", "text-bottom", "middle"],
       valid_for_first_letter: true,
       valid_for_first_line: true,
-    },
-    {
-      name: "view-timeline-axis",
-      property_methods: ["ParseSingleValue", "CSSValueFromComputedStyleInternal", "InitialValue"],
-      field_group: "*->timeline",
-      field_template: "external",
-      default_value: "Vector<TimelineAxis>()",
-      type_name: "Vector<TimelineAxis>",
-      converter: "ConvertViewTimelineAxis",
-      separator: ",",
-      runtime_flag: "CSSViewTimeline",
-    },
-    {
-      name: "view-timeline-inset",
-      property_methods: ["ParseSingleValue", "CSSValueFromComputedStyleInternal", "InitialValue"],
-      field_group: "*->timeline",
-      field_template: "external",
-      include_paths: ["third_party/blink/renderer/core/style/timeline_inset.h"],
-      default_value: "Vector<TimelineInset>()",
-      type_name: "Vector<TimelineInset>",
-      converter: "ConvertViewTimelineInset",
-      separator: ",",
-      runtime_flag: "CSSViewTimeline",
-    },
-    {
-      name: "view-timeline-name",
-      property_methods: ["ParseSingleValue", "CSSValueFromComputedStyleInternal", "InitialValue"],
-      field_group: "*->timeline",
-      field_template: "external",
-      default_value: "Vector<AtomicString>()",
-      type_name: "Vector<AtomicString>",
-      converter: "ConvertViewTimelineName",
-      separator: ",",
-      runtime_flag: "CSSViewTimeline",
     },
     {
       name: "visibility",
@@ -5227,7 +5216,7 @@
       converter: "ConvertString<CSSValueID::kNone>",
     },
     {
-      name: "hyphenate-character",
+      name: "-webkit-hyphenate-character",
       property_methods: ["ParseSingleValue", "CSSValueFromComputedStyleInternal"],
       inherited: true,
       field_group: "*",
@@ -5247,7 +5236,7 @@
       keywords: ["auto", "loose", "normal", "strict", "after-white-space", "anywhere"],
       default_value: "auto",
       type_name: "LineBreak",
-      valid_for_formatted_text: true,
+      valid_for_canvas_formatted_text: true,
     },
     {
       name: "line-break",
@@ -5257,7 +5246,7 @@
       keywords: ["auto", "loose", "normal", "strict", "anywhere"],
       typedom_types: ["Keyword"],
       valid_for_marker: true,
-      valid_for_formatted_text: true,
+      valid_for_canvas_formatted_text: true,
       surrogate_for: "-webkit-line-break",
     },
     // An Apple extension.
@@ -5466,7 +5455,7 @@
       name: "-webkit-text-combine",
       property_methods: ["CSSValueFromComputedStyleInternal"],
       inherited: true,
-      surrogate_for: "text-combine-upright",
+      name_for_methods: "TextCombine",
     },
     {
       name: "text-emphasis-color",
@@ -5618,7 +5607,7 @@
     {
       name: "white-space",
       property_methods: ["CSSValueFromComputedStyleInternal"],
-      independent: false,  // Actually true, but setting it to false saves a precious bit in ComputedStyleBase.
+      independent: true,
       inherited: true,
       field_template: "bitset_keyword",
       keywords: [
@@ -5658,7 +5647,7 @@
         resolver: "horizontal",
       },
       supports_incremental_style: true,
-      valid_for_formatted_text: true,
+      valid_for_canvas_formatted_text: true,
       valid_for_position_fallback: true,
     },
     {
@@ -6841,12 +6830,6 @@
       property_methods: ["ParseShorthand", "CSSValueFromComputedStyleInternal"],
     },
     {
-      name: "scroll-timeline",
-      longhands: ["scroll-timeline-axis", "scroll-timeline-name"],
-      property_methods: ["ParseShorthand", "CSSValueFromComputedStyleInternal"],
-      runtime_flag: "CSSScrollTimeline",
-    },
-    {
       name: "text-decoration",
       longhands: ["text-decoration-line", "text-decoration-thickness", "text-decoration-style", "text-decoration-color"],
       property_methods: ["ParseShorthand", "CSSValueFromComputedStyleInternal"],
@@ -6865,12 +6848,6 @@
         "transition-timing-function", "transition-delay"
       ],
       property_methods: ["ParseShorthand", "CSSValueFromComputedStyleInternal"],
-    },
-    {
-      name: "view-timeline",
-      longhands: ["view-timeline-name", "view-timeline-axis"],
-      property_methods: ["ParseShorthand", "CSSValueFromComputedStyleInternal"],
-      runtime_flag: "CSSViewTimeline",
     },
     {
       name: "-webkit-border-after",
@@ -7595,10 +7572,6 @@
     {
       name: "-webkit-font-feature-settings",
       alias_for: "font-feature-settings",
-    },
-    {
-      name: "-webkit-hyphenate-character",
-      alias_for: "hyphenate-character",
     },
     {
       name: "-webkit-justify-content",

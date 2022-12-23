@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,7 +48,6 @@
 #include "net/http/http_util.h"
 #include "net/log/net_log_with_source.h"
 #include "net/quic/quic_server_info.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 #if BUILDFLAG(IS_POSIX)
 #include <unistd.h>
@@ -130,7 +129,9 @@ HttpCache::ActiveEntry::ActiveEntry(disk_cache::Entry* entry, bool opened_in)
   DCHECK(disk_entry);
 }
 
-HttpCache::ActiveEntry::~ActiveEntry() = default;
+HttpCache::ActiveEntry::~ActiveEntry() {
+  disk_entry->Close();
+}
 
 bool HttpCache::ActiveEntry::HasNoTransactions() {
   return (!writers || writers->IsEmpty()) && readers.empty() &&
@@ -218,8 +219,8 @@ class HttpCache::WorkItem {
 
  private:
   WorkItemOperation operation_;
-  raw_ptr<Transaction, DanglingUntriaged> transaction_;
-  raw_ptr<ActiveEntry*, DanglingUntriaged> entry_;
+  raw_ptr<Transaction> transaction_;
+  raw_ptr<ActiveEntry*> entry_;
   CompletionOnceCallback callback_;  // User callback.
 };
 
@@ -364,7 +365,7 @@ void HttpCache::OnExternalCacheHit(
       request_info.load_flags |= ~LOAD_DO_NOT_SAVE_COOKIES;
   }
 
-  std::string key = *GenerateCacheKeyForRequest(
+  std::string key = GenerateCacheKeyForRequest(
       &request_info, /*use_single_keyed_cache=*/false);
   disk_cache_->OnExternalCacheHit(key);
 }
@@ -446,9 +447,42 @@ std::string HttpCache::GetResourceURLFromHttpCacheKey(const std::string& key) {
   return key.substr(pos);
 }
 
+Error HttpCache::CheckResourceExistence(
+    const GURL& url,
+    const base::StringPiece method,
+    const NetworkIsolationKey& network_isolation_key,
+    bool is_subframe,
+    base::OnceCallback<void(Error)> callback) {
+  if (!disk_cache_)
+    return ERR_CACHE_MISS;
+
+  if (IsSplitCacheEnabled() && network_isolation_key.IsTransient())
+    return ERR_CACHE_MISS;
+
+  HttpRequestInfo request_info;
+  request_info.url = url;
+  request_info.method = std::string(method);
+  request_info.network_isolation_key = network_isolation_key;
+  request_info.is_subframe_document_resource = is_subframe;
+
+  // TODO(https://crbug.com/1325315): Support looking in the single-keyed cache
+  // for the resource.
+  std::string key = GenerateCacheKeyForRequest(
+      &request_info, /*use_single_keyed_cache=*/false);
+  disk_cache::EntryResult entry_result = disk_cache_->OpenEntry(
+      key, net::IDLE,
+      base::BindOnce(&HttpCache::ResourceExistenceCheckCallback, GetWeakPtr(),
+                     std::move(callback)));
+
+  if (entry_result.net_error() == OK && !entry_result.opened())
+    return ERR_CACHE_MISS;
+
+  return entry_result.net_error();
+}
+
 // static
 // Generate a key that can be used inside the cache.
-absl::optional<std::string> HttpCache::GenerateCacheKey(
+std::string HttpCache::GenerateCacheKey(
     const GURL& url,
     int load_flags,
     const NetworkIsolationKey& network_isolation_key,
@@ -483,13 +517,12 @@ absl::optional<std::string> HttpCache::GenerateCacheKey(
     // double-keyed (and makes it an invalid url so that it doesn't get
     // confused with a single-keyed entry). Separate the origin and url
     // with invalid whitespace character |kDoubleKeySeparator|.
-    if (network_isolation_key.IsTransient())
-      return absl::nullopt;
+    DCHECK(!network_isolation_key.IsTransient());
     std::string subframe_document_resource_prefix =
         is_subframe_document_resource ? kSubframeDocumentResourcePrefix : "";
-    isolation_key = base::StrCat(
-        {kDoubleKeyPrefix, subframe_document_resource_prefix,
-         *network_isolation_key.ToCacheKeyString(), kDoubleKeySeparator});
+    isolation_key =
+        base::StrCat({kDoubleKeyPrefix, subframe_document_resource_prefix,
+                      network_isolation_key.ToString(), kDoubleKeySeparator});
   }
 
   // The key format is:
@@ -504,7 +537,7 @@ absl::optional<std::string> HttpCache::GenerateCacheKey(
 }
 
 // static
-absl::optional<std::string> HttpCache::GenerateCacheKeyForRequest(
+std::string HttpCache::GenerateCacheKeyForRequest(
     const HttpRequestInfo* request,
     bool use_single_keyed_cache) {
   DCHECK(request);
@@ -645,7 +678,7 @@ int HttpCache::DoomEntry(const std::string& key, Transaction* transaction) {
   DCHECK_EQ(0u, doomed_entries_.count(entry_ptr));
   doomed_entries_[entry_ptr] = std::move(entry);
 
-  entry_ptr->GetEntry()->Doom();
+  entry_ptr->disk_entry->Doom();
   entry_ptr->doomed = true;
 
   DCHECK(!entry_ptr->SafeToDestroy());
@@ -693,7 +726,7 @@ void HttpCache::DoomMainEntryForUrl(const GURL& url,
   // single-keyed cache, so therefore it is correct that use_single_keyed_cache
   // be false.
   std::string key =
-      *GenerateCacheKeyForRequest(&temp_info, /*use_single_keyed_cache=*/false);
+      GenerateCacheKeyForRequest(&temp_info, /*use_single_keyed_cache=*/false);
 
   // Defer to DoomEntry if there is an active entry, otherwise call
   // AsyncDoomEntry without triggering a callback.
@@ -730,7 +763,7 @@ void HttpCache::DeactivateEntry(ActiveEntry* entry) {
   DCHECK(!entry->doomed);
   DCHECK(entry->SafeToDestroy());
 
-  std::string key = entry->GetEntry()->GetKey();
+  std::string key = entry->disk_entry->GetKey();
   if (key.empty())
     return SlowDeactivateEntry(entry);
 
@@ -878,7 +911,7 @@ void HttpCache::DestroyEntry(ActiveEntry* entry) {
 int HttpCache::AddTransactionToEntry(ActiveEntry* entry,
                                      Transaction* transaction) {
   DCHECK(entry);
-  DCHECK(entry->GetEntry());
+  DCHECK(entry->disk_entry);
   // Always add a new transaction to the queue to maintain FIFO order.
   entry->add_to_entry_queue.push_back(transaction);
   ProcessQueuedTransactions(entry);
@@ -924,7 +957,7 @@ void HttpCache::DoneWithEntry(ActiveEntry* entry,
   bool is_mode_read_only = transaction->mode() == Transaction::READ;
 
   if (!entry_is_complete && !is_mode_read_only && is_partial)
-    entry->GetEntry()->CancelSparseIO();
+    entry->disk_entry->CancelSparseIO();
 
   // Transaction is waiting in the done_headers_queue.
   auto it = std::find(entry->done_headers_queue.begin(),
@@ -988,8 +1021,6 @@ void HttpCache::WritersDoneWritingToEntry(ActiveEntry* entry,
   DCHECK(entry->writers->IsEmpty());
   DCHECK(success || make_readers.empty());
 
-  entry->writers_done_writing_to_entry_history = absl::make_optional(success);
-
   if (!success && should_keep_entry) {
     // Restart already validated transactions so that they are able to read
     // the truncated status of the entry.
@@ -1023,12 +1054,12 @@ void HttpCache::DoomEntryValidationNoMatch(ActiveEntry* entry) {
 
   entry->headers_transaction = nullptr;
   if (entry->SafeToDestroy()) {
-    entry->GetEntry()->Doom();
+    entry->disk_entry->Doom();
     DestroyEntry(entry);
     return;
   }
 
-  DoomActiveEntry(entry->GetEntry()->GetKey());
+  DoomActiveEntry(entry->disk_entry->GetKey());
 
   // Restart only add_to_entry_queue transactions.
   // Post task here to avoid a race in creating the entry between |transaction|
@@ -1069,10 +1100,10 @@ void HttpCache::ProcessEntryFailure(ActiveEntry* entry) {
   RemoveAllQueuedTransactions(entry, &list);
 
   if (entry->SafeToDestroy()) {
-    entry->GetEntry()->Doom();
+    entry->disk_entry->Doom();
     DestroyEntry(entry);
   } else {
-    DoomActiveEntry(entry->GetEntry()->GetKey());
+    DoomActiveEntry(entry->disk_entry->GetKey());
   }
   // ERR_CACHE_RACE causes the transaction to restart the whole process.
   for (auto* queued_transaction : list)
@@ -1549,6 +1580,15 @@ void HttpCache::OnBackendCreated(int result, PendingOp* pending_op) {
   // The cache may be gone when we return from the callback.
   if (!item->DoCallback(result))
     item->NotifyTransaction(result, nullptr);
+}
+
+void HttpCache::ResourceExistenceCheckCallback(
+    base::OnceCallback<void(Error)> callback,
+    disk_cache::EntryResult entry_result) {
+  Error result = (entry_result.net_error() == OK && entry_result.opened())
+                     ? OK
+                     : ERR_CACHE_MISS;
+  std::move(callback).Run(result);
 }
 
 }  // namespace net

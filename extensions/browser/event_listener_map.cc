@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -84,8 +84,7 @@ bool EventListener::Equals(const EventListener* other) const {
 std::unique_ptr<EventListener> EventListener::Copy() const {
   std::unique_ptr<DictionaryValue> filter_copy;
   if (filter_)
-    filter_copy = base::DictionaryValue::From(
-        base::Value::ToUniquePtrValue(filter_->Clone()));
+    filter_copy = filter_->CreateDeepCopy();
   return base::WrapUnique(
       new EventListener(event_name_, extension_id_, listener_url_, process_,
                         is_for_service_worker_, service_worker_version_id_,
@@ -164,10 +163,8 @@ bool EventListenerMap::AddListener(std::unique_ptr<EventListener> listener) {
 
 std::unique_ptr<EventMatcher> EventListenerMap::ParseEventMatcher(
     DictionaryValue* filter_dict) {
-  return std::make_unique<EventMatcher>(
-      base::DictionaryValue::From(
-          base::Value::ToUniquePtrValue(filter_dict->Clone())),
-      MSG_ROUTING_NONE);
+  return std::make_unique<EventMatcher>(filter_dict->CreateDeepCopy(),
+                                        MSG_ROUTING_NONE);
 }
 
 bool EventListenerMap::RemoveListener(const EventListener* listener) {
@@ -288,31 +285,28 @@ void EventListenerMap::LoadFilteredLazyListeners(
     const std::string& extension_id,
     bool is_for_service_worker,
     const DictionaryValue& filtered) {
-  for (const auto item : filtered.GetDict()) {
+  for (DictionaryValue::Iterator it(filtered); !it.IsAtEnd(); it.Advance()) {
     // We skip entries if they are malformed.
-    if (!item.second.is_list())
+    if (!it.value().is_list())
       continue;
-    for (const base::Value& filter_value : item.second.GetList()) {
+    for (const base::Value& filter_value : it.value().GetListDeprecated()) {
       if (!filter_value.is_dict())
         continue;
       const base::DictionaryValue* filter =
           static_cast<const base::DictionaryValue*>(&filter_value);
       if (is_for_service_worker) {
         AddListener(EventListener::ForExtensionServiceWorker(
-            item.first, extension_id, nullptr,
+            it.key(), extension_id, nullptr,
             // TODO(lazyboy): We need to store correct scopes of each worker
             // into ExtensionPrefs for events. This currently assumes all
             // workers are registered in the '/' scope.
             // https://crbug.com/773103.
             Extension::GetBaseURLFromExtensionId(extension_id),
             blink::mojom::kInvalidServiceWorkerVersionId, kMainThreadId,
-            base::DictionaryValue::From(
-                base::Value::ToUniquePtrValue(filter->Clone()))));
+            filter->CreateDeepCopy()));
       } else {
-        AddListener(EventListener::ForExtension(
-            item.first, extension_id, nullptr,
-            base::DictionaryValue::From(
-                base::Value::ToUniquePtrValue(filter->Clone()))));
+        AddListener(EventListener::ForExtension(it.key(), extension_id, nullptr,
+                                                filter->CreateDeepCopy()));
       }
     }
   }

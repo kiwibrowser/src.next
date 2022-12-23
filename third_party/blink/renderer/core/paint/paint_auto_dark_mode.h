@@ -15,9 +15,7 @@ class LocalFrame;
 
 inline AutoDarkMode PaintAutoDarkMode(const ComputedStyle& style,
                                       DarkModeFilter::ElementRole role) {
-  return AutoDarkMode(
-      role, style.ForceDark(),
-      style.VisitedDependentColor(GetCSSPropertyBackgroundColor()).Rgb());
+  return AutoDarkMode(role, style.ForceDark());
 }
 
 inline AutoDarkMode PaintAutoDarkMode(DarkModeFilter::ElementRole role,
@@ -25,9 +23,16 @@ inline AutoDarkMode PaintAutoDarkMode(DarkModeFilter::ElementRole role,
   return AutoDarkMode(role, auto_dark_mode_enabled);
 }
 
-class ImageClassifierHelper {
-  STATIC_ONLY(ImageClassifierHelper);
+inline AutoDarkMode BorderPaintAutoDarkMode(const ComputedStyle& style,
+                                            Color border_color) {
+  SkColor background_color =
+      style.VisitedDependentColor(GetCSSPropertyBackgroundColor()).Rgb();
+  return PaintAutoDarkMode(style,
+                           DarkModeFilter::DarkModeFilter::BorderElementRole(
+                               border_color.Rgb(), background_color));
+}
 
+class ImageClassifierHelper {
  public:
   CORE_EXPORT static ImageAutoDarkMode GetImageAutoDarkMode(
       LocalFrame& local_frame,

@@ -378,7 +378,7 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
                                            LayoutUnit& max_logical_width);
 
   // Return true if this object is allowed to establish a multicol container.
-  virtual bool AllowsColumns() const;
+  bool AllowsColumns() const;
 
   bool AllowsPaginationStrut() const;
   // Pagination strut caused by the first line or child block inside this

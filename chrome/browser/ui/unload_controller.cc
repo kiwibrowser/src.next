@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,8 +52,7 @@ bool UnloadController::ShouldRunUnloadEventsHelper(
     content::WebContents* contents) {
   // If |contents| is being inspected, devtools needs to intercept beforeunload
   // events.
-  return DevToolsWindow::GetInstanceForInspectedWebContents(contents) !=
-         nullptr;
+  return DevToolsWindow::GetInstanceForInspectedWebContents(contents) != NULL;
 }
 
 bool UnloadController::RunUnloadEventsHelper(content::WebContents* contents) {

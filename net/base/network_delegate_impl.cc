@@ -1,11 +1,11 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/base/network_delegate_impl.h"
 
 #include "net/base/net_errors.h"
-#include "net/first_party_sets/same_party_context.h"
+#include "net/cookies/same_party_context.h"
 
 namespace net {
 
@@ -51,14 +51,19 @@ void NetworkDelegateImpl::OnPACScriptError(int line_number,
 bool NetworkDelegateImpl::OnAnnotateAndMoveUserBlockedCookies(
     const URLRequest& request,
     net::CookieAccessResultList& maybe_included_cookies,
-    net::CookieAccessResultList& excluded_cookies) {
-  return true;
+    net::CookieAccessResultList& excluded_cookies,
+    bool allowed_from_caller) {
+  if (!allowed_from_caller)
+    ExcludeAllCookies(CookieInclusionStatus::EXCLUDE_USER_PREFERENCES,
+                      maybe_included_cookies, excluded_cookies);
+  return allowed_from_caller;
 }
 
 bool NetworkDelegateImpl::OnCanSetCookie(const URLRequest& request,
                                          const net::CanonicalCookie& cookie,
-                                         CookieOptions* options) {
-  return true;
+                                         CookieOptions* options,
+                                         bool allowed_from_caller) {
+  return allowed_from_caller;
 }
 
 NetworkDelegate::PrivacySetting NetworkDelegateImpl::OnForcePrivacyMode(

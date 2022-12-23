@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@ import android.view.View.OnClickListener;
 
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
-import org.chromium.ui.modelutil.PropertyModel.WritableObjectPropertyKey;
 
 /**
  * List of properties used by TabGridDialog.
@@ -35,8 +34,6 @@ class TabGridPanelProperties {
             new PropertyModel.WritableObjectPropertyKey<>();
     public static final PropertyModel.WritableBooleanPropertyKey IS_DIALOG_VISIBLE =
             new PropertyModel.WritableBooleanPropertyKey();
-    public static final WritableObjectPropertyKey<TabGridDialogView.VisibilityListener>
-            VISIBILITY_LISTENER = new WritableObjectPropertyKey<>();
     public static final PropertyModel.WritableObjectPropertyKey<Runnable> SCRIMVIEW_CLICK_RUNNABLE =
             new PropertyModel.WritableObjectPropertyKey<>(true);
     public static final PropertyModel.WritableObjectPropertyKey<View> ANIMATION_SOURCE_VIEW =
@@ -79,11 +76,11 @@ class TabGridPanelProperties {
             new PropertyModel.WritableObjectPropertyKey<>();
     public static final PropertyKey[] ALL_KEYS = new PropertyKey[] {COLLAPSE_CLICK_LISTENER,
             ADD_CLICK_LISTENER, HEADER_TITLE, CONTENT_TOP_MARGIN, PRIMARY_COLOR,
-            DIALOG_BACKGROUND_COLOR, TINT, IS_DIALOG_VISIBLE, VISIBILITY_LISTENER,
-            SCRIMVIEW_CLICK_RUNNABLE, ANIMATION_SOURCE_VIEW, UNGROUP_BAR_STATUS,
-            DIALOG_UNGROUP_BAR_BACKGROUND_COLOR, DIALOG_UNGROUP_BAR_HOVERED_BACKGROUND_COLOR,
-            DIALOG_UNGROUP_BAR_TEXT_COLOR, DIALOG_UNGROUP_BAR_HOVERED_TEXT_COLOR,
-            INITIAL_SCROLL_INDEX, IS_MAIN_CONTENT_VISIBLE, MENU_CLICK_LISTENER, TITLE_TEXT_WATCHER,
-            TITLE_TEXT_ON_FOCUS_LISTENER, TITLE_CURSOR_VISIBILITY, IS_TITLE_TEXT_FOCUSED,
-            IS_KEYBOARD_VISIBLE, COLLAPSE_BUTTON_CONTENT_DESCRIPTION};
+            DIALOG_BACKGROUND_COLOR, TINT, IS_DIALOG_VISIBLE, SCRIMVIEW_CLICK_RUNNABLE,
+            ANIMATION_SOURCE_VIEW, UNGROUP_BAR_STATUS, DIALOG_UNGROUP_BAR_BACKGROUND_COLOR,
+            DIALOG_UNGROUP_BAR_HOVERED_BACKGROUND_COLOR, DIALOG_UNGROUP_BAR_TEXT_COLOR,
+            DIALOG_UNGROUP_BAR_HOVERED_TEXT_COLOR, INITIAL_SCROLL_INDEX, IS_MAIN_CONTENT_VISIBLE,
+            MENU_CLICK_LISTENER, TITLE_TEXT_WATCHER, TITLE_TEXT_ON_FOCUS_LISTENER,
+            TITLE_CURSOR_VISIBILITY, IS_TITLE_TEXT_FOCUSED, IS_KEYBOARD_VISIBLE,
+            COLLAPSE_BUTTON_CONTENT_DESCRIPTION};
 }

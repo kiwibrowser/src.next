@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors
+// Copyright 2020 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,19 +39,8 @@ void ShowFileSystemAccessRestrictedDirectoryDialog(
     const url::Origin& origin,
     const base::FilePath& path,
     content::FileSystemAccessPermissionContext::HandleType handle_type,
-    base::OnceCallback<
-        void(content::FileSystemAccessPermissionContext::SensitiveEntryResult)>
-        callback,
-    content::WebContents* web_contents);
-
-// Displays a dialog to explain to the user that the file at `path` has a
-// dangerous extension and ask whether they still want to save the file.
-// `callback` is called when the user has accepted or rejected the dialog.
-void ShowFileSystemAccessDangerousFileDialog(
-    const url::Origin& origin,
-    const base::FilePath& path,
-    base::OnceCallback<
-        void(content::FileSystemAccessPermissionContext::SensitiveEntryResult)>
+    base::OnceCallback<void(
+        content::FileSystemAccessPermissionContext::SensitiveDirectoryResult)>
         callback,
     content::WebContents* web_contents);
 

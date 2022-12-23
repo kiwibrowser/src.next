@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors
+// Copyright 2022 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,10 +24,12 @@ public class CouponCardView extends FrameLayout {
     }
 
     /**
-     * Sets the coupon annotation text when coupon is available.
+     * Sets the current price string and previous price string when a price drop is detected.
      */
-    public void setCouponString(String couponText) {
-        mCouponInfoBox.setText(couponText);
+    public void setCouponString(String couponName) {
+        // TODO(crbug.com/1335127): Display coupon discount amount as text for coupon
+        // annotations on Tab UI.
+        mCouponInfoBox.setText(couponName);
     }
 
     @Override

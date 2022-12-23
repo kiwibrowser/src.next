@@ -26,18 +26,20 @@ void SetDefaultEnvironmentVariables(StyleEnvironmentVariables* instance) {
                         kSafeAreaInsetDefault);
   instance->SetVariable(UADefinedVariable::kSafeAreaInsetRight,
                         kSafeAreaInsetDefault);
-  instance->SetVariable(UADefinedVariable::kKeyboardInsetTop,
-                        kKeyboardInsetDefault);
-  instance->SetVariable(UADefinedVariable::kKeyboardInsetLeft,
-                        kKeyboardInsetDefault);
-  instance->SetVariable(UADefinedVariable::kKeyboardInsetBottom,
-                        kKeyboardInsetDefault);
-  instance->SetVariable(UADefinedVariable::kKeyboardInsetRight,
-                        kKeyboardInsetDefault);
-  instance->SetVariable(UADefinedVariable::kKeyboardInsetWidth,
-                        kKeyboardInsetDefault);
-  instance->SetVariable(UADefinedVariable::kKeyboardInsetHeight,
-                        kKeyboardInsetDefault);
+  if (RuntimeEnabledFeatures::VirtualKeyboardEnabled()) {
+    instance->SetVariable(UADefinedVariable::kKeyboardInsetTop,
+                          kKeyboardInsetDefault);
+    instance->SetVariable(UADefinedVariable::kKeyboardInsetLeft,
+                          kKeyboardInsetDefault);
+    instance->SetVariable(UADefinedVariable::kKeyboardInsetBottom,
+                          kKeyboardInsetDefault);
+    instance->SetVariable(UADefinedVariable::kKeyboardInsetRight,
+                          kKeyboardInsetDefault);
+    instance->SetVariable(UADefinedVariable::kKeyboardInsetWidth,
+                          kKeyboardInsetDefault);
+    instance->SetVariable(UADefinedVariable::kKeyboardInsetHeight,
+                          kKeyboardInsetDefault);
+  }
 }
 
 }  // namespace.
@@ -78,16 +80,22 @@ const AtomicString StyleEnvironmentVariables::GetVariableName(
     case UADefinedVariable::kSafeAreaInsetRight:
       return "safe-area-inset-right";
     case UADefinedVariable::kKeyboardInsetTop:
+      DCHECK(RuntimeEnabledFeatures::VirtualKeyboardEnabled());
       return "keyboard-inset-top";
     case UADefinedVariable::kKeyboardInsetLeft:
+      DCHECK(RuntimeEnabledFeatures::VirtualKeyboardEnabled());
       return "keyboard-inset-left";
     case UADefinedVariable::kKeyboardInsetBottom:
+      DCHECK(RuntimeEnabledFeatures::VirtualKeyboardEnabled());
       return "keyboard-inset-bottom";
     case UADefinedVariable::kKeyboardInsetRight:
+      DCHECK(RuntimeEnabledFeatures::VirtualKeyboardEnabled());
       return "keyboard-inset-right";
     case UADefinedVariable::kKeyboardInsetWidth:
+      DCHECK(RuntimeEnabledFeatures::VirtualKeyboardEnabled());
       return "keyboard-inset-width";
     case UADefinedVariable::kKeyboardInsetHeight:
+      DCHECK(RuntimeEnabledFeatures::VirtualKeyboardEnabled());
       return "keyboard-inset-height";
     case UADefinedVariable::kTitlebarAreaX:
       DCHECK(RuntimeEnabledFeatures::WebAppWindowControlsOverlayEnabled(

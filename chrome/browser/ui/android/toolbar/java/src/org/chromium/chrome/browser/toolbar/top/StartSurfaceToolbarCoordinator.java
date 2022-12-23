@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,20 +10,18 @@ import android.view.View.OnLongClickListener;
 import android.view.ViewStub;
 
 import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.Callback;
 import org.chromium.base.CallbackController;
 import org.chromium.base.supplier.BooleanSupplier;
+import org.chromium.base.supplier.ObservableSupplier;
 import org.chromium.base.supplier.Supplier;
-import org.chromium.chrome.browser.device.DeviceClassManager;
-import org.chromium.chrome.browser.layouts.LayoutType;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tabmodel.IncognitoStateProvider;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.theme.ThemeColorProvider;
 import org.chromium.chrome.browser.toolbar.ButtonData;
-import org.chromium.chrome.browser.toolbar.ButtonDataProvider;
 import org.chromium.chrome.browser.toolbar.R;
 import org.chromium.chrome.browser.toolbar.TabCountProvider;
 import org.chromium.chrome.browser.toolbar.TabSwitcherButtonCoordinator;
@@ -60,12 +58,14 @@ public class StartSurfaceToolbarCoordinator {
     private CallbackController mCallbackController = new CallbackController();
 
     StartSurfaceToolbarCoordinator(ViewStub startSurfaceToolbarStub,
-            UserEducationHelper userEducationHelper, ButtonDataProvider identityDiscController,
-            ThemeColorProvider provider, MenuButtonCoordinator menuButtonCoordinator,
+            UserEducationHelper userEducationHelper,
+            ObservableSupplier<Boolean> identityDiscStateSupplier, ThemeColorProvider provider,
+            MenuButtonCoordinator menuButtonCoordinator,
             Supplier<ButtonData> identityDiscButtonSupplier, boolean isGridTabSwitcherEnabled,
-            boolean isTabToGtsAnimationEnabled, boolean isTabGroupsAndroidContinuationEnabled,
+            boolean isTabGroupsAndroidContinuationEnabled,
             BooleanSupplier isIncognitoModeEnabledSupplier,
-            Callback<LoadUrlParams> logoClickedCallback, boolean isRefactorEnabled) {
+            ObservableSupplier<Profile> profileSupplier,
+            Callback<LoadUrlParams> logoClickedCallback) {
         mStub = startSurfaceToolbarStub;
 
         mPropertyModel =
@@ -79,8 +79,6 @@ public class StartSurfaceToolbarCoordinator {
                                 isGridTabSwitcherEnabled)
                         .build();
 
-        boolean isTabToGtsFadeAnimationEnabled = isTabToGtsAnimationEnabled
-                && !DeviceClassManager.enableAccessibilityLayout(mStub.getContext());
         mToolbarMediator = new StartSurfaceToolbarMediator(mPropertyModel,
                 (iphCommandBuilder)
                         -> {
@@ -91,11 +89,10 @@ public class StartSurfaceToolbarCoordinator {
                             iphCommandBuilder.setAnchorView(mView.getIdentityDiscView()).build());
                 },
                 StartSurfaceConfiguration.START_SURFACE_HIDE_INCOGNITO_SWITCH_NO_TAB.getValue(),
-                menuButtonCoordinator, identityDiscController, identityDiscButtonSupplier,
+                menuButtonCoordinator, identityDiscStateSupplier, identityDiscButtonSupplier,
                 StartSurfaceConfiguration.TAB_COUNT_BUTTON_ON_START_SURFACE.getValue(),
-                isTabToGtsFadeAnimationEnabled, isTabGroupsAndroidContinuationEnabled,
-                isIncognitoModeEnabledSupplier, logoClickedCallback, isRefactorEnabled,
-                StartSurfaceConfiguration.IS_DOODLE_SUPPORTED.getValue());
+                isTabGroupsAndroidContinuationEnabled, isIncognitoModeEnabledSupplier,
+                profileSupplier, logoClickedCallback);
 
         mThemeColorProvider = provider;
         mMenuButtonCoordinator = menuButtonCoordinator;
@@ -193,22 +190,20 @@ public class StartSurfaceToolbarCoordinator {
 
     /**
      * Called when start surface state is changed.
-     * @param newState The new {@link StartSurfaceState}. Should be removed after refactor is
-     *         enabled.
+     * @param newState The new {@link StartSurfaceState}.
      * @param shouldShowStartSurfaceToolbar Whether or not should show start surface toolbar.
-     * @param newLayoutType The new {@link LayoutType}. Only used when refactor is enabled.
      */
-    void onStartSurfaceStateChanged(@Nullable @StartSurfaceState Integer newState,
-            boolean shouldShowStartSurfaceToolbar, @Nullable @LayoutType Integer newLayoutType) {
+    void onStartSurfaceStateChanged(
+            @StartSurfaceState int newState, boolean shouldShowStartSurfaceToolbar) {
         if (shouldShowStartSurfaceToolbar && !isInflated()) inflate();
-        mToolbarMediator.onStartSurfaceStateChanged(
-                newState == null ? StartSurfaceState.NOT_SHOWN : newState,
-                shouldShowStartSurfaceToolbar,
-                newLayoutType == null ? LayoutType.NONE : newLayoutType);
+        mToolbarMediator.onStartSurfaceStateChanged(newState, shouldShowStartSurfaceToolbar);
     }
 
-    void initLogoWithNative() {
-        mToolbarMediator.initLogoWithNative();
+    /**
+     * Called when default search engine changes.
+     */
+    void onDefaultSearchEngineChanged() {
+        mToolbarMediator.onDefaultSearchEngineChanged();
     }
 
     /**

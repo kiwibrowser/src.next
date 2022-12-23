@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,7 +52,7 @@ public class TabModelSelectorTabObserver
             }
 
             @Override
-            public void willCloseTab(Tab tab, boolean animate, boolean didCloseAlone) {
+            public void willCloseTab(Tab tab, boolean animate) {
                 mTabsToClose.put(tab.getId(), tab);
             }
 
@@ -62,7 +62,7 @@ public class TabModelSelectorTabObserver
             }
 
             @Override
-            public void onFinishingTabClosure(Tab tab) {
+            public void didCloseTab(Tab tab) {
                 if (mTabsToClose.get(tab.getId()) != null) {
                     mTabsToClose.remove(tab.getId());
                     onTabUnregistered(tab);

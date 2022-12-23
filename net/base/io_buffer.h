@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -94,7 +94,7 @@ class NET_EXPORT IOBuffer : public base::RefCountedThreadSafe<IOBuffer> {
 
   virtual ~IOBuffer();
 
-  raw_ptr<char> data_;
+  raw_ptr<char, DanglingUntriaged> data_;
 };
 
 // This version stores the size of the buffer so that the creator of the object

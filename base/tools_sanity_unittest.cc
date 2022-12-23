@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -45,7 +45,7 @@ const base::subtle::Atomic32 kMagicValue = 42;
 #define HARMFUL_ACCESS_IS_NOOP
 #endif
 
-void DoReadUninitializedValue(volatile char *ptr) {
+void DoReadUninitializedValue(char *ptr) {
   // Comparison with 64 is to prevent clang from optimizing away the
   // jump -- valgrind only catches jumps and conditional moves, but clang uses
   // the borrow flag if the condition is just `*ptr == '\0'`.  We no longer
@@ -57,7 +57,7 @@ void DoReadUninitializedValue(volatile char *ptr) {
   }
 }
 
-void ReadUninitializedValue(volatile char *ptr) {
+void ReadUninitializedValue(char *ptr) {
 #if defined(MEMORY_SANITIZER)
   EXPECT_DEATH(DoReadUninitializedValue(ptr),
                "use-of-uninitialized-value");
@@ -89,10 +89,14 @@ void WriteValueOutOfArrayBoundsRight(char *ptr, size_t size) {
 void MakeSomeErrors(char *ptr, size_t size) {
   ReadUninitializedValue(ptr);
 
-  HARMFUL_ACCESS(ReadValueOutOfArrayBoundsLeft(ptr), "2 bytes before");
-  HARMFUL_ACCESS(ReadValueOutOfArrayBoundsRight(ptr, size), "1 bytes after");
-  HARMFUL_ACCESS(WriteValueOutOfArrayBoundsLeft(ptr), "1 bytes before");
-  HARMFUL_ACCESS(WriteValueOutOfArrayBoundsRight(ptr, size), "0 bytes after");
+  HARMFUL_ACCESS(ReadValueOutOfArrayBoundsLeft(ptr),
+                 "2 bytes to the left");
+  HARMFUL_ACCESS(ReadValueOutOfArrayBoundsRight(ptr, size),
+                 "1 bytes to the right");
+  HARMFUL_ACCESS(WriteValueOutOfArrayBoundsLeft(ptr),
+                 "1 bytes to the left");
+  HARMFUL_ACCESS(WriteValueOutOfArrayBoundsRight(ptr, size),
+                 "0 bytes to the right");
 }
 
 }  // namespace
@@ -250,11 +254,11 @@ TEST(ToolsSanityTest, DISABLED_AddressSanitizerGlobalOOBCrashTest) {
 
 #ifndef HARMFUL_ACCESS_IS_NOOP
 TEST(ToolsSanityTest, AsanHeapOverflow) {
-  HARMFUL_ACCESS(debug::AsanHeapOverflow(), "after");
+  HARMFUL_ACCESS(debug::AsanHeapOverflow() ,"to the right");
 }
 
 TEST(ToolsSanityTest, AsanHeapUnderflow) {
-  HARMFUL_ACCESS(debug::AsanHeapUnderflow(), "before");
+  HARMFUL_ACCESS(debug::AsanHeapUnderflow(), "to the left");
 }
 
 TEST(ToolsSanityTest, AsanHeapUseAfterFree) {

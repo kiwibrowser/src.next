@@ -6,12 +6,16 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
+#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 
 namespace blink {
 
-class AlternateSignedExchangeResourceInfoTest : public testing::Test {
+class AlternateSignedExchangeResourceInfoTest
+    : public testing::Test,
+      private ScopedSignedExchangeSubresourcePrefetchForTest {
  public:
-  AlternateSignedExchangeResourceInfoTest() = default;
+  AlternateSignedExchangeResourceInfoTest()
+      : ScopedSignedExchangeSubresourcePrefetchForTest(true) {}
   AlternateSignedExchangeResourceInfoTest(
       const AlternateSignedExchangeResourceInfoTest&) = delete;
   AlternateSignedExchangeResourceInfoTest& operator=(

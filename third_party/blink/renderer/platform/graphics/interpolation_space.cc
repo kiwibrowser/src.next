@@ -66,10 +66,9 @@ Color ConvertColor(const Color& src_color,
                    InterpolationSpace src_interpolation_space) {
   sk_sp<SkColorFilter> conversion_filter =
       GetConversionFilter(dst_interpolation_space, src_interpolation_space);
-  // TODO(https://crbug.com/1351544): This should be SkColor4f and not Color.
-  return conversion_filter ? Color::FromRGBA32(conversion_filter->filterColor(
-                                 src_color.Rgb()))
-                           : src_color;
+  return conversion_filter
+             ? Color(conversion_filter->filterColor(src_color.Rgb()))
+             : src_color;
 }
 
 sk_sp<SkColorFilter> CreateInterpolationSpaceFilter(

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors
+// Copyright 2020 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,9 +42,8 @@ public class LoadProgressMediator {
         mIsStartSurfaceEnabled = isStartSurfaceEnabled;
         mTabObserver = new CurrentTabObserver(tabSupplier, new EmptyTabObserver() {
             @Override
-            public void onDidStartNavigationInPrimaryMainFrame(
-                    Tab tab, NavigationHandle navigation) {
-                if (navigation.isSameDocument()) {
+            public void onDidStartNavigation(Tab tab, NavigationHandle navigation) {
+                if (navigation.isSameDocument() || !navigation.isInPrimaryMainFrame()) {
                     return;
                 }
 
@@ -56,11 +55,6 @@ public class LoadProgressMediator {
                 mLoadProgressSimulator.cancel();
                 startLoadProgress();
                 updateLoadProgress(tab.getProgress());
-            }
-
-            @Override
-            public void onDidStartNavigationNoop(Tab tab, NavigationHandle navigation) {
-                if (!navigation.isInPrimaryMainFrame()) return;
             }
 
             @Override

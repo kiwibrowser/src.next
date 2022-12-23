@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,6 @@
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/devtools/chrome_devtools_manager_delegate.h"
 #include "chrome/browser/devtools/devtools_window_testing.h"
 #include "chrome/browser/extensions/api/developer_private/developer_private_api.h"
 #include "chrome/browser/extensions/extension_action_test_util.h"
@@ -27,7 +26,6 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/extensions/extension_action_test_helper.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
-#include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -348,8 +346,6 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest,
       content::DevToolsAgentHost::GetOrCreateAll();
   scoped_refptr<content::DevToolsAgentHost> service_worker_host;
   for (const scoped_refptr<content::DevToolsAgentHost>& host : targets) {
-    if (host->GetType() != ChromeDevToolsManagerDelegate::kTypeBackgroundPage)
-      continue;
     if (host->GetURL() == BackgroundInfo::GetBackgroundURL(extension.get())) {
       EXPECT_FALSE(service_worker_host);
       service_worker_host = host;
@@ -384,7 +380,7 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, WaitForView) {
 
   // Close the new tab.
   browser()->tab_strip_model()->CloseWebContentsAt(
-      browser()->tab_strip_model()->active_index(), TabCloseTypes::CLOSE_NONE);
+      browser()->tab_strip_model()->active_index(), TabStripModel::CLOSE_NONE);
   host_helper.WaitForHostDestroyed();
 
   // Lazy Background Page has been shut down.
@@ -494,7 +490,7 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, NaClInView) {
     host_helper.RestrictToType(mojom::ViewType::kExtensionBackgroundPage);
     browser()->tab_strip_model()->CloseWebContentsAt(
         browser()->tab_strip_model()->active_index(),
-        TabCloseTypes::CLOSE_NONE);
+        TabStripModel::CLOSE_NONE);
     host_helper.WaitForHostDestroyed();
   }
 
@@ -622,7 +618,7 @@ class LazyBackgroundPageApiWithBFCacheParamTest
   LazyBackgroundPageApiWithBFCacheParamTest() {
     if (IsBackForwardCacheEnabled()) {
       feature_list_.InitWithFeaturesAndParameters(
-          {{features::kBackForwardCache, {}},
+          {{features::kBackForwardCache, {{"enable_same_site", "true"}}},
            // Allow BackForwardCache for all devices regardless of their memory.
            {features::kBackForwardCacheMemoryControls, {}}},
           {});

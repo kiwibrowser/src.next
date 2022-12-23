@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,11 +33,9 @@ void PrintPackExtensionMessage(const std::string& message) {
 
 }  // namespace
 
-StartupHelper::StartupHelper() {
+StartupHelper::StartupHelper() : pack_job_succeeded_(false) {
   EnsureExtensionsClientInitialized();
 }
-
-StartupHelper::~StartupHelper() = default;
 
 void StartupHelper::OnPackSuccess(
     const base::FilePath& crx_path,
@@ -51,12 +49,10 @@ void StartupHelper::OnPackSuccess(
 
 void StartupHelper::OnPackFailure(const std::string& error_message,
                                   ExtensionCreator::ErrorType type) {
-  error_message_ = error_message;
   PrintPackExtensionMessage(error_message);
 }
 
-bool StartupHelper::PackExtension(const base::CommandLine& cmd_line,
-                                  std::string* error) {
+bool StartupHelper::PackExtension(const base::CommandLine& cmd_line) {
   if (!cmd_line.HasSwitch(::switches::kPackExtension))
     return false;
 
@@ -76,8 +72,6 @@ bool StartupHelper::PackExtension(const base::CommandLine& cmd_line,
   pack_job.set_synchronous();
   pack_job.Start();
 
-  if (!pack_job_succeeded_)
-    *error = error_message_;
   return pack_job_succeeded_;
 }
 
@@ -188,5 +182,7 @@ bool StartupHelper::ValidateCrx(const base::CommandLine& cmd_line,
     *error = base::UTF16ToUTF8(helper->error());
   return success;
 }
+
+StartupHelper::~StartupHelper() {}
 
 }  // namespace extensions

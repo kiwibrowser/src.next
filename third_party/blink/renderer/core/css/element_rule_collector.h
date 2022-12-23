@@ -26,7 +26,6 @@
 #include "base/auto_reset.h"
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/css/container_selector.h"
 #include "third_party/blink/renderer/core/css/css_rule_list.h"
 #include "third_party/blink/renderer/core/css/resolver/element_resolve_context.h"
 #include "third_party/blink/renderer/core/css/resolver/match_request.h"
@@ -213,7 +212,7 @@ class CORE_EXPORT ElementRuleCollector {
   };
 
   template <bool perf_trace_enabled>
-  void CollectMatchingRulesForListInternal(base::span<const RuleData>,
+  void CollectMatchingRulesForListInternal(const HeapVector<RuleData>*,
                                            const MatchRequest&,
                                            const RuleSet*,
                                            const CSSStyleSheet*,
@@ -221,7 +220,7 @@ class CORE_EXPORT ElementRuleCollector {
                                            const SelectorChecker&,
                                            PartRequest* = nullptr);
 
-  void CollectMatchingRulesForList(base::span<const RuleData>,
+  void CollectMatchingRulesForList(const HeapVector<RuleData>*,
                                    const MatchRequest&,
                                    const RuleSet*,
                                    const CSSStyleSheet*,
@@ -267,7 +266,6 @@ class CORE_EXPORT ElementRuleCollector {
   EInsideLink inside_link_;
 
   HeapVector<MatchedRule, 32> matched_rules_;
-  ContainerSelectorCache container_selector_cache_;
 
   // Output.
   Member<RuleIndexList> css_rule_list_;

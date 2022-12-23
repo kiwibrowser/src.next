@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors
+// Copyright 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -206,11 +206,9 @@ final class TabWebContentsDelegateAndroidImpl extends TabWebContentsDelegateAndr
     @Override
     public void visibleSSLStateChanged() {
         PolicyAuditor auditor = AppHooks.get().getPolicyAuditor();
-        if (auditor != null) {
-            auditor.notifyCertificateFailure(
-                    PolicyAuditorJni.get().getCertificateFailure(mTab.getWebContents()),
-                    ContextUtils.getApplicationContext());
-        }
+        auditor.notifyCertificateFailure(
+                PolicyAuditorJni.get().getCertificateFailure(mTab.getWebContents()),
+                ContextUtils.getApplicationContext());
         RewindableIterator<TabObserver> observers = mTab.getTabObservers();
         while (observers.hasNext()) observers.next().onSSLStateUpdated(mTab);
         mDelegate.visibleSSLStateChanged();
@@ -251,6 +249,9 @@ final class TabWebContentsDelegateAndroidImpl extends TabWebContentsDelegateAndr
 
     @Override
     public void rendererResponsive() {
+        if (mTab.getWebContents() != null) {
+            TabWebContentsDelegateAndroidImplJni.get().onRendererResponsive(mTab.getWebContents());
+        }
         mTab.handleRendererResponsiveStateChanged(true);
         mDelegate.rendererResponsive();
     }
@@ -389,6 +390,7 @@ final class TabWebContentsDelegateAndroidImpl extends TabWebContentsDelegateAndr
     @NativeMethods
     interface Natives {
         void onRendererUnresponsive(WebContents webContents);
+        void onRendererResponsive(WebContents webContents);
         void showFramebustBlockInfoBar(WebContents webContents, String url);
     }
 }

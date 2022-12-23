@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors
+// Copyright 2020 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -133,9 +133,8 @@ IN_PROC_BROWSER_TEST_F(ScriptExecutorBrowserTest, MainWorldExecution) {
       mojom::HostID(mojom::HostID::HostType::kExtensions, extension->id()),
       mojom::CodeInjection::NewJs(mojom::JSInjection::New(
           std::move(sources), mojom::ExecutionWorld::kMain,
-          blink::mojom::WantResultOption::kWantResult,
-          blink::mojom::UserActivationOption::kDoNotActivate,
-          blink::mojom::PromiseResultOption::kAwait)),
+          true /* wants_result */, false /* user_gesture */,
+          true /* wait_for_promise */)),
       ScriptExecutor::SPECIFIED_FRAMES, {ExtensionApiFrameIdMap::kTopFrameId},
       ScriptExecutor::DONT_MATCH_ABOUT_BLANK, mojom::RunLocation::kDocumentIdle,
       ScriptExecutor::DEFAULT_PROCESS, GURL() /* webview_src */,
@@ -182,9 +181,8 @@ IN_PROC_BROWSER_TEST_F(ScriptExecutorBrowserTest, MainFrameExecution) {
       mojom::HostID(mojom::HostID::HostType::kExtensions, extension->id()),
       mojom::CodeInjection::NewJs(mojom::JSInjection::New(
           std::move(sources), mojom::ExecutionWorld::kIsolated,
-          blink::mojom::WantResultOption::kWantResult,
-          blink::mojom::UserActivationOption::kDoNotActivate,
-          blink::mojom::PromiseResultOption::kAwait)),
+          true /* wants_result */, false /* user_gesture */,
+          true /* wait_for_promise */)),
       ScriptExecutor::SPECIFIED_FRAMES, {ExtensionApiFrameIdMap::kTopFrameId},
       ScriptExecutor::DONT_MATCH_ABOUT_BLANK, mojom::RunLocation::kDocumentIdle,
       ScriptExecutor::DEFAULT_PROCESS, GURL() /* webview_src */,
@@ -238,9 +236,8 @@ IN_PROC_BROWSER_TEST_F(ScriptExecutorBrowserTest, MultipleSourceExecution) {
       mojom::HostID(mojom::HostID::HostType::kExtensions, extension->id()),
       mojom::CodeInjection::NewJs(mojom::JSInjection::New(
           std::move(sources), mojom::ExecutionWorld::kIsolated,
-          blink::mojom::WantResultOption::kWantResult,
-          blink::mojom::UserActivationOption::kDoNotActivate,
-          blink::mojom::PromiseResultOption::kAwait)),
+          true /* wants_result */, false /* user_gesture */,
+          true /* wait_for_promise */)),
       ScriptExecutor::SPECIFIED_FRAMES, {ExtensionApiFrameIdMap::kTopFrameId},
       ScriptExecutor::DONT_MATCH_ABOUT_BLANK, mojom::RunLocation::kDocumentIdle,
       ScriptExecutor::DEFAULT_PROCESS, GURL() /* webview_src */,
@@ -304,9 +301,8 @@ IN_PROC_BROWSER_TEST_F(ScriptExecutorBrowserTest, PromisesResolve) {
         mojom::HostID(mojom::HostID::HostType::kExtensions, extension->id()),
         mojom::CodeInjection::NewJs(mojom::JSInjection::New(
             std::move(sources), mojom::ExecutionWorld::kIsolated,
-            blink::mojom::WantResultOption::kWantResult,
-            blink::mojom::UserActivationOption::kDoNotActivate,
-            blink::mojom::PromiseResultOption::kAwait)),
+            true /* wants_result */, false /* user_gesture */,
+            true /* wait_for_promise */)),
         ScriptExecutor::SPECIFIED_FRAMES, {ExtensionApiFrameIdMap::kTopFrameId},
         ScriptExecutor::DONT_MATCH_ABOUT_BLANK,
         mojom::RunLocation::kDocumentIdle, ScriptExecutor::DEFAULT_PROCESS,
@@ -334,9 +330,8 @@ IN_PROC_BROWSER_TEST_F(ScriptExecutorBrowserTest, PromisesResolve) {
         mojom::HostID(mojom::HostID::HostType::kExtensions, extension->id()),
         mojom::CodeInjection::NewJs(mojom::JSInjection::New(
             std::move(sources), mojom::ExecutionWorld::kIsolated,
-            blink::mojom::WantResultOption::kWantResult,
-            blink::mojom::UserActivationOption::kDoNotActivate,
-            blink::mojom::PromiseResultOption::kDoNotWait)),
+            true /* wants_result */, false /* user_gesture */,
+            false /* wait_for_promise */)),
         ScriptExecutor::SPECIFIED_FRAMES, {ExtensionApiFrameIdMap::kTopFrameId},
         ScriptExecutor::DONT_MATCH_ABOUT_BLANK,
         mojom::RunLocation::kDocumentIdle, ScriptExecutor::DEFAULT_PROCESS,
@@ -421,9 +416,8 @@ IN_PROC_BROWSER_TEST_F(ScriptExecutorBrowserTest, SpecifiedFrames) {
         mojom::HostID(mojom::HostID::HostType::kExtensions, extension->id()),
         mojom::CodeInjection::NewJs(mojom::JSInjection::New(
             std::move(sources), mojom::ExecutionWorld::kIsolated,
-            blink::mojom::WantResultOption::kWantResult,
-            blink::mojom::UserActivationOption::kDoNotActivate,
-            blink::mojom::PromiseResultOption::kAwait)),
+            true /* wants_result */, false /* user_gesture */,
+            true /* wait_for_promise */)),
         ScriptExecutor::SPECIFIED_FRAMES, {frame1_id, frame2_id},
         ScriptExecutor::DONT_MATCH_ABOUT_BLANK,
         mojom::RunLocation::kDocumentIdle, ScriptExecutor::DEFAULT_PROCESS,
@@ -446,9 +440,8 @@ IN_PROC_BROWSER_TEST_F(ScriptExecutorBrowserTest, SpecifiedFrames) {
         mojom::HostID(mojom::HostID::HostType::kExtensions, extension->id()),
         mojom::CodeInjection::NewJs(mojom::JSInjection::New(
             std::move(sources), mojom::ExecutionWorld::kIsolated,
-            blink::mojom::WantResultOption::kWantResult,
-            blink::mojom::UserActivationOption::kDoNotActivate,
-            blink::mojom::PromiseResultOption::kAwait)),
+            true /* wants_result */, false /* user_gesture */,
+            true /* wait_for_promise */)),
         ScriptExecutor::INCLUDE_SUB_FRAMES, {frame1_id, frame2_id},
         ScriptExecutor::DONT_MATCH_ABOUT_BLANK,
         mojom::RunLocation::kDocumentIdle, ScriptExecutor::DEFAULT_PROCESS,
@@ -480,9 +473,8 @@ IN_PROC_BROWSER_TEST_F(ScriptExecutorBrowserTest, SpecifiedFrames) {
         mojom::HostID(mojom::HostID::HostType::kExtensions, extension->id()),
         mojom::CodeInjection::NewJs(mojom::JSInjection::New(
             std::move(sources), mojom::ExecutionWorld::kIsolated,
-            blink::mojom::WantResultOption::kWantResult,
-            blink::mojom::UserActivationOption::kDoNotActivate,
-            blink::mojom::PromiseResultOption::kAwait)),
+            true /* wants_result */, false /* user_gesture */,
+            true /* wait_for_promise */)),
         ScriptExecutor::SPECIFIED_FRAMES,
         {frame1_id, frame2_id, kNonExistentFrameId},
         ScriptExecutor::DONT_MATCH_ABOUT_BLANK,
@@ -507,9 +499,8 @@ IN_PROC_BROWSER_TEST_F(ScriptExecutorBrowserTest, SpecifiedFrames) {
         mojom::HostID(mojom::HostID::HostType::kExtensions, extension->id()),
         mojom::CodeInjection::NewJs(mojom::JSInjection::New(
             std::move(sources), mojom::ExecutionWorld::kIsolated,
-            blink::mojom::WantResultOption::kWantResult,
-            blink::mojom::UserActivationOption::kDoNotActivate,
-            blink::mojom::PromiseResultOption::kAwait)),
+            true /* wants_result */, false /* user_gesture */,
+            true /* wait_for_promise */)),
         ScriptExecutor::SPECIFIED_FRAMES, {kNonExistentFrameId},
         ScriptExecutor::DONT_MATCH_ABOUT_BLANK,
         mojom::RunLocation::kDocumentIdle, ScriptExecutor::DEFAULT_PROCESS,

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors
+// Copyright 2020 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,27 +21,14 @@ void ShowFileSystemAccessRestrictedDirectoryDialog(
     const url::Origin& origin,
     const base::FilePath& path,
     content::FileSystemAccessPermissionContext::HandleType handle_type,
-    base::OnceCallback<
-        void(content::FileSystemAccessPermissionContext::SensitiveEntryResult)>
+    base::OnceCallback<void(
+        content::FileSystemAccessPermissionContext::SensitiveDirectoryResult)>
         callback,
     content::WebContents* web_contents) {
   // There's no dialog version of this available outside views, run callback as
   // if the dialog was instantly dismissed.
-  std::move(callback).Run(
-      content::FileSystemAccessPermissionContext::SensitiveEntryResult::kAbort);
-}
-
-void ShowFileSystemAccessDangerousFileDialog(
-    const url::Origin& origin,
-    const base::FilePath& path,
-    base::OnceCallback<
-        void(content::FileSystemAccessPermissionContext::SensitiveEntryResult)>
-        callback,
-    content::WebContents* web_contents) {
-  // There's no dialog version of this available outside views, run callback as
-  // if the dialog was instantly dismissed.
-  std::move(callback).Run(
-      content::FileSystemAccessPermissionContext::SensitiveEntryResult::kAbort);
+  std::move(callback).Run(content::FileSystemAccessPermissionContext::
+                              SensitiveDirectoryResult::kAbort);
 }
 
 #endif  // !defined(TOOLKIT_VIEWS)

@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,20 +24,14 @@
 namespace net {
 namespace {
 
-// https://infra.spec.whatwg.org/#ascii-whitespace, which is referenced by
-// https://infra.spec.whatwg.org/#forgiving-base64, does not include \v in the
-// set of ASCII whitespace characters the way Unicode does.
-bool IsBase64Whitespace(char c) {
-  return c != '\v' && base::IsAsciiWhitespace(c);
-}
-
 // A data URL is ready for decode if it:
 //   - Doesn't need any extra padding.
 //   - Does not have any escaped characters.
 //   - Does not have any whitespace.
 bool IsDataURLReadyForDecode(base::StringPiece body) {
   return (body.length() % 4) == 0 && base::ranges::find_if(body, [](char c) {
-                                       return c == '%' || IsBase64Whitespace(c);
+                                       return c == '%' ||
+                                              base::IsAsciiWhitespace(c);
                                      }) == std::end(body);
 }
 
@@ -149,7 +143,7 @@ bool DataURL::Parse(const GURL& url,
         std::string unescaped_body = base::UnescapeBinaryURLComponent(raw_body);
 
         // Strip spaces, which aren't allowed in Base64 encoding.
-        base::EraseIf(unescaped_body, IsBase64Whitespace);
+        base::EraseIf(unescaped_body, base::IsAsciiWhitespace<char>);
 
         size_t length = unescaped_body.length();
         size_t padding_needed = 4 - (length % 4);

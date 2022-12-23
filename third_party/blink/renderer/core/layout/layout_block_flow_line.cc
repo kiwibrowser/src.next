@@ -54,14 +54,16 @@ class ExpansionOpportunities {
  public:
   ExpansionOpportunities() : total_opportunities_(0) {}
 
-  void AddRunWithExpansions(BidiRun& run, bool& is_after_expansion) {
+  void AddRunWithExpansions(BidiRun& run,
+                            bool& is_after_expansion,
+                            TextJustify text_justify) {
     LineLayoutText text = LineLayoutText(run.line_layout_item_);
     unsigned opportunities_in_run;
     if (text.Is8Bit()) {
       opportunities_in_run = Character::ExpansionOpportunityCount(
           {text.Characters8() + run.start_,
            static_cast<size_t>(run.stop_ - run.start_)},
-          run.box_->Direction(), is_after_expansion);
+          run.box_->Direction(), is_after_expansion, text_justify);
     } else if (run.line_layout_item_.IsCombineText()) {
       // Justfication applies to before and after the combined text as if
       // it is an ideographic character, and is prohibited inside the
@@ -72,7 +74,7 @@ class ExpansionOpportunities {
       opportunities_in_run = Character::ExpansionOpportunityCount(
           {text.Characters16() + run.start_,
            static_cast<size_t>(run.stop_ - run.start_)},
-          run.box_->Direction(), is_after_expansion);
+          run.box_->Direction(), is_after_expansion, text_justify);
     }
     runs_with_expansions_.push_back(opportunities_in_run);
     total_opportunities_ += opportunities_in_run;
@@ -770,7 +772,10 @@ void LayoutBlockFlow::ComputeInlineDirectionPositionsForLine(
   NOT_DESTROYED();
   bool is_first_line =
       line_info.IsFirstLine() && CanContainFirstFormattedLine();
-  IndentTextOrNot indent_text = RequiresIndent(is_first_line);
+  bool is_after_hard_line_break =
+      line_box->PrevRootBox() && line_box->PrevRootBox()->EndsWithBreak();
+  IndentTextOrNot indent_text =
+      RequiresIndent(is_first_line, is_after_hard_line_break, StyleRef());
   LayoutUnit line_logical_left;
   LayoutUnit line_logical_right;
   LayoutUnit available_logical_width;
@@ -813,6 +818,7 @@ BidiRun* LayoutBlockFlow::ComputeInlineDirectionPositionsForSegment(
   ExpansionOpportunities expansions;
   LayoutObject* previous_object = nullptr;
   ETextAlign text_align = line_info.GetTextAlign();
+  TextJustify text_justify = StyleRef().GetTextJustify();
 
   BidiRun* r = first_run;
   wtf_size_t word_measurements_index = 0;
@@ -826,10 +832,11 @@ BidiRun* LayoutBlockFlow::ComputeInlineDirectionPositionsForSegment(
     }
     if (r->line_layout_item_.IsText()) {
       LineLayoutText rt(r->line_layout_item_);
-      if (text_align == ETextAlign::kJustify && r != trailing_space_run) {
+      if (text_align == ETextAlign::kJustify && r != trailing_space_run &&
+          text_justify != TextJustify::kNone) {
         if (!is_after_expansion)
           To<InlineTextBox>(r->box_.Get())->SetCanHaveLeadingExpansion(true);
-        expansions.AddRunWithExpansions(*r, is_after_expansion);
+        expansions.AddRunWithExpansions(*r, is_after_expansion, text_justify);
       }
 
       if (rt.TextLength()) {
@@ -1102,6 +1109,7 @@ void LayoutBlockFlow::LayoutRunsAndFloatsInRange(
   LayoutUnit deleted_line_old_offset = LayoutUnit::Min();
 
   LineBreaker line_breaker(LineLayoutBlockFlow(this));
+
 
   while (!end_of_line.AtEnd()) {
     // The runs from the previous line should have been cleaned up.

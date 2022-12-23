@@ -1,22 +1,21 @@
-// Copyright 2017 The Chromium Authors
+// Copyright 2017 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'chrome://resources/cr_elements/cr_button/cr_button.js';
-import 'chrome://resources/cr_elements/cr_toggle/cr_toggle.js';
+import 'chrome://resources/cr_elements/cr_button/cr_button.m.js';
+import 'chrome://resources/cr_elements/cr_toggle/cr_toggle.m.js';
 import 'chrome://resources/cr_elements/cr_toolbar/cr_toolbar.js';
-import 'chrome://resources/cr_elements/cr_hidden_style.css.js';
-import 'chrome://resources/cr_elements/policy/cr_tooltip_icon.js';
-import 'chrome://resources/cr_elements/cr_shared_vars.css.js';
+import 'chrome://resources/cr_elements/hidden_style_css.m.js';
+import 'chrome://resources/cr_elements/policy/cr_tooltip_icon.m.js';
+import 'chrome://resources/cr_elements/shared_vars_css.m.js';
 import 'chrome://resources/polymer/v3_0/paper-styles/color.js';
 import './pack_dialog.js';
 
 import {getToastManager} from 'chrome://resources/cr_elements/cr_toast/cr_toast_manager.js';
-import {CrToggleElement} from 'chrome://resources/cr_elements/cr_toggle/cr_toggle.js';
+import {CrToggleElement} from 'chrome://resources/cr_elements/cr_toggle/cr_toggle.m.js';
 import {I18nMixin} from 'chrome://resources/js/i18n_mixin.js';
 import {listenOnce} from 'chrome://resources/js/util.m.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-
 import {getTemplate} from './toolbar.html.js';
 
 export interface ToolbarDelegate {

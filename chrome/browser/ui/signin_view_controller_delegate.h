@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors
+// Copyright 2016 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,8 +50,7 @@ class SigninViewControllerDelegate {
   // displays the sync confirmation dialog. The returned object should delete
   // itself when the window it's managing is closed.
   static SigninViewControllerDelegate* CreateSyncConfirmationDelegate(
-      Browser* browser,
-      bool is_signin_intercept = false);
+      Browser* browser);
 
   // Returns a platform-specific SigninViewControllerDelegate instance that
   // displays the modal sign in error dialog. The returned object should delete
@@ -73,13 +72,10 @@ class SigninViewControllerDelegate {
   // Returns a platform-specific SigninViewControllerDelegate instance that
   // displays the profile customization modal dialog. The returned object should
   // delete itself when the window it's managing is closed.
-  // If |is_local_profile_creation| is true, the profile customization will
-  // display the local profile creation version of the page.
-  // If |show_profile_switch_iph| is true, shows a profile switch IPH after the
+  // If `show_profile_switch_iph` is true, shows a profile switch IPH after the
   // user completes the profile customization.
   static SigninViewControllerDelegate* CreateProfileCustomizationDelegate(
       Browser* browser,
-      bool is_local_profile_creation,
       bool show_profile_switch_iph = false);
 #endif  // BUILDFLAG(ENABLE_DICE_SUPPORT) || BUILDFLAG(IS_CHROMEOS_LACROS)
 

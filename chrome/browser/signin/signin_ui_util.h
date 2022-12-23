@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,9 +28,15 @@ class ProfileAttributesStorage;
 namespace signin_ui_util {
 class SigninUiDelegate;
 
+// The maximum number of times to show the welcome tutorial for an upgrade user.
+const int kUpgradeWelcomeTutorialShowMax = 1;
+
 // Returns the username of the primary account or an empty string if there is
 // no primary account or the account has not consented to browser sync.
 std::u16string GetAuthenticatedUsername(Profile* profile);
+
+// Initializes signin-related preferences.
+void InitializePrefsForProfile(Profile* profile);
 
 // Shows a learn more page for signin errors.
 void ShowSigninErrorLearnMorePage(Profile* profile);

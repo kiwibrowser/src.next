@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -237,7 +237,6 @@ class BrowserProcessImpl : public BrowserProcess,
   void CreateStatusTray();
   void CreateBackgroundModeManager();
   void CreateGCMDriver();
-  void CreateNetworkTimeTracker();
 
   void ApplyDefaultBrowserPolicy();
 
@@ -341,10 +340,8 @@ class BrowserProcessImpl : public BrowserProcess,
 
   bool tearing_down_ = false;
 
-#if BUILDFLAG(ENABLE_PRINTING)
   // Ensures that all the print jobs are finished before closing the browser.
   std::unique_ptr<printing::PrintJobManager> print_job_manager_;
-#endif
 
   std::string locale_;
 

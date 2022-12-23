@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors
+// Copyright (c) 2016 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -2893,10 +2893,12 @@ TEST_P(HttpStreamFactoryJobControllerTest,
        PreconnectJobDoesntBlockIpBasedPooling) {
   // Make sure that both "www.example.org" and "other.example.org" are pointing
   // to the same IP address.
-  session_deps_.host_resolver->rules()->AddRule(
-      "www.example.org", IPAddress::IPv4Localhost().ToString());
-  session_deps_.host_resolver->rules()->AddRule(
-      "other.example.org", IPAddress::IPv4Localhost().ToString());
+  std::vector<HostResolverEndpointResult> endpoints;
+  HostResolverEndpointResult endpoint_result;
+  endpoint_result.ip_endpoints = {IPEndPoint(IPAddress::IPv4Localhost(), 0)};
+  endpoints.push_back(endpoint_result);
+  session_deps_.host_resolver->rules()->AddRule("www.example.org", endpoints);
+  session_deps_.host_resolver->rules()->AddRule("other.example.org", endpoints);
   // Make |host_resolver| asynchronous to simulate the issue of
   // crbug.com/1320608.
   session_deps_.host_resolver->set_synchronous_mode(false);
@@ -3883,11 +3885,8 @@ class HttpStreamFactoryJobControllerDnsHttpsAlpnTest
     std::vector<HostResolverEndpointResult> endpoints;
     endpoints.push_back(endpoint_result1);
     endpoints.push_back(endpoint_result2);
-    session_deps_.host_resolver->rules()->AddRule(
-        "www.example.org",
-        MockHostResolverBase::RuleResolver::RuleResult(
-            std::move(endpoints),
-            /*aliases=*/std::set<std::string>{"www.example.org"}));
+    session_deps_.host_resolver->rules()->AddRule("www.example.org",
+                                                  std::move(endpoints));
   }
 
   void CreateJobController(const HttpRequestInfo& request_info) {
@@ -4633,7 +4632,7 @@ TEST_F(HttpStreamFactoryJobControllerDnsHttpsAlpnTest,
   }
   histogram_tester.ExpectUniqueSample(
       "Net.AlternateProtocolUsage",
-      ALTERNATE_PROTOCOL_USAGE_DNS_ALPN_H3_JOB_WON_WITHOUT_RACE, 1);
+      ALTERNATE_PROTOCOL_USAGE_DNS_ALPN_H3_JOB_WON_WITOUT_RACE, 1);
   CheckJobsStatus(/*main_job_exists=*/false, /*alternative_job_exists=*/false,
                   /*dns_alpn_h3_job_exists=*/true,
                   "DNS alpn H3 job must exist.");
@@ -4678,7 +4677,7 @@ TEST_F(HttpStreamFactoryJobControllerDnsHttpsAlpnTest,
   }
   histogram_tester.ExpectUniqueSample(
       "Net.AlternateProtocolUsage",
-      ALTERNATE_PROTOCOL_USAGE_DNS_ALPN_H3_JOB_WON_WITHOUT_RACE, 1);
+      ALTERNATE_PROTOCOL_USAGE_DNS_ALPN_H3_JOB_WON_WITOUT_RACE, 1);
 
   CheckJobsStatus(/*main_job_exists=*/false, /*alternative_job_exists=*/false,
                   /*dns_alpn_h3_job_exists=*/true,

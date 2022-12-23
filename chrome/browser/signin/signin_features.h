@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors
+// Copyright 2020 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,6 @@
 #if BUILDFLAG(IS_ANDROID)
 extern const base::Feature kEnableFamilyInfoFeedback;
 #endif
-
-#if !BUILDFLAG(IS_CHROMEOS_ASH) && !BUILDFLAG(IS_ANDROID)
-extern const base::Feature kForYouFre;
-#endif
-
-extern const base::Feature kDelayConsentLevelUpgrade;
 
 extern const base::Feature kProcessGaiaRemoveLocalAccountHeader;
 

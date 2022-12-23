@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@ import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerP
 import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.IS_INCOGNITO;
 import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.IS_VISIBLE;
 import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.SHADOW_TOP_OFFSET;
-import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.TAB_LIST_ITEM_ANIMATOR_ENABLED;
 import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.TOP_MARGIN;
 import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.VISIBILITY_LISTENER;
 
@@ -40,6 +39,7 @@ import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider
 import org.chromium.chrome.browser.compositor.layouts.LayoutManagerImpl;
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.init.FirstDrawDetector;
 import org.chromium.chrome.browser.multiwindow.MultiWindowModeStateDispatcher;
 import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
 import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
@@ -65,7 +65,6 @@ import org.chromium.chrome.browser.tasks.tab_management.TabSwitcher.TabSwitcherV
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.chrome.features.start_surface.StartSurfaceUserData;
 import org.chromium.chrome.tab_ui.R;
-import org.chromium.components.browser_ui.util.FirstDrawDetector;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.ui.modelutil.PropertyModel;
 
@@ -129,17 +128,6 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
     private boolean mIsOnHomepage;
 
     /**
-     * A custom view that can be supplied by clients to be shown inside the tab grid.
-     * Only one client at a time is supported. The custom view is set to null when the client
-     * signals the mediator for removal.
-     */
-    private @Nullable View mCustomView;
-    /**
-     * A back press {@link Runnable} that can be supplied by clients when adding a custom view.
-     */
-    private @Nullable Runnable mCustomViewBackPressRunnable;
-
-    /**
      * In cases where a didSelectTab was due to switching models with a toggle,
      * we don't change tab grid visibility.
      */
@@ -200,13 +188,6 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
          * Release the thumbnail {@link Bitmap} but keep the {@link TabGridView}.
          */
         void softCleanup();
-
-        /**
-         * Check to see if there are any not viewed price drops when the user leaves the tab
-         * switcher. This is done only before the coordinator is destroyed to reduce the amount of
-         * calls to ShoppingPersistedTabData.
-         */
-        void hardCleanup();
     }
 
     /**
@@ -354,7 +335,7 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
             }
 
             @Override
-            public void willCloseTab(Tab tab, boolean animate, boolean didCloseAlone) {
+            public void willCloseTab(Tab tab, boolean animate) {
                 if (mTabModelSelector.getCurrentModel().getCount() == 1) {
                     messageItemsController.removeAllAppendedMessage();
                 } else if (mPriceMessageService != null
@@ -372,17 +353,6 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
                         && mPriceMessageService.getBindingTabId() == tab.getId()) {
                     priceWelcomeMessageController.restorePriceWelcomeMessage();
                 }
-                notifyBackPressStateChangedInternal();
-            }
-
-            @Override
-            public void tabPendingClosure(Tab tab) {
-                notifyBackPressStateChangedInternal();
-            }
-
-            @Override
-            public void multipleTabsPendingClosure(List<Tab> tabs, boolean isAllTabs) {
-                notifyBackPressStateChangedInternal();
             }
 
             @Override
@@ -464,10 +434,8 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
         mContainerView = containerView;
 
         mSoftClearTabListRunnable = mResetHandler::softCleanup;
-        mClearTabListRunnable = () -> {
-            mResetHandler.hardCleanup();
-            mResetHandler.resetWithTabList(null, false, mShowTabsInMruOrder);
-        };
+        mClearTabListRunnable =
+                () -> mResetHandler.resetWithTabList(null, false, mShowTabsInMruOrder);
         mHandler = new Handler();
         mTabContentManager = tabContentManager;
 
@@ -554,8 +522,7 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
     private void updateTopControlsProperties() {
         // If the Start surface is enabled, it will handle the margins and positioning of the tab
         // switcher. So, we shouldn't do it here.
-        if (ReturnToChromeUtil.isStartSurfaceEnabled(mContext)
-                && !ReturnToChromeUtil.isTabSwitcherOnlyRefactorEnabled(mContext)) {
+        if (ReturnToChromeUtil.isStartSurfaceEnabled(mContext)) {
             mContainerViewModel.set(TOP_MARGIN, 0);
             mContainerViewModel.set(SHADOW_TOP_OFFSET, 0);
             return;
@@ -669,15 +636,6 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
     @Override
     public void removeTabSwitcherViewObserver(TabSwitcherViewObserver observer) {
         mObservers.removeObserver(observer);
-    }
-
-    @Override
-    public void prepareHideTabSwitcherView() {
-        if (mTabGridDialogController != null) {
-            // Don't wait until switcher container view hides.
-            // Hide dialog before GTS hides.
-            mTabGridDialogController.hideDialog(false);
-        }
     }
 
     @Override
@@ -814,11 +772,6 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
             return true;
         }
 
-        if (mCustomViewBackPressRunnable != null) {
-            mCustomViewBackPressRunnable.run();
-            return true;
-        }
-
         if (!mContainerViewModel.get(IS_VISIBLE)) return false;
 
         if (mTabGridDialogController != null && mTabGridDialogController.handleBackPressed()) {
@@ -914,38 +867,24 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
      * view inside the tab switcher.
      *
      * @param customView A {@link View} view that needs to be shown.
-     * @param backPressRunnable A {@link Runnable} which can be supplied if clients also wish to
-     *         handle back presses while the custom view is shown. A null value can be passed to not
-     *         intercept back presses.
      */
     @Override
-    public void addCustomView(@NonNull View customView, @Nullable Runnable backPressRunnable) {
-        assert mCustomView == null : "Only one client at a time is supported to add a custom view.";
+    public void addCustomView(@NonNull View customView) {
         mContainerView.addView(customView);
-        mCustomView = customView;
-        mCustomViewBackPressRunnable = backPressRunnable;
-        notifyBackPressStateChangedInternal();
-
-        // Disable the animation on the tab list during the time period of the custom view.
-        mContainerViewModel.set(TAB_LIST_ITEM_ANIMATOR_ENABLED, false);
     }
 
     /**
      * A method to handle signal from outside world that a client is requesting to remove the custom
      * view from the tab switcher.
      *
+     * TODO(crbug.com/1227656): Transitions needs to be handled correctly to not leak the Incognito
+     * content.
+     *
      * @param customView A {@link View} view that needs to be removed.
      */
     @Override
     public void removeCustomView(@NonNull View customView) {
-        assert mCustomView
-                != null : "No client previously passed a custom view that needs removal.";
         mContainerView.removeView(customView);
-        mCustomView = null;
-        mCustomViewBackPressRunnable = null;
-        notifyBackPressStateChangedInternal();
-
-        mContainerViewModel.set(TAB_LIST_ITEM_ANIMATOR_ENABLED, true);
     }
 
     /**
@@ -1082,17 +1021,9 @@ class TabSwitcherMediator implements TabSwitcher.Controller, TabListRecyclerView
         mBackPressChangedSupplier.set(shouldInterceptBackPress());
     }
 
-    /**
-     * A method to indicate whether back press should be intercepted. The respective interceptors
-     * should also take care of invoking #notifyBackPressStateChangedInternal each time their
-     * decision to intercept back press has changed.
-     *
-     * @return A boolean to indicate if back press should be intercepted or not.
-     */
     @VisibleForTesting
     boolean shouldInterceptBackPress() {
         if (isDialogVisible()) return true;
-        if (mCustomViewBackPressRunnable != null) return true;
 
         if (!mContainerViewModel.get(IS_VISIBLE)) return false;
 

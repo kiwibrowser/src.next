@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "base/containers/contains.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
+#include "base/values.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/url_pattern.h"
 #include "url/gurl.h"
@@ -225,19 +226,6 @@ bool URLPatternSet::MatchesAllURLs() const {
   return false;
 }
 
-bool URLPatternSet::MatchesHost(const GURL& test,
-                                bool require_match_subdomains) const {
-  if (!test.is_valid())
-    return false;
-
-  return std::any_of(
-      patterns_.begin(), patterns_.end(),
-      [&test, require_match_subdomains](const URLPattern& pattern) {
-        return pattern.MatchesHost(test) &&
-               (!require_match_subdomains || pattern.match_subdomains());
-      });
-}
-
 bool URLPatternSet::MatchesSecurityOrigin(const GURL& origin) const {
   for (auto pattern = patterns_.begin(); pattern != patterns_.end();
        ++pattern) {
@@ -262,14 +250,14 @@ bool URLPatternSet::OverlapsWith(const URLPatternSet& other) const {
   return false;
 }
 
-base::Value::List URLPatternSet::ToValue() const {
-  base::Value::List result;
-  for (const auto& pattern : patterns_) {
-    base::Value pattern_str_value(pattern.GetAsString());
-    if (!base::Contains(result, pattern_str_value))
-      result.Append(std::move(pattern_str_value));
+std::unique_ptr<base::ListValue> URLPatternSet::ToValue() const {
+  std::unique_ptr<base::ListValue> value(new base::ListValue);
+  for (auto i = patterns_.cbegin(); i != patterns_.cend(); ++i) {
+    base::Value pattern_str_value(i->GetAsString());
+    if (!base::Contains(value->GetList(), pattern_str_value))
+      value->Append(std::move(pattern_str_value));
   }
-  return result;
+  return value;
 }
 
 bool URLPatternSet::Populate(const std::vector<std::string>& patterns,
@@ -297,20 +285,21 @@ bool URLPatternSet::Populate(const std::vector<std::string>& patterns,
   return true;
 }
 
-std::vector<std::string> URLPatternSet::ToStringVector() const {
-  std::vector<std::string> result;
-  for (const auto& pattern : patterns_) {
-    result.push_back(pattern.GetAsString());
+std::unique_ptr<std::vector<std::string>> URLPatternSet::ToStringVector()
+    const {
+  std::unique_ptr<std::vector<std::string>> value(new std::vector<std::string>);
+  for (auto i = patterns_.cbegin(); i != patterns_.cend(); ++i) {
+    value->push_back(i->GetAsString());
   }
-  return result;
+  return value;
 }
 
-bool URLPatternSet::Populate(const base::Value::List& value,
+bool URLPatternSet::Populate(const base::ListValue& value,
                              int valid_schemes,
                              bool allow_file_access,
                              std::string* error) {
   std::vector<std::string> patterns;
-  for (const base::Value& pattern : value) {
+  for (const base::Value& pattern : value.GetList()) {
     const std::string* item = pattern.GetIfString();
     if (!item)
       return false;

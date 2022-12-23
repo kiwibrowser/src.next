@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,7 +37,7 @@ ExtensionApiUnittest::RunFunctionAndReturnDictionary(
     ExtensionFunction* function,
     const std::string& args) {
   base::Value* value = RunFunctionAndReturnValue(function, args).release();
-  base::DictionaryValue* dict = nullptr;
+  base::DictionaryValue* dict = NULL;
 
   if (value && !value->GetAsDictionary(&dict))
     delete value;

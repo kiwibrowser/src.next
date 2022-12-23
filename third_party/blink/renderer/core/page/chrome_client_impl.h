@@ -75,22 +75,23 @@ class CORE_EXPORT ChromeClientImpl final : public ChromeClient {
   void TakeFocus(mojom::blink::FocusType) override;
   void SetKeyboardFocusURL(Element* new_focus_element) override;
   void BeginLifecycleUpdates(LocalFrame& main_frame) override;
-  void RegisterForCommitObservation(CommitObserver*) override;
-  void UnregisterFromCommitObservation(CommitObserver*) override;
-  void WillCommitCompositorFrame() override;
+  void RegisterForDeferredCommitObservation(DeferredCommitObserver*) override;
+  void UnregisterFromDeferredCommitObservation(
+      DeferredCommitObserver*) override;
+  void OnDeferCommitsChanged(
+      bool defer_status,
+      cc::PaintHoldingReason reason,
+      absl::optional<cc::PaintHoldingCommitTrigger> trigger) override;
   bool StartDeferringCommits(LocalFrame& main_frame,
                              base::TimeDelta timeout,
                              cc::PaintHoldingReason reason) override;
   void StopDeferringCommits(LocalFrame& main_frame,
                             cc::PaintHoldingCommitTrigger) override;
-  std::unique_ptr<cc::ScopedPauseRendering> PauseRendering(
-      LocalFrame&) override;
   void StartDragging(LocalFrame*,
                      const WebDragData&,
                      DragOperationsMask,
                      const SkBitmap& drag_image,
-                     const gfx::Vector2d& cursor_offset,
-                     const gfx::Rect& drag_obj_rect) override;
+                     const gfx::Point& drag_image_offset) override;
   bool AcceptsLoadDrops() const override;
   Page* CreateWindowDelegate(LocalFrame*,
                              const FrameLoadRequest&,
@@ -102,7 +103,7 @@ class CORE_EXPORT ChromeClientImpl final : public ChromeClient {
   void Show(LocalFrame& frame,
             LocalFrame& opener_frame,
             NavigationPolicy navigation_policy,
-            const mojom::blink::WindowFeatures& window_features,
+            const gfx::Rect& initial_rect,
             bool user_gesture) override;
   void DidOverscroll(const gfx::Vector2dF& overscroll_delta,
                      const gfx::Vector2dF& accumulated_overscroll,
@@ -196,7 +197,6 @@ class CORE_EXPORT ChromeClientImpl final : public ChromeClient {
   void SetNeedsUnbufferedInputForDebugger(LocalFrame*, bool immediate) override;
   void RequestUnbufferedInputEvents(LocalFrame*) override;
   void SetTouchAction(LocalFrame*, TouchAction) override;
-  void SetPanAction(LocalFrame*, mojom::blink::PanAction pan_action) override;
 
   void AttachRootLayer(scoped_refptr<cc::Layer>,
                        LocalFrame* local_root) override;
@@ -334,7 +334,7 @@ class CORE_EXPORT ChromeClientImpl final : public ChromeClient {
   Member<ExternalDateTimeChooser> external_date_time_chooser_;
   bool did_request_non_empty_tool_tip_;
   absl::optional<bool> before_unload_confirm_panel_result_for_testing_;
-  HeapHashSet<WeakMember<CommitObserver>> commit_observers_;
+  HeapHashSet<WeakMember<DeferredCommitObserver>> deferred_commit_observers_;
 
   FRIEND_TEST_ALL_PREFIXES(FileChooserQueueTest, DerefQueuedChooser);
 };

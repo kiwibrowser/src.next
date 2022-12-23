@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,6 @@
 #include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "cc/base/switches.h"
-#include "content/browser/aggregation_service/aggregation_service_internals.mojom.h"
-#include "content/browser/aggregation_service/aggregation_service_internals_ui.h"
 #include "content/browser/attribution_reporting/attribution_internals.mojom.h"
 #include "content/browser/attribution_reporting/attribution_internals_ui.h"
 #include "content/browser/background_fetch/background_fetch_service_impl.h"
@@ -70,7 +68,6 @@
 #include "content/public/browser/shared_worker_instance.h"
 #include "content/public/browser/site_isolation_policy.h"
 #include "content/public/browser/storage_partition.h"
-#include "content/public/browser/web_ui_controller_interface_binder.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/url_constants.h"
@@ -275,6 +272,113 @@ void BindColorChooserFactoryForFrame(
   auto* web_contents =
       static_cast<WebContentsImpl*>(WebContents::FromRenderFrameHost(host));
   web_contents->OnColorChooserFactoryReceiver(std::move(receiver));
+}
+
+void BindAttributionInternalsHandler(
+    RenderFrameHost* host,
+    mojo::PendingReceiver<attribution_internals::mojom::Handler> receiver) {
+  WebUI* web_ui = host->GetWebUI();
+
+  // Performs a safe downcast to the concrete AttributionInternalsUI subclass.
+  AttributionInternalsUI* attribution_internals_ui =
+      web_ui ? web_ui->GetController()->GetAs<AttributionInternalsUI>()
+             : nullptr;
+
+  // This is expected to be called only for outermost main frames and for the
+  // right WebUI pages matching the same WebUI associated to the
+  // RenderFrameHost.
+  if (host->GetParentOrOuterDocument() || !attribution_internals_ui) {
+    ReceivedBadMessage(
+        host->GetProcess(),
+        bad_message::BadMessageReason::RFH_INVALID_WEB_UI_CONTROLLER);
+    return;
+  }
+
+  DCHECK_EQ(host->GetLastCommittedURL().host_piece(),
+            kChromeUIAttributionInternalsHost);
+  DCHECK(host->GetLastCommittedURL().SchemeIs(kChromeUIScheme));
+
+  attribution_internals_ui->BindInterface(std::move(receiver));
+}
+
+void BindQuotaInternalsHandler(
+    RenderFrameHost* host,
+    mojo::PendingReceiver<storage::mojom::QuotaInternalsHandler> receiver) {
+  WebUI* web_ui = host->GetWebUI();
+
+  // Performs a safe downcast to the concrete QuotaInternalsUI
+  // subclass.
+  QuotaInternalsUI* quota_internals_ui =
+      web_ui ? web_ui->GetController()->GetAs<QuotaInternalsUI>() : nullptr;
+
+  // This is expected to be called only for main frames and for the right WebUI
+  // pages matching the same WebUI associated to the RenderFrameHost.
+  if (host->GetParent() || !quota_internals_ui) {
+    ReceivedBadMessage(
+        host->GetProcess(),
+        bad_message::BadMessageReason::RFH_INVALID_WEB_UI_CONTROLLER);
+    return;
+  }
+
+  DCHECK_EQ(host->GetLastCommittedURL().host_piece(),
+            kChromeUIQuotaInternalsHost);
+  DCHECK(host->GetLastCommittedURL().SchemeIs(kChromeUIScheme));
+
+  static_cast<StoragePartitionImpl*>(host->GetStoragePartition())
+      ->GetQuotaManager()
+      ->proxy()
+      ->BindInternalsHandler(std::move(receiver));
+}
+
+void BindPrerenderInternalsHandler(
+    RenderFrameHost* host,
+    mojo::PendingReceiver<mojom::PrerenderInternalsHandler> receiver) {
+  WebUI* web_ui = host->GetWebUI();
+
+  PrerenderInternalsUI* prerender_internals_ui =
+      web_ui ? web_ui->GetController()->GetAs<PrerenderInternalsUI>() : nullptr;
+
+  // This is expected to be called only for outermost main frames and for the
+  // right WebUI pages matching the same WebUI associated to the
+  // RenderFrameHost.
+  if (host->GetParentOrOuterDocument() || !prerender_internals_ui) {
+    ReceivedBadMessage(
+        host->GetProcess(),
+        bad_message::BadMessageReason::RFH_INVALID_WEB_UI_CONTROLLER);
+    return;
+  }
+
+  DCHECK_EQ(host->GetLastCommittedURL().host_piece(),
+            kChromeUIPrerenderInternalsHost);
+  DCHECK(host->GetLastCommittedURL().SchemeIs(kChromeUIScheme));
+
+  prerender_internals_ui->BindPrerenderInternalsHandler(std::move(receiver));
+}
+
+void BindProcessInternalsHandler(
+    RenderFrameHost* host,
+    mojo::PendingReceiver<::mojom::ProcessInternalsHandler> receiver) {
+  WebUI* web_ui = host->GetWebUI();
+
+  // Performs a safe downcast to the concrete ProcessInternalsUI subclass.
+  ProcessInternalsUI* process_internals_ui =
+      web_ui ? web_ui->GetController()->GetAs<ProcessInternalsUI>() : nullptr;
+
+  // This is expected to be called only for outermost main frames and for the
+  // right WebUI pages matching the same WebUI associated to the
+  // RenderFrameHost.
+  if (host->GetParentOrOuterDocument() || !process_internals_ui) {
+    ReceivedBadMessage(
+        host->GetProcess(),
+        bad_message::BadMessageReason::RFH_INVALID_WEB_UI_CONTROLLER);
+    return;
+  }
+
+  DCHECK_EQ(host->GetLastCommittedURL().host_piece(),
+            kChromeUIProcessInternalsHost);
+  DCHECK(host->GetLastCommittedURL().SchemeIs(kChromeUIScheme));
+
+  process_internals_ui->BindProcessInternalsHandler(std::move(receiver), host);
 }
 
 void BindQuotaManagerHost(
@@ -997,8 +1101,10 @@ void PopulateBinderMapWithContext(
         base::BindRepeating(&BrowsingTopicsDocumentHost::CreateMojoService));
   }
 #if !BUILDFLAG(IS_ANDROID)
-  map->Add<blink::mojom::DirectSocketsService>(
-      base::BindRepeating(&DirectSocketsServiceImpl::CreateForFrame));
+  if (SiteIsolationPolicy::IsApplicationIsolationLevelEnabled()) {
+    map->Add<blink::mojom::DirectSocketsService>(
+        base::BindRepeating(&DirectSocketsServiceImpl::CreateForFrame));
+  }
   map->Add<media::mojom::SpeechRecognitionContext>(base::BindRepeating(
       &EmptyBinderForFrame<media::mojom::SpeechRecognitionContext>));
   map->Add<media::mojom::SpeechRecognitionClientBrowserInterface>(
@@ -1044,17 +1150,14 @@ void PopulateBinderMapWithContext(
   map->Add<device::mojom::VRService>(
       base::BindRepeating(&EmptyBinderForFrame<device::mojom::VRService>));
 #endif
-  RegisterWebUIControllerInterfaceBinder<
-      aggregation_service_internals::mojom::Handler,
-      AggregationServiceInternalsUI>(map);
-  RegisterWebUIControllerInterfaceBinder<attribution_internals::mojom::Handler,
-                                         AttributionInternalsUI>(map);
-  RegisterWebUIControllerInterfaceBinder<mojom::PrerenderInternalsHandler,
-                                         PrerenderInternalsUI>(map);
-  RegisterWebUIControllerInterfaceBinder<::mojom::ProcessInternalsHandler,
-                                         ProcessInternalsUI>(map);
-  RegisterWebUIControllerInterfaceBinder<storage::mojom::QuotaInternalsHandler,
-                                         QuotaInternalsUI>(map);
+  map->Add<attribution_internals::mojom::Handler>(
+      base::BindRepeating(&BindAttributionInternalsHandler));
+  map->Add<mojom::PrerenderInternalsHandler>(
+      base::BindRepeating(&BindPrerenderInternalsHandler));
+  map->Add<::mojom::ProcessInternalsHandler>(
+      base::BindRepeating(&BindProcessInternalsHandler));
+  map->Add<storage::mojom::QuotaInternalsHandler>(
+      base::BindRepeating(&BindQuotaInternalsHandler));
 #if BUILDFLAG(IS_ANDROID)
   map->Add<blink::mojom::DateTimeChooser>(
       base::BindRepeating(&BindDateTimeChooserForFrame));
@@ -1154,14 +1257,6 @@ void PopulateDedicatedWorkerBinders(DedicatedWorkerHost* host,
   map->Add<blink::mojom::SerialService>(base::BindRepeating(
       &DedicatedWorkerHost::BindSerialService, base::Unretained(host)));
 #endif  // !BUILDFLAG(IS_ANDROID)
-  map->Add<blink::mojom::BucketManagerHost>(base::BindRepeating(
-      &DedicatedWorkerHost::CreateBucketManagerHost, base::Unretained(host)));
-
-#if BUILDFLAG(IS_FUCHSIA)
-  map->Add<media::mojom::FuchsiaMediaResourceProvider>(base::BindRepeating(
-      &DedicatedWorkerHost::BindFuchsiaMediaResourceProvider,
-      base::Unretained(host)));
-#endif  // BUILDFLAG(IS_FUCHSIA)
 
   // RenderProcessHost binders
   map->Add<media::mojom::VideoDecodePerfHistory>(BindWorkerReceiver(
@@ -1193,6 +1288,8 @@ void PopulateBinderMapWithContext(
       &RenderProcessHostImpl::CreatePaymentManagerForOrigin, host));
   map->Add<blink::mojom::PermissionService>(BindWorkerReceiverForOrigin(
       &RenderProcessHostImpl::CreatePermissionService, host));
+  map->Add<blink::mojom::BucketManagerHost>(BindWorkerReceiverForOrigin(
+      &RenderProcessHostImpl::BindBucketManagerHostForWorker, host));
 
   // RenderProcessHost binders taking a frame id and an origin
   map->Add<blink::mojom::NotificationService>(
@@ -1250,8 +1347,6 @@ void PopulateSharedWorkerBinders(SharedWorkerHost* host, mojo::BinderMap* map) {
                           base::Unretained(host)));
   map->Add<blink::mojom::ReportingServiceProxy>(base::BindRepeating(
       &CreateReportingServiceProxyForSharedWorker, base::Unretained(host)));
-  map->Add<blink::mojom::BucketManagerHost>(base::BindRepeating(
-      &SharedWorkerHost::CreateBucketManagerHost, base::Unretained(host)));
 
   // RenderProcessHost binders
   map->Add<media::mojom::VideoDecodePerfHistory>(BindWorkerReceiver(
@@ -1285,6 +1380,8 @@ void PopulateBinderMapWithContext(
       &RenderProcessHostImpl::CreatePaymentManagerForOrigin, host));
   map->Add<blink::mojom::PermissionService>(BindWorkerReceiverForOrigin(
       &RenderProcessHostImpl::CreatePermissionService, host));
+  map->Add<blink::mojom::BucketManagerHost>(BindWorkerReceiverForOrigin(
+      &RenderProcessHostImpl::BindBucketManagerHostForWorker, host));
 
   // RenderProcessHost binders taking a frame id and an origin
   map->Add<blink::mojom::NotificationService>(
@@ -1344,8 +1441,6 @@ void PopulateServiceWorkerBinders(ServiceWorkerHost* host,
   map->Add<blink::mojom::HidService>(base::BindRepeating(
       &ServiceWorkerHost::BindHidService, base::Unretained(host)));
 #endif
-  map->Add<blink::mojom::BucketManagerHost>(base::BindRepeating(
-      &ServiceWorkerHost::CreateBucketManagerHost, base::Unretained(host)));
 
   // RenderProcessHost binders
   map->Add<media::mojom::VideoDecodePerfHistory>(BindServiceWorkerReceiver(
@@ -1381,6 +1476,8 @@ void PopulateBinderMapWithContext(
       BindServiceWorkerReceiverForStorageKey(
           &RenderProcessHostImpl::BindRestrictedCookieManagerForServiceWorker,
           host));
+  map->Add<blink::mojom::BucketManagerHost>(BindServiceWorkerReceiverForOrigin(
+      &RenderProcessHostImpl::BindBucketManagerHostForWorker, host));
   map->Add<blink::mojom::OneShotBackgroundSyncService>(
       BindServiceWorkerReceiverForOrigin(
           &RenderProcessHostImpl::CreateOneShotSyncService, host));

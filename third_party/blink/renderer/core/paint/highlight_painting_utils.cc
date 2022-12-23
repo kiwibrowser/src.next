@@ -33,27 +33,10 @@ bool NodeIsReplaced(Node* node) {
          node->GetLayoutObject()->IsLayoutReplaced();
 }
 
-mojom::blink::ColorScheme UsedColorScheme(
-    const ComputedStyle& originating_style,
-    const ComputedStyle* pseudo_style) {
-  return pseudo_style ? pseudo_style->UsedColorScheme()
-                      : originating_style.UsedColorScheme();
-}
-
-Color PreviousLayerColor(const ComputedStyle& originating_style,
-                         absl::optional<Color> previous_layer_color) {
-  if (previous_layer_color &&
-      RuntimeEnabledFeatures::HighlightOverlayPaintingEnabled()) {
-    return *previous_layer_color;
-  }
-  return originating_style.VisitedDependentColor(GetCSSPropertyColor());
-}
-
-// Returns the forced foreground color for the given |pseudo|.
-Color ForcedForegroundColor(PseudoId pseudo,
-                            mojom::blink::ColorScheme color_scheme) {
+Color ForcedSystemForegroundColor(PseudoId pseudo_id,
+                                  mojom::blink::ColorScheme color_scheme) {
   CSSValueID keyword = CSSValueID::kHighlighttext;
-  switch (pseudo) {
+  switch (pseudo_id) {
     case kPseudoIdTargetText:
       // TODO(futhark): According to the spec, the UA style should use Marktext.
       keyword = CSSValueID::kHighlighttext;
@@ -64,7 +47,6 @@ Color ForcedForegroundColor(PseudoId pseudo,
     case kPseudoIdHighlight:
       keyword = CSSValueID::kHighlighttext;
       break;
-    // TODO(crbug.com/1035708) add cases for ::{spelling,grammar}-error
     default:
       NOTREACHED();
       break;
@@ -72,11 +54,10 @@ Color ForcedForegroundColor(PseudoId pseudo,
   return LayoutTheme::GetTheme().SystemColor(keyword, color_scheme);
 }
 
-// Returns the forced ‘background-color’ for the given |pseudo|.
-Color ForcedBackgroundColor(PseudoId pseudo,
-                            mojom::blink::ColorScheme color_scheme) {
+Color ForcedSystemBackgroundColor(PseudoId pseudo_id,
+                                  mojom::blink::ColorScheme color_scheme) {
   CSSValueID keyword = CSSValueID::kHighlight;
-  switch (pseudo) {
+  switch (pseudo_id) {
     case kPseudoIdTargetText:
       // TODO(futhark): According to the spec, the UA style should use Mark.
       keyword = CSSValueID::kHighlight;
@@ -87,7 +68,6 @@ Color ForcedBackgroundColor(PseudoId pseudo,
     case kPseudoIdHighlight:
       keyword = CSSValueID::kHighlight;
       break;
-    // TODO(crbug.com/1035708) add cases for ::{spelling,grammar}-error
     default:
       NOTREACHED();
       break;
@@ -95,72 +75,55 @@ Color ForcedBackgroundColor(PseudoId pseudo,
   return LayoutTheme::GetTheme().SystemColor(keyword, color_scheme);
 }
 
-// Returns the forced background color if |property| is ‘background-color’,
-// or the forced foreground color for all other properties (e.g. ‘color’,
-// ‘text-decoration-color’, ‘-webkit-text-fill-color’).
-Color ForcedColor(const ComputedStyle& originating_style,
-                  const ComputedStyle* pseudo_style,
-                  PseudoId pseudo,
-                  const CSSProperty& property) {
-  mojom::blink::ColorScheme color_scheme =
-      UsedColorScheme(originating_style, pseudo_style);
-  if (property.IDEquals(CSSPropertyID::kBackgroundColor))
-    return ForcedBackgroundColor(pseudo, color_scheme);
-  return ForcedForegroundColor(pseudo, color_scheme);
-}
-
-// Returns the UA default ‘color’ for the given |pseudo|.
-absl::optional<Color> DefaultForegroundColor(
-    const Document& document,
-    PseudoId pseudo,
-    mojom::blink::ColorScheme color_scheme) {
-  // TODO(crbug.com/1295264): unstyled custom highlights should not change
-  // the foreground color, but for now the best we can do is defaulting to
-  // transparent (pre-HighlightOverlayPainting with double painting). The
-  // correct behaviour is to use the ‘color’ of the next topmost active
-  // highlight (equivalent to 'currentColor').
-  absl::optional<Color> previous_layer_color =
-      RuntimeEnabledFeatures::HighlightOverlayPaintingEnabled()
-          ? absl::nullopt
-          : absl::make_optional(Color::kTransparent);
-
-  switch (pseudo) {
+Color HighlightThemeForegroundColor(const Document& document,
+                                    const ComputedStyle& style,
+                                    const CSSProperty& color_property,
+                                    Color previous_layer_color,
+                                    PseudoId pseudo_id) {
+  switch (pseudo_id) {
     case kPseudoIdSelection:
       if (!LayoutTheme::GetTheme().SupportsSelectionForegroundColors())
-        return previous_layer_color;
+        return style.VisitedDependentColor(color_property);
       if (document.GetFrame()->Selection().FrameIsFocusedAndActive()) {
         return LayoutTheme::GetTheme().ActiveSelectionForegroundColor(
-            color_scheme);
+            style.UsedColorScheme());
       }
       return LayoutTheme::GetTheme().InactiveSelectionForegroundColor(
-          color_scheme);
+          style.UsedColorScheme());
     case kPseudoIdTargetText:
       return LayoutTheme::GetTheme().PlatformTextSearchColor(
-          false /* active match */, color_scheme);
+          false /* active match */, style.UsedColorScheme());
     case kPseudoIdSpellingError:
     case kPseudoIdGrammarError:
     case kPseudoIdHighlight:
-      return previous_layer_color;
+      if (RuntimeEnabledFeatures::HighlightOverlayPaintingEnabled()) {
+        return previous_layer_color;
+      } else {
+        // TODO(crbug.com/1295264): unstyled custom highlights should not change
+        // the foreground color, but for now the best we can do is defaulting to
+        // transparent (pre-HighlightOverlayPainting with double painting). The
+        // correct behaviour is to use the ‘color’ of the next topmost active
+        // highlight (equivalent to 'currentColor').
+        return Color::kTransparent;
+      }
     default:
       NOTREACHED();
-      return absl::nullopt;
+      return Color();
   }
 }
 
-// Returns the UA default ‘background-color’ for the given |pseudo|.
-Color DefaultBackgroundColor(const Document& document,
-                             PseudoId pseudo,
-                             mojom::blink::ColorScheme color_scheme) {
-  switch (pseudo) {
+Color HighlightThemeBackgroundColor(const Document& document,
+                                    const ComputedStyle& style,
+                                    PseudoId pseudo_id) {
+  switch (pseudo_id) {
     case kPseudoIdSelection:
       return document.GetFrame()->Selection().FrameIsFocusedAndActive()
                  ? LayoutTheme::GetTheme().ActiveSelectionBackgroundColor(
-                       color_scheme)
+                       style.UsedColorScheme())
                  : LayoutTheme::GetTheme().InactiveSelectionBackgroundColor(
-                       color_scheme);
+                       style.UsedColorScheme());
     case kPseudoIdTargetText:
-      return Color::FromRGBA32(
-          shared_highlighting::kFragmentTextBackgroundColorARGB);
+      return Color(shared_highlighting::kFragmentTextBackgroundColorARGB);
     case kPseudoIdSpellingError:
     case kPseudoIdGrammarError:
     case kPseudoIdHighlight:
@@ -169,27 +132,6 @@ Color DefaultBackgroundColor(const Document& document,
       NOTREACHED();
       return Color();
   }
-}
-
-// Returns the UA default highlight color for a paired cascade |property|,
-// that is, ‘color’ or ‘background-color’. Paired cascade only applies to those
-// properties, not ‘-webkit-text-fill-color’ or ‘-webkit-text-stroke-color’.
-Color DefaultHighlightColor(const Document& document,
-                            const ComputedStyle& originating_style,
-                            const ComputedStyle* pseudo_style,
-                            PseudoId pseudo,
-                            const CSSProperty& property,
-                            absl::optional<Color> previous_layer_color) {
-  mojom::blink::ColorScheme color_scheme =
-      UsedColorScheme(originating_style, pseudo_style);
-  if (property.IDEquals(CSSPropertyID::kBackgroundColor))
-    return DefaultBackgroundColor(document, pseudo, color_scheme);
-  DCHECK(property.IDEquals(CSSPropertyID::kColor));
-  if (absl::optional<Color> result =
-          DefaultForegroundColor(document, pseudo, color_scheme)) {
-    return *result;
-  }
-  return PreviousLayerColor(originating_style, previous_layer_color);
 }
 
 // Returns highlight styles for the given node, inheriting from the originating
@@ -238,63 +180,57 @@ HighlightPseudoStyleWithOriginatingInheritance(
   return element->CachedStyleForPseudoElement(pseudo, pseudo_argument);
 }
 
-bool UseForcedColors(const Document& document,
-                     const ComputedStyle& originating_style,
-                     const ComputedStyle* pseudo_style) {
-  if (!document.InForcedColorsMode())
-    return false;
-  // TODO(crbug.com/1309835) simplify when valid_for_highlight_legacy is removed
-  if (pseudo_style)
-    return pseudo_style->ForcedColorAdjust() == EForcedColorAdjust::kAuto;
-  return originating_style.ForcedColorAdjust() == EForcedColorAdjust::kAuto;
-}
-
 // Paired cascade: when we encounter any highlight colors, we make all other
 // highlight color properties default to initial, rather than the UA default.
 // https://drafts.csswg.org/css-pseudo-4/#highlight-cascade
-bool UseDefaultHighlightColors(const ComputedStyle* pseudo_style,
-                               PseudoId pseudo,
-                               const CSSProperty& property) {
-  switch (property.PropertyID()) {
-    case CSSPropertyID::kColor:
-    case CSSPropertyID::kBackgroundColor:
-      return !pseudo_style || (UsesHighlightPseudoInheritance(pseudo) &&
-                               !pseudo_style->HasAuthorHighlightColors());
-    default:
-      return false;
+bool UseUaHighlightColors(PseudoId pseudo, const ComputedStyle& pseudo_style) {
+  return !pseudo_style.HasAuthorHighlightColors();
+}
+
+Color HighlightColor(const Document& document,
+                     const ComputedStyle& style,
+                     Node* node,
+                     Color previous_layer_color,
+                     PseudoId pseudo,
+                     const CSSProperty& color_property,
+                     PaintFlags paint_flags,
+                     const AtomicString& pseudo_argument = g_null_atom) {
+  if (pseudo == kPseudoIdSelection) {
+    // If the element is unselectable, or we are only painting the selection,
+    // don't override the foreground color with the selection foreground color.
+    if ((node && !style.IsSelectable()) ||
+        (paint_flags & PaintFlag::kSelectionDragImageOnly)) {
+      return style.VisitedDependentColor(color_property);
+    }
   }
+
+  scoped_refptr<const ComputedStyle> pseudo_style =
+      HighlightPaintingUtils::HighlightPseudoStyle(node, style, pseudo,
+                                                   pseudo_argument);
+
+  mojom::blink::ColorScheme color_scheme = style.UsedColorScheme();
+  if (pseudo_style && (!UsesHighlightPseudoInheritance(pseudo) ||
+                       !UseUaHighlightColors(pseudo, *pseudo_style))) {
+    if (!document.InForcedColorsMode() ||
+        pseudo_style->ForcedColorAdjust() != EForcedColorAdjust::kAuto) {
+      if (pseudo_style->ColorIsCurrentColor()) {
+        if (RuntimeEnabledFeatures::HighlightOverlayPaintingEnabled())
+          return previous_layer_color;
+        else
+          return style.VisitedDependentColor(color_property);
+      }
+      return pseudo_style->VisitedDependentColor(color_property);
+    }
+    color_scheme = pseudo_style->UsedColorScheme();
+  }
+
+  if (document.InForcedColorsMode())
+    return ForcedSystemForegroundColor(pseudo, color_scheme);
+  return HighlightThemeForegroundColor(document, style, color_property,
+                                       previous_layer_color, pseudo);
 }
 
 }  // anonymous namespace
-
-// Returns the used value of the given <color>-valued |property|, taking into
-// account forced colors, default highlight colors, and ‘currentColor’ fallback.
-Color HighlightPaintingUtils::ResolveColor(
-    const Document& document,
-    const ComputedStyle& originating_style,
-    const ComputedStyle* pseudo_style,
-    PseudoId pseudo,
-    const CSSProperty& property,
-    absl::optional<Color> previous_layer_color) {
-  if (UseForcedColors(document, originating_style, pseudo_style))
-    return ForcedColor(originating_style, pseudo_style, pseudo, property);
-  if (UseDefaultHighlightColors(pseudo_style, pseudo, property)) {
-    return DefaultHighlightColor(document, originating_style, pseudo_style,
-                                 pseudo, property, previous_layer_color);
-  }
-  if (pseudo_style) {
-    bool is_current_color;
-    Color result =
-        pseudo_style->VisitedDependentColor(property, &is_current_color);
-    if (!is_current_color)
-      return result;
-  }
-  if (!property.IDEquals(CSSPropertyID::kColor)) {
-    return ResolveColor(document, originating_style, pseudo_style, pseudo,
-                        GetCSSPropertyColor(), previous_layer_color);
-  }
-  return PreviousLayerColor(originating_style, previous_layer_color);
-}
 
 // Returns highlight styles for the given node, inheriting through the “tree” of
 // highlight pseudo styles mirroring the originating element tree. None of the
@@ -343,23 +279,42 @@ Color HighlightPaintingUtils::HighlightBackgroundColor(
 
   scoped_refptr<const ComputedStyle> pseudo_style =
       HighlightPseudoStyle(node, style, pseudo, pseudo_argument);
-  Color result =
-      ResolveColor(document, style, pseudo_style.get(), pseudo,
-                   GetCSSPropertyBackgroundColor(), previous_layer_color);
-  if (pseudo == kPseudoIdSelection && NodeIsReplaced(node)) {
-    // Avoid that ::selection full obscures selected replaced elements like
-    // images.
-    return result.BlendWithWhite();
+
+  mojom::blink::ColorScheme color_scheme = style.UsedColorScheme();
+  if (pseudo_style && (!UsesHighlightPseudoInheritance(pseudo) ||
+                       !UseUaHighlightColors(pseudo, *pseudo_style))) {
+    if (!document.InForcedColorsMode() ||
+        pseudo_style->ForcedColorAdjust() != EForcedColorAdjust::kAuto) {
+      Color highlight_color =
+          pseudo_style->VisitedDependentColor(GetCSSPropertyBackgroundColor());
+      if (pseudo_style->IsBackgroundColorCurrentColor() &&
+          pseudo_style->ColorIsCurrentColor()) {
+        if (RuntimeEnabledFeatures::HighlightOverlayPaintingEnabled() &&
+            previous_layer_color.has_value()) {
+          highlight_color = previous_layer_color.value();
+        } else {
+          highlight_color = style.VisitedDependentColor(GetCSSPropertyColor());
+        }
+      }
+      if (pseudo == kPseudoIdSelection && NodeIsReplaced(node)) {
+        // Avoid that ::selection full obscures selected replaced elements like
+        // images.
+        return highlight_color.BlendWithWhite();
+      }
+      return highlight_color;
+    }
+    color_scheme = pseudo_style->UsedColorScheme();
   }
-  return result;
+
+  if (document.InForcedColorsMode())
+    return ForcedSystemBackgroundColor(pseudo, color_scheme);
+  return HighlightThemeBackgroundColor(document, style, pseudo);
 }
 
 absl::optional<AppliedTextDecoration>
-HighlightPaintingUtils::SelectionTextDecoration(
-    const Document& document,
+HighlightPaintingUtils::HighlightTextDecoration(
     const ComputedStyle& style,
-    const ComputedStyle& pseudo_style,
-    absl::optional<Color> previous_layer_color) {
+    const ComputedStyle& pseudo_style) {
   const Vector<AppliedTextDecoration>& style_decorations =
       style.AppliedTextDecorations();
   const Vector<AppliedTextDecoration>& pseudo_style_decorations =
@@ -378,10 +333,35 @@ HighlightPaintingUtils::SelectionTextDecoration(
   }
 
   highlight_text_decoration.value().SetColor(
-      ResolveColor(document, style, &pseudo_style, kPseudoIdSelection,
-                   GetCSSPropertyTextDecorationColor(), previous_layer_color));
+      pseudo_style.VisitedDependentColor(GetCSSPropertyTextDecorationColor()));
 
   return highlight_text_decoration;
+}
+
+Color HighlightPaintingUtils::HighlightForegroundColor(
+    const Document& document,
+    const ComputedStyle& style,
+    Node* node,
+    Color previous_layer_color,
+    PseudoId pseudo,
+    PaintFlags paint_flags,
+    const AtomicString& pseudo_argument) {
+  return HighlightColor(document, style, node, previous_layer_color, pseudo,
+                        GetCSSPropertyWebkitTextFillColor(), paint_flags,
+                        pseudo_argument);
+}
+
+Color HighlightPaintingUtils::HighlightEmphasisMarkColor(
+    const Document& document,
+    const ComputedStyle& style,
+    Node* node,
+    Color previous_layer_color,
+    PseudoId pseudo,
+    PaintFlags paint_flags,
+    const AtomicString& pseudo_argument) {
+  return HighlightColor(document, style, node, previous_layer_color, pseudo,
+                        GetCSSPropertyTextEmphasisColor(), paint_flags,
+                        pseudo_argument);
 }
 
 TextPaintStyle HighlightPaintingUtils::HighlightPaintingStyle(
@@ -389,42 +369,32 @@ TextPaintStyle HighlightPaintingUtils::HighlightPaintingStyle(
     const ComputedStyle& style,
     Node* node,
     PseudoId pseudo,
-    const TextPaintStyle& previous_layer_text_style,
+    const TextPaintStyle& text_style,
     const PaintInfo& paint_info,
     const AtomicString& pseudo_argument) {
-  TextPaintStyle highlight_style = previous_layer_text_style;
-  const PaintFlags paint_flags = paint_info.GetPaintFlags();
+  TextPaintStyle highlight_style = text_style;
   bool uses_text_as_clip = paint_info.phase == PaintPhase::kTextClip;
-  bool ignored_selection = pseudo == kPseudoIdSelection &&
-                           ((node && !style.IsSelectable()) ||
-                            (paint_flags & PaintFlag::kSelectionDragImageOnly));
+  const PaintFlags paint_flags = paint_info.GetPaintFlags();
 
   // Each highlight overlay’s shadows are completely independent of any shadows
   // specified on the originating element (or the other highlight overlays).
   highlight_style.shadow = nullptr;
 
-  scoped_refptr<const ComputedStyle> pseudo_style =
-      HighlightPseudoStyle(node, style, pseudo, pseudo_argument);
-  Color previous_layer_current_color = previous_layer_text_style.current_color;
-
-  if (!uses_text_as_clip && !ignored_selection) {
-    highlight_style.current_color =
-        ResolveColor(document, style, pseudo_style.get(), pseudo,
-                     GetCSSPropertyColor(), previous_layer_current_color);
-    highlight_style.fill_color = ResolveColor(
-        document, style, pseudo_style.get(), pseudo,
-        GetCSSPropertyWebkitTextFillColor(), previous_layer_current_color);
-    // TODO(crbug.com/1147859) ignore highlight ‘text-emphasis-color’
-    // https://github.com/w3c/csswg-drafts/issues/7101
-    highlight_style.emphasis_mark_color = ResolveColor(
-        document, style, pseudo_style.get(), pseudo,
-        GetCSSPropertyTextEmphasisColor(), previous_layer_current_color);
-    highlight_style.stroke_color = ResolveColor(
-        document, style, pseudo_style.get(), pseudo,
-        GetCSSPropertyWebkitTextStrokeColor(), previous_layer_current_color);
+  if (!uses_text_as_clip) {
+    highlight_style.fill_color =
+        HighlightForegroundColor(document, style, node, text_style.fill_color,
+                                 pseudo, paint_flags, pseudo_argument);
+    highlight_style.emphasis_mark_color = HighlightEmphasisMarkColor(
+        document, style, node, text_style.emphasis_mark_color, pseudo,
+        paint_flags, pseudo_argument);
   }
 
-  if (pseudo_style) {
+  if (scoped_refptr<const ComputedStyle> pseudo_style =
+          HighlightPseudoStyle(node, style, pseudo, pseudo_argument)) {
+    highlight_style.stroke_color =
+        uses_text_as_clip ? Color::kBlack
+                          : pseudo_style->VisitedDependentColor(
+                                GetCSSPropertyWebkitTextStrokeColor());
     highlight_style.stroke_width = pseudo_style->TextStrokeWidth();
     // TODO(crbug.com/1164461) For now, don't paint text shadows for ::highlight
     // because some details of how this will be standardized aren't yet
@@ -434,8 +404,8 @@ TextPaintStyle HighlightPaintingUtils::HighlightPaintingStyle(
       highlight_style.shadow =
           uses_text_as_clip ? nullptr : pseudo_style->TextShadow();
     }
-    highlight_style.selection_text_decoration = SelectionTextDecoration(
-        document, style, *pseudo_style, previous_layer_current_color);
+    highlight_style.selection_text_decoration =
+        HighlightTextDecoration(style, *pseudo_style);
   }
 
   // Text shadows are disabled when printing. http://crbug.com/258321
@@ -446,10 +416,8 @@ TextPaintStyle HighlightPaintingUtils::HighlightPaintingStyle(
 }
 
 absl::optional<Color> HighlightPaintingUtils::HighlightTextDecorationColor(
-    const Document& document,
     const ComputedStyle& style,
     Node* node,
-    absl::optional<Color> previous_layer_color,
     PseudoId pseudo) {
   DCHECK(pseudo == kPseudoIdSpellingError || pseudo == kPseudoIdGrammarError);
 
@@ -458,9 +426,8 @@ absl::optional<Color> HighlightPaintingUtils::HighlightTextDecorationColor(
 
   if (scoped_refptr<const ComputedStyle> pseudo_style =
           HighlightPseudoStyle(node, style, pseudo)) {
-    return ResolveColor(document, style, pseudo_style.get(), pseudo,
-                        GetCSSPropertyTextDecorationColor(),
-                        previous_layer_color);
+    return pseudo_style->VisitedDependentColor(
+        GetCSSPropertyTextDecorationColor());
   }
 
   return absl::nullopt;

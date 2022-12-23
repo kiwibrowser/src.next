@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors
+// Copyright 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -94,7 +94,7 @@ class SandboxMacTest : public base::MultiProcessTest {
         sandbox::mojom::Sandbox::kCdm,
         sandbox::mojom::Sandbox::kGpu,
         sandbox::mojom::Sandbox::kNaClLoader,
-#if BUILDFLAG(ENABLE_PPAPI)
+#if BUILDFLAG(ENABLE_PLUGINS)
         sandbox::mojom::Sandbox::kPpapi,
 #endif
         sandbox::mojom::Sandbox::kPrintBackend,

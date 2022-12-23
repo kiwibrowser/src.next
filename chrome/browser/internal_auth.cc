@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -222,7 +222,7 @@ class InternalAuthVerificationService {
       if (key_change_tick_ + get_verification_window_ticks() < tick) {
         return false;
       }
-      if (old_key_.empty() || old_engine_ == nullptr)
+      if (old_key_.empty() || old_engine_ == NULL)
         return false;
       CreatePassport(domain, map, tick, old_engine_.get(), &reference_passport);
       if (passport != reference_passport)
@@ -251,7 +251,7 @@ class InternalAuthVerificationService {
     old_key_.swap(key_);
     key_.clear();
     old_engine_.swap(engine_);
-    engine_.reset();
+    engine_.reset(NULL);
 
     if (key.size() != kKeySizeInBytes)
       return;
@@ -273,10 +273,13 @@ class InternalAuthVerificationService {
   int64_t PreVerifyPassport(const std::string& passport,
                             const std::string& domain,
                             int64_t current_tick) {
-    if (passport.size() != kPassportSize || !base::IsStringASCII(passport) ||
-        !IsDomainSane(domain) || current_tick <= dark_tick_ ||
-        current_tick > key_change_tick_ + kKeyRegenerationHardTicks ||
-        key_.empty() || engine_ == nullptr) {
+    if (passport.size() != kPassportSize ||
+        !base::IsStringASCII(passport) ||
+        !IsDomainSane(domain) ||
+        current_tick <= dark_tick_ ||
+        current_tick > key_change_tick_  + kKeyRegenerationHardTicks ||
+        key_.empty() ||
+        engine_ == NULL) {
       return 0;
     }
 
@@ -354,7 +357,7 @@ class InternalAuthGenerationService : public base::ThreadChecker {
   // Returns zero on failure.
   int64_t GetUnusedTick(const std::string& domain) {
     DCHECK(CalledOnValidThread());
-    if (engine_ == nullptr) {
+    if (engine_ == NULL) {
       NOTREACHED();
       return 0;
     }

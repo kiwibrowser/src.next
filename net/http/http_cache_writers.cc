@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors
+// Copyright (c) 2017 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -461,9 +461,8 @@ int HttpCache::Writers::DoNetworkReadComplete(int result) {
 void HttpCache::Writers::OnNetworkReadFailure(int result) {
   ProcessFailure(result);
 
-  if (active_transaction_) {
+  if (active_transaction_)
     EraseTransaction(active_transaction_, result);
-  }
   active_transaction_ = nullptr;
 
   if (ShouldTruncate())
@@ -498,7 +497,7 @@ int HttpCache::Writers::DoCacheWriteData(int num_bytes) {
                                        read_buf_.get(), num_bytes,
                                        std::move(io_callback), true);
   } else {
-    rv = partial->CacheWrite(entry_->GetEntry(), read_buf_.get(), num_bytes,
+    rv = partial->CacheWrite(entry_->disk_entry, read_buf_.get(), num_bytes,
                              std::move(io_callback));
   }
   return rv;
@@ -506,38 +505,32 @@ int HttpCache::Writers::DoCacheWriteData(int num_bytes) {
 
 int HttpCache::Writers::DoCacheWriteDataComplete(int result) {
   DCHECK(!all_writers_.empty());
-  DCHECK_GE(write_len_, 0);
+  next_state_ = State::NONE;
+  if (checksum_) {
+    if (write_len_ > 0) {
+      checksum_->Update(read_buf_->data(), write_len_);
+    } else {
+      // The write to the cache may have failed if result < 0, but even in that
+      // case we want to check whether the data we've read from the network is
+      // valid or not.
+      CHECK(active_transaction_);
+      if (!active_transaction_->ResponseChecksumMatches(std::move(checksum_))) {
+        next_state_ = State::MARK_SINGLE_KEYED_CACHE_ENTRY_UNUSABLE;
+      }
+    }
+  }
 
   if (result != write_len_) {
-    next_state_ = State::NONE;
-
     // Note that it is possible for cache write to fail if the size of the file
     // exceeds the per-file limit.
     OnCacheWriteFailure();
 
     // |active_transaction_| can continue reading from the network.
-    return write_len_;
+    result = write_len_;
+  } else {
+    OnDataReceived(result);
   }
-
-  if (checksum_) {
-    if (write_len_ > 0) {
-      checksum_->Update(read_buf_->data(), write_len_);
-    } else {
-      DCHECK(active_transaction_);
-      if (!active_transaction_->ResponseChecksumMatches(std::move(checksum_))) {
-        next_state_ = State::MARK_SINGLE_KEYED_CACHE_ENTRY_UNUSABLE;
-        return result;
-      }
-    }
-  }
-
-  next_state_ = State::NONE;
-  OnDataReceived(write_len_);
-
-  // If we came from DoMarkSingleKeyedCacheUnusableComplete() then  result  will
-  // be the size of the metadata that was written. But DoLoop() needs to know
-  // the number of bytes of data that were written. So return that instead.
-  return write_len_;
+  return result;
 }
 
 int HttpCache::Writers::DoMarkSingleKeyedCacheEntryUnusable() {
@@ -563,11 +556,15 @@ int HttpCache::Writers::DoMarkSingleKeyedCacheEntryUnusable() {
 
 int HttpCache::Writers::DoMarkSingleKeyedCacheEntryUnusableComplete(
     int result) {
-  DCHECK(!checksum_);
-  // We run DoCacheWriteDataComplete again, but this time `checksum_` is null so
-  // we won't come back here.
-  next_state_ = State::CACHE_WRITE_DATA_COMPLETE;
-  return result < 0 ? result : write_len_;
+  next_state_ = State::NONE;
+
+  if (result < 0) {
+    OnCacheWriteFailure();
+  }
+
+  // DoLoop() wants the size of the data write, not the size of the metadata
+  // write.
+  return write_len_;
 }
 
 void HttpCache::Writers::OnDataReceived(int result) {
@@ -599,22 +596,18 @@ void HttpCache::Writers::OnDataReceived(int result) {
       return;
     }
 
-    if (active_transaction_) {
+    if (active_transaction_)
       EraseTransaction(active_transaction_, result);
-    }
     active_transaction_ = nullptr;
     CompleteWaitingForReadTransactions(write_len_);
 
     // Invoke entry processing.
     DCHECK(ContainsOnlyIdleWriters());
     TransactionSet make_readers;
-    for (auto& writer : all_writers_) {
+    for (auto& writer : all_writers_)
       make_readers.insert(writer.first);
-    }
     all_writers_.clear();
     SetCacheCallback(true, make_readers);
-    // We assume the set callback will be called immediately.
-    DCHECK_EQ(next_state_, State::NONE);
     return;
   }
 
@@ -665,9 +658,8 @@ void HttpCache::Writers::CompleteWaitingForReadTransactions(int result) {
 
     // If its response completion or failure, this transaction needs to be
     // removed from writers.
-    if (result <= 0) {
+    if (result <= 0)
       EraseTransaction(transaction, result);
-    }
   }
 }
 

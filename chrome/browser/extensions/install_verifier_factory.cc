@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors
+// Copyright 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "chrome/browser/extensions/install_verifier.h"
 #include "chrome/browser/profiles/profile.h"
+#include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_prefs_factory.h"
 #include "extensions/browser/extension_registry_factory.h"
@@ -28,9 +29,9 @@ InstallVerifierFactory* InstallVerifierFactory::GetInstance() {
 }
 
 InstallVerifierFactory::InstallVerifierFactory()
-    : ProfileKeyedServiceFactory(
+    : BrowserContextKeyedServiceFactory(
           "InstallVerifier",
-          ProfileSelections::BuildRedirectedInIncognito()) {
+          BrowserContextDependencyManager::GetInstance()) {
   DependsOn(ExtensionPrefsFactory::GetInstance());
   DependsOn(ExtensionRegistryFactory::GetInstance());
 }
@@ -41,6 +42,12 @@ InstallVerifierFactory::~InstallVerifierFactory() {
 KeyedService* InstallVerifierFactory::BuildServiceInstanceFor(
     BrowserContext* context) const {
   return new InstallVerifier(ExtensionPrefs::Get(context), context);
+}
+
+BrowserContext* InstallVerifierFactory::GetBrowserContextToUse(
+    BrowserContext* context) const {
+  // Redirected in incognito.
+  return ExtensionsBrowserClient::Get()->GetOriginalContext(context);
 }
 
 }  // namespace extensions

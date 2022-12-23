@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -330,8 +330,18 @@ EXTENSIONS_EXPORT extern const char kGoogleSlidesAppId[];
 // The extension id of the default Demo Mode Highlights app.
 EXTENSIONS_EXPORT extern const char kHighlightsAppId[];
 
+// The extension id of the atlas Demo Mode Highlights app.
+EXTENSIONS_EXPORT extern const char kHighlightsAtlasAppId[];
+
 // The extension id of the default Demo Mode screensaver app.
 EXTENSIONS_EXPORT extern const char kScreensaverAppId[];
+
+// The extension id of the atlas Demo Mode screensaver app.
+EXTENSIONS_EXPORT extern const char kScreensaverAtlasAppId[];
+
+// The extension id of the krane Demo Mode screensaver app. That app is only
+// run on KRANE-ZDKS devices.
+EXTENSIONS_EXPORT extern const char kScreensaverKraneZdksAppId[];
 
 // The id of the testing extension allowed in the signin profile.
 EXTENSIONS_EXPORT extern const char kSigninProfileTestExtensionId[];
@@ -339,11 +349,6 @@ EXTENSIONS_EXPORT extern const char kSigninProfileTestExtensionId[];
 // The id of the testing extension allowed in guest mode.
 EXTENSIONS_EXPORT extern const char kGuestModeTestExtensionId[];
 
-// The extension id of 2022 Demo Mode Highlights app.
-EXTENSIONS_EXPORT extern const char kNewAttractLoopAppId[];
-
-// The extension id of 2022 Demo Mode screensaver app.
-EXTENSIONS_EXPORT extern const char kNewHighlightsAppId[];
 // Returns true if this app is part of the "system UI". Generally this is UI
 // that that on other operating systems would be considered part of the OS,
 // for example the file manager.

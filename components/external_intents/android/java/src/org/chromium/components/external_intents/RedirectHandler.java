@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors
+// Copyright 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -346,13 +346,6 @@ public class RedirectHandler {
             return mNavigationChainState.getInitialNavigationType() == NAVIGATION_TYPE_FROM_INTENT
                     && !mNavigationChainState.mIsOnFirstLoadInChain;
         }
-    }
-
-    /**
-     * @return whether we're on the first load in the current navigation chain.
-     */
-    public boolean isOnFirstLoadInNavigationChain() {
-        return mNavigationChainState.mIsOnFirstLoadInChain;
     }
 
     /**

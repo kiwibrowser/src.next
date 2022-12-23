@@ -20,7 +20,8 @@ namespace cssvalue {
 // Represents the non-keyword subset of <color>.
 class CORE_EXPORT CSSColor : public CSSValue {
  public:
-  static CSSColor* Create(const Color& color);
+  // TODO(sashab): Make this create() method take a Color instead.
+  static CSSColor* Create(RGBA32 color);
 
   CSSColor(Color color) : CSSValue(kColorClass), color_(color) {}
 

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -91,12 +91,12 @@ void BrowserTabRestorer::TabRestoreServiceLoaded(
     sessions::TabRestoreService* service) {
   RestoreTab(browser_);
   // This deletes us.
-  browser_->profile()->SetUserData(kBrowserTabRestorerKey, nullptr);
+  browser_->profile()->SetUserData(kBrowserTabRestorerKey, NULL);
 }
 
 void BrowserTabRestorer::OnBrowserRemoved(Browser* browser) {
   // This deletes us.
-  browser_->profile()->SetUserData(kBrowserTabRestorerKey, nullptr);
+  browser_->profile()->SetUserData(kBrowserTabRestorerKey, NULL);
 }
 
 }  // namespace

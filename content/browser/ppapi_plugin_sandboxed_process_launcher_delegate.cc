@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors
+// Copyright (c) 2021 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,39 +20,30 @@
 
 namespace content {
 #if BUILDFLAG(IS_WIN)
-std::string PpapiPluginSandboxedProcessLauncherDelegate::GetSandboxTag() {
-  return sandbox::policy::SandboxWin::GetSandboxTagForDelegate(
-      "ppapi", GetSandboxType());
-}
-
 bool PpapiPluginSandboxedProcessLauncherDelegate::PreSpawnTarget(
     sandbox::TargetPolicy* policy) {
-  sandbox::TargetConfig* config = policy->GetConfig();
-  if (config->IsConfigured())
-    return true;
-
   // The Pepper process is as locked-down as a renderer except that it can
   // create the server side of Chrome pipes.
   sandbox::ResultCode result;
+  result = policy->AddRule(sandbox::SubSystem::kNamedPipes,
+                           sandbox::Semantics::kNamedPipesAllowAny,
+                           L"\\\\.\\pipe\\chrome.*");
+  if (result != sandbox::SBOX_ALL_OK)
+    return false;
+
 #if !defined(NACL_WIN64)
   // We don't support PPAPI win32k lockdown prior to Windows 10.
   if (base::win::GetVersion() >= base::win::Version::WIN10) {
-    result = sandbox::policy::SandboxWin::AddWin32kLockdownPolicy(config);
+    result = sandbox::policy::SandboxWin::AddWin32kLockdownPolicy(policy);
     if (result != sandbox::SBOX_ALL_OK)
       return false;
   }
 #endif  // !defined(NACL_WIN64)
 
   // No plugins can generate executable code.
-  sandbox::MitigationFlags flags = config->GetDelayedProcessMitigations();
+  sandbox::MitigationFlags flags = policy->GetDelayedProcessMitigations();
   flags |= sandbox::MITIGATION_DYNAMIC_CODE_DISABLE;
-  if (sandbox::SBOX_ALL_OK != config->SetDelayedProcessMitigations(flags))
-    return false;
-
-  result = config->AddRule(sandbox::SubSystem::kNamedPipes,
-                           sandbox::Semantics::kNamedPipesAllowAny,
-                           L"\\\\.\\pipe\\chrome.*");
-  if (result != sandbox::SBOX_ALL_OK)
+  if (sandbox::SBOX_ALL_OK != policy->SetDelayedProcessMitigations(flags))
     return false;
 
   return true;

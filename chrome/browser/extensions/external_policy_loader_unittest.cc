@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -56,9 +56,7 @@ class MockExternalPolicyProviderVisitor
              const std::set<std::string>& expected_extensions) {
     profile_ = std::make_unique<TestingProfile>();
     profile_->GetTestingPrefService()->SetManagedPref(
-        pref_names::kInstallForceList,
-        base::DictionaryValue::From(
-            base::Value::ToUniquePtrValue(policy_forcelist.Clone())));
+        pref_names::kInstallForceList, policy_forcelist.CreateDeepCopy());
     provider_ = std::make_unique<ExternalProviderImpl>(
         this,
         new ExternalPolicyLoader(
