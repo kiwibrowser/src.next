@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,14 +27,6 @@ const char kAllowLoopbackInPeerConnection[] =
 // This is used in blimp to emulate android fonts on linux.
 const char kAndroidFontsPath[]          = "android-fonts-path";
 
-// Indicates that the ash web browser is disabled (i.e. lacros the only
-// browser).
-const char kAshWebBrowserDisabled[] = "ash-web-browser-disabled";
-
-// Causes the Attribution Report API to run without delays or noise.
-const char kAttributionReportingDebugMode[] =
-    "attribution-reporting-debug-mode";
-
 // Causes the browser process to crash on startup.
 const char kBrowserCrashTest[]              = "crash-test";
 
@@ -59,6 +51,9 @@ const char kBrowserTest[] = "browser-test";
 const char kChangeStackGuardOnFork[] = "change-stack-guard-on-fork";
 const char kChangeStackGuardOnForkEnabled[] = "enable";
 const char kChangeStackGuardOnForkDisabled[] = "disable";
+
+// Causes the Conversion Measurement API to run without delays or noise.
+const char kConversionsDebugMode[] = "conversions-debug-mode";
 
 // Enables gating of getDisplayMedia by the display-capture permissions-policy.
 // This switch supports the shipping of display-capture, as it allows admins to
@@ -642,10 +637,6 @@ const char kPullToRefresh[] = "pull-to-refresh";
 // the debounce mechanimsm.
 const char kQuotaChangeEventInterval[] = "quota-change-event-interval";
 
-// Reduce the accept-language http header, and only send one language in the
-// request header: https://github.com/Tanych/accept-language.
-const char kReduceAcceptLanguage[] = "reduce-accept-language";
-
 // Reduce the minor version number in the User-Agent string. This flag
 // implements phase 4 of User-Agent reduction:
 // https://blog.chromium.org/2021/09/user-agent-reduction-origin-trial-and-dates.html.
@@ -790,11 +781,6 @@ const char kTouchEventFeatureDetectionDisabled[] = "disabled";
 // Accepts specified file URL of a trustable WebBundle file. This flag
 // should be used only for testing purpose.
 const char kTrustableWebBundleFileUrl[] = "trustable-web-bundles-file-url";
-
-// Accepts a number representing the time-ticks value at the Unix epoch.
-// Since different processes can produce a different value for this due to
-// system clock changes, this allows synchronizing them to a single value.
-const char kTimeTicksAtUnixEpoch[] = "time-ticks-at-unix-epoch";
 
 // Replaces the existing codecs supported in peer connection with a single fake
 // codec entry that create a fake video encoder and decoder.

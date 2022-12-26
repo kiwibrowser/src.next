@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors
+// Copyright (c) 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/download/public/common/auto_resumption_handler.h"
+#include "components/download/public/common/download_schedule.h"
 #include "components/download/public/common/download_utils.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/download_item_utils.h"
@@ -20,6 +21,7 @@
 #endif
 
 using DownloadItem = download::DownloadItem;
+using DownloadSchedule = download::DownloadSchedule;
 using ContentId = offline_items_collection::ContentId;
 using OfflineItem = offline_items_collection::OfflineItem;
 using OfflineItemFilter = offline_items_collection::OfflineItemFilter;
@@ -137,6 +139,7 @@ OfflineItem OfflineItemUtils::CreateOfflineItem(const std::string& name_space,
   item.fail_state =
       ConvertDownloadInterruptReasonToFailState(download_item->GetLastReason());
   item.can_rename = download_item->GetState() == DownloadItem::COMPLETE;
+  item.schedule = ToOfflineItemSchedule(download_item->GetDownloadSchedule());
 
   switch (download_item->GetState()) {
     case DownloadItem::IN_PROGRESS:
@@ -354,4 +357,24 @@ RenameResult OfflineItemUtils::ConvertDownloadRenameResultToRenameResult(
     case DownloadRenameResult::FAILURE_UNKNOWN:
       return RenameResult::FAILURE_UNKNOWN;
   }
+}
+
+// static
+absl::optional<DownloadSchedule> OfflineItemUtils::ToDownloadSchedule(
+    absl::optional<OfflineItemSchedule> offline_item_schedule) {
+  if (!offline_item_schedule)
+    return absl::nullopt;
+
+  return absl::make_optional<DownloadSchedule>(
+      offline_item_schedule->only_on_wifi, offline_item_schedule->start_time);
+}
+
+// static
+absl::optional<OfflineItemSchedule> OfflineItemUtils::ToOfflineItemSchedule(
+    absl::optional<DownloadSchedule> download_schedule) {
+  if (!download_schedule)
+    return absl::nullopt;
+
+  return absl::make_optional<OfflineItemSchedule>(
+      download_schedule->only_on_wifi(), download_schedule->start_time());
 }

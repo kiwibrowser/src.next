@@ -50,7 +50,6 @@
 #include "third_party/blink/public/common/chrome_debug_urls.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/input/web_input_event_attribution.h"
-#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/blob/blob_url_store.mojom-blink.h"
 #include "third_party/blink/public/mojom/devtools/inspector_issue.mojom-blink.h"
@@ -76,6 +75,7 @@
 #include "third_party/blink/public/web/web_frame.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
+#include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/core/clipboard/system_clipboard.h"
 #include "third_party/blink/renderer/core/content_capture/content_capture_manager.h"
@@ -105,7 +105,6 @@
 #include "third_party/blink/renderer/core/editing/surrounding_text.h"
 #include "third_party/blink/renderer/core/editing/visible_position.h"
 #include "third_party/blink/renderer/core/event_type_names.h"
-#include "third_party/blink/renderer/core/events/message_event.h"
 #include "third_party/blink/renderer/core/execution_context/security_context.h"
 #include "third_party/blink/renderer/core/execution_context/window_agent.h"
 #include "third_party/blink/renderer/core/exported/web_plugin_container_impl.h"
@@ -181,7 +180,6 @@
 #include "third_party/blink/renderer/core/svg/svg_document_extensions.h"
 #include "third_party/blink/renderer/platform/back_forward_cache_utils.h"
 #include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
-#include "third_party/blink/renderer/platform/bindings/source_location.h"
 #include "third_party/blink/renderer/platform/bindings/v8_binding.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
@@ -305,8 +303,7 @@ LocalFrame* LocalFrame::FromFrameToken(const LocalFrameToken& frame_token) {
 }
 
 void LocalFrame::Init(Frame* opener,
-                      std::unique_ptr<PolicyContainer> policy_container,
-                      const StorageKey& storage_key) {
+                      std::unique_ptr<PolicyContainer> policy_container) {
   if (!policy_container)
     policy_container = PolicyContainer::CreateEmpty();
 
@@ -318,7 +315,7 @@ void LocalFrame::Init(Frame* opener,
   mojo_handler_ = MakeGarbageCollected<LocalFrameMojoHandler>(*this);
 
   SetOpenerDoNotNotify(opener);
-  loader_.Init(std::move(policy_container), storage_key);
+  loader_.Init(std::move(policy_container));
 }
 
 void LocalFrame::SetView(LocalFrameView* view) {
@@ -381,7 +378,7 @@ LocalFrame::~LocalFrame() {
   // the frame owner.
   DCHECK(!view_);
   DCHECK(!frame_color_overlay_);
-  if (IsAdFrame())
+  if (IsAdSubframe())
     InstanceCounters::DecrementCounter(InstanceCounters::kAdSubframeCounter);
 }
 
@@ -622,22 +619,17 @@ void LocalFrame::CheckCompleted() {
 
 BackgroundColorPaintImageGenerator*
 LocalFrame::GetBackgroundColorPaintImageGenerator() {
+  // There is no compositor thread in certain testing environment, and we should
+  // not composite background color animation in those cases.
+  if (!Thread::CompositorThread())
+    return nullptr;
   LocalFrame& local_root = LocalFrameRoot();
   // One background color paint worklet per root frame.
-  // There is no compositor thread in certain testing environment, and we
-  // should not composite background color animation in those cases.
-  if (Thread::CompositorThread() &&
-      !local_root.background_color_paint_image_generator_) {
+  if (!local_root.background_color_paint_image_generator_) {
     local_root.background_color_paint_image_generator_ =
         BackgroundColorPaintImageGenerator::Create(local_root);
   }
   return local_root.background_color_paint_image_generator_.Get();
-}
-
-void LocalFrame::SetBackgroundColorPaintImageGeneratorForTesting(
-    BackgroundColorPaintImageGenerator* generator_for_testing) {
-  LocalFrame& local_root = LocalFrameRoot();
-  local_root.background_color_paint_image_generator_ = generator_for_testing;
 }
 
 BoxShadowPaintImageGenerator* LocalFrame::GetBoxShadowPaintImageGenerator() {
@@ -1514,6 +1506,7 @@ LocalFrame::LocalFrame(LocalFrameClient* client,
             inheriting_agent_factory),
       frame_scheduler_(page.GetPageScheduler()->CreateFrameScheduler(
           this,
+          client->GetFrameBlameContext(),
           /*TODO(crbug.com/1170350): Set for portals*/ IsInFencedFrameTree(),
           IsMainFrame() ? FrameScheduler::FrameType::kMainFrame
                         : FrameScheduler::FrameType::kSubframe)),
@@ -1577,7 +1570,7 @@ LocalFrame::LocalFrame(LocalFrameClient* client,
   absl::optional<AdScriptIdentifier> ad_script_on_stack;
   // See SubresourceFilterAgent::Initialize for why we don't set this here for
   // fenced frames.
-  is_frame_created_by_ad_script_ =
+  is_subframe_created_by_ad_script_ =
       !IsMainFrame() && ad_tracker_ &&
       ad_tracker_->IsAdScriptInStack(AdTracker::StackType::kBottomAndTop,
                                      /*out_ad_script=*/&ad_script_on_stack);
@@ -1987,6 +1980,36 @@ FrameNavigationDisabler::~FrameNavigationDisabler() {
   frame_->EnableNavigation();
 }
 
+namespace {
+
+bool IsScopedFrameBlamerEnabled() {
+  // Must match the category used in content::FrameBlameContext.
+  static const auto* enabled =
+      TRACE_EVENT_API_GET_CATEGORY_GROUP_ENABLED("blink");
+  return *enabled;
+}
+
+}  // namespace
+
+ScopedFrameBlamer::ScopedFrameBlamer(LocalFrame* frame)
+    : frame_(IsScopedFrameBlamerEnabled() ? frame : nullptr) {
+  if (LIKELY(!frame_))
+    return;
+  LocalFrameClient* client = frame_->Client();
+  if (!client)
+    return;
+  if (BlameContext* context = client->GetFrameBlameContext())
+    context->Enter();
+}
+
+void ScopedFrameBlamer::LeaveContext() {
+  LocalFrameClient* client = frame_->Client();
+  if (!client)
+    return;
+  if (BlameContext* context = client->GetFrameBlameContext())
+    context->Leave();
+}
+
 LocalFrame::LazyLoadImageSetting LocalFrame::GetLazyLoadImageSetting() const {
   DCHECK(GetSettings());
   if (!RuntimeEnabledFeatures::LazyImageLoadingEnabled() ||
@@ -2131,20 +2154,22 @@ void LocalFrame::SetViewportIntersectionFromParent(
   }
 }
 
-gfx::Size LocalFrame::GetOutermostMainFrameSize() const {
+gfx::Size LocalFrame::GetMainFrameViewportSize() const {
   LocalFrame& local_root = LocalFrameRoot();
-  return local_root.IsOutermostMainFrame()
-             ? local_root.View()->LayoutViewport()->VisibleContentRect().size()
-             : local_root.intersection_state_.outermost_main_frame_size;
+  return local_root.IsMainFrame()
+             ? local_root.View()
+                   ->GetScrollableArea()
+                   ->VisibleContentRect()
+                   .size()
+             : local_root.intersection_state_.main_frame_viewport_size;
 }
 
-gfx::Point LocalFrame::GetOutermostMainFrameScrollPosition() const {
+gfx::Point LocalFrame::GetMainFrameScrollPosition() const {
   LocalFrame& local_root = LocalFrameRoot();
-  return local_root.IsOutermostMainFrame()
+  return local_root.IsMainFrame()
              ? gfx::ToFlooredPoint(
                    local_root.View()->LayoutViewport()->ScrollPosition())
-             : local_root.intersection_state_
-                   .outermost_main_frame_scroll_position;
+             : local_root.intersection_state_.main_frame_scroll_position;
 }
 
 void LocalFrame::SetOpener(Frame* opener_frame) {
@@ -2226,23 +2251,23 @@ bool LocalFrame::IsProvisional() const {
   return Owner()->ContentFrame() != this;
 }
 
-bool LocalFrame::IsAdFrame() const {
-  return ad_evidence_ && ad_evidence_->IndicatesAdFrame();
+bool LocalFrame::IsAdSubframe() const {
+  return ad_evidence_ && ad_evidence_->IndicatesAdSubframe();
 }
 
 bool LocalFrame::IsAdRoot() const {
-  return IsAdFrame() && !ad_evidence_->parent_is_ad();
+  return IsAdSubframe() && !ad_evidence_->parent_is_ad();
 }
 
-void LocalFrame::SetAdEvidence(const FrameAdEvidence& ad_evidence) {
+void LocalFrame::SetAdEvidence(const blink::FrameAdEvidence& ad_evidence) {
   DCHECK(!IsMainFrame() || IsInFencedFrameTree());
   DCHECK(ad_evidence.is_complete());
 
-  // Once set, `is_frame_created_by_ad_script_` should not be unset.
-  DCHECK(!is_frame_created_by_ad_script_ ||
+  // Once set, `is_subframe_created_by_ad_script_` should not be unset.
+  DCHECK(!is_subframe_created_by_ad_script_ ||
          ad_evidence.created_by_ad_script() ==
              blink::mojom::FrameCreationStackEvidence::kCreatedByAdScript);
-  is_frame_created_by_ad_script_ =
+  is_subframe_created_by_ad_script_ =
       ad_evidence.created_by_ad_script() ==
       blink::mojom::FrameCreationStackEvidence::kCreatedByAdScript;
 
@@ -2258,11 +2283,11 @@ void LocalFrame::SetAdEvidence(const FrameAdEvidence& ad_evidence) {
               ad_evidence.most_restrictive_filter_list_result());
   }
 
-  bool was_ad_frame = IsAdFrame();
-  bool is_ad_frame = ad_evidence.IndicatesAdFrame();
+  bool was_ad_subframe = IsAdSubframe();
+  bool is_ad_subframe = ad_evidence.IndicatesAdSubframe();
   ad_evidence_ = ad_evidence;
 
-  if (was_ad_frame == is_ad_frame)
+  if (was_ad_subframe == is_ad_subframe)
     return;
 
   if (auto* document = GetDocument()) {
@@ -2271,13 +2296,13 @@ void LocalFrame::SetAdEvidence(const FrameAdEvidence& ad_evidence) {
     // of sending an IPC.
     auto* document_resource_coordinator = document->GetResourceCoordinator();
     if (document_resource_coordinator)
-      document_resource_coordinator->SetIsAdFrame(is_ad_frame);
+      document_resource_coordinator->SetIsAdFrame(is_ad_subframe);
   }
 
   UpdateAdHighlight();
-  frame_scheduler_->SetIsAdFrame(is_ad_frame);
+  frame_scheduler_->SetIsAdFrame(is_ad_subframe);
 
-  if (is_ad_frame) {
+  if (is_ad_subframe) {
     UseCounter::Count(DomWindow(), WebFeature::kAdFrameDetected);
     InstanceCounters::IncrementCounter(InstanceCounters::kAdSubframeCounter);
   } else {
@@ -2299,11 +2324,11 @@ void LocalFrame::UpdateAdHighlight() {
   if (IsAdRoot() && GetPage()->GetSettings().GetHighlightAds())
     SetSubframeColorOverlay(SkColorSetARGB(128, 255, 0, 0));
   else
-    SetSubframeColorOverlay(SK_ColorTRANSPARENT);
+    SetSubframeColorOverlay(Color::kTransparent);
 }
 
 void LocalFrame::PauseSubresourceLoading(
-    mojo::PendingReceiver<mojom::blink::PauseSubresourceLoadingHandle>
+    mojo::PendingReceiver<blink::mojom::blink::PauseSubresourceLoadingHandle>
         receiver) {
   auto handle = GetFrameScheduler()->GetPauseSubresourceLoadingHandle();
   if (!handle)
@@ -2417,7 +2442,6 @@ class FrameColorOverlay final : public FrameOverlay::Delegate {
  public:
   explicit FrameColorOverlay(LocalFrame* frame, SkColor color)
       : color_(color), frame_(frame) {}
-  SkColor GetColorForTesting() const { return color_; }
 
  private:
   void PaintFrameOverlay(const FrameOverlay& frame_overlay,
@@ -2439,36 +2463,16 @@ class FrameColorOverlay final : public FrameOverlay::Delegate {
                              gfx::Rect(view->Size()));
     gfx::RectF rect(0, 0, view->Width(), view->Height());
     graphics_context.FillRect(
-        rect, Color::FromSkColor(color_),
+        rect, color_,
         PaintAutoDarkMode(view->GetLayoutView()->StyleRef(),
                           DarkModeFilter::ElementRole::kBackground));
   }
 
-  // TODO(https://crbug.com/1351544): This should be an SkColor4f or a Color.
   SkColor color_;
   Persistent<LocalFrame> frame_;
 };
 
 }  // namespace
-
-void LocalFrame::SetReducedAcceptLanguage(
-    const AtomicString& reduced_accept_language) {
-  reduced_accept_language_ = reduced_accept_language;
-}
-
-template <>
-struct DowncastTraits<FrameColorOverlay> {
-  static bool AllowFrom(const FrameOverlay::Delegate& frame_overlay) {
-    return true;
-  }
-};
-
-absl::optional<SkColor> LocalFrame::GetFrameOverlayColorForTesting() const {
-  if (!frame_color_overlay_)
-    return absl::nullopt;
-  return DynamicTo<FrameColorOverlay>(frame_color_overlay_->GetDelegate())
-      ->GetColorForTesting();
-}
 
 void LocalFrame::SetMainFrameColorOverlay(SkColor color) {
   DCHECK(IsMainFrame() && !IsInFencedFrameTree());
@@ -2484,7 +2488,7 @@ void LocalFrame::SetFrameColorOverlay(SkColor color) {
   if (frame_color_overlay_)
     frame_color_overlay_.Release()->Destroy();
 
-  if (color == SK_ColorTRANSPARENT)
+  if (color == Color::kTransparent)
     return;
 
   frame_color_overlay_ = MakeGarbageCollected<FrameOverlay>(
@@ -2568,46 +2572,6 @@ void LocalFrame::LoadJavaScriptURL(const KURL& url) {
       &DOMWrapperWorld::MainWorld());
 }
 
-void LocalFrame::RequestExecuteScript(
-    int32_t world_id,
-    base::span<const WebScriptSource> sources,
-    mojom::blink::UserActivationOption user_gesture,
-    mojom::blink::EvaluationTiming evaluation_timing,
-    mojom::blink::LoadEventBlockingOption blocking_option,
-    WebScriptExecutionCallback callback,
-    BackForwardCacheAware back_forward_cache_aware,
-    mojom::blink::WantResultOption want_result_option,
-    mojom::blink::PromiseResultOption promise_behavior) {
-  scoped_refptr<DOMWrapperWorld> world;
-  ExecuteScriptPolicy execute_script_policy;
-  if (world_id == DOMWrapperWorld::kMainWorldId) {
-    world = &DOMWrapperWorld::MainWorld();
-    execute_script_policy =
-        ExecuteScriptPolicy::kDoNotExecuteScriptWhenScriptsDisabled;
-  } else {
-    world = DOMWrapperWorld::EnsureIsolatedWorld(ToIsolate(this), world_id);
-
-    // This is to preserve the existing behavior.
-    execute_script_policy =
-        ExecuteScriptPolicy::kExecuteScriptWhenScriptsDisabled;
-  }
-
-  if (back_forward_cache_aware == BackForwardCacheAware::kPossiblyDisallow) {
-    GetFrameScheduler()->RegisterStickyFeature(
-        SchedulingPolicy::Feature::kInjectedJavascript,
-        {SchedulingPolicy::DisableBackForwardCache()});
-  }
-
-  Vector<WebScriptSource> script_sources;
-  script_sources.Append(sources.data(),
-                        base::checked_cast<wtf_size_t>(sources.size()));
-
-  PausableScriptExecutor::CreateAndRun(
-      ToScriptState(DomWindow(), *world), std::move(script_sources),
-      execute_script_policy, user_gesture, evaluation_timing, blocking_option,
-      want_result_option, promise_behavior, std::move(callback));
-}
-
 void LocalFrame::SetEvictCachedSessionStorageOnFreezeOrUnload() {
   DCHECK(RuntimeEnabledFeatures::Prerender2Enabled(
       GetDocument()->GetExecutionContext()));
@@ -2687,7 +2651,7 @@ void LocalFrame::DidResume() {
 }
 
 void LocalFrame::MaybeLogAdClickNavigation() {
-  if (HasTransientUserActivation(this) && IsAdFrame())
+  if (HasTransientUserActivation(this) && IsAdSubframe())
     UseCounter::Count(GetDocument(), WebFeature::kAdClickNavigation);
 }
 
@@ -3002,7 +2966,7 @@ void LocalFrame::SaveImageAt(const gfx::Point& window_point) {
 
 void LocalFrame::MediaPlayerActionAtViewportPoint(
     const gfx::Point& viewport_position,
-    const mojom::blink::MediaPlayerActionType type,
+    const blink::mojom::blink::MediaPlayerActionType type,
     bool enable) {
   HitTestResult result = HitTestResultForVisualViewportPos(viewport_position);
   Node* node = result.InnerNode();
@@ -3011,22 +2975,22 @@ void LocalFrame::MediaPlayerActionAtViewportPoint(
 
   auto* media_element = To<HTMLMediaElement>(node);
   switch (type) {
-    case mojom::blink::MediaPlayerActionType::kPlay:
+    case blink::mojom::blink::MediaPlayerActionType::kPlay:
       if (enable)
         media_element->Play();
       else
         media_element->pause();
       break;
-    case mojom::blink::MediaPlayerActionType::kMute:
+    case blink::mojom::blink::MediaPlayerActionType::kMute:
       media_element->setMuted(enable);
       break;
-    case mojom::blink::MediaPlayerActionType::kLoop:
+    case blink::mojom::blink::MediaPlayerActionType::kLoop:
       media_element->SetLoop(enable);
       break;
-    case mojom::blink::MediaPlayerActionType::kControls:
+    case blink::mojom::blink::MediaPlayerActionType::kControls:
       media_element->SetUserWantsControlsVisible(enable);
       break;
-    case mojom::blink::MediaPlayerActionType::kPictureInPicture:
+    case blink::mojom::blink::MediaPlayerActionType::kPictureInPicture:
       DCHECK(IsA<HTMLVideoElement>(media_element));
       if (enable) {
         PictureInPictureController::From(node->GetDocument())

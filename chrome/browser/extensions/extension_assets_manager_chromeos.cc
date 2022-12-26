@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright (c) 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,7 +45,7 @@ namespace {
 const char kSharedExtensionsDir[] = "/var/cache/shared_extensions";
 
 // Shared install dir overrider for tests only.
-static const base::FilePath* g_shared_install_dir_override = nullptr;
+static const base::FilePath* g_shared_install_dir_override = NULL;
 
 // This helper class lives on UI thread only. Main purpose of this class is to
 // track shared installation in progress between multiple profiles.
@@ -132,7 +132,7 @@ ExtensionAssetsManagerChromeOS::ExtensionAssetsManagerChromeOS() { }
 ExtensionAssetsManagerChromeOS::~ExtensionAssetsManagerChromeOS() {
   if (g_shared_install_dir_override) {
     delete g_shared_install_dir_override;
-    g_shared_install_dir_override = nullptr;
+    g_shared_install_dir_override = NULL;
   }
 }
 
@@ -216,24 +216,22 @@ bool ExtensionAssetsManagerChromeOS::CleanUpSharedExtensions(
     return false;
 
   DictionaryPrefUpdate shared_extensions(local_state, kSharedExtensions);
-  base::Value::Dict& shared_extension_dict = shared_extensions->GetDict();
-
   std::vector<std::string> extensions;
-  extensions.reserve(shared_extension_dict.size());
-  for (const auto it : shared_extension_dict)
+  extensions.reserve(shared_extensions->DictSize());
+  for (const auto it : shared_extensions->DictItems())
     extensions.push_back(it.first);
 
   for (const std::string& id : extensions) {
-    base::Value::Dict* extension_info = shared_extension_dict.FindDict(id);
+    base::Value* extension_info = shared_extensions->FindDictKey(id);
     if (!extension_info) {
       NOTREACHED();
       return false;
     }
-    if (!CleanUpExtension(id, *extension_info, live_extension_paths)) {
+    if (!CleanUpExtension(id, extension_info, live_extension_paths)) {
       return false;
     }
-    if (extension_info->empty())
-      shared_extension_dict.Remove(id);
+    if (extension_info->DictEmpty())
+      shared_extensions->RemoveKey(id);
   }
 
   return true;
@@ -312,7 +310,7 @@ void ExtensionAssetsManagerChromeOS::CheckSharedExtension(
   if (shared_path && users) {
     // This extension version already in shared location.
     bool user_found = false;
-    for (const base::Value& user : users->GetList()) {
+    for (const base::Value& user : users->GetListDeprecated()) {
       const std::string* temp = user.GetIfString();
       if (temp && *temp == user_id) {
         // Re-installation for the same user.
@@ -431,34 +429,35 @@ void ExtensionAssetsManagerChromeOS::MarkSharedExtensionUnused(
 
   PrefService* local_state = g_browser_process->local_state();
   DictionaryPrefUpdate shared_extensions(local_state, kSharedExtensions);
-  base::Value::Dict& shared_extensions_dict = shared_extensions->GetDict();
-  base::Value::Dict* extension_info = shared_extensions_dict.FindDict(id);
+  base::Value* extension_info = shared_extensions->FindDictKey(id);
   if (!extension_info) {
     NOTREACHED();
     return;
   }
 
   std::vector<std::string> versions;
-  versions.reserve(extension_info->size());
-  for (const auto kv : *extension_info) {
+  versions.reserve(extension_info->DictSize());
+  for (const auto kv : extension_info->DictItems()) {
     versions.push_back(kv.first);
   }
 
   base::Value user_name(profile->GetProfileUserName());
   for (std::vector<std::string>::const_iterator it = versions.begin();
        it != versions.end(); it++) {
-    base::Value::Dict* version_info = extension_info->FindDict(*it);
+    base::Value* version_info = extension_info->FindDictKey(*it);
     if (!version_info) {
       NOTREACHED();
       continue;
     }
-    base::Value::List* users = version_info->FindList(kSharedExtensionUsers);
+    base::Value* users = version_info->FindListKey(kSharedExtensionUsers);
     if (!users) {
       NOTREACHED();
       continue;
     }
-    if (users->EraseValue(user_name) && users->empty()) {
-      std::string* shared_path = version_info->FindString(kSharedExtensionPath);
+    if (users->EraseListValue(user_name) &&
+        users->GetListDeprecated().empty()) {
+      std::string* shared_path =
+          version_info->FindStringKey(kSharedExtensionPath);
       if (!shared_path) {
         NOTREACHED();
         continue;
@@ -467,11 +466,11 @@ void ExtensionAssetsManagerChromeOS::MarkSharedExtensionUnused(
           FROM_HERE,
           base::BindOnce(&ExtensionAssetsManagerChromeOS::DeleteSharedVersion,
                          base::FilePath(*shared_path)));
-      extension_info->Remove(*it);
+      extension_info->RemoveKey(*it);
     }
   }
-  if (extension_info->empty()) {
-    shared_extensions_dict.Remove(id);
+  if (extension_info->DictEmpty()) {
+    shared_extensions->RemoveKey(id);
     // Don't remove extension dir in shared location. It will be removed by GC
     // when it is safe to do so, and this avoids a race condition between
     // concurrent uninstall by one user and install by another.
@@ -488,7 +487,7 @@ void ExtensionAssetsManagerChromeOS::DeleteSharedVersion(
 // static
 bool ExtensionAssetsManagerChromeOS::CleanUpExtension(
     const std::string& id,
-    base::Value::Dict& extension_info,
+    base::Value* extension_info,
     std::multimap<std::string, base::FilePath>* live_extension_paths) {
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
   if (!user_manager) {
@@ -497,29 +496,29 @@ bool ExtensionAssetsManagerChromeOS::CleanUpExtension(
   }
 
   std::vector<std::string> versions;
-  versions.reserve(extension_info.size());
-  for (const auto it : extension_info) {
+  versions.reserve(extension_info->DictSize());
+  for (const auto it : extension_info->DictItems()) {
     versions.push_back(it.first);
   }
 
   for (std::vector<std::string>::const_iterator it = versions.begin();
        it != versions.end(); it++) {
-    base::Value::Dict* version_info = extension_info.FindDict(*it);
+    base::Value* version_info = extension_info->FindDictKey(*it);
     if (!version_info) {
       NOTREACHED();
       return false;
     }
-    base::Value::List* users_list =
-        version_info->FindList(kSharedExtensionUsers);
+    base::Value* users = version_info->FindListKey(kSharedExtensionUsers);
     const std::string* shared_path =
-        version_info->FindString(kSharedExtensionPath);
-    if (!users_list || !shared_path) {
+        version_info->FindStringKey(kSharedExtensionPath);
+    if (!users || !shared_path) {
       NOTREACHED();
       return false;
     }
 
-    for (auto iter = users_list->begin(); iter != users_list->end();) {
-      const std::string* user_id = iter->GetIfString();
+    size_t num_users = users->GetListDeprecated().size();
+    for (size_t i = 0; i < num_users; i++) {
+      const std::string* user_id = users->GetListDeprecated()[i].GetIfString();
       if (!user_id) {
         NOTREACHED();
         return false;
@@ -549,17 +548,18 @@ bool ExtensionAssetsManagerChromeOS::CleanUpExtension(
       }
 
       if (not_used) {
-        iter = users_list->erase(iter);
-      } else {
-        ++iter;
+        users->EraseListIter(users->GetListDeprecated().begin() + i);
+
+        i--;
+        num_users--;
       }
     }
 
-    if (users_list->empty()) {
-      extension_info.Remove(*it);
-    } else {
+    if (num_users) {
       live_extension_paths->insert(
           std::make_pair(id, base::FilePath(*shared_path)));
+    } else {
+      extension_info->RemoveKey(*it);
     }
   }
 

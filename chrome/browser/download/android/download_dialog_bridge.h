@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors
+// Copyright 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "chrome/browser/download/download_dialog_types.h"
+#include "components/download/public/common/download_schedule.h"
 #include "net/base/network_change_notifier.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/native_widget_types.h"
@@ -19,6 +20,9 @@ struct DownloadDialogResult {
   DownloadDialogResult();
   DownloadDialogResult(const DownloadDialogResult&);
   ~DownloadDialogResult();
+
+  // Results from download later dialog.
+  absl::optional<download::DownloadSchedule> download_schedule;
 
   // Results from download location dialog.
   DownloadLocationDialogResult location_result =

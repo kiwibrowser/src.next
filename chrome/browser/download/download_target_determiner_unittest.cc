@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -122,6 +122,11 @@ ACTION_P(ScheduleCallback, result0) {
 ACTION_P2(ScheduleCallback2, result0, result1) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::BindOnce(std::move(arg0), result0, result1));
+}
+
+ACTION_P3(ScheduleCallback3, result0, result1, result2) {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(std::move(arg0), result0, result1, result2));
 }
 
 // Used with DownloadTestCase. Indicates the type of test case. The expectations
@@ -621,8 +626,8 @@ void MockDownloadTargetDeterminerDelegate::NullPromptUser(
     const base::FilePath& suggested_path,
     DownloadConfirmationReason reason,
     ConfirmationCallback& callback) {
-  std::move(callback).Run(DownloadConfirmationResult::CONFIRMED,
-                          suggested_path);
+  std::move(callback).Run(DownloadConfirmationResult::CONFIRMED, suggested_path,
+                          absl::nullopt);
 }
 
 // static
@@ -710,8 +715,9 @@ TEST_F(DownloadTargetDeterminerTest, CancelSaveAs) {
 
        EXPECT_LOCAL_PATH}};
   ON_CALL(*delegate(), RequestConfirmation_(_, _, _, _))
-      .WillByDefault(WithArg<3>(ScheduleCallback2(
-          DownloadConfirmationResult::CANCELED, base::FilePath())));
+      .WillByDefault(
+          WithArg<3>(ScheduleCallback3(DownloadConfirmationResult::CANCELED,
+                                       base::FilePath(), absl::nullopt)));
   RunTestCasesWithActiveItem(kCancelSaveAsTestCases,
                              std::size(kCancelSaveAsTestCases));
 }
@@ -986,9 +992,9 @@ TEST_F(DownloadTargetDeterminerTest, DefaultVirtual) {
     EXPECT_CALL(*delegate(), RequestConfirmation_(
                                  _, test_virtual_dir().AppendASCII("bar.txt"),
                                  DownloadConfirmationReason::SAVE_AS, _))
-        .WillOnce(WithArg<3>(
-            ScheduleCallback2(DownloadConfirmationResult::CONFIRMED,
-                              test_virtual_dir().AppendASCII("prompted.txt"))));
+        .WillOnce(WithArg<3>(ScheduleCallback3(
+            DownloadConfirmationResult::CONFIRMED,
+            test_virtual_dir().AppendASCII("prompted.txt"), absl::nullopt)));
     RunTestCasesWithActiveItem(&kSaveAsToVirtualDir, 1);
   }
 
@@ -1010,9 +1016,10 @@ TEST_F(DownloadTargetDeterminerTest, DefaultVirtual) {
     EXPECT_CALL(*delegate(), RequestConfirmation_(
                                  _, test_virtual_dir().AppendASCII("bar.txt"),
                                  DownloadConfirmationReason::SAVE_AS, _))
-        .WillOnce(WithArg<3>(ScheduleCallback2(
+        .WillOnce(WithArg<3>(ScheduleCallback3(
             DownloadConfirmationResult::CONFIRMED,
-            GetPathInDownloadDir(FILE_PATH_LITERAL("foo-x.txt")))));
+            GetPathInDownloadDir(FILE_PATH_LITERAL("foo-x.txt")),
+            absl::nullopt)));
     RunTestCasesWithActiveItem(&kSaveAsToLocalDir, 1);
   }
 
@@ -1456,9 +1463,10 @@ TEST_F(DownloadTargetDeterminerTest, ContinueWithoutConfirmation_SaveAs) {
       RequestConfirmation_(
           _, GetPathInDownloadDir(FILE_PATH_LITERAL("save-as.kindabad")),
           DownloadConfirmationReason::SAVE_AS, _))
-      .WillOnce(WithArg<3>(ScheduleCallback2(
+      .WillOnce(WithArg<3>(ScheduleCallback3(
           DownloadConfirmationResult::CONTINUE_WITHOUT_CONFIRMATION,
-          GetPathInDownloadDir(FILE_PATH_LITERAL("foo.kindabad")))));
+          GetPathInDownloadDir(FILE_PATH_LITERAL("foo.kindabad")),
+          absl::nullopt)));
   RunTestCasesWithActiveItem(&kTestCase, 1);
 }
 
@@ -1482,9 +1490,10 @@ TEST_F(DownloadTargetDeterminerTest, ContinueWithConfirmation_SaveAs) {
       RequestConfirmation_(
           _, GetPathInDownloadDir(FILE_PATH_LITERAL("save-as.kindabad")),
           DownloadConfirmationReason::SAVE_AS, _))
-      .WillOnce(WithArg<3>(ScheduleCallback2(
+      .WillOnce(WithArg<3>(ScheduleCallback3(
           DownloadConfirmationResult::CONFIRMED,
-          GetPathInDownloadDir(FILE_PATH_LITERAL("foo.kindabad")))));
+          GetPathInDownloadDir(FILE_PATH_LITERAL("foo.kindabad")),
+          absl::nullopt)));
   RunTestCasesWithActiveItem(&kTestCase, 1);
 }
 
@@ -2472,7 +2481,7 @@ class MockPluginServiceFilter : public content::PluginServiceFilter {
  public:
   MOCK_METHOD1(MockPluginAvailable, bool(const base::FilePath&));
 
-  bool IsPluginAvailable(content::BrowserContext* browser_context,
+  bool IsPluginAvailable(int render_process_id,
                          const content::WebPluginInfo& plugin) override {
     return MockPluginAvailable(plugin.path);
   }

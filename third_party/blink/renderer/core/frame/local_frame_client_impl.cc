@@ -33,8 +33,8 @@
 
 #include <utility>
 
+#include "base/stl_util.h"
 #include "base/time/time.h"
-#include "base/types/optional_util.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/type_converter.h"
@@ -593,7 +593,7 @@ void LocalFrameClientImpl::BeginNavigation(
     navigation_info->initiator_frame_has_download_sandbox_flag =
         origin_window->IsSandboxed(
             network::mojom::blink::WebSandboxFlags::kDownloads);
-    navigation_info->initiator_frame_is_ad = frame->IsAdFrame();
+    navigation_info->initiator_frame_is_ad = frame->IsAdSubframe();
   }
 
   // The frame has navigated either by itself or by the action of the
@@ -606,7 +606,7 @@ void LocalFrameClientImpl::BeginNavigation(
   if (!source_location) {
     DCHECK(!origin_window);
     source_location =
-        CaptureSourceLocation(web_frame_->GetFrame()->DomWindow());
+        SourceLocation::Capture(web_frame_->GetFrame()->DomWindow());
   }
   if (!source_location->IsUnknown()) {
     navigation_info->source_location.url = source_location->Url();
@@ -662,7 +662,8 @@ void LocalFrameClientImpl::BeginNavigation(
 }
 
 void LocalFrameClientImpl::DispatchWillSendSubmitEvent(HTMLFormElement* form) {
-  web_frame_->WillSendSubmitEvent(WebFormElement(form));
+  if (web_frame_->Client())
+    web_frame_->Client()->WillSendSubmitEvent(WebFormElement(form));
 }
 
 void LocalFrameClientImpl::DidStartLoading() {
@@ -837,8 +838,9 @@ absl::optional<UserAgentMetadata> LocalFrameClientImpl::UserAgentMetadata() {
 }
 
 String LocalFrameClientImpl::DoNotTrackValue() {
-  if (web_frame_->View()->GetRendererPreferences().enable_do_not_track)
-    return "1";
+  WebString do_not_track = web_frame_->Client()->DoNotTrackValue();
+  if (!do_not_track.IsEmpty())
+    return do_not_track;
   return String();
 }
 
@@ -952,6 +954,12 @@ void LocalFrameClientImpl::DispatchDidChangeManifest() {
 unsigned LocalFrameClientImpl::BackForwardLength() {
   WebViewImpl* webview = web_frame_->ViewImpl();
   return webview ? webview->HistoryListLength() : 0;
+}
+
+BlameContext* LocalFrameClientImpl::GetFrameBlameContext() {
+  if (WebLocalFrameClient* client = web_frame_->Client())
+    return client->GetFrameBlameContext();
+  return nullptr;
 }
 
 WebDevToolsAgentImpl* LocalFrameClientImpl::DevToolsAgent() {

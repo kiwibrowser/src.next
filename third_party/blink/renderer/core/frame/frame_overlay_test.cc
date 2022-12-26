@@ -71,8 +71,7 @@ class FrameOverlayTest : public testing::Test, public PaintTestConfigurations {
   FrameOverlay* CreateSolidYellowOverlay() {
     return MakeGarbageCollected<FrameOverlay>(
         GetWebView()->MainFrameImpl()->GetFrame(),
-        std::make_unique<SolidColorOverlay>(
-            Color::FromSkColor(SK_ColorYELLOW)));
+        std::make_unique<SolidColorOverlay>(SK_ColorYELLOW));
   }
 
   template <typename OverlayType>

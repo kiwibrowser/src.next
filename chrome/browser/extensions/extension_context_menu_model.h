@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,7 +43,6 @@ class ExtensionContextMenuModel : public ui::SimpleMenuModel,
     PAGE_ACCESS_LEARN_MORE,
     PAGE_ACCESS_ALL_EXTENSIONS_GRANTED,
     PAGE_ACCESS_ALL_EXTENSIONS_BLOCKED,
-    PAGE_ACCESS_PERMISSIONS_PAGE,
     // NOTE: If you update this, you probably need to update the
     // ContextMenuAction enum below.
   };
@@ -68,8 +67,7 @@ class ExtensionContextMenuModel : public ui::SimpleMenuModel,
     kPageAccessRunOnSite = 9,
     kPageAccessRunOnAllSites = 10,
     kPageAccessLearnMore = 11,
-    kPageAccessPermissionsPage = 12,
-    kMaxValue = kPageAccessPermissionsPage,
+    kMaxValue = kPageAccessLearnMore,
   };
 
   // Location where the context menu is open from.
@@ -144,6 +142,10 @@ class ExtensionContextMenuModel : public ui::SimpleMenuModel,
 
   void HandlePageAccessCommand(int command_id,
                                const Extension* extension) const;
+
+  // Logs a user action when an option is selected in the page access section of
+  // the context menu.
+  void LogPageAccessAction(int command_id) const;
 
   // Gets the extension we are displaying the menu for. Returns NULL if the
   // extension has been uninstalled and no longer exists.

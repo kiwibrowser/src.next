@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,7 @@ namespace {
 
 static base::LazyInstance<ManifestHandlerRegistry>::DestructorAtExit
     g_registry = LAZY_INSTANCE_INITIALIZER;
-static ManifestHandlerRegistry* g_registry_override = nullptr;
+static ManifestHandlerRegistry* g_registry_override = NULL;
 
 }  // namespace
 
@@ -50,12 +50,12 @@ const std::vector<std::string> ManifestHandler::PrerequisiteKeys() const {
 }
 
 ManifestPermission* ManifestHandler::CreatePermission() {
-  return nullptr;
+  return NULL;
 }
 
 ManifestPermission* ManifestHandler::CreateInitialRequiredPermission(
     const Extension* extension) {
-  return nullptr;
+  return NULL;
 }
 
 // static
@@ -172,7 +172,7 @@ ManifestPermission* ManifestHandlerRegistry::CreatePermission(
     const std::string& name) {
   ManifestHandlerMap::const_iterator it = handlers_.find(name);
   if (it == handlers_.end())
-    return nullptr;
+    return NULL;
 
   return it->second->CreatePermission();
 }
@@ -203,7 +203,7 @@ ManifestHandlerRegistry* ManifestHandlerRegistry::SetForTesting(
   if (new_registry != g_registry.Pointer())
     g_registry_override = new_registry;
   else
-    g_registry_override = nullptr;
+    g_registry_override = NULL;
   return old_registry;
 }
 

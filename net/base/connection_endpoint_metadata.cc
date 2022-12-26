@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors
+// Copyright 2021 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,6 @@ namespace net {
 namespace {
 const char kSupportedProtocolAlpnsKey[] = "supported_protocol_alpns";
 const char kEchConfigListKey[] = "ech_config_list";
-const char kTargetNameKey[] = "target_name";
 }  // namespace
 
 ConnectionEndpointMetadata::ConnectionEndpointMetadata() = default;
@@ -38,10 +37,6 @@ base::Value ConnectionEndpointMetadata::ToValue() const {
 
   dict.Set(kEchConfigListKey, base::Base64Encode(ech_config_list));
 
-  if (!target_name.empty()) {
-    dict.Set(kTargetNameKey, target_name);
-  }
-
   return base::Value(std::move(dict));
 }
 
@@ -56,7 +51,6 @@ ConnectionEndpointMetadata::FromValue(const base::Value& value) {
       dict->FindList(kSupportedProtocolAlpnsKey);
   const std::string* ech_config_list_value =
       dict->FindString(kEchConfigListKey);
-  const std::string* target_name_value = dict->FindString(kTargetNameKey);
 
   if (!alpns_list || !ech_config_list_value)
     return absl::nullopt;
@@ -64,10 +58,10 @@ ConnectionEndpointMetadata::FromValue(const base::Value& value) {
   ConnectionEndpointMetadata metadata;
 
   std::vector<std::string> alpns;
-  for (const base::Value& alpn : *alpns_list) {
-    if (!alpn.is_string())
+  for (const base::Value& value : *alpns_list) {
+    if (!value.is_string())
       return absl::nullopt;
-    metadata.supported_protocol_alpns.push_back(alpn.GetString());
+    metadata.supported_protocol_alpns.push_back(value.GetString());
   }
 
   absl::optional<std::vector<uint8_t>> decoded =
@@ -75,10 +69,6 @@ ConnectionEndpointMetadata::FromValue(const base::Value& value) {
   if (!decoded)
     return absl::nullopt;
   metadata.ech_config_list = std::move(*decoded);
-
-  if (target_name_value) {
-    metadata.target_name = *target_name_value;
-  }
 
   return metadata;
 }

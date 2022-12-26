@@ -4,7 +4,6 @@
 
 #include "third_party/blink/renderer/core/frame/device_single_window_event_controller.h"
 
-#include "base/ranges/algorithm.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/page/page.h"
@@ -71,11 +70,11 @@ void DeviceSingleWindowEventController::DidRemoveAllEventListeners(
 bool DeviceSingleWindowEventController::CheckPolicyFeatures(
     const Vector<mojom::blink::PermissionsPolicyFeature>& features) const {
   LocalDOMWindow& window = GetWindow();
-  return base::ranges::all_of(
-      features, [&window](mojom::blink::PermissionsPolicyFeature feature) {
-        return window.IsFeatureEnabled(feature,
-                                       ReportOptions::kReportOnFailure);
-      });
+  return std::all_of(features.begin(), features.end(),
+                     [&window](mojom::blink::PermissionsPolicyFeature feature) {
+                       return window.IsFeatureEnabled(
+                           feature, ReportOptions::kReportOnFailure);
+                     });
 }
 
 void DeviceSingleWindowEventController::Trace(Visitor* visitor) const {

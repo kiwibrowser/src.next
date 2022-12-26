@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors
+// Copyright 2021 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,11 +53,6 @@ class ContentScriptTracker {
   static bool DidProcessRunContentScriptFromExtension(
       const content::RenderProcessHost& process,
       const ExtensionId& extension_id);
-
-  // Returns all the IDs for extensions that have ever in the past run a content
-  // script in `process`.
-  static ExtensionIdSet GetExtensionsThatRanScriptsInProcess(
-      const content::RenderProcessHost& process);
 
   // The few methods below are called by ExtensionWebContentsObserver to notify
   // ContentScriptTracker about various events.  The methods correspond directly

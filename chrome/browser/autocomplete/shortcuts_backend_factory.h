@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
-#include "chrome/browser/profiles/refcounted_profile_keyed_service_factory.h"
+#include "components/keyed_service/content/refcounted_browser_context_keyed_service_factory.h"
 
 class Profile;
 
@@ -15,7 +15,8 @@ class ShortcutsBackend;
 
 // Singleton that owns all instances of ShortcutsBackend and associates them
 // with Profiles.
-class ShortcutsBackendFactory : public RefcountedProfileKeyedServiceFactory {
+class ShortcutsBackendFactory
+    : public RefcountedBrowserContextKeyedServiceFactory {
  public:
   static scoped_refptr<ShortcutsBackend> GetForProfile(Profile* profile);
 

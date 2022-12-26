@@ -1,9 +1,10 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/child_process_security_policy_impl.h"
 
+#include <algorithm>
 #include <tuple>
 #include <utility>
 
@@ -18,7 +19,6 @@
 #include "base/logging.h"
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/ranges/algorithm.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -56,7 +56,6 @@
 #include "storage/browser/file_system/file_system_url.h"
 #include "storage/browser/file_system/isolated_context.h"
 #include "storage/common/file_system/file_system_util.h"
-#include "third_party/blink/public/common/features.h"
 #include "url/gurl.h"
 #include "url/url_canon.h"
 #include "url/url_constants.h"
@@ -790,7 +789,7 @@ void ChildProcessSecurityPolicyImpl::AddForTesting(
     BrowserContext* browser_context) {
   Add(child_id, browser_context);
   LockProcess(IsolationContext(BrowsingInstanceId(1), browser_context,
-                               /*is_guest=*/false, /*is_fenced=*/false),
+                               /*is_guest=*/false),
               child_id, /*is_process_used=*/false,
               ProcessLock::CreateAllowAnySite(
                   StoragePartitionConfig::CreateDefault(browser_context),
@@ -1249,10 +1248,10 @@ bool ChildProcessSecurityPolicyImpl::CanReadFile(int child_id,
 bool ChildProcessSecurityPolicyImpl::CanReadAllFiles(
     int child_id,
     const std::vector<base::FilePath>& files) {
-  return base::ranges::all_of(files,
-                              [this, child_id](const base::FilePath& file) {
-                                return CanReadFile(child_id, file);
-                              });
+  return std::all_of(files.begin(), files.end(),
+                     [this, child_id](const base::FilePath& file) {
+                       return CanReadFile(child_id, file);
+                     });
 }
 
 bool ChildProcessSecurityPolicyImpl::CanReadRequestBody(
@@ -1679,18 +1678,17 @@ bool ChildProcessSecurityPolicyImpl::CanAccessDataForMaybeOpaqueOrigin(
         failure_reason += base::StringPrintf(
             "[BI=%d]", browsing_instance_id.GetUnsafeValue());
 
-        // Use the actual process lock's state to compute `is_guest` and
-        // `is_fenced` for the expected process lock's `isolation_context`.
-        // Guest status and fenced status doesn't currently influence the
-        // outcome of this access check, and even if it did, `url` wouldn't be
-        // sufficient to tell whether the request belongs solely to a guest (or
-        // non-guest) or fenced process.  Note that a guest isn't allowed to
-        // access data outside of its own StoragePartition, but this is enforced
-        // by other means (e.g., resource access APIs can't name an alternate
-        // StoragePartition).
-        IsolationContext isolation_context(
-            browsing_instance_id, browser_or_resource_context,
-            actual_process_lock.is_guest(), actual_process_lock.is_fenced());
+        // Use the actual process lock's state to compute `is_guest` for the
+        // expected process lock's `isolation_context`.  Guest status doesn't
+        // currently influence the outcome of this access check, and even if it
+        // did, `url` wouldn't be sufficient to tell whether the request
+        // belongs solely to a guest (or non-guest) process.  Note that a guest
+        // isn't allowed to access data outside of its own StoragePartition,
+        // but this is enforced by other means (e.g., resource access APIs
+        // can't name an alternate StoragePartition).
+        IsolationContext isolation_context(browsing_instance_id,
+                                           browser_or_resource_context,
+                                           actual_process_lock.is_guest());
 
         // NOTE: If we're on the IO thread, the call to
         // ProcessLock::Create() below will return a ProcessLock with
@@ -1731,9 +1729,7 @@ bool ChildProcessSecurityPolicyImpl::CanAccessDataForMaybeOpaqueOrigin(
                         .WithWebExposedIsolationInfo(
                             actual_process_lock.GetWebExposedIsolationInfo())
                         .WithIsPdf(actual_process_lock.is_pdf())
-                        .WithSandbox(actual_process_lock.is_sandboxed())
-                        .WithUniqueSandboxId(
-                            actual_process_lock.unique_sandbox_id())));
+                        .WithSandbox(actual_process_lock.is_sandboxed())));
 
         if (actual_process_lock.is_locked_to_site()) {
           // Jail-style enforcement - a process with a lock can only access
@@ -2121,8 +2117,7 @@ bool ChildProcessSecurityPolicyImpl::IsGloballyIsolatedOriginForTesting(
   BrowserOrResourceContext no_browser_context;
   BrowsingInstanceId null_browsing_instance_id;
   IsolationContext isolation_context(null_browsing_instance_id,
-                                     no_browser_context, /*is_guest=*/false,
-                                     /*is_fenced=*/false);
+                                     no_browser_context, /*is_guest=*/false);
   return IsIsolatedOrigin(isolation_context, origin, false);
 }
 
@@ -2345,14 +2340,12 @@ ChildProcessSecurityPolicyImpl::DetermineOriginAgentClusterIsolation(
   return requested_isolation_state;
 }
 
-bool ChildProcessSecurityPolicyImpl::
-    HasOriginEverRequestedOriginAgentClusterValue(
-        BrowserContext* browser_context,
-        const url::Origin& origin) {
+bool ChildProcessSecurityPolicyImpl::HasOriginEverRequestedOptInIsolation(
+    BrowserContext* browser_context,
+    const url::Origin& origin) {
   base::AutoLock origins_isolation_opt_in_lock(origins_isolation_opt_in_lock_);
-  return base::Contains(origin_isolation_opt_ins_and_outs_, browser_context) &&
-         base::Contains(origin_isolation_opt_ins_and_outs_[browser_context],
-                        origin);
+  return base::Contains(origin_isolation_opt_ins_, browser_context) &&
+         base::Contains(origin_isolation_opt_ins_[browser_context], origin);
 }
 
 OriginAgentClusterIsolationState*
@@ -2366,14 +2359,17 @@ ChildProcessSecurityPolicyImpl::LookupOriginIsolationState(
     return nullptr;
   }
   auto& origin_list = it_isolation_by_browsing_instance->second;
-  auto it_origin_list = base::ranges::find(
-      origin_list, origin, &OriginAgentClusterOptInEntry::origin);
+  auto it_origin_list =
+      std::find_if(origin_list.begin(), origin_list.end(),
+                   [&origin](const OriginAgentClusterOptInEntry entry) {
+                     return entry.origin == origin;
+                   });
   if (it_origin_list != origin_list.end())
     return &(it_origin_list->oac_isolation_state);
   return nullptr;
 }
 
-void ChildProcessSecurityPolicyImpl::AddDefaultIsolatedOriginIfNeeded(
+void ChildProcessSecurityPolicyImpl::AddNonIsolatedOriginIfNeeded(
     const IsolationContext& isolation_context,
     const url::Origin& origin,
     bool is_global_walk_or_frame_removal) {
@@ -2392,32 +2388,31 @@ void ChildProcessSecurityPolicyImpl::AddDefaultIsolatedOriginIfNeeded(
 
   base::AutoLock origins_isolation_opt_in_lock(origins_isolation_opt_in_lock_);
 
-  // Commits of origins that have ever sent the OriginAgentCluster header in
-  // this BrowserContext are tracked in every BrowsingInstance in this
+  // Commits of origins that have ever requested isolation in this
+  // BrowserContext are tracked in every BrowsingInstance in this
   // BrowserContext, to avoid having to do multiple global walks. If the origin
   // isn't in the list of such origins (i.e., the common case), return early to
   // avoid unnecessary work, since this is called on every commit. Skip this
   // during global walks and frame removals, since we do want to track the
   // origin's non-isolated status in those cases.
   if (!is_global_walk_or_frame_removal &&
-      !(base::Contains(origin_isolation_opt_ins_and_outs_, browser_context) &&
-        base::Contains(origin_isolation_opt_ins_and_outs_[browser_context],
-                       origin))) {
+      !(base::Contains(origin_isolation_opt_ins_, browser_context) &&
+        base::Contains(origin_isolation_opt_ins_[browser_context], origin))) {
     return;
   }
 
-  // If |origin| is already in the opt-in-out list, then we don't want to add it
-  // to the list. Technically this check is unnecessary during global
+  // If |origin| is already in the opt-in list, then we don't want to add it
+  // to the opt-out list. Technically this check is unnecessary during global
   // walks (when the origin won't be in this list yet), but it matters during
   // frame removal (when we don't want to add an opted-in origin to the
-  // list as non-isolated when its frame is removed).
+  // non-isolated list when its frame is removed).
   if (LookupOriginIsolationState(browsing_instance_id, origin))
     return;
 
   // Since there was no prior record for this BrowsingInstance, track that this
-  // origin should use the default isolation model.
+  // origin should not be isolated.
   origin_isolation_by_browsing_instance_[browsing_instance_id].emplace_back(
-      OriginAgentClusterIsolationState::CreateForDefaultIsolation(), origin);
+      OriginAgentClusterIsolationState::CreateNonIsolated(), origin);
 }
 
 void ChildProcessSecurityPolicyImpl::
@@ -2485,14 +2480,21 @@ void ChildProcessSecurityPolicyImpl::
   }
 }
 
-void ChildProcessSecurityPolicyImpl::AddCoopIsolatedOriginForBrowsingInstance(
+void ChildProcessSecurityPolicyImpl::AddIsolatedOriginForBrowsingInstance(
     const IsolationContext& isolation_context,
     const url::Origin& origin,
+    bool is_origin_agent_cluster,
+    bool requires_origin_keyed_process,
     IsolatedOriginSource source) {
   // We ought to have validated the origin prior to getting here.  If the
-  // origin isn't valid at this point, something has gone wrong.
-  CHECK(IsolatedOriginUtil::IsValidIsolatedOrigin(origin))
-      << "Trying to isolate invalid origin: " << origin;
+  // origin isn't valid at this point, something has gone wrong.  Note that the
+  // origin-keyed OriginAgentCluster isolated origins have slightly different
+  // validation requirements.
+  bool is_valid_origin =
+      is_origin_agent_cluster
+          ? IsolatedOriginUtil::IsValidOriginForOptInIsolation(origin)
+          : IsolatedOriginUtil::IsValidIsolatedOrigin(origin);
+  CHECK(is_valid_origin) << "Trying to isolate invalid origin: " << origin;
 
   // This can only be called from the UI thread, as it reads state that's only
   // available (and is only safe to be retrieved) on the UI thread, such as
@@ -2507,52 +2509,25 @@ void ChildProcessSecurityPolicyImpl::AddCoopIsolatedOriginForBrowsingInstance(
 
   // For site-keyed isolation, add `origin` to the isolated_origins_ map (which
   // supports subdomain matching).
-  // Ensure that `origin` is a site (scheme + eTLD+1) rather than any origin.
-  auto site_origin = url::Origin::Create(SiteInfo::GetSiteForOrigin(origin));
-  CHECK_EQ(origin, site_origin);
+  if (!is_origin_agent_cluster) {
+    // Ensure that `origin` is a site (scheme + eTLD+1) rather than any origin.
+    auto site_origin = url::Origin::Create(SiteInfo::GetSiteForOrigin(origin));
+    CHECK_EQ(origin, site_origin);
 
-  base::AutoLock isolated_origins_lock(isolated_origins_lock_);
+    base::AutoLock isolated_origins_lock(isolated_origins_lock_);
 
-  // Explicitly set `applies_to_future_browsing_instances` to false to only
-  // isolate `origin` within the provided BrowsingInstance, but not future
-  // ones.  Note that it's possible for `origin` to also become isolated for
-  // future BrowsingInstances if AddFutureIsolatedOrigins() is called for it
-  // later.
-  AddIsolatedOriginInternal(
-      isolation_context.browser_or_resource_context().ToBrowserContext(),
-      origin, false /* applies_to_future_browsing_instances */,
-      isolation_context.browsing_instance_id(),
-      false /* isolate_all_subdomains */, source);
-}
-
-void ChildProcessSecurityPolicyImpl::AddOriginIsolationStateForBrowsingInstance(
-    const IsolationContext& isolation_context,
-    const url::Origin& origin,
-    bool is_origin_agent_cluster,
-    bool requires_origin_keyed_process) {
-  DCHECK(is_origin_agent_cluster ||
-         base::FeatureList::IsEnabled(
-             blink::features::kOriginAgentClusterDefaultEnabled));
-  // We ought to have validated the origin prior to getting here.  If the
-  // origin isn't valid at this point, something has gone wrong.
-  CHECK((is_origin_agent_cluster &&
-         IsolatedOriginUtil::IsValidOriginForOptInIsolation(origin)) ||
-        // The second part of this check is specific to OAC-by-default, and is
-        // required to allow explicit opt-outs for HTTP schemed origins. See
-        // OriginAgentClusterInsecureEnabledBrowserTest.DocumentDomain_Disabled.
-        IsolatedOriginUtil::IsValidOriginForOptOutIsolation(origin))
-      << "Trying to isolate invalid origin: " << origin;
-
-  // This can only be called from the UI thread, as it reads state that's only
-  // available (and is only safe to be retrieved) on the UI thread, such as
-  // BrowsingInstance IDs.
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  BrowsingInstanceId browsing_instance_id(
-      isolation_context.browsing_instance_id());
-  // This function should only be called when a BrowsingInstance is registering
-  // a new SiteInstance, so |browsing_instance_id| should always be defined.
-  CHECK(!browsing_instance_id.is_null());
+    // Explicitly set `applies_to_future_browsing_instances` to false to only
+    // isolate `origin` within the provided BrowsingInstance, but not future
+    // ones.  Note that it's possible for `origin` to also become isolated for
+    // future BrowsingInstances if AddFutureIsolatedOrigins() is called for it
+    // later.
+    AddIsolatedOriginInternal(
+        isolation_context.browser_or_resource_context().ToBrowserContext(),
+        origin, false /* applies_to_future_browsing_instances */,
+        isolation_context.browsing_instance_id(),
+        false /* isolate_all_subdomains */, source);
+    return;
+  }
 
   // For origin-keyed isolation, use the origin_isolation_by_browsing_instance_
   // map.
@@ -2566,13 +2541,13 @@ void ChildProcessSecurityPolicyImpl::AddOriginIsolationStateForBrowsingInstance(
   // We only support adding new entries, not modifying existing ones. If at
   // some point in the future we allow isolation status to change during the
   // lifetime of a BrowsingInstance, then this will need to be updated.
-  if (!base::Contains(it->second, origin,
-                      &OriginAgentClusterOptInEntry::origin)) {
+  if (std::find_if(it->second.begin(), it->second.end(),
+                   [&origin](const OriginAgentClusterOptInEntry entry) {
+                     return entry.origin == origin;
+                   }) == it->second.end()) {
     it->second.emplace_back(
-        is_origin_agent_cluster
-            ? OriginAgentClusterIsolationState::CreateForOriginAgentCluster(
-                  requires_origin_keyed_process)
-            : OriginAgentClusterIsolationState::CreateNonIsolated(),
+        OriginAgentClusterIsolationState::CreateForOriginAgentCluster(
+            requires_origin_keyed_process),
         origin);
   }
 }
@@ -2585,13 +2560,12 @@ bool ChildProcessSecurityPolicyImpl::UpdateOriginIsolationOptInListIfNecessary(
 
   base::AutoLock origins_isolation_opt_in_lock(origins_isolation_opt_in_lock_);
 
-  if (base::Contains(origin_isolation_opt_ins_and_outs_, browser_context) &&
-      base::Contains(origin_isolation_opt_ins_and_outs_[browser_context],
-                     origin)) {
+  if (base::Contains(origin_isolation_opt_ins_, browser_context) &&
+      base::Contains(origin_isolation_opt_ins_[browser_context], origin)) {
     return false;
   }
 
-  origin_isolation_opt_ins_and_outs_[browser_context].insert(origin);
+  origin_isolation_opt_ins_[browser_context].insert(origin);
   return true;
 }
 

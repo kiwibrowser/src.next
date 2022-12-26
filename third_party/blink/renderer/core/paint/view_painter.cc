@@ -5,7 +5,6 @@
 #include "third_party/blink/renderer/core/paint/view_painter.h"
 
 #include "base/containers/adapters.h"
-#include "third_party/blink/renderer/core/document_transition/document_transition_supplement.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
@@ -85,19 +84,9 @@ void ViewPainter::PaintBoxDecorationBackground(const PaintInfo& paint_info) {
   bool paints_scroll_hit_test =
       !painting_background_in_contents_space &&
       layout_view_.FirstFragment().PaintProperties()->Scroll();
-  bool is_represented_via_pseudo_elements = [this]() {
-    if (auto* supplement = DocumentTransitionSupplement::FromIfExists(
-            layout_view_.GetDocument())) {
-      return supplement->GetTransition()->IsRepresentedViaPseudoElements(
-          layout_view_);
-    }
-    return false;
-  }();
   if (!layout_view_.HasBoxDecorationBackground() && !has_hit_test_data &&
-      !paints_scroll_hit_test && !has_region_capture_data &&
-      !is_represented_via_pseudo_elements) {
+      !paints_scroll_hit_test && !has_region_capture_data)
     return;
-  }
 
   // The background rect always includes at least the visible content size.
   PhysicalRect background_rect(layout_view_.BackgroundRect());
@@ -139,8 +128,7 @@ void ViewPainter::PaintBoxDecorationBackground(const PaintInfo& paint_info) {
       document.IsHTMLDocument() || document.IsXHTMLDocument();
 
   bool should_paint_background = !paint_info.ShouldSkipBackground() &&
-                                 (layout_view_.HasBoxDecorationBackground() ||
-                                  is_represented_via_pseudo_elements);
+                                 layout_view_.HasBoxDecorationBackground();
 
   LayoutObject* root_object = nullptr;
   if (auto* document_element = document.documentElement())

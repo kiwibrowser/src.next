@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,6 @@
 
 #include "base/atomicops.h"
 #include "base/callback.h"
-#include "base/location.h"
 #include "base/memory/memory_pressure_listener.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
@@ -80,7 +79,6 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
   // called with a null host (e.g. when |force_create| is false, and no
   // GpuProcessHost instance exists).
   CONTENT_EXPORT static void CallOnIO(
-      const base::Location& location,
       GpuProcessKind kind,
       bool force_create,
       base::OnceCallback<void(GpuProcessHost*)> callback);
@@ -171,11 +169,10 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
   void DidUpdateOverlayInfo(const gpu::OverlayInfo& overlay_info) override;
   void DidUpdateDXGIInfo(gfx::mojom::DXGIInfoPtr dxgi_info) override;
 #endif
-  void BlockDomainsFrom3DAPIs(const std::set<GURL>& urls,
-                              gpu::DomainGuilt guilt) override;
+  void BlockDomainFrom3DAPIs(const GURL& url, gpu::DomainGuilt guilt) override;
   void DisableGpuCompositing() override;
   bool GpuAccessAllowed() const override;
-  gpu::GpuDiskCacheFactory* GetGpuDiskCacheFactory() override;
+  gpu::ShaderCacheFactory* GetShaderCacheFactory() override;
   void RecordLogMessage(int32_t severity,
                         const std::string& header,
                         const std::string& message) override;

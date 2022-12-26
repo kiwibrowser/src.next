@@ -93,9 +93,10 @@ class FakeChromeClientForAutofill : public EmptyChromeClient {
 };
 }  // namespace
 
-class ViewCreatingClient : public frame_test_helpers::TestWebFrameClient {
+class ViewCreatingClient : public frame_test_helpers::TestWebViewClient {
  public:
-  WebView* CreateNewWindow(
+  WebView* CreateView(
+      WebLocalFrame* opener,
       const WebURLRequest&,
       const WebWindowFeatures&,
       const WebString& name,
@@ -105,7 +106,7 @@ class ViewCreatingClient : public frame_test_helpers::TestWebFrameClient {
       bool& consumed_user_gesture,
       const absl::optional<Impression>&,
       const absl::optional<WebPictureInPictureWindowOptions>&) override {
-    return web_view_helper_.InitializeWithOpener(Frame());
+    return web_view_helper_.InitializeWithOpener(opener);
   }
 
  private:
@@ -115,13 +116,13 @@ class ViewCreatingClient : public frame_test_helpers::TestWebFrameClient {
 class CreateWindowTest : public testing::Test {
  protected:
   void SetUp() override {
-    web_view_ = helper_.Initialize(&web_frame_client_);
+    web_view_ = helper_.Initialize(nullptr, &web_view_client_);
     main_frame_ = helper_.LocalMainFrame();
     chrome_client_impl_ =
         To<ChromeClientImpl>(&web_view_->GetPage()->GetChromeClient());
   }
 
-  ViewCreatingClient web_frame_client_;
+  ViewCreatingClient web_view_client_;
   frame_test_helpers::WebViewHelper helper_;
   WebViewImpl* web_view_;
   WebLocalFrame* main_frame_;

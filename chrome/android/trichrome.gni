@@ -1,13 +1,13 @@
-# Copyright 2018 The Chromium Authors
+# Copyright 2018 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 import("//build/config/android/abi.gni")
 import("//build/config/android/config.gni")
 import("//build/config/android/rules.gni")
+import("//build/util/version.gni")
 import("//chrome/android/chrome_public_apk_tmpl.gni")
 import("//chrome/android/modules/buildflags.gni")
-import("//chrome/version.gni")
 import("//device/vr/buildflags/buildflags.gni")
 
 if (!defined(default_trichrome_certdigest)) {

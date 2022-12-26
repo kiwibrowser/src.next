@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -156,7 +156,8 @@ bool IndividualSettings::Parse(const base::DictionaryValue* dict,
     // Get the list of URLPatterns.
     const base::Value* host_list_value = dict->FindListKey(key);
     if (host_list_value) {
-      const base::Value::List& host_list_view = host_list_value->GetList();
+      base::Value::ConstListView host_list_view =
+          host_list_value->GetListDeprecated();
       if (host_list_view.size() > schema_constants::kMaxItemsURLPatternSet) {
         LOG(WARNING) << "Exceeded maximum number of URL match patterns ("
                      << schema_constants::kMaxItemsURLPatternSet

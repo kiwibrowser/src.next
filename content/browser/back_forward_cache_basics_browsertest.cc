@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors
+// Copyright 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -784,7 +784,7 @@ IN_PROC_BROWSER_TEST_F(BackForwardCacheBrowserTest, Events) {
 
   content::FetchHistogramsFromChildProcesses();
   EXPECT_THAT(
-      histogram_tester().GetAllSamples(kEventPageShowPersisted),
+      histogram_tester_.GetAllSamples(kEventPageShowPersisted),
       testing::UnorderedElementsAre(base::Bucket(
           static_cast<int>(blink::EventPageShowPersisted::kNoInRenderer), 1)));
 
@@ -804,7 +804,7 @@ IN_PROC_BROWSER_TEST_F(BackForwardCacheBrowserTest, Events) {
   MatchEventList(rfh_b.get(), ListValueOf("window.pageshow"));
   content::FetchHistogramsFromChildProcesses();
   EXPECT_THAT(
-      histogram_tester().GetAllSamples(kEventPageShowPersisted),
+      histogram_tester_.GetAllSamples(kEventPageShowPersisted),
       testing::UnorderedElementsAre(base::Bucket(
           static_cast<int>(blink::EventPageShowPersisted::kNoInRenderer), 2)));
 
@@ -825,7 +825,7 @@ IN_PROC_BROWSER_TEST_F(BackForwardCacheBrowserTest, Events) {
 
   content::FetchHistogramsFromChildProcesses();
   EXPECT_THAT(
-      histogram_tester().GetAllSamples(kEventPageShowPersisted),
+      histogram_tester_.GetAllSamples(kEventPageShowPersisted),
       testing::UnorderedElementsAre(
           base::Bucket(
               static_cast<int>(blink::EventPageShowPersisted::kNoInRenderer),

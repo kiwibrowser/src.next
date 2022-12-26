@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors
+// Copyright 2022 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -136,9 +136,9 @@ public class ChildProcessConnectionMetrics {
         cancelEmitting();
     }
 
-    private boolean bindingManagerHasExclusiveVisibleBinding(ChildProcessConnection connection) {
+    private boolean bindingManagerHasExclusiveModerateBinding(ChildProcessConnection connection) {
         if (mBindingManager != null) {
-            return mBindingManager.hasExclusiveVisibleBinding(connection);
+            return mBindingManager.hasExclusiveModerateBinding(connection);
         }
         return false;
     }
@@ -150,42 +150,37 @@ public class ChildProcessConnectionMetrics {
 
         // Binding counts from all connections.
         int strongBindingCount = 0;
-        int visibleBindingCount = 0;
-        int notPerceptibleBindingCount = 0;
+        int moderateBindingCount = 0;
         int waivedBindingCount = 0;
 
-        // Bindings from BindingManager which could be waived.
+        // Moderate binding from BindingManager which could be waived.
         int waivableBindingCount = 0;
 
-        // Visible and waived connections if BindingManager didn't exist.
-        int contentVisibleBindingCount = 0;
+        // Moderate and waived connections if BindingManager didn't exist.
+        int contentModerateBindingCount = 0;
         int contentWaivedBindingCount = 0;
 
         if (mBindingManager != null) {
-            waivableBindingCount = mBindingManager.getExclusiveBindingCount();
+            waivableBindingCount = mBindingManager.getExclusiveModerateBindingCount();
         }
 
         for (ChildProcessConnection connection : mConnections) {
             if (connection.isStrongBindingBound()) {
                 strongBindingCount++;
-            } else if (connection.isVisibleBindingBound()) {
-                visibleBindingCount++;
-                if (bindingManagerHasExclusiveVisibleBinding(connection)) {
+            } else if (connection.isModerateBindingBound()) {
+                moderateBindingCount++;
+                if (bindingManagerHasExclusiveModerateBinding(connection)) {
                     contentWaivedBindingCount++;
                 } else {
-                    contentVisibleBindingCount++;
+                    contentModerateBindingCount++;
                 }
-            } else if (connection.isNotPerceptibleBindingBound()) {
-                notPerceptibleBindingCount++;
-                contentWaivedBindingCount++;
             } else {
                 waivedBindingCount++;
                 contentWaivedBindingCount++;
             }
         }
 
-        assert strongBindingCount + visibleBindingCount + notPerceptibleBindingCount
-                        + waivedBindingCount
+        assert strongBindingCount + moderateBindingCount + waivedBindingCount
                 == mConnections.size();
         final int totalConnections = mConnections.size();
 
@@ -198,17 +193,14 @@ public class ChildProcessConnectionMetrics {
         RecordHistogram.recordCount100Histogram(
                 "Android.ChildProcessBinding.StrongConnections", strongBindingCount);
         RecordHistogram.recordCount100Histogram(
-                "Android.ChildProcessBinding.VisibleConnections", visibleBindingCount);
-        RecordHistogram.recordCount100Histogram(
-                "Android.ChildProcessBinding.NotPerceptibleConnections",
-                notPerceptibleBindingCount);
+                "Android.ChildProcessBinding.ModerateConnections", moderateBindingCount);
         RecordHistogram.recordCount100Histogram(
                 "Android.ChildProcessBinding.WaivedConnections", waivedBindingCount);
 
         // Metrics if BindingManager wasn't running.
         RecordHistogram.recordCount100Histogram(
-                "Android.ChildProcessBinding.ContentVisibleConnections",
-                contentVisibleBindingCount);
+                "Android.ChildProcessBinding.ContentModerateConnections",
+                contentModerateBindingCount);
         RecordHistogram.recordCount100Histogram(
                 "Android.ChildProcessBinding.ContentWaivedConnections", contentWaivedBindingCount);
         RecordHistogram.recordCount100Histogram(
@@ -221,18 +213,15 @@ public class ChildProcessConnectionMetrics {
                     "Android.ChildProcessBinding.PercentageStrongConnections_" + bucket,
                     Math.round((float) strongBindingCount / totalConnections * 100));
             RecordHistogram.recordPercentageHistogram(
-                    "Android.ChildProcessBinding.PercentageVisibleConnections_" + bucket,
-                    Math.round((float) visibleBindingCount / totalConnections * 100));
-            RecordHistogram.recordPercentageHistogram(
-                    "Android.ChildProcessBinding.PercentageNotPerceptibleConnections_" + bucket,
-                    Math.round((float) notPerceptibleBindingCount / totalConnections * 100));
+                    "Android.ChildProcessBinding.PercentageModerateConnections_" + bucket,
+                    Math.round((float) moderateBindingCount / totalConnections * 100));
             RecordHistogram.recordPercentageHistogram(
                     "Android.ChildProcessBinding.PercentageWaivedConnections_" + bucket,
                     Math.round((float) waivedBindingCount / totalConnections * 100));
 
             RecordHistogram.recordPercentageHistogram(
-                    "Android.ChildProcessBinding.PercentageContentVisibleConnections_" + bucket,
-                    Math.round((float) contentVisibleBindingCount / totalConnections * 100));
+                    "Android.ChildProcessBinding.PercentageContentModerateConnections_" + bucket,
+                    Math.round((float) contentModerateBindingCount / totalConnections * 100));
             RecordHistogram.recordPercentageHistogram(
                     "Android.ChildProcessBinding.PercentageContentWaivedConnections_" + bucket,
                     Math.round((float) contentWaivedBindingCount / totalConnections * 100));

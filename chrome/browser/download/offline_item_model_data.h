@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors
+// Copyright 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,6 @@
 struct OfflineItemModelData {
   // Whether the UI has been notified about this offline item.
   bool was_ui_notified_ = false;
-
-  // Was the UI actioned on.
-  bool actioned_on_ = false;
 };
 
 #endif  // CHROME_BROWSER_DOWNLOAD_OFFLINE_ITEM_MODEL_DATA_H_

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,6 @@ import androidx.recyclerview.widget.ItemTouchHelper;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
-import org.chromium.base.Callback;
 import org.chromium.base.TraceEvent;
 import org.chromium.chrome.browser.lifecycle.DestroyObserver;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -90,7 +89,6 @@ public class TabListCoordinator
     private ViewTreeObserver.OnGlobalLayoutListener mGlobalLayoutListener;
     private OnLayoutChangeListener mListLayoutListener;
     private boolean mLayoutListenerRegistered;
-    private @Nullable TabStripSnapshotter mTabStripSnapshotter;
 
     /**
      * Construct a coordinator for UI that shows a list of tabs.
@@ -114,9 +112,6 @@ public class TabListCoordinator
      * @param componentName A unique string uses to identify different components for UMA recording.
      *                      Recommended to use the class name or make sure the string is unique
      *                      through actions.xml file.
-     * @param rootView The root view of the app.
-     * @param onModelTokenChange Callback to invoke whenever a model changes. Only currently
-     *                           respected in TabListMode.STRIP mode.
      */
     TabListCoordinator(@TabListMode int mode, Context context, TabModelSelector tabModelSelector,
             @Nullable TabListMediator.ThumbnailProvider thumbnailProvider,
@@ -128,7 +123,7 @@ public class TabListCoordinator
             @Nullable TabSwitcherMediator
                     .PriceWelcomeMessageController priceWelcomeMessageController,
             @NonNull ViewGroup parentView, boolean attachToParent, String componentName,
-            @NonNull ViewGroup rootView, @Nullable Callback<Object> onModelTokenChange) {
+            @NonNull ViewGroup rootView) {
         mMode = mode;
         mItemType = itemType;
         mContext = context;
@@ -276,9 +271,6 @@ public class TabListCoordinator
                 mListLayoutListener = (view, left, top, right, bottom, oldLeft, oldTop, oldRight,
                         oldBottom) -> updateGridCardLayout(right - left);
             }
-        } else if (mMode == TabListMode.STRIP) {
-            mTabStripSnapshotter =
-                    new TabStripSnapshotter(onModelTokenChange, mModel, mRecyclerView);
         }
     }
 
@@ -410,10 +402,6 @@ public class TabListCoordinator
         mMediator.softCleanup();
     }
 
-    void hardCleanup() {
-        mMediator.hardCleanup();
-    }
-
     void prepareTabSwitcherView() {
         if (mGlobalLayoutListener != null) {
             mRecyclerView.getViewTreeObserver().addOnGlobalLayoutListener(mGlobalLayoutListener);
@@ -421,7 +409,6 @@ public class TabListCoordinator
         registerLayoutChangeListener();
         mRecyclerView.prepareTabSwitcherView();
         mMediator.prepareTabSwitcherView();
-        mMediator.registerOnScrolledListener(mRecyclerView);
     }
 
     private void registerLayoutChangeListener() {
@@ -462,9 +449,6 @@ public class TabListCoordinator
             mLayoutListenerRegistered = false;
         }
         mRecyclerView.setRecyclerListener(null);
-        if (mTabStripSnapshotter != null) {
-            mTabStripSnapshotter.destroy();
-        }
     }
 
     int getResourceId() {

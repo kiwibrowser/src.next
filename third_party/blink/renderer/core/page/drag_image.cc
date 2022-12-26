@@ -96,6 +96,7 @@ gfx::Vector2dF DragImage::ClampedImageScale(const gfx::Size& image_size,
 std::unique_ptr<DragImage> DragImage::Create(
     Image* image,
     RespectImageOrientationEnum should_respect_image_orientation,
+    float device_scale_factor,
     InterpolationQuality interpolation_quality,
     float opacity,
     gfx::Vector2dF image_scale) {
@@ -119,7 +120,8 @@ std::unique_ptr<DragImage> DragImage::Create(
   if (!paint_image || !paint_image.GetSwSkImage()->asLegacyBitmap(&bm))
     return nullptr;
 
-  return base::WrapUnique(new DragImage(bm, interpolation_quality));
+  return base::WrapUnique(
+      new DragImage(bm, device_scale_factor, interpolation_quality));
 }
 
 static Font DeriveDragLabelFont(int size,
@@ -133,7 +135,6 @@ static Font DeriveDragLabelFont(int size,
   return result;
 }
 
-// static
 std::unique_ptr<DragImage> DragImage::Create(const KURL& url,
                                              const String& in_label,
                                              const FontDescription& system_font,
@@ -262,12 +263,16 @@ std::unique_ptr<DragImage> DragImage::Create(const KURL& url,
                           text_paint);
 
   scoped_refptr<StaticBitmapImage> image = resource_provider->Snapshot();
-  return DragImage::Create(image.get(), kRespectImageOrientation);
+  return DragImage::Create(image.get(), kRespectImageOrientation,
+                           device_scale_factor);
 }
 
 DragImage::DragImage(const SkBitmap& bitmap,
+                     float resolution_scale,
                      InterpolationQuality interpolation_quality)
-    : bitmap_(bitmap), interpolation_quality_(interpolation_quality) {}
+    : bitmap_(bitmap),
+      resolution_scale_(resolution_scale),
+      interpolation_quality_(interpolation_quality) {}
 
 DragImage::~DragImage() = default;
 

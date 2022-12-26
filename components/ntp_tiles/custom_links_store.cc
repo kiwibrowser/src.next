@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,7 +35,7 @@ std::vector<CustomLinksManager::Link> CustomLinksStore::RetrieveLinks() {
   std::vector<CustomLinksManager::Link> links;
 
   const base::Value::List& stored_links =
-      prefs_->GetList(prefs::kCustomLinksList);
+      prefs_->GetValueList(prefs::kCustomLinksList);
 
   for (const base::Value& link : stored_links) {
     const std::string* url_string =

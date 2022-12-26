@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors
+// Copyright 2017 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@ import android.app.Activity;
 import android.app.ActivityManager.RecentTaskInfo;
 import android.app.Notification;
 import android.app.SearchManager;
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -116,11 +115,8 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
     public static @Action int dispatchToCustomTabActivity(Activity currentActivity, Intent intent) {
         LaunchIntentDispatcher dispatcher = new LaunchIntentDispatcher(currentActivity, intent);
         if (!isCustomTabIntent(dispatcher.mIntent)) return Action.CONTINUE;
-        if (dispatcher.launchCustomTabActivity(new IntentHandler(currentActivity, dispatcher))) {
-            return Action.FINISH_ACTIVITY;
-        } else {
-            return Action.CONTINUE;
-        }
+        dispatcher.launchCustomTabActivity();
+        return Action.FINISH_ACTIVITY;
     }
 
     private LaunchIntentDispatcher(Activity activity, Intent intent) {
@@ -191,7 +187,7 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
 
         // Check if we should launch a Custom Tab.
         if (isCustomTabIntent) {
-            launchCustomTabActivity(intentHandler);
+            launchCustomTabActivity();
             return Action.FINISH_ACTIVITY;
         }
 
@@ -204,10 +200,11 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
         searchIntent.putExtra(SearchManager.QUERY, query);
 
         try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
-            if (PackageManagerUtils.canResolveActivity(
-                        searchIntent, PackageManager.GET_RESOLVED_FILTER)) {
-                mActivity.startActivity(searchIntent);
-            } else {
+            int resolvers =
+                    PackageManagerUtils
+                            .queryIntentActivities(searchIntent, PackageManager.GET_RESOLVED_FILTER)
+                            .size();
+            if (resolvers == 0) {
                 // Phone doesn't have a WEB_SEARCH action handler, open Search Activity with
                 // the given query.
                 Intent searchActivityIntent = new Intent(Intent.ACTION_MAIN);
@@ -215,6 +212,8 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
                         ContextUtils.getApplicationContext(), SearchActivity.class);
                 searchActivityIntent.putExtra(SearchManager.QUERY, query);
                 mActivity.startActivity(searchActivityIntent);
+            } else {
+                mActivity.startActivity(searchIntent);
             }
         }
     }
@@ -351,30 +350,19 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
 
     /**
      * Handles launching a {@link CustomTabActivity}, which will sit on top of a client's activity
-     * in the same task. Returns whether an Activity was launched (or brought to the foreground).
+     * in the same task.
      */
-    private boolean launchCustomTabActivity(IntentHandler intentHandler) {
+    private void launchCustomTabActivity() {
         CustomTabsConnection.getInstance().onHandledIntent(
                 CustomTabsSessionToken.getSessionTokenFromIntent(mIntent), mIntent);
-
-        boolean startedActivity = false;
-        boolean isCustomTab = true;
-        if (intentHandler.shouldIgnoreIntent(mIntent, startedActivity, isCustomTab)) {
-            return false;
-        }
-
         if (!clearTopIntentsForCustomTabsEnabled(mIntent)) {
             // The old way of delivering intents relies on calling the activity directly via a
             // static reference. It doesn't allow using CLEAR_TOP, and also doesn't work when an
             // intent brings the task to foreground. The condition above is a temporary safety net.
             boolean handled = getSessionDataHolder().handleIntent(mIntent);
-            if (handled) return true;
+            if (handled) return;
         }
         maybePrefetchDnsInBackground();
-
-        // Strip EXTRA_CALLING_ACTIVITY_PACKAGE if present on the original intent so that it
-        // cannot be spoofed by CCT client apps.
-        IntentUtils.safeRemoveExtra(mIntent, IntentHandler.EXTRA_CALLING_ACTIVITY_PACKAGE);
 
         // Create and fire a launch intent.
         Intent launchIntent = createCustomTabActivityIntent(mActivity, mIntent);
@@ -382,21 +370,15 @@ public class LaunchIntentDispatcher implements IntentHandler.IntentHandlerDelega
         if (extraReferrer != null) {
             launchIntent.putExtra(IntentHandler.EXTRA_ACTIVITY_REFERRER, extraReferrer.toString());
         }
-        ComponentName callingActivity = mActivity.getCallingActivity();
-        if (callingActivity != null) {
-            launchIntent.putExtra(
-                    IntentHandler.EXTRA_CALLING_ACTIVITY_PACKAGE, callingActivity.getPackageName());
-        }
 
         // Allow disk writes during startActivity() to avoid strict mode violations on some
         // Samsung devices, see https://crbug.com/796548.
         try (StrictModeContext ignored = StrictModeContext.allowDiskWrites()) {
             if (TwaSplashController.handleIntent(mActivity, launchIntent)) {
-                return true;
+                return;
             }
 
             mActivity.startActivity(launchIntent, null);
-            return true;
         }
     }
 

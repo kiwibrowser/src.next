@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors
+// Copyright 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -60,6 +60,7 @@ using base::android::ConvertUTF8ToJavaString;
 using base::android::JavaParamRef;
 using base::android::ScopedJavaLocalRef;
 using offline_items_collection::android::OfflineItemBridge;
+using DownloadSchedule = download::DownloadSchedule;
 using OfflineItemSchedule = offline_items_collection::OfflineItemSchedule;
 
 namespace {
@@ -161,6 +162,11 @@ ScopedJavaLocalRef<jobject> DownloadManagerService::CreateJavaDownloadInfo(
   }
 
   absl::optional<OfflineItemSchedule> offline_item_schedule;
+  auto download_schedule = item->GetDownloadSchedule();
+  if (download_schedule.has_value()) {
+    offline_item_schedule = absl::make_optional<OfflineItemSchedule>(
+        download_schedule->only_on_wifi(), download_schedule->start_time());
+  }
   auto j_offline_item_schedule =
       OfflineItemBridge::CreateOfflineItemSchedule(env, offline_item_schedule);
   return Java_DownloadInfo_createDownloadInfo(

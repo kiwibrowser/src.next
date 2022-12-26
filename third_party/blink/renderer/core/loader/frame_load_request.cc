@@ -4,11 +4,10 @@
 
 #include "third_party/blink/renderer/core/loader/frame_load_request.h"
 
-#include "base/types/optional_util.h"
+#include "base/stl_util.h"
 #include "third_party/blink/public/common/blob/blob_utils.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/public/platform/web_url_request.h"
-#include "third_party/blink/renderer/bindings/core/v8/capture_source_location.h"
 #include "third_party/blink/renderer/core/events/current_input_event.h"
 #include "third_party/blink/renderer/core/fileapi/public_url_manager.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
@@ -76,7 +75,7 @@ FrameLoadRequest::FrameLoadRequest(LocalDOMWindow* origin_window,
 
     SetReferrerForRequest(origin_window, resource_request_);
 
-    SetSourceLocation(CaptureSourceLocation(origin_window));
+    SetSourceLocation(SourceLocation::Capture(origin_window));
   }
 }
 
@@ -92,7 +91,7 @@ bool FrameLoadRequest::CanDisplay(const KURL& url) const {
 }
 
 const LocalFrameToken* FrameLoadRequest::GetInitiatorFrameToken() const {
-  return base::OptionalToPtr(initiator_frame_token_);
+  return base::OptionalOrNullptr(initiator_frame_token_);
 }
 
 }  // namespace blink

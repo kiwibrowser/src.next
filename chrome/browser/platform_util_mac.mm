@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,11 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
-#include "base/mac/foundation_util.h"
 #include "base/mac/mac_logging.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/platform_util_internal.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "net/base/mac/url_conversions.h"
 #include "ui/views/widget/widget.h"
 #include "url/gurl.h"
 
@@ -24,30 +22,33 @@ namespace platform_util {
 
 void ShowItemInFolder(Profile* profile, const base::FilePath& full_path) {
   DCHECK([NSThread isMainThread]);
-  NSURL* url = base::mac::FilePathToNSURL(full_path);
-  [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:@[ url ]];
+  NSString* path_string = base::SysUTF8ToNSString(full_path.value());
+  if (!path_string || ![[NSWorkspace sharedWorkspace] selectFile:path_string
+                                        inFileViewerRootedAtPath:@""])
+    LOG(WARNING) << "NSWorkspace failed to select file " << full_path.value();
 }
 
 void OpenFileOnMainThread(const base::FilePath& full_path) {
   DCHECK([NSThread isMainThread]);
-  NSURL* url = base::mac::FilePathToNSURL(full_path);
+  NSString* path_string = base::SysUTF8ToNSString(full_path.value());
+  if (!path_string)
+    return;
+
+  // On Mavericks or later, NSWorkspaceLaunchWithErrorPresentation will
+  // properly handle Finder activation for quarantined files
+  // (http://crbug.com/32921) and unassociated file types
+  // (http://crbug.com/50263).
+  NSURL* url = [NSURL fileURLWithPath:path_string];
   if (!url)
     return;
 
-  if (@available(macOS 10.15, *)) {
-    [[NSWorkspace sharedWorkspace]
-                  openURL:url
-            configuration:[NSWorkspaceOpenConfiguration configuration]
-        completionHandler:nil];
-  } else {
-    const NSWorkspaceLaunchOptions launch_options =
-        NSWorkspaceLaunchAsync | NSWorkspaceLaunchWithErrorPresentation;
-    [[NSWorkspace sharedWorkspace] openURLs:@[ url ]
-                    withAppBundleIdentifier:nil
-                                    options:launch_options
-             additionalEventParamDescriptor:nil
-                          launchIdentifiers:nil];
-  }
+  const NSWorkspaceLaunchOptions launch_options =
+      NSWorkspaceLaunchAsync | NSWorkspaceLaunchWithErrorPresentation;
+  [[NSWorkspace sharedWorkspace] openURLs:@[ url ]
+                  withAppBundleIdentifier:nil
+                                  options:launch_options
+           additionalEventParamDescriptor:nil
+                        launchIdentifiers:NULL];
 }
 
 namespace internal {
@@ -59,14 +60,13 @@ void PlatformOpenVerifiedItem(const base::FilePath& path, OpenItemType type) {
           FROM_HERE, base::BindOnce(&OpenFileOnMainThread, path));
       return;
     case OPEN_FOLDER:
-      NSURL* url = base::mac::FilePathToNSURL(path);
-      if (!url)
+      NSString* path_string = base::SysUTF8ToNSString(path.value());
+      if (!path_string)
         return;
-
       // Note that there exists a TOCTOU race between the time that |path| was
       // verified as being a directory and when NSWorkspace invokes Finder (or
       // alternative) to open |path_string|.
-      [[NSWorkspace sharedWorkspace] openURL:url];
+      [[NSWorkspace sharedWorkspace] openFile:path_string];
       return;
   }
 }
@@ -75,7 +75,8 @@ void PlatformOpenVerifiedItem(const base::FilePath& path, OpenItemType type) {
 
 void OpenExternal(Profile* profile, const GURL& url) {
   DCHECK([NSThread isMainThread]);
-  NSURL* ns_url = net::NSURLWithGURL(url);
+  NSString* url_string = base::SysUTF8ToNSString(url.spec());
+  NSURL* ns_url = [NSURL URLWithString:url_string];
   if (!ns_url || ![[NSWorkspace sharedWorkspace] openURL:ns_url])
     LOG(WARNING) << "NSWorkspace failed to open URL " << url;
 }
@@ -132,7 +133,9 @@ bool IsVisible(gfx::NativeView native_view) {
 }
 
 bool IsSwipeTrackingFromScrollEventsEnabled() {
-  return NSEvent.swipeTrackingFromScrollEventsEnabled;
+  SEL selector = @selector(isSwipeTrackingFromScrollEventsEnabled);
+  return [NSEvent respondsToSelector:selector]
+      && [NSEvent performSelector:selector];
 }
 
 NSWindow* GetActiveWindow() {

@@ -1,4 +1,4 @@
-// Copyright 2011 The Chromium Authors
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,8 +33,8 @@ class NET_EXPORT_PRIVATE HttpResponseBodyDrainer {
   ~HttpResponseBodyDrainer();
 
   // Starts reading the body until completion, or we hit the buffer limit, or we
-  // timeout.  After Start(), |this| will eventually delete itself via
-  // HttpNetworkSession::RemoveResponseDrainer().
+  // timeout.  After Start(), |this| will eventually delete itself.  If it
+  // doesn't complete immediately, it will add itself to |session|.
   void Start(HttpNetworkSession* session);
 
  private:

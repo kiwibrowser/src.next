@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -71,7 +71,6 @@
 #include "content/browser/renderer_host/navigator.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/render_frame_proxy_host.h"
-#include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_input_event_router.h"
 #include "content/browser/renderer_host/render_widget_host_view_child_frame.h"
@@ -91,7 +90,6 @@
 #include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/javascript_dialog_manager.h"
 #include "content/public/browser/navigation_handle.h"
-#include "content/public/browser/render_process_host_priority_client.h"
 #include "content/public/browser/site_isolation_policy.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
@@ -114,7 +112,6 @@
 #include "content/public/test/test_utils.h"
 #include "content/public/test/url_loader_interceptor.h"
 #include "content/shell/browser/shell.h"
-#include "content/shell/common/main_frame_counter_test_impl.h"
 #include "content/shell/common/shell_switches.h"
 #include "content/test/content_browser_test_utils_internal.h"
 #include "content/test/did_commit_navigation_interceptor.h"
@@ -180,7 +177,9 @@
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
 #include "content/browser/web_contents/web_contents_view_android.h"
 #include "content/public/browser/android/child_process_importance.h"
+#include "content/public/common/content_client.h"
 #include "content/test/mock_overscroll_refresh_handler_android.h"
+#include "content/test/test_content_browser_client.h"
 #include "ui/android/view_android.h"
 #include "ui/android/window_android.h"
 #include "ui/events/android/event_handler_android.h"
@@ -195,20 +194,6 @@ using ::testing::ElementsAre;
 namespace content {
 
 namespace {
-
-void VerifyChildProcessHasMainFrame(
-    mojo::Remote<mojom::MainFrameCounterTest>& main_frame_counter,
-    bool expected_state) {
-  main_frame_counter.FlushForTesting();
-  base::RunLoop run_loop;
-  main_frame_counter->HasMainFrame(base::BindOnce(
-      [](base::RunLoop* loop, bool expected_state, bool has_main_frame) {
-        EXPECT_EQ(expected_state, has_main_frame);
-        loop->Quit();
-      },
-      &run_loop, expected_state));
-  run_loop.Run();
-}
 
 using CrashVisibility = CrossProcessFrameConnector::CrashVisibility;
 
@@ -412,7 +397,7 @@ blink::ParsedPermissionsPolicy CreateParsedPermissionsPolicyMatchesNone(
 // Check frame depth on node, widget, and process all match expected depth.
 void CheckFrameDepth(unsigned int expected_depth, FrameTreeNode* node) {
   EXPECT_EQ(expected_depth, node->current_frame_host()->GetFrameDepth());
-  RenderProcessHostPriorityClient::Priority priority =
+  RenderProcessHost::Priority priority =
       node->current_frame_host()->GetRenderWidgetHost()->GetPriority();
   EXPECT_EQ(expected_depth, priority.frame_depth);
   EXPECT_EQ(expected_depth,
@@ -601,17 +586,6 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, CrossSiteIframe) {
         web_contents()->GetRenderWidgetHostViewsInWebContentsTree();
     EXPECT_EQ(2U, views_set.size());
   }
-  mojo::Remote<mojom::MainFrameCounterTest> main_frame_counter;
-  shell()->web_contents()->GetPrimaryMainFrame()->GetProcess()->BindReceiver(
-      main_frame_counter.BindNewPipeAndPassReceiver());
-
-  VerifyChildProcessHasMainFrame(main_frame_counter, true);
-
-  mojo::Remote<mojom::MainFrameCounterTest> main_frame_counter_child;
-  rph->BindReceiver(main_frame_counter_child.BindNewPipeAndPassReceiver());
-
-  VerifyChildProcessHasMainFrame(main_frame_counter_child, false);
-
   RenderFrameProxyHost* proxy_to_parent =
       child->render_manager()->GetProxyToParent();
   EXPECT_TRUE(proxy_to_parent);
@@ -658,7 +632,6 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, CrossSiteIframe) {
   EXPECT_NE(shell()->web_contents()->GetPrimaryMainFrame()->GetProcess(),
             child->current_frame_host()->GetProcess());
   EXPECT_NE(rph, child->current_frame_host()->GetProcess());
-  VerifyChildProcessHasMainFrame(main_frame_counter, true);
   {
     std::set<RenderWidgetHostViewBase*> views_set =
         web_contents()->GetRenderWidgetHostViewsInWebContentsTree();
@@ -681,61 +654,6 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, CrossSiteIframe) {
       "Where A = http://a.com/\n"
       "      C = http://bar.com/",
       DepictFrameTree(root));
-}
-
-// Ensure that processes for iframes correctly track whether or not they have a
-// local main frame.
-IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
-                       CrossSiteIframeMainFrameCount) {
-  GURL main_url(embedded_test_server()->GetURL(
-      "a.com", "/cross_site_iframe_factory.html?a(a,a,a(a,a))"));
-  EXPECT_TRUE(NavigateToURL(shell(), main_url));
-
-  FrameTreeNode* root = web_contents()->GetPrimaryFrameTree().root();
-
-  TestNavigationObserver observer(shell()->web_contents());
-
-  EXPECT_EQ(
-      " Site A\n"
-      "   |--Site A\n"
-      "   |--Site A\n"
-      "   +--Site A\n"
-      "        |--Site A\n"
-      "        +--Site A\n"
-      "Where A = http://a.com/",
-      DepictFrameTree(root));
-
-  mojo::Remote<mojom::MainFrameCounterTest> main_frame_counter;
-  shell()->web_contents()->GetPrimaryMainFrame()->GetProcess()->BindReceiver(
-      main_frame_counter.BindNewPipeAndPassReceiver());
-  VerifyChildProcessHasMainFrame(main_frame_counter, true);
-
-  GURL url = embedded_test_server()->GetURL(
-      "b.com", "/cross_site_iframe_factory.html?b(a,a)");
-  {
-    RenderFrameDeletedObserver deleted_observer(
-        root->child_at(2)->current_frame_host());
-    EXPECT_TRUE(NavigateToURLFromRenderer(root->child_at(2), url));
-    deleted_observer.WaitUntilDeleted();
-  }
-
-  EXPECT_EQ(
-      " Site A ------------ proxies for B\n"
-      "   |--Site A ------- proxies for B\n"
-      "   |--Site A ------- proxies for B\n"
-      "   +--Site B ------- proxies for A\n"
-      "        |--Site A -- proxies for B\n"
-      "        +--Site A -- proxies for B\n"
-      "Where A = http://a.com/\n"
-      "      B = http://b.com/",
-      DepictFrameTree(root));
-
-  VerifyChildProcessHasMainFrame(main_frame_counter, true);
-
-  mojo::Remote<mojom::MainFrameCounterTest> main_frame_counter_child;
-  root->child_at(2)->current_frame_host()->GetProcess()->BindReceiver(
-      main_frame_counter_child.BindNewPipeAndPassReceiver());
-  VerifyChildProcessHasMainFrame(main_frame_counter_child, false);
 }
 
 // Ensure that title updates affect the correct NavigationEntry after a new
@@ -1705,8 +1623,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_TRUE(observer.last_navigation_succeeded());
   EXPECT_EQ(b_url, observer.last_navigation_url());
 
-  // Ensure that the grandchild `blink::RemoteFrame` in B was created when
-  // process B was restored.
+  // Ensure that the grandchild RenderFrameProxy in B was created when process
+  // B was restored.
   EXPECT_TRUE(grandchild_rfph->is_render_frame_proxy_live());
 }
 
@@ -2323,7 +2241,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, OriginReplication) {
   // Check that b.com frame's location.ancestorOrigins contains the correct
   // origin for the parent.  The origin should have been replicated as part of
   // the mojom::Renderer::CreateView message that created the parent's
-  // `blink::RemoteFrame` in b.com's process.
+  // RenderFrameProxy in b.com's process.
   EXPECT_EQ(ListValueOf(a_origin),
             EvalJs(tiptop_child, "Array.from(location.ancestorOrigins);"));
 
@@ -2331,8 +2249,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, OriginReplication) {
   // origin for its two ancestors. The topmost parent origin should be
   // replicated as part of mojom::Renderer::CreateView, and the middle frame
   // (b.com's) origin should be replicated as part of
-  // blink::mojom::RemoteFrame::CreateRemoteChild sent for b.com's frame in
-  // c.com's process.
+  // mojom::Renderer::CreateFrameProxy sent for b.com's frame in c.com's
+  // process.
   EXPECT_EQ(ListValueOf(b_origin, a_origin),
             EvalJs(middle_child, "Array.from(location.ancestorOrigins);"));
 
@@ -3769,10 +3687,10 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, NavigateSubframeWithOpener) {
 }
 
 // Check that if a subframe has an opener, that opener is preserved when a new
-// `blink::RemoteFrame` is created for that subframe in another renderer
-// process. Similar to NavigateSubframeWithOpener, but this test verifies the
-// subframe opener plumbing for blink::mojom::RemoteFrame::CreateRemoteChild(),
-// whereas NavigateSubframeWithOpener targets mojom::Renderer::CreateFrame().
+// RenderFrameProxy is created for that subframe in another renderer process.
+// Similar to NavigateSubframeWithOpener, but this test verifies the subframe
+// opener plumbing for mojom::Renderer::CreateFrameProxy(), whereas
+// NavigateSubframeWithOpener targets mojom::Renderer::CreateFrame().
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
                        NewRenderFrameProxyPreservesOpener) {
   GURL main_url(
@@ -4238,7 +4156,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
           EvalJs(child1, "document.activeElement.tagName").ExtractString()));
 }
 
-// Tests that we are using the correct `blink::RemoteFrame` when navigating an
+// Tests that we are using the correct RenderFrameProxy when navigating an
 // opener window.
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, OpenerSetLocation) {
   // Navigate the main window.
@@ -4361,6 +4279,81 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, NavigateAboutBlankAndDetach) {
   EXPECT_EQ(0, EvalJs(root, "frames.length;"));
 }
 
+// Test for https://crbug.com/568670.  In A-embed-B, simultaneously have B
+// create a new (local) child frame, and have A detach B's proxy.  The child
+// frame creation sends an IPC to create a new proxy in A's process, and if
+// that IPC arrives after the detach, the new frame's parent (a proxy) won't be
+// available, and this shouldn't cause RenderFrameProxy::CreateFrameProxy to
+// crash.
+IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
+                       RaceBetweenCreateChildFrameAndDetachParentProxy) {
+  GURL main_url(embedded_test_server()->GetURL(
+      "a.com", "/cross_site_iframe_factory.html?a(b)"));
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
+
+  WebContents* contents = shell()->web_contents();
+  FrameTreeNode* root =
+      static_cast<WebContentsImpl*>(contents)->GetPrimaryFrameTree().root();
+
+  // Simulate subframe B creating a new child frame in parallel to main frame A
+  // detaching subframe B.  We can't use ExecuteScript in both A and B to do
+  // this simultaneously, as that won't guarantee the timing that we want.
+  // Instead, tell A to detach B and then send a fake proxy creation IPC to A
+  // that would've come from create-child-frame code in B.  Prepare parameters
+  // for that IPC ahead of the detach, while B's FrameTreeNode still exists.
+  SiteInstanceGroup* site_instance_group_a =
+      root->current_frame_host()->GetSiteInstance()->group();
+  RenderProcessHost* process_a =
+      root->render_manager()->current_frame_host()->GetProcess();
+  AgentSchedulingGroupHost* agent_scheduling_group_a =
+      AgentSchedulingGroupHost::GetOrCreate(*site_instance_group_a, *process_a);
+  int view_routing_id = root->frame_tree()
+                            ->GetRenderViewHost(site_instance_group_a)
+                            ->GetRoutingID();
+  blink::RemoteFrameToken parent_frame_token =
+      root->child_at(0)->render_manager()->GetProxyToParent()->GetFrameToken();
+
+  // Tell main frame A to delete its subframe B.
+  FrameDeletedObserver observer(root->child_at(0)->current_frame_host());
+  EXPECT_TRUE(ExecJs(
+      root, "document.body.removeChild(document.querySelector('iframe'));"));
+
+  auto remote_frame_interfaces = mojom::RemoteFrameInterfacesFromBrowser::New();
+  mojo::AssociatedRemote<blink::mojom::RemoteFrame> frame;
+  remote_frame_interfaces->frame_receiver =
+      frame.BindNewEndpointAndPassReceiver();
+
+  mojo::AssociatedRemote<blink::mojom::RemoteFrameHost> frame_host;
+  std::ignore = frame_host.BindNewEndpointAndPassReceiver();
+  remote_frame_interfaces->frame_host = frame_host.Unbind();
+
+  auto remote_main_frame_interfaces = mojom::RemoteMainFrameInterfaces::New();
+  mojo::AssociatedRemote<blink::mojom::RemoteMainFrame> main_frame;
+  remote_main_frame_interfaces->main_frame =
+      main_frame.BindNewEndpointAndPassReceiver();
+
+  mojo::AssociatedRemote<blink::mojom::RemoteMainFrameHost> main_frame_host;
+  std::ignore = main_frame_host.BindNewEndpointAndPassReceiver();
+  remote_main_frame_interfaces->main_frame_host = main_frame_host.Unbind();
+
+  // Send the message to create a proxy for B's new child frame in A.  This
+  // used to crash, as `parent_frame_token` refers to a proxy that doesn't exist
+  // anymore.
+  agent_scheduling_group_a->CreateFrameProxy(
+      blink::RemoteFrameToken(), absl::nullopt, view_routing_id,
+      parent_frame_token, blink::mojom::TreeScopeType::kDocument,
+      blink::mojom::FrameReplicationState::New(),
+      base::UnguessableToken::Create(), std::move(remote_frame_interfaces),
+      std::move(remote_main_frame_interfaces));
+
+  // Ensure the subframe is detached in the browser process.
+  observer.Wait();
+  EXPECT_EQ(0U, root->child_count());
+
+  // Make sure process A did not crash.
+  EXPECT_EQ(0, EvalJs(root, "frames.length;"));
+}
+
 // This test ensures that the RenderFrame isn't leaked in the renderer process
 // if a pending cross-process navigation is cancelled. The test works by trying
 // to create a new RenderFrame with the same routing id. If there is an
@@ -4421,8 +4414,6 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
     params->routing_id = frame_routing_id;
     params->frame = pending_frame.InitWithNewEndpointAndPassReceiver();
     std::ignore = params->interface_broker.InitWithNewPipeAndPassReceiver();
-    std::ignore = params->associated_interface_provider_remote
-                      .InitWithNewEndpointAndPassReceiver();
     params->previous_frame_token = previous_frame_token;
     params->opener_frame_token = absl::nullopt;
     params->parent_frame_token =
@@ -4505,8 +4496,6 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, ParentDetachRemoteChild) {
     params->routing_id = frame_routing_id;
     params->frame = pending_frame.InitWithNewEndpointAndPassReceiver();
     std::ignore = params->interface_broker.InitWithNewPipeAndPassReceiver();
-    std::ignore = params->associated_interface_provider_remote
-                      .InitWithNewEndpointAndPassReceiver();
     params->previous_frame_token = absl::nullopt;
     params->opener_frame_token = absl::nullopt;
     params->parent_frame_token = parent_frame_token;
@@ -5368,12 +5357,12 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 // Test for https://crbug.com/568836.  From an A-embed-B page, navigate the
 // subframe from B to A.  This cleans up the process for B, but the test delays
 // the browser side from killing the B process right away.  This allows the
-// B process to process the subframe's detached event and the disconnect
-// of the blink::WebView's blink::mojom::PageBroadcast mojo channel. In the bug,
-// the latter crashed while detaching the subframe's LocalFrame (triggered as
-// part of closing the `blink::WebView`), because this tried to access the
-// subframe's WebFrameWidget (from RenderFrameImpl::didChangeSelection), which
-// had already been cleared by the former.
+// B process to process the subframe's detached event and the DestroyView sent
+// to the RenderView. In the bug, the latter crashed while detaching the
+// subframe's LocalFrame (triggered as part of closing the RenderView), because
+// this tried to access the subframe's WebFrameWidget (from
+// RenderFrameImpl::didChangeSelection), which had already been cleared by the
+// former.
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
                        CloseSubframeWidgetAndViewOnProcessExit) {
   GURL main_url(embedded_test_server()->GetURL(
@@ -5394,17 +5383,17 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Prevent b.com process from terminating right away once the subframe
   // navigates away from b.com below.  This is necessary so that the renderer
-  // process has time to process the closings of RenderWidget and
-  // `blink::WebView`, which is where the original bug was triggered.
-  // Incrementing the keep alive ref count will cause
-  // RenderProcessHostImpl::Cleanup to forego process termination.
+  // process has time to process the closings of RenderWidget and RenderView,
+  // which is where the original bug was triggered.  Incrementing the keep alive
+  // ref count will cause RenderProcessHostImpl::Cleanup to forego process
+  // termination.
   RenderProcessHost* subframe_process =
       root->child_at(0)->current_frame_host()->GetProcess();
   subframe_process->IncrementKeepAliveRefCount(0);
 
   // Navigate the subframe away from b.com.  Since this is the last active
-  // frame in the b.com process, this causes the RenderWidget and
-  // `blink::WebView` to be closed.
+  // frame in the b.com process, this causes the RenderWidget and RenderView to
+  // be closed.
   EXPECT_TRUE(NavigateToURLFromRenderer(
       root->child_at(0),
       embedded_test_server()->GetURL("a.com", "/title1.html")));
@@ -5873,13 +5862,13 @@ class ShowCreatedWindowInterceptor
 
   void ShowCreatedWindow(const blink::LocalFrameToken& opener_frame_token,
                          WindowOpenDisposition disposition,
-                         blink::mojom::WindowFeaturesPtr window_features,
+                         const gfx::Rect& initial_rect,
                          bool user_gesture,
                          ShowCreatedWindowCallback callback) override {
     show_callback_ = std::move(callback);
     opener_frame_token_ = opener_frame_token;
     user_gesture_ = user_gesture;
-    window_features_ = std::move(window_features);
+    initial_rect_ = initial_rect;
     disposition_ = disposition;
     std::move(test_callback_)
         .Run(render_frame_host_->GetRenderWidgetHost()->GetRoutingID());
@@ -5887,8 +5876,8 @@ class ShowCreatedWindowInterceptor
 
   void ResumeShowCreatedWindow() {
     GetForwardingInterface()->ShowCreatedWindow(
-        opener_frame_token_, disposition_, std::move(window_features_),
-        user_gesture_, std::move(show_callback_));
+        opener_frame_token_, disposition_, initial_rect_, user_gesture_,
+        std::move(show_callback_));
   }
 
  private:
@@ -5896,7 +5885,7 @@ class ShowCreatedWindowInterceptor
   base::OnceCallback<void(int32_t pending_widget_routing_id)> test_callback_;
   ShowCreatedWindowCallback show_callback_;
   blink::LocalFrameToken opener_frame_token_;
-  blink::mojom::WindowFeaturesPtr window_features_;
+  gfx::Rect initial_rect_;
   bool user_gesture_ = false;
   WindowOpenDisposition disposition_;
   mojo::test::ScopedSwapImplForTesting<
@@ -6365,8 +6354,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Navigate popup to b.com to recreate the b.com process.  When creating
   // opener proxies, |rvh| should be reused as a swapped out RVH.  In
-  // https://crbug.com/627893, recreating the opener `blink::WebView` was
-  // hitting a CHECK(params.swapped_out) in the renderer process, since its
+  // https://crbug.com/627893, recreating the opener RenderView was hitting a
+  // CHECK(params.swapped_out) in the renderer process, since its
   // RenderViewHost was brought into an active state by the navigation to
   // |stall_url| above, even though it never committed.
   GURL b_url(embedded_test_server()->GetURL("b.com", "/title3.html"));
@@ -6645,11 +6634,10 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 }
 
 // Test that when canceling a pending RenderFrameHost in the middle of a
-// redirect, and then killing the corresponding `blink::WebView`'s renderer
-// process, the RenderViewHost isn't reused in an improper state later.
-// Previously this led to a crash in CreateRenderView when recreating the
-// `blink::WebView` due to a stale main frame routing ID.  See
-// https://crbug.com/627400.
+// redirect, and then killing the corresponding RenderView's renderer process,
+// the RenderViewHost isn't reused in an improper state later.  Previously this
+// led to a crash in CreateRenderView when recreating the RenderView due to a
+// stale main frame routing ID.  See https://crbug.com/627400.
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
                        ReuseNonLiveRenderViewHostAfterCancelPending) {
   GURL a_url(embedded_test_server()->GetURL("a.com", "/title1.html"));
@@ -6675,7 +6663,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   EXPECT_EQ(c_url, observer.last_navigation_url());
   EXPECT_TRUE(observer.last_navigation_succeeded());
 
-  // Kill the b.com process (which currently hosts a `blink::RemoteFrame` that
+  // Kill the b.com process (which currently hosts a RenderFrameProxy that
   // replaced the pending RenderFrame in |popup2|, as well as the RenderFrame
   // for |popup|).
   RenderProcessHost* b_process =
@@ -6686,9 +6674,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   crash_observer.Wait();
 
   // Navigate the second popup to b.com.  This used to crash when creating the
-  // `blink::WebView`, because it reused the RenderViewHost created by the
-  // canceled navigation to b.com, and that RenderViewHost had a stale main
-  // frame routing ID and active state.
+  // RenderView, because it reused the RenderViewHost created by the canceled
+  // navigation to b.com, and that RenderViewHost had a stale main frame
+  // routing ID and active state.
   EXPECT_TRUE(NavigateToURLInSameBrowsingInstance(popup2, b_url));
 }
 
@@ -8175,10 +8163,10 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 // created its RenderFrame, which crashed when referencing its parent by a
 // proxy which didn't exist.
 //
-// All cross-process navigations now require creating a `blink::RemoteFrame`
-// before creating a RenderFrame, which makes such navigations follow the
-// provisional frame (remote-to-local navigation) paths, where such a scenario
-// is no longer possible.  See https://crbug.com/756790.
+// All cross-process navigations now require creating a RenderFrameProxy before
+// creating a RenderFrame, which makes such navigations follow the provisional
+// frame (remote-to-local navigation) paths, where such a scenario is no longer
+// possible.  See https://crbug.com/756790.
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
                        TwoCrossSitePendingNavigationsAndMainFrameWins) {
   GURL main_url(embedded_test_server()->GetURL(
@@ -10603,7 +10591,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, FrameDepthTest) {
   FrameTreeNode* child0 = root->child_at(0);
   {
     EXPECT_EQ(1u, child0->current_frame_host()->GetFrameDepth());
-    RenderProcessHostPriorityClient::Priority priority =
+    RenderProcessHost::Priority priority =
         child0->current_frame_host()->GetRenderWidgetHost()->GetPriority();
     // Same site instance as root.
     EXPECT_EQ(0u, priority.frame_depth);
@@ -10624,7 +10612,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, FrameDepthTest) {
   FrameTreeNode* grand_child = root->child_at(1)->child_at(0);
   {
     EXPECT_EQ(2u, grand_child->current_frame_host()->GetFrameDepth());
-    RenderProcessHostPriorityClient::Priority priority =
+    RenderProcessHost::Priority priority =
         grand_child->current_frame_host()->GetRenderWidgetHost()->GetPriority();
     EXPECT_EQ(2u, priority.frame_depth);
     // Same process as root

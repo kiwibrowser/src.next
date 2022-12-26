@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,8 +30,8 @@
 #include "build/build_config.h"
 #include "build/buildflag.h"
 #include "net/base/net_export.h"
+#include "net/base/network_change_notifier.h"
 #include "net/base/network_delegate.h"
-#include "net/base/network_handle.h"
 #include "net/base/proxy_delegate.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/dns/host_resolver.h"
@@ -345,7 +345,7 @@ class NET_EXPORT URLRequestContextBuilder {
   }
 
   // Sets a ClientSocketFactory when the network service sandbox is enabled. The
-  // unique_ptr is moved to a URLRequestContext once Build() is called.
+  // unique_ptr is moved to a URLRequestContextStorage once Build() is called.
   void set_client_socket_factory(
       std::unique_ptr<ClientSocketFactory> client_socket_factory) {
     set_client_socket_factory(client_socket_factory.get());
@@ -360,7 +360,7 @@ class NET_EXPORT URLRequestContextBuilder {
   // * By design, QUIC connection migration will be turned off.
   // Only implemented for Android (API level > 23).
   void BindToNetwork(
-      handles::NetworkHandle network,
+      NetworkChangeNotifier::NetworkHandle network,
       absl::optional<HostResolver::ManagerOptions> options = absl::nullopt);
 
   // Creates a mostly self-contained URLRequestContext. May only be called once
@@ -418,7 +418,8 @@ class NET_EXPORT URLRequestContextBuilder {
   bool suppress_setting_socket_performance_watcher_factory_for_testing_ = false;
   bool first_party_sets_enabled_ = false;
 
-  handles::NetworkHandle bound_network_ = handles::kInvalidNetworkHandle;
+  NetworkChangeNotifier::NetworkHandle bound_network_ =
+      NetworkChangeNotifier::kInvalidNetworkHandle;
   // Used only if the context is bound to a network to customize the
   // HostResolver created internally.
   HostResolver::ManagerOptions manager_options_;

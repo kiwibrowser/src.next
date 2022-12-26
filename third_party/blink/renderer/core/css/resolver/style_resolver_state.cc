@@ -74,19 +74,20 @@ StyleResolverState::StyleResolverState(
       can_cache_base_style_(blink::CanCacheBaseStyle(style_request)) {
   DCHECK(!!parent_style_ == !!layout_parent_style_);
 
-  if (UsesHighlightPseudoInheritance()) {
-    DCHECK(originating_element_style_);
-  } else {
-    if (!parent_style_)
-      parent_style_ = element_context_.ParentStyle();
-    if (!layout_parent_style_)
-      layout_parent_style_ = element_context_.LayoutParentStyle();
+  if (!parent_style_) {
+    parent_style_ = element_context_.ParentStyle();
   }
+
+  if (!layout_parent_style_)
+    layout_parent_style_ = element_context_.LayoutParentStyle();
 
   if (!layout_parent_style_)
     layout_parent_style_ = parent_style_;
 
   DCHECK(document.IsActive());
+
+  if (UsesHighlightPseudoInheritance())
+    DCHECK(originating_element_style_);
 }
 
 StyleResolverState::~StyleResolverState() {
@@ -239,13 +240,6 @@ const CSSValue& StyleResolverState::ResolveLightDarkPair(
     return pair->Second();
   }
   return value;
-}
-
-void StyleResolverState::UpdateFont() {
-  GetFontBuilder().CreateFont(StyleRef(), ParentStyle());
-  SetConversionFontSizes(
-      CSSToLengthConversionData::FontSizes(Style(), RootElementStyle()));
-  SetConversionZoom(Style()->EffectiveZoom());
 }
 
 }  // namespace blink

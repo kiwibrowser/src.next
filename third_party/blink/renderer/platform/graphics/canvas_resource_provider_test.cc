@@ -198,11 +198,12 @@ TEST_F(CanvasResourceProviderTest,
 
   // Resource recycled.
   viz::TransferableResource transferable_resource;
-  CanvasResource::ReleaseCallback release_callback;
+  viz::ReleaseCallback release_callback;
   ASSERT_TRUE(resource->PrepareTransferableResource(
       &transferable_resource, &release_callback, kUnverifiedSyncToken));
   auto* resource_ptr = resource.get();
-  std::move(release_callback).Run(std::move(resource), sync_token, false);
+  resource = nullptr;
+  std::move(release_callback).Run(sync_token, false);
 
   provider->Canvas()->clear(SkColors::kBlack);
   auto resource_again = provider->ProduceCanvasResource();
@@ -302,8 +303,8 @@ TEST_F(CanvasResourceProviderTest, CanvasResourceProviderSharedBitmap) {
 
   MockCanvasResourceDispatcherClient client;
   CanvasResourceDispatcher resource_dispatcher(
-      &client, base::ThreadTaskRunnerHandle::Get(), 1 /* client_id */,
-      1 /* sink_id */, 1 /* placeholder_canvas_id */, kSize);
+      &client, 1 /* client_id */, 1 /* sink_id */,
+      1 /* placeholder_canvas_id */, kSize);
 
   auto provider = CanvasResourceProvider::CreateSharedBitmapProvider(
       kInfo, cc::PaintFlags::FilterQuality::kLow,

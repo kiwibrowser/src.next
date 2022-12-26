@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,7 +36,6 @@
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/feature_switch.h"
 #include "extensions/common/manifest_handlers/background_info.h"
-#include "third_party/blink/public/mojom/window_features/window_features.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/window_open_disposition.h"
 
@@ -369,14 +368,13 @@ content::JavaScriptDialogManager* ExtensionHost::GetJavaScriptDialogManager(
   return delegate_->GetJavaScriptDialogManager();
 }
 
-void ExtensionHost::AddNewContents(
-    WebContents* source,
-    std::unique_ptr<WebContents> new_contents,
-    const GURL& target_url,
-    WindowOpenDisposition disposition,
-    const blink::mojom::WindowFeatures& window_features,
-    bool user_gesture,
-    bool* was_blocked) {
+void ExtensionHost::AddNewContents(WebContents* source,
+                                   std::unique_ptr<WebContents> new_contents,
+                                   const GURL& target_url,
+                                   WindowOpenDisposition disposition,
+                                   const gfx::Rect& initial_rect,
+                                   bool user_gesture,
+                                   bool* was_blocked) {
   // First, if the creating extension view was associated with a tab contents,
   // use that tab content's delegate. We must be careful here that the
   // associated tab contents has the same profile as the new tab contents. In
@@ -393,7 +391,7 @@ void ExtensionHost::AddNewContents(
       WebContentsDelegate* delegate = associated_contents->GetDelegate();
       if (delegate) {
         delegate->AddNewContents(associated_contents, std::move(new_contents),
-                                 target_url, disposition, window_features,
+                                 target_url, disposition, initial_rect,
                                  user_gesture, was_blocked);
         return;
       }
@@ -401,7 +399,7 @@ void ExtensionHost::AddNewContents(
   }
 
   delegate_->CreateTab(std::move(new_contents), extension_id_, disposition,
-                       window_features.bounds, user_gesture);
+                       initial_rect, user_gesture);
 }
 
 void ExtensionHost::RenderFrameCreated(content::RenderFrameHost* frame_host) {

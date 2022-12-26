@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors
+// Copyright 2021 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,8 +40,8 @@ public class MixedContentDownloadDialogBridge {
      * @param callbackId Native callback Id to invoke.
      */
     @CalledByNative
-    private void showDialog(
-            WindowAndroid windowAndroid, String fileName, long totalBytes, long callbackId) {
+    private void showDialog(WindowAndroid windowAndroid, String fileName, long totalBytes,
+            boolean isOffTheRecord, long callbackId) {
         Activity activity = windowAndroid.getActivity().get();
         if (activity == null) {
             onConfirmed(callbackId, false);
@@ -50,7 +50,7 @@ public class MixedContentDownloadDialogBridge {
 
         new MixedContentDownloadDialog().show(activity,
                 ((ModalDialogManagerHolder) activity).getModalDialogManager(), fileName, totalBytes,
-                (accepted) -> { onConfirmed(callbackId, accepted); });
+                isOffTheRecord, (accepted) -> { onConfirmed(callbackId, accepted); });
     }
 
     @CalledByNative

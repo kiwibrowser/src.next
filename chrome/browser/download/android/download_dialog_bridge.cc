@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors
+// Copyright 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -99,6 +99,15 @@ void DownloadDialogBridge::OnComplete(
   dialog_result.location_result = DownloadLocationDialogResult::USER_CONFIRMED;
   dialog_result.file_path = base::FilePath(
       base::android::ConvertJavaStringToUTF8(env, returned_path));
+
+  if (on_wifi) {
+    dialog_result.download_schedule =
+        download::DownloadSchedule(true /*only_on_wifi*/, absl::nullopt);
+  }
+  if (start_time > 0) {
+    dialog_result.download_schedule = download::DownloadSchedule(
+        false /*only_on_wifi*/, base::Time::FromJavaTime(start_time));
+  }
 
   CompleteSelection(std::move(dialog_result));
   is_dialog_showing_ = false;

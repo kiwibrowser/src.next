@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors
+// Copyright 2021 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -85,7 +85,8 @@ void DuplicateDownloadDialogBridgeDelegate::OnConfirmed(
                        std::move(callback)));
   } else {
     std::move(callback).Run(DownloadConfirmationResult::CANCELED,
-                            base::FilePath());
+                            base::FilePath(),
+                            absl::nullopt /*download_schedule*/);
   }
 }
 

@@ -40,7 +40,6 @@
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/frame/event_page_show_persisted.h"
 #include "third_party/blink/public/mojom/devtools/inspector_issue.mojom-blink.h"
-#include "third_party/blink/public/mojom/frame/frame.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions_policy/policy_disposition.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
@@ -50,6 +49,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
+#include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_scroll_to_options.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_void_function.h"
 #include "third_party/blink/renderer/bindings/core/v8/window_proxy.h"
@@ -93,7 +93,6 @@
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/navigator.h"
-#include "third_party/blink/renderer/core/frame/pending_beacon_dispatcher.h"
 #include "third_party/blink/renderer/core/frame/permissions_policy_violation_report_body.h"
 #include "third_party/blink/renderer/core/frame/report.h"
 #include "third_party/blink/renderer/core/frame/reporting_context.h"
@@ -113,7 +112,6 @@
 #include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
 #include "third_party/blink/renderer/core/inspector/main_thread_debugger.h"
 #include "third_party/blink/renderer/core/layout/adjust_for_absolute_zoom.h"
-#include "third_party/blink/renderer/core/layout/deferred_shaping_controller.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/origin_trials/origin_trial_context.h"
@@ -134,7 +132,6 @@
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/microtask.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/bindings/source_location.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/network/network_state_notifier.h"
@@ -482,7 +479,7 @@ scoped_refptr<base::SingleThreadTaskRunner> LocalDOMWindow::GetTaskRunner(
   // some cases, though, there isn't a good candidate (most commonly when either
   // the passed-in document or the ExecutionContext used to be attached to a
   // Frame but has since been detached).
-  return Thread::Current()->GetDeprecatedTaskRunner();
+  return Thread::Current()->GetTaskRunner();
 }
 
 void LocalDOMWindow::ReportPermissionsPolicyViolation(
@@ -643,14 +640,6 @@ void LocalDOMWindow::AddConsoleMessageImpl(ConsoleMessage* console_message,
   }
 
   GetFrame()->Console().AddMessage(console_message, discard_duplicates);
-}
-
-scoped_refptr<base::SingleThreadTaskRunner>
-LocalDOMWindow::GetAgentGroupSchedulerCompositorTaskRunner() {
-  if (!GetFrame())
-    return nullptr;
-  auto* frame_scheduler = GetFrame()->GetFrameScheduler();
-  return frame_scheduler->GetAgentGroupScheduler()->CompositorTaskRunner();
 }
 
 void LocalDOMWindow::AddInspectorIssue(
@@ -839,14 +828,6 @@ void LocalDOMWindow::DispatchPagehideEvent(
     // TODO(crbug.com/1119291): Investigate whether this is possible or not.
     return;
   }
-
-  if (base::FeatureList::IsEnabled(features::kPendingBeaconAPI)) {
-    if (auto* dispatcher =
-            PendingBeaconDispatcher::From(*GetExecutionContext())) {
-      dispatcher->OnDispatchPagehide();
-    }
-  }
-
   DispatchEvent(
       *PageTransitionEvent::Create(event_type_names::kPagehide, persistence),
       document_.Get());
@@ -1085,7 +1066,7 @@ void LocalDOMWindow::SchedulePostMessage(PostedMessage* posted_message) {
   // Allowing unbounded amounts of messages to build up for a suspended context
   // is problematic; consider imposing a limit or other restriction if this
   // surfaces often as a problem (see crbug.com/587012).
-  std::unique_ptr<SourceLocation> location = CaptureSourceLocation(source);
+  std::unique_ptr<SourceLocation> location = SourceLocation::Capture(source);
   GetTaskRunner(TaskType::kPostedMessage)
       ->PostTask(
           FROM_HERE,
@@ -1633,6 +1614,8 @@ void LocalDOMWindow::scrollBy(const ScrollToOptions* scroll_to_options) const {
   if (!IsCurrentlyDisplayedInFrame())
     return;
 
+  document()->UpdateStyleAndLayout(DocumentUpdateReason::kJavaScript);
+
   LocalFrameView* view = GetFrame()->View();
   if (!view)
     return;
@@ -1640,10 +1623,6 @@ void LocalDOMWindow::scrollBy(const ScrollToOptions* scroll_to_options) const {
   Page* page = GetFrame()->GetPage();
   if (!page)
     return;
-
-  DeferredShapingController::From(*document())
-      ->ReshapeAllDeferred(ReshapeReason::kScrollingApi);
-  document()->UpdateStyleAndLayout(DocumentUpdateReason::kJavaScript);
 
   float x = 0.0f;
   float y = 0.0f;
@@ -1702,8 +1681,6 @@ void LocalDOMWindow::scrollTo(const ScrollToOptions* scroll_to_options) const {
   // clamped, which is never the case for (0, 0).
   if (!scroll_to_options->hasLeft() || !scroll_to_options->hasTop() ||
       scroll_to_options->left() || scroll_to_options->top()) {
-    DeferredShapingController::From(*document())
-        ->ReshapeAllDeferred(ReshapeReason::kScrollingApi);
     document()->UpdateStyleAndLayout(DocumentUpdateReason::kJavaScript);
   }
 
@@ -1752,9 +1729,6 @@ void LocalDOMWindow::moveBy(int x, int y) const {
     return;
   }
 
-  if (IsPictureInPictureWindow())
-    return;
-
   LocalFrame* frame = GetFrame();
   Page* page = frame->GetPage();
   if (!page)
@@ -1772,9 +1746,6 @@ void LocalDOMWindow::moveTo(int x, int y) const {
       document()->IsPrerendering()) {
     return;
   }
-
-  if (IsPictureInPictureWindow())
-    return;
 
   LocalFrame* frame = GetFrame();
   Page* page = frame->GetPage();
@@ -1794,9 +1765,6 @@ void LocalDOMWindow::resizeBy(int x, int y) const {
     return;
   }
 
-  if (IsPictureInPictureWindow())
-    return;
-
   LocalFrame* frame = GetFrame();
   Page* page = frame->GetPage();
   if (!page)
@@ -1813,9 +1781,6 @@ void LocalDOMWindow::resizeTo(int width, int height) const {
       document()->IsPrerendering()) {
     return;
   }
-
-  if (IsPictureInPictureWindow())
-    return;
 
   LocalFrame* frame = GetFrame();
   Page* page = frame->GetPage();
@@ -1849,7 +1814,7 @@ void LocalDOMWindow::queueMicrotask(V8VoidFunction* callback) {
   ScriptState* script_state = callback->CallbackRelevantScriptState();
   auto* tracker = ThreadScheduler::Current()->GetTaskAttributionTracker();
   if (tracker && script_state->World().IsMainWorld()) {
-    callback->SetParentTaskId(tracker->RunningTaskAttributionId(script_state));
+    callback->SetParentTaskId(tracker->RunningTaskId(script_state));
   }
   Microtask::EnqueueMicrotask(
       WTF::Bind(&V8VoidFunction::InvokeAndReportException,
@@ -2117,7 +2082,7 @@ DOMWindow* LocalDOMWindow::open(v8::Isolate* isolate,
   }
 
   WebWindowFeatures window_features =
-      GetWindowFeaturesFromString(features, entered_window, completed_url);
+      GetWindowFeaturesFromString(features, entered_window);
 
   // In fenced frames, we should always use `noopener`.
   if (GetFrame()->IsInFencedFrameTree()) {
@@ -2236,11 +2201,8 @@ DOMWindow* LocalDOMWindow::openPictureInPictureWindow(
   DCHECK(result.new_window);
 
   result.frame->Navigate(frame_request, WebFrameLoadType::kStandard);
-  LocalDOMWindow* pip_dom_window =
-      To<LocalDOMWindow>(result.frame->DomWindow());
-  pip_dom_window->SetIsPictureInPictureWindow();
 
-  return pip_dom_window;
+  return result.frame->DomWindow();
 }
 
 void LocalDOMWindow::Trace(Visitor* visitor) const {
@@ -2330,7 +2292,7 @@ void LocalDOMWindow::DidBufferLoadWhileInBackForwardCache(size_t num_bytes) {
   BackForwardCacheBufferLimitTracker::Get().DidBufferBytes(num_bytes);
 }
 
-bool LocalDOMWindow::anonymouslyFramed() const {
+bool LocalDOMWindow::isAnonymouslyFramed() const {
   return GetExecutionContext()
       ->GetPolicyContainer()
       ->GetPolicies()
@@ -2361,14 +2323,6 @@ Fence* LocalDOMWindow::fence() {
   }
 
   return fence_.Get();
-}
-
-bool LocalDOMWindow::IsPictureInPictureWindow() const {
-  return is_picture_in_picture_window_;
-}
-
-void LocalDOMWindow::SetIsPictureInPictureWindow() {
-  is_picture_in_picture_window_ = true;
 }
 
 }  // namespace blink

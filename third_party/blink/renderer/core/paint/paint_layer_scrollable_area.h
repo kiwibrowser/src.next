@@ -518,15 +518,13 @@ class CORE_EXPORT PaintLayerScrollableArea final
   }
 
   void AddStickyLayer(PaintLayer*);
-  void RemoveStickyLayer(PaintLayer*);
   bool HasStickyLayer(PaintLayer* layer) const {
     return rare_data_ && rare_data_->sticky_layers_.Contains(layer);
   }
   void InvalidateAllStickyConstraints();
   void InvalidatePaintForStickyDescendants();
 
-  // Returns true if the layer is not already added.
-  bool AddAnchorPositionedLayer(PaintLayer*);
+  void AddAnchorPositionedLayer(PaintLayer*);
   void InvalidateAllAnchorPositionedLayers();
   void InvalidatePaintForAnchorPositionedLayers();
 
@@ -616,13 +614,6 @@ class CORE_EXPORT PaintLayerScrollableArea final
 
   // Force scrollbars off for reconstruction.
   void RemoveScrollbarsForReconstruction();
-
-  void DidUpdateCullRect() {
-    last_cull_rect_update_scroll_offset_ = scroll_offset_;
-  }
-  ScrollOffset LastCullRectUpdateScrollOffset() const {
-    return last_cull_rect_update_scroll_offset_;
-  }
 
  private:
   // This also updates main thread scrolling reasons and the LayoutBox's
@@ -796,8 +787,6 @@ class CORE_EXPORT PaintLayerScrollableArea final
   gfx::Rect horizontal_scrollbar_visual_rect_;
   gfx::Rect vertical_scrollbar_visual_rect_;
   gfx::Rect scroll_corner_and_resizer_visual_rect_;
-
-  ScrollOffset last_cull_rect_update_scroll_offset_;
 
   class ScrollingBackgroundDisplayItemClient final
       : public GarbageCollected<ScrollingBackgroundDisplayItemClient>,

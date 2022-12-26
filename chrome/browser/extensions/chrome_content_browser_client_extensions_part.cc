@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -280,6 +280,10 @@ bool ChromeContentBrowserClientExtensionsPart::
   // the app process to not break scripting when a hosted app opens a same-site
   // popup. See https://crbug.com/718516 and https://crbug.com/828720 and
   // https://crbug.com/859062.
+  // TODO(crbug.com/3577897): Follow up to confirm correctness for fenced
+  // frames. This code has comprehensive tests in HostedAppProcessModelTest and
+  // coveraged should be added to ensure that fenced frames cannot jump into/out
+  // of the app.
   if (!is_outermost_main_frame)
     return false;
   size_t candidate_active_contents_count =
@@ -497,9 +501,7 @@ bool ChromeContentBrowserClientExtensionsPart::
 
   // We must use a new BrowsingInstance (forcing a process swap and disabling
   // scripting by existing tabs) if one of the URLs corresponds to the Chrome
-  // Web Store and the other does not. For the old Web Store this is done by
-  // checking for the Web Store hosted app and for the new Web Store we just
-  // check against the expected URL.
+  // Web Store hosted app, and the other does not.
   //
   // We don't force a BrowsingInstance swap in other cases (i.e., when opening
   // a popup from one extension to a different extension, or to a non-extension
@@ -510,44 +512,30 @@ bool ChromeContentBrowserClientExtensionsPart::
   // (by the content/ part of ShouldSwapBrowsingInstancesForNavigation); this
   // check is just doing the same for top-level frames.  See
   // https://crbug.com/590068.
-
-  // First we check for navigations which are transitioning to/from the URL
-  // associated with the new Webstore.
-  bool current_url_matches_new_webstore =
-      url::Origin::Create(current_effective_url)
-          .IsSameOriginWith(extension_urls::GetNewWebstoreLaunchURL());
-  bool dest_url_matches_new_webstore =
-      url::Origin::Create(destination_effective_url)
-          .IsSameOriginWith(extension_urls::GetNewWebstoreLaunchURL());
-  if (current_url_matches_new_webstore != dest_url_matches_new_webstore)
-    return true;
-
-  // Next we do a process check, looking to see if the Web Store hosted app ID
-  // is associated with the URLs.
   const Extension* current_extension =
       registry->enabled_extensions().GetExtensionOrAppByURL(
           current_effective_url);
-  bool is_current_url_for_webstore_app =
+  bool is_current_url_for_web_store =
       current_extension && current_extension->id() == kWebStoreAppId;
 
   const Extension* dest_extension =
       registry->enabled_extensions().GetExtensionOrAppByURL(
           destination_effective_url);
-  bool is_dest_url_for_webstore_app =
+  bool is_dest_url_for_web_store =
       dest_extension && dest_extension->id() == kWebStoreAppId;
 
-  // We should force a BrowsingInstance swap if we are going to Chrome Web
-  // Store, but the current process doesn't know about CWS, even if
-  // current_extension somehow corresponds to CWS.
+  // First do a process check.  We should force a BrowsingInstance swap if we
+  // are going to Chrome Web Store, but the current process doesn't know about
+  // CWS, even if current_extension somehow corresponds to CWS.
   ProcessMap* process_map = ProcessMap::Get(site_instance->GetBrowserContext());
-  if (is_dest_url_for_webstore_app && site_instance->HasProcess() &&
+  if (is_dest_url_for_web_store && site_instance->HasProcess() &&
       !process_map->Contains(dest_extension->id(),
                              site_instance->GetProcess()->GetID()))
     return true;
 
   // Otherwise, swap BrowsingInstances when transitioning to/from Chrome Web
   // Store.
-  return is_current_url_for_webstore_app != is_dest_url_for_webstore_app;
+  return is_current_url_for_web_store != is_dest_url_for_web_store;
 }
 
 // static
@@ -574,8 +562,6 @@ std::vector<url::Origin> ChromeContentBrowserClientExtensionsPart::
   // Require a dedicated process for the webstore origin.  See
   // https://crbug.com/939108.
   list.push_back(url::Origin::Create(extension_urls::GetWebstoreLaunchURL()));
-  list.push_back(
-      url::Origin::Create(extension_urls::GetNewWebstoreLaunchURL()));
 
   return list;
 }
@@ -758,14 +744,12 @@ void ChromeContentBrowserClientExtensionsPart::ExposeInterfacesToRenderer(
     service_manager::BinderRegistry* registry,
     blink::AssociatedInterfaceRegistry* associated_registry,
     content::RenderProcessHost* host) {
-  associated_registry->AddInterface<mojom::EventRouter>(
+  associated_registry->AddInterface(
       base::BindRepeating(&EventRouter::BindForRenderer, host->GetID()));
-  associated_registry->AddInterface<guest_view::mojom::GuestViewHost>(
-      base::BindRepeating(&ExtensionsGuestView::CreateForComponents,
-                          host->GetID()));
-  associated_registry->AddInterface<extensions::mojom::GuestView>(
-      base::BindRepeating(&ExtensionsGuestView::CreateForExtensions,
-                          host->GetID()));
+  associated_registry->AddInterface(base::BindRepeating(
+      &ExtensionsGuestView::CreateForComponents, host->GetID()));
+  associated_registry->AddInterface(base::BindRepeating(
+      &ExtensionsGuestView::CreateForExtensions, host->GetID()));
 }
 
 }  // namespace extensions

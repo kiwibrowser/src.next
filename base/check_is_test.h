@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors
+// Copyright 2022 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,7 +34,7 @@
 //
 // `CHECK_IS_TEST` is thread safe.
 
-#define CHECK_IS_TEST() base::internal::check_is_test_impl()
+#define CHECK_IS_TEST() base::internal::check_is_test_impl();
 
 namespace base::internal {
 BASE_EXPORT void check_is_test_impl();

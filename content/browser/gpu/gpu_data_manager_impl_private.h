@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -121,12 +121,11 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
 
   void ProcessCrashed();
 
-  base::Value::List GetLogMessages() const;
+  std::unique_ptr<base::ListValue> GetLogMessages() const;
 
   void HandleGpuSwitch();
 
-  void BlockDomainsFrom3DAPIs(const std::set<GURL>& urls,
-                              gpu::DomainGuilt guilt);
+  void BlockDomainFrom3DAPIs(const GURL& url, gpu::DomainGuilt guilt);
   bool Are3DAPIsBlocked(const GURL& top_origin_url,
                         ThreeDAPIType requester);
 
@@ -153,29 +152,19 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
 
  private:
   friend class GpuDataManagerImplPrivateTest;
-  friend class GpuDataManagerImplPrivateTestP;
 
   FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTest,
                            GpuInfoUpdate);
-  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTestP,
-                           SingleContextLossDoesNotBlockDomain);
-  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTestP,
-                           TwoContextLossesBlockDomain);
-  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTestP,
-                           TwoSimultaneousContextLossesDoNotBlockDomain);
-  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTestP, DomainBlockExpires);
-  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTestP, UnblockDomain);
-  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTestP,
-                           Domain1DoesNotBlockDomain2);
-  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTestP,
-                           UnblockingDomain1DoesNotUnblockDomain2);
-  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTestP,
-                           SimultaneousContextLossDoesNotBlock);
-  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTestP,
-                           MultipleTDRsBlockAll);
-  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTestP, MultipleTDRsExpire);
-  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTestP,
-                           MultipleTDRsCanBeUnblocked);
+  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTest,
+                           BlockAllDomainsFrom3DAPIs);
+  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTest,
+                           UnblockGuiltyDomainFrom3DAPIs);
+  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTest,
+                           UnblockDomainOfUnknownGuiltFrom3DAPIs);
+  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTest,
+                           UnblockOtherDomainFrom3DAPIs);
+  FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTest,
+                           UnblockThisDomainFrom3DAPIs);
 
   // Indicates the reason that access to a given client API (like
   // WebGL or Pepper 3D) was blocked or not. This state is distinct
@@ -185,6 +174,8 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
     kAllDomainsBlocked,
     kNotBlocked,
   };
+
+  using DomainGuiltMap = std::map<std::string, gpu::DomainGuilt>;
 
   using GpuDataManagerObserverList =
       base::ObserverListThreadSafe<GpuDataManagerObserver>;
@@ -215,13 +206,12 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
 
   // Implementation functions for blocking of 3D graphics APIs, used
   // for unit testing.
-  void BlockDomainsFrom3DAPIsAtTime(const std::set<GURL>& url,
-                                    gpu::DomainGuilt guilt,
-                                    base::Time at_time);
-  void ExpireOldBlockedDomainsAtTime(base::Time at_time) const;
+  void BlockDomainFrom3DAPIsAtTime(const GURL& url,
+                                   gpu::DomainGuilt guilt,
+                                   base::Time at_time);
   DomainBlockStatus Are3DAPIsBlockedAtTime(const GURL& url,
                                            base::Time at_time) const;
-  base::TimeDelta GetDomainBlockingExpirationPeriod() const;
+  int64_t GetBlockAllDomainsDurationInMs() const;
 
   // Notify all observers whenever there is a GPU info update.
   void NotifyGpuInfoUpdate();
@@ -287,16 +277,8 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
   // they cause random failures.
   bool update_histograms_ = true;
 
-  struct DomainBlockingEntry {
-    DomainBlockingEntry(const std::string& domain, gpu::DomainGuilt guilt)
-        : domain(domain), guilt(guilt) {}
-
-    std::string domain;
-    gpu::DomainGuilt guilt;
-  };
-
-  // Implicitly sorted by increasing timestamp.
-  mutable std::multimap<base::Time, DomainBlockingEntry> blocked_domains_;
+  DomainGuiltMap blocked_domains_;
+  mutable std::list<base::Time> timestamps_of_gpu_resets_;
   bool domain_blocking_enabled_ = true;
 
   bool application_is_visible_ = true;

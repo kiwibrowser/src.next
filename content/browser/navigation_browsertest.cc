@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -181,8 +181,7 @@ class RenderFrameHostFactoryForHistoryBackInterceptor
         site_instance, std::move(render_view_host), delegate, frame_tree,
         frame_tree_node, routing_id, std::move(frame_remote), frame_token,
         renderer_initiated_creation, lifecycle_state,
-        std::move(browsing_context_state),
-        frame_tree_node->frame_owner_element_type()));
+        std::move(browsing_context_state)));
   }
 };
 
@@ -4669,11 +4668,11 @@ class SubresourceLoadingTest : public NavigationBrowserTest {
 
       // Flush all the frames in the `current_contents's active page.
       current_contents->GetPrimaryMainFrame()->ForEachRenderFrameHost(
-          [](RenderFrameHost* frame_to_flush) {
+          base::BindRepeating([](RenderFrameHost* frame_to_flush) {
             constexpr bool kDoNothingIfNoNetworkServiceConnection = true;
             frame_to_flush->FlushNetworkAndNavigationInterfacesForTesting(
                 kDoNothingIfNoNetworkServiceConnection);
-          });
+          }));
 
       // Traverse the `current_frame`'s opener chain.
       if (FrameTreeNode* opener_node =
@@ -5630,10 +5629,10 @@ IN_PROC_BROWSER_TEST_F(NavigationBrowserTestWithPerformanceManager,
   // This test's process layout is structured a bit differently from the main
   // frame case. PerformanceManager reports when a remote frame is attached to
   // a local parent, and it was previously getting confused by the fact that
-  // a `blink::RemoteFrame` with matching RemoteFrameTokens was being reported
-  // as attached twice: once by the initial page loaded in the next statement,
-  // and the next when the browser needs to send a `UndoCommitNavigation()` to
-  // the a.com renderer.
+  // a RenderFrameProxy with matching RemoteFrameTokens was being reported as
+  // attached twice: once by the initial page loaded in the next statement, and
+  // the next when the browser needs to send a `UndoCommitNavigation()` to the
+  // a.com renderer.
   ASSERT_TRUE(NavigateToURL(
       shell(), embedded_test_server()->GetURL(
                    "a.com", "/cross_site_iframe_factory.html?a(b)")));
@@ -5663,7 +5662,7 @@ IN_PROC_BROWSER_TEST_F(NavigationBrowserTestWithPerformanceManager,
             speculative_render_frame_host->GetProcess());
 
   // Update the id attribute to exercise a PerformanceManager-specific code
-  // path: when the renderer swaps in a `blink::RemoteFrame` to undo the
+  // path: when the renderer swaps in a RenderFrameProxy to undo the
   // `CommitNavigation()`, it will report the iframe attribution data again. The
   // PerformanceManager should not complain that V8ContextTracker already has
   // the iframe attribution data, nor should it update the iframe attribution
@@ -5795,7 +5794,13 @@ IN_PROC_BROWSER_TEST_F(NavigationBrowserTestWithPerformanceManager,
 // new NavigationRequest, because it was trying to access the current
 // RenderFrameHost's PolicyContainerHost, which had not been set up yet by
 // RenderFrameHostImpl::DidNavigate.
-IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, Bug1210234) {
+#if BUILDFLAG(IS_ANDROID)
+// Flaky on Android: https://crbug.com/1222320.
+#define MAYBE_Bug1210234 DISABLED_Bug1210234
+#else
+#define MAYBE_Bug1210234 Bug1210234
+#endif  // BUILDFLAG(IS_ANDROID)
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, MAYBE_Bug1210234) {
   class NavigationWebContentsDelegate : public WebContentsDelegate {
    public:
     NavigationWebContentsDelegate(const GURL& url_to_intercept,
@@ -5828,24 +5833,11 @@ IN_PROC_BROWSER_TEST_F(NavigationBrowserTest, Bug1210234) {
 
   ASSERT_TRUE(NavigateToURL(shell(), warmup_url));
 
-  // Note that since we committed a navigation, the next cross-origin navigation
-  // will create a speculative RenderFrameHost (when site isolation is enabled).
+  // Since we committed a navigation, the next cross-origin navigation will
+  // create a speculative RenderFrameHost.
 
-  // Start the navigation to `initial_url` and wait until the web contents
-  // navigates to `redirection_url`. We cannot use helper functions like
-  // `NavigateToURLBlockUntilNavigationsComplete` because they wait for
-  // DidStopLoading and check the LastCommittedURL when they receive it.
-  // However, without SiteIsolation, an earlier DidStopLoading might be received
-  // when the WebContents has not yet committed the `redirection_url`.
-
-  // Prepare for the navigation.
-  WaitForLoadStop(web_contents());
-  TestNavigationObserver navigation_observer(redirection_url);
-  navigation_observer.WatchExistingWebContents();
-
-  shell()->LoadURL(initial_url);
-
-  navigation_observer.Wait();
+  EXPECT_TRUE(NavigateToURL(web_contents(), initial_url,
+                            /*expected_commit_url=*/redirection_url));
 
   EXPECT_TRUE(IsLastCommittedEntryOfPageType(web_contents(), PAGE_TYPE_NORMAL));
   EXPECT_EQ(redirection_url, web_contents()->GetLastCommittedURL());
@@ -5874,7 +5866,7 @@ IN_PROC_BROWSER_TEST_F(NavigationBrowserTestAnonymousIframe,
   EXPECT_FALSE(child->anonymous());
   EXPECT_FALSE(child->current_frame_host()->IsAnonymous());
   EXPECT_EQ(false,
-            EvalJs(child->current_frame_host(), "window.anonymouslyFramed"));
+            EvalJs(child->current_frame_host(), "window.isAnonymouslyFramed"));
 
   // Changes to the iframe 'anonymous' attribute are propagated to the
   // FrameTreeNode. The RenderFrameHost, however, is updated only on navigation.
@@ -5884,7 +5876,7 @@ IN_PROC_BROWSER_TEST_F(NavigationBrowserTestAnonymousIframe,
   EXPECT_TRUE(child->anonymous());
   EXPECT_FALSE(child->current_frame_host()->IsAnonymous());
   EXPECT_EQ(false,
-            EvalJs(child->current_frame_host(), "window.anonymouslyFramed"));
+            EvalJs(child->current_frame_host(), "window.isAnonymouslyFramed"));
 
   // Create a grandchild iframe.
   EXPECT_TRUE(ExecJs(
@@ -5902,7 +5894,7 @@ IN_PROC_BROWSER_TEST_F(NavigationBrowserTestAnonymousIframe,
   EXPECT_FALSE(grandchild->anonymous());
   EXPECT_FALSE(grandchild->current_frame_host()->IsAnonymous());
   EXPECT_EQ(false, EvalJs(grandchild->current_frame_host(),
-                          "window.anonymouslyFramed"));
+                          "window.isAnonymouslyFramed"));
 
   // Navigate the child iframe same-document. This does not change anything.
   EXPECT_TRUE(ExecJs(main_frame(),
@@ -5913,7 +5905,7 @@ IN_PROC_BROWSER_TEST_F(NavigationBrowserTestAnonymousIframe,
   EXPECT_TRUE(child->anonymous());
   EXPECT_FALSE(child->current_frame_host()->IsAnonymous());
   EXPECT_EQ(false,
-            EvalJs(child->current_frame_host(), "window.anonymouslyFramed"));
+            EvalJs(child->current_frame_host(), "window.isAnonymouslyFramed"));
 
   // Now navigate the child iframe cross-document.
   EXPECT_TRUE(ExecJs(
@@ -5923,7 +5915,7 @@ IN_PROC_BROWSER_TEST_F(NavigationBrowserTestAnonymousIframe,
   EXPECT_TRUE(child->anonymous());
   EXPECT_TRUE(child->current_frame_host()->IsAnonymous());
   EXPECT_EQ(true,
-            EvalJs(child->current_frame_host(), "window.anonymouslyFramed"));
+            EvalJs(child->current_frame_host(), "window.isAnonymouslyFramed"));
   // An anonymous document has a storage key with a nonce.
   EXPECT_TRUE(child->current_frame_host()->storage_key().nonce().has_value());
   base::UnguessableToken anonymous_nonce =
@@ -5945,7 +5937,7 @@ IN_PROC_BROWSER_TEST_F(NavigationBrowserTestAnonymousIframe,
   EXPECT_FALSE(grandchild->anonymous());
   EXPECT_TRUE(grandchild->current_frame_host()->IsAnonymous());
   EXPECT_EQ(true, EvalJs(grandchild->current_frame_host(),
-                         "window.anonymouslyFramed"));
+                         "window.isAnonymouslyFramed"));
 
   // The storage key's nonce is the same for all anonymous documents in the same
   // page.
@@ -5960,7 +5952,7 @@ IN_PROC_BROWSER_TEST_F(NavigationBrowserTestAnonymousIframe,
   WaitForLoadStop(web_contents());
   EXPECT_TRUE(grandchild->current_frame_host()->IsAnonymous());
   EXPECT_EQ(true, EvalJs(grandchild->current_frame_host(),
-                         "window.anonymouslyFramed"));
+                         "window.isAnonymouslyFramed"));
 
   // The storage key's nonce is still the same.
   EXPECT_TRUE(child->current_frame_host()->storage_key().nonce().has_value());
@@ -5975,7 +5967,7 @@ IN_PROC_BROWSER_TEST_F(NavigationBrowserTestAnonymousIframe,
   EXPECT_FALSE(child->anonymous());
   EXPECT_TRUE(child->current_frame_host()->IsAnonymous());
   EXPECT_EQ(true,
-            EvalJs(child->current_frame_host(), "window.anonymouslyFramed"));
+            EvalJs(child->current_frame_host(), "window.isAnonymouslyFramed"));
   EXPECT_TRUE(child->current_frame_host()->storage_key().nonce().has_value());
   EXPECT_EQ(anonymous_nonce,
             child->current_frame_host()->storage_key().nonce().value());
@@ -5993,7 +5985,7 @@ IN_PROC_BROWSER_TEST_F(NavigationBrowserTestAnonymousIframe,
   EXPECT_FALSE(grandchild2->anonymous());
   EXPECT_TRUE(grandchild2->current_frame_host()->IsAnonymous());
   EXPECT_EQ(true, EvalJs(grandchild2->current_frame_host(),
-                         "window.anonymouslyFramed"));
+                         "window.isAnonymouslyFramed"));
   EXPECT_TRUE(
       grandchild2->current_frame_host()->storage_key().nonce().has_value());
   EXPECT_EQ(anonymous_nonce,
@@ -6009,7 +6001,7 @@ IN_PROC_BROWSER_TEST_F(NavigationBrowserTestAnonymousIframe,
   EXPECT_FALSE(child->anonymous());
   EXPECT_FALSE(child->current_frame_host()->IsAnonymous());
   EXPECT_EQ(false,
-            EvalJs(child->current_frame_host(), "window.anonymouslyFramed"));
+            EvalJs(child->current_frame_host(), "window.isAnonymouslyFramed"));
   EXPECT_FALSE(child->current_frame_host()->storage_key().nonce().has_value());
 
   // Now navigate the whole page away.
@@ -6024,8 +6016,8 @@ IN_PROC_BROWSER_TEST_F(NavigationBrowserTestAnonymousIframe,
   EXPECT_EQ(iframe_url_b, child_b->current_url());
   EXPECT_TRUE(child_b->anonymous());
   EXPECT_TRUE(child_b->current_frame_host()->IsAnonymous());
-  EXPECT_EQ(true,
-            EvalJs(child_b->current_frame_host(), "window.anonymouslyFramed"));
+  EXPECT_EQ(true, EvalJs(child_b->current_frame_host(),
+                         "window.isAnonymouslyFramed"));
 
   EXPECT_TRUE(child_b->current_frame_host()->storage_key().nonce().has_value());
   base::UnguessableToken anonymous_nonce_b =
@@ -6128,9 +6120,8 @@ class CacheTransparencyNavigationBrowserTest : public ContentBrowserTest {
   base::HistogramTester histogram_tester_;
 };
 
-// TODO(crbug.com/1364167): Test is failing on various builders.
 IN_PROC_BROWSER_TEST_F(CacheTransparencyNavigationBrowserTest,
-                       DISABLED_SuccessfulPervasivePayload) {
+                       SuccessfulPervasivePayload) {
   GURL url_main_document =
       embedded_test_server()->GetURL("/cache_transparency/pervasive.html");
 

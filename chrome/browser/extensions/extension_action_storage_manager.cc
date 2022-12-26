@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -93,38 +93,36 @@ std::string BitmapToString(const SkBitmap& bitmap) {
 }
 
 // Set |action|'s default values to those specified in |dict|.
-void SetDefaultsFromValue(const base::Value::Dict& dict,
+void SetDefaultsFromValue(const base::DictionaryValue* dict,
                           ExtensionAction* action) {
   const int kDefaultTabId = ExtensionAction::kDefaultTabId;
+  std::string str_value;
 
   // For each value, don't set it if it has been modified already.
-  const std::string* popup_url = dict.FindString(kPopupUrlStorageKey);
-  if (popup_url && !action->HasPopupUrl(kDefaultTabId)) {
-    action->SetPopupUrl(kDefaultTabId, GURL(*popup_url));
+  if (dict->GetString(kPopupUrlStorageKey, &str_value) &&
+      !action->HasPopupUrl(kDefaultTabId)) {
+    action->SetPopupUrl(kDefaultTabId, GURL(str_value));
   }
-  const std::string* title = dict.FindString(kTitleStorageKey);
-  if (title && !action->HasTitle(kDefaultTabId)) {
-    action->SetTitle(kDefaultTabId, *title);
+  if (dict->GetString(kTitleStorageKey, &str_value) &&
+      !action->HasTitle(kDefaultTabId)) {
+    action->SetTitle(kDefaultTabId, str_value);
   }
-  const std::string* badge_text = dict.FindString(kBadgeTextStorageKey);
-  if (badge_text && !action->HasBadgeText(kDefaultTabId)) {
-    action->SetBadgeText(kDefaultTabId, *badge_text);
+  if (dict->GetString(kBadgeTextStorageKey, &str_value) &&
+      !action->HasBadgeText(kDefaultTabId)) {
+    action->SetBadgeText(kDefaultTabId, str_value);
   }
-  const std::string* badge_background_color =
-      dict.FindString(kBadgeBackgroundColorStorageKey);
-  if (badge_background_color &&
+  if (dict->GetString(kBadgeBackgroundColorStorageKey, &str_value) &&
       !action->HasBadgeBackgroundColor(kDefaultTabId)) {
-    action->SetBadgeBackgroundColor(
-        kDefaultTabId, RawStringToSkColor(*badge_background_color));
+    action->SetBadgeBackgroundColor(kDefaultTabId,
+                                    RawStringToSkColor(str_value));
   }
-  const std::string* badge_text_color =
-      dict.FindString(kBadgeTextColorStorageKey);
-  if (badge_text_color && !action->HasBadgeTextColor(kDefaultTabId)) {
-    action->SetBadgeTextColor(kDefaultTabId,
-                              RawStringToSkColor(*badge_text_color));
+  if (dict->GetString(kBadgeTextColorStorageKey, &str_value) &&
+      !action->HasBadgeTextColor(kDefaultTabId)) {
+    action->SetBadgeTextColor(kDefaultTabId, RawStringToSkColor(str_value));
   }
 
-  absl::optional<int> appearance_storage = dict.FindInt(kAppearanceStorageKey);
+  absl::optional<int> appearance_storage =
+      dict->FindIntKey(kAppearanceStorageKey);
   if (appearance_storage && !action->HasIsVisible(kDefaultTabId)) {
     switch (*appearance_storage) {
       case INVISIBLE:
@@ -137,15 +135,17 @@ void SetDefaultsFromValue(const base::Value::Dict& dict,
     }
   }
 
-  const base::Value::Dict* icon_dict = dict.FindDict(kIconStorageKey);
-  if (icon_dict && !action->HasIcon(kDefaultTabId)) {
+  const base::DictionaryValue* icon_value = NULL;
+  if (dict->GetDictionary(kIconStorageKey, &icon_value) &&
+      !action->HasIcon(kDefaultTabId)) {
     gfx::ImageSkia icon;
     SkBitmap bitmap;
-    for (const auto iter : *icon_dict) {
+    for (base::DictionaryValue::Iterator iter(*icon_value); !iter.IsAtEnd();
+         iter.Advance()) {
       int icon_size = 0;
-      if (base::StringToInt(iter.first, &icon_size) &&
-          iter.second.is_string() &&
-          StringToSkBitmap(iter.second.GetString(), &bitmap)) {
+      if (base::StringToInt(iter.key(), &icon_size) &&
+          iter.value().is_string() &&
+          StringToSkBitmap(iter.value().GetString(), &bitmap)) {
         CHECK(!bitmap.isNull());
         float scale =
             static_cast<float>(icon_size) / ExtensionAction::ActionIconSize();
@@ -158,32 +158,37 @@ void SetDefaultsFromValue(const base::Value::Dict& dict,
 
 // Store |action|'s default values in a DictionaryValue for use in storing to
 // disk.
-base::Value::Dict DefaultsToValue(ExtensionAction* action) {
+std::unique_ptr<base::DictionaryValue> DefaultsToValue(
+    ExtensionAction* action) {
   const int kDefaultTabId = ExtensionAction::kDefaultTabId;
-  base::Value::Dict dict;
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
 
-  dict.Set(kPopupUrlStorageKey, action->GetPopupUrl(kDefaultTabId).spec());
-  dict.Set(kTitleStorageKey, action->GetTitle(kDefaultTabId));
-  dict.Set(kBadgeTextStorageKey,
-           action->GetExplicitlySetBadgeText(kDefaultTabId));
-  dict.Set(kBadgeBackgroundColorStorageKey,
-           SkColorToRawString(action->GetBadgeBackgroundColor(kDefaultTabId)));
-  dict.Set(kBadgeTextColorStorageKey,
-           SkColorToRawString(action->GetBadgeTextColor(kDefaultTabId)));
-  dict.Set(kAppearanceStorageKey,
-           action->GetIsVisible(kDefaultTabId) ? ACTIVE : INVISIBLE);
+  dict->SetStringKey(kPopupUrlStorageKey,
+                     action->GetPopupUrl(kDefaultTabId).spec());
+  dict->SetStringKey(kTitleStorageKey, action->GetTitle(kDefaultTabId));
+  dict->SetStringKey(kBadgeTextStorageKey,
+                     action->GetExplicitlySetBadgeText(kDefaultTabId));
+  dict->SetStringKey(
+      kBadgeBackgroundColorStorageKey,
+      SkColorToRawString(action->GetBadgeBackgroundColor(kDefaultTabId)));
+  dict->SetStringKey(
+      kBadgeTextColorStorageKey,
+      SkColorToRawString(action->GetBadgeTextColor(kDefaultTabId)));
+  dict->SetIntKey(kAppearanceStorageKey,
+                  action->GetIsVisible(kDefaultTabId) ? ACTIVE : INVISIBLE);
 
   gfx::ImageSkia icon =
       action->GetExplicitlySetIcon(kDefaultTabId).AsImageSkia();
   if (!icon.isNull()) {
-    base::Value::Dict icon_value;
+    std::unique_ptr<base::DictionaryValue> icon_value(
+        new base::DictionaryValue());
     std::vector<gfx::ImageSkiaRep> image_reps = icon.image_reps();
     for (const gfx::ImageSkiaRep& rep : image_reps) {
       int size = static_cast<int>(rep.scale() * icon.width());
       std::string size_string = base::NumberToString(size);
-      icon_value.Set(size_string, BitmapToString(rep.GetBitmap()));
+      icon_value->SetStringKey(size_string, BitmapToString(rep.GetBitmap()));
     }
-    dict.Set(kIconStorageKey, std::move(icon_value));
+    dict->Set(kIconStorageKey, std::move(icon_value));
   }
   return dict;
 }
@@ -246,16 +251,16 @@ void ExtensionActionStorageManager::WriteToStorage(
     ExtensionAction* extension_action) {
   StateStore* store = GetStateStore();
   if (store) {
-    base::Value::Dict defaults = DefaultsToValue(extension_action);
+    std::unique_ptr<base::DictionaryValue> defaults =
+        DefaultsToValue(extension_action);
     store->SetExtensionValue(extension_action->extension_id(),
-                             kBrowserActionStorageKey,
-                             base::Value(std::move(defaults)));
+                             kBrowserActionStorageKey, std::move(defaults));
   }
 }
 
 void ExtensionActionStorageManager::ReadFromStorage(
     const std::string& extension_id,
-    absl::optional<base::Value> value) {
+    std::unique_ptr<base::Value> value) {
   const Extension* extension = ExtensionRegistry::Get(browser_context_)->
       enabled_extensions().GetByID(extension_id);
   if (!extension)
@@ -270,10 +275,11 @@ void ExtensionActionStorageManager::ReadFromStorage(
     return;
   }
 
-  if (!value || !value->is_dict())
+  const base::DictionaryValue* dict = NULL;
+  if (!value.get() || !value->GetAsDictionary(&dict))
     return;
 
-  SetDefaultsFromValue(value->GetDict(), action);
+  SetDefaultsFromValue(dict, action);
 }
 
 StateStore* ExtensionActionStorageManager::GetStateStore() {

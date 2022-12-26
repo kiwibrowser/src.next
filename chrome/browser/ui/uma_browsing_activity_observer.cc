@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,8 +34,7 @@
 namespace chrome {
 namespace {
 
-UMABrowsingActivityObserver* g_uma_browsing_activity_observer_instance =
-    nullptr;
+UMABrowsingActivityObserver* g_uma_browsing_activity_observer_instance = NULL;
 
 }  // namespace
 
@@ -92,7 +91,7 @@ void UMABrowsingActivityObserver::Observe(
 void UMABrowsingActivityObserver::OnAppTerminating() const {
   LogTimeBeforeUpdate();
   delete g_uma_browsing_activity_observer_instance;
-  g_uma_browsing_activity_observer_instance = nullptr;
+  g_uma_browsing_activity_observer_instance = NULL;
 }
 
 void UMABrowsingActivityObserver::LogTimeBeforeUpdate() const {
@@ -127,7 +126,6 @@ void UMABrowsingActivityObserver::LogBrowserTabCount() const {
   int app_window_count = 0;
   int popup_window_count = 0;
   int tabbed_window_count = 0;
-  int pinned_tab_count = 0;
   std::map<base::StringPiece, int> unique_domain;
 
   for (auto* browser : *BrowserList::GetInstance()) {
@@ -142,10 +140,7 @@ void UMABrowsingActivityObserver::LogBrowserTabCount() const {
       base::StringPiece domain = tab_strip_model->GetWebContentsAt(i)
                                      ->GetLastCommittedURL()
                                      .host_piece();
-      unique_domain[domain]++;
-
-      if (tab_strip_model->IsTabPinned(i))
-        pinned_tab_count++;
+      unique_domain[domain] += 1;
     }
 
     if (tab_strip_model->group_model()) {
@@ -194,8 +189,11 @@ void UMABrowsingActivityObserver::LogBrowserTabCount() const {
   // Record how many tab groups (including zero) are open across all windows.
   UMA_HISTOGRAM_COUNTS_100("TabGroups.UserGroupCountPerLoad", tab_group_count);
 
-  UMA_HISTOGRAM_COUNTS_100("TabGroups.UserPinnedTabCountPerLoad",
-                           std::min(pinned_tab_count, 100));
+  // Record how many tab groups are open across all windows.
+  if (tab_group_count != 0) {
+    UMA_HISTOGRAM_COUNTS_100("TabGroups.NonZeroUserGroupCountPerLoad",
+                             tab_group_count);
+  }
 
   // Record how many tabs are in the current group. Records 0 if the active tab
   // is not in a group.

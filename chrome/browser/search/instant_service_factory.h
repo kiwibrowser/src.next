@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include "base/memory/singleton.h"
 #include "build/build_config.h"
-#include "chrome/browser/profiles/profile_keyed_service_factory.h"
+#include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 
 #if BUILDFLAG(IS_ANDROID)
 #error "Instant is only used on desktop";
@@ -17,7 +17,7 @@ class InstantService;
 class Profile;
 
 // Singleton that owns all InstantServices and associates them with Profiles.
-class InstantServiceFactory : public ProfileKeyedServiceFactory {
+class InstantServiceFactory : public BrowserContextKeyedServiceFactory {
  public:
   // Returns the InstantService for |profile|.
   static InstantService* GetForProfile(Profile* profile);
@@ -34,6 +34,8 @@ class InstantServiceFactory : public ProfileKeyedServiceFactory {
   ~InstantServiceFactory() override;
 
   // Overridden from BrowserContextKeyedServiceFactory:
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
   KeyedService* BuildServiceInstanceFor(
       content::BrowserContext* context) const override;
 };

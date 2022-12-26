@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,10 @@
 #include "extensions/common/features/feature.h"
 #include "extensions/common/features/feature_provider.h"
 #include "extensions/common/url_pattern_set.h"
+
+namespace base {
+class DictionaryValue;
+}
 
 class GURL;
 
@@ -130,7 +134,7 @@ class ExtensionAPI {
   // Ownership remains with this object.
   // TODO(devlin): Now that we use GetSchemaStringPiece() in the renderer, we
   // may not really need this anymore.
-  const base::Value::Dict* GetSchema(const std::string& full_name);
+  const base::DictionaryValue* GetSchema(const std::string& full_name);
 
   // Splits a full name from the extension API into its API and child name
   // parts. Some examples:
@@ -182,7 +186,8 @@ class ExtensionAPI {
   base::Lock lock_;
 
   // Schemas for each namespace.
-  using SchemaMap = std::map<std::string, base::Value::Dict>;
+  using SchemaMap =
+      std::map<std::string, std::unique_ptr<const base::DictionaryValue>>;
   SchemaMap schemas_ GUARDED_BY(lock_);
 
   // FeatureProviders used for resolving dependencies.

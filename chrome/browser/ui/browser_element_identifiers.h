@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors
+// Copyright 2021 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,21 +16,15 @@
 #include "ui/base/interaction/element_tracker.h"
 
 // These should gradually replace values in view_ids.h.
-// Please keep this list alphabetized.
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kAppMenuButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kAppUninstallDialogOkButtonId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kAutofillCreditCardSuggestionEntryElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kAvatarButtonElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(kBatterySaverButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kBookmarkStarViewElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(kHighEfficiencyChipElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kInstallPwaElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(kIntentChipElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kLocationIconElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kMediaButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kOmniboxElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(kPriceTrackingChipElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(kPriceTrackingBookmarkViewElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kReadLaterButtonElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kReadLaterSidePanelWebViewElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kSidePanelCloseButtonElementId);
@@ -46,7 +40,7 @@ DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabStripElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kTabStripRegionElementId);
 DECLARE_ELEMENT_IDENTIFIER_VALUE(kTopContainerElementId);
-DECLARE_ELEMENT_IDENTIFIER_VALUE(kWebUIIPHDemoElementIdentifier);
+DECLARE_ELEMENT_IDENTIFIER_VALUE(kIntentChipElementId);
 
 DECLARE_CUSTOM_ELEMENT_EVENT_TYPE(kTabGroupedCustomEventId);
 

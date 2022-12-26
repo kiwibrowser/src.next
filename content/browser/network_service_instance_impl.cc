@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors
+// Copyright 2017 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <string>
 #include <utility>
 
-#include "base/base_paths.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/environment.h"
@@ -20,7 +19,6 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/no_destructor.h"
-#include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
@@ -34,7 +32,6 @@
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "content/browser/browser_main_loop.h"
-#include "content/browser/buildflags.h"
 #include "content/browser/first_party_sets/first_party_sets_handler_impl.h"
 #include "content/browser/net/http_cache_backend_file_operations_factory.h"
 #include "content/browser/net/socket_broker_impl.h"
@@ -52,7 +49,6 @@
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "net/base/features.h"
-#include "net/first_party_sets/public_sets.h"
 #include "net/log/net_log_util.h"
 #include "sandbox/policy/features.h"
 #include "services/cert_verifier/cert_verifier_service_factory.h"
@@ -71,10 +67,6 @@
 #include "content/browser/network_sandbox.h"
 #endif
 
-#if BUILDFLAG(IS_WIN)
-#include "content/browser/net/network_service_process_tracker_win.h"
-#endif
-
 namespace content {
 
 namespace {
@@ -85,13 +77,6 @@ constexpr char kKrb5CCEnvName[] = "KRB5CCNAME";
 // Environment variable pointing to Kerberos config file.
 constexpr char kKrb5ConfEnvName[] = "KRB5_CONFIG";
 #endif
-
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-constexpr char kKrb5CCFilePrefix[] = "FILE:";
-constexpr char kKrb5Directory[] = "kerberos";
-constexpr char kKrb5CCFile[] = "krb5cc";
-constexpr char kKrb5ConfFile[] = "krb5.conf";
-#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
 
 bool g_force_create_network_service_directly = false;
 mojo::Remote<network::mojom::NetworkService>* g_network_service_remote =
@@ -297,39 +282,14 @@ void CreateNetworkContextInternal(
     }
   }
 
-  // This might recreate g_client if the network service needed to be restarted.
-  auto* network_service = GetNetworkService();
-
-#if BUILDFLAG(USE_SOCKET_BROKER)
-  if (GetContentClient()->browser()->ShouldSandboxNetworkService() &&
-      !params->socket_broker) {
-    params->socket_broker = g_client->BindSocketBroker();
-  }
-#endif  // BUILDFLAG(USE_SOCKET_BROKER)
-
-  network_service->CreateNetworkContext(std::move(context), std::move(params));
+  GetNetworkService()->CreateNetworkContext(std::move(context),
+                                            std::move(params));
 }
 
 scoped_refptr<base::SequencedTaskRunner>& GetNetworkTaskRunnerStorage() {
   static base::NoDestructor<scoped_refptr<base::SequencedTaskRunner>> storage;
   return *storage;
 }
-
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-base::FilePath GetKerberosDir() {
-  base::FilePath dir;
-  base::PathService::Get(base::DIR_HOME, &dir);
-  return dir.Append(kKrb5Directory);
-}
-
-std::string GetKrb5CCEnvValue() {
-  return kKrb5CCFilePrefix + GetKerberosDir().Append(kKrb5CCFile).value();
-}
-
-std::string GetKrb5ConfEnvValue() {
-  return GetKerberosDir().Append(kKrb5ConfFile).value();
-}
-#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
 
 void CreateInProcessNetworkService(
     mojo::PendingReceiver<network::mojom::NetworkService> receiver) {
@@ -367,14 +327,6 @@ network::mojom::NetworkServiceParamsPtr CreateNetworkServiceParams() {
 #if BUILDFLAG(IS_POSIX)
   // Send Kerberos environment variables to the network service.
   if (IsOutOfProcessNetworkService()) {
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-    network_service_params->environment.push_back(
-        network::mojom::EnvironmentVariable::New(kKrb5CCEnvName,
-                                                 GetKrb5CCEnvValue()));
-    network_service_params->environment.push_back(
-        network::mojom::EnvironmentVariable::New(kKrb5ConfEnvName,
-                                                 GetKrb5ConfEnvValue()));
-#else
     std::unique_ptr<base::Environment> env(base::Environment::Create());
     std::string value;
     if (env->HasVar(kKrb5CCEnvName)) {
@@ -387,9 +339,8 @@ network::mojom::NetworkServiceParamsPtr CreateNetworkServiceParams() {
       network_service_params->environment.push_back(
           network::mojom::EnvironmentVariable::New(kKrb5ConfEnvName, value));
     }
-#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
   }
-#endif  // BUILDFLAG(IS_POSIX)
+#endif
   return network_service_params;
 }
 
@@ -622,11 +573,13 @@ network::mojom::NetworkService* GetNetworkService() {
       }
 
       if (FirstPartySetsHandlerImpl::GetInstance()->IsEnabled()) {
-        if (absl::optional<net::PublicSets> sets =
+        if (absl::optional<FirstPartySetsHandlerImpl::FlattenedSets> sets =
                 FirstPartySetsHandlerImpl::GetInstance()->GetSets(
-                    base::BindOnce([](net::PublicSets sets) {
-                      GetNetworkService()->SetFirstPartySets(std::move(sets));
-                    }));
+                    base::BindOnce(
+                        [](FirstPartySetsHandlerImpl::FlattenedSets sets) {
+                          GetNetworkService()->SetFirstPartySets(
+                              std::move(sets));
+                        }));
             sets.has_value()) {
           g_network_service_remote->get()->SetFirstPartySets(
               std::move(sets.value()));
@@ -768,7 +721,6 @@ GetNewCertVerifierServiceRemote(
 }
 
 void RunInProcessCertVerifierServiceFactory(
-    cert_verifier::mojom::CertVerifierServiceParamsPtr params,
     mojo::PendingReceiver<cert_verifier::mojom::CertVerifierServiceFactory>
         receiver) {
 #if BUILDFLAG(IS_CHROMEOS)
@@ -785,7 +737,7 @@ void RunInProcessCertVerifierServiceFactory(
       service_factory_slot;
   service_factory_slot.GetOrCreateValue() =
       std::make_unique<cert_verifier::CertVerifierServiceFactoryImpl>(
-          std::move(params), std::move(receiver));
+          std::move(receiver));
 }
 
 // Owns the CertVerifierServiceFactory used by the browser.
@@ -812,8 +764,6 @@ GetCertVerifierServiceFactory() {
       factory_remote_storage = GetCertVerifierServiceFactoryRemoteStorage();
   if (!factory_remote_storage.is_bound() ||
       !factory_remote_storage.is_connected()) {
-    cert_verifier::mojom::CertVerifierServiceParamsPtr service_params =
-        GetContentClient()->browser()->GetCertVerifierServiceParams();
     factory_remote_storage.reset();
 #if BUILDFLAG(IS_CHROMEOS)
     // In-process CertVerifierService in Ash and Lacros should run on the IO
@@ -823,11 +773,9 @@ GetCertVerifierServiceFactory() {
     GetIOThreadTaskRunner({})->PostTask(
         FROM_HERE,
         base::BindOnce(&RunInProcessCertVerifierServiceFactory,
-                       std::move(service_params),
                        factory_remote_storage.BindNewPipeAndPassReceiver()));
 #else
     RunInProcessCertVerifierServiceFactory(
-        std::move(service_params),
         factory_remote_storage.BindNewPipeAndPassReceiver());
 #endif
   }
@@ -887,6 +835,11 @@ void CreateNetworkContextInNetworkService(
   }
 
 #if BUILDFLAG(IS_ANDROID)
+
+  if (sandbox::policy::features::IsNetworkSandboxEnabled() &&
+      !params->socket_broker) {
+    params->socket_broker = g_client->BindSocketBroker();
+  }
   // On Android, if a cookie_manager pending receiver was passed then migration
   // should not be attempted as the cookie file is already being accessed by the
   // browser instance.

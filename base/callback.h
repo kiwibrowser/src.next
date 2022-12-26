@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -13,12 +13,12 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/callback_forward.h"  // IWYU pragma: export
+#include "base/callback_forward.h"
 #include "base/callback_internal.h"
 #include "base/check.h"
-#include "base/functional/function_ref.h"
 #include "base/notreached.h"
 #include "base/types/always_false.h"
+#include "third_party/abseil-cpp/absl/functional/function_ref.h"
 
 // -----------------------------------------------------------------------------
 // Usage documentation
@@ -180,19 +180,19 @@ class OnceCallback<R(Args...)> : public internal::CallbackBase {
 
   template <typename Signature>
   // NOLINTNEXTLINE(google-explicit-constructor)
-  operator FunctionRef<Signature>() & {
+  operator absl::FunctionRef<Signature>() & {
     static_assert(
         AlwaysFalse<Signature>,
-        "need to convert a base::OnceCallback to base::FunctionRef? "
+        "need to convert a base::OnceCallback to absl::FunctionRef? "
         "Please bring up this use case on #cxx (Slack) or cxx@chromium.org.");
   }
 
   template <typename Signature>
   // NOLINTNEXTLINE(google-explicit-constructor)
-  operator FunctionRef<Signature>() && {
+  operator absl::FunctionRef<Signature>() && {
     static_assert(
         AlwaysFalse<Signature>,
-        "using base::BindOnce() is not necessary with base::FunctionRef; is it "
+        "using base::BindOnce() is not necessary with absl::FunctionRef; is it "
         "possible to use a capturing lambda directly? If not, please bring up "
         "this use case on #cxx (Slack) or cxx@chromium.org.");
   }
@@ -258,10 +258,6 @@ class RepeatingCallback<R(Args...)> : public internal::CallbackBaseCopyable {
   }
 
   R Run(Args... args) const & {
-    // Keep `bind_state_` alive at least until after the invocation to ensure
-    // all bound `Unretained` arguments remain protected by MiraclePtr.
-    auto bind_state_protector = this->bind_state_;
-
     PolymorphicInvoke f =
         reinterpret_cast<PolymorphicInvoke>(this->polymorphic_invoke());
     return f(this->bind_state_.get(), std::forward<Args>(args)...);
@@ -314,19 +310,19 @@ class RepeatingCallback<R(Args...)> : public internal::CallbackBaseCopyable {
 
   template <typename Signature>
   // NOLINTNEXTLINE(google-explicit-constructor)
-  operator FunctionRef<Signature>() & {
+  operator absl::FunctionRef<Signature>() & {
     static_assert(
         AlwaysFalse<Signature>,
-        "need to convert a base::RepeatingCallback to base::FunctionRef? "
+        "need to convert a base::RepeatingCallback to absl::FunctionRef? "
         "Please bring up this use case on #cxx (Slack) or cxx@chromium.org.");
   }
 
   template <typename Signature>
   // NOLINTNEXTLINE(google-explicit-constructor)
-  operator FunctionRef<Signature>() && {
+  operator absl::FunctionRef<Signature>() && {
     static_assert(
         AlwaysFalse<Signature>,
-        "using base::BindRepeating() is not necessary with base::FunctionRef; "
+        "using base::BindRepeating() is not necessary with absl::FunctionRef; "
         "is it possible to use a capturing lambda directly? If not, please "
         "bring up this use case on #cxx (Slack) or cxx@chromium.org.");
   }

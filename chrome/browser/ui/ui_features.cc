@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,11 +15,6 @@ namespace features {
 // by the platform (e.g. Wayland). See https://crbug.com/896640
 const base::Feature kAllowWindowDragUsingSystemDragDrop{
     "AllowWindowDragUsingSystemDragDrop", base::FEATURE_DISABLED_BY_DEFAULT};
-
-#if !BUILDFLAG(IS_CHROMEOS) && !BUILDFLAG(IS_ANDROID)
-const base::Feature kDesktopPWAsAppHomePage{"DesktopPWAsAppHomePage",
-                                            base::FEATURE_DISABLED_BY_DEFAULT};
-#endif  // !BUILDFLAG(IS_CHROMEOS) && !BUILDFLAG(IS_ANDROID)
 
 // Enables Chrome Labs menu in the toolbar. See https://crbug.com/1145666
 const base::Feature kChromeLabs{"ChromeLabs",
@@ -67,14 +62,6 @@ const base::Feature kDisplayOpenLinkAsProfile{
 const base::Feature kEvDetailsInPageInfo{"EvDetailsInPageInfo",
                                          base::FEATURE_ENABLED_BY_DEFAULT};
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-// Controls whether we use a different UX for simple extensions overriding
-// settings.
-const base::Feature kLightweightExtensionOverrideConfirmations{
-    "LightweightExtensionOverrideConfirmations",
-    base::FEATURE_ENABLED_BY_DEFAULT};
-#endif
-
 // Enables the reauth flow for authenticated profiles with invalid credentials
 // when the force sign-in policy is enabled.
 const base::Feature kForceSignInReauth{"ForceSignInReauth",
@@ -111,10 +98,29 @@ const base::Feature kSideSearchFeedback{"SideSearchFeedback",
 const base::Feature kSideSearchDSESupport{"SideSearchDSESupport",
                                           base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Displays right-click search results of a highlighted text in side panel,
-// So users are not forced to switch to a new tab to view the search results
-const base::Feature kSearchWebInSidePanel{"SearchWebInSidePanel",
-                                          base::FEATURE_DISABLED_BY_DEFAULT};
+// Controls whether the side search icon animates-in its label when the side
+// panel is made available for the active tab.
+const base::Feature kSideSearchPageActionLabelAnimation{
+    "SideSearchPageActionLabelAnimation", base::FEATURE_ENABLED_BY_DEFAULT};
+
+// Controls the frequency that the Side Search page action's label is shown. If
+// enabled the label text is shown one per window.
+const base::FeatureParam<kSideSearchLabelAnimationTypeOption>::Option
+    kSideSearchPageActionLabelAnimationTypeParamOptions[] = {
+        {kSideSearchLabelAnimationTypeOption::kProfile, "Profile"},
+        {kSideSearchLabelAnimationTypeOption::kWindow, "Window"},
+        {kSideSearchLabelAnimationTypeOption::kTab, "Tab"}};
+
+const base::FeatureParam<kSideSearchLabelAnimationTypeOption>
+    kSideSearchPageActionLabelAnimationType{
+        &kSideSearchPageActionLabelAnimation,
+        "SideSearchPageActionLabelAnimationType",
+        kSideSearchLabelAnimationTypeOption::kWindow,
+        &kSideSearchPageActionLabelAnimationTypeParamOptions};
+
+const base::FeatureParam<int> kSideSearchPageActionLabelAnimationMaxCount{
+    &kSideSearchPageActionLabelAnimation,
+    "SideSearchPageActionLabelAnimationMaxCount", 1};
 
 // Whether to clobber all side search side panels in the current browser window
 // or only the side search in the current tab before read later or lens side
@@ -122,42 +128,19 @@ const base::Feature kSearchWebInSidePanel{"SearchWebInSidePanel",
 const base::Feature kClobberAllSideSearchSidePanels{
     "ClobberAllSideSearchSidePanels", base::FEATURE_ENABLED_BY_DEFAULT};
 
-// Feature that controls whether or not feature engagement configurations can be
-// used to control automatic triggering for side search.
-const base::Feature kSideSearchAutoTriggering{"SideSearchAutoTriggering",
-                                              base::FEATURE_ENABLED_BY_DEFAULT};
-
-// Feature param that determines how many times a user has to return to a given
-// SRP before we automatically trigger the side search side panel for that SRP
-// on a subsequent navigation.
-const base::FeatureParam<int> kSideSearchAutoTriggeringReturnCount{
-    &kSideSearchAutoTriggering, "SideSearchAutoTriggeringReturnCount", 2};
-
 // Adds improved support for handling multiple contextual and global RHS browser
 // side panels. Designed specifically to handle the interim state before the v2
 // side panel project launches.
 const base::Feature kSidePanelImprovedClobbering{
     "SidePanelImprovedClobbering", base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kSidePanelWebView{"SidePanelWebView",
-                                      base::FEATURE_DISABLED_BY_DEFAULT};
-
 const base::Feature kSidePanelJourneys{"SidePanelJourneys",
                                        base::FEATURE_DISABLED_BY_DEFAULT};
-// If enabled, and the main flag is also enabled, the Journeys omnibox
-// entrypoints open Journeys in Side Panel rather than the History WebUI.
-const base::FeatureParam<bool> kSidePanelJourneysOpensFromOmnibox{
-    &kSidePanelJourneys, "SidePanelJourneysOpensFromOmnibox", false};
 
 // Enables tabs to scroll in the tabstrip. https://crbug.com/951078
 const base::Feature kScrollableTabStrip{"ScrollableTabStrip",
                                         base::FEATURE_DISABLED_BY_DEFAULT};
 const char kMinimumTabWidthFeatureParameterName[] = "minTabWidth";
-
-// Splits pinned and unpinned tabs into separate TabStrips.
-// https://crbug.com/1346019
-const base::Feature kSplitTabStrip("SplitTabStrip",
-                                   base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Directly controls the "new" badge (as opposed to old "master switch"; see
 // https://crbug.com/1169907 for master switch deprecation and
@@ -173,15 +156,8 @@ const base::Feature kTabGroupsSave{"TabGroupsSave",
 
 // Enables preview images in tab-hover cards.
 // https://crbug.com/928954
-const base::Feature kTabHoverCardImages {
-  "TabHoverCardImages",
-#if BUILDFLAG(IS_MAC)
-      base::FEATURE_DISABLED_BY_DEFAULT
-#else
-      base::FEATURE_ENABLED_BY_DEFAULT
-#endif
-};
-
+const base::Feature kTabHoverCardImages{"TabHoverCardImages",
+                                        base::FEATURE_DISABLED_BY_DEFAULT};
 const char kTabHoverCardImagesNotReadyDelayParameterName[] =
     "page_not_ready_delay";
 const char kTabHoverCardImagesLoadingDelayParameterName[] =
@@ -212,6 +188,9 @@ const char kTabSearchSearchThresholdName[] = "TabSearchSearchThreshold";
 
 const base::FeatureParam<bool> kTabSearchSearchIgnoreLocation{
     &kTabSearchFuzzySearch, "TabSearchSearchIgnoreLocation", false};
+
+const base::Feature kTabSearchMediaTabs{"TabSearchMediaTabs",
+                                        base::FEATURE_ENABLED_BY_DEFAULT};
 
 // If this feature parameter is enabled, show media tabs in both "Audio & Video"
 // section and "Open Tabs" section.
@@ -252,11 +231,6 @@ const base::Feature kTabSearchUseMetricsReporter{
 
 const base::Feature kToolbarUseHardwareBitmapDraw{
     "ToolbarUseHardwareBitmapDraw", base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Controls whether top chrome pages will use the spare renderer if no top
-// chrome renderers are present.
-const base::Feature kTopChromeWebUIUsesSpareRenderer{
-    "TopChromeWebUIUsesSpareRenderer", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kUnifiedSidePanel{"UnifiedSidePanel",
                                       base::FEATURE_DISABLED_BY_DEFAULT};

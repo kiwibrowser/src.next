@@ -1123,7 +1123,7 @@ TEST_F(DocumentTest, AtPageMarginWithDeviceScaleFactor) {
   EXPECT_EQ(gfx::SizeF(400, 960), description.size);
 }
 
-TEST_F(DocumentTest, HandlesDisconnectDuringHasTrustToken) {
+TEST(Document, HandlesDisconnectDuringHasTrustToken) {
   // Check that a Mojo handle disconnecting during hasTrustToken operation
   // execution results in the promise getting rejected with the proper
   // exception.
@@ -1145,7 +1145,7 @@ TEST_F(DocumentTest, HandlesDisconnectDuringHasTrustToken) {
                              DOMExceptionCode::kOperationError));
 }
 
-TEST_F(DocumentTest, RejectsHasTrustTokenCallFromNonHttpNonHttpsDocument) {
+TEST(Document, RejectsHasTrustTokenCallFromNonHttpNonHttpsDocument) {
   // Check that hasTrustToken getting called from a secure, but
   // non-http/non-https, document results in an exception being thrown.
   V8TestingScope scope(KURL("file:///trusttoken.txt"));
@@ -1197,29 +1197,6 @@ class MockTrustTokenQueryAnswerer
     }
   }
 
-  void HasRedemptionRecord(
-      const ::scoped_refptr<const ::blink::SecurityOrigin>& issuer,
-      HasRedemptionRecordCallback callback) override {
-    auto result = network::mojom::blink::HasRedemptionRecordResult::New();
-    result->status = network::mojom::blink::TrustTokenOperationStatus::kOk;
-    switch (outcome_) {
-      case kTrue: {
-        result->has_redemption_record = true;
-        break;
-      }
-      case kFalse: {
-        result->has_redemption_record = false;
-        break;
-      }
-      case kError: {
-        result->status =
-            network::mojom::blink::TrustTokenOperationStatus::kUnknownError;
-        break;
-      }
-    }
-    std::move(callback).Run(std::move(result));
-  }
-
   void Bind(mojo::ScopedMessagePipeHandle handle) {
     receiver_.Bind(
         mojo::PendingReceiver<network::mojom::blink::TrustTokenQueryAnswerer>(
@@ -1233,7 +1210,7 @@ class MockTrustTokenQueryAnswerer
 };
 }  // namespace
 
-TEST_F(DocumentTest, HasTrustTokenSuccess) {
+TEST(Document, HasTrustTokenSuccess) {
   V8TestingScope scope(KURL("https://secure.example"));
 
   MockTrustTokenQueryAnswerer answerer(MockTrustTokenQueryAnswerer::kTrue);
@@ -1261,7 +1238,7 @@ TEST_F(DocumentTest, HasTrustTokenSuccess) {
       network::mojom::blink::TrustTokenQueryAnswerer::Name_, {});
 }
 
-TEST_F(DocumentTest, HasTrustTokenSuccessWithFalseValue) {
+TEST(Document, HasTrustTokenSuccessWithFalseValue) {
   V8TestingScope scope(KURL("https://secure.example"));
 
   MockTrustTokenQueryAnswerer answerer(MockTrustTokenQueryAnswerer::kFalse);
@@ -1289,7 +1266,7 @@ TEST_F(DocumentTest, HasTrustTokenSuccessWithFalseValue) {
       network::mojom::blink::TrustTokenQueryAnswerer::Name_, {});
 }
 
-TEST_F(DocumentTest, HasTrustTokenOperationError) {
+TEST(Document, HasTrustTokenOperationError) {
   V8TestingScope scope(KURL("https://secure.example"));
 
   MockTrustTokenQueryAnswerer answerer(MockTrustTokenQueryAnswerer::kError);
@@ -1316,135 +1293,6 @@ TEST_F(DocumentTest, HasTrustTokenOperationError) {
 
   document.GetFrame()->GetBrowserInterfaceBroker().SetBinderForTesting(
       network::mojom::blink::TrustTokenQueryAnswerer::Name_, {});
-}
-
-TEST_F(DocumentTest, HasRedemptionRecordSuccess) {
-  V8TestingScope scope(KURL("https://secure.example"));
-
-  MockTrustTokenQueryAnswerer answerer(MockTrustTokenQueryAnswerer::kTrue);
-
-  Document& document = scope.GetDocument();
-  document.GetFrame()->GetBrowserInterfaceBroker().SetBinderForTesting(
-      network::mojom::blink::TrustTokenQueryAnswerer::Name_,
-      WTF::BindRepeating(&MockTrustTokenQueryAnswerer::Bind,
-                         WTF::Unretained(&answerer)));
-
-  ScriptState* script_state = scope.GetScriptState();
-  ExceptionState exception_state(script_state->GetIsolate(),
-                                 ExceptionState::kExecutionContext, "Document",
-                                 "hasRedemptionRecord");
-
-  auto promise = document.hasRedemptionRecord(
-      script_state, "https://issuer.example", exception_state);
-
-  ScriptPromiseTester promise_tester(script_state, promise);
-  promise_tester.WaitUntilSettled();
-  EXPECT_TRUE(promise_tester.IsFulfilled());
-  EXPECT_TRUE(promise_tester.Value().V8Value()->IsTrue());
-
-  document.GetFrame()->GetBrowserInterfaceBroker().SetBinderForTesting(
-      network::mojom::blink::TrustTokenQueryAnswerer::Name_, {});
-}
-
-TEST_F(DocumentTest, HasRedemptionRecordSuccessWithFalseValue) {
-  V8TestingScope scope(KURL("https://secure.example"));
-
-  MockTrustTokenQueryAnswerer answerer(MockTrustTokenQueryAnswerer::kFalse);
-
-  Document& document = scope.GetDocument();
-  document.GetFrame()->GetBrowserInterfaceBroker().SetBinderForTesting(
-      network::mojom::blink::TrustTokenQueryAnswerer::Name_,
-      WTF::BindRepeating(&MockTrustTokenQueryAnswerer::Bind,
-                         WTF::Unretained(&answerer)));
-
-  ScriptState* script_state = scope.GetScriptState();
-  ExceptionState exception_state(script_state->GetIsolate(),
-                                 ExceptionState::kExecutionContext, "Document",
-                                 "hasTrustToken");
-
-  auto promise = document.hasRedemptionRecord(
-      script_state, "https://issuer.example", exception_state);
-
-  ScriptPromiseTester promise_tester(script_state, promise);
-  promise_tester.WaitUntilSettled();
-  EXPECT_TRUE(promise_tester.IsFulfilled());
-  EXPECT_TRUE(promise_tester.Value().V8Value()->IsFalse());
-
-  document.GetFrame()->GetBrowserInterfaceBroker().SetBinderForTesting(
-      network::mojom::blink::TrustTokenQueryAnswerer::Name_, {});
-}
-
-TEST_F(DocumentTest, HasRedemptionRecordOperationError) {
-  V8TestingScope scope(KURL("https://secure.example"));
-
-  MockTrustTokenQueryAnswerer answerer(MockTrustTokenQueryAnswerer::kError);
-
-  Document& document = scope.GetDocument();
-  document.GetFrame()->GetBrowserInterfaceBroker().SetBinderForTesting(
-      network::mojom::blink::TrustTokenQueryAnswerer::Name_,
-      WTF::BindRepeating(&MockTrustTokenQueryAnswerer::Bind,
-                         WTF::Unretained(&answerer)));
-
-  ScriptState* script_state = scope.GetScriptState();
-  ExceptionState exception_state(script_state->GetIsolate(),
-                                 ExceptionState::kExecutionContext, "Document",
-                                 "hasRedemptionRecord");
-
-  auto promise = document.hasRedemptionRecord(
-      script_state, "https://issuer.example", exception_state);
-
-  ScriptPromiseTester promise_tester(script_state, promise);
-  promise_tester.WaitUntilSettled();
-  EXPECT_TRUE(promise_tester.IsRejected());
-  EXPECT_TRUE(IsDOMException(script_state, promise_tester.Value(),
-                             DOMExceptionCode::kOperationError));
-
-  document.GetFrame()->GetBrowserInterfaceBroker().SetBinderForTesting(
-      network::mojom::blink::TrustTokenQueryAnswerer::Name_, {});
-}
-
-TEST_F(DocumentTest, HandlesDisconnectDuringHasRedemptionRecord) {
-  // Check that a Mojo handle disconnecting during hasRedemptionRecord
-  // operation execution results in the promise getting rejected with
-  // the proper exception.
-  V8TestingScope scope(KURL("https://trusttoken.example"));
-
-  Document& document = scope.GetDocument();
-
-  auto promise = document.hasRedemptionRecord(scope.GetScriptState(),
-                                              "https://issuer.example",
-                                              scope.GetExceptionState());
-  DocumentTest::SimulateTrustTokenQueryAnswererConnectionError(&document);
-
-  ASSERT_TRUE(promise.IsAssociatedWith(scope.GetScriptState()));
-
-  ScriptPromiseTester promise_tester(scope.GetScriptState(), promise);
-  promise_tester.WaitUntilSettled();
-  EXPECT_TRUE(promise_tester.IsRejected());
-  EXPECT_TRUE(IsDOMException(scope.GetScriptState(), promise_tester.Value(),
-                             DOMExceptionCode::kOperationError));
-}
-
-TEST_F(DocumentTest,
-       RejectsHasRedemptionRecordCallFromNonHttpNonHttpsDocument) {
-  // Check that hasRedemptionRecord getting called from a secure, but
-  // non-http/non-https, document results in an exception being thrown.
-  V8TestingScope scope(KURL("file:///trusttoken.txt"));
-
-  Document& document = scope.GetDocument();
-  ScriptState* script_state = scope.GetScriptState();
-  ExceptionState exception_state(script_state->GetIsolate(),
-                                 ExceptionState::kExecutionContext, "Document",
-                                 "hasRedemptionRecord");
-
-  auto promise = document.hasRedemptionRecord(
-      script_state, "https://issuer.example", exception_state);
-
-  ScriptPromiseTester promise_tester(script_state, promise);
-  promise_tester.WaitUntilSettled();
-  EXPECT_TRUE(promise_tester.IsRejected());
-  EXPECT_TRUE(IsDOMException(script_state, promise_tester.Value(),
-                             DOMExceptionCode::kNotAllowedError));
 }
 
 /**

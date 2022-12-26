@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -140,8 +140,7 @@ void ChromeBrowserFieldTrials::RegisterSyntheticTrials() {
     const std::string group =
         fre_mobile_identity_consistency_field_trial::GetFREFieldTrialGroup();
     ChromeMetricsServiceAccessor::RegisterSyntheticFieldTrial(
-        kFREMobileIdentityConsistencyTrial, group,
-        variations::SyntheticTrialAnnotationMode::kCurrentLog);
+        kFREMobileIdentityConsistencyTrial, group);
 
     if (fre_mobile_identity_consistency_field_trial::IsFREFieldTrialEnabled()) {
       // MobileIdentityConsistencyFREVariationsSynthetic field trial.

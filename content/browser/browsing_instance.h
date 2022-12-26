@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -93,14 +93,12 @@ class CONTENT_EXPORT BrowsingInstance final
   // cross-origin-opener-policy set to same-origin and
   // cross-origin-embedder-policy set to require-corp, and if so, from which
   // top level origin. |is_guest| specifies whether this BrowsingInstance will
-  // be used in a <webview> guest; |is_fenced| specifies whether this
-  // BrowsingInstance is used inside a fenced frame. Note that both |is_guest|
-  // and |is_fenced| cannot change over the lifetime of the BrowsingInstance.
+  // be used in a <webview> guest; note that this cannot change over the
+  // lifetime of the BrowsingInstance.
   explicit BrowsingInstance(
       BrowserContext* context,
       const WebExposedIsolationInfo& web_exposed_isolation_info,
-      bool is_guest,
-      bool is_fenced);
+      bool is_guest);
 
   ~BrowsingInstance();
 
@@ -215,8 +213,6 @@ class CONTENT_EXPORT BrowsingInstance final
   const WebExposedIsolationInfo& web_exposed_isolation_info() const {
     return web_exposed_isolation_info_;
   }
-
-  SiteInstanceImpl* default_site_instance() { return default_site_instance_; }
 
   // The next available browser-global BrowsingInstance ID.
   static int next_browsing_instance_id_;

@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,8 +21,6 @@ CONTENT_EXPORT extern const char kAllowInsecureLocalhost[];
 CONTENT_EXPORT extern const char kAllowLoopbackInPeerConnection[];
 CONTENT_EXPORT extern const char kAllowSyncXHRInPageDismissal[];
 CONTENT_EXPORT extern const char kAndroidFontsPath[];
-CONTENT_EXPORT extern const char kAshWebBrowserDisabled[];
-CONTENT_EXPORT extern const char kAttributionReportingDebugMode[];
 CONTENT_EXPORT extern const char kBrowserCrashTest[];
 CONTENT_EXPORT extern const char kBrowserStartupDialog[];
 CONTENT_EXPORT extern const char kBrowserSubprocessPath[];
@@ -30,6 +28,7 @@ CONTENT_EXPORT extern const char kBrowserTest[];
 CONTENT_EXPORT extern const char kChangeStackGuardOnFork[];
 CONTENT_EXPORT extern const char kChangeStackGuardOnForkEnabled[];
 CONTENT_EXPORT extern const char kChangeStackGuardOnForkDisabled[];
+CONTENT_EXPORT extern const char kConversionsDebugMode[];
 CONTENT_EXPORT extern const char kDisplayCapturePermissionsPolicyAllowed[];
 CONTENT_EXPORT extern const char kDisable2dCanvasAntialiasing[];
 CONTENT_EXPORT extern const char kDisable2dCanvasImageChromium[];
@@ -186,7 +185,6 @@ CONTENT_EXPORT extern const char kProcessType[];
 CONTENT_EXPORT extern const char kProxyServer[];
 CONTENT_EXPORT extern const char kPullToRefresh[];
 CONTENT_EXPORT extern const char kQuotaChangeEventInterval[];
-CONTENT_EXPORT extern const char kReduceAcceptLanguage[];
 CONTENT_EXPORT extern const char kReduceUserAgentMinorVersion[];
 CONTENT_EXPORT extern const char kReduceUserAgentPlatformOsCpu[];
 CONTENT_EXPORT extern const char kRegisterPepperPlugins[];
@@ -212,7 +210,6 @@ CONTENT_EXPORT extern const char kStatsCollectionController[];
 extern const char kSkiaFontCacheLimitMb[];
 extern const char kSkiaResourceCacheLimitMb[];
 CONTENT_EXPORT extern const char kTestType[];
-CONTENT_EXPORT extern const char kTimeTicksAtUnixEpoch[];
 CONTENT_EXPORT extern const char kTimeZoneForTesting[];
 CONTENT_EXPORT extern const char kTouchEventFeatureDetection[];
 CONTENT_EXPORT extern const char kTouchEventFeatureDetectionAuto[];

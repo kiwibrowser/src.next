@@ -65,7 +65,6 @@ class CORE_EXPORT CSSToLengthConversionData : public CSSLengthResolver {
     float Rem() const { return rem_ * zoom_adjust_.value_or(zoom_); }
     float Ex() const;
     float Ch() const;
-    float Ic() const;
 
    private:
     friend class CSSToLengthConversionData;
@@ -178,7 +177,6 @@ class CORE_EXPORT CSSToLengthConversionData : public CSSLengthResolver {
   float RemFontSize() const override;
   float ExFontSize() const override;
   float ChFontSize() const override;
-  float IcFontSize() const override;
   double ViewportWidth() const override;
   double ViewportHeight() const override;
   double SmallViewportWidth() const override;

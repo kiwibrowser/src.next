@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors
+// Copyright 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,13 +46,13 @@ class NET_EXPORT HttpAuthPreferences {
   virtual bool NegotiateEnablePort() const;
 #if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
   virtual bool NtlmV2Enabled() const;
-#endif  // BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
+#endif
 #if BUILDFLAG(IS_ANDROID)
   virtual std::string AuthAndroidNegotiateAccountType() const;
 #endif
-#if BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   virtual bool AllowGssapiLibraryLoad() const;
-#endif  // BUILDFLAG(IS_CHROMEOS)
+#endif
   virtual bool CanUseDefaultCredentials(
       const url::SchemeHostPort& auth_scheme_host_port) const;
   virtual HttpAuth::DelegationType GetDelegationType(
@@ -84,13 +84,13 @@ class NET_EXPORT HttpAuthPreferences {
   void set_ntlm_v2_enabled(bool ntlm_v2_enabled) {
     ntlm_v2_enabled_ = ntlm_v2_enabled;
   }
-#endif  // BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
+#endif
 
-#if BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   void set_allow_gssapi_library_load(bool allow_gssapi_library_load) {
     allow_gssapi_library_load_ = allow_gssapi_library_load;
   }
-#endif  // BUILDFLAG(IS_CHROMEOS)
+#endif
 
   const absl::optional<std::set<std::string>>& allowed_schemes() const {
     return allowed_schemes_;
@@ -119,7 +119,7 @@ class NET_EXPORT HttpAuthPreferences {
       const std::string& account_type) {
     auth_android_negotiate_account_type_ = account_type;
   }
-#endif  // BUILDFLAG(IS_ANDROID)
+#endif
 
  private:
   bool delegate_by_kdc_policy_ = false;
@@ -131,15 +131,15 @@ class NET_EXPORT HttpAuthPreferences {
 
 #if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
   bool ntlm_v2_enabled_ = true;
-#endif  // BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
+#endif
 
 #if BUILDFLAG(IS_ANDROID)
   std::string auth_android_negotiate_account_type_;
-#endif  // BUILDFLAG(IS_ANDROID)
+#endif
 
-#if BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   bool allow_gssapi_library_load_ = true;
-#endif  // BUILDFLAG(IS_CHROMEOS)
+#endif
 
   absl::optional<std::set<std::string>> allowed_schemes_;
   std::unique_ptr<URLSecurityManager> security_manager_;

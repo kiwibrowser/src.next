@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -90,6 +90,7 @@
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
+#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/web_applications/isolation_prefs_utils.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "content/public/browser/storage_partition_config.h"
@@ -947,23 +948,6 @@ TEST_F(ChromeContentBrowserClientSwitchTest,
       result.HasSwitch(blink::switches::kWebSQLNonSecureContextEnabled));
 }
 
-TEST_F(ChromeContentBrowserClientSwitchTest, PersistentQuotaEnabledDefault) {
-  base::CommandLine result = FetchCommandLineSwitchesForRendererProcess();
-  EXPECT_FALSE(result.HasSwitch(blink::switches::kPersistentQuotaEnabled));
-}
-
-TEST_F(ChromeContentBrowserClientSwitchTest, PersistentQuotaEnabledDisabled) {
-  profile()->GetPrefs()->SetBoolean(storage::kPersistentQuotaEnabled, false);
-  base::CommandLine result = FetchCommandLineSwitchesForRendererProcess();
-  EXPECT_FALSE(result.HasSwitch(blink::switches::kPersistentQuotaEnabled));
-}
-
-TEST_F(ChromeContentBrowserClientSwitchTest, PersistentQuotaEnabledEnabled) {
-  profile()->GetPrefs()->SetBoolean(storage::kPersistentQuotaEnabled, true);
-  base::CommandLine result = FetchCommandLineSwitchesForRendererProcess();
-  EXPECT_TRUE(result.HasSwitch(blink::switches::kPersistentQuotaEnabled));
-}
-
 #if BUILDFLAG(IS_CHROMEOS)
 TEST_F(ChromeContentBrowserClientSwitchTest,
        ShouldSetForceAppModeSwitchInRendererProcessIfItIsSetInCurrentProcess) {
@@ -980,3 +964,29 @@ TEST_F(
   EXPECT_FALSE(result.HasSwitch(switches::kForceAppMode));
 }
 #endif  // BUILDFLAG(IS_CHROMEOS)
+
+class ChromeContentBrowserGetFirstPartySetsOverridesTest
+    : public testing::Test {
+ public:
+  ChromeContentBrowserGetFirstPartySetsOverridesTest()
+      : testing_local_state_(TestingBrowserProcess::GetGlobal()) {}
+
+ protected:
+  ScopedTestingLocalState testing_local_state_;
+  ChromeContentBrowserClient client_;
+};
+
+TEST_F(ChromeContentBrowserGetFirstPartySetsOverridesTest, PrefUnset) {
+  EXPECT_EQ(client_.GetFirstPartySetsOverrides(), base::Value::Dict());
+}
+
+TEST_F(ChromeContentBrowserGetFirstPartySetsOverridesTest,
+       PrefSetWithValidDict) {
+  base::Value::Dict valid_dict;
+  valid_dict.Set("additions", base::Value(base::Value::List()));
+  base::Value expected_value(std::move(valid_dict));
+  testing_local_state_.Get()->Set(first_party_sets::kFirstPartySetsOverrides,
+                                  expected_value.Clone());
+  EXPECT_EQ(client_.GetFirstPartySetsOverrides(),
+            expected_value.Clone().GetDict());
+}

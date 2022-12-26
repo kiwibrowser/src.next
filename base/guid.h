@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,15 +11,9 @@
 #include <string>
 
 #include "base/base_export.h"
-#include "base/containers/span.h"
 #include "base/hash/hash.h"
 #include "base/strings/string_piece.h"
-#include "base/types/pass_key.h"
 #include "build/build_config.h"
-
-namespace content {
-class FileSystemAccessManagerImpl;
-}
 
 namespace base {
 
@@ -38,10 +32,6 @@ BASE_EXPORT std::string RandomDataToGUIDString(const uint64_t bytes[2]);
 
 class BASE_EXPORT GUID {
  public:
-  // Length in bytes of the input required to format the input as a GUID in the
-  // form of version 4.
-  static constexpr size_t kGuidV4InputLength = 16;
-
   // Generate a 128-bit random GUID in the form of version 4. see RFC 4122,
   // section 4.4. The format of GUID version 4 must be
   // xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx, where y is one of [8, 9, a, b]. The
@@ -49,21 +39,6 @@ class BASE_EXPORT GUID {
   // A cryptographically secure random source will be used, but consider using
   // UnguessableToken for greater type-safety if GUID format is unnecessary.
   static GUID GenerateRandomV4();
-
-  // Formats a sequence of 16 random bytes as a GUID in the form of version 4.
-  // `input` must:
-  // - have been randomly generated (e.g. created from an UnguessableToken), and
-  // - be of length 16 (this is checked at compile-time).
-  // Despite taking 128 bits of randomness, certain bits will always be
-  // masked over to adhere to the V4 GUID format.
-  // Useful in cases where an opaque identifier that is generated from stable
-  // inputs needs to be formatted as a V4 GUID. Currently only exposed to the
-  // File System Access API to return a V4 GUID for the getUniqueId() method.
-  static GUID FormatRandomDataAsV4(
-      base::span<const uint8_t, kGuidV4InputLength> input,
-      base::PassKey<content::FileSystemAccessManagerImpl> pass_key);
-  static GUID FormatRandomDataAsV4ForTesting(
-      base::span<const uint8_t, kGuidV4InputLength> input);
 
   // Returns a valid GUID if the input string conforms to the GUID format, and
   // an invalid GUID otherwise. Note that this does NOT check if the hexadecimal
@@ -105,9 +80,6 @@ class BASE_EXPORT GUID {
   bool operator>=(const GUID& other) const;
 
  private:
-  static GUID FormatRandomDataAsV4Impl(
-      base::span<const uint8_t, kGuidV4InputLength> input);
-
   // TODO(crbug.com/1026195): Consider using a different internal type.
   // Most existing representations of GUIDs in the codebase use std::string,
   // so matching the internal type will avoid inefficient string conversions

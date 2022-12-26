@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors
+// Copyright (c) 2017 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -91,7 +91,6 @@ class SecureOriginAllowlistBrowsertest
     }
 
     policy::PolicyMap values;
-#if !BUILDFLAG(IS_CHROMEOS) && !BUILDFLAG(IS_ANDROID)
     values.Set((variant == TestVariant::kPolicyOld ||
                 variant == TestVariant::kPolicyOldAndNew)
                    ? policy::key::kUnsafelyTreatInsecureOriginAsSecure
@@ -105,11 +104,6 @@ class SecureOriginAllowlistBrowsertest
                  policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
                  policy::POLICY_SOURCE_CLOUD, std::move(other_urls), nullptr);
     }
-#else
-    values.Set(policy::key::kOverrideSecurityRestrictionsOnInsecureOrigin,
-               policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
-               policy::POLICY_SOURCE_CLOUD, std::move(urls), nullptr);
-#endif  // !BUILDFLAG(IS_CHROMEOS) && !BUILDFLAG(IS_ANDROID)
 
     provider_.UpdateChromePolicy(values);
   }

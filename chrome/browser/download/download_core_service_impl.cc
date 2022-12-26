@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors
+// Copyright 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -94,10 +94,6 @@ DownloadCoreServiceImpl::GetDownloadManagerDelegate() {
   return manager_delegate_.get();
 }
 
-DownloadUIController* DownloadCoreServiceImpl::GetDownloadUIController() {
-  return download_ui_ ? download_ui_.get() : nullptr;
-}
-
 DownloadHistory* DownloadCoreServiceImpl::GetDownloadHistory() {
   if (!download_manager_created_) {
     GetDownloadManagerDelegate();
@@ -158,15 +154,6 @@ bool DownloadCoreServiceImpl::IsDownloadUiEnabled() {
   return true;
 #else
   return !extension_event_router_ || extension_event_router_->IsUiEnabled();
-#endif
-}
-
-bool DownloadCoreServiceImpl::IsDownloadObservedByExtension() {
-#if BUILDFLAG(IS_ANDROID)
-  return false;
-#else
-  return extension_event_router_ &&
-         extension_event_router_->IsDownloadObservedByExtension();
 #endif
 }
 

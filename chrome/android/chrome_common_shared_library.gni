@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors
+# Copyright 2018 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -18,6 +18,10 @@ declare_args() {
   use_relr_relocations = false
 }
 
+# TODO(cjgrant): Remove these variables once downstream stops using them.
+bundle_library_suffix = ""
+apk_pak_asset_type = "_apk"
+
 # This template contains all common configuration for native shared libraries,
 # including libchrome, monochrome, standalone webview (also called monochrome),
 # and libchromefortest (used by chrome_public_test_apk).
@@ -34,7 +38,6 @@ declare_args() {
 #      native_deps. See //chrome/android/modules/chrome_feature_modules.gni for
 #      the descriptor format.
 template("chrome_common_shared_library") {
-  forward_variables_from(invoker, TESTONLY_AND_VISIBILITY)
   _is_monochrome = defined(invoker.is_monochrome) && invoker.is_monochrome
   _is_webview = defined(invoker.is_webview) && invoker.is_webview
   _export_java_symbols = _is_monochrome || _is_webview
@@ -120,14 +123,9 @@ template("chrome_common_shared_library") {
         sources += [ "../browser/android/vr/register_jni_monochrome.cc" ]
       } else {
         sources += [ "../browser/android/vr/register_jni.cc" ]
-        if (defined(invoker.testonly) && invoker.testonly) {
-          defines = [ "JNI_REGISTRATION_FOR_TESTING" ]
-          deps += [ "//chrome/browser/android/vr:jni_registration_for_testing($default_toolchain)" ]
-        } else {
-          deps += [
-            "//chrome/browser/android/vr:jni_registration($default_toolchain)",
-          ]
-        }
+        deps += [
+          "//chrome/browser/android/vr:jni_registration($default_toolchain)",
+        ]
       }
     }
 

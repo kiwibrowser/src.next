@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors
+// Copyright 2021 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,8 @@
 #include "cc/base/math_util.h"
 #include "content/browser/renderer_host/cross_process_frame_connector.h"
 #include "content/browser/renderer_host/input/synthetic_touchscreen_pinch_gesture.h"
-#include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_child_frame.h"
 #include "content/common/input/actions_parser.h"
-#include "content/public/browser/render_process_host_priority_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -66,7 +64,7 @@ void LayoutNonRecursiveForTestingViewportIntersection(
 
 // Check |intersects_viewport| on widget and process.
 bool CheckIntersectsViewport(bool expected, FrameTreeNode* node) {
-  RenderProcessHostPriorityClient::Priority priority =
+  RenderProcessHost::Priority priority =
       node->current_frame_host()->GetRenderWidgetHost()->GetPriority();
   return priority.intersects_viewport == expected &&
          node->current_frame_host()->GetProcess()->GetIntersectsViewport() ==
@@ -1001,8 +999,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
       filter->GetIntersectionState()->main_frame_intersection.IsEmpty());
 }
 
-// Tests that outermost_main_frame_scroll_position is not shared by frames in
-// the same process. This is a regression test for https://crbug.com/1063760.
+// Tests that main_frame_scroll_position is not shared by frames in the same
+// process. This is a regression test for https://crbug.com/1063760.
 //
 // Set up the frame tree to be A(B1(C1),B2(C2)). Send IPC's with different
 // ViewportIntersection information to B1 and B2, and then check that the
@@ -1060,18 +1058,17 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Now that everything is in a stable, consistent state, we will send viewport
   // intersection IPC's to B1 and B2 that contain a different
-  // outermost_main_frame_scroll_position, and then verify that each of them
-  // propagates their own value of outermost_main_frame_scroll_position to C1
-  // and C2, respectively. The IPC code mimics messages that A would send to B1
-  // and B2.
+  // main_frame_scroll_position, and then verify that each of them propagates
+  // their own value of main_frame_scroll_position to C1 and C2, respectively.
+  // The IPC code mimics messages that A would send to B1 and B2.
   auto b1_intersection_state = b1_node->render_manager()
                                    ->GetProxyToParent()
                                    ->cross_process_frame_connector()
                                    ->intersection_state();
 
-  b1_intersection_state.outermost_main_frame_scroll_position.Offset(10, 0);
-  // A change in outermost_main_frame_scroll_position by itself will not cause
-  // B1 to be marked dirty, so we also modify viewport_intersection.
+  b1_intersection_state.main_frame_scroll_position.Offset(10, 0);
+  // A change in main_frame_scroll_position by itself will not cause B1 to be
+  // marked dirty, so we also modify viewport_intersection.
   b1_intersection_state.viewport_intersection.set_y(
       b1_intersection_state.viewport_intersection.y() + 7);
   b1_intersection_state.viewport_intersection.set_height(
@@ -1084,7 +1081,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
                                    ->cross_process_frame_connector()
                                    ->intersection_state();
 
-  b2_intersection_state.outermost_main_frame_scroll_position.Offset(20, 0);
+  b2_intersection_state.main_frame_scroll_position.Offset(20, 0);
   b2_intersection_state.viewport_intersection.set_y(
       b2_intersection_state.viewport_intersection.y() + 7);
   b2_intersection_state.viewport_intersection.set_height(
@@ -1093,16 +1090,16 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   ForceUpdateViewportIntersection(b2_node, b2_intersection_state);
 
   // Once IPC's have been flushed to the C frames, we should see conflicting
-  // values for outermost_main_frame_scroll_position.
+  // values for main_frame_scroll_position.
   flush_ipcs(b1_node);
   flush_ipcs(b2_node);
   ASSERT_TRUE(b1_to_c1_message_filter->MessageReceived());
   ASSERT_TRUE(b2_to_c2_message_filter->MessageReceived());
   EXPECT_EQ(b1_to_c1_message_filter->GetIntersectionState()
-                ->outermost_main_frame_scroll_position,
+                ->main_frame_scroll_position,
             gfx::Point(10, 0));
   EXPECT_EQ(b2_to_c2_message_filter->GetIntersectionState()
-                ->outermost_main_frame_scroll_position,
+                ->main_frame_scroll_position,
             gfx::Point(20, 0));
   b1_to_c1_message_filter->Clear();
   b2_to_c2_message_filter->Clear();
@@ -1123,10 +1120,10 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
                                         ->GetDeviceScaleFactor();
   float expected_y = device_scale_factor * 5.0;
   EXPECT_NEAR(b1_to_c1_message_filter->GetIntersectionState()
-                  ->outermost_main_frame_scroll_position.y(),
+                  ->main_frame_scroll_position.y(),
               expected_y, 1.f);
   EXPECT_NEAR(b2_to_c2_message_filter->GetIntersectionState()
-                  ->outermost_main_frame_scroll_position.y(),
+                  ->main_frame_scroll_position.y(),
               expected_y, 1.f);
 }
 
@@ -1143,7 +1140,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // Child 2 does not intersect, but shares widget with the main frame.
   FrameTreeNode* node = root->child_at(2);
-  RenderProcessHostPriorityClient::Priority priority =
+  RenderProcessHost::Priority priority =
       node->current_frame_host()->GetRenderWidgetHost()->GetPriority();
   EXPECT_TRUE(priority.intersects_viewport);
   EXPECT_TRUE(
@@ -1304,8 +1301,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, TextAutosizerPageInfo) {
 
   GURL c_url = embedded_test_server()->GetURL("c.com", "/title1.html");
   // The following is a hack so we can get an IPC watcher connected to the
-  // RenderProcessHost for C before the `blink::WebView` is created for it, and
-  // the TextAutosizerPageInfo IPC is sent to it.
+  // RenderProcessHost for C before the RenderView is created for it, and the
+  // TextAutosizerPageInfo IPC is sent to it.
   scoped_refptr<SiteInstance> c_site =
       web_contents()->GetSiteInstance()->GetRelatedSiteInstance(c_url);
   // Force creation of a render process for c's SiteInstance, this will get
@@ -1386,8 +1383,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // good way to avoid this due to various device-scale-factor. (e.g. when
   // dsf=3.375, ceil(round(50 * 3.375) / 3.375) = 51. Thus, we allow the screen
   // size in dip to be off by 1 here.
-  EXPECT_NEAR(50, connector->rect_in_parent_view_in_dip().size().width(), 1);
-  EXPECT_NEAR(50, connector->rect_in_parent_view_in_dip().size().height(), 1);
+  EXPECT_NEAR(50, connector->screen_space_rect_in_dip().size().width(), 1);
+  EXPECT_NEAR(50, connector->screen_space_rect_in_dip().size().height(), 1);
   EXPECT_EQ(gfx::Size(100, 100), rwhv_nested->GetViewBounds().size());
   EXPECT_EQ(gfx::Size(100, 100), connector->local_frame_size_in_dip());
   EXPECT_EQ(connector->local_frame_size_in_pixels(),

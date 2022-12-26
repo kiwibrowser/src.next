@@ -4,7 +4,7 @@
 
 #include "third_party/blink/renderer/core/paint/pre_paint_tree_walk.h"
 
-#include "base/types/optional_util.h"
+#include "base/stl_util.h"
 #include "third_party/blink/renderer/core/dom/document_lifecycle.h"
 #include "third_party/blink/renderer/core/frame/event_handler_registry.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
@@ -85,7 +85,6 @@ void PrePaintTreeWalk::WalkTree(LocalFrameView& root_frame_view) {
     if (auto* client = root_frame_view.GetChromeClient())
       client->InvalidateContainer();
   }
-  root_frame_view.UpdateAllPendingTransforms();
 }
 
 void PrePaintTreeWalk::Walk(LocalFrameView& frame_view,
@@ -450,8 +449,9 @@ void PrePaintTreeWalk::UpdateContextForOOFContainer(
   // context. If we're not participating in block fragmentation, the containing
   // fragment of an OOF fragment is always simply the parent.
   const LayoutBox* box = DynamicTo<LayoutBox>(&object);
-  if (!context.current_container.IsInFragmentationContext() ||
-      (box && box->GetNGPaginationBreakability() == LayoutBox::kForbidBreaks)) {
+  // TODO(crbug.com/1343746): Review the revert of the following lines.
+  if (context.current_container.fragment && box &&
+      box->GetNGPaginationBreakability() == LayoutBox::kForbidBreaks) {
     context.current_container.fragment = fragment;
   }
 
@@ -502,7 +502,7 @@ void PrePaintTreeWalk::WalkInternal(const LayoutObject& object,
 
   if (paint_invalidator_.InvalidatePaint(
           object, pre_paint_info,
-          base::OptionalToPtr(context.tree_builder_context),
+          base::OptionalOrNullptr(context.tree_builder_context),
           paint_invalidator_context))
     needs_invalidate_chrome_client_ = true;
 
@@ -922,27 +922,20 @@ void PrePaintTreeWalk::WalkLayoutObjectChildren(
     }
 
     if (box_fragment) {
-      const ContainingFragment* container_for_child =
-          &context.current_container;
-      bool is_in_different_fragmentation_context = false;
+      NGPrePaintInfo pre_paint_info(
+          *box_fragment, paint_offset, fragmentainer_idx, is_first_for_node,
+          is_last_for_node, is_inside_fragment_child,
+          context.current_container.IsInFragmentationContext());
       if (oof_containing_fragment_info &&
           context.current_container.fragmentation_nesting_level !=
               oof_containing_fragment_info->fragmentation_nesting_level) {
         // We're walking an out-of-flow positioned descendant that isn't in the
-        // same fragmentation context as parent_object. We need to update the
-        // context, so that we create FragmentData objects correctly both for
-        // the descendant and all its descendants.
-        container_for_child = oof_containing_fragment_info;
-        is_in_different_fragmentation_context = true;
-      }
-      NGPrePaintInfo pre_paint_info(
-          *box_fragment, paint_offset, fragmentainer_idx, is_first_for_node,
-          is_last_for_node, is_inside_fragment_child,
-          container_for_child->IsInFragmentationContext());
-      if (is_in_different_fragmentation_context) {
+        // same fragmentation context as parent_object. Update the context, so
+        // that we create FragmentData objects correctly both for the descendant
+        // and all its descendants.
         PrePaintTreeWalkContext oof_context(
             context, NeedsTreeBuilderContextUpdate(*child, context));
-        oof_context.current_container = *container_for_child;
+        oof_context.current_container = *oof_containing_fragment_info;
         Walk(*child, oof_context, &pre_paint_info);
       } else {
         Walk(*child, context, &pre_paint_info);
@@ -961,8 +954,8 @@ void PrePaintTreeWalk::WalkChildren(
   const LayoutBox* box = DynamicTo<LayoutBox>(&object);
   if (box) {
     if (traversable_fragment) {
-      if (!box->IsLayoutFlowThread() &&
-          (!box->IsLayoutNGObject() || !box->PhysicalFragmentCount())) {
+      if (!box->IsLayoutFlowThread() && (!box->CanTraversePhysicalFragments() ||
+                                         !box->PhysicalFragmentCount())) {
         // Leave LayoutNGBoxFragment-accompanied child LayoutObject traversal,
         // since this object doesn't support that (or has no fragments (happens
         // for table columns)). We need to switch back to legacy LayoutObject
@@ -1012,7 +1005,7 @@ void PrePaintTreeWalk::WalkChildren(
     // box-tree-wise. This is only an issue for OOF descendants, though, so only
     // examine OOF containing blocks.
     if (box && box->CanContainAbsolutePositionObjects() &&
-        box->IsLayoutNGObject() && box->PhysicalFragmentCount()) {
+        box->PhysicalFragmentCount()) {
       DCHECK_EQ(box->PhysicalFragmentCount(), 1u);
       fragment = box->GetPhysicalFragment(0);
     }

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,8 +43,6 @@
 #include "chrome/browser/profiles/keep_alive/scoped_profile_keep_alive.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/profiles/profile_selections.h"
-#include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/renderer_host/chrome_navigation_ui_data.h"
 #include "chrome/browser/safe_browsing/extension_telemetry/extension_telemetry_service.h"
 #include "chrome/browser/safe_browsing/extension_telemetry/extension_telemetry_service_factory.h"
@@ -94,10 +92,6 @@
 
 #if BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/chromeos/policy/dlp/dlp_content_manager.h"
-#endif
-
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-#include "chromeos/startup/browser_params_proxy.h"
 #endif
 
 namespace extensions {
@@ -189,37 +183,6 @@ content::BrowserContext* ChromeExtensionsBrowserClient::GetOriginalContext(
     content::BrowserContext* context) {
   DCHECK(context);
   return static_cast<Profile*>(context)->GetOriginalProfile();
-}
-
-content::BrowserContext*
-ChromeExtensionsBrowserClient::GetRedirectedContextInIncognito(
-    content::BrowserContext* context,
-    bool force_guest_profile,
-    bool force_system_profile) {
-  const ProfileSelections selections =
-      ProfileSelections::BuildRedirectedInIncognito(force_guest_profile,
-                                                    force_system_profile);
-  return selections.ApplyProfileSelection(Profile::FromBrowserContext(context));
-}
-
-content::BrowserContext*
-ChromeExtensionsBrowserClient::GetContextForRegularAndIncognito(
-    content::BrowserContext* context,
-    bool force_guest_profile,
-    bool force_system_profile) {
-  const ProfileSelections selections =
-      ProfileSelections::BuildForRegularAndIncognito(force_guest_profile,
-                                                     force_system_profile);
-  return selections.ApplyProfileSelection(Profile::FromBrowserContext(context));
-}
-
-content::BrowserContext* ChromeExtensionsBrowserClient::GetRegularProfile(
-    content::BrowserContext* context,
-    bool force_guest_profile,
-    bool force_system_profile) {
-  const ProfileSelections selections = ProfileSelections::BuildDefault(
-      force_guest_profile, force_system_profile);
-  return selections.ApplyProfileSelection(Profile::FromBrowserContext(context));
 }
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -361,10 +324,8 @@ void ChromeExtensionsBrowserClient::PermitExternalProtocolHandler() {
 
 bool ChromeExtensionsBrowserClient::IsInDemoMode() {
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-  return ash::DemoSession::IsDeviceInDemoMode();
-#elif BUILDFLAG(IS_CHROMEOS_LACROS)
-  return chromeos::BrowserParamsProxy::Get()->DeviceMode() ==
-         crosapi::mojom::DeviceMode::kDemo;
+  const auto* const demo_session = ash::DemoSession::Get();
+  return demo_session && demo_session->started();
 #else
   return false;
 #endif
@@ -389,7 +350,11 @@ bool ChromeExtensionsBrowserClient::IsAppModeForcedForApp(
 }
 
 bool ChromeExtensionsBrowserClient::IsLoggedInAsPublicAccount() {
-  return profiles::IsPublicSession();
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  return user_manager::UserManager::Get()->IsLoggedInAsPublicAccount();
+#else
+  return false;
+#endif
 }
 
 ExtensionSystemProvider*
@@ -749,9 +714,10 @@ ChromeExtensionsBrowserClient::GetRelatedContextsForExtension(
       Profile::FromBrowserContext(browser_context), extension);
 }
 
-void ChromeExtensionsBrowserClient::AddAdditionalAllowedHosts(
+std::unique_ptr<const PermissionSet>
+ChromeExtensionsBrowserClient::AddAdditionalAllowedHosts(
     const PermissionSet& desired_permissions,
-    PermissionSet* granted_permissions) const {
+    const PermissionSet& granted_permissions) const {
   auto get_new_host_patterns = [](const URLPatternSet& desired_patterns,
                                   const URLPatternSet& granted_patterns) {
     URLPatternSet new_patterns = granted_patterns.Clone();
@@ -772,12 +738,15 @@ void ChromeExtensionsBrowserClient::AddAdditionalAllowedHosts(
 
   URLPatternSet new_explicit_hosts =
       get_new_host_patterns(desired_permissions.explicit_hosts(),
-                            granted_permissions->explicit_hosts());
+                            granted_permissions.explicit_hosts());
   URLPatternSet new_scriptable_hosts =
       get_new_host_patterns(desired_permissions.scriptable_hosts(),
-                            granted_permissions->scriptable_hosts());
-  granted_permissions->SetExplicitHosts(std::move(new_explicit_hosts));
-  granted_permissions->SetScriptableHosts(std::move(new_scriptable_hosts));
+                            granted_permissions.scriptable_hosts());
+
+  return std::make_unique<PermissionSet>(
+      granted_permissions.apis().Clone(),
+      granted_permissions.manifest_permissions().Clone(),
+      std::move(new_explicit_hosts), std::move(new_scriptable_hosts));
 }
 
 }  // namespace extensions

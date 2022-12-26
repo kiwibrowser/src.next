@@ -1,4 +1,4 @@
-// Copyright 2011 The Chromium Authors
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -139,24 +139,9 @@ inline internal::UnretainedWrapper<T> Unretained(T* o) {
   return internal::UnretainedWrapper<T>(o);
 }
 
-template <typename T, typename I>
-inline internal::UnretainedWrapper<T> Unretained(const raw_ptr<T, I>& o) {
+template <typename T, typename O>
+inline internal::UnretainedWrapper<T> Unretained(const raw_ptr<T, O>& o) {
   return internal::UnretainedWrapper<T>(o);
-}
-
-template <typename T, typename I>
-inline internal::UnretainedWrapper<T> Unretained(raw_ptr<T, I>&& o) {
-  return internal::UnretainedWrapper<T>(std::move(o));
-}
-
-template <typename T, typename I>
-inline auto Unretained(const raw_ref<T, I>& o) {
-  return internal::UnretainedRefWrapper(o);
-}
-
-template <typename T, typename I>
-inline auto Unretained(raw_ref<T, I>&& o) {
-  return internal::UnretainedRefWrapper(std::move(o));
 }
 
 // RetainedRef() accepts a ref counted object and retains a reference to it.

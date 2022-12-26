@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -104,10 +104,11 @@ void NetworkDelegate::NotifyPACScriptError(int line_number,
 bool NetworkDelegate::AnnotateAndMoveUserBlockedCookies(
     const URLRequest& request,
     net::CookieAccessResultList& maybe_included_cookies,
-    net::CookieAccessResultList& excluded_cookies) {
+    net::CookieAccessResultList& excluded_cookies,
+    bool allowed_from_caller) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   bool allowed = OnAnnotateAndMoveUserBlockedCookies(
-      request, maybe_included_cookies, excluded_cookies);
+      request, maybe_included_cookies, excluded_cookies, allowed_from_caller);
   cookie_util::DCheckIncludedAndExcludedCookieLists(maybe_included_cookies,
                                                     excluded_cookies);
   return allowed;
@@ -115,10 +116,11 @@ bool NetworkDelegate::AnnotateAndMoveUserBlockedCookies(
 
 bool NetworkDelegate::CanSetCookie(const URLRequest& request,
                                    const CanonicalCookie& cookie,
-                                   CookieOptions* options) {
+                                   CookieOptions* options,
+                                   bool allowed_from_caller) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(!(request.load_flags() & LOAD_DO_NOT_SAVE_COOKIES));
-  return OnCanSetCookie(request, cookie, options);
+  return OnCanSetCookie(request, cookie, options, allowed_from_caller);
 }
 
 NetworkDelegate::PrivacySetting NetworkDelegate::ForcePrivacyMode(

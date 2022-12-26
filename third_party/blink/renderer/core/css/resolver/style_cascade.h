@@ -254,9 +254,7 @@ class CORE_EXPORT StyleCascade {
     explicit TokenSequence(const CSSVariableData*);
 
     bool IsAnimationTainted() const { return is_animation_tainted_; }
-    CSSParserTokenRange TokenRange() const {
-      return CSSParserTokenRange{tokens_};
-    }
+    CSSParserTokenRange TokenRange() const { return tokens_; }
 
     bool Append(const TokenSequence&, wtf_size_t);
     bool Append(CSSVariableData* data,
@@ -266,7 +264,7 @@ class CORE_EXPORT StyleCascade {
     scoped_refptr<CSSVariableData> BuildVariableData();
 
    private:
-    bool AppendTokens(base::span<const CSSParserToken>, wtf_size_t);
+    bool AppendTokens(const Vector<CSSParserToken>&, wtf_size_t);
 
     Vector<CSSParserToken> tokens_;
     Vector<scoped_refptr<const CSSVariableData>> variable_data_;

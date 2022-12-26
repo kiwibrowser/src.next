@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -143,7 +143,7 @@ bool GetExtensionIdSet(const base::DictionaryValue& dictionary,
   const base::ListValue* id_list = nullptr;
   if (!dictionary.GetList(key, &id_list))
     return false;
-  for (const auto& entry : id_list->GetList()) {
+  for (const auto& entry : id_list->GetListDeprecated()) {
     if (!entry.is_string()) {
       return false;
     }
@@ -193,17 +193,16 @@ std::unique_ptr<InstallSignature> InstallSignature::FromValue(
     return result;
   }
 
-  const base::Value::Dict& dict = value.GetDict();
-  const std::string* expire_date = dict.FindString(kExpireDateKey);
-  const std::string* salt_base64 = dict.FindString(kSaltKey);
-  const std::string* signature_base64 = dict.FindString(kSignatureKey);
-  if (!expire_date || !salt_base64 || !signature_base64 ||
-      !base::Base64Decode(*salt_base64, &result->salt) ||
-      !base::Base64Decode(*signature_base64, &result->signature)) {
+  std::string salt_base64;
+  std::string signature_base64;
+  if (!value.GetString(kExpireDateKey, &result->expire_date) ||
+      !value.GetString(kSaltKey, &salt_base64) ||
+      !value.GetString(kSignatureKey, &signature_base64) ||
+      !base::Base64Decode(salt_base64, &result->salt) ||
+      !base::Base64Decode(signature_base64, &result->signature)) {
     result.reset();
     return result;
   }
-  result->expire_date = *expire_date;
 
   // Note: earlier versions of the code did not write out a timestamp value
   // so older entries will not necessarily have this.
@@ -399,27 +398,23 @@ void InstallSigner::ParseFetchResponse(
   // where |invalid_ids| is a list of ids from the original request that
   // could not be verified to be in the webstore.
 
-  absl::optional<base::Value> parsed = base::JSONReader::Read(*response_body);
-  bool json_success = parsed && parsed->is_dict();
+  base::DictionaryValue* dictionary = NULL;
+  std::unique_ptr<base::Value> parsed =
+      base::JSONReader::ReadDeprecated(*response_body);
+  bool json_success = parsed.get() && parsed->GetAsDictionary(&dictionary);
   if (!json_success) {
     ReportErrorViaCallback();
     return;
   }
-  base::Value::Dict& dictionary = parsed->GetDict();
 
-  int protocol_version = dictionary.FindInt(kProtocolVersionKey).value_or(0);
+  int protocol_version =
+      dictionary->FindIntKey(kProtocolVersionKey).value_or(0);
   std::string signature_base64;
   std::string signature;
   std::string expire_date;
 
-  if (const std::string* maybe_signature_base64 =
-          dictionary.FindString(kSignatureKey)) {
-    signature_base64 = *maybe_signature_base64;
-  }
-  if (const std::string* maybe_expire_date =
-          dictionary.FindString(kExpiryKey)) {
-    expire_date = *maybe_expire_date;
-  }
+  dictionary->GetString(kSignatureKey, &signature_base64);
+  dictionary->GetString(kExpiryKey, &expire_date);
 
   bool fields_success =
       protocol_version == 1 && !signature_base64.empty() &&
@@ -431,10 +426,10 @@ void InstallSigner::ParseFetchResponse(
   }
 
   ExtensionIdSet invalid_ids;
-  const base::Value::List* invalid_ids_list =
-      dictionary.FindList(kInvalidIdsKey);
+  const base::Value* invalid_ids_list = dictionary->FindListKey(kInvalidIdsKey);
   if (invalid_ids_list) {
-    for (const base::Value& invalid_id : *invalid_ids_list) {
+    for (const base::Value& invalid_id :
+         invalid_ids_list->GetListDeprecated()) {
       const std::string* id = invalid_id.GetIfString();
       if (!id) {
         ReportErrorViaCallback();

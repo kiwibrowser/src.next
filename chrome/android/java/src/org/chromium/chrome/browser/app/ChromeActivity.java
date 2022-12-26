@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors
+// Copyright 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,8 +47,8 @@ import org.chromium.base.PowerMonitor;
 import org.chromium.base.StrictModeContext;
 import org.chromium.base.SysUtils;
 import org.chromium.base.TraceEvent;
+import org.chromium.base.annotations.UsedByReflection;
 import org.chromium.base.jank_tracker.DummyJankTracker;
-import org.chromium.base.memory.MemoryPurgeManager;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.base.supplier.ObservableSupplier;
@@ -57,7 +57,6 @@ import org.chromium.base.supplier.OneshotSupplier;
 import org.chromium.base.supplier.OneshotSupplierImpl;
 import org.chromium.base.supplier.Supplier;
 import org.chromium.base.supplier.UnownedUserDataSupplier;
-import org.chromium.build.annotations.UsedByReflection;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ActivityTabProvider;
 import org.chromium.chrome.browser.ActivityUtils;
@@ -85,7 +84,7 @@ import org.chromium.chrome.browser.bookmarks.BookmarkBridge;
 import org.chromium.chrome.browser.bookmarks.BookmarkModel;
 import org.chromium.chrome.browser.bookmarks.PowerBookmarkUtils;
 import org.chromium.chrome.browser.bookmarks.TabBookmarker;
-import org.chromium.chrome.browser.commerce.ShoppingFeatures;
+import org.chromium.chrome.browser.commerce.shopping_list.ShoppingFeatures;
 import org.chromium.chrome.browser.compositor.CompositorViewHolder;
 import org.chromium.chrome.browser.compositor.layouts.Layout;
 import org.chromium.chrome.browser.compositor.layouts.LayoutManagerImpl;
@@ -161,11 +160,9 @@ import org.chromium.chrome.browser.tab.RequestDesktopUtils;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabHidingType;
 import org.chromium.chrome.browser.tab.TabLaunchType;
-import org.chromium.chrome.browser.tab.TabObscuringHandler;
 import org.chromium.chrome.browser.tab.TabSelectionType;
 import org.chromium.chrome.browser.tab.TabState;
 import org.chromium.chrome.browser.tab.TabUtils;
-import org.chromium.chrome.browser.tab.TabUtils.LoadIfNeededCaller;
 import org.chromium.chrome.browser.tab.TabUtils.UseDesktopUserAgentCaller;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModel;
 import org.chromium.chrome.browser.tabmodel.TabCreator;
@@ -174,7 +171,6 @@ import org.chromium.chrome.browser.tabmodel.TabCreatorManagerSupplier;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelInitializer;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.chrome.browser.tabmodel.TabModelSelectorObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorProfileSupplier;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorSupplier;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorTabObserver;
@@ -186,6 +182,7 @@ import org.chromium.chrome.browser.translate.TranslateAssistContent;
 import org.chromium.chrome.browser.translate.TranslateBridge;
 import org.chromium.chrome.browser.ui.BottomContainer;
 import org.chromium.chrome.browser.ui.RootUiCoordinator;
+import org.chromium.chrome.browser.ui.TabObscuringHandler;
 import org.chromium.chrome.browser.ui.appmenu.AppMenuBlocker;
 import org.chromium.chrome.browser.ui.appmenu.AppMenuDelegate;
 import org.chromium.chrome.browser.ui.appmenu.AppMenuPropertiesDelegate;
@@ -799,11 +796,6 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
         mInsetObserverViewSupplier.set(InsetObserverView.create(this));
         rootView.addView(mInsetObserverViewSupplier.get(), 0);
 
-        if (ChromeFeatureList.sOSKResizesVisualViewport.isEnabled()) {
-            getWindowAndroid().getApplicationBottomInsetProvider().addStackingSupplier(
-                    mInsetObserverViewSupplier.get().getSupplierForBottomInset());
-        }
-
         super.onInitialLayoutInflationComplete();
     }
 
@@ -852,14 +844,6 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
                 postDeferredStartupIfNeeded();
             }
         };
-
-        tabModelSelector.addObserver(new TabModelSelectorObserver() {
-            @Override
-            public void onTabStateInitialized() {
-                RequestDesktopUtils.maybeDowngradeSiteSettings(tabModelSelector);
-                tabModelSelector.removeObserver(this);
-            }
-        });
     }
 
     /**
@@ -1003,12 +987,11 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
         Tab tab = getActivityTab();
         if (tab != null) {
             if (tab.isHidden()) {
-                tab.show(
-                        TabSelectionType.FROM_USER, LoadIfNeededCaller.ON_ACTIVITY_SHOWN_THEN_SHOW);
+                tab.show(TabSelectionType.FROM_USER);
             } else {
                 // The visible Tab's renderer process may have died after the activity was
                 // paused. Ensure that it's restored appropriately.
-                tab.loadIfNeeded(LoadIfNeededCaller.ON_ACTIVITY_SHOWN);
+                tab.loadIfNeeded();
             }
         }
         VrModuleProvider.getDelegate().onActivityShown(this);
@@ -1282,9 +1265,7 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
 
         super.onNewIntentWithNative(intent);
         getLaunchCauseMetrics().onReceivedIntent();
-        if (mIntentHandler.shouldIgnoreIntent(intent, /*startedActivity=*/false, isCustomTab())) {
-            return;
-        }
+        if (mIntentHandler.shouldIgnoreIntent(intent, /*startedActivity=*/false)) return;
 
         // We send this intent so that we can enter WebVr presentation mode if needed. This
         // call doesn't consume the intent because it also has the url that we need to load.
@@ -1376,9 +1357,6 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
                 createContextReporterIfNeeded();
             });
         }
-
-        DeferredStartupHandler.getInstance().addDeferredTask(
-                () -> { MemoryPurgeManager.getInstance().start(); });
     }
 
     /**
@@ -2058,12 +2036,6 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
         compositorViewHolder.setInsetObserverView(mInsetObserverViewSupplier.get());
         compositorViewHolder.setAutofillUiBottomInsetSupplier(
                 mManualFillingComponentSupplier.get().getBottomInsetSupplier());
-
-        if (ChromeFeatureList.sOSKResizesVisualViewport.isEnabled()) {
-            getWindowAndroid().getApplicationBottomInsetProvider().addStackingSupplier(
-                    mManualFillingComponentSupplier.get().getBottomInsetSupplier());
-        }
-
         compositorViewHolder.setTopUiThemeColorProvider(
                 mRootUiCoordinator.getTopUiThemeColorProvider());
         compositorViewHolder.onFinishNativeInitialization(getTabModelSelector(), this);
@@ -2132,13 +2104,13 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
             if (mTabReparentingControllerSupplier.get() != null && didChangeTabletMode()) {
                 onScreenLayoutSizeChange();
             }
-            // For UI mode type, we only need to recreate for TELEVISION to update refresh rate.
-            // Note that if UI mode night changes, with or without other changes, we will
-            // still recreate() when we get a callback from the
-            // ChromeBaseAppCompatActivity#onNightModeStateChanged or the overridden method in
+            // We only handle VR UI mode and UI mode night changes. Any other changes should follow
+            // the default behavior of recreating the activity. Note that if UI mode night changes,
+            // with or without other changes, we will still recreate() until we get a callback from
+            // the ChromeBaseAppCompatActivity#onNightModeStateChanged or the overridden method in
             // sub-classes if necessary.
-            if (didChangeUiModeType(
-                        mConfig.uiMode, newConfig.uiMode, Configuration.UI_MODE_TYPE_TELEVISION)) {
+            if (didChangeNonVrUiMode(mConfig.uiMode, newConfig.uiMode)
+                    && !didChangeUiModeNight(mConfig.uiMode, newConfig.uiMode)) {
                 recreate();
                 return;
             }
@@ -2161,14 +2133,18 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
         mConfig = newConfig;
     }
 
-    // Checks whether the given uiModeTypes were present on oldUiMode or newUiMode but not the
-    // other.
-    private static boolean didChangeUiModeType(int oldUiMode, int newUiMode, int uiModeType) {
-        return isInUiModeType(oldUiMode, uiModeType) != isInUiModeType(newUiMode, uiModeType);
+    private static boolean didChangeNonVrUiMode(int oldMode, int newMode) {
+        if (oldMode == newMode) return false;
+        return isInVrUiMode(oldMode) == isInVrUiMode(newMode);
     }
 
-    private static boolean isInUiModeType(int uiMode, int uiModeType) {
-        return (uiMode & Configuration.UI_MODE_TYPE_MASK) == uiModeType;
+    private static boolean isInVrUiMode(int uiMode) {
+        return (uiMode & Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_VR_HEADSET;
+    }
+
+    private static boolean didChangeUiModeNight(int oldMode, int newMode) {
+        return (oldMode & Configuration.UI_MODE_NIGHT_MASK)
+                != (newMode & Configuration.UI_MODE_NIGHT_MASK);
     }
 
     /**
@@ -2283,8 +2259,7 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
         handleBackPressed();
     }
 
-    @CallSuper
-    protected void initializeBackPressHandling() {
+    private void initializeBackPressHandling() {
         if (BackPressManager.isEnabled()) {
             getOnBackPressedDispatcher().addCallback(this, mBackPressManager.getCallback());
             // TODO(crbug.com/1279941): consider move to RootUiCoordinator.
@@ -2590,13 +2565,9 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
                 RequestDesktopUtils.setRequestDesktopSiteContentSettingsForUrl(
                         profile, currentTab.getUrl(), usingDesktopUserAgent);
                 currentTab.reload();
-                RequestDesktopUtils.maybeShowUserEducationPromptForAppMenuSelection(
-                        profile, this, getModalDialogManager());
             } else {
                 TabUtils.switchUserAgent(currentTab, usingDesktopUserAgent, /* forcedByUser */ true,
                         UseDesktopUserAgentCaller.ON_MENU_OR_KEYBOARD_ACTION);
-                TrackerFactory.getTrackerForProfile(Profile.getLastUsedRegularProfile())
-                        .notifyEvent(EventConstants.APP_MENU_DESKTOP_SITE_FOR_TAB_CLICKED);
             }
             RequestDesktopUtils.recordUserChangeUserAgent(usingDesktopUserAgent, getActivityTab());
             return true;
@@ -2746,15 +2717,6 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
         // 20dp granularity.
         RecordHistogram.recordLinearCountHistogram(
                 "Android.DeviceSize.LargestDisplaySize2", largestDisplaySize, 200, 2000, 92);
-
-        double screenSizeInches = mRootUiCoordinator.getPrimaryDisplaySizeInInches();
-        // A sample value 10 times the screen size in inches will be used to support a granularity
-        // of 0.2" (or 2 units of the recorded value) for devices ranging from 4" to 15" (inclusive)
-        // in screen size. Two additional buckets will account for underflow and overflow screen
-        // sizes.
-        int sample = (int) (screenSizeInches * 10.0);
-        RecordHistogram.recordLinearCountHistogram(
-                "Android.DeviceSize.ScreenSizeInTensOfInches", sample, 40, 152, 58);
     }
 
     @Override

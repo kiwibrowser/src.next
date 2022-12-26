@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -160,7 +160,6 @@ class SandboxedUnpacker : public ImageSanitizer::Client {
 
  private:
   friend class SandboxedUnpackerTest;
-  class IOThreadState;
 
   ~SandboxedUnpacker() override;
 
@@ -316,8 +315,20 @@ class SandboxedUnpacker : public ImageSanitizer::Client {
   // The decoded install icon.
   SkBitmap install_icon_;
 
-  // TODO(crbug.com/1346172): Consider to wrap it in base::SequenceBound
-  std::unique_ptr<IOThreadState> io_thread_state_;
+  // Controls our own lazily started, isolated instance of the Data Decoder
+  // service so that multiple decode operations related to this
+  // SandboxedUnpacker can share a single instance.
+  data_decoder::DataDecoder data_decoder_;
+
+  // The JSONParser remote from the data decoder service.
+  mojo::Remote<data_decoder::mojom::JsonParser> json_parser_;
+
+  // The ImageSanitizer used to clean-up images.
+  std::unique_ptr<ImageSanitizer> image_sanitizer_;
+
+  // Used during the message catalog rewriting phase to sanitize the extension
+  // provided message catalogs.
+  std::unique_ptr<JsonFileSanitizer> json_file_sanitizer_;
 };
 
 }  // namespace extensions

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors
+// Copyright 2022 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,22 +18,12 @@ namespace {
 
 // Array of features exposed through the Java ExternalIntentsFeatures API.
 const base::Feature* kFeaturesExposedToJava[] = {
-    &kAutofillAssistantGoogleInitiatorOriginCheck,
-    &kExternalNavigationDebugLogs, &kScaryExternalNavigationRefactoring};
+    &kScaryExternalNavigationRefactoring,
+};
 
 }  // namespace
 
 // Alphabetical:
-
-// Uses the initiator origin to check whether a navigation was started from a
-// Google domain.
-const base::Feature kAutofillAssistantGoogleInitiatorOriginCheck{
-    "AutofillAssistantGoogleInitiatorOriginCheck",
-    base::FEATURE_ENABLED_BY_DEFAULT};
-
-const base::Feature kExternalNavigationDebugLogs{
-    "ExternalNavigationDebugLogs", base::FEATURE_DISABLED_BY_DEFAULT};
-
 const base::Feature kScaryExternalNavigationRefactoring{
     "ScaryExternalNavigationRefactoring", base::FEATURE_ENABLED_BY_DEFAULT};
 

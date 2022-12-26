@@ -397,7 +397,7 @@ void WebAssociatedURLLoaderImpl::LoadAsynchronously(
     task_runner = observer_->GetExecutionContext()->GetTaskRunner(
         TaskType::kInternalLoading);
   } else {
-    task_runner = Thread::Current()->GetDeprecatedTaskRunner();
+    task_runner = Thread::Current()->GetTaskRunner();
   }
   client_ = client;
   client_adapter_ = MakeGarbageCollected<ClientAdapter>(

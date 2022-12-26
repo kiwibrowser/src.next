@@ -22,8 +22,9 @@ class LocalFrame;
 class WebURLLoader;
 class WebURLRequest;
 
-// This class holds the prefetched signed exchange info and will returns
-// loaders for matching requests.
+// For SignedExchangeSubresourcePrefetch feature. This class holds the
+// prefetched signed exchange info and will returns loaders for matching
+// requests.
 class PrefetchedSignedExchangeManager final
     : public GarbageCollected<PrefetchedSignedExchangeManager> {
  public:

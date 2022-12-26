@@ -48,31 +48,17 @@ bool Matches(const ComputedStyle& style,
          TypeMatches(style, container_selector);
 }
 
-Element* CachedContainer(Element* starting_element,
-                         const ContainerSelector& container_selector,
-                         ContainerSelectorCache& container_selector_cache) {
-  ContainerSelectorCache::AddResult add_result =
-      container_selector_cache.insert(container_selector, nullptr);
-
-  if (add_result.is_new_entry) {
-    add_result.stored_value->value = ContainerQueryEvaluator::FindContainer(
-        starting_element, container_selector);
-  }
-
-  return add_result.stored_value->value.Get();
-}
-
 }  // namespace
 
 // static
 Element* ContainerQueryEvaluator::FindContainer(
-    Element* starting_element,
+    Element* context_element,
     const ContainerSelector& container_selector) {
   // TODO(crbug.com/1213888): Cache results.
-  for (Element* element = starting_element; element;
+  for (Element* element = context_element; element;
        element = element->ParentOrShadowHostElement()) {
     if (const ComputedStyle* style = element->GetComputedStyle()) {
-      if (style->StyleType() == kPseudoIdNone &&
+      if (style->IsContainerForSizeContainerQueries() &&
           Matches(*style, container_selector)) {
         return element;
       }
@@ -82,36 +68,18 @@ Element* ContainerQueryEvaluator::FindContainer(
   return nullptr;
 }
 
-bool ContainerQueryEvaluator::EvalAndAdd(
-    const Element& matching_element,
-    const StyleRecalcContext& context,
-    const ContainerQuery& query,
-    ContainerSelectorCache& container_selector_cache,
-    MatchResult& match_result) {
-  const ContainerSelector& selector = query.Selector();
-  bool selects_size = selector.SelectsSizeContainers();
-  bool selects_style = selector.SelectsStyleContainers();
-  if (!selects_size && !selects_style)
-    return false;
-
-  Element* starting_element =
-      selects_size ? context.container
-                   : matching_element.ParentOrShadowHostElement();
-  Element* container = CachedContainer(starting_element, query.Selector(),
-                                       container_selector_cache);
+bool ContainerQueryEvaluator::EvalAndAdd(const StyleRecalcContext& context,
+                                         const ContainerQuery& query,
+                                         MatchResult& match_result) {
+  Element* container = FindContainer(context.container, query.Selector());
   if (!container)
     return false;
-
   ContainerQueryEvaluator* evaluator = container->GetContainerQueryEvaluator();
-  if (!evaluator) {
-    if (selects_size || !selects_style)
-      return false;
-    evaluator = &container->EnsureContainerQueryEvaluator();
-    evaluator->SetData(container->GetDocument(), *container, PhysicalSize(),
-                       kPhysicalAxisNone);
-  }
-  Change change = starting_element == container ? Change::kNearestContainer
-                                                : Change::kDescendantContainers;
+  if (!evaluator)
+    return false;
+  Change change = (context.container == container)
+                      ? Change::kNearestContainer
+                      : Change::kDescendantContainers;
   return evaluator->EvalAndAdd(query, change, match_result);
 }
 
@@ -123,76 +91,41 @@ double ContainerQueryEvaluator::Height() const {
   return size_.height.ToDouble();
 }
 
-ContainerQueryEvaluator::Result ContainerQueryEvaluator::Eval(
+bool ContainerQueryEvaluator::Eval(
     const ContainerQuery& container_query) const {
+  return Eval(container_query, nullptr /* result_flags */);
+}
+
+bool ContainerQueryEvaluator::Eval(const ContainerQuery& container_query,
+                                   MediaQueryResultFlags* result_flags) const {
   if (!media_query_evaluator_)
-    return Result();
-
-  MediaQueryResultFlags result_flags;
-  bool value =
-      (media_query_evaluator_->Eval(*container_query.query_, &result_flags) ==
-       KleeneValue::kTrue);
-
-  Result result;
-  result.value = value;
-  result.unit_flags = result_flags.unit_flags;
-  return result;
+    return false;
+  return media_query_evaluator_->Eval(*container_query.query_, result_flags) ==
+         KleeneValue::kTrue;
 }
 
 bool ContainerQueryEvaluator::EvalAndAdd(const ContainerQuery& query,
                                          Change change,
                                          MatchResult& match_result) {
-  HeapHashMap<Member<const ContainerQuery>, Result>::AddResult entry =
-      results_.insert(&query, Result());
-
-  Result& result = entry.stored_value->value;
-
-  // We can only use the cached values when evaluating queries whose results
-  // would have been cleared by [Size,Style]ContainerChanged. The following
-  // represents dependencies on external circumstance that can change without
-  // ContainerQueryEvaluator being notified.
-  bool use_cached =
-      (result.unit_flags & (MediaQueryExpValue::UnitFlags::kRootFontRelative |
-                            MediaQueryExpValue::UnitFlags::kDynamicViewport |
-                            MediaQueryExpValue::UnitFlags::kStaticViewport |
-                            MediaQueryExpValue::UnitFlags::kContainer)) == 0;
-  bool has_cached = !entry.is_new_entry;
-
-  if (has_cached && use_cached) {
-    // Verify that the cached result is equal to the value we would get
-    // had we Eval'ed in full.
-#if EXPENSIVE_DCHECKS_ARE_ON()
-    Result actual = Eval(query);
-
-    // This ignores `change`, because it's not actually part of Eval's result.
-    DCHECK_EQ(result.value, actual.value);
-    DCHECK_EQ(result.unit_flags, actual.unit_flags);
-#endif  // EXPENSIVE_DCHECKS_ARE_ON()
-  } else {
-    result = Eval(query);
-  }
-
-  // Store the most severe `Change` seen.
-  result.change = std::max(result.change, change);
-
-  if (result.unit_flags & MediaQueryExpValue::UnitFlags::kDynamicViewport)
+  MediaQueryResultFlags result_flags;
+  bool result = Eval(query, &result_flags);
+  unsigned unit_flags = result_flags.unit_flags;
+  if (unit_flags & MediaQueryExpValue::UnitFlags::kDynamicViewport)
     match_result.SetDependsOnDynamicViewportUnits();
   // Note that container-relative units *may* fall back to the small viewport,
   // hence we also set the DependsOnStaticViewportUnits flag when in that case.
-  if (result.unit_flags & (MediaQueryExpValue::UnitFlags::kStaticViewport |
-                           MediaQueryExpValue::UnitFlags::kContainer)) {
+  if (unit_flags & (MediaQueryExpValue::UnitFlags::kStaticViewport |
+                    MediaQueryExpValue::UnitFlags::kContainer)) {
     match_result.SetDependsOnStaticViewportUnits();
   }
-  if (result.unit_flags & MediaQueryExpValue::UnitFlags::kRootFontRelative)
+  if (unit_flags & MediaQueryExpValue::UnitFlags::kRootFontRelative)
     match_result.SetDependsOnRemContainerQueries();
-  if (!depends_on_style_)
-    depends_on_style_ = query.Selector().SelectsStyleContainers();
-  unit_flags_ |= result.unit_flags;
-
-  return result.value;
+  results_.Set(&query, Result{result, unit_flags, change});
+  unit_flags_ |= unit_flags;
+  return result;
 }
 
-ContainerQueryEvaluator::Change ContainerQueryEvaluator::SizeContainerChanged(
+ContainerQueryEvaluator::Change ContainerQueryEvaluator::ContainerChanged(
     Document& document,
     Element& container,
     PhysicalSize size,
@@ -203,23 +136,10 @@ ContainerQueryEvaluator::Change ContainerQueryEvaluator::SizeContainerChanged(
   SetData(document, container, size, contained_axes);
   font_dirty_ = false;
 
-  Change change = ComputeSizeChange();
+  Change change = ComputeChange();
 
   if (change != Change::kNone)
-    ClearResults(change, kSizeContainer);
-
-  return change;
-}
-
-ContainerQueryEvaluator::Change
-ContainerQueryEvaluator::StyleContainerChanged() {
-  if (!depends_on_style_)
-    return Change::kNone;
-
-  Change change = ComputeStyleChange();
-
-  if (change != Change::kNone)
-    ClearResults(change, kStyleContainer);
+    ClearResults(change);
 
   return change;
 }
@@ -262,63 +182,50 @@ void ContainerQueryEvaluator::SetData(Document& document,
       MakeGarbageCollected<MediaQueryEvaluator>(query_values);
 }
 
-void ContainerQueryEvaluator::ClearResults(Change change,
-                                           ContainerType container_type) {
-  if (change == Change::kNone)
-    return;
-  if (change == Change::kDescendantContainers) {
-    if (container_type == kSizeContainer)
-      referenced_by_unit_ = false;
-    else
-      depends_on_style_ = false;
-  }
-  unit_flags_ = 0;
-
-  HeapHashMap<Member<const ContainerQuery>, Result> new_results;
-  for (const auto& pair : results_) {
-    if (pair.value.change <= change &&
-        ((container_type == kSizeContainer &&
-          pair.key->Selector().SelectsSizeContainers()) ||
-         (container_type == kStyleContainer &&
-          pair.key->Selector().SelectsStyleContainers()))) {
-      continue;
+void ContainerQueryEvaluator::ClearResults(Change change) {
+  switch (change) {
+    case Change::kNone:
+      NOTREACHED();
+      break;
+    case Change::kNearestContainer: {
+      DCHECK(!referenced_by_unit_);
+      // We are going to recalculate the style of all descendants which depend
+      // on this container, *excluding* those that exist within nested
+      // containers. Therefore all entries with `change` greater than
+      // kNearestContainer need to remain.
+      unit_flags_ = 0;
+      HeapHashMap<Member<const ContainerQuery>, Result> new_results;
+      for (const auto& pair : results_) {
+        if (pair.value.change > change) {
+          new_results.Set(pair.key, pair.value);
+          unit_flags_ |= pair.value.unit_flags;
+        }
+      }
+      std::swap(new_results, results_);
+      break;
     }
-    new_results.Set(pair.key, pair.value);
-    unit_flags_ |= pair.value.unit_flags;
+    case Change::kDescendantContainers: {
+      // We are going to recalculate the style of all descendants which
+      // depend on this container, *including* those that exist within nested
+      // containers. Therefore all results will be repopulated, and we can clear
+      // everything.
+      results_.clear();
+      referenced_by_unit_ = false;
+      unit_flags_ = 0;
+      break;
+    }
   }
-
-  std::swap(new_results, results_);
 }
 
-ContainerQueryEvaluator::Change ContainerQueryEvaluator::ComputeSizeChange()
-    const {
+ContainerQueryEvaluator::Change ContainerQueryEvaluator::ComputeChange() const {
+  Change change = Change::kNone;
+
   if (referenced_by_unit_)
     return Change::kDescendantContainers;
 
-  Change change = Change::kNone;
-
   for (const auto& result : results_) {
-    const ContainerQuery& query = *result.key;
-    if (!query.Selector().SelectsSizeContainers())
-      continue;
-    if (Eval(query).value != result.value.value)
-      change = std::max(result.value.change, change);
-  }
-
-  return change;
-}
-
-ContainerQueryEvaluator::Change ContainerQueryEvaluator::ComputeStyleChange()
-    const {
-  Change change = Change::kNone;
-
-  for (const auto& result : results_) {
-    const ContainerQuery& query = *result.key;
-    if (!query.Selector().SelectsStyleContainers())
-      continue;
-    if (Eval(query).value == result.value.value)
-      continue;
-    change = std::max(result.value.change, change);
+    if (Eval(*result.key) != result.value.value)
+      change = std::max(change, result.value.change);
   }
 
   return change;

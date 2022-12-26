@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -472,8 +472,7 @@ void ExpireHistoryBackend::DeleteVisitRelatedInfo(const VisitVector& visits,
     }
 
     // Delete content & context annotations associated with visit.
-    if (visit.visit_id)
-      main_db_->DeleteAnnotationsForVisit(visit.visit_id);
+    main_db_->DeleteAnnotationsForVisit(visit.visit_id);
 
     notifier_->NotifyVisitDeleted(visit);
   }

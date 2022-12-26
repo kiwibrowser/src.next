@@ -11,6 +11,7 @@
 #include "services/network/public/mojom/web_sandbox_flags.mojom-blink.h"
 #include "third_party/blink/public/common/action_after_pagehide.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/post_message_helper.h"
+#include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_window.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_window_post_message_options.h"
@@ -37,7 +38,6 @@
 #include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
-#include "third_party/blink/renderer/platform/bindings/source_location.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
@@ -611,7 +611,7 @@ void DOMWindow::ReportCoopAccess(const char* property_name) {
 
     // TODO(arthursonzogni): Send the blocked-window-url.
 
-    auto location = CaptureSourceLocation(
+    auto location = SourceLocation::Capture(
         ExecutionContext::From(isolate->GetCurrentContext()));
     // TODO(arthursonzogni): Once implemented, use the SourceLocation typemap
     // https://chromium-review.googlesource.com/c/chromium/src/+/2041657

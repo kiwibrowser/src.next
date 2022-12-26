@@ -1,8 +1,17 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/logging.h"
+#include <atomic>
+#include <memory>
+
+// logging.h is a widely included header and its size has significant impact on
+// build time. Try not to raise this limit unless absolutely necessary. See
+// https://chromium.googlesource.com/chromium/src/+/HEAD/docs/wmax_tokens.md
+#ifndef NACL_TC_REV
+#pragma clang max_tokens_here 470000
+#endif  // NACL_TC_REV
 
 #ifdef BASE_CHECK_H_
 #error "logging.h should not include check.h"
@@ -11,28 +20,20 @@
 #include <limits.h>
 #include <stdint.h>
 
-#include <atomic>
-#include <memory>
 #include <tuple>
 #include <vector>
 
 #include "base/base_export.h"
 #include "base/debug/crash_logging.h"
+#if defined(LEAK_SANITIZER) && !BUILDFLAG(IS_NACL)
+#include "base/debug/leak_annotations.h"
+#endif  // defined(LEAK_SANITIZER) && !BUILDFLAG(IS_NACL)
 #include "base/immediate_crash.h"
 #include "base/pending_task.h"
 #include "base/strings/string_piece.h"
 #include "base/task/common/task_annotator.h"
 #include "base/trace_event/base_tracing.h"
 #include "build/build_config.h"
-
-#if !BUILDFLAG(IS_NACL)
-#include "base/auto_reset.h"
-#include "base/debug/crash_logging.h"
-#endif  // !BUILDFLAG(IS_NACL)
-
-#if defined(LEAK_SANITIZER) && !BUILDFLAG(IS_NACL)
-#include "base/debug/leak_annotations.h"
-#endif  // defined(LEAK_SANITIZER) && !BUILDFLAG(IS_NACL)
 
 #if BUILDFLAG(IS_WIN)
 #include <io.h>
@@ -461,53 +462,14 @@ void WriteToFd(int fd, const char* data, size_t length) {
   }
 }
 
-void SetLogFatalCrashKey(LogMessage* log_message) {
-#if !BUILDFLAG(IS_NACL)
-  // In case of an out-of-memory condition, this code could be reentered when
-  // constructing and storing the key. Using a static is not thread-safe, but if
-  // multiple threads are in the process of a fatal crash at the same time, this
-  // should work.
-  static bool guarded = false;
-  if (guarded)
-    return;
-
-  base::AutoReset<bool> guard(&guarded, true);
-
-  static auto* const crash_key = base::debug::AllocateCrashKeyString(
-      "LOG_FATAL", base::debug::CrashKeySize::Size1024);
-  base::debug::SetCrashKeyString(crash_key, log_message->BuildCrashString());
-
-#endif  // !BUILDFLAG(IS_NACL)
-}
-
-std::string BuildCrashString(const char* file,
-                             int line,
-                             const char* message_without_prefix) {
-  // Only log last path component.
-  if (file) {
-    const char* slash = strrchr(file,
-#if BUILDFLAG(IS_WIN)
-                                '\\'
-#else
-                                '/'
-#endif  // BUILDFLAG(IS_WIN)
-    );
-    if (slash) {
-      file = slash + 1;
-    }
-  }
-
-  return base::StringPrintf("%s:%d: %s", file, line, message_without_prefix);
-}
-
 }  // namespace
 
-#if BUILDFLAG(DCHECK_IS_CONFIGURABLE)
+#if defined(DCHECK_IS_CONFIGURABLE)
 // In DCHECK-enabled Chrome builds, allow the meaning of LOGGING_DCHECK to be
 // determined at run-time. We default it to INFO, to avoid it triggering
 // crashes before the run-time has explicitly chosen the behaviour.
 BASE_EXPORT logging::LogSeverity LOGGING_DCHECK = LOGGING_INFO;
-#endif  // BUILDFLAG(DCHECK_IS_CONFIGURABLE)
+#endif  // defined(DCHECK_IS_CONFIGURABLE)
 
 // This is never instantiated, it's just used for EAT_STREAM_PARAMETERS to have
 // an object of the correct type on the LHS of the unused part of the ternary
@@ -728,9 +690,6 @@ LogMessage::~LogMessage() {
   std::string str_newline(stream_.str());
   TRACE_LOG_MESSAGE(
       file_, base::StringPiece(str_newline).substr(message_start_), line_);
-
-  if (severity_ == LOGGING_FATAL)
-    SetLogFatalCrashKey(this);
 
   // Give any log message handler first dibs on the message.
   if (g_log_message_handler &&
@@ -954,8 +913,21 @@ LogMessage::~LogMessage() {
 }
 
 std::string LogMessage::BuildCrashString() const {
-  return logging::BuildCrashString(file(), line(),
-                                   str().c_str() + message_start_);
+  return BuildCrashString(file(), line(), str().c_str() + message_start_);
+}
+
+std::string LogMessage::BuildCrashString(const char* file,
+                                         int line,
+                                         const char* message_without_prefix) {
+  // Only log last path component.
+  if (file) {
+    const char* slash = strrchr(file, '/');
+    if (slash) {
+      file = slash + 1;
+    }
+  }
+
+  return base::StringPrintf("%s:%d: %s", file, line, message_without_prefix);
 }
 
 // writes the common header info to the stream

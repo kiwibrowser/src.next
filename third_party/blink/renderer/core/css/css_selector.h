@@ -30,14 +30,12 @@
 #include "third_party/blink/renderer/core/css/parser/css_parser_mode.h"
 #include "third_party/blink/renderer/core/dom/qualified_name.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
-#include "third_party/blink/renderer/core/style/toggle_root.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 
 namespace blink {
 
 class CSSParserContext;
 class CSSSelectorList;
-class Document;
 
 // This class represents a simple selector for a StyleRule.
 
@@ -103,8 +101,7 @@ class CORE_EXPORT CSSSelector {
 
   String SelectorText() const;
 
-  bool operator==(const CSSSelector&) const = delete;
-  bool operator!=(const CSSSelector&) const = delete;
+  bool operator==(const CSSSelector&) const;
 
   static constexpr unsigned kIdSpecificity = 0x010000;
   static constexpr unsigned kClassLikeSpecificity = 0x000100;
@@ -173,65 +170,64 @@ class CORE_EXPORT CSSSelector {
   };
 
   enum PseudoType {
-    kPseudoActive,
-    kPseudoAfter,
+    kPseudoUnknown,
+    kPseudoEmpty,
+    kPseudoFirstChild,
+    kPseudoFirstOfType,
+    kPseudoLastChild,
+    kPseudoLastOfType,
+    kPseudoOnlyChild,
+    kPseudoOnlyOfType,
+    kPseudoFirstLine,
+    kPseudoFirstLetter,
+    kPseudoNthChild,
+    kPseudoNthOfType,
+    kPseudoNthLastChild,
+    kPseudoNthLastOfType,
+    kPseudoPart,
+    kPseudoState,
+    kPseudoLink,
+    kPseudoVisited,
     kPseudoAny,
+    kPseudoIs,
+    kPseudoWhere,
     kPseudoAnyLink,
+    kPseudoWebkitAnyLink,
     kPseudoAutofill,
+    kPseudoWebKitAutofill,
     kPseudoAutofillPreviewed,
     kPseudoAutofillSelected,
-    kPseudoBackdrop,
-    kPseudoBefore,
-    kPseudoChecked,
-    kPseudoCornerPresent,
-    kPseudoDecrement,
-    kPseudoDefault,
-    kPseudoDisabled,
-    kPseudoDoubleButton,
+    kPseudoHover,
     kPseudoDrag,
-    kPseudoEmpty,
-    kPseudoEnabled,
-    kPseudoEnd,
-    kPseudoFileSelectorButton,
-    kPseudoFirstChild,
-    kPseudoFirstLetter,
-    kPseudoFirstLine,
-    kPseudoFirstOfType,
-    kPseudoFirstPage,
     kPseudoFocus,
     kPseudoFocusVisible,
     kPseudoFocusWithin,
+    kPseudoActive,
+    kPseudoChecked,
+    kPseudoEnabled,
     kPseudoFullPageMedia,
-    kPseudoHorizontal,
-    kPseudoHover,
-    kPseudoIncrement,
-    kPseudoIndeterminate,
-    kPseudoInvalid,
-    kPseudoIs,
-    kPseudoLang,
-    kPseudoLastChild,
-    kPseudoLastOfType,
-    kPseudoLeftPage,
-    kPseudoLink,
-    kPseudoMarker,
-    kPseudoModal,
-    kPseudoNoButton,
-    kPseudoNot,
-    kPseudoNthChild,
-    kPseudoNthLastChild,
-    kPseudoNthLastOfType,
-    kPseudoNthOfType,
-    kPseudoOnlyChild,
-    kPseudoOnlyOfType,
+    kPseudoDefault,
+    kPseudoDisabled,
     kPseudoOptional,
-    kPseudoPart,
-    kPseudoPlaceholder,
     kPseudoPlaceholderShown,
+    kPseudoRequired,
     kPseudoReadOnly,
     kPseudoReadWrite,
-    kPseudoRequired,
+    kPseudoValid,
+    kPseudoInvalid,
+    kPseudoIndeterminate,
+    kPseudoTarget,
+    kPseudoBefore,
+    kPseudoAfter,
+    kPseudoMarker,
+    kPseudoModal,
+    kPseudoSelectorFragmentAnchor,
+    kPseudoBackdrop,
+    kPseudoLang,
+    kPseudoNot,
+    kPseudoPlaceholder,
+    kPseudoFileSelectorButton,
     kPseudoResizer,
-    kPseudoRightPage,
     kPseudoRoot,
     kPseudoScope,
     kPseudoScrollbar,
@@ -240,20 +236,21 @@ class CORE_EXPORT CSSSelector {
     kPseudoScrollbarThumb,
     kPseudoScrollbarTrack,
     kPseudoScrollbarTrackPiece,
-    kPseudoSelection,
-    kPseudoSelectorFragmentAnchor,
-    kPseudoSingleButton,
-    kPseudoStart,
-    kPseudoState,
-    kPseudoTarget,
-    kPseudoUnknown,
-    kPseudoValid,
-    kPseudoVertical,
-    kPseudoVisited,
-    kPseudoWebKitAutofill,
-    kPseudoWebkitAnyLink,
-    kPseudoWhere,
     kPseudoWindowInactive,
+    kPseudoCornerPresent,
+    kPseudoDecrement,
+    kPseudoIncrement,
+    kPseudoHorizontal,
+    kPseudoVertical,
+    kPseudoStart,
+    kPseudoEnd,
+    kPseudoDoubleButton,
+    kPseudoSingleButton,
+    kPseudoNoButton,
+    kPseudoSelection,
+    kPseudoLeftPage,
+    kPseudoRightPage,
+    kPseudoFirstPage,
     // TODO(foolip): When the unprefixed Fullscreen API is enabled, merge
     // kPseudoFullScreen and kPseudoFullscreen into one. (kPseudoFullscreen is
     // controlled by the FullscreenUnprefixed REF, but is otherwise an alias.)
@@ -266,7 +263,6 @@ class CORE_EXPORT CSSSelector {
     kPseudoInRange,
     kPseudoOutOfRange,
     kPseudoXrOverlay,
-    kPseudoToggle,
     // Pseudo elements in UA ShadowRoots. Available in any stylesheets.
     kPseudoWebKitCustomElement,
     // Pseudo elements in UA ShadowRoots. Available only in UA stylesheets.
@@ -284,8 +280,8 @@ class CORE_EXPORT CSSSelector {
     kPseudoListBox,
     kPseudoMultiSelectFocus,
     kPseudoHostHasAppearance,
-    kPseudoOpen,
-    kPseudoPopupOpeningOrOpen,
+    kPseudoTopLayer,
+    kPseudoPopupHidden,
     kPseudoSlotted,
     kPseudoVideoPersistent,
     kPseudoVideoPersistentAncestor,
@@ -323,10 +319,8 @@ class CORE_EXPORT CSSSelector {
                         const CSSParserContext&,
                         bool has_arguments,
                         CSSParserMode);
-  void UpdatePseudoPage(const AtomicString&, const Document*);
-  static PseudoType NameToPseudoType(const AtomicString&,
-                                     bool has_arguments,
-                                     const Document* document);
+  void UpdatePseudoPage(const AtomicString&);
+  static PseudoType NameToPseudoType(const AtomicString&, bool has_arguments);
   static PseudoId GetPseudoId(PseudoType);
 
   // Selectors are kept in an array by CSSSelectorList. The next component of
@@ -361,9 +355,6 @@ class CORE_EXPORT CSSSelector {
   const Vector<AtomicString>* PartNames() const {
     return has_rare_data_ ? data_.rare_data_->part_names_.get() : nullptr;
   }
-  const ToggleRoot::State* ToggleValue() const {
-    return has_rare_data_ ? data_.rare_data_->toggle_value_.get() : nullptr;
-  }
   bool ContainsPseudoInsideHasPseudoClass() const {
     return has_rare_data_ ? data_.rare_data_->bits_.has_.contains_pseudo_
                           : false;
@@ -385,8 +376,6 @@ class CORE_EXPORT CSSSelector {
   void SetArgument(const AtomicString&);
   void SetSelectorList(std::unique_ptr<CSSSelectorList>);
   void SetPartNames(std::unique_ptr<Vector<AtomicString>>);
-  void SetToggle(const AtomicString& name,
-                 std::unique_ptr<ToggleRoot::State>&& value);
   void SetContainsPseudoInsideHasPseudoClass();
   void SetContainsComplexLogicalCombinationsInsideHasPseudoClass();
 
@@ -510,12 +499,11 @@ class CORE_EXPORT CSSSelector {
       } has_;
     } bits_;
     QualifiedName attribute_;  // used for attribute selector
-    AtomicString argument_;    // Used for :contains, :lang, :nth-*, :toggle()
+    AtomicString argument_;    // Used for :contains, :lang, :nth-*
     std::unique_ptr<CSSSelectorList>
         selector_list_;  // Used for :-webkit-any and :not
     std::unique_ptr<Vector<AtomicString>>
         part_names_;  // Used for ::part() selectors.
-    std::unique_ptr<ToggleRoot::State> toggle_value_;  // used for :toggle()
 
    private:
     RareData(const AtomicString& value);

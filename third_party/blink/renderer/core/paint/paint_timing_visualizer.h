@@ -25,8 +25,6 @@ class MediaTiming;
 // intermediate rects. These debugging events, as well as their intermediate
 // rects, can be visualized by third-party visualization tools.
 class CORE_EXPORT PaintTimingVisualizer {
-  DISALLOW_NEW();
-
  public:
   static bool IsTracingEnabled();
 

@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -73,6 +73,10 @@ class BrowserGpuChannelHostFactory : public gpu::GpuChannelEstablishFactory {
 
   void GpuChannelEstablished(EstablishRequest* request);
   void RestartTimeout();
+
+  static void InitializeShaderDiskCacheOnIO(int gpu_client_id,
+                                            const base::FilePath& cache_dir);
+  static void InitializeGrShaderDiskCacheOnIO(const base::FilePath& cache_dir);
 
   const int gpu_client_id_;
   const uint64_t gpu_client_tracing_id_;

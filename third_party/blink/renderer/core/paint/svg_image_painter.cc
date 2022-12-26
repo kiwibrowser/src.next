@@ -25,20 +25,6 @@
 
 namespace blink {
 
-namespace {
-ImagePaintTimingInfo ComputeImagePaintTimingInfo(
-    const LayoutSVGImage& layout_image,
-    const Image& image,
-    const ImageResourceContent* image_content,
-    const GraphicsContext& context,
-    const gfx::Rect& image_border) {
-  return ImagePaintTimingInfo(PaintTimingDetector::NotifyImagePaint(
-      layout_image, image.Size(), *image_content,
-      context.GetPaintController().CurrentPaintChunkProperties(),
-      image_border));
-}
-}  // namespace
-
 void SVGImagePainter::Paint(const PaintInfo& paint_info) {
   if (paint_info.phase != PaintPhase::kForeground ||
       layout_svg_image_.StyleRef().Visibility() != EVisibility::kVisible ||
@@ -100,6 +86,7 @@ void SVGImagePainter::PaintForeground(const PaintInfo& paint_info) {
   }
 
   ImageResourceContent* image_content = image_resource.CachedImage();
+  bool image_may_be_lcp_candidate = false;
   if (image_content->IsLoaded()) {
     LocalDOMWindow* window = layout_svg_image_.GetDocument().domWindow();
     DCHECK(window);
@@ -108,6 +95,10 @@ void SVGImagePainter::PaintForeground(const PaintInfo& paint_info) {
         paint_info.context.GetPaintController().CurrentPaintChunkProperties(),
         gfx::ToEnclosingRect(dest_rect));
   }
+  image_may_be_lcp_candidate = PaintTimingDetector::NotifyImagePaint(
+      layout_svg_image_, image->Size(), *image_content,
+      paint_info.context.GetPaintController().CurrentPaintChunkProperties(),
+      gfx::ToEnclosingRect(dest_rect));
   PaintTiming& timing = PaintTiming::From(layout_svg_image_.GetDocument());
   timing.MarkFirstContentfulPaint();
 
@@ -119,12 +110,9 @@ void SVGImagePainter::PaintForeground(const PaintInfo& paint_info) {
   auto image_auto_dark_mode = ImageClassifierHelper::GetImageAutoDarkMode(
       *layout_svg_image_.GetFrame(), layout_svg_image_.StyleRef(), dest_rect,
       src_rect);
-  paint_info.context.DrawImage(
-      image.get(), decode_mode, image_auto_dark_mode,
-      ComputeImagePaintTimingInfo(layout_svg_image_, *image, image_content,
-                                  paint_info.context,
-                                  gfx::ToEnclosingRect(dest_rect)),
-      dest_rect, &src_rect, SkBlendMode::kSrcOver, respect_orientation);
+  paint_info.context.DrawImage(image.get(), decode_mode, image_auto_dark_mode,
+                               dest_rect, &src_rect, SkBlendMode::kSrcOver,
+                               respect_orientation, image_may_be_lcp_candidate);
 }
 
 gfx::SizeF SVGImagePainter::ComputeImageViewportSize() const {

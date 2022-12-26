@@ -355,9 +355,6 @@ class CORE_EXPORT Node : public EventTarget {
   DISABLE_CFI_PERF bool IsBackdropPseudoElement() const {
     return GetPseudoId() == kPseudoIdBackdrop;
   }
-  DISABLE_CFI_PERF bool IsDocumentTransitionPseudoElement() const {
-    return IsTransitionPseudoElement(GetPseudoId());
-  }
   virtual PseudoId GetPseudoId() const { return kPseudoIdNone; }
 
   CustomElementState GetCustomElementState() const {

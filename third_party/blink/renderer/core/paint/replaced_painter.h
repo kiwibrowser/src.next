@@ -27,7 +27,6 @@ class ReplacedPainter {
 
  private:
   bool ShouldPaintBoxDecorationBackground(const PaintInfo&);
-  void MeasureOverflowMetrics() const;
 
   const LayoutReplaced& layout_replaced_;
 };

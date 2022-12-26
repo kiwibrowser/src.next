@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/types/optional_util.h"
 #include "base/values.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/common/api/content_scripts.h"
@@ -108,10 +107,10 @@ std::unique_ptr<UserScript> CreateUserScript(
 
   bool wants_file_access = false;
   if (!script_parsing::ParseMatchPatterns(
-          content_script.matches,
-          base::OptionalToPtr(content_script.exclude_matches), definition_index,
-          extension->creation_flags(), can_execute_script_everywhere,
-          valid_schemes, all_urls_includes_chrome_urls, result.get(), error,
+          content_script.matches, content_script.exclude_matches.get(),
+          definition_index, extension->creation_flags(),
+          can_execute_script_everywhere, valid_schemes,
+          all_urls_includes_chrome_urls, result.get(), error,
           &wants_file_access)) {
     return nullptr;
   }
@@ -139,13 +138,12 @@ std::unique_ptr<UserScript> CreateUserScript(
   if (wants_file_access)
     extension->set_wants_file_access(true);
 
-  ParseGlobs(base::OptionalToPtr(content_script.include_globs),
-             base::OptionalToPtr(content_script.exclude_globs), result.get());
+  ParseGlobs(content_script.include_globs.get(),
+             content_script.exclude_globs.get(), result.get());
 
   if (!script_parsing::ParseFileSources(
-          extension, base::OptionalToPtr(content_script.js),
-          base::OptionalToPtr(content_script.css), definition_index,
-          result.get(), error)) {
+          extension, content_script.js.get(), content_script.css.get(),
+          definition_index, result.get(), error)) {
     return nullptr;
   }
 
@@ -209,8 +207,7 @@ base::span<const char* const> ContentScriptsHandler::Keys() const {
 bool ContentScriptsHandler::Parse(Extension* extension, std::u16string* error) {
   ContentScriptsKeys manifest_keys;
   if (!ContentScriptsKeys::ParseFromDictionary(
-          extension->manifest()->available_values().GetDict(), &manifest_keys,
-          error)) {
+          extension->manifest()->available_values(), &manifest_keys, error)) {
     return false;
   }
 

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors
+// Copyright (c) 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,10 @@
 #include "net/net_buildflags.h"
 
 namespace net::features {
+
+// Toggles the `Accept-Language` HTTP request header, which
+// https://github.com/WICG/lang-client-hint proposes that we deprecate.
+NET_EXPORT extern const base::Feature kAcceptLanguageHeader;
 
 // Enables ALPS extension of TLS 1.3 for HTTP/2, see
 // https://vasilvv.github.io/tls-alps/draft-vvv-tls-alps.html and
@@ -234,24 +238,6 @@ NET_EXPORT extern const base::Feature
 NET_EXPORT extern const base::Feature
     kPartitionNelAndReportingByNetworkIsolationKey;
 
-// Creates a <double key + is_cross_site> NetworkAnonymizationKey which is used
-// to partition the network state. This double key will have the following
-// properties: `top_frame_site` -> the schemeful site of the top level page.
-// `frame_site ` -> nullopt
-// `is_cross_site` -> true if the `top_frame_site` is cross site when compared
-// to the frame site. The frame site will not be stored in this key so the value
-// of is_cross_site will be computed at key construction. This feature overrides
-// `kEnableDoubleKeyNetworkAnonymizationKey` if both are enabled.
-NET_EXPORT extern const base::Feature
-    kEnableCrossSiteFlagNetworkAnonymizationKey;
-
-// Creates a double keyed NetworkAnonymizationKey which is used to partition the
-// network state. This double key will have the following properties:
-// `top_frame_site` -> the schemeful site of the top level page.
-// `frame_site ` -> nullopt
-// `is_cross_site` -> nullopt
-NET_EXPORT extern const base::Feature kEnableDoubleKeyNetworkAnonymizationKey;
-
 // Enables limiting the size of Expect-CT table.
 NET_EXPORT extern const base::Feature kExpectCTPruning;
 
@@ -467,9 +453,6 @@ NET_EXPORT extern const base::FeatureParam<int>
 NET_EXPORT extern const base::FeatureParam<int>
     kOptimizeNetworkBuffersFilterSourceStreamBufferSize;
 
-NET_EXPORT extern const base::FeatureParam<bool>
-    kOptimizeNetworkBuffersInputStreamCheckAvailable;
-
 // Enable the Storage Access API. https://crbug.com/989663.
 NET_EXPORT extern const base::Feature kStorageAccessAPI;
 
@@ -479,32 +462,6 @@ NET_EXPORT extern const base::Feature kStorageAccessAPI;
 NET_EXPORT extern const int kStorageAccessAPIDefaultImplicitGrantLimit;
 NET_EXPORT extern const base::FeatureParam<int>
     kStorageAccessAPIImplicitGrantLimit;
-// Whether the Storage Access API can grant access to storage (even if it is
-// unpartitioned). When this feature is disabled, access to storage is only
-// granted if the storage is partitioned.
-NET_EXPORT extern const base::FeatureParam<bool>
-    kStorageAccessAPIGrantsUnpartitionedStorage;
-// Whether to auto-grant storage access requests when the top level origin and
-// the requesting origin are in the same First-Party Set.
-NET_EXPORT extern const base::FeatureParam<bool>
-    kStorageAccessAPIAutoGrantInFPS;
-// Whether to auto-deny storage access requests when the top level origin and
-// the requesting origin are not in the same First-Party Set.
-NET_EXPORT extern const base::FeatureParam<bool>
-    kStorageAccessAPIAutoDenyOutsideFPS;
-
-NET_EXPORT extern const base::Feature kThirdPartyStoragePartitioning;
-
-// Whether ALPS parsing is on for any type of frame.
-NET_EXPORT extern const base::Feature kAlpsParsing;
-
-// Whether ALPS parsing is on for client hint parsing specifically.
-NET_EXPORT extern const base::Feature kAlpsClientHintParsing;
-
-// Whether to kill the session on Error::kAcceptChMalformed.
-NET_EXPORT extern const base::Feature kShouldKillSessionOnAcceptChMalformed;
-
-NET_EXPORT extern const base::Feature kCaseInsensitiveCookiePrefix;
 
 }  // namespace net::features
 

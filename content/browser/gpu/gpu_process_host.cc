@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,9 +39,9 @@
 #include "content/browser/compositor/image_transport_factory.h"
 #include "content/browser/gpu/compositor_util.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
-#include "content/browser/gpu/gpu_disk_cache_factory.h"
 #include "content/browser/gpu/gpu_main_thread_factory.h"
 #include "content/browser/gpu/gpu_memory_buffer_manager_singleton.h"
+#include "content/browser/gpu/shader_cache_factory.h"
 #include "content/common/child_process.mojom.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/common/in_process_child_thread_params.h"
@@ -65,7 +65,7 @@
 #include "gpu/config/gpu_switches.h"
 #include "gpu/ipc/common/gpu_client_ids.h"
 #include "gpu/ipc/common/result_codes.h"
-#include "gpu/ipc/host/gpu_disk_cache.h"
+#include "gpu/ipc/host/shader_disk_cache.h"
 #include "media/base/media_switches.h"
 #include "media/media_buildflags.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
@@ -99,6 +99,10 @@
 #include "ui/ozone/public/gpu_platform_support_host.h"
 #include "ui/ozone/public/ozone_platform.h"
 #include "ui/ozone/public/ozone_switches.h"
+#endif
+
+#if BUILDFLAG(IS_LINUX)
+#include "ui/gfx/switches.h"
 #endif
 
 #if BUILDFLAG(USE_ZYGOTE_HANDLE)
@@ -360,11 +364,6 @@ class GpuSandboxedProcessLauncherDelegate
 #if BUILDFLAG(IS_WIN)
   bool DisableDefaultPolicy() override { return true; }
 
-  std::string GetSandboxTag() override {
-    return sandbox::policy::SandboxWin::GetSandboxTagForDelegate(
-        "gpu", GetSandboxType());
-  }
-
   enum GPUAppContainerEnableState{
       AC_ENABLED = 0,
       AC_DISABLED_GL = 1,
@@ -396,19 +395,15 @@ class GpuSandboxedProcessLauncherDelegate
   // backend. Note that the GPU process is connected to the interactive
   // desktop.
   bool PreSpawnTarget(sandbox::TargetPolicy* policy) override {
-    sandbox::TargetConfig* config = policy->GetConfig();
-    if (config->IsConfigured())
-      return true;
-
     if (UseOpenGLRenderer()) {
       // Open GL path.
-      config->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
+      policy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
                             sandbox::USER_LIMITED);
       sandbox::policy::SandboxWin::SetJobLevel(sandbox::mojom::Sandbox::kGpu,
                                                sandbox::JobLevel::kUnprotected,
-                                               0, config);
+                                               0, policy);
     } else {
-      config->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
+      policy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
                             sandbox::USER_LIMITED);
 
       // UI restrictions break when we access Windows from outside our job.
@@ -422,7 +417,7 @@ class GpuSandboxedProcessLauncherDelegate
           JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS | JOB_OBJECT_UILIMIT_DESKTOP |
               JOB_OBJECT_UILIMIT_EXITWINDOWS |
               JOB_OBJECT_UILIMIT_DISPLAYSETTINGS,
-          config);
+          policy);
     }
 
     // Check if we are running on the winlogon desktop and set a delayed
@@ -433,17 +428,17 @@ class GpuSandboxedProcessLauncherDelegate
     // the normal integrity and delay the switch to low integrity until after
     // the gpu process has started and has access to the desktop.
     if (ShouldSetDelayedIntegrity())
-      config->SetDelayedIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW);
+      policy->SetDelayedIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW);
     else
-      config->SetIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW);
+      policy->SetIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW);
 
     // Block this DLL even if it is not loaded by the browser process.
-    config->AddDllToUnload(L"cmsetac.dll");
+    policy->AddDllToUnload(L"cmsetac.dll");
 
     if (cmd_line_.HasSwitch(switches::kEnableLogging)) {
       std::wstring log_file_path = logging::GetLogFileFullPath();
       if (!log_file_path.empty()) {
-        sandbox::ResultCode result = config->AddRule(
+        sandbox::ResultCode result = policy->AddRule(
             sandbox::SubSystem::kFiles, sandbox::Semantics::kFilesAllowAny,
             log_file_path.c_str());
         if (result != sandbox::SBOX_ALL_OK)
@@ -633,7 +628,6 @@ void GpuProcessHost::GetHasGpuProcess(base::OnceCallback<void(bool)> callback) {
 
 // static
 void GpuProcessHost::CallOnIO(
-    const base::Location& location,
     GpuProcessKind kind,
     bool force_create,
     base::OnceCallback<void(GpuProcessHost*)> callback) {
@@ -641,8 +635,8 @@ void GpuProcessHost::CallOnIO(
   DCHECK_NE(kind, GPU_PROCESS_KIND_INFO_COLLECTION);
 #endif
   GetUIThreadTaskRunner({})->PostTask(
-      location, base::BindOnce(&RunCallbackOnIO, kind, force_create,
-                               std::move(callback)));
+      FROM_HERE, base::BindOnce(&RunCallbackOnIO, kind, force_create,
+                                std::move(callback)));
 }
 
 void GpuProcessHost::BindInterface(
@@ -1054,9 +1048,9 @@ void GpuProcessHost::DidUpdateDXGIInfo(gfx::mojom::DXGIInfoPtr dxgi_info) {
 }
 #endif
 
-void GpuProcessHost::BlockDomainsFrom3DAPIs(const std::set<GURL>& urls,
-                                            gpu::DomainGuilt guilt) {
-  GpuDataManagerImpl::GetInstance()->BlockDomainsFrom3DAPIs(urls, guilt);
+void GpuProcessHost::BlockDomainFrom3DAPIs(const GURL& url,
+                                           gpu::DomainGuilt guilt) {
+  GpuDataManagerImpl::GetInstance()->BlockDomainFrom3DAPIs(url, guilt);
 }
 
 bool GpuProcessHost::GpuAccessAllowed() const {
@@ -1077,8 +1071,8 @@ void GpuProcessHost::DisableGpuCompositing() {
 #endif
 }
 
-gpu::GpuDiskCacheFactory* GpuProcessHost::GetGpuDiskCacheFactory() {
-  return GetGpuDiskCacheFactorySingleton();
+gpu::ShaderCacheFactory* GpuProcessHost::GetShaderCacheFactory() {
+  return GetShaderCacheFactorySingleton();
 }
 
 void GpuProcessHost::RecordLogMessage(int32_t severity,

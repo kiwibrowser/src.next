@@ -79,23 +79,6 @@
 
 namespace blink {
 
-namespace {
-
-OverscrollType ComputeOverscrollType() {
-  if (!Platform::Current()->IsElasticOverscrollEnabled())
-    return OverscrollType::kNone;
-#if BUILDFLAG(IS_ANDROID)
-  if (base::GetFieldTrialParamValueByFeature(
-          ::features::kElasticOverscroll, ::features::kElasticOverscrollType) ==
-      ::features::kElasticOverscrollTypeFilter) {
-    return OverscrollType::kFilter;
-  }
-#endif
-  return OverscrollType::kTransform;
-}
-
-}  // anonymous namespace
-
 VisualViewport::VisualViewport(Page& owner)
     : ScrollableArea(owner.GetAgentGroupScheduler().CompositorTaskRunner()),
       page_(&owner),
@@ -105,8 +88,7 @@ VisualViewport::VisualViewport(Page& owner)
       browser_controls_adjustment_(0),
       max_page_scale_(-1),
       track_pinch_zoom_stats_for_page_(false),
-      needs_paint_property_update_(true),
-      overscroll_type_(ComputeOverscrollType()) {
+      needs_paint_property_update_(true) {
   UniqueObjectId unique_id = NewUniqueObjectId();
   page_scale_element_id_ = CompositorElementIdFromUniqueObjectId(
       unique_id, CompositorElementIdNamespace::kPrimary);
@@ -117,43 +99,31 @@ VisualViewport::VisualViewport(Page& owner)
   Reset();
 }
 
-const TransformPaintPropertyNode*
-VisualViewport::GetDeviceEmulationTransformNode() const {
+TransformPaintPropertyNode* VisualViewport::GetDeviceEmulationTransformNode()
+    const {
   return device_emulation_transform_node_.get();
 }
 
-const TransformPaintPropertyNode*
+TransformPaintPropertyNode*
 VisualViewport::GetOverscrollElasticityTransformNode() const {
   return overscroll_elasticity_transform_node_.get();
 }
 
-const EffectPaintPropertyNode*
-VisualViewport::GetOverscrollElasticityEffectNode() const {
+EffectPaintPropertyNode* VisualViewport::GetOverscrollElasticityEffectNode()
+    const {
   return overscroll_elasticity_effect_node_.get();
 }
 
-const TransformPaintPropertyNode* VisualViewport::GetPageScaleNode() const {
+TransformPaintPropertyNode* VisualViewport::GetPageScaleNode() const {
   return page_scale_node_.get();
 }
 
-const TransformPaintPropertyNode* VisualViewport::GetScrollTranslationNode()
-    const {
+TransformPaintPropertyNode* VisualViewport::GetScrollTranslationNode() const {
   return scroll_translation_node_.get();
 }
 
-const ScrollPaintPropertyNode* VisualViewport::GetScrollNode() const {
+ScrollPaintPropertyNode* VisualViewport::GetScrollNode() const {
   return scroll_node_.get();
-}
-
-const TransformPaintPropertyNode*
-VisualViewport::TransformNodeForViewportScrollbars() const {
-  // Viewport scrollbars don't move with elastic overscroll or scale with
-  // page scale.
-  if (overscroll_elasticity_transform_node_)
-    return overscroll_elasticity_transform_node_->UnaliasedParent();
-  if (page_scale_node_)
-    return page_scale_node_->UnaliasedParent();
-  return nullptr;
 }
 
 PaintPropertyChangeType VisualViewport::UpdatePaintPropertyNodesIfNeeded(
@@ -200,7 +170,7 @@ PaintPropertyChangeType VisualViewport::UpdatePaintPropertyNodesIfNeeded(
     }
   }
 
-  if (overscroll_type_ == OverscrollType::kTransform) {
+  {
     DCHECK(!transform_parent->Unalias().IsInSubtreeOfPageScale());
 
     TransformPaintPropertyNode::State state;
@@ -216,16 +186,9 @@ PaintPropertyChangeType VisualViewport::UpdatePaintPropertyNodesIfNeeded(
       change = std::max(change, overscroll_elasticity_transform_node_->Update(
                                     *transform_parent, std::move(state)));
     }
-  } else {
-    DCHECK(!overscroll_elasticity_transform_node_);
   }
 
   {
-    auto* parent = overscroll_elasticity_transform_node_
-                       ? overscroll_elasticity_transform_node_.get()
-                       : transform_parent;
-    DCHECK(!parent->Unalias().IsInSubtreeOfPageScale());
-
     TransformPaintPropertyNode::State state;
     if (scale_ != 1.f)
       state.transform_and_origin = {TransformationMatrix().Scale(scale_)};
@@ -234,12 +197,12 @@ PaintPropertyChangeType VisualViewport::UpdatePaintPropertyNodesIfNeeded(
     state.compositor_element_id = page_scale_element_id_;
 
     if (!page_scale_node_) {
-      page_scale_node_ =
-          TransformPaintPropertyNode::Create(*parent, std::move(state));
+      page_scale_node_ = TransformPaintPropertyNode::Create(
+          *overscroll_elasticity_transform_node_.get(), std::move(state));
       change = PaintPropertyChangeType::kNodeAddedOrRemoved;
     } else {
-      auto effective_change_type =
-          page_scale_node_->Update(*parent, std::move(state));
+      auto effective_change_type = page_scale_node_->Update(
+          *overscroll_elasticity_transform_node_.get(), std::move(state));
       // As an optimization, attempt to directly update the compositor
       // scale translation node and return kChangedOnlyCompositedValues which
       // avoids an expensive PaintArtifactCompositor update.
@@ -339,7 +302,10 @@ PaintPropertyChangeType VisualViewport::UpdatePaintPropertyNodesIfNeeded(
   }
 
 #if BUILDFLAG(IS_ANDROID)
-  if (overscroll_type_ == OverscrollType::kFilter) {
+  if (Platform::Current()->IsElasticOverscrollEnabled() &&
+      base::GetFieldTrialParamValueByFeature(
+          ::features::kElasticOverscroll, ::features::kElasticOverscrollType) ==
+          ::features::kElasticOverscrollTypeFilter) {
     bool needs_overscroll_effect_node = !MaximumScrollOffset().IsZero();
     if (needs_overscroll_effect_node && !overscroll_elasticity_effect_node_) {
       EffectPaintPropertyNode::State state;
@@ -851,10 +817,6 @@ gfx::Vector2d VisualViewport::MaximumScrollOffsetInt() const {
 }
 
 ScrollOffset VisualViewport::MaximumScrollOffset() const {
-  return MaximumScrollOffsetAtScale(scale_);
-}
-
-ScrollOffset VisualViewport::MaximumScrollOffsetAtScale(float scale) const {
   if (!IsActiveViewport())
     return ScrollOffset();
 
@@ -868,14 +830,14 @@ ScrollOffset VisualViewport::MaximumScrollOffsetAtScale(float scale) const {
     frame_view_size.Enlarge(0, browser_controls_adjustment_ / min_scale);
   }
 
-  frame_view_size.Scale(scale);
+  frame_view_size.Scale(scale_);
   frame_view_size = gfx::SizeF(ToFlooredSize(frame_view_size));
 
   gfx::SizeF viewport_size(size_);
   viewport_size.Enlarge(0, ceilf(browser_controls_adjustment_));
 
   gfx::SizeF max_position = frame_view_size - viewport_size;
-  max_position.Scale(1 / scale);
+  max_position.Scale(1 / scale_);
   return ScrollOffset(max_position.width(), max_position.height());
 }
 

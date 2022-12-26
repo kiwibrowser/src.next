@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/autocomplete/chrome_autocomplete_provider_client.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/chrome_navigation_ui_data.h"
@@ -27,8 +28,9 @@
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/search/ntp_test_utils.h"
 #include "chrome/browser/ui/singleton_tabs.h"
-#include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/web_applications/web_app_helpers.h"
+#include "chrome/browser/web_applications/web_app_install_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -694,33 +696,37 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, NavigateOnTabSwitchLostTest) {
   NavigateHelper(GURL("chrome://about"), browser(),
                  WindowOpenDisposition::NEW_FOREGROUND_TAB, true);
   browser()->tab_strip_model()->CloseWebContentsAt(0,
-                                                   TabCloseTypes::CLOSE_NONE);
+                                                   TabStripModel::CLOSE_NONE);
   // This expects a new WebContents, since we just closed the tab.
   NavigateHelper(singleton_url, browser(), WindowOpenDisposition::SWITCH_TO_TAB,
                  true, nullptr /* expected_contents */);
   EXPECT_EQ(2, browser()->tab_strip_model()->count());
 }
 
-// This test verifies that SWITCH_TO_TAB will switch to a tab even if the scheme
-// mismatches, as long as the rest of the URL does.
+// This test verifies that IsTabOpenWithURL() and GetIndexOfExistingTab()
+// will not discriminate between http and https.
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, SchemeMismatchTabSwitchTest) {
-  GURL navigate_url("https://www.chromium.org/");
-  GURL search_url("http://www.chromium.org/");
-  GURL dino_url("chrome://dino");
+  GURL navigate_url("https://maps.google.com/");
+  GURL search_url("http://maps.google.com/");
 
-  NavigateHelper(navigate_url, browser(), WindowOpenDisposition::CURRENT_TAB,
-                 true);
-  NavigateHelper(dino_url, browser(), WindowOpenDisposition::NEW_FOREGROUND_TAB,
-                 true);
+  // Generate history so the tab isn't closed.
+  NavigateHelper(GURL("chrome://dino/"), browser(),
+                 WindowOpenDisposition::CURRENT_TAB, true);
+
+  NavigateHelper(navigate_url, browser(),
+                 WindowOpenDisposition::NEW_BACKGROUND_TAB, true);
 
   // We must be on another tab than the target for it to be found and
-  // switched to. To meet that requirement, ensure the dino tab is currently
-  // active.
-  EXPECT_EQ(1, browser()->tab_strip_model()->active_index());
+  // switched to.
+  EXPECT_EQ(0, browser()->tab_strip_model()->active_index());
+
+  ChromeAutocompleteProviderClient client(browser()->profile());
+  EXPECT_TRUE(client.GetTabMatcher().IsTabOpenWithURL(search_url, nullptr));
 
   NavigateHelper(search_url, browser(), WindowOpenDisposition::SWITCH_TO_TAB,
                  false);
-  EXPECT_EQ(0, browser()->tab_strip_model()->active_index());
+
+  EXPECT_EQ(1, browser()->tab_strip_model()->active_index());
 }
 
 // Make sure that switching tabs preserves the post-focus state (of the
@@ -751,39 +757,56 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, SaveAfterFocusTabSwitchTest) {
             OmniboxFocusState::OMNIBOX_FOCUS_NONE);
 }
 
+#if BUILDFLAG(IS_LINUX)
+// Flaky on Linux Ozone. See https://crbug.com/1230723.
+#define MAYBE_SwitchToTabCorrectWindow DISABLED_SwitchToTabCorrectWindow
+#elif BUILDFLAG(IS_CHROMEOS_LACROS) || BUILDFLAG(IS_WIN)
+// Flaky on Lacros and Win. See https://crbug.com/674497.
+#define MAYBE_SwitchToTabCorrectWindow DISABLED_SwitchToTabCorrectWindow
+#else
+#define MAYBE_SwitchToTabCorrectWindow SwitchToTabCorrectWindow
+#endif
 // This test verifies that we're picking the correct browser and tab to
 // switch to. It verifies that we don't recommend the active tab, and that,
-// when switching, we don't mistakenly pick the current browser. Note that this
-// test checks which window the new tab was created in, but does not check
-// whether the target window was activated - that would require a much slower
-// interactive UI test, since we'd have to wait for the async window activation
-// to complete to avoid flakes.
-IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, SwitchToTabCorrectWindow) {
-  const GURL url1("http://example1.chromium.org");
-  const GURL url2("http://example2.chromium.org");
+// when switching, we don't mistakenly pick the current browser.
+IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, MAYBE_SwitchToTabCorrectWindow) {
+  const GURL singleton_url("http://maps.google.com/");
 
   // Make singleton tab.
-  Browser* browser1 =
-      NavigateHelper(url1, browser(), WindowOpenDisposition::CURRENT_TAB, true);
+  Browser* orig_browser = NavigateHelper(
+      singleton_url, browser(), WindowOpenDisposition::CURRENT_TAB, true);
 
   // Make a new window with different URL.
-  Browser* browser2 =
-      NavigateHelper(url2, browser1, WindowOpenDisposition::NEW_WINDOW, true);
-  EXPECT_NE(browser1, browser2);
+  Browser* middle_browser =
+      NavigateHelper(GURL("http://www.google.com/"), orig_browser,
+                     WindowOpenDisposition::NEW_WINDOW, true);
+  EXPECT_NE(orig_browser, middle_browser);
 
-  EXPECT_EQ(browser1,
-            NavigateHelper(url1, browser2, WindowOpenDisposition::SWITCH_TO_TAB,
-                           false));
-  EXPECT_EQ(browser2,
-            NavigateHelper(url2, browser1, WindowOpenDisposition::SWITCH_TO_TAB,
-                           false));
+  ChromeAutocompleteProviderClient client(browser()->profile());
+  // We avoid recommending the active tab, because during navigation, we
+  // actively avoid it (because the user almost certainly doesn't want to
+  // switch to the tab they're already on). While we are not on the target
+  // tab, make sure the provider client recommends our other window.
+  EXPECT_TRUE(client.GetTabMatcher().IsTabOpenWithURL(singleton_url, nullptr));
+
+  // Navigate to the singleton again.
+  Browser* test_browser =
+      NavigateHelper(singleton_url, middle_browser,
+                     WindowOpenDisposition::SWITCH_TO_TAB, false);
+
+  // Make sure we chose the browser with the tab, not simply the current
+  // browser.
+  EXPECT_EQ(orig_browser, test_browser);
+  // Now that we're on the tab, make sure the provider client doesn't
+  // recommend it.
+  EXPECT_FALSE(client.GetTabMatcher().IsTabOpenWithURL(singleton_url, nullptr));
 }
 
 // TODO(crbug/1272155): Reactivate the test.
 #if !BUILDFLAG(IS_CHROMEOS_LACROS)
 // This test verifies that "switch to tab" prefers the latest used browser,
 // if multiple exist.
-IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, DISABLED_SwitchToTabLatestWindow) {
+IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, SwitchToTabLatestWindow) {
   // Navigate to a site.
   NavigateHelper(GURL("http://maps.google.com/"), browser(),
                  WindowOpenDisposition::CURRENT_TAB, true);
@@ -1107,7 +1130,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, Tabstrip_InsertAtIndex) {
   NavigateParams params(MakeNavigateParams());
   params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
   params.tabstrip_index = 0;
-  params.tabstrip_add_types = AddTabTypes::ADD_FORCE_INDEX;
+  params.tabstrip_add_types = TabStripModel::ADD_FORCE_INDEX;
   Navigate(&params);
 
   // Navigate() should have inserted a new tab at slot 0 in the tabstrip.
@@ -1607,7 +1630,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, MAYBE_CloseSingletonTab) {
   }
 
   EXPECT_TRUE(browser()->tab_strip_model()->CloseWebContentsAt(
-      2, TabCloseTypes::CLOSE_USER_GESTURE));
+      2, TabStripModel::CLOSE_USER_GESTURE));
   EXPECT_EQ(0, browser()->tab_strip_model()->active_index());
 }
 
@@ -1865,7 +1888,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, SubFrameNavigationUIData) {
 // See crbug.com/1320453 for why this is off for lacros.
 class BrowserNavigatorWithPictureInPictureTest : public BrowserNavigatorTest {
   base::test::ScopedFeatureList scoped_feature_list_{
-      features::kDocumentPictureInPictureAPI};
+      features::kPictureInPictureV2};
 };
 
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorWithPictureInPictureTest,
@@ -1908,8 +1931,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorWithPictureInPictureTest,
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
                        Disposition_PictureInPicture_FeatureMustBeEnabled) {
   // Creating a picture in picture window should not work if the feature is off.
-  ASSERT_FALSE(
-      base::FeatureList::IsEnabled(features::kDocumentPictureInPictureAPI));
+  ASSERT_FALSE(base::FeatureList::IsEnabled(features::kPictureInPictureV2));
   NavigateParams params(MakeNavigateParams(browser()));
   params.disposition = WindowOpenDisposition::NEW_PICTURE_IN_PICTURE;
   Navigate(&params);

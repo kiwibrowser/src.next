@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,24 +47,22 @@ class ExtensionOverrideTest : public ExtensionApiTest {
 
   bool CheckHistoryOverridesContainsNoDupes() {
     // There should be no duplicate entries in the preferences.
-    const base::Value::Dict& overrides =
-        browser()->profile()->GetPrefs()->GetDict(
+    const base::Value* overrides =
+        browser()->profile()->GetPrefs()->GetDictionary(
             ExtensionWebUI::kExtensionURLOverrides);
 
-    const base::Value::List* values = overrides.FindList("history");
+    const base::Value* values = overrides->FindListKey("history");
     if (!values)
       return false;
 
     std::set<std::string> seen_overrides;
-    for (const auto& val : *values) {
-      if (!val.is_dict()) {
+    for (const auto& val : values->GetListDeprecated()) {
+      const base::DictionaryValue* dict = nullptr;
+      std::string entry;
+      if (!val.GetAsDictionary(&dict) || !dict->GetString("entry", &entry) ||
+          seen_overrides.count(entry) != 0)
         return false;
-      }
-      const base::Value::Dict& dict = val.GetDict();
-      const std::string* entry = dict.FindString("entry");
-      if (!entry || seen_overrides.count(*entry) != 0)
-        return false;
-      seen_overrides.insert(*entry);
+      seen_overrides.insert(entry);
     }
 
     return true;
@@ -265,13 +263,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionOverrideTest, OverrideNewTabIncognito) {
 // on that page does not steal the focus away by focusing the omnibox.
 // See https://crbug.com/700124.
 // Flaky, http://crbug.com/1269169.
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_LINUX)
 #define MAYBE_SubframeNavigationInOverridenNTPDoesNotAffectFocus \
   DISABLED_SubframeNavigationInOverridenNTPDoesNotAffectFocus
 #else
 #define MAYBE_SubframeNavigationInOverridenNTPDoesNotAffectFocus \
   SubframeNavigationInOverridenNTPDoesNotAffectFocus
-#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_LINUX)
 IN_PROC_BROWSER_TEST_F(
     ExtensionOverrideTest,
     MAYBE_SubframeNavigationInOverridenNTPDoesNotAffectFocus) {

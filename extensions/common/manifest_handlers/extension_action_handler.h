@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,7 +28,6 @@ class ExtensionActionHandler : public ManifestHandler {
 
  private:
   bool AlwaysParseForType(Manifest::Type type) const override;
-  bool AlwaysValidateForType(Manifest::Type type) const override;
   base::span<const char* const> Keys() const override;
 };
 

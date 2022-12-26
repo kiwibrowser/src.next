@@ -579,18 +579,26 @@ TEST(AttributionResponseParsingTest, ParseSourceRegistrationHeader) {
       {
           "required_fields_only",
           R"json({
+            "source_event_id": "1",
             "destination": "https://d.test"
           })json",
           mojom::blink::AttributionSourceData::New(
               /*destination=*/SecurityOrigin::CreateFromString(
                   "https://d.test"),
               /*reporting_origin=*/reporting_origin,
-              /*source_event_id=*/0,
+              /*source_event_id=*/1,
               /*expiry=*/absl::nullopt,
               /*priority=*/0,
               /*debug_key=*/nullptr,
               /*filter_data=*/AttributionFilterDataBuilder().Build(),
               /*aggregation_keys=*/WTF::HashMap<String, absl::uint128>()),
+      },
+      {
+          "missing_source_event_id",
+          R"json({
+            "destination": "https://d.test"
+          })json",
+          nullptr,
       },
       {
           "missing_destination",
@@ -605,16 +613,7 @@ TEST(AttributionResponseParsingTest, ParseSourceRegistrationHeader) {
             "source_event_id": 1,
             "destination": "https://d.test"
           })json",
-          mojom::blink::AttributionSourceData::New(
-              /*destination=*/SecurityOrigin::CreateFromString(
-                  "https://d.test"),
-              /*reporting_origin=*/reporting_origin,
-              /*source_event_id=*/0,
-              /*expiry=*/absl::nullopt,
-              /*priority=*/0,
-              /*debug_key=*/nullptr,
-              /*filter_data=*/AttributionFilterDataBuilder().Build(),
-              /*aggregation_keys=*/WTF::HashMap<String, absl::uint128>()),
+          nullptr,
       },
       {
           "invalid_source_event_id",
@@ -634,10 +633,45 @@ TEST(AttributionResponseParsingTest, ParseSourceRegistrationHeader) {
               /*aggregation_keys=*/WTF::HashMap<String, absl::uint128>()),
       },
       {
-          "valid_source_event_id",
+          "destination_not_string",
           R"json({
             "source_event_id": "1",
-            "destination": "https://d.test"
+            "destination": 4
+          })json",
+          nullptr,
+      },
+      {
+          "destination_not_potentially_trustworthy",
+          R"json({
+            "source_event_id": "1",
+            "destination": "http://d.test"
+          })json",
+          nullptr,
+      },
+      {
+          "valid_priority",
+          R"json({
+            "source_event_id": "1",
+            "destination": "https://d.test",
+            "priority": "5"
+          })json",
+          mojom::blink::AttributionSourceData::New(
+              /*destination=*/SecurityOrigin::CreateFromString(
+                  "https://d.test"),
+              /*reporting_origin=*/reporting_origin,
+              /*source_event_id=*/1,
+              /*expiry=*/absl::nullopt,
+              /*priority=*/5,
+              /*debug_key=*/nullptr,
+              /*filter_data=*/AttributionFilterDataBuilder().Build(),
+              /*aggregation_keys=*/WTF::HashMap<String, absl::uint128>()),
+      },
+      {
+          "priority_not_string",
+          R"json({
+            "source_event_id": "1",
+            "destination": "https://d.test",
+            "priority": 5
           })json",
           mojom::blink::AttributionSourceData::New(
               /*destination=*/SecurityOrigin::CreateFromString(
@@ -651,56 +685,9 @@ TEST(AttributionResponseParsingTest, ParseSourceRegistrationHeader) {
               /*aggregation_keys=*/WTF::HashMap<String, absl::uint128>()),
       },
       {
-          "destination_not_string",
-          R"json({
-            "destination": 4
-          })json",
-          nullptr,
-      },
-      {
-          "destination_not_potentially_trustworthy",
-          R"json({
-            "destination": "http://d.test"
-          })json",
-          nullptr,
-      },
-      {
-          "valid_priority",
-          R"json({
-            "destination": "https://d.test",
-            "priority": "5"
-          })json",
-          mojom::blink::AttributionSourceData::New(
-              /*destination=*/SecurityOrigin::CreateFromString(
-                  "https://d.test"),
-              /*reporting_origin=*/reporting_origin,
-              /*source_event_id=*/0,
-              /*expiry=*/absl::nullopt,
-              /*priority=*/5,
-              /*debug_key=*/nullptr,
-              /*filter_data=*/AttributionFilterDataBuilder().Build(),
-              /*aggregation_keys=*/WTF::HashMap<String, absl::uint128>()),
-      },
-      {
-          "priority_not_string",
-          R"json({
-            "destination": "https://d.test",
-            "priority": 5
-          })json",
-          mojom::blink::AttributionSourceData::New(
-              /*destination=*/SecurityOrigin::CreateFromString(
-                  "https://d.test"),
-              /*reporting_origin=*/reporting_origin,
-              /*source_event_id=*/0,
-              /*expiry=*/absl::nullopt,
-              /*priority=*/0,
-              /*debug_key=*/nullptr,
-              /*filter_data=*/AttributionFilterDataBuilder().Build(),
-              /*aggregation_keys=*/WTF::HashMap<String, absl::uint128>()),
-      },
-      {
           "invalid_priority",
           R"json({
+            "source_event_id": "1",
             "destination": "https://d.test",
             "priority": "abc"
           })json",
@@ -708,7 +695,7 @@ TEST(AttributionResponseParsingTest, ParseSourceRegistrationHeader) {
               /*destination=*/SecurityOrigin::CreateFromString(
                   "https://d.test"),
               /*reporting_origin=*/reporting_origin,
-              /*source_event_id=*/0,
+              /*source_event_id=*/1,
               /*expiry=*/absl::nullopt,
               /*priority=*/0,
               /*debug_key=*/nullptr,
@@ -718,6 +705,7 @@ TEST(AttributionResponseParsingTest, ParseSourceRegistrationHeader) {
       {
           "valid_expiry",
           R"json({
+            "source_event_id": "1",
             "destination": "https://d.test",
             "expiry": "5"
           })json",
@@ -725,7 +713,7 @@ TEST(AttributionResponseParsingTest, ParseSourceRegistrationHeader) {
               /*destination=*/SecurityOrigin::CreateFromString(
                   "https://d.test"),
               /*reporting_origin=*/reporting_origin,
-              /*source_event_id=*/0,
+              /*source_event_id=*/1,
               /*expiry=*/base::Seconds(5),
               /*priority=*/0,
               /*debug_key=*/nullptr,
@@ -735,6 +723,7 @@ TEST(AttributionResponseParsingTest, ParseSourceRegistrationHeader) {
       {
           "expiry_not_string",
           R"json({
+            "source_event_id": "1",
             "destination": "https://d.test",
             "expiry": 5
           })json",
@@ -742,7 +731,7 @@ TEST(AttributionResponseParsingTest, ParseSourceRegistrationHeader) {
               /*destination=*/SecurityOrigin::CreateFromString(
                   "https://d.test"),
               /*reporting_origin=*/reporting_origin,
-              /*source_event_id=*/0,
+              /*source_event_id=*/1,
               /*expiry=*/absl::nullopt,
               /*priority=*/0,
               /*debug_key=*/nullptr,
@@ -752,6 +741,7 @@ TEST(AttributionResponseParsingTest, ParseSourceRegistrationHeader) {
       {
           "invalid_expiry",
           R"json({
+            "source_event_id": "1",
             "destination": "https://d.test",
             "expiry": "abc"
           })json",
@@ -759,7 +749,7 @@ TEST(AttributionResponseParsingTest, ParseSourceRegistrationHeader) {
               /*destination=*/SecurityOrigin::CreateFromString(
                   "https://d.test"),
               /*reporting_origin=*/reporting_origin,
-              /*source_event_id=*/0,
+              /*source_event_id=*/1,
               /*expiry=*/absl::nullopt,
               /*priority=*/0,
               /*debug_key=*/nullptr,
@@ -769,6 +759,7 @@ TEST(AttributionResponseParsingTest, ParseSourceRegistrationHeader) {
       {
           "valid_debug_key",
           R"json({
+            "source_event_id": "1",
             "destination": "https://d.test",
             "debug_key": "5"
           })json",
@@ -776,7 +767,7 @@ TEST(AttributionResponseParsingTest, ParseSourceRegistrationHeader) {
               /*destination=*/SecurityOrigin::CreateFromString(
                   "https://d.test"),
               /*reporting_origin=*/reporting_origin,
-              /*source_event_id=*/0,
+              /*source_event_id=*/1,
               /*expiry=*/absl::nullopt,
               /*priority=*/0,
               /*debug_key=*/mojom::blink::AttributionDebugKey::New(5),
@@ -786,6 +777,7 @@ TEST(AttributionResponseParsingTest, ParseSourceRegistrationHeader) {
       {
           "valid_filter_data",
           R"json({
+            "source_event_id": "1",
             "destination": "https://d.test",
             "filter_data": {"SOURCE_TYPE": []}
           })json",
@@ -793,7 +785,7 @@ TEST(AttributionResponseParsingTest, ParseSourceRegistrationHeader) {
               /*destination=*/SecurityOrigin::CreateFromString(
                   "https://d.test"),
               /*reporting_origin=*/reporting_origin,
-              /*source_event_id=*/0,
+              /*source_event_id=*/1,
               /*expiry=*/absl::nullopt,
               /*priority=*/0,
               /*debug_key=*/nullptr,
@@ -806,6 +798,7 @@ TEST(AttributionResponseParsingTest, ParseSourceRegistrationHeader) {
       {
           "invalid_source_type_key_in_filter_data",
           R"json({
+            "source_event_id": "1",
             "destination": "https://d.test",
             "filter_data": {"source_type": []}
           })json",
@@ -814,6 +807,7 @@ TEST(AttributionResponseParsingTest, ParseSourceRegistrationHeader) {
       {
           "unknown_field",
           R"json({
+            "source_event_id": "1",
             "destination": "https://d.test",
             "a": {"b": {"c": {"d": "e"}}}
           })json",
@@ -821,7 +815,7 @@ TEST(AttributionResponseParsingTest, ParseSourceRegistrationHeader) {
               /*destination=*/SecurityOrigin::CreateFromString(
                   "https://d.test"),
               /*reporting_origin=*/reporting_origin,
-              /*source_event_id=*/0,
+              /*source_event_id=*/1,
               /*expiry=*/absl::nullopt,
               /*priority=*/0,
               /*debug_key=*/nullptr,
@@ -925,28 +919,14 @@ TEST(AttributionResponseParsingTest, ParseEventTriggerData) {
       {
           "missing_trigger_data",
           ParseJSON(R"json([{}])json"),
-          true,
-          VectorBuilder<mojom::blink::EventTriggerDataPtr>()
-              .Add(mojom::blink::EventTriggerData::New(
-                  /*data=*/0,
-                  /*priority=*/0,
-                  /*dedup_key=*/nullptr,
-                  /*filters=*/AttributionFilterDataBuilder().Build(),
-                  /*not_filters=*/AttributionFilterDataBuilder().Build()))
-              .Build(),
+          false,
+          {},
       },
       {
           "trigger_data_not_string",
           ParseJSON(R"json([{"trigger_data": 1}])json"),
-          true,
-          VectorBuilder<mojom::blink::EventTriggerDataPtr>()
-              .Add(mojom::blink::EventTriggerData::New(
-                  /*data=*/0,
-                  /*priority=*/0,
-                  /*dedup_key=*/nullptr,
-                  /*filters=*/AttributionFilterDataBuilder().Build(),
-                  /*not_filters=*/AttributionFilterDataBuilder().Build()))
-              .Build(),
+          false,
+          {},
       },
       {
           "invalid_trigger_data",

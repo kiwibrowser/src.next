@@ -39,7 +39,6 @@ struct TileParameters {
   float scale_factor;
   float phase;
   float spacing;
-  STACK_ALLOCATED();
 };
 
 absl::optional<TileParameters> ComputeTileParameters(
@@ -131,11 +130,8 @@ void PaintPieces(GraphicsContext& context,
     if (!ShouldTile(draw_info)) {
       // Since there is no way for the developer to specify decode behavior,
       // use kSync by default.
-      // TODO(sohom): Per crbug.com/1351498 investigate and set
-      // ImagePaintTimingInfo parameters correctly
       context.DrawImage(image, Image::kSyncDecode, image_auto_dark_mode,
-                        ImagePaintTimingInfo(), draw_info.destination,
-                        &draw_info.source);
+                        draw_info.destination, &draw_info.source);
       continue;
     }
 
@@ -169,10 +165,8 @@ void PaintPieces(GraphicsContext& context,
         draw_info.destination.origin() +
         (gfx::PointF(h_tile->phase, v_tile->phase) - tile_origin_in_dest_space);
     tiling_info.spacing = gfx::SizeF(h_tile->spacing, v_tile->spacing);
-    // TODO(sohom): Per crbug.com/1351498 investigate and set
-    // ImagePaintTimingInfo parameters correctly
     context.DrawImageTiled(image, draw_info.destination, tiling_info,
-                           image_auto_dark_mode, ImagePaintTimingInfo());
+                           image_auto_dark_mode);
   }
 }
 

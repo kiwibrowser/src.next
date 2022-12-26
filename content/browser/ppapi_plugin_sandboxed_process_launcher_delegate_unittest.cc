@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors
+// Copyright 2021 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -64,9 +64,9 @@ TEST_P(PpapiPluginFeatureSandboxWinTest, PpapiGeneratedPolicyTest) {
           handles_to_inherit, &test_ppapi_delegate, policy.get());
   ASSERT_EQ(::sandbox::ResultCode::SBOX_ALL_OK, result);
 
-  ValidateSecurityLevels(policy->GetConfig());
-  ValidatePolicyFlagSettings(policy->GetConfig());
-  ValidateAppContainerSettings(policy->GetConfig());
+  ValidateSecurityLevels(policy.get());
+  ValidatePolicyFlagSettings(policy.get());
+  ValidateAppContainerSettings(policy.get());
 }
 
 INSTANTIATE_TEST_SUITE_P(

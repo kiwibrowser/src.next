@@ -4,131 +4,161 @@
 
 #include "third_party/blink/renderer/core/frame/pending_beacon.h"
 
-#include "base/task/single_thread_task_runner.h"
-#include "base/time/time.h"
-#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/frame/pending_beacon.mojom-blink.h"
+#include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/platform/web_url_request_util.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_beacon_options.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_arraybuffer_arraybufferview_blob_formdata_readablestream_urlsearchparams_usvstring.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
-#include "third_party/blink/renderer/core/frame/pending_beacon_dispatcher.h"
 #include "third_party/blink/renderer/core/loader/beacon_data.h"
-#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/exported/wrapped_resource_request.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
-#include "third_party/blink/renderer/platform/network/http_names.h"
+#include "third_party/blink/renderer/platform/network/encoded_form_data.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 
 namespace blink {
-namespace {
 
-// Internally enforces a time limit to send out pending beacons when using
-// background timeout.
-//
-// When the page is in hidden state, beacons will be sent out no later than
-// min(Time evicted from back/forward cache,
-//     `kDefaultPendingBeaconMaxBackgroundTimeout`).
-// Note that this is currently longer than back/forward cache entry's TTL.
-// See https://github.com/WICG/unload-beacon/issues/3
-constexpr base::TimeDelta kDefaultPendingBeaconMaxBackgroundTimeout =
-    base::Minutes(30);  // 30 minutes
+// Helper class to wrap a shared mojo remote to the frame's pending beacon host,
+// such that all beacons can share the same remote to make calls to that host.
+class PendingBeaconHostRemote
+    : public GarbageCollected<PendingBeaconHostRemote>,
+      public Supplement<ExecutionContext> {
+ public:
+  static const char kSupplementName[];
+  explicit PendingBeaconHostRemote(ExecutionContext& ec)
+      : Supplement<ExecutionContext>(ec), remote_(&ec) {
+    // Using the MiscPlatformAPI task type as pending beacons are not yet
+    // associated with any specific task runner in the spec.
+    auto task_runner = ec.GetTaskRunner(TaskType::kMiscPlatformAPI);
 
-// Returns a max possible background timeout for every pending beacon.
-base::TimeDelta GetMaxBackgroundTimeout() {
-  return base::Milliseconds(GetFieldTrialParamByFeatureAsInt(
-      features::kPendingBeaconAPI, "PendingBeaconMaxBackgroundTimeoutInMs",
-      base::checked_cast<int32_t>(
-          kDefaultPendingBeaconMaxBackgroundTimeout.InMilliseconds())));
-}
-
-}  // namespace
-
-PendingBeacon::PendingBeacon(ExecutionContext* ec,
-                             const String& url,
-                             const String& method,
-                             int32_t background_timeout,
-                             int32_t timeout)
-    : ExecutionContextLifecycleObserver(ec),
-      ec_(ec),
-      remote_(ec),
-      url_(url),
-      method_(method),
-      background_timeout_(base::Milliseconds(background_timeout)),
-      timeout_timer_(GetTaskRunner(), this, &PendingBeacon::TimeoutTimerFired) {
-  // Creates a corresponding instance of PendingBeacon in the browser process
-  // and binds `remote_` to it.
-  mojom::blink::BeaconMethod host_method;
-  if (method == http_names::kGET) {
-    host_method = mojom::blink::BeaconMethod::kGet;
-  } else {
-    host_method = mojom::blink::BeaconMethod::kPost;
+    mojo::PendingReceiver<mojom::blink::PendingBeaconHost> host_receiver =
+        remote_.BindNewPipeAndPassReceiver(task_runner);
+    ec.GetBrowserInterfaceBroker().GetInterface(std::move(host_receiver));
   }
 
-  mojo::PendingReceiver<mojom::blink::PendingBeacon> beacon_receiver =
-      remote_.BindNewPipeAndPassReceiver(GetTaskRunner());
-  KURL host_url = ec_->CompleteURL(url);
+  static PendingBeaconHostRemote& From(ExecutionContext& ec) {
+    PendingBeaconHostRemote* remote =
+        Supplement<ExecutionContext>::From<PendingBeaconHostRemote>(ec);
+    if (!remote) {
+      remote = MakeGarbageCollected<PendingBeaconHostRemote>(ec);
+      ProvideTo(ec, remote);
+    }
+    return *remote;
+  }
 
-  PendingBeaconDispatcher& dispatcher =
-      PendingBeaconDispatcher::FromOrAttachTo(*ec_);
-  dispatcher.CreateHostBeacon(this, std::move(beacon_receiver), host_url,
-                              host_method);
-  // May trigger beacon sending immediately.
-  setTimeout(timeout);
+  void Trace(Visitor* visitor) const override {
+    Supplement::Trace(visitor);
+    visitor->Trace(remote_);
+  }
+
+  HeapMojoRemote<mojom::blink::PendingBeaconHost> remote_;
+};
+
+const char PendingBeaconHostRemote::kSupplementName[] =
+    "PendingBeaconHostRemote";
+
+// static
+PendingBeacon* PendingBeacon::Create(ExecutionContext* ec,
+                                     const String& targetURL) {
+  BeaconOptions* options = BeaconOptions::Create();
+  return PendingBeacon::Create(ec, targetURL, options);
 }
+// static
+PendingBeacon* PendingBeacon::Create(ExecutionContext* ec,
+                                     const String& targetURL,
+                                     BeaconOptions* options) {
+  PendingBeacon* beacon = MakeGarbageCollected<PendingBeacon>(
+      ec, targetURL, options->method(), options->pageHideTimeout());
+  mojom::blink::BeaconMethod method;
+  if (options->method() == V8BeaconMethod::Enum::kGET) {
+    method = mojom::blink::BeaconMethod::kGet;
+  } else {
+    method = mojom::blink::BeaconMethod::kPost;
+  }
+
+  // Using the MiscPlatformAPI task type as pending beacons are not yet
+  // associated with any specific task runner in the spec.
+  auto task_runner = ec->GetTaskRunner(TaskType::kMiscPlatformAPI);
+
+  mojo::PendingReceiver<mojom::blink::PendingBeacon> beacon_receiver =
+      beacon->remote_.BindNewPipeAndPassReceiver(task_runner);
+
+  PendingBeaconHostRemote& host_remote = PendingBeaconHostRemote::From(*ec);
+
+  KURL url = ec->CompleteURL(targetURL);
+
+  host_remote.remote_->CreateBeacon(
+      std::move(beacon_receiver), url, method,
+      base::Milliseconds(beacon->page_hide_timeout_));
+  return beacon;
+}
+
+PendingBeacon::PendingBeacon(ExecutionContext* context,
+                             String url,
+                             String method,
+                             int32_t page_hide_timeout)
+    : remote_(context),
+      url_(url),
+      method_(method),
+      page_hide_timeout_(page_hide_timeout) {}
 
 void PendingBeacon::Trace(Visitor* visitor) const {
   ScriptWrappable::Trace(visitor);
-  ExecutionContextLifecycleObserver::Trace(visitor);
-  visitor->Trace(ec_);
   visitor->Trace(remote_);
-  visitor->Trace(timeout_timer_);
+}
+
+void PendingBeacon::setData(
+    const V8UnionReadableStreamOrXMLHttpRequestBodyInit* data) {
+  if (method_ == http_names::kGET) {
+    // TODO(crbug.com/1293679): Throw errors.
+    return;
+  }
+  using ContentType =
+      V8UnionReadableStreamOrXMLHttpRequestBodyInit::ContentType;
+  switch (data->GetContentType()) {
+    case ContentType::kUSVString: {
+      SetDataInternal(BeaconString(data->GetAsUSVString()));
+      return;
+    }
+    case ContentType::kArrayBuffer: {
+      SetDataInternal(BeaconDOMArrayBuffer(data->GetAsArrayBuffer()));
+      return;
+    }
+    case ContentType::kArrayBufferView: {
+      SetDataInternal(
+          BeaconDOMArrayBufferView(data->GetAsArrayBufferView().Get()));
+      return;
+    }
+    case ContentType::kFormData: {
+      SetDataInternal(BeaconFormData(data->GetAsFormData()));
+      return;
+    }
+    case ContentType::kURLSearchParams: {
+      SetDataInternal(BeaconURLSearchParams(data->GetAsURLSearchParams()));
+      return;
+    }
+    case ContentType::kBlob:
+      // TODO(crbug.com/1293679): Decide whether to support blob/file.
+    case ContentType::kReadableStream: {
+      // TODO(crbug.com/1293679): Throw errors.
+      break;
+    }
+  }
+  NOTIMPLEMENTED();
 }
 
 void PendingBeacon::deactivate() {
-  if (pending_) {
-    remote_->Deactivate();
-    pending_ = false;
-
-    UnregisterFromDispatcher();
-  }
+  remote_->Deactivate();
 }
 
 void PendingBeacon::sendNow() {
-  if (pending_) {
+  if (is_pending_) {
     remote_->SendNow();
-    pending_ = false;
-
-    UnregisterFromDispatcher();
+    is_pending_ = false;
   }
 }
 
-void PendingBeacon::setBackgroundTimeout(int32_t background_timeout) {
-  background_timeout_ = base::Milliseconds(background_timeout);
-}
-
-void PendingBeacon::setTimeout(int32_t timeout) {
-  timeout_ = base::Milliseconds(timeout);
-  if (timeout_.is_negative() || !pending_) {
-    return;
-  }
-
-  // TODO(crbug.com/3774273): Use the nullity of data & url to decide whether
-  // beacon should be sent.
-  // https://github.com/WICG/unload-beacon/issues/17#issuecomment-1198871880
-
-  // If timeout >= 0, the timer starts immediately after its value is set or
-  // updated.
-  // https://github.com/WICG/unload-beacon/blob/main/README.md#properties
-  timeout_timer_.StartOneShot(timeout_, FROM_HERE);
-}
-
-void PendingBeacon::SetURLInternal(const String& url) {
-  url_ = url;
-  KURL host_url = ec_->CompleteURL(url);
-  remote_->SetRequestURL(host_url);
-}
-
-void PendingBeacon::SetDataInternal(const BeaconData& data,
-                                    ExceptionState& exception_state) {
+void PendingBeacon::SetDataInternal(const BeaconData& data) {
   ResourceRequest request;
 
   data.Serialize(request);
@@ -136,47 +166,9 @@ void PendingBeacon::SetDataInternal(const BeaconData& data,
   request.SetHttpMethod(http_names::kPOST);
   scoped_refptr<network::ResourceRequestBody> request_body =
       GetRequestBodyForWebURLRequest(WrappedResourceRequest(request));
-  // TODO(crbug.com/1293679): Support multi-parts request.
-  // Current implementation in browser only supports sending single request with
-  // single DataElement.
-  if (request_body->elements()->size() > 1) {
-    exception_state.ThrowRangeError(
-        "PendingBeacon only supports single part data.");
-    return;
-  }
-
   AtomicString content_type = request.HttpContentType();
   remote_->SetRequestData(std::move(request_body),
                           content_type.IsNull() ? "" : content_type);
-}
-
-base::TimeDelta PendingBeacon::GetBackgroundTimeout() const {
-  const auto max_background_timeout = GetMaxBackgroundTimeout();
-  return (background_timeout_.is_negative() ||
-          background_timeout_ > max_background_timeout)
-             ? max_background_timeout
-             : background_timeout_;
-}
-
-void PendingBeacon::Send() {
-  sendNow();
-}
-
-scoped_refptr<base::SingleThreadTaskRunner> PendingBeacon::GetTaskRunner() {
-  return GetExecutionContext()->GetTaskRunner(
-      PendingBeaconDispatcher::kTaskType);
-}
-
-void PendingBeacon::TimeoutTimerFired(TimerBase*) {
-  sendNow();
-}
-
-void PendingBeacon::ContextDestroyed() {
-  // Updates state to disallow any subsequent actions.
-  pending_ = false;
-  // Cancels timer task when the Document is destroyed.
-  // The browser will take over the responsibility.
-  timeout_timer_.Stop();
 }
 
 }  // namespace blink

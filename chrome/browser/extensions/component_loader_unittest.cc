@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -140,11 +140,10 @@ TEST_F(ComponentLoaderTest, ParseManifest) {
   EXPECT_EQ(1, manifest->FindIntPath("test.one"));
   EXPECT_EQ(2, manifest->FindIntKey("two"));
 
+  std::string string_value;
   manifest = component_loader_.ParseManifest(manifest_contents_);
-  const std::string* string_value =
-      manifest->GetDict().FindStringByDottedPath("background.page");
-  ASSERT_TRUE(string_value);
-  EXPECT_EQ("backgroundpage.html", *string_value);
+  ASSERT_TRUE(manifest->GetString("background.page", &string_value));
+  EXPECT_EQ("backgroundpage.html", string_value);
 }
 
 // Test that the extension isn't loaded if the extension service isn't ready.

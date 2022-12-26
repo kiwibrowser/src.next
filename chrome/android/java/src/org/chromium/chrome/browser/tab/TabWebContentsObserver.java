@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors
+// Copyright 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -192,22 +192,18 @@ public class TabWebContentsObserver extends TabWebContentsUserData {
         }
 
         @Override
-        public void didFinishLoadInPrimaryMainFrame(GlobalRenderFrameHostId frameId, GURL url,
-                boolean isKnownValid, @LifecycleState int frameLifecycleState) {
+        public void didFinishLoad(GlobalRenderFrameHostId frameId, GURL url, boolean isKnownValid,
+                boolean isInPrimaryMainFrame, @LifecycleState int frameLifecycleState) {
             assert isKnownValid;
             if (frameLifecycleState == LifecycleState.ACTIVE) {
                 if (mTab.getNativePage() != null) {
                     mTab.pushNativePageStateToNavigationEntry();
                 }
-                mTab.didFinishPageLoad(url);
+                if (isInPrimaryMainFrame) mTab.didFinishPageLoad(url);
             }
-        }
-
-        @Override
-        public void didFinishLoadNoop(GlobalRenderFrameHostId frameId, GURL url,
-                boolean isKnownValid, boolean isInPrimaryMainFrame,
-                @LifecycleState int frameLifecycleState) {
-            if (!isInPrimaryMainFrame) return;
+            PolicyAuditor auditor = AppHooks.get().getPolicyAuditor();
+            auditor.notifyAuditEvent(ContextUtils.getApplicationContext(),
+                    AuditEvent.OPEN_URL_SUCCESS, url.getSpec(), "");
         }
 
         @Override
@@ -225,13 +221,11 @@ public class TabWebContentsObserver extends TabWebContentsUserData {
             assert description != null;
 
             PolicyAuditor auditor = AppHooks.get().getPolicyAuditor();
-            if (auditor != null) {
+            auditor.notifyAuditEvent(ContextUtils.getApplicationContext(),
+                    AuditEvent.OPEN_URL_FAILURE, failingUrl, description);
+            if (errorCode == BLOCKED_BY_ADMINISTRATOR) {
                 auditor.notifyAuditEvent(ContextUtils.getApplicationContext(),
-                        AuditEvent.OPEN_URL_FAILURE, failingUrl, description);
-                if (errorCode == BLOCKED_BY_ADMINISTRATOR) {
-                    auditor.notifyAuditEvent(ContextUtils.getApplicationContext(),
-                            AuditEvent.OPEN_URL_BLOCKED, failingUrl, "");
-                }
+                        AuditEvent.OPEN_URL_BLOCKED, failingUrl, "");
             }
         }
 
@@ -241,22 +235,14 @@ public class TabWebContentsObserver extends TabWebContentsUserData {
         }
 
         @Override
-        public void didStartNavigationInPrimaryMainFrame(NavigationHandle navigation) {
-            if (!navigation.isSameDocument()) {
+        public void didStartNavigation(NavigationHandle navigation) {
+            if (navigation.isInPrimaryMainFrame() && !navigation.isSameDocument()) {
                 mTab.didStartPageLoad(navigation.getUrl());
             }
 
             RewindableIterator<TabObserver> observers = mTab.getTabObservers();
             while (observers.hasNext()) {
-                observers.next().onDidStartNavigationInPrimaryMainFrame(mTab, navigation);
-            }
-        }
-
-        @Override
-        public void didStartNavigationNoop(NavigationHandle navigation) {
-            RewindableIterator<TabObserver> observers = mTab.getTabObservers();
-            while (observers.hasNext()) {
-                observers.next().onDidStartNavigationNoop(mTab, navigation);
+                observers.next().onDidStartNavigation(mTab, navigation);
             }
         }
 
@@ -277,6 +263,9 @@ public class TabWebContentsObserver extends TabWebContentsUserData {
 
             if (navigation.errorCode() != NetError.OK) {
                 if (navigation.isInPrimaryMainFrame()) mTab.didFailPageLoad(navigation.errorCode());
+
+                recordErrorInPolicyAuditor(navigation.getUrl().getSpec(),
+                        navigation.errorDescription(), navigation.errorCode());
             }
             mLastUrl = navigation.getUrl();
 

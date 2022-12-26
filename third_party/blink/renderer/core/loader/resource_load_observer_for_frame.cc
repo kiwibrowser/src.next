@@ -5,7 +5,7 @@
 #include "third_party/blink/renderer/core/loader/resource_load_observer_for_frame.h"
 
 #include "base/metrics/histogram_macros.h"
-#include "base/types/optional_util.h"
+#include "base/stl_util.h"
 #include "components/power_scheduler/power_mode_arbiter.h"
 #include "services/network/public/cpp/cors/cors_error_status.h"
 #include "services/network/public/mojom/cors.mojom-forward.h"
@@ -280,7 +280,9 @@ void ResourceLoadObserverForFrame::DidReceiveResponse(
       resource->GetType() == ResourceType::kLinkPrefetch) {
     CountUsage(WebFeature::kLinkRelPrefetchForSignedExchanges);
 
-    if (resource->RedirectChainSize() > 0) {
+    if (RuntimeEnabledFeatures::SignedExchangeSubresourcePrefetchEnabled(
+            document_->GetExecutionContext()) &&
+        resource->RedirectChainSize() > 0) {
       // See if the outer response (which must be the last response in
       // the redirect chain) had provided alternate links for the prefetch.
       alternate_resource_info =
@@ -302,7 +304,7 @@ void ResourceLoadObserverForFrame::DidReceiveResponse(
       response.HttpHeaderField(http_names::kLink), response.CurrentRequestUrl(),
       *frame, document_, resource_loading_policy, PreloadHelper::kLoadAll,
       nullptr /* viewport_description */, std::move(alternate_resource_info),
-      base::OptionalToPtr(response.RecursivePrefetchToken()));
+      base::OptionalOrNullptr(response.RecursivePrefetchToken()));
 
   if (response.HasMajorCertificateErrors()) {
     MixedContentChecker::HandleCertificateError(

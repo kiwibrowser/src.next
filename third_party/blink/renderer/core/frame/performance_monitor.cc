@@ -6,8 +6,8 @@
 
 #include "base/format_macros.h"
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/renderer/bindings/core/v8/capture_source_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/scheduled_action.h"
+#include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/core/core_probe_sink.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event_listener.h"
@@ -17,7 +17,6 @@
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/html/parser/html_document_parser.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
-#include "third_party/blink/renderer/platform/bindings/source_location.h"
 #include "v8/include/v8-metrics.h"
 
 namespace blink {
@@ -240,7 +239,7 @@ void PerformanceMonitor::Did(const probe::CallFunction& probe) {
   String text = String::Format("'%s' handler took %" PRId64 "ms",
                                name.Utf8().c_str(), duration.InMilliseconds());
   InnerReportGenericViolation(probe.context, handler_type, text, duration,
-                              CaptureSourceLocation(probe.function));
+                              SourceLocation::FromFunction(probe.function));
 }
 
 void PerformanceMonitor::Will(const probe::V8Compile& probe) {
@@ -349,7 +348,7 @@ void PerformanceMonitor::InnerReportGenericViolation(
     return;
 
   if (!location)
-    location = CaptureSourceLocation(context);
+    location = SourceLocation::Capture(context);
 
   ClientThresholds* client_thresholds = subscriptions_it->value;
   for (const auto& it : *client_thresholds) {

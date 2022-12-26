@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,6 +37,8 @@ class StartSurfaceToolbarProperties {
             new PropertyModel.WritableBooleanPropertyKey();
     public static final PropertyModel.WritableBooleanPropertyKey IS_VISIBLE =
             new PropertyModel.WritableBooleanPropertyKey();
+    public static final PropertyModel.WritableBooleanPropertyKey LOGO_IS_VISIBLE =
+            new PropertyModel.WritableBooleanPropertyKey();
     public static final PropertyModel.WritableBooleanPropertyKey IS_INCOGNITO =
             new PropertyModel.WritableBooleanPropertyKey();
     public static final PropertyModel.WritableBooleanPropertyKey ACCESSIBILITY_ENABLED =
@@ -71,15 +73,13 @@ class StartSurfaceToolbarProperties {
 
     public static final PropertyModel.WritableFloatPropertyKey TRANSLATION_Y =
             new PropertyModel.WritableFloatPropertyKey();
-    public static final PropertyModel.WritableFloatPropertyKey ALPHA =
-            new PropertyModel.WritableFloatPropertyKey();
 
     public static final PropertyKey[] ALL_KEYS = new PropertyKey[] {NEW_TAB_CLICK_HANDLER,
-            IS_NEW_TAB_ENABLED, IS_VISIBLE, IS_INCOGNITO, INCOGNITO_STATE_PROVIDER,
+            IS_NEW_TAB_ENABLED, IS_VISIBLE, LOGO_IS_VISIBLE, IS_INCOGNITO, INCOGNITO_STATE_PROVIDER,
             ACCESSIBILITY_ENABLED, MENU_IS_VISIBLE, NEW_TAB_VIEW_IS_VISIBLE,
             NEW_TAB_VIEW_TEXT_IS_VISIBLE, BUTTONS_CLICKABLE, GRID_TAB_SWITCHER_ENABLED,
             IDENTITY_DISC_AT_START, INCOGNITO_SWITCHER_VISIBLE, IDENTITY_DISC_IS_VISIBLE,
             IDENTITY_DISC_CLICK_HANDLER, IDENTITY_DISC_IMAGE, IDENTITY_DISC_DESCRIPTION,
-            NEW_TAB_BUTTON_HIGHLIGHT, TRANSLATION_Y, ALPHA, TAB_SWITCHER_BUTTON_IS_VISIBLE,
+            NEW_TAB_BUTTON_HIGHLIGHT, TRANSLATION_Y, TAB_SWITCHER_BUTTON_IS_VISIBLE,
             INCOGNITO_TAB_COUNT_PROVIDER, INCOGNITO_TAB_MODEL_SELECTOR};
 }

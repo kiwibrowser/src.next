@@ -45,7 +45,6 @@ def _CheckForWrongMojomIncludes(input_api, output_api):
                 r'third_party[\\/]blink[\\/]common[\\/]',
                 r'third_party[\\/]blink[\\/]public[\\/]common[\\/]',
                 r'third_party[\\/]blink[\\/]renderer[\\/]platform[\\/]loader[\\/]fetch[\\/]url_loader[\\/]',
-                r'third_party[\\/]blink[\\/]renderer[\\/]core[\\/]frame[\\/]web_view_impl.*\.(cc|h)$',
                 r'third_party[\\/]blink[\\/]renderer[\\/]core[\\/]frame[\\/]web.*frame.*\.(cc|h)$',
             ])
 
@@ -131,7 +130,6 @@ def _CommonChecks(input_api, output_api):
             input_api,
             output_api,
             excluded_paths=_EXCLUDED_PATHS,
-            owners_check=False,
             maxlen=800,
             license_header=license_header,
             global_checks=False))
@@ -194,7 +192,7 @@ def _CheckStyle(input_api, output_api):
             if child.returncode != 0:
                 results.append(
                     output_api.PresubmitError('check_blink_style.py failed',
-                                              [stderrdata.decode('utf-8')]))
+                                              [stderrdata]))
         except Exception as e:
             results.append(
                 output_api.PresubmitNotifyResult(

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors
+// Copyright 2020 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,6 @@ import androidx.annotation.IntDef;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.Px;
-import androidx.annotation.VisibleForTesting;
 import androidx.core.view.ViewCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -31,8 +30,6 @@ import androidx.recyclerview.widget.RecyclerView;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.metrics.TimingMetric;
 import org.chromium.base.task.PostTask;
-import org.chromium.chrome.browser.omnibox.LocationBarDataProvider;
-import org.chromium.chrome.browser.omnibox.OmniboxFeatures;
 import org.chromium.chrome.browser.omnibox.R;
 import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
 import org.chromium.chrome.browser.util.KeyNavigationUtil;
@@ -172,8 +169,7 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
      * Constructs a new list designed for containing omnibox suggestions.
      * @param context Context used for contained views.
      */
-    public OmniboxSuggestionsDropdown(
-            @NonNull Context context, @NonNull LocationBarDataProvider locationBarDataProvider) {
+    public OmniboxSuggestionsDropdown(@NonNull Context context) {
         super(context, null, android.R.attr.dropDownListViewStyle);
         setFocusable(true);
         setFocusableInTouchMode(true);
@@ -196,22 +192,13 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
             }
         });
 
-        boolean shouldShowModernizeVisualUpdate =
-                OmniboxFeatures.shouldShowModernizeVisualUpdate(context);
         final Resources resources = context.getResources();
-        int paddingSide = shouldShowModernizeVisualUpdate
-                ? resources.getDimensionPixelOffset(R.dimen.omnibox_suggestion_list_padding_side)
-                : 0;
         int paddingBottom =
                 resources.getDimensionPixelOffset(R.dimen.omnibox_suggestion_list_padding_bottom);
-        ViewCompat.setPaddingRelative(this, paddingSide, 0, paddingSide, paddingBottom);
+        ViewCompat.setPaddingRelative(this, 0, 0, 0, paddingBottom);
 
-        mStandardBgColor = shouldShowModernizeVisualUpdate
-                ? locationBarDataProvider.getDropdownStandardBackgroundColor()
-                : ChromeColors.getDefaultThemeColor(context, false);
-        mIncognitoBgColor = shouldShowModernizeVisualUpdate
-                ? locationBarDataProvider.getDropdownIncognitoBackgroundColor()
-                : ChromeColors.getDefaultThemeColor(context, true);
+        mStandardBgColor = ChromeColors.getDefaultThemeColor(context, false);
+        mIncognitoBgColor = ChromeColors.getDefaultThemeColor(context, true);
     }
 
     /** Get the Android View implementing suggestion list. */
@@ -554,15 +541,5 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
         setPadding(mTempPosition[0], getPaddingTop(),
                 mAnchorView.getWidth() - mAlignmentView.getWidth() - mTempPosition[0],
                 getPaddingBottom());
-    }
-
-    @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
-    public int getStandardBgColor() {
-        return mStandardBgColor;
-    }
-
-    @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
-    public int getIncognitoBgColor() {
-        return mIncognitoBgColor;
     }
 }

@@ -32,7 +32,6 @@
 #include "third_party/blink/public/common/dom_storage/session_storage_namespace_id.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/loader/request_context_frame_type.mojom-blink.h"
-#include "third_party/blink/public/mojom/window_features/window_features.mojom-blink.h"
 #include "third_party/blink/public/web/web_view_client.h"
 #include "third_party/blink/public/web/web_window_features.h"
 #include "third_party/blink/renderer/core/core_initializer.h"
@@ -67,8 +66,7 @@ static bool IsWindowFeaturesSeparator(UChar c) {
 }
 
 WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
-                                              LocalDOMWindow* dom_window,
-                                              const KURL& url) {
+                                              LocalDOMWindow* dom_window) {
   WebWindowFeatures window_features;
 
   bool attribution_reporting_enabled =
@@ -147,16 +145,16 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
 
     // Listing a key with no value is shorthand for key=yes
     int value;
-    constexpr auto kLoose = WTF::NumberParsingOptions::Loose();
     if (value_string.IsEmpty() || value_string == "yes" ||
         value_string == "true") {
       value = 1;
     } else if (value_string.Is8Bit()) {
       value = CharactersToInt(value_string.Characters8(), value_string.length(),
-                              kLoose, nullptr);
+                              WTF::NumberParsingOptions::kLoose, nullptr);
     } else {
-      value = CharactersToInt(value_string.Characters16(),
-                              value_string.length(), kLoose, nullptr);
+      value =
+          CharactersToInt(value_string.Characters16(), value_string.length(),
+                          WTF::NumberParsingOptions::kLoose, nullptr);
     }
 
     if (!ui_features_were_disabled && key_string != "noopener" &&
@@ -228,10 +226,10 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
       // If the impression could not be set, or if the value was empty, mark
       // attribution eligibility by adding an impression.
       if (!window_features.impression &&
-          dom_window->GetFrame()->GetAttributionSrcLoader()->CanRegister(
-              url,
-              /*element=*/nullptr,
-              /*request_id=*/absl::nullopt)) {
+          CanRegisterAttributionInContext(
+              dom_window->GetFrame(), /*element=*/nullptr,
+              /*request_id=*/absl::nullopt,
+              AttributionSrcLoader::RegisterContext::kAttributionSrc)) {
         window_features.impression = blink::Impression();
       }
     }
@@ -264,7 +262,7 @@ static void MaybeLogWindowOpen(LocalFrame& opener_frame) {
   if (!ad_tracker)
     return;
 
-  bool is_ad_frame = opener_frame.IsAdFrame();
+  bool is_ad_subframe = opener_frame.IsAdSubframe();
   bool is_ad_script_in_stack =
       ad_tracker->IsAdScriptInStack(AdTracker::StackType::kBottomAndTop);
 
@@ -273,7 +271,7 @@ static void MaybeLogWindowOpen(LocalFrame& opener_frame) {
   ukm::SourceId source_id = opener_frame.GetDocument()->UkmSourceID();
   if (source_id != ukm::kInvalidSourceId) {
     ukm::builders::AbusiveExperienceHeuristic_WindowOpen(source_id)
-        .SetFromAdSubframe(is_ad_frame)
+        .SetFromAdSubframe(is_ad_subframe)
         .SetFromAdScript(is_ad_script_in_stack)
         .Record(ukm_recorder);
   }
@@ -379,10 +377,7 @@ Frame* CreateNewWindow(LocalFrame& opener_frame,
 
   frame.View()->SetCanHaveScrollbars(features.scrollbars_visible);
 
-  mojom::blink::WindowFeaturesPtr window_features =
-      mojom::blink::WindowFeatures::New();
-  window_features->bounds = page->GetChromeClient().RootWindowRect(frame);
-  gfx::Rect& window_rect = window_features->bounds;
+  gfx::Rect window_rect = page->GetChromeClient().RootWindowRect(frame);
   if (features.x_set)
     window_rect.set_x(features.x);
   if (features.y_set)
@@ -393,7 +388,7 @@ Frame* CreateNewWindow(LocalFrame& opener_frame,
     window_rect.set_height(features.height);
 
   page->GetChromeClient().Show(frame, opener_frame,
-                               request.GetNavigationPolicy(), *window_features,
+                               request.GetNavigationPolicy(), window_rect,
                                consumed_user_gesture);
   MaybeLogWindowOpen(opener_frame);
   return &frame;

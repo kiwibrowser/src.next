@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include "base/memory/singleton.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_keyed_service_factory.h"
+#include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 
 namespace history {
 class WebHistoryService;
@@ -15,7 +15,7 @@ class WebHistoryService;
 
 // Used for creating and fetching a per-profile instance of the
 // WebHistoryService.
-class WebHistoryServiceFactory : public ProfileKeyedServiceFactory {
+class WebHistoryServiceFactory : public BrowserContextKeyedServiceFactory {
  public:
   // Get the singleton instance of the factory.
   static WebHistoryServiceFactory* GetInstance();

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors
+// Copyright 2022 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,20 +20,11 @@ import org.chromium.build.BuildConfig;
  */
 @JNINamespace("external_intents")
 public class ExternalIntentsFeatures extends Features {
-    public static final String AUTOFILL_ASSISTANT_GOOGLE_INITIATOR_ORIGIN_CHECK_NAME =
-            "AutofillAssistantGoogleInitiatorOriginCheck";
-    public static final String EXTERNAL_NAVIGATION_DEBUG_LOGS_NAME = "ExternalNavigationDebugLogs";
     public static final String SCARY_EXTERNAL_NAVIGATION_REFACTORING_NAME =
             "ScaryExternalNavigationRefactoring";
 
-    public static final ExternalIntentsFeatures AUTOFILL_ASSISTANT_GOOGLE_INITIATOR_ORIGIN_CHECK =
-            new ExternalIntentsFeatures(0, AUTOFILL_ASSISTANT_GOOGLE_INITIATOR_ORIGIN_CHECK_NAME);
-
-    public static final ExternalIntentsFeatures EXTERNAL_NAVIGATION_DEBUG_LOGS =
-            new ExternalIntentsFeatures(1, EXTERNAL_NAVIGATION_DEBUG_LOGS_NAME);
-
     public static final ExternalIntentsFeatures SCARY_EXTERNAL_NAVIGATION_REFACTORING =
-            new ExternalIntentsFeatures(2, SCARY_EXTERNAL_NAVIGATION_REFACTORING_NAME);
+            new ExternalIntentsFeatures(0, SCARY_EXTERNAL_NAVIGATION_REFACTORING_NAME);
 
     private final int mOrdinal;
 

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -212,12 +212,14 @@ TEST_F(ExtensionWebUITest, TestRemovingDuplicateEntriesForHosts) {
 
   // Duplicates should be removed (in response to ExtensionSystem::ready()).
   // Only a single entry should remain.
-  const base::Value::Dict& overrides =
-      prefs->GetDict(ExtensionWebUI::kExtensionURLOverrides);
-  const base::Value::List* newtab_overrides = overrides.FindList("newtab");
+  const base::Value* overrides =
+      prefs->GetDictionary(ExtensionWebUI::kExtensionURLOverrides);
+  ASSERT_TRUE(overrides);
+  const base::Value* newtab_overrides =
+      overrides->FindKeyOfType("newtab", base::Value::Type::LIST);
   ASSERT_TRUE(newtab_overrides);
-  ASSERT_EQ(1u, newtab_overrides->size());
-  const base::Value& override_dict = (*newtab_overrides)[0];
+  ASSERT_EQ(1u, newtab_overrides->GetListDeprecated().size());
+  const base::Value& override_dict = newtab_overrides->GetListDeprecated()[0];
   EXPECT_EQ(newtab_url.spec(), override_dict.FindKey("entry")->GetString());
   EXPECT_TRUE(override_dict.FindKey("active")->GetBool());
 }

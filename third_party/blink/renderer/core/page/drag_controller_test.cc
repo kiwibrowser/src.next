@@ -33,14 +33,13 @@ class DragMockChromeClient : public RenderingTestChromeClient {
                      const WebDragData&,
                      DragOperationsMask,
                      const SkBitmap& drag_image,
-                     const gfx::Vector2d& cursor_offset,
-                     const gfx::Rect& drag_obj_rect) override {
+                     const gfx::Point& drag_image_offset) override {
     last_drag_image_size = gfx::Size(drag_image.width(), drag_image.height());
-    last_cursor_offset = cursor_offset;
+    last_drag_image_offset = drag_image_offset;
   }
 
   gfx::Size last_drag_image_size;
-  gfx::Vector2d last_cursor_offset;
+  gfx::Point last_drag_image_offset;
 };
 
 class DragControllerTest : public RenderingTest {
@@ -429,9 +428,9 @@ TEST_F(DragControllerTest, DragImageOffsetWithPageScaleFactor) {
   EXPECT_EQ(expected_image_size, GetChromeClient().last_drag_image_size);
   // The drag image has a margin of 2px which should offset the selection
   // image by 2px from the dragged location of (5, 10).
-  gfx::Vector2d expected_offset(5 * page_scale_factor,
-                                (10 - 2) * page_scale_factor);
-  EXPECT_EQ(expected_offset, GetChromeClient().last_cursor_offset);
+  gfx::Point expected_offset(5 * page_scale_factor,
+                             (10 - 2) * page_scale_factor);
+  EXPECT_EQ(expected_offset, GetChromeClient().last_drag_image_offset);
 }
 
 TEST_F(DragControllerTest, DragLinkWithPageScaleFactor) {
@@ -477,12 +476,14 @@ TEST_F(DragControllerTest, DragLinkWithPageScaleFactor) {
   // image is not offset by margin because the link image is not based on the
   // link's painting but instead is a generated image of the link's url. Because
   // link_image_size is already scaled, no additional scaling is expected.
-  gfx::Vector2d expected_offset(link_image_size.width() / 2, 2);
+  gfx::Point expected_offset = gfx::Point(link_image_size.width() / 2, 2);
   // The offset is mapped using integers which can introduce rounding errors
   // (see TODO in DragController::DoSystemDrag) so we accept values near our
   // expectation until more precise offset mapping is available.
-  EXPECT_NEAR(expected_offset.x(), GetChromeClient().last_cursor_offset.x(), 1);
-  EXPECT_NEAR(expected_offset.y(), GetChromeClient().last_cursor_offset.y(), 1);
+  EXPECT_NEAR(expected_offset.x(), GetChromeClient().last_drag_image_offset.x(),
+              1);
+  EXPECT_NEAR(expected_offset.y(), GetChromeClient().last_drag_image_offset.y(),
+              1);
 }
 
 }  // namespace blink

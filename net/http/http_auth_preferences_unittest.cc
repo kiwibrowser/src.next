@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,10 +41,10 @@ TEST(HttpAuthPreferencesTest, DisableNtlmV2) {
   http_auth_preferences.set_ntlm_v2_enabled(false);
   EXPECT_FALSE(http_auth_preferences.NtlmV2Enabled());
 }
-#endif  // BUILDFLAG(IS_POSIX)
+#endif
 
 #if BUILDFLAG(IS_ANDROID)
-TEST(HttpAuthPreferencesTest, AuthAndroidNegotiateAccountType) {
+TEST(HttpAuthPreferencesTest, AuthAndroidhNegotiateAccountType) {
   HttpAuthPreferences http_auth_preferences;
   EXPECT_EQ(std::string(),
             http_auth_preferences.AuthAndroidNegotiateAccountType());
@@ -52,16 +52,16 @@ TEST(HttpAuthPreferencesTest, AuthAndroidNegotiateAccountType) {
   EXPECT_EQ(std::string("foo"),
             http_auth_preferences.AuthAndroidNegotiateAccountType());
 }
-#endif  // BUILDFLAG(IS_ANDROID)
+#endif
 
-#if BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 TEST(HttpAuthPreferencesTest, AllowGssapiLibraryLoad) {
   HttpAuthPreferences http_auth_preferences;
   EXPECT_TRUE(http_auth_preferences.AllowGssapiLibraryLoad());
   http_auth_preferences.set_allow_gssapi_library_load(false);
   EXPECT_FALSE(http_auth_preferences.AllowGssapiLibraryLoad());
 }
-#endif  // BUILDFLAG(IS_CHROMEOS)
+#endif
 
 TEST(HttpAuthPreferencesTest, AuthServerAllowlist) {
   HttpAuthPreferences http_auth_preferences;

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors
+// Copyright 2021 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,11 +35,13 @@ void DownloadDialogUtils::CreateNewFileDone(
     download::PathValidationResult result,
     const base::FilePath& target_path) {
   if (result == download::PathValidationResult::SUCCESS) {
-    std::move(callback).Run(DownloadConfirmationResult::CONFIRMED, target_path);
+    std::move(callback).Run(DownloadConfirmationResult::CONFIRMED, target_path,
+                            absl::nullopt /*download_schedule*/);
 
   } else {
     std::move(callback).Run(DownloadConfirmationResult::FAILED,
-                            base::FilePath());
+                            base::FilePath(),
+                            absl::nullopt /*download_schedule*/);
   }
 }
 

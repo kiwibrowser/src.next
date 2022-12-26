@@ -291,11 +291,9 @@ void PaintLayerClipper::CalculateBackgroundClipRectWithGeometryMapper(
       context.root_fragment->LocalBorderBoxProperties();
   if (context.ShouldRespectRootLayerClip()) {
     destination_property_tree_state.SetClip(context.root_fragment->PreClip());
-    destination_property_tree_state.SetEffect(
-        context.root_fragment->PreEffect());
   } else {
     destination_property_tree_state.SetClip(
-        context.root_fragment->ContentsClip());
+        context.root_fragment->PostOverflowClip());
   }
 
   // The background rect applies all clips *above* m_layer, but not the overflow
@@ -358,8 +356,9 @@ PhysicalRect PaintLayerClipper::LocalVisualRect(
   // overflow induced by paint, prior to applying filters. This function is
   // expected the return the final visual rect after filtering.
   if (layer_->PaintsWithFilters() &&
-      // GeometryMapper will handle filter effects.
-      !use_geometry_mapper_) {
+      // If we use GeometryMapper to map to an ancestor layer, GeometryMapper
+      // will handle filter effects.
+      (!use_geometry_mapper_ || context.root_layer == layer_)) {
     layer_bounds_with_visual_overflow =
         layer_->MapRectForFilter(layer_bounds_with_visual_overflow);
   }

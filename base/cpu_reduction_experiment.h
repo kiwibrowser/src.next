@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors
+// Copyright 2022 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,11 +18,17 @@ BASE_EXPORT bool IsRunningCpuReductionExperiment();
 // single-threaded.
 BASE_EXPORT void InitializeCpuReductionExperiment();
 
-// Returns true if the next sample should be recorded to an histogram
-// sub-sampled under the CPU reduction experiment. Returns true randomly for
-// ~1/1000 calls when the experiment is enabled, or always returns true when the
-// experiment is disabled.
-BASE_EXPORT bool ShouldLogHistogramForCpuReductionExperiment();
+// This is a helper class to reduce common duplicate code. If the CPU reduction
+// experiment is running, then ShouldLogHistograms returns true on every 1000th
+// call. Otherwise it always returns true.
+class BASE_EXPORT CpuReductionExperimentFilter {
+ public:
+  // Returns true on the first call, and every 1000th call after that.
+  bool ShouldLogHistograms();
+
+ private:
+  int counter_ = 0;
+};
 
 }  // namespace base
 

@@ -49,7 +49,7 @@ class CORE_EXPORT CollapsedBorderValue {
  public:
   // Constructs a CollapsedBorderValue for non-existence border.
   CollapsedBorderValue()
-      : color_(Color::kTransparent),
+      : color_(0),
         width_(0),
         style_(static_cast<unsigned>(EBorderStyle::kNone)),
         precedence_(kBorderPrecedenceOff) {}

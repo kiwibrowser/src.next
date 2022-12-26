@@ -71,11 +71,10 @@ class CORE_EXPORT Screen : public EventTargetWithInlineData,
   const WTF::AtomicString& InterfaceName() const override;
   ExecutionContext* GetExecutionContext() const override;
 
-  // Whether the device’s visual output extends over multiple screens.
-  // https://w3c.github.io/window-placement/
+  // Proposed: https://github.com/webscreens/window-placement
+  // Whether this Screen is part of a multi-screen extended visual workspace.
   bool isExtended() const;
-  // Fired when the window’s screen or that screen's attributes change.
-  // https://w3c.github.io/window-placement/
+  // An event fired when Screen attributes change.
   DEFINE_ATTRIBUTE_EVENT_LISTENER(change, kChange)
 
   // Not web-exposed; for internal usage only.

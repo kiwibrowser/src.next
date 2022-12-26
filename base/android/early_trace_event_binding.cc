@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors
+// Copyright 2016 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -104,12 +104,12 @@ static void JNI_EarlyTraceEvent_RecordEarlyAsyncBeginEvent(
     jlong id,
     jlong time_ns) {
   std::string name = ConvertJavaStringToUTF8(env, jname);
-  TRACE_EVENT_BEGIN(internal::kJavaTraceCategory, nullptr,
-                    perfetto::Track(static_cast<uint64_t>(id)),
-                    TimeTicks::FromJavaNanoTime(time_ns),
-                    [&](::perfetto::EventContext& ctx) {
-                      ctx.event()->set_name(name.c_str());
-                    });
+
+  TRACE_EVENT_NESTABLE_ASYNC_BEGIN_WITH_TIMESTAMP_AND_FLAGS0(
+      internal::kJavaTraceCategory, name.c_str(),
+      TRACE_ID_LOCAL(static_cast<uint64_t>(id)),
+      TimeTicks::FromJavaNanoTime(time_ns),
+      TRACE_EVENT_FLAG_JAVA_STRING_LITERALS | TRACE_EVENT_FLAG_COPY);
 }
 
 static void JNI_EarlyTraceEvent_RecordEarlyAsyncEndEvent(
@@ -118,8 +118,12 @@ static void JNI_EarlyTraceEvent_RecordEarlyAsyncEndEvent(
     jlong id,
     jlong time_ns) {
   std::string name = ConvertJavaStringToUTF8(env, jname);
-  TRACE_EVENT_END(internal::kJavaTraceCategory,
-                  perfetto::Track(static_cast<uint64_t>(id)));
+
+  TRACE_EVENT_NESTABLE_ASYNC_END_WITH_TIMESTAMP_AND_FLAGS0(
+      internal::kJavaTraceCategory, name.c_str(),
+      TRACE_ID_LOCAL(static_cast<uint64_t>(id)),
+      TimeTicks::FromJavaNanoTime(time_ns),
+      TRACE_EVENT_FLAG_JAVA_STRING_LITERALS | TRACE_EVENT_FLAG_COPY);
 }
 
 bool GetBackgroundStartupTracingFlag() {

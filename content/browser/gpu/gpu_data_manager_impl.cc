@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -331,7 +331,7 @@ void GpuDataManagerImpl::ProcessCrashed() {
   private_->ProcessCrashed();
 }
 
-base::Value::List GpuDataManagerImpl::GetLogMessages() const {
+std::unique_ptr<base::ListValue> GpuDataManagerImpl::GetLogMessages() const {
   base::AutoLock auto_lock(lock_);
   return private_->GetLogMessages();
 }
@@ -341,10 +341,10 @@ void GpuDataManagerImpl::HandleGpuSwitch() {
   private_->HandleGpuSwitch();
 }
 
-void GpuDataManagerImpl::BlockDomainsFrom3DAPIs(const std::set<GURL>& urls,
-                                                gpu::DomainGuilt guilt) {
+void GpuDataManagerImpl::BlockDomainFrom3DAPIs(const GURL& url,
+                                               gpu::DomainGuilt guilt) {
   base::AutoLock auto_lock(lock_);
-  private_->BlockDomainsFrom3DAPIs(urls, guilt);
+  private_->BlockDomainFrom3DAPIs(url, guilt);
 }
 
 bool GpuDataManagerImpl::Are3DAPIsBlocked(const GURL& top_origin_url,

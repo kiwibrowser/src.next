@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "extensions/buildflags/buildflags.h"
 
 class ChromeDownloadManagerDelegate;
-class DownloadUIController;
 class ExtensionDownloadsEventRouter;
 
 namespace content {
@@ -36,9 +35,6 @@ class DownloadCoreService : public KeyedService {
 
   // Get the download manager delegate, creating it if it doesn't already exist.
   virtual ChromeDownloadManagerDelegate* GetDownloadManagerDelegate() = 0;
-
-  // Get the download UI controller, return nullptr if it doesn't already exist.
-  virtual DownloadUIController* GetDownloadUIController() = 0;
 
   // Get the interface to the history system. Returns NULL if profile is
   // incognito or if the DownloadManager hasn't been created yet or if there is
@@ -81,10 +77,6 @@ class DownloadCoreService : public KeyedService {
   // Returns false if at least one extension has disabled the UI, true
   // otherwise.
   virtual bool IsDownloadUiEnabled() = 0;
-
-  // Returns true if at least one extension is observing download events, false
-  // otherwise.
-  virtual bool IsDownloadObservedByExtension() = 0;
 };
 
 #endif  // CHROME_BROWSER_DOWNLOAD_DOWNLOAD_CORE_SERVICE_H_

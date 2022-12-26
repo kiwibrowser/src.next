@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,7 +30,7 @@ namespace {
 class WasInProgressData : public base::SupportsUserData::Data {
  public:
   static bool Get(download::DownloadItem* item) {
-    return item->GetUserData(kKey) != nullptr;
+    return item->GetUserData(kKey) != NULL;
   }
 
   static void Clear(download::DownloadItem* item) {

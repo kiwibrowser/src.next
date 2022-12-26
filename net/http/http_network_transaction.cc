@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -1642,7 +1642,7 @@ int HttpNetworkTransaction::HandleIOError(int error) {
     case ERR_QUIC_PROTOCOL_ERROR:
       if (GetResponseHeaders() != nullptr ||
           !stream_->GetAlternativeService(&retried_alternative_service_)) {
-        // If the response headers have already been received and passed up
+        // If the response headers have already been recieved and passed up
         // then the request can not be retried. Also, if there was no
         // alternative service used for this request, then there is no
         // alternative service to be disabled.

@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -167,7 +167,10 @@ const char kGoogleSlidesAppId[] = "aapocclcgogkmnckokdopfmhonfmgoek";
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 // TODO(michaelpg): Deprecate old app IDs before adding new ones to avoid bloat.
 const char kHighlightsAppId[] = "lpmakjfjcconjeehbidjclhdlpjmfjjj";
+const char kHighlightsAtlasAppId[] = "gjeelkjnolfmhphfhhjokaijbicopfln";
 const char kScreensaverAppId[] = "mnoijifedipmbjaoekhadjcijipaijjc";
+const char kScreensaverAtlasAppId[] = "bnabjkecnachpogjlfilfcnlpcmacglh";
+const char kScreensaverKraneZdksAppId[] = "fafhbhdboeiciklpkminlncemohljlkj";
 const char kSigninProfileTestExtensionId[] = "mecfefiddjlmabpeilblgegnbioikfmp";
 const char kGuestModeTestExtensionId[] = "behllobkkfkfnphdnhnkndlbkcpglgmj";
 
@@ -183,7 +186,9 @@ bool IsSystemUIApp(base::StringPiece extension_id) {
       // clang-format off
       kChromeVoxExtensionId,
       kFilesManagerAppId,
+      kHighlightsAtlasAppId,
       kHighlightsAppId,
+      kScreensaverAtlasAppId,
       kScreensaverAppId,
       // clang-format on
   };

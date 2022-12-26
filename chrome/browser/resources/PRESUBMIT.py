@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors
+# Copyright 2014 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -10,10 +10,9 @@ for more details about the presubmit API built into depot_tools.
 
 USE_PYTHON3 = True
 ACTION_XML_PATH = '../../../tools/metrics/actions/actions.xml'
-PRESUBMIT_VERSION = '2.0.0'
 
 
-def InternalCheckUserActionUpdate(input_api, output_api, action_xml_path):
+def CheckUserActionUpdate(input_api, output_api, action_xml_path):
   """Checks if any new user action has been added."""
   if any('actions.xml' == input_api.os_path.basename(f) for f in
          input_api.change.LocalPaths()):
@@ -45,10 +44,6 @@ def InternalCheckUserActionUpdate(input_api, output_api, action_xml_path):
             'tools/metrics/actions/extract_actions.py to update.'
             % (f.LocalPath(), line_num, metric_name), [])]
   return []
-
-
-def CheckUserActionUpdate(input_api, output_api):
-  return InternalCheckUserActionUpdate(input_api, output_api, ACTION_XML_PATH)
 
 
 def IsActionPresent(current_actions, metric_name, is_boolean):
@@ -99,7 +94,7 @@ def CheckHtml(input_api, output_api):
       input_api, output_api, 80, lambda x: x.LocalPath().endswith('.html'))
 
 
-def CheckSvgsOptimized(input_api, output_api):
+def _CheckSvgsOptimized(input_api, output_api):
   results = []
   try:
     import sys
@@ -113,7 +108,7 @@ def CheckSvgsOptimized(input_api, output_api):
   return results
 
 
-def CheckWebDevStyle(input_api, output_api):
+def _CheckWebDevStyle(input_api, output_api):
   results = []
 
   try:
@@ -129,7 +124,21 @@ def CheckWebDevStyle(input_api, output_api):
   return results
 
 
-def CheckPatchFormatted(input_api, output_api):
-  results = input_api.canned_checks.CheckPatchFormatted(input_api, output_api,
+def _CheckChangeOnUploadOrCommit(input_api, output_api):
+  results = CheckUserActionUpdate(input_api, output_api, ACTION_XML_PATH)
+  affected = input_api.AffectedFiles()
+  if any(f for f in affected if f.LocalPath().endswith('.html')):
+    results += CheckHtml(input_api, output_api)
+  results += _CheckSvgsOptimized(input_api, output_api)
+  results += _CheckWebDevStyle(input_api, output_api)
+  results += input_api.canned_checks.CheckPatchFormatted(input_api, output_api,
                                                          check_js=True)
   return results
+
+
+def CheckChangeOnUpload(input_api, output_api):
+  return _CheckChangeOnUploadOrCommit(input_api, output_api)
+
+
+def CheckChangeOnCommit(input_api, output_api):
+  return _CheckChangeOnUploadOrCommit(input_api, output_api)

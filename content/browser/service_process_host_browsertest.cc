@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 
 #include "base/memory/shared_memory_mapping.h"
 #include "base/memory/unsafe_shared_memory_region.h"
-#include "base/process/process.h"
 #include "base/run_loop.h"
 #include "base/test/bind.h"
 #include "base/time/time.h"
@@ -18,6 +17,7 @@
 #include "services/test/echo/public/mojom/echo.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+
 
 namespace content {
 
@@ -40,13 +40,13 @@ class EchoServiceProcessObserver : public ServiceProcessHost::Observer {
   void WaitForCrash() { crash_loop_.Run(); }
 
   // Valid after WaitForLaunch.
-  base::ProcessId pid() const { return process_.Pid(); }
+  base::ProcessId pid() const { return pid_; }
 
  private:
   // ServiceProcessHost::Observer:
   void OnServiceProcessLaunched(const ServiceProcessInfo& info) override {
     if (info.IsService<echo::mojom::EchoService>()) {
-      process_ = info.GetProcess().Duplicate();
+      pid_ = info.pid;
       launch_loop_.Quit();
     }
   }
@@ -65,7 +65,7 @@ class EchoServiceProcessObserver : public ServiceProcessHost::Observer {
   base::RunLoop launch_loop_;
   base::RunLoop death_loop_;
   base::RunLoop crash_loop_;
-  base::Process process_;
+  base::ProcessId pid_ = base::kNullProcessId;
 };
 
 IN_PROC_BROWSER_TEST_F(ServiceProcessHostBrowserTest, Launch) {

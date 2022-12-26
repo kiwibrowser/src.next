@@ -102,7 +102,6 @@ class InlineTextBoxPainter {
   struct PaintOffsets {
     unsigned start;
     unsigned end;
-    STACK_ALLOCATED();
   };
   PaintOffsets ApplyTruncationToPaintOffsets(const PaintOffsets&);
   // For markers that shouldn't draw over a truncation ellipsis (i.e., not

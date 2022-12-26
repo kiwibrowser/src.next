@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -85,6 +85,13 @@ class X509Certificate;
 //
 class NET_EXPORT URLRequest : public base::SupportsUserData {
  public:
+  // Callback function implemented by protocol handlers to create new jobs.
+  // The factory may return NULL to indicate an error, which will cause other
+  // factories to be queried.  If no factory handles the request, then the
+  // default job will be used.
+  typedef URLRequestJob*(ProtocolFactory)(URLRequest* request,
+                                          const std::string& scheme);
+
   // Max number of http redirects to follow. The Fetch spec says: "If
   // request's redirect count is twenty, return a network error."
   // https://fetch.spec.whatwg.org/#http-redirect-fetch
@@ -731,7 +738,7 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   void SetRequestHeadersCallback(RequestHeadersCallback callback);
 
   // Sets a callback that will be invoked each time the response is received
-  // from the remote party with the actual response headers received. Note this
+  // from the remote party with the actual response headers recieved. Note this
   // is different from response_headers() getter in that in case of revalidation
   // request, the latter will return cached headers, while the callback will be
   // called with a response from the server.
@@ -955,7 +962,7 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
 
   // Never access methods of the |delegate_| directly. Always use the
   // Notify... methods for this.
-  raw_ptr<Delegate, DanglingUntriaged> delegate_;
+  raw_ptr<Delegate> delegate_;
 
   const bool is_for_websockets_;
 

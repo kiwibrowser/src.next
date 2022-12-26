@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/base64.h"
 #include "base/check_op.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/values.h"
 #include "extensions/browser/extension_icon_image.h"
 #include "extensions/browser/extension_icon_placeholder.h"
 #include "extensions/common/constants.h"
@@ -118,17 +119,18 @@ void ExtensionAction::SetIcon(int tab_id, const gfx::Image& image) {
 }
 
 ExtensionAction::IconParseResult ExtensionAction::ParseIconFromCanvasDictionary(
-    const base::Value::Dict& dict,
+    const base::DictionaryValue& dict,
     gfx::ImageSkia* icon) {
-  for (const auto item : dict) {
+  for (base::DictionaryValue::Iterator iter(dict); !iter.IsAtEnd();
+       iter.Advance()) {
     std::string byte_string;
     const void* bytes = nullptr;
     size_t num_bytes = 0;
-    if (item.second.is_blob()) {
-      bytes = item.second.GetBlob().data();
-      num_bytes = item.second.GetBlob().size();
-    } else if (item.second.is_string()) {
-      if (!base::Base64Decode(item.second.GetString(), &byte_string))
+    if (iter.value().is_blob()) {
+      bytes = iter.value().GetBlob().data();
+      num_bytes = iter.value().GetBlob().size();
+    } else if (iter.value().is_string()) {
+      if (!base::Base64Decode(iter.value().GetString(), &byte_string))
         return IconParseResult::kDecodeFailure;
       bytes = byte_string.c_str();
       num_bytes = byte_string.length();

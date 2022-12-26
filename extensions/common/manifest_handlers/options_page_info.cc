@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -135,7 +135,7 @@ std::unique_ptr<OptionsPageInfo> OptionsPageInfo::Create(
         install_warnings->push_back(
             InstallWarning(base::UTF16ToASCII(options_parse_error)));
       }
-      if (options_ui->chrome_style) {
+      if (options_ui->chrome_style.get()) {
         if (extension->manifest_version() < 3)
           chrome_style = *options_ui->chrome_style;
         else {
@@ -143,7 +143,9 @@ std::unique_ptr<OptionsPageInfo> OptionsPageInfo::Create(
           return nullptr;
         }
       }
-      open_in_tab = options_ui->open_in_tab.value_or(false);
+      open_in_tab = false;
+      if (options_ui->open_in_tab.get())
+        open_in_tab = *options_ui->open_in_tab;
     }
   }
 

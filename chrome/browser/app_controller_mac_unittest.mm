@@ -1,4 +1,4 @@
-// Copyright 2011 The Chromium Authors
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -184,7 +184,7 @@ TEST_F(AppControllerTest, DockMenu) {
   }
 }
 
-TEST_F(AppControllerTest, LastProfileIfLoaded) {
+TEST_F(AppControllerTest, LastProfile) {
   // Create a second profile.
   base::FilePath dest_path1 = profile_->GetPath();
   base::FilePath dest_path2 =
@@ -204,7 +204,7 @@ TEST_F(AppControllerTest, LastProfileIfLoaded) {
 
   base::RunLoop().RunUntilIdle();
 
-  EXPECT_EQ(dest_path2, [ac lastProfileIfLoaded]->GetPath());
+  EXPECT_EQ(dest_path2, [ac lastProfile]->GetPath());
 }
 
 // Tests key equivalents for Close Window when target is a child window (like a

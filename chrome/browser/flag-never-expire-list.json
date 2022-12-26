@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -70,7 +70,6 @@
   "enable-webgpu-developer-features",
   "enable-zero-copy",
   "extensions-on-chrome-urls",
-  "external-navigation-debug-logs",
   "force-color-profile",
   "force-effective-connection-type",
   "force-show-update-menu-badge",
@@ -92,7 +91,6 @@
   "memlog",
   "memlog-sampling-rate",
   "memlog-stack-mode",
-  "omaha-min-sdk-version-android",
   "overlay-strategies",
   "password-import",
   "reader-mode-heuristics",
@@ -120,6 +118,7 @@
   "use-angle",
   "use-custom-messages-domain",
   "use-fake-device-for-media-stream",
+  "use-first-party-set",
   "use_messages_staging_url",
   "use-stork-smds-server-address",
   "use-sync-sandbox",

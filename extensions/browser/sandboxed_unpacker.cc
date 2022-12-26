@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/sequenced_task_runner.h"
-#include "base/task/task_runner_util.h"
 #include "base/timer/elapsed_timer.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
@@ -159,79 +158,6 @@ absl::optional<crx_file::VerifierFormat> g_verifier_format_override_for_test;
 
 }  // namespace
 
-class SandboxedUnpacker::IOThreadState {
- public:
-  IOThreadState() = default;
-  IOThreadState(const IOThreadState&) = delete;
-  IOThreadState& operator=(const IOThreadState&) = delete;
-  ~IOThreadState() = default;
-
-  void CleanUp() {
-    image_sanitizer_.reset();
-    json_file_sanitizer_.reset();
-    json_parser_.reset();
-  }
-
-  data_decoder::DataDecoder* GetDataDecoder() { return &data_decoder_; }
-
-  void CreateImangeSanitizer(
-      const extensions::Extension* extension,
-      const base::FilePath& extension_root,
-      scoped_refptr<ImageSanitizer::Client> client,
-      const scoped_refptr<base::SequencedTaskRunner>& unpacker_io_task_runner) {
-    DCHECK(!image_sanitizer_);
-    std::set<base::FilePath> image_paths =
-        ExtensionsClient::Get()->GetBrowserImagePaths(extension);
-    image_sanitizer_ = ImageSanitizer::CreateAndStart(
-        client, extension_root, image_paths, unpacker_io_task_runner);
-  }
-
-  void CreateJsonFileSanitizer(
-      const std::set<base::FilePath>& message_catalog_paths,
-      JsonFileSanitizer::Callback callback,
-      const scoped_refptr<base::SequencedTaskRunner>& unpacker_io_task_runner) {
-    json_file_sanitizer_ = JsonFileSanitizer::CreateAndStart(
-        GetDataDecoder(), message_catalog_paths, std::move(callback),
-        unpacker_io_task_runner);
-  }
-
-  data_decoder::mojom::JsonParser* GetJsonParserPtr(
-      SandboxedUnpacker* unpacker) {
-    if (!json_parser_) {
-      data_decoder_.GetService()->BindJsonParser(
-          json_parser_.BindNewPipeAndPassReceiver());
-      json_parser_.set_disconnect_handler(base::BindOnce(
-          &SandboxedUnpacker::ReportFailure, unpacker,
-          SandboxedUnpackerFailureReason::
-              UTILITY_PROCESS_CRASHED_WHILE_TRYING_TO_INSTALL,
-          l10n_util::GetStringFUTF16(
-              IDS_EXTENSION_PACKAGE_INSTALL_ERROR,
-              u"UTILITY_PROCESS_CRASHED_WHILE_TRYING_TO_INSTALL") +
-              u". " +
-              l10n_util::GetStringUTF16(
-                  IDS_EXTENSION_INSTALL_PROCESS_CRASHED)));
-    }
-
-    return json_parser_.get();
-  }
-
- private:
-  // Controls our own lazily started, isolated instance of the Data Decoder
-  // service so that multiple decode operations related to this
-  // SandboxedUnpacker can share a single instance.
-  data_decoder::DataDecoder data_decoder_;
-
-  // The JSONParser remote from the data decoder service.
-  mojo::Remote<data_decoder::mojom::JsonParser> json_parser_;
-
-  // The ImageSanitizer used to clean-up images.
-  std::unique_ptr<ImageSanitizer> image_sanitizer_;
-
-  // Used during the message catalog rewriting phase to sanitize the extension
-  // provided message catalogs.
-  std::unique_ptr<JsonFileSanitizer> json_file_sanitizer_;
-};
-
 SandboxedUnpackerClient::SandboxedUnpackerClient()
     : RefCountedDeleteOnSequence<SandboxedUnpackerClient>(
           content::GetUIThreadTaskRunner({})) {
@@ -274,8 +200,7 @@ SandboxedUnpacker::SandboxedUnpacker(
       location_(location),
       creation_flags_(creation_flags),
       format_verifier_override_(g_verifier_format_override_for_test),
-      unpacker_io_task_runner_(unpacker_io_task_runner),
-      io_thread_state_(std::make_unique<IOThreadState>()) {
+      unpacker_io_task_runner_(unpacker_io_task_runner) {
   // Tracking for crbug.com/692069. The location must be valid. If it's invalid,
   // the utility process kills itself for a bad IPC.
   CHECK_GT(location, mojom::ManifestLocation::kInvalidLocation);
@@ -410,7 +335,15 @@ SandboxedUnpacker::~SandboxedUnpacker() {
   // |temp_dir_| eventually.
   temp_dir_.Take();
 
-  unpacker_io_task_runner_->DeleteSoon(FROM_HERE, std::move(io_thread_state_));
+  // Make sure that members get deleted on the thread they were created.
+  if (image_sanitizer_) {
+    unpacker_io_task_runner_->DeleteSoon(FROM_HERE,
+                                         std::move(image_sanitizer_));
+  }
+  if (json_file_sanitizer_) {
+    unpacker_io_task_runner_->DeleteSoon(FROM_HERE,
+                                         std::move(json_file_sanitizer_));
+  }
 }
 
 void SandboxedUnpacker::Unzip(const base::FilePath& crx_path,
@@ -443,7 +376,7 @@ void SandboxedUnpacker::UnzipDone(const base::FilePath& zip_file,
     Unpack(unzip_dir);
     return;
   }
-  GetDataDecoder()->GzipUncompress(
+  data_decoder_.GzipUncompress(
       compressed_verified_contents_,
       base::BindOnce(&SandboxedUnpacker::OnVerifiedContentsUncompressed, this,
                      unzip_dir));
@@ -579,7 +512,7 @@ void SandboxedUnpacker::UnpackExtensionSucceeded(base::Value manifest) {
   // with std::u16string
   std::string utf8_error;
   if (!extension_l10n_util::LocalizeExtension(
-          extension_root_, &final_manifest_dict->GetDict(),
+          extension_root_, final_manifest_dict.get(),
           extension_l10n_util::GzippedMessagesPermission::kDisallow,
           &utf8_error)) {
     ReportFailure(
@@ -619,12 +552,15 @@ void SandboxedUnpacker::UnpackExtensionSucceeded(base::Value manifest) {
 
   manifest_ = std::move(manifest);
 
-  io_thread_state_->CreateImangeSanitizer(extension_.get(), extension_root_,
-                                          this, unpacker_io_task_runner_);
+  DCHECK(!image_sanitizer_);
+  std::set<base::FilePath> image_paths =
+      ExtensionsClient::Get()->GetBrowserImagePaths(extension_.get());
+  image_sanitizer_ = ImageSanitizer::CreateAndStart(
+      this, extension_root_, image_paths, unpacker_io_task_runner_);
 }
 
 data_decoder::DataDecoder* SandboxedUnpacker::GetDataDecoder() {
-  return io_thread_state_->GetDataDecoder();
+  return &data_decoder_;
 }
 
 void SandboxedUnpacker::OnImageDecoded(const base::FilePath& path,
@@ -705,8 +641,8 @@ void SandboxedUnpacker::ReadMessageCatalogs() {
 void SandboxedUnpacker::SanitizeMessageCatalogs(
     const std::set<base::FilePath>& message_catalog_paths) {
   DCHECK(unpacker_io_task_runner_->RunsTasksInCurrentSequence());
-  io_thread_state_->CreateJsonFileSanitizer(
-      message_catalog_paths,
+  json_file_sanitizer_ = JsonFileSanitizer::CreateAndStart(
+      &data_decoder_, message_catalog_paths,
       base::BindOnce(&SandboxedUnpacker::MessageCatalogsSanitized, this),
       unpacker_io_task_runner_);
 }
@@ -827,7 +763,20 @@ void SandboxedUnpacker::MaybeComputeHashes(bool should_compute) {
 
 data_decoder::mojom::JsonParser* SandboxedUnpacker::GetJsonParserPtr() {
   DCHECK(unpacker_io_task_runner_->RunsTasksInCurrentSequence());
-  return io_thread_state_->GetJsonParserPtr(this);
+  if (!json_parser_) {
+    data_decoder_.GetService()->BindJsonParser(
+        json_parser_.BindNewPipeAndPassReceiver());
+    json_parser_.set_disconnect_handler(base::BindOnce(
+        &SandboxedUnpacker::ReportFailure, this,
+        SandboxedUnpackerFailureReason::
+            UTILITY_PROCESS_CRASHED_WHILE_TRYING_TO_INSTALL,
+        l10n_util::GetStringFUTF16(
+            IDS_EXTENSION_PACKAGE_INSTALL_ERROR,
+            u"UTILITY_PROCESS_CRASHED_WHILE_TRYING_TO_INSTALL") +
+            u". " +
+            l10n_util::GetStringUTF16(IDS_EXTENSION_INSTALL_PROCESS_CRASHED)));
+  }
+  return json_parser_.get();
 }
 
 void SandboxedUnpacker::ReportUnpackExtensionFailed(base::StringPiece error) {
@@ -1093,8 +1042,9 @@ void SandboxedUnpacker::Cleanup() {
     LOG(WARNING) << "Can not delete temp directory at "
                  << temp_dir_.GetPath().value();
   }
-
-  io_thread_state_->CleanUp();
+  image_sanitizer_.reset();
+  json_file_sanitizer_.reset();
+  json_parser_.reset();
 }
 
 void SandboxedUnpacker::ParseJsonFile(

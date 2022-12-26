@@ -41,11 +41,7 @@ bool StyleRecalcChange::ShouldRecalcStyleFor(const Node& node) const {
   // Container queries may affect display:none elements, and we since we store
   // that dependency on ComputedStyle we need to recalc style for display:none
   // subtree roots.
-  return !old_style ||
-         (RecalcSizeContainerQueryDependent() &&
-          old_style->DependsOnSizeContainerQueries()) ||
-         (RecalcStyleContainerQueryDependent() &&
-          old_style->DependsOnStyleContainerQueries());
+  return !old_style || old_style->DependsOnSizeContainerQueries();
 }
 
 bool StyleRecalcChange::ShouldUpdatePseudoElement(
@@ -56,13 +52,8 @@ bool StyleRecalcChange::ShouldUpdatePseudoElement(
     return true;
   if (pseudo_element.NeedsLayoutSubtreeUpdate())
     return true;
-  if (!RecalcSizeContainerQueryDependent())
-    return false;
-  const ComputedStyle& style = pseudo_element.ComputedStyleRef();
-  return (RecalcSizeContainerQueryDependent() &&
-          style.DependsOnSizeContainerQueries()) ||
-         (RecalcStyleContainerQueryDependent() &&
-          style.DependsOnStyleContainerQueries());
+  return RecalcContainerQueryDependent() &&
+         pseudo_element.ComputedStyleRef().DependsOnSizeContainerQueries();
 }
 
 String StyleRecalcChange::ToString() const {
@@ -84,9 +75,6 @@ String StyleRecalcChange::ToString() const {
     case kRecalcDescendants:
       builder.Append("kRecalcDescendants");
       break;
-    case kRecalcSiblingDescendants:
-      builder.Append("kRecalcSiblingDescendants");
-      break;
   }
   builder.Append(", flags=");
   if (!flags_) {
@@ -100,12 +88,12 @@ String StyleRecalcChange::ToString() const {
       previous_flags = flags;
       builder.Append(separator);
       separator = "|";
-      if (flags & kRecalcSizeContainer) {
-        builder.Append("kRecalcSizeContainer");
-        flags &= ~kRecalcSizeContainer;
-      } else if (flags & kRecalcDescendantSizeContainers) {
-        builder.Append("kRecalcDescendantSizeContainers");
-        flags &= ~kRecalcDescendantSizeContainers;
+      if (flags & kRecalcContainer) {
+        builder.Append("kRecalcContainer");
+        flags &= ~kRecalcContainer;
+      } else if (flags & kRecalcDescendantContainers) {
+        builder.Append("kRecalcDescendantContainers");
+        flags &= ~kRecalcDescendantContainers;
       } else if (flags & kReattach) {
         builder.Append("kReattach");
         flags &= ~kReattach;
@@ -126,34 +114,19 @@ String StyleRecalcChange::ToString() const {
 
 StyleRecalcChange::Flags StyleRecalcChange::FlagsForChildren(
     const Element& element) const {
-  if (!flags_)
-    return 0;
-
-  // TODO(crbug.com/1302630): This is not correct for shadow hosts. Style recalc
-  // traversal happens in flat tree order while query containers are found among
-  // shadow-including ancestors. A slotted shadow host child queries its shadow
-  // host for style() queries without a container name.
-  Flags result = flags_ & ~kRecalcStyleContainerChildren;
+  Flags result = flags_;
 
   // Note that kSuppressRecalc is used on the root container for the
   // interleaved style recalc.
-  if ((result & (kRecalcSizeContainerFlags | kSuppressRecalc)) ==
-      kRecalcSizeContainer) {
-    if (IsShadowHost(element)) {
-      // Since the nearest container is found in shadow-including ancestors and
-      // not in flat tree ancestors, and style recalc traversal happens in flat
-      // tree order, we need to invalidate inside flat tree descendant
-      // containers if such containers are inside shadow trees.
-      result |= kRecalcDescendantSizeContainers;
-    } else {
-      // Don't traverse into children if we hit a descendant container while
-      // recalculating container queries. If the queries for this container also
-      // changes, we will enter another container query recalc for this subtree
-      // from layout.
-      const ComputedStyle* old_style = element.GetComputedStyle();
-      if (old_style && old_style->CanMatchSizeContainerQueries(element))
-        result &= ~kRecalcSizeContainer;
-    }
+  if ((result & (kRecalcContainerFlags | kSuppressRecalc)) ==
+      kRecalcContainer) {
+    // Don't traverse into children if we hit a descendant container while
+    // recalculating container queries. If the queries for this container also
+    // changes, we will enter another container query recalc for this subtree
+    // from layout.
+    const ComputedStyle* old_style = element.GetComputedStyle();
+    if (old_style && old_style->CanMatchSizeContainerQueries(element))
+      result &= ~kRecalcContainer;
   }
 
   // kSuppressRecalc should only take effect for the query container itself, not
@@ -174,10 +147,8 @@ bool StyleRecalcChange::IndependentInherit(
   // as depending on container queries, we need to do a proper recalc for the
   // element.
   return propagate_ == kIndependentInherit &&
-         (!RecalcSizeContainerQueryDependent() ||
-          !old_style.DependsOnSizeContainerQueries()) &&
-         (!RecalcStyleContainerQueryDependent() ||
-          !old_style.DependsOnStyleContainerQueries());
+         (!RecalcContainerQueryDependent() ||
+          !old_style.DependsOnSizeContainerQueries());
 }
 
 }  // namespace blink

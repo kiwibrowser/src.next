@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -59,14 +59,10 @@ class TestGpuService : public viz::mojom::GpuService {
   void EstablishGpuChannel(int32_t client_id,
                            uint64_t client_tracing_id,
                            bool is_gpu_host,
+                           bool cache_shaders_on_disk,
                            EstablishGpuChannelCallback callback) override {}
   void SetChannelClientPid(int32_t client_id,
                            base::ProcessId client_pid) override {}
-  void SetChannelDiskCacheHandle(
-      int32_t client_id,
-      const gpu::GpuDiskCacheHandle& handle) override {}
-  void OnDiskCacheHandleDestoyed(
-      const gpu::GpuDiskCacheHandle& handle) override {}
   void CloseChannel(int32_t client_id) override {}
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 #if BUILDFLAG(USE_CHROMEOS_MEDIA_ACCELERATION)
@@ -120,9 +116,9 @@ class TestGpuService : public viz::mojom::GpuService {
 #if BUILDFLAG(IS_WIN)
   void RequestDXGIInfo(RequestDXGIInfoCallback callback) override {}
 #endif
-  void LoadedBlob(const gpu::GpuDiskCacheHandle& handle,
-                  const std::string& key,
-                  const std::string& data) override {}
+  void LoadedShader(int32_t client_id,
+                    const std::string& key,
+                    const std::string& data) override {}
   void WakeUpGpu() override {}
   void GpuSwitched(gl::GpuPreference active_gpu_heuristic) override {}
   void DisplayAdded() override {}

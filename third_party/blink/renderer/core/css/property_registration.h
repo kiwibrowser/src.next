@@ -15,6 +15,7 @@
 
 namespace blink {
 
+class CSSVariableData;
 class ExceptionState;
 class ExecutionContext;
 class PropertyDefinition;
@@ -43,17 +44,19 @@ class CORE_EXPORT PropertyRegistration final
   PropertyRegistration(const AtomicString& name,
                        const CSSSyntaxDefinition&,
                        bool inherits,
-                       const CSSValue* initial);
+                       const CSSValue* initial,
+                       scoped_refptr<CSSVariableData> initial_variable_data);
   ~PropertyRegistration();
 
   const CSSSyntaxDefinition& Syntax() const { return syntax_; }
   bool Inherits() const { return inherits_; }
   const CSSValue* Initial() const { return initial_; }
+  CSSVariableData* InitialVariableData() const {
+    return initial_variable_data_.get();
+  }
   const InterpolationTypes& GetInterpolationTypes() const {
     return interpolation_types_;
   }
-  // See `ViewportUnitFlag`.
-  unsigned GetViewportUnitFlags() const;
 
   void Trace(Visitor* visitor) const { visitor->Trace(initial_); }
 
@@ -63,6 +66,7 @@ class CORE_EXPORT PropertyRegistration final
   const CSSSyntaxDefinition syntax_;
   const bool inherits_;
   const Member<const CSSValue> initial_;
+  const scoped_refptr<CSSVariableData> initial_variable_data_;
   const InterpolationTypes interpolation_types_;
   mutable bool referenced_;
 };

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -200,13 +200,13 @@ class ScopedRequestParamsCrashKeys {
  private:
   static base::debug::CrashKeyString* GetNameCrashKey() {
     static auto* crash_key = base::debug::AllocateCrashKeyString(
-        "RequestParams-name", base::debug::CrashKeySize::Size256);
+        "RequestParams::name", base::debug::CrashKeySize::Size256);
     return crash_key;
   }
 
   static base::debug::CrashKeyString* GetExtensionIdCrashKey() {
     static auto* crash_key = base::debug::AllocateCrashKeyString(
-        "RequestParams-extension_id", base::debug::CrashKeySize::Size64);
+        "RequestParams::extension_id", base::debug::CrashKeySize::Size64);
     return crash_key;
   }
 

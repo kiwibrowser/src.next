@@ -71,18 +71,15 @@ void FragmentData::SetLayer(PaintLayer* layer) {
 
 const TransformPaintPropertyNodeOrAlias& FragmentData::PreTransform() const {
   if (const auto* properties = PaintProperties()) {
-    for (const TransformPaintPropertyNode* transform :
-         properties->AllCSSTransformPropertiesOutsideToInside()) {
-      if (transform) {
-        DCHECK(transform->Parent());
-        return *transform->Parent();
-      }
+    if (const auto* transform = properties->Transform()) {
+      DCHECK(transform->Parent());
+      return *transform->Parent();
     }
   }
   return LocalBorderBoxProperties().Transform();
 }
 
-const TransformPaintPropertyNodeOrAlias& FragmentData::ContentsTransform()
+const TransformPaintPropertyNodeOrAlias& FragmentData::PostScrollTranslation()
     const {
   if (const auto* properties = PaintProperties()) {
     if (properties->TransformIsolationNode())
@@ -99,6 +96,10 @@ const TransformPaintPropertyNodeOrAlias& FragmentData::ContentsTransform()
 
 const ClipPaintPropertyNodeOrAlias& FragmentData::PreClip() const {
   if (const auto* properties = PaintProperties()) {
+    if (const auto* clip = properties->PixelMovingFilterClipExpander()) {
+      DCHECK(clip->Parent());
+      return *clip->Parent();
+    }
     if (const auto* clip = properties->ClipPathClip()) {
       DCHECK(clip->Parent());
       return *clip->Parent();
@@ -111,15 +112,11 @@ const ClipPaintPropertyNodeOrAlias& FragmentData::PreClip() const {
       DCHECK(css_clip->Parent());
       return *css_clip->Parent();
     }
-    if (const auto* clip = properties->PixelMovingFilterClipExpander()) {
-      DCHECK(clip->Parent());
-      return *clip->Parent();
-    }
   }
   return LocalBorderBoxProperties().Clip();
 }
 
-const ClipPaintPropertyNodeOrAlias& FragmentData::ContentsClip() const {
+const ClipPaintPropertyNodeOrAlias& FragmentData::PostOverflowClip() const {
   if (const auto* properties = PaintProperties()) {
     if (properties->ClipIsolationNode())
       return *properties->ClipIsolationNode();
@@ -145,7 +142,8 @@ const EffectPaintPropertyNodeOrAlias& FragmentData::PreEffect() const {
   return LocalBorderBoxProperties().Effect();
 }
 
-const EffectPaintPropertyNodeOrAlias& FragmentData::ContentsEffect() const {
+const EffectPaintPropertyNodeOrAlias& FragmentData::PostIsolationEffect()
+    const {
   if (const auto* properties = PaintProperties()) {
     if (properties->EffectIsolationNode())
       return *properties->EffectIsolationNode();

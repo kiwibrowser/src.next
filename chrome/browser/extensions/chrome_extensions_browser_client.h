@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -64,20 +64,6 @@ class ChromeExtensionsBrowserClient : public ExtensionsBrowserClient {
       content::BrowserContext* context) override;
   content::BrowserContext* GetOriginalContext(
       content::BrowserContext* context) override;
-
-  content::BrowserContext* GetRedirectedContextInIncognito(
-      content::BrowserContext* context,
-      bool force_guest_profile,
-      bool force_system_profile) override;
-  content::BrowserContext* GetContextForRegularAndIncognito(
-      content::BrowserContext* context,
-      bool force_guest_profile,
-      bool force_system_profile) override;
-  content::BrowserContext* GetRegularProfile(
-      content::BrowserContext* context,
-      bool force_guest_profile,
-      bool force_system_profile) override;
-
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   std::string GetUserIdHashFromContext(
       content::BrowserContext* context) override;
@@ -207,9 +193,9 @@ class ChromeExtensionsBrowserClient : public ExtensionsBrowserClient {
   std::vector<content::BrowserContext*> GetRelatedContextsForExtension(
       content::BrowserContext* browser_context,
       const Extension& extension) const override;
-  void AddAdditionalAllowedHosts(
+  std::unique_ptr<const PermissionSet> AddAdditionalAllowedHosts(
       const PermissionSet& desired_permissions,
-      PermissionSet* granted_permissions) const override;
+      const PermissionSet& granted_permissions) const override;
 
  private:
   friend struct base::LazyInstanceTraitsBase<ChromeExtensionsBrowserClient>;

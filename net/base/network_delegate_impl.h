@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 #include "net/base/net_export.h"
 #include "net/base/network_delegate.h"
 #include "net/cookies/canonical_cookie.h"
-#include "net/first_party_sets/same_party_context.h"
+#include "net/cookies/same_party_context.h"
 #include "net/proxy_resolution/proxy_retry_info.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
@@ -69,11 +69,13 @@ class NET_EXPORT NetworkDelegateImpl : public NetworkDelegate {
   bool OnAnnotateAndMoveUserBlockedCookies(
       const URLRequest& request,
       net::CookieAccessResultList& maybe_included_cookies,
-      net::CookieAccessResultList& excluded_cookies) override;
+      net::CookieAccessResultList& excluded_cookies,
+      bool allowed_from_caller) override;
 
   bool OnCanSetCookie(const URLRequest& request,
                       const net::CanonicalCookie& cookie,
-                      CookieOptions* options) override;
+                      CookieOptions* options,
+                      bool allowed_from_caller) override;
 
   NetworkDelegate::PrivacySetting OnForcePrivacyMode(
       const GURL& url,

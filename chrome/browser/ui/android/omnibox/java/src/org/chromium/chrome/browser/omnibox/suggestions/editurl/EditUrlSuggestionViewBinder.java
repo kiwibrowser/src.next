@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors
+// Copyright 2020 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@ import android.graphics.drawable.Drawable;
 import android.view.View;
 
 import org.chromium.chrome.browser.omnibox.styles.OmniboxResourceProvider;
-import org.chromium.chrome.browser.omnibox.suggestions.DropdownCommonProperties;
 import org.chromium.chrome.browser.omnibox.suggestions.SuggestionCommonProperties;
 import org.chromium.chrome.browser.omnibox.suggestions.base.BaseSuggestionViewBinder;
 import org.chromium.chrome.browser.omnibox.suggestions.basic.SuggestionViewViewBinder;
@@ -34,11 +33,6 @@ public class EditUrlSuggestionViewBinder
                     view.getContext(), model.get(SuggestionCommonProperties.COLOR_SCHEME),
                     android.R.attr.listDivider);
             view.getDivider().setBackground(drawable);
-        } else if (DropdownCommonProperties.BG_TOP_CORNER_ROUNDED == propertyKey) {
-            // No divider line when the background shadow is present.
-            // Also once the background shadow is present, the divider line will not to be shown
-            // again, so do not need to consider to set it View.VISIBLE again.
-            view.getDivider().setVisibility(View.GONE);
         }
     }
 }

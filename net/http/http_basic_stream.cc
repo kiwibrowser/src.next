@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "net/http/http_network_session.h"
 #include "net/http/http_raw_request_headers.h"
 #include "net/http/http_request_info.h"
 #include "net/http/http_response_body_drainer.h"
@@ -89,7 +88,6 @@ void HttpBasicStream::Close(bool not_reusable) {
   StreamSocket* socket = state_.connection()->socket();
   if (not_reusable && socket)
     socket->Disconnect();
-  parser()->OnConnectionClose();
   state_.connection()->Reset();
 }
 
@@ -187,8 +185,8 @@ int HttpBasicStream::GetRemoteEndpoint(IPEndPoint* endpoint) {
 }
 
 void HttpBasicStream::Drain(HttpNetworkSession* session) {
-  session->StartResponseDrainer(
-      std::make_unique<HttpResponseBodyDrainer>(this));
+  HttpResponseBodyDrainer* drainer = new HttpResponseBodyDrainer(this);
+  drainer->Start(session);
   // |drainer| will delete itself.
 }
 

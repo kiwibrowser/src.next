@@ -1,8 +1,7 @@
 {
   // The mode argument is used to limit the keyword to be used only for certain
   // CSSParserModes. Values that have the prefix -internal- are only allowed by
-  // CSSParserModes listed in CSSValueKeywordsWriter, which feeds the generated
-  // code for isValueAllowedInMode.
+  // CSSParserModes listed in allowInternalPropertyAndValue()
 
   parameters: {
     mode: {},
@@ -168,10 +167,6 @@
     "fallback",
     "optional",
 
-    // https://drafts.csswg.org/css-conditional-5/#typedef-supports-font-tech-fn
-    "font-tech",
-    "font-format",
-
     //
     // *-color
     //
@@ -248,11 +243,6 @@
     // Value used to implement the behavior in:
     // https://quirks.spec.whatwg.org/#the-tables-inherit-color-from-body-quirk
     "-internal-quirk-inherit",
-    //
-    // css-text-decor
-    // <https://github.com/w3c/csswg-drafts/issues/7522>
-    "-internal-spelling-error-color",
-    "-internal-grammar-error-color",
 
     //
     // "Extended" named colors
@@ -446,6 +436,13 @@
     //
     "inline-start",
     "inline-end",
+    //
+    // text-justify
+    //
+    //auto
+    //none
+    "inter-word",
+    "distribute",
     //
     // list-style-position
     //
@@ -1039,7 +1036,6 @@
     "alphabetic",
 
     // (display-mode:) media feature
-    "borderless",
     "fullscreen",
     "standalone",
     "minimal-ui",
@@ -1094,6 +1090,10 @@
     "minmax",
     "subgrid",
 
+    // text-indent
+    "each-line",
+    "hanging",
+
     // (scan:) media feature
     "progressive",
     "interlace",
@@ -1135,7 +1135,7 @@
     "text-before-edge",
     "text-after-edge",
     "ideographic",
-    "hanging",
+    // hanging
     "mathematical",
 
     // dominant-baseline
@@ -1244,25 +1244,6 @@
 
     // @font-face src
     "format",
-    "collection",
-    "embedded-opentype",
-    "opentype",
-    "svg",
-    "truetype",
-    "woff",
-    "woff2",
-    "tech",
-    "features-opentype",
-    "features-aat",
-    "features-graphite",
-    "color-COLRv0",
-    "color-COLRv1",
-    "color-SVG",
-    "color-sbix",
-    "color-CBDT",
-    "variations",
-    "palettes",
-    "incremental",
 
     // (-webkit-)filter
     "invert",
@@ -1283,32 +1264,7 @@
     "hsl",
     "hsla",
     "hwb",
-    "lab",
-    "oklab",
-    "lch",
-    "oklch",
-    // "color",
     "-internal-light-dark",
-
-    // color spaces
-    // "srgb", included in color-interpolation
-    // "rec2020", included in color-gamut
-    "srgb-linear",
-    "display-p3",
-    "a98-rgb",
-    "prophoto-rgb",
-    "xyz",
-    "xyz-d50",
-    "xyz-d65",
-    // hue interpolation methods
-    "shorter",
-    "longer",
-    "decreasing",
-    "increasing",
-    "specified",
-
-    // For gradient interpolations in certain color spaces
-    "in",
 
     // transform
     "matrix",
@@ -1353,12 +1309,12 @@
 
     // Trigonometic functions
     "sin",
-    "cos",
+    // "cos",
     // "tan" - already declared for color value
-    "asin",
     // "atan",
     // "atan2",
-    "acos",
+    // "acos",
+    // "asin",
 
     //<calc-constant>
     //https://drafts.csswg.org/css-values/#calc-syntax
@@ -1469,6 +1425,9 @@
     // none
     "back-button",
 
+    // content-visibility
+    "hidden-matchable",
+
     // -internal-empty-line-height
     // none
     "fabricated",
@@ -1570,9 +1529,5 @@
     // inline,
     "self-block",
     "self-inline",
-
-    // scroll()
-    "root",
-    "nearest",
   ],
 }

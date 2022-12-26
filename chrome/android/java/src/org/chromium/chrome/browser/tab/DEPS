@@ -31,6 +31,7 @@ include_rules = [
   "+chrome/android/java/src/org/chromium/chrome/browser/policy/PolicyAuditor.java",
   "+chrome/android/java/src/org/chromium/chrome/browser/tab",
   "+chrome/android/java/src/org/chromium/chrome/browser/tabmodel/TabbedModeTabPersistencePolicy.java",
+  "+chrome/android/java/src/org/chromium/chrome/browser/ui/TabObscuringHandler.java",
   "+chrome/browser/android/crypto/java/src/org/chromium/chrome/browser/crypto/CipherFactory.java",
   "+chrome/browser/android/lifecycle",
   "+chrome/browser/commerce/price_tracking/android/java/src/org/chromium/chrome/browser/price_tracking/PriceTrackingFeatures.java",
@@ -42,14 +43,12 @@ include_rules = [
   "+chrome/browser/password_check/android/java/src/org/chromium/chrome/browser/password_check/PasswordCheckUkmRecorder.java",
   "+chrome/browser/profiles/android/java/src/org/chromium/chrome/browser/profiles/Profile.java",
   "+chrome/browser/ui/messages/android/java/src/org/chromium/chrome/browser/ui/messages/snackbar/SnackbarManager.java",
-  "+chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/TabObscuringHandler.java",
   "+chrome/browser/feature_engagement/java/src/org/chromium/chrome/browser/feature_engagement/TrackerFactory.java",
   "+chrome/browser/flags",
   "+chrome/browser/preferences",
   "+chrome/browser/tab",
   "+chrome/browser/ui/android/native_page",
   "+chrome/browser/version",
-  "+chrome/test/android/javatests/src/org/chromium/chrome/test/util/browser/Features.java",
   "+components/browser_ui/styles/android",
   "+components/browser_ui/widget/android",
   "+components/security_state/content/android/java/src/org/chromium/components/security_state/SecurityStateModel.java",
@@ -72,12 +71,6 @@ specific_include_rules = {
     "+chrome/android/java/src/org/chromium/chrome/browser/IntentHandler.java",
     "+chrome/android/java/src/org/chromium/chrome/browser/LaunchIntentDispatcher.java",
     "+chrome/android/java/src/org/chromium/chrome/browser/customtabs/CustomTabIntentDataProvider.java",
-  ],
-  'RequestDesktopUtils\.java': [
-    "+chrome/android/java/src/org/chromium/chrome/browser/page_info/SiteSettingsHelper.java",
-    "+chrome/browser/tabmodel/android/java/src/org/chromium/chrome/browser/tabmodel/TabModel.java",
-    "+chrome/browser/tabmodel/android/java/src/org/chromium/chrome/browser/tabmodel/TabModelSelector.java",
-    "+chrome/android/java/src/org/chromium/chrome/browser/metrics/UmaSessionStats.java",
   ],
   'TabImpl\.java': [
     "+chrome/android/features/vr/java/src/org/chromium/chrome/browser/vr/VrModuleProvider.java",
@@ -103,8 +96,6 @@ specific_include_rules = {
     "+components/navigation_interception/android/java/src/org/chromium/components/navigation_interception",
     "+components/security_state/content/android/java/src/org/chromium/components/security_state/SecurityStateModel.java",
     "+components/version_info/android",
-    "+components/prefs/android/java/src/org/chromium/components/prefs/PrefService.java",
-    "+components/user_prefs/android/java/src/org/chromium/components/user_prefs/UserPrefs.java",
   ],
   'TabStateBrowserControlsVisibilityDelegate\.java': [
     "+chrome/browser/util/android/java/src/org/chromium/chrome/browser/util/ChromeAccessibilityUtil.java",
@@ -117,5 +108,5 @@ specific_include_rules = {
   ],
   'TabWebContentsObserver\.java': [
     "+chrome/android/java/src/org/chromium/chrome/browser/display_cutout/DisplayCutoutTabHelper.java",
-  ],
+  ]
 }

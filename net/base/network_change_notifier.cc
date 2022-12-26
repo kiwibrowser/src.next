@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -90,6 +90,9 @@ class MockNetworkChangeNotifier : public NetworkChangeNotifier {
 
 // static
 bool NetworkChangeNotifier::test_notifications_only_ = false;
+// static
+const NetworkChangeNotifier::NetworkHandle
+    NetworkChangeNotifier::kInvalidNetworkHandle = -1;
 
 NetworkChangeNotifier::NetworkChangeCalculatorParams::
     NetworkChangeCalculatorParams() = default;
@@ -466,8 +469,7 @@ void NetworkChangeNotifier::GetConnectedNetworks(NetworkList* network_list) {
 
 // static
 NetworkChangeNotifier::ConnectionType
-NetworkChangeNotifier::GetNetworkConnectionType(
-    handles::NetworkHandle network) {
+NetworkChangeNotifier::GetNetworkConnectionType(NetworkHandle network) {
   DCHECK(AreNetworkHandlesSupported());
   return g_network_change_notifier
              ? g_network_change_notifier->GetCurrentNetworkConnectionType(
@@ -476,11 +478,12 @@ NetworkChangeNotifier::GetNetworkConnectionType(
 }
 
 // static
-handles::NetworkHandle NetworkChangeNotifier::GetDefaultNetwork() {
+NetworkChangeNotifier::NetworkHandle
+NetworkChangeNotifier::GetDefaultNetwork() {
   DCHECK(AreNetworkHandlesSupported());
   return g_network_change_notifier
              ? g_network_change_notifier->GetCurrentDefaultNetwork()
-             : handles::kInvalidNetworkHandle;
+             : kInvalidNetworkHandle;
 }
 
 // static
@@ -908,12 +911,13 @@ void NetworkChangeNotifier::GetCurrentConnectedNetworks(
 
 NetworkChangeNotifier::ConnectionType
 NetworkChangeNotifier::GetCurrentNetworkConnectionType(
-    handles::NetworkHandle network) const {
+    NetworkHandle network) const {
   return CONNECTION_UNKNOWN;
 }
 
-handles::NetworkHandle NetworkChangeNotifier::GetCurrentDefaultNetwork() const {
-  return handles::kInvalidNetworkHandle;
+NetworkChangeNotifier::NetworkHandle
+NetworkChangeNotifier::GetCurrentDefaultNetwork() const {
+  return kInvalidNetworkHandle;
 }
 
 SystemDnsConfigChangeNotifier*
@@ -974,7 +978,7 @@ void NetworkChangeNotifier::NotifyObserversOfDNSChange() {
 // static
 void NetworkChangeNotifier::NotifyObserversOfSpecificNetworkChange(
     NetworkChangeType type,
-    handles::NetworkHandle network) {
+    NetworkHandle network) {
   if (g_network_change_notifier &&
       !NetworkChangeNotifier::test_notifications_only_) {
     g_network_change_notifier->NotifyObserversOfSpecificNetworkChangeImpl(
@@ -1041,7 +1045,7 @@ void NetworkChangeNotifier::NotifyObserversOfMaxBandwidthChangeImpl(
 
 void NetworkChangeNotifier::NotifyObserversOfSpecificNetworkChangeImpl(
     NetworkChangeType type,
-    handles::NetworkHandle network) {
+    NetworkHandle network) {
   switch (type) {
     case NetworkChangeType::kConnected:
       GetObserverList().network_observer_list_->Notify(

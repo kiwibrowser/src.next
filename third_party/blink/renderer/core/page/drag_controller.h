@@ -35,7 +35,6 @@
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "ui/base/dragdrop/mojom/drag_drop_types.mojom-blink-forward.h"
 #include "ui/gfx/geometry/point.h"
-#include "ui/gfx/geometry/rect.h"
 
 namespace gfx {
 class RectF;
@@ -82,16 +81,10 @@ class CORE_EXPORT DragController final
   bool PopulateDragDataTransfer(LocalFrame* src,
                                 const DragState&,
                                 const gfx::Point& drag_origin);
-
-  // The parameter `drag_event` is the event that triggered the drag operation,
-  // and `drag_initiation_location` is the where the drag originated.  The
-  // event's location does NOT match the initiation location for a mouse-drag:
-  // the drag is triggered by a mouse-move event but the initiation location is
-  // that of a mouse-down event.
-  bool StartDrag(LocalFrame*,
+  bool StartDrag(LocalFrame* src,
                  const DragState&,
                  const WebMouseEvent& drag_event,
-                 const gfx::Point& drag_initiation_location);
+                 const gfx::Point& drag_origin);
 
   DragState& GetDragState();
 
@@ -127,11 +120,14 @@ class CORE_EXPORT DragController final
 
   void MouseMovedIntoDocument(Document*);
 
+  // drag_location and drag_origin should be in the coordinate space of the
+  // LocalFrame's contents.
   void DoSystemDrag(DragImage*,
-                    const gfx::Rect& drag_obj_rect,
-                    const gfx::Point& drag_initiation_location,
+                    const gfx::Point& drag_location,
+                    const gfx::Point& drag_origin,
                     DataTransfer*,
-                    LocalFrame*);
+                    LocalFrame*,
+                    bool for_link);
 
   Member<Page> page_;
 

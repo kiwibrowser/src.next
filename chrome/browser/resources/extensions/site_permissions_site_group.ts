@@ -1,11 +1,11 @@
-// Copyright 2022 The Chromium Authors
+// Copyright 2022 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'chrome://resources/cr_elements/cr_expand_button/cr_expand_button.js';
-import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.js';
-import 'chrome://resources/cr_elements/cr_shared_style.css.js';
-import 'chrome://resources/cr_elements/cr_shared_vars.css.js';
+import 'chrome://resources/cr_elements/cr_expand_button/cr_expand_button.m.js';
+import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.m.js';
+import 'chrome://resources/cr_elements/shared_style_css.m.js';
+import 'chrome://resources/cr_elements/shared_vars_css.m.js';
 import './strings.m.js';
 import './shared_style.css.js';
 import './shared_vars.css.js';
@@ -97,40 +97,29 @@ export class SitePermissionsSiteGroupElement extends PolymerElement {
   }
 
   private getEtldOrSiteSubText_(): string {
-    // TODO(crbug.com/1253673): Revisit what to show for this eTLD+1 group's
-    // subtext. For now, default to showing no text if there is any mix of sites
-    // under the group (i.e. user permitted/restricted/specified by extensions).
-    const siteSet = this.data.sites[0].siteSet;
-    const isSiteSetConsistent =
-        this.data.sites.every(site => site.siteSet === siteSet);
-    if (!isSiteSetConsistent) {
-      return '';
+    if (this.data.sites.length === 1) {
+      return this.getSiteSubtext_(this.data.sites[0].siteList);
     }
 
-    if (siteSet === chrome.developerPrivate.SiteSet.USER_PERMITTED) {
+    const areAllPermitted = this.data.sites.every(
+        site =>
+            site.siteList === chrome.developerPrivate.UserSiteSet.PERMITTED);
+    if (areAllPermitted) {
       return loadTimeData.getString('permittedSites');
     }
 
-    return siteSet === chrome.developerPrivate.SiteSet.USER_RESTRICTED ?
-        loadTimeData.getString('restrictedSites') :
-        loadTimeData.getStringF(
-            'sitePermissionsAllSitesExtensionCount', this.data.numExtensions);
+    const areAllRestricted = this.data.sites.every(
+        site =>
+            site.siteList === chrome.developerPrivate.UserSiteSet.RESTRICTED);
+    return areAllRestricted ? loadTimeData.getString('restrictedSites') : '';
   }
 
-  private getSiteSubtext_(siteInfo: chrome.developerPrivate.SiteInfo): string {
-    if (siteInfo.numExtensions > 0) {
-      return loadTimeData.getStringF(
-          'sitePermissionsAllSitesExtensionCount', siteInfo.numExtensions);
-    }
-
+  private getSiteSubtext_(siteList: chrome.developerPrivate.UserSiteSet):
+      string {
     return loadTimeData.getString(
-        siteInfo.siteSet === chrome.developerPrivate.SiteSet.USER_PERMITTED ?
+        siteList === chrome.developerPrivate.UserSiteSet.PERMITTED ?
             'permittedSites' :
             'restrictedSites');
-  }
-
-  private showEditSitePermissionsDialogButton_(): boolean {
-    return !this.isExpandable_ && !!this.data.sites[0].siteSet;
   }
 
   private onEditSiteClick_() {
@@ -148,12 +137,6 @@ export class SitePermissionsSiteGroupElement extends PolymerElement {
     this.showEditSitePermissionsDialog_ = false;
     assert(this.siteToEdit_, 'Site To Edit');
     this.siteToEdit_ = null;
-  }
-
-  private isUserSpecifiedSite_(siteSet: chrome.developerPrivate.SiteSet):
-      boolean {
-    return siteSet === chrome.developerPrivate.SiteSet.USER_PERMITTED ||
-        siteSet === chrome.developerPrivate.SiteSet.USER_RESTRICTED;
   }
 }
 

@@ -49,16 +49,6 @@ namespace {
 const base::Feature kUseVideoFrameSinkBundle{"UseVideoFrameSinkBundle",
                                              base::FEATURE_ENABLED_BY_DEFAULT};
 
-// Builds a cc::FrameInfo representing a video frame, which is considered
-// Compositor-only.
-cc::FrameInfo CreateFrameInfo(cc::FrameInfo::FrameFinalState final_state) {
-  cc::FrameInfo frame_info;
-  frame_info.final_state = final_state;
-  frame_info.smooth_thread = cc::FrameInfo::SmoothThread::kSmoothCompositor;
-  frame_info.main_thread_response = cc::FrameInfo::MainThreadResponse::kMissing;
-  return frame_info;
-}
-
 }  // namespace
 
 // Helper CompositorFrameSink implementation which sits locally between a
@@ -172,9 +162,6 @@ VideoFrameSubmitter::VideoFrameSubmitter(
       roughness_reporter_(std::make_unique<cc::VideoPlaybackRoughnessReporter>(
           std::move(roughness_reporting_callback))),
       frame_trackers_(false, nullptr),
-      frame_sorter_(base::BindRepeating(
-          &cc::FrameSequenceTrackerCollection::AddSortedFrame,
-          base::Unretained(&frame_trackers_))),
       power_mode_voter_(
           power_scheduler::PowerModeArbiter::GetInstance()->NewVoter(
               "PowerModeVoter.VideoPlayback")) {
@@ -219,7 +206,6 @@ void VideoFrameSubmitter::StopRendering() {
   is_rendering_ = false;
 
   frame_trackers_.StopSequence(cc::FrameSequenceTrackerType::kVideo);
-  frame_sorter_.Reset();
 
   UpdateSubmissionState();
 }
@@ -354,45 +340,31 @@ void VideoFrameSubmitter::OnBeginFrame(
     bool presentation_failure =
         feedback.flags & gfx::PresentationFeedback::kFailure;
 #endif
-    cc::FrameInfo::FrameFinalState final_state =
-        cc::FrameInfo::FrameFinalState::kNoUpdateDesired;
-    if (ignorable_submitted_frames_.contains(frame_token)) {
-      ignorable_submitted_frames_.erase(frame_token);
-    } else {
-      if (presentation_failure) {
-        final_state = cc::FrameInfo::FrameFinalState::kDropped;
-      } else {
-        frame_trackers_.NotifyFramePresented(
-            frame_token,
-            gfx::PresentationFeedback(feedback.timestamp, feedback.interval,
-                                      feedback.flags));
-        final_state = cc::FrameInfo::FrameFinalState::kPresentedAll;
+    if (!presentation_failure &&
+        !ignorable_submitted_frames_.contains(frame_token)) {
+      frame_trackers_.NotifyFramePresented(
+          frame_token,
+          gfx::PresentationFeedback(feedback.timestamp, feedback.interval,
+                                    feedback.flags));
 
-        // We assume that presentation feedback is reliable if
-        // 1. (kHWCompletion) OS told us that the frame was shown at that time
-        //  or
-        // 2. (kVSync) at least presentation time is aligned with vsyncs
-        // intervals
-        uint32_t reliable_feedback_mask =
-            gfx::PresentationFeedback::kHWCompletion |
-            gfx::PresentationFeedback::kVSync;
-        bool reliable_timestamp = feedback.flags & reliable_feedback_mask;
-        roughness_reporter_->FramePresented(frame_token, feedback.timestamp,
-                                            reliable_timestamp);
-      }
-      if (pending_frames_.contains(frame_token)) {
-        frame_sorter_.AddFrameResult(pending_frames_[frame_token],
-                                     CreateFrameInfo(final_state));
-        pending_frames_.erase(frame_token);
-      }
+      // We assume that presentation feedback is reliable if
+      // 1. (kHWCompletion) OS told us that the frame was shown at that time
+      //  or
+      // 2. (kVSync) at least presentation time is aligned with vsyncs intervals
+      uint32_t reliable_feedback_mask =
+          gfx::PresentationFeedback::kHWCompletion |
+          gfx::PresentationFeedback::kVSync;
+      bool reliable_timestamp = feedback.flags & reliable_feedback_mask;
+      roughness_reporter_->FramePresented(frame_token, feedback.timestamp,
+                                          reliable_timestamp);
     }
 
+    ignorable_submitted_frames_.erase(frame_token);
     TRACE_EVENT_NESTABLE_ASYNC_END_WITH_TIMESTAMP0(
         "media", "VideoFrameSubmitter", TRACE_ID_LOCAL(frame_token),
         feedback.timestamp);
   }
   frame_trackers_.NotifyBeginImplFrame(args);
-  frame_sorter_.AddNewFrame(args);
 
   base::ScopedClosureRunner end_frame(
       base::BindOnce(&cc::FrameSequenceTrackerCollection::NotifyFrameEnd,
@@ -407,9 +379,6 @@ void VideoFrameSubmitter::OnBeginFrame(
   if (args.type == viz::BeginFrameArgs::MISSED || !is_rendering_) {
     compositor_frame_sink_->DidNotProduceFrame(current_begin_frame_ack);
     frame_trackers_.NotifyImplFrameCausedNoDamage(current_begin_frame_ack);
-    frame_sorter_.AddFrameResult(
-        args,
-        CreateFrameInfo(cc::FrameInfo::FrameFinalState::kNoUpdateDesired));
     return;
   }
 
@@ -422,9 +391,6 @@ void VideoFrameSubmitter::OnBeginFrame(
                                     args.frame_time + 2 * args.interval)) {
     compositor_frame_sink_->DidNotProduceFrame(current_begin_frame_ack);
     frame_trackers_.NotifyImplFrameCausedNoDamage(current_begin_frame_ack);
-    frame_sorter_.AddFrameResult(
-        args,
-        CreateFrameInfo(cc::FrameInfo::FrameFinalState::kNoUpdateDesired));
     return;
   }
 
@@ -434,9 +400,6 @@ void VideoFrameSubmitter::OnBeginFrame(
   if (!SubmitFrame(current_begin_frame_ack, std::move(video_frame))) {
     compositor_frame_sink_->DidNotProduceFrame(current_begin_frame_ack);
     frame_trackers_.NotifyImplFrameCausedNoDamage(current_begin_frame_ack);
-    frame_sorter_.AddFrameResult(
-        args,
-        CreateFrameInfo(cc::FrameInfo::FrameFinalState::kNoUpdateDesired));
     return;
   }
 
@@ -787,11 +750,8 @@ viz::CompositorFrame VideoFrameSubmitter::CreateCompositorFrame(
                                     TRACE_ID_LOCAL(frame_token));
 
     if (begin_frame_ack.frame_id.source_id ==
-        viz::BeginFrameArgs::kManualSourceId) {
+        viz::BeginFrameArgs::kManualSourceId)
       ignorable_submitted_frames_.insert(frame_token);
-    } else {
-      pending_frames_[frame_token] = last_begin_frame_args_;
-    }
 
     UMA_HISTOGRAM_TIMES("Media.VideoFrameSubmitter.PreSubmitBuffering",
                         base::TimeTicks::Now() - value);

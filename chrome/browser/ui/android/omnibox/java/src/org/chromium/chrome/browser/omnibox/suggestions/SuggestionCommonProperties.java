@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@ package org.chromium.chrome.browser.omnibox.suggestions;
 import androidx.annotation.IntDef;
 
 import org.chromium.ui.modelutil.PropertyKey;
-import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.modelutil.PropertyModel.WritableIntPropertyKey;
 
 import java.lang.annotation.Retention;
@@ -33,8 +32,6 @@ public class SuggestionCommonProperties {
     /** The device type for calculating the tile margin in the suggestion view. */
     public static final WritableIntPropertyKey DEVICE_FORM_FACTOR = new WritableIntPropertyKey();
 
-    public static final PropertyKey[] ALL_KEYS = PropertyModel.concatKeys(
-            new PropertyKey[] {COLOR_SCHEME, LAYOUT_DIRECTION, DEVICE_FORM_FACTOR},
-            DropdownCommonProperties.ALL_KEYS);
-    ;
+    public static final PropertyKey[] ALL_KEYS =
+            new PropertyKey[] {COLOR_SCHEME, LAYOUT_DIRECTION, DEVICE_FORM_FACTOR};
 }

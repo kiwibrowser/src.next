@@ -176,7 +176,6 @@ class BoxBorderPainter {
   unsigned visible_edge_count_;
   unsigned first_visible_edge_;
   BorderEdgeFlags visible_edge_set_;
-  DarkModeFilter::ElementRole element_role_;
 
   bool is_uniform_style_;
   bool is_uniform_width_;

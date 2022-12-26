@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,7 @@ namespace extensions {
 
 namespace {
 
-ExtensionsBrowserClient* g_extension_browser_client = nullptr;
+ExtensionsBrowserClient* g_extension_browser_client = NULL;
 
 }  // namespace
 
@@ -175,8 +175,11 @@ ExtensionsBrowserClient::GetRelatedContextsForExtension(
   return {browser_context};
 }
 
-void ExtensionsBrowserClient::AddAdditionalAllowedHosts(
+std::unique_ptr<const PermissionSet>
+ExtensionsBrowserClient::AddAdditionalAllowedHosts(
     const PermissionSet& desired_permissions,
-    PermissionSet* granted_permissions) const {}
+    const PermissionSet& granted_permissions) const {
+  return granted_permissions.Clone();
+}
 
 }  // namespace extensions

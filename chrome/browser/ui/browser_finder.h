@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 #define CHROME_BROWSER_UI_BROWSER_FINDER_H_
 
 #include <stddef.h>
-#include <vector>
 
 #include "ui/display/types/display_constants.h"
 #include "ui/gfx/native_widget_types.h"
@@ -21,10 +20,6 @@ class WebContents;
 
 namespace tab_groups {
 class TabGroupId;
-}
-
-namespace ui {
-class ElementContext;
 }
 
 // Collection of functions to find Browsers based on various criteria.
@@ -76,10 +71,6 @@ Browser* FindBrowserWithWebContents(const content::WebContents* web_contents);
 // found within the given |profile|. If the profile is not specified, find any
 // browser containing the group.
 Browser* FindBrowserWithGroup(tab_groups::TabGroupId group, Profile* profile);
-
-// Find the browser for the given element context. Returns NULL if no such
-// browser currently exists.
-Browser* FindBrowserWithUiElementContext(ui::ElementContext context);
 
 // Returns the Browser object owned by |profile| whose window was most recently
 // active. If no such Browsers exist, returns NULL.

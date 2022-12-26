@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,13 @@
 #define CHROME_BROWSER_EXTENSIONS_BLOCKLIST_FACTORY_H_
 
 #include "base/memory/singleton.h"
-#include "chrome/browser/profiles/profile_keyed_service_factory.h"
+#include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 
 namespace extensions {
 
 class Blocklist;
 
-class BlocklistFactory : public ProfileKeyedServiceFactory {
+class BlocklistFactory : public BrowserContextKeyedServiceFactory {
  public:
   static Blocklist* GetForBrowserContext(content::BrowserContext* context);
 
@@ -29,6 +29,8 @@ class BlocklistFactory : public ProfileKeyedServiceFactory {
 
   // BrowserContextKeyedServiceFactory
   KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
+  content::BrowserContext* GetBrowserContextToUse(
       content::BrowserContext* context) const override;
 };
 

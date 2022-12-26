@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,8 +37,9 @@ class ChromeTemplateURLServiceClient : public TemplateURLServiceClient,
 
   // history::HistoryServiceObserver:
   void OnURLVisited(history::HistoryService* history_service,
-                    const history::URLRow& url_row,
-                    const history::VisitRow& new_visit) override;
+                    ui::PageTransition transition,
+                    const history::URLRow& row,
+                    base::Time visit_time) override;
 
  private:
   raw_ptr<TemplateURLService> owner_;

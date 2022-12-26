@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors
+// Copyright 2022 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,17 +44,12 @@ TEST_F(TabMatcherDesktopTest, GetOpenTabsOnlyWithinProfile) {
 
   AddTab(browser(), GURL("http://foo.chromium.org"));
   AddTab(browser(), GURL("http://bar.chromium.org"));
-  // The last tab added is active. It should be returned from `GetOpenTabs()`.
-  AddTab(browser(), GURL("http://active.chromium.org"));
   AddTab(other_browser.get(), GURL("http://baz.chromium.org"));
 
   TemplateURLService service(kServiceInitializers, 2);
   TabMatcherDesktop matcher(&service, profile());
 
-  const auto tabs = matcher.GetOpenTabs();
-  ASSERT_EQ(tabs.size(), 2U);
-  EXPECT_EQ(tabs[0]->GetURL(), GURL("http://bar.chromium.org"));
-  EXPECT_EQ(tabs[1]->GetURL(), GURL("http://foo.chromium.org"));
+  EXPECT_EQ(matcher.GetOpenTabs().size(), 2U);
 
   other_browser->tab_strip_model()->CloseAllTabs();
 }

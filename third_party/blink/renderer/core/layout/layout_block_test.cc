@@ -147,14 +147,8 @@ TEST_F(LayoutBlockTest, ContainmentStyleChange) {
   } else {
     EXPECT_FALSE(target->PositionedObjects());
   }
-  const LayoutView* view = GetDocument().GetLayoutView();
-  if (view->IsLayoutNGObject()) {
-    EXPECT_TRUE(view->GetCachedLayoutResult()
-                    ->PhysicalFragment()
-                    .HasOutOfFlowFragmentChild());
-  } else {
-    EXPECT_TRUE(view->PositionedObjects()->Contains(contained));
-  }
+  EXPECT_TRUE(
+      GetDocument().GetLayoutView()->PositionedObjects()->Contains(contained));
 }
 
 }  // namespace blink

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors
+// Copyright 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,6 +27,7 @@ import org.chromium.chrome.browser.layouts.LayoutManager;
 import org.chromium.chrome.browser.layouts.LayoutStateProvider;
 import org.chromium.chrome.browser.layouts.LayoutType;
 import org.chromium.chrome.browser.omnibox.LocationBar;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.IncognitoStateProvider;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
@@ -74,7 +75,7 @@ public class TopToolbarCoordinator implements Toolbar {
 
     private final ToolbarLayout mToolbarLayout;
 
-    private final boolean mIsStartSurfaceRefactorEnabled;
+    private final boolean mIsGridTabSwitcherEnabled;
 
     /**
      * The coordinator for the tab switcher mode toolbar (phones only). This will be lazily created
@@ -111,7 +112,7 @@ public class TopToolbarCoordinator implements Toolbar {
      * @param overviewThemeColorProvider The {@link ThemeColorProvider} for overview mode.
      * @param tabModelSelectorSupplier Supplier of the {@link TabModelSelector}.
      * @param homepageEnabledSupplier Supplier of whether Home button is enabled.
-     * @param identityDiscController The controller of the identity disc button.
+     * @param identityDiscStateSupplier Supplier of the state change of identity disc button.
      * @param invalidatorCallback Callback that will be invoked  when the toolbar attempts to
      *        invalidate the drawing surface.  This will give the object that registers as the host
      *        for the {@link Invalidator} a chance to defer the actual invalidate to sync drawing.
@@ -129,7 +130,6 @@ public class TopToolbarCoordinator implements Toolbar {
      *         on Start surface. On NTP, the logo is in the new tab page layout instead of the
      *         toolbar and the logo click events are processed in NewTabPageLayout. So this callback
      *         will only be called on Start surface.
-     * @param constraintsSupplier supplier for browser controls constraints.
      */
     public TopToolbarCoordinator(ToolbarControlContainer controlContainer, ViewStub toolbarStub,
             ViewStub fullscreenToolbarStub, ToolbarLayout toolbarLayout,
@@ -143,8 +143,8 @@ public class TopToolbarCoordinator implements Toolbar {
             ObservableSupplier<AppMenuButtonHelper> appMenuButtonHelperSupplier,
             ObservableSupplier<TabModelSelector> tabModelSelectorSupplier,
             ObservableSupplier<Boolean> homepageEnabledSupplier,
-            ButtonDataProvider identityDiscController, Callback<Runnable> invalidatorCallback,
-            Supplier<ButtonData> identityDiscButtonSupplier,
+            ObservableSupplier<Boolean> identityDiscStateSupplier,
+            Callback<Runnable> invalidatorCallback, Supplier<ButtonData> identityDiscButtonSupplier,
             Supplier<ResourceManager> resourceManagerSupplier,
             ObservableSupplier<Boolean> isProgressBarVisibleSupplier,
             BooleanSupplier isIncognitoModeEnabledSupplier, boolean isGridTabSwitcherEnabled,
@@ -152,33 +152,32 @@ public class TopToolbarCoordinator implements Toolbar {
             boolean isStartSurfaceEnabled, boolean isTabGroupsAndroidContinuationEnabled,
             HistoryDelegate historyDelegate, BooleanSupplier partnerHomepageEnabledSupplier,
             OfflineDownloader offlineDownloader, boolean initializeWithIncognitoColors,
-            Callback<LoadUrlParams> startSurfaceLogoClickedCallback,
-            boolean isStartSurfaceRefactorEnabled,
-            ObservableSupplier<Integer> constraintsSupplier) {
+            ObservableSupplier<Profile> profileSupplier,
+            Callback<LoadUrlParams> startSurfaceLogoClickedCallback) {
         mControlContainer = controlContainer;
         mToolbarLayout = toolbarLayout;
         mMenuButtonCoordinator = browsingModeMenuButtonCoordinator;
         mOptionalButtonController = new OptionalBrowsingModeButtonController(buttonDataProviders,
                 userEducationHelper, mToolbarLayout, () -> toolbarDataProvider.getTab());
         mResourceManagerSupplier = resourceManagerSupplier;
+
         mTabModelSelectorSupplier = tabModelSelectorSupplier;
-        mIsStartSurfaceRefactorEnabled = isStartSurfaceRefactorEnabled;
 
         if (mToolbarLayout instanceof ToolbarPhone && isStartSurfaceEnabled) {
             mStartSurfaceToolbarCoordinator = new StartSurfaceToolbarCoordinator(toolbarStub,
-                    userEducationHelper, identityDiscController, overviewThemeColorProvider,
+                    userEducationHelper, identityDiscStateSupplier, overviewThemeColorProvider,
                     overviewModeMenuButtonCoordinator, identityDiscButtonSupplier,
-                    isGridTabSwitcherEnabled, isTabToGtsAnimationEnabled,
-                    isTabGroupsAndroidContinuationEnabled, isIncognitoModeEnabledSupplier,
-                    startSurfaceLogoClickedCallback, mIsStartSurfaceRefactorEnabled);
+                    isGridTabSwitcherEnabled, isTabGroupsAndroidContinuationEnabled,
+                    isIncognitoModeEnabledSupplier, profileSupplier,
+                    startSurfaceLogoClickedCallback);
         } else if (mToolbarLayout instanceof ToolbarPhone || isTabletGridTabSwitcherEnabled()) {
             mTabSwitcherModeCoordinator = new TabSwitcherModeTTCoordinator(toolbarStub,
                     fullscreenToolbarStub, overviewModeMenuButtonCoordinator,
                     isGridTabSwitcherEnabled, isTabletGtsPolishEnabled, isTabToGtsAnimationEnabled,
                     isIncognitoModeEnabledSupplier);
         }
-        controlContainer.setPostInitializationDependencies(this, initializeWithIncognitoColors,
-                constraintsSupplier, () -> toolbarDataProvider.getTab());
+        mIsGridTabSwitcherEnabled = isGridTabSwitcherEnabled;
+        controlContainer.setToolbar(this, initializeWithIncognitoColors);
         mToolbarLayout.initialize(toolbarDataProvider, tabController, mMenuButtonCoordinator,
                 isProgressBarVisibleSupplier, historyDelegate, partnerHomepageEnabledSupplier,
                 offlineDownloader);
@@ -248,7 +247,7 @@ public class TopToolbarCoordinator implements Toolbar {
             mStartSurfaceToolbarCoordinator.setOnTabSwitcherLongClickHandler(
                     StartSurfaceTabSwitcherActionMenuCoordinator.createOnLongClickListener(
                             tabSwitcherLongClickCallback));
-            mStartSurfaceToolbarCoordinator.initLogoWithNative();
+            mStartSurfaceToolbarCoordinator.onDefaultSearchEngineChanged();
         }
 
         mToolbarLayout.setTabModelSelector(mTabModelSelectorSupplier.get());
@@ -589,6 +588,9 @@ public class TopToolbarCoordinator implements Toolbar {
      */
     public void onDefaultSearchEngineChanged() {
         mToolbarLayout.onDefaultSearchEngineChanged();
+        if (mStartSurfaceToolbarCoordinator != null) {
+            mStartSurfaceToolbarCoordinator.onDefaultSearchEngineChanged();
+        }
     }
 
     @Override
@@ -657,16 +659,13 @@ public class TopToolbarCoordinator implements Toolbar {
      * @param newState New Start Surface State.
      * @param requestToShow Whether or not request showing the start surface toolbar.
      */
-    public void updateStartSurfaceToolbarState(@Nullable @StartSurfaceState Integer newState,
-            boolean requestToShow, @Nullable @LayoutType Integer newLayoutType) {
+    public void updateStartSurfaceToolbarState(
+            @StartSurfaceState int newState, boolean requestToShow) {
         if (mStartSurfaceToolbarCoordinator == null
                 || mToolbarLayout.getToolbarDataProvider() == null) {
             return;
         }
-        assert (mIsStartSurfaceRefactorEnabled && newLayoutType != null)
-                || (!mIsStartSurfaceRefactorEnabled && newState != null);
-        mStartSurfaceToolbarCoordinator.onStartSurfaceStateChanged(
-                newState, requestToShow, newLayoutType);
+        mStartSurfaceToolbarCoordinator.onStartSurfaceStateChanged(newState, requestToShow);
         updateToolbarLayoutVisibility();
     }
 

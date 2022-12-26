@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors
+// Copyright 2019 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -988,13 +988,9 @@ class ExtensionSamePartyCookiesTest : public ExtensionCookiesTest {
     ExtensionCookiesTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(network::switches::kUseFirstPartySet,
                                     base::StrCat({
-                                        R"({"primary": "https://)",
-                                        kPermittedOwner,  //
-                                        R"(", "associatedSites": ["https://)",
-                                        kPermittedMember,  //
-                                        R"(", "https://)",
-                                        kNotPermittedMember,  //
-                                        R"("]})",
+                                        "https://", kPermittedOwner,       //
+                                        ",https://", kPermittedMember,     //
+                                        ",https://", kNotPermittedMember,  //
                                     }));
   }
 

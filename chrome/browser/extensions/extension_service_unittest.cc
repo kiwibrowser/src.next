@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -398,7 +398,8 @@ class MockProviderVisitor : public ExternalProviderInterface::VisitorInterface {
     // values we gave it. So if the id we doesn't exist in our internal
     // dictionary then something is wrong.
     EXPECT_TRUE(prefs_->GetDictionary(info.extension_id, &pref))
-        << "Got back ID (" << info.extension_id << ") we weren't expecting";
+        << "Got back ID (" << info.extension_id.c_str()
+        << ") we weren't expecting";
 
     EXPECT_TRUE(info.path.IsAbsolute());
     if (!fake_base_path_.empty())
@@ -438,7 +439,8 @@ class MockProviderVisitor : public ExternalProviderInterface::VisitorInterface {
     // values we gave it. So if the id we doesn't exist in our internal
     // dictionary then something is wrong.
     EXPECT_TRUE(prefs_->GetDictionary(info.extension_id, &pref))
-        << "Got back ID (" << info.extension_id << ") we weren't expecting";
+        << L"Got back ID (" << info.extension_id.c_str()
+        << ") we weren't expecting";
     EXPECT_EQ(ManifestLocation::kExternalPrefDownload, info.download_location);
 
     if (pref) {
@@ -452,10 +454,9 @@ class MockProviderVisitor : public ExternalProviderInterface::VisitorInterface {
       EXPECT_FALSE(v1.get());
       EXPECT_EQ(ManifestLocation::kExternalPrefDownload, location1);
 
-      const std::string* parsed_install_parameter =
-          pref->GetDict().FindString("install_parameter");
-      EXPECT_TRUE(parsed_install_parameter);
-      EXPECT_EQ(*parsed_install_parameter, info.install_parameter);
+      std::string parsed_install_parameter;
+      pref->GetString("install_parameter", &parsed_install_parameter);
+      EXPECT_EQ(parsed_install_parameter, info.install_parameter);
 
       // Remove it so we won't count it again.
       prefs_->RemoveKey(info.extension_id);
@@ -689,10 +690,13 @@ class ExtensionServiceTest : public ExtensionServiceTestWithInstall {
     ASSERT_FALSE(IsBlocked(extension_id));
   }
 
-  const base::Value::Dict* GetExtensionPref(const std::string& extension_id) {
-    const base::Value::Dict& dict =
-        profile()->GetPrefs()->GetDict(pref_names::kExtensions);
-    const base::Value::Dict* pref = dict.FindDict(extension_id);
+  const base::Value* GetExtensionPref(const std::string& extension_id) {
+    const base::Value* dict =
+        profile()->GetPrefs()->GetDictionary(pref_names::kExtensions);
+    if (!dict) {
+      return nullptr;
+    }
+    const base::Value* pref = dict->FindDictKey(extension_id);
     if (!pref) {
       return nullptr;
     }
@@ -701,17 +705,17 @@ class ExtensionServiceTest : public ExtensionServiceTestWithInstall {
 
   bool IsPrefExist(const std::string& extension_id,
                    const std::string& pref_path) {
-    const base::Value::Dict* pref = GetExtensionPref(extension_id);
-    return pref && pref->FindBoolByDottedPath(pref_path).has_value();
+    const base::Value* pref = GetExtensionPref(extension_id);
+    return pref && pref->FindBoolPath(pref_path).has_value();
   }
 
   bool DoesIntegerPrefExist(const std::string& extension_id,
                             const std::string& pref_path) {
-    const base::Value::Dict* pref = GetExtensionPref(extension_id);
+    const base::Value* pref = GetExtensionPref(extension_id);
     if (!pref) {
       return false;
     }
-    return pref->FindIntByDottedPath(pref_path).has_value();
+    return pref->FindIntPath(pref_path).has_value();
   }
 
   void SetPref(const std::string& extension_id,
@@ -5215,11 +5219,11 @@ TEST_F(ExtensionServiceTest, ClearExtensionData) {
   task_environment()->RunUntilIdle();
 
   // Check that the localStorage data been removed.
-  std::vector<storage::mojom::StorageUsageInfoV2Ptr> usage_infos;
+  std::vector<storage::mojom::StorageUsageInfoPtr> usage_infos;
   {
     base::RunLoop run_loop;
     local_storage_control->GetUsage(base::BindLambdaForTesting(
-        [&](std::vector<storage::mojom::StorageUsageInfoV2Ptr> usage_infos_in) {
+        [&](std::vector<storage::mojom::StorageUsageInfoPtr> usage_infos_in) {
           usage_infos.swap(usage_infos_in);
           run_loop.Quit();
         }));
@@ -5423,11 +5427,11 @@ TEST_F(ExtensionServiceTest, ClearAppData) {
   task_environment()->RunUntilIdle();
 
   // Check that the localStorage data been removed.
-  std::vector<storage::mojom::StorageUsageInfoV2Ptr> usage_infos;
+  std::vector<storage::mojom::StorageUsageInfoPtr> usage_infos;
   {
     base::RunLoop run_loop;
     local_storage_control->GetUsage(base::BindLambdaForTesting(
-        [&](std::vector<storage::mojom::StorageUsageInfoV2Ptr> usage_infos_in) {
+        [&](std::vector<storage::mojom::StorageUsageInfoPtr> usage_infos_in) {
           usage_infos.swap(usage_infos_in);
           run_loop.Quit();
         }));

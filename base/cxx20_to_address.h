@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors
+// Copyright 2021 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,7 @@ constexpr T* to_address(T* p) noexcept {
 
 template <typename Ptr>
 constexpr auto to_address(const Ptr& p) noexcept {
-  return base::to_address(p.operator->());
+  return to_address(p.operator->());
 }
 
 }  // namespace base

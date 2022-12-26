@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors
+// Copyright 2022 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,6 @@ namespace {
 // this array may either refer to features defined in the header of this file or
 // in other locations in the code base (e.g. content_features.h).
 const base::Feature* const kFeaturesExposedToJava[] = {
-    &features::kBrowserProcessMemoryPurge,
     &features::kCrashBrowserOnChildMismatchIfBrowserChanged,
     &features::kCrashBrowserOnAnyChildMismatch,
 };  // namespace

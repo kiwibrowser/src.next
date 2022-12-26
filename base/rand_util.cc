@@ -1,4 +1,4 @@
-// Copyright 2011 The Chromium Authors
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,11 +43,16 @@ double BitsToOpenEndedUnitInterval(uint64_t bits) {
   // We try to get maximum precision by masking out as many bits as will fit
   // in the target type's mantissa, and raising it to an appropriate power to
   // produce output in the range [0, 1).  For IEEE 754 doubles, the mantissa
-  // is expected to accommodate 53 bits (including the implied bit).
+  // is expected to accommodate 53 bits.
+
   static_assert(std::numeric_limits<double>::radix == 2,
                 "otherwise use scalbn");
-  constexpr int kBits = std::numeric_limits<double>::digits;
-  return ldexp(bits & ((UINT64_C(1) << kBits) - 1u), -kBits);
+  static const int kBits = std::numeric_limits<double>::digits;
+  uint64_t random_bits = bits & ((UINT64_C(1) << kBits) - 1);
+  double result = ldexp(static_cast<double>(random_bits), -1 * kBits);
+  DCHECK_GE(result, 0.0);
+  DCHECK_LT(result, 1.0);
+  return result;
 }
 
 uint64_t RandGenerator(uint64_t range) {

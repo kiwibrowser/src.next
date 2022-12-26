@@ -82,7 +82,7 @@ TEST(GraphicsContextTest, Recording) {
   auto paint_controller = std::make_unique<PaintController>();
   GraphicsContext context(*paint_controller);
 
-  Color opaque = Color::FromRGBA(255, 0, 0, 255);
+  Color opaque(1.0f, 0.0f, 0.0f, 1.0f);
   gfx::RectF bounds(0, 0, 100, 100);
 
   context.BeginRecording(bounds);
@@ -108,8 +108,8 @@ TEST(GraphicsContextTest, UnboundedDrawsAreClipped) {
   bitmap.eraseColor(0);
   SkiaPaintCanvas canvas(bitmap);
 
-  Color opaque = Color::FromRGBA(255, 0, 0, 255);
-  Color transparent = Color::kTransparent;
+  Color opaque(1.0f, 0.0f, 0.0f, 1.0f);
+  Color transparent(0.0f, 0.0f, 0.0f, 0.0f);
   gfx::RectF bounds(0, 0, 100, 100);
 
   auto paint_controller = std::make_unique<PaintController>();
@@ -167,16 +167,16 @@ class GraphicsContextDarkModeTest : public testing::Test {
     if (is_dark_mode_on)
       context.UpdateDarkModeSettingsForTest(settings);
     context.BeginRecording(gfx::RectF(0, 0, 4, 1));
-    context.FillRect(gfx::RectF(0, 0, 1, 1), Color::kBlack,
+    context.FillRect(gfx::RectF(0, 0, 1, 1), Color(SK_ColorBLACK),
                      AutoDarkMode(DarkModeFilter::ElementRole::kBackground,
                                   is_dark_mode_on));
-    context.FillRect(gfx::RectF(1, 0, 1, 1), Color::kWhite,
+    context.FillRect(gfx::RectF(1, 0, 1, 1), Color(SK_ColorWHITE),
                      AutoDarkMode(DarkModeFilter::ElementRole::kBackground,
                                   is_dark_mode_on));
-    context.FillRect(gfx::RectF(2, 0, 1, 1), Color::FromSkColor(SK_ColorRED),
+    context.FillRect(gfx::RectF(2, 0, 1, 1), Color(SK_ColorRED),
                      AutoDarkMode(DarkModeFilter::ElementRole::kBackground,
                                   is_dark_mode_on));
-    context.FillRect(gfx::RectF(3, 0, 1, 1), Color::FromSkColor(SK_ColorGRAY),
+    context.FillRect(gfx::RectF(3, 0, 1, 1), Color(SK_ColorGRAY),
                      AutoDarkMode(DarkModeFilter::ElementRole::kBackground,
                                   is_dark_mode_on));
     // Capture the result in the bitmap.

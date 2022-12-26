@@ -76,8 +76,7 @@ void EmbeddedObjectPainter::PaintReplaced(const PaintInfo& paint_info,
   FloatRoundedRect rounded_background_rect(
       gfx::RectF(ToPixelSnappedRect(background_rect)),
       kReplacementTextRoundedRectRadius);
-  Color color = Color::FromSkColor(
-      ScaleAlpha(SK_ColorWHITE, kReplacementTextRoundedRectOpacity));
+  Color color = ScaleAlpha(Color::kWhite, kReplacementTextRoundedRectOpacity);
   AutoDarkMode auto_dark_mode(
       PaintAutoDarkMode(layout_embedded_object_.StyleRef(),
                         DarkModeFilter::ElementRole::kBackground));
@@ -87,8 +86,7 @@ void EmbeddedObjectPainter::PaintReplaced(const PaintInfo& paint_info,
   text_rect.Offset(gfx::PointF(content_rect.Center()) -
                    text_rect.CenterPoint());
   TextRunPaintInfo run_info(text_run);
-  context.SetFillColor(Color::FromSkColor(
-      ScaleAlpha(SK_ColorBLACK, kReplacementTextTextOpacity)));
+  context.SetFillColor(ScaleAlpha(Color::kBlack, kReplacementTextTextOpacity));
   context.DrawBidiText(
       font, run_info,
       text_rect.origin() +

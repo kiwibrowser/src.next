@@ -95,10 +95,6 @@ class CORE_EXPORT StyleResolverState {
     DCHECK(style_);
     return *style_;
   }
-  const ComputedStyle& StyleRef() const {
-    DCHECK(style_);
-    return *style_;
-  }
   scoped_refptr<ComputedStyle> TakeStyle();
 
   const CSSToLengthConversionData& CssToLengthConversionData() const {
@@ -199,10 +195,6 @@ class CORE_EXPORT StyleResolverState {
     return rejected_legacy_overlapping_;
   }
   void SetRejectedLegacyOverlapping() { rejected_legacy_overlapping_ = true; }
-
-  // Update the Font object on the ComputedStyle and the CSSLengthResolver to
-  // reflect applied font properties.
-  void UpdateFont();
 
  private:
   void UpdateLengthConversionData();

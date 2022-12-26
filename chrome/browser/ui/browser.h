@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -69,6 +69,12 @@ class StatusBubble;
 class TabStripModel;
 class TabStripModelDelegate;
 class TabMenuModelDelegate;
+
+#if BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
+namespace screen_ai {
+class AXScreenAIAnnotator;
+}
+#endif
 
 namespace blink {
 enum class ProtocolHandlerSecurityLevel;
@@ -298,6 +304,9 @@ class Browser : public TabStripModelObserver,
 
     // User-set title of this browser window, if there is one.
     std::string user_title;
+
+    // Title if this is a picture in picture browser window.
+    std::string picture_in_picture_window_title;
 
     // Only applied when not in forced app mode. True if the browser is
     // resizeable.
@@ -654,7 +663,6 @@ class Browser : public TabStripModelObserver,
   void TabStripEmpty() override;
 
   // Overridden from content::WebContentsDelegate:
-  void ActivateContents(content::WebContents* contents) override;
   void SetTopControlsShownRatio(content::WebContents* web_contents,
                                 float ratio) override;
   int GetTopControlsHeight() override;
@@ -819,9 +827,10 @@ class Browser : public TabStripModelObserver,
                       std::unique_ptr<content::WebContents> new_contents,
                       const GURL& target_url,
                       WindowOpenDisposition disposition,
-                      const blink::mojom::WindowFeatures& window_features,
+                      const gfx::Rect& initial_rect,
                       bool user_gesture,
                       bool* was_blocked) override;
+  void ActivateContents(content::WebContents* contents) override;
   void LoadingStateChanged(content::WebContents* source,
                            bool should_show_loading_ui) override;
   void CloseContents(content::WebContents* source) override;
@@ -1279,6 +1288,8 @@ class Browser : public TabStripModelObserver,
 
   std::string user_title_;
 
+  std::string picture_in_picture_window_title_;
+
   // Controls both signin and sync consent.
   SigninViewController signin_view_controller_;
 
@@ -1296,6 +1307,11 @@ class Browser : public TabStripModelObserver,
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   std::unique_ptr<extensions::ExtensionBrowserWindowHelper>
       extension_browser_window_helper_;
+#endif
+
+#if BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
+  // Manages the snapshot processing by ScreenAI, if enabled.
+  std::unique_ptr<screen_ai::AXScreenAIAnnotator> screen_ai_annotator_;
 #endif
 
   const base::ElapsedTimer creation_timer_;

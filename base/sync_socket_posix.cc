@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,16 +14,18 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
+#include "build/build_config.h"
+
+#if BUILDFLAG(IS_SOLARIS)
+#include <sys/filio.h>
+#endif
+
 #include "base/check_op.h"
 #include "base/containers/span.h"
 #include "base/files/file_util.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "build/build_config.h"
-
-#if BUILDFLAG(IS_SOLARIS)
-#include <sys/filio.h>
-#endif
 
 namespace base {
 

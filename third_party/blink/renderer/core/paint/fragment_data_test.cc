@@ -7,16 +7,18 @@
 
 namespace blink {
 
-class FragmentDataTest : public RenderingTest {};
+class FragmentDataTest : public RenderingTest {
+ protected:
+  bool HasRareData(const FragmentData& data) { return !!data.rare_data_; }
+};
 
-TEST_F(FragmentDataTest, PreClip) {
+TEST_F(FragmentDataTest, PreEffectClipProperties) {
   SetBodyInnerHTML(R"HTML(
     <style>
       #target {
         width: 400px; height: 400px; position: absolute;
         clip: rect(0, 50px, 100px, 0);
         clip-path: inset(0%);
-        filter: blur(10px);
       }
     </style>
     <div id='target'></div>
@@ -27,12 +29,9 @@ TEST_F(FragmentDataTest, PreClip) {
       target->FirstFragment().PaintProperties();
   EXPECT_TRUE(properties->ClipPathClip());
   EXPECT_TRUE(properties->CssClip());
-  EXPECT_TRUE(properties->PixelMovingFilterClipExpander());
-  EXPECT_EQ(properties->CssClip(),
-            properties->PixelMovingFilterClipExpander()->Parent());
   EXPECT_EQ(properties->ClipPathClip(), properties->CssClip()->Parent());
   EXPECT_EQ(properties->ClipPathClip()->Parent(),
-            &target->FirstFragment().PreClip());
+            &target->FirstFragment().PreEffectProperties().Clip());
 }
 
 }  // namespace blink

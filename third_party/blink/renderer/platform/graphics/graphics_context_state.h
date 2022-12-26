@@ -70,11 +70,7 @@ class PLATFORM_EXPORT GraphicsContextState final {
   void DecrementSaveCount() { --save_count_; }
 
   // Stroke data
-  Color StrokeColor() const {
-    // This conversion from SkColor4f to Color will lose information about the
-    // original Color.
-    return Color::FromSkColor4f(stroke_flags_.getColor4f());
-  }
+  Color StrokeColor() const { return stroke_flags_.getColor(); }
   void SetStrokeColor(const Color&);
 
   const StrokeData& GetStrokeData() const { return stroke_data_; }
@@ -86,11 +82,7 @@ class PLATFORM_EXPORT GraphicsContextState final {
   void SetLineDash(const DashArray&, float);
 
   // Fill data
-  Color FillColor() const {
-    // This conversion from SkColor4f to Color will lose information about the
-    // original Color.
-    return Color::FromSkColor4f(fill_flags_.getColor4f());
-  }
+  Color FillColor() const { return fill_flags_.getColor(); }
   void SetFillColor(const Color&);
 
   // Shadow. (This will need tweaking if we use draw loopers for other things.)

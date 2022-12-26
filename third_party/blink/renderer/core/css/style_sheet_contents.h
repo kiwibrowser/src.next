@@ -24,7 +24,6 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
-#include "third_party/blink/renderer/core/css/parser/css_tokenizer.h"
 #include "third_party/blink/renderer/core/css/rule_set.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
@@ -70,10 +69,7 @@ class CORE_EXPORT StyleSheetContents final
   const AtomicString& NamespaceURIFromPrefix(const AtomicString& prefix) const;
 
   void ParseAuthorStyleSheet(const CSSStyleSheetResource*);
-  ParseSheetResult ParseString(
-      const String&,
-      bool allow_import_rules = true,
-      std::unique_ptr<CachedCSSTokenizer> tokenizer = nullptr);
+  ParseSheetResult ParseString(const String&, bool allow_import_rules = true);
 
   bool IsCacheableForResource() const;
   bool IsCacheableForStyleElement() const;

@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,6 @@
 
 #include "base/bind.h"
 #include "base/containers/flat_set.h"
-#include "base/containers/unique_ptr_adapters.h"
 #include "base/memory/memory_pressure_monitor.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
@@ -83,11 +82,8 @@ const uint32_t kSpdyMaxHeaderListSize = 256 * 1024;
 // Specifies the maximum concurrent streams server could send (via push).
 const uint32_t kSpdyMaxConcurrentPushedStreams = 1000;
 
-// Specifies the the default value for the push setting, which is disabled.
-const uint32_t kSpdyDisablePush = 0;
-
-// Self-contained structure with all the simple configuration options
-// supported by the HttpNetworkSession.
+  // Self-contained structure with all the simple configuration options
+  // supported by the HttpNetworkSession.
 struct NET_EXPORT HttpNetworkSessionParams {
   HttpNetworkSessionParams();
   HttpNetworkSessionParams(const HttpNetworkSessionParams& other);
@@ -182,9 +178,6 @@ struct NET_EXPORT HttpNetworkSessionParams {
   // default network does (hence underlying objects should not drop their
   // state).
   bool ignore_ip_address_changes = false;
-
-  // Whether to use the ALPN information in the DNS HTTPS record.
-  bool use_dns_https_svcb_alpn = false;
 };
 
   // Structure with pointers to the dependencies of the HttpNetworkSession.
@@ -235,9 +228,9 @@ class NET_EXPORT HttpNetworkSession {
   HttpAuthCache* http_auth_cache() { return &http_auth_cache_; }
   SSLClientContext* ssl_client_context() { return &ssl_client_context_; }
 
-  void StartResponseDrainer(std::unique_ptr<HttpResponseBodyDrainer> drainer);
+  void AddResponseDrainer(std::unique_ptr<HttpResponseBodyDrainer> drainer);
 
-  // Removes the drainer from the session.
+  // Removes the drainer from the session. Does not dispose of it.
   void RemoveResponseDrainer(HttpResponseBodyDrainer* drainer);
 
   // Returns the socket pool of the given type for use with the specified
@@ -353,7 +346,7 @@ class NET_EXPORT HttpNetworkSession {
   QuicStreamFactory quic_stream_factory_;
   SpdySessionPool spdy_session_pool_;
   std::unique_ptr<HttpStreamFactory> http_stream_factory_;
-  std::set<std::unique_ptr<HttpResponseBodyDrainer>, base::UniquePtrComparator>
+  std::map<HttpResponseBodyDrainer*, std::unique_ptr<HttpResponseBodyDrainer>>
       response_drainers_;
   NextProtoVector next_protos_;
   SSLConfig::ApplicationSettings application_settings_;
