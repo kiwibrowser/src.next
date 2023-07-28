@@ -45,7 +45,7 @@ jobs:
         run: sudo apt-get update
 
       - name: Installing rclone
-        run: sudo -v ; curl https://rclone.org/install.sh | sudo bash -s beta
+        run: sudo -v ; curl --http1.1 https://rclone.org/install.sh | sudo bash -s beta
 
       - name: Installing Python and OpenJDK
         run: sudo apt-get install -y 2to3 python2-minimal python2 dh-python python-is-python3 openjdk-8-jdk-headless libncurses5 ccache
