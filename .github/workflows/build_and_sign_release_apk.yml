@@ -355,9 +355,10 @@ jobs:
         if: contains(github.event.inputs.announceOnMessengers, 'yes')
         run: |
           COMMIT_MSG=$(<./apk-arm/last_commits.txt)
+          COMMIT_MSG="\n\n${COMMIT_MSG}\n"
           PAYLOAD=$(jq -n \
                       --arg username "Kiwi Builder (Next)" \
-                      --arg content "A new build of Kiwi Browser Next (preview version) is available. This version will replace your currently installed Kiwi Browser (com.kiwibrowser.browser) <@&913196471787065344> - https://github.com/kiwibrowser/src.next/releases/tag/${{ github.run_id }}\\n\\n$COMMIT_MSG" \
+                      --arg content "A new build of Kiwi Browser Next (preview version) is available. This version will replace your currently installed Kiwi Browser (com.kiwibrowser.browser) <@&913196471787065344> - https://github.com/kiwibrowser/src.next/releases/tag/${{ github.run_id }} $COMMIT_MSG" \
                       '{username: $username, content: $content}')
           curl -H 'Content-Type: application/json' -X POST -d "$PAYLOAD" ${{ secrets.DISCORD_WEBHOOK }}
       
@@ -366,8 +367,9 @@ jobs:
         if: contains(github.event.inputs.announceOnMessengers, 'yes')
         run: |
           COMMIT_MSG=$(<./apk-arm/last_commits.txt)
+          COMMIT_MSG="\n\n${COMMIT_MSG}\n"
           PAYLOAD=$(jq -n \
-                      --arg text "A new build of Kiwi Browser Next (preview version) is available. \n Version :[${{ github.run_id }}](https://github.com/kiwibrowser/src.next/releases/tag/${{ github.run_id }})\\n\\n$COMMIT_MSG" \
+                      --arg text "A new build of Kiwi Browser Next (preview version) is available. Link: [${{ github.run_id }}](https://github.com/kiwibrowser/src.next/releases/tag/${{ github.run_id }}) $COMMIT_MSG" \
                       --arg chat_id "@kiwibrowserbuilds" \
                       --arg parse_mode "markdown" \
                       --argjson reply_markup '{"inline_keyboard": [[{"text": "x86", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser-x86-${{ github.run_id }}-github.apk"},{"text": "x64", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser-x64-${{ github.run_id }}-github.apk"}],[{"text": "arm", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser-arm-${{ github.run_id }}-github.apk"},{"text": "arm64", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser-arm64-${{ github.run_id }}-github.apk"}],[{"text": ".DEV x86", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser.dev-x86-${{ github.run_id }}-github.apk"},{"text": ".DEV x64", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser.dev-x64-${{ github.run_id }}-github.apk"}],[{"text": ".DEV arm", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser.dev-arm-${{ github.run_id }}-github.apk"},{"text": ".DEV arm64", "url": "https://github.com/kiwibrowser/src.next/releases/download/${{ github.run_id }}/com.kiwibrowser.browser.dev-arm64-${{ github.run_id }}-github.apk"}]]}' \
