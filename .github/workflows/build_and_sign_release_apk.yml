@@ -9,8 +9,8 @@ on:
         description: 'Create a draft release in Google Play Store'     
         required: true
         default: 'no'
-      announceOnDiscord:
-        description: 'Announce new release on Discord channel'     
+      announceOnMessengers:
+        description: 'Announce new release on Discord and Telegram channel'     
         required: true
         default: 'yes'
 
@@ -352,7 +352,7 @@ jobs:
 
       - name: Send announcement on Discord
         continue-on-error: true
-        if: contains(github.event.inputs.announceOnDiscord, 'yes')
+        if: contains(github.event.inputs.announceOnMessengers, 'yes')
         run: |
           COMMIT_MSG=$(<./apk-arm/last_commits.txt)
           PAYLOAD=$(jq -n \
@@ -363,6 +363,7 @@ jobs:
       
       - name: Send announcement on Telegram
         continue-on-error: true
+        if: contains(github.event.inputs.announceOnMessengers, 'yes')
         run: |
           COMMIT_MSG=$(<./apk-arm/last_commits.txt)
           PAYLOAD=$(jq -n \
