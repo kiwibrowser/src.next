@@ -10,7 +10,7 @@ on:
         required: true
         default: 'no'
       announceOnMessengers:
-        description: 'Announce new release on Discord and Telegram channel'     
+        description: 'Announce new release on Discord and Telegram channels'     
         required: true
         default: 'yes'
 
@@ -160,6 +160,27 @@ jobs:
           echo 'user = storage' >> $HOME/.config/rclone/rclone.conf
           echo 'key_pem = ${{ secrets.STORAGE_KEY }}' >> $HOME/.config/rclone/rclone.conf
 
+
+      - name: Downloading artifact (arm)
+        uses: actions/download-artifact@v1
+        with:
+          name: apk-arm
+
+      - name: Downloading artifact (arm64)
+        uses: actions/download-artifact@v1
+        with:
+          name: apk-arm64
+
+      - name: Downloading artifact (x86)
+        uses: actions/download-artifact@v1
+        with:
+          name: apk-x86
+
+      - name: Downloading artifact (x64)
+        uses: actions/download-artifact@v1
+        with:
+          name: apk-x64
+
       - name: Read last commits
         id: read_commits
         run: |
@@ -228,26 +249,6 @@ jobs:
               - You cannot install a "-playstore.apk" build on top of a "-github.apk" build.
                 
             Essentially, if you downloaded Kiwi from an app store, you need to use the "-playstore.apk" files or uninstall the version of Kiwi you have and start using the "-github.apk" version.
-
-      - name: Downloading artifact (arm)
-        uses: actions/download-artifact@v1
-        with:
-          name: apk-arm
-
-      - name: Downloading artifact (arm64)
-        uses: actions/download-artifact@v1
-        with:
-          name: apk-arm64
-
-      - name: Downloading artifact (x86)
-        uses: actions/download-artifact@v1
-        with:
-          name: apk-x86
-
-      - name: Downloading artifact (x64)
-        uses: actions/download-artifact@v1
-        with:
-          name: apk-x64
 
       - name: Signing and uploading release to GitHub and send to the Play Store
         if: ${{ github.repository_owner == 'kiwibrowser' && contains(github.event.inputs.prepareRelease, 'yes') }}
