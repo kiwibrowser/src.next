@@ -181,10 +181,59 @@ jobs:
         with:
           name: apk-x64
 
-      - name: Read last commits
-        id: read_commits
+      - name: Prepare release notes
         run: |
-          echo "::set-output name=commits::$(cat ./apk-arm/last_commits.txt)"
+          cat ./apk-arm/last_commits.txt > release_notes.txt
+          cat <<EOT >> release_notes.txt
+          
+          This version will replace your currently installed Kiwi Browser (com.kiwibrowser.browser).
+          If you have important data, make sure to backup them or save them before upgrading to this version.
+          
+          This release was automatically generated from GitHub ${{ github.ref }} in run ID ${{ github.run_id }}.
+          
+          Summary:
+            - To install / update Kiwi Browser, use "com.kiwibrowser.browser-arm64-${{ github.run_id }}-github.apk".
+            If it doesn't work, try again using "com.kiwibrowser.browser-arm64-${{ github.run_id }}-playstore.apk" (if it exists).
+          
+          Detailed information about the different files:
+            - ".map" files are files that developers can use to investigate crashes (ProGuard mapping files), these files are not needed to run the browser and are for developers only.
+            - ".apk" files are packages that you have to install to use Kiwi Browser.
+        
+          The filenames are in the form "[PACKAGE_NAME]-[ARCHITECTURE]-[BUILD_VERSION]-[SIGNATURE_TYPE].apk"
+        
+          If you want to keep the Play Store version installed, and still try the GitHub edition then you can install the APKs starting with "com.kiwibrowser.browser.dev" (you will keep all your Play Store bookmarks, settings and passwords, and the GitHub edition will be installed separately).
+          
+          Build version:
+           - Everytime a change is introduced in Kiwi Browser, a new build version is generated.
+          
+          Architecture:
+            - "-arm64" is compatible with modern devices and offers the best performance.
+            - "-arm" is compatible with almost all devices and uses less memory.
+            - "-x86" and "-x64" builds are compatible with emulators and Intel compatible tablets.
+          
+          Signature type:
+            - On Android, applications have to be signed by a developer before they can be installed.
+          
+          Kiwi has two types of builds:
+          
+          Signed by the developer:
+            - "-github.apk" are builds signed using the official developer key.
+          A signed build is a build that comes straight from the GitHub official repository and is always the most updated.
+          
+          Play Certified by Google:
+            - Once in a while, we send a "-github.apk" build to be reviewed and signed by Google.
+          Google reviews the application, checks that the application is not malicious, adds the "Google Play Certified" badge, signs the file and this becomes "-playstore.apk".
+          
+          We then distribute "-playstore.apk" on Google Play, XDA-Developers, Samsung and other app stores.
+           
+          This process takes some time and is partially manual so not all GitHub builds have a "-playstore.apk".
+          
+          On Android, you can install an update to an application only if it was signed by the same developer as the version that you currently have installed:
+            - You can install a "-github.apk" build on top of a "-github.apk" build, and a "-playstore.apk" build on top of a "-playstore.apk" build.
+            - You cannot install a "-playstore.apk" build on top of a "-github.apk" build.
+          
+          Essentially, if you downloaded Kiwi from an app store, you need to use the "-playstore.apk" files or uninstall the version of Kiwi you have and start using the "-github.apk" version.
+          EOT
 
       - name: Creating release
         id: create_release
@@ -198,56 +247,7 @@ jobs:
           release_name: Generation ${{ github.run_id }}
           draft: false
           prerelease: true
-          body: |
-            ${{ steps.read_commits.outputs.commits }}
-                
-            This version will replace your currently installed Kiwi Browser (com.kiwibrowser.browser).
-            If you have important data, make sure to backup them or save them before upgrading to this version.
-
-            This release was automatically generated from GitHub ${{ github.ref }} in run ID ${{ github.run_id }}.
-            
-            Summary:
-              - To install / update Kiwi Browser, use "com.kiwibrowser.browser-arm64-${{ github.run_id }}-github.apk".
-              If it doesn't work, try again using "com.kiwibrowser.browser-arm64-${{ github.run_id }}-playstore.apk" (if it exists).
-
-            Detailed information about the different files:
-              - ".map" files are files that developers can use to investigate crashes (ProGuard mapping files), these files are not needed to run the browser and are for developers only.
-              - ".apk" files are packages that you have to install to use Kiwi Browser.
-
-            The filenames are in the form "[PACKAGE_NAME]-[ARCHITECTURE]-[BUILD_VERSION]-[SIGNATURE_TYPE].apk"
-
-            If you want to keep the Play Store version installed, and still try the GitHub edition then you can install the APKs starting with "com.kiwibrowser.browser.dev" (you will keep all your Play Store bookmarks, settings and passwords, and the GitHub edition will be installed separately).
-
-            Build version:
-              - Everytime a change is introduced in Kiwi Browser, a new build version is generated.
-
-            Architecture:
-              - "-arm64" is compatible with modern devices and offers the best performance.
-              - "-arm" is compatible with almost all devices and uses less memory.
-              - "-x86" and "-x64" builds are compatible with emulators and Intel compatible tablets.
-                
-            Signature type:
-              - On Android, applications have to be signed by a developer before they can be installed.
-
-            Kiwi has two types of builds:
-
-            Signed by the developer:
-              - "-github.apk" are builds signed using the official developer key.
-            A signed build is a build that comes straight from the GitHub official repository and is always the most updated.
-
-            Play Certified by Google:
-              - Once in a while, we send a "-github.apk" build to be reviewed and signed by Google.
-            Google reviews the application, checks that the application is not malicious, adds the "Google Play Certified" badge, signs the file and this becomes "-playstore.apk".
-            
-            We then distribute "-playstore.apk" on Google Play, XDA-Developers, Samsung and other app stores.
-            
-            This process takes some time and is partially manual so not all GitHub builds have a "-playstore.apk".
-            
-            On Android, you can install an update to an application only if it was signed by the same developer as the version that you currently have installed:
-              - You can install a "-github.apk" build on top of a "-github.apk" build, and a "-playstore.apk" build on top of a "-playstore.apk" build.
-              - You cannot install a "-playstore.apk" build on top of a "-github.apk" build.
-                
-            Essentially, if you downloaded Kiwi from an app store, you need to use the "-playstore.apk" files or uninstall the version of Kiwi you have and start using the "-github.apk" version.
+          body_path: release_notes.txt
 
       - name: Signing and uploading release to GitHub and send to the Play Store
         if: ${{ github.repository_owner == 'kiwibrowser' && contains(github.event.inputs.prepareRelease, 'yes') }}
