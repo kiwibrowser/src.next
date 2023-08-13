@@ -184,8 +184,7 @@ jobs:
       - name: Read last commits
         id: read_commits
         run: |
-          COMMIT_MSG=$(cat ./apk-arm/last_commits.txt)
-          echo "commits=$COMMIT_MSG" >> $GITHUB_OUTPUT
+          echo "::set-output name=commits::$(cat ./apk-arm/last_commits.txt)"
 
       - name: Creating release
         id: create_release
