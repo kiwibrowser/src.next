@@ -354,8 +354,11 @@ jobs:
         continue-on-error: true
         if: contains(github.event.inputs.announceOnMessengers, 'yes')
         run: |
-          COMMIT_MSG=$(<./apk-arm/last_commits.txt)
-          COMMIT_MSG="\n\n${COMMIT_MSG}\n"
+          echo "" > commit_message.txt
+          echo "" >> commit_message.txt
+          cat ./apk-arm/last_commits.txt >> commit_message.txt
+          echo "" >> commit_message.txt
+          COMMIT_MSG=$(<./commit_message.txt)
           PAYLOAD=$(jq -n \
                       --arg username "Kiwi Builder (Next)" \
                       --arg content "A new build of Kiwi Browser Next (preview version) is available. This version will replace your currently installed Kiwi Browser (com.kiwibrowser.browser) <@&913196471787065344> - https://github.com/kiwibrowser/src.next/releases/tag/${{ github.run_id }} $COMMIT_MSG" \
@@ -366,8 +369,7 @@ jobs:
         continue-on-error: true
         if: contains(github.event.inputs.announceOnMessengers, 'yes')
         run: |
-          COMMIT_MSG=$(<./apk-arm/last_commits.txt)
-          COMMIT_MSG="\n\n${COMMIT_MSG}\n"
+          COMMIT_MSG=$(<./commit_message.txt)
           PAYLOAD=$(jq -n \
                       --arg text "A new build of Kiwi Browser Next (preview version) is available. Link: [${{ github.run_id }}](https://github.com/kiwibrowser/src.next/releases/tag/${{ github.run_id }}) $COMMIT_MSG" \
                       --arg chat_id "@kiwibrowserbuilds" \
