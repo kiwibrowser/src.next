@@ -47,3 +47,5 @@ treat_warnings_as_errors = false
 
 # Fast APK
 cc_wrapper = "ccache"
+
+is_high_end_android = true
