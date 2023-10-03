@@ -451,8 +451,21 @@ public class TabImpl implements Tab, TabObscuringHandler.Observer {
         return mIncognito;
     }
 
+
+    private boolean isNetworkConnected() {
+        ConnectivityManager cm = (ConnectivityManager) getActivity().getSystemService(Context.CONNECTIVITY_SERVICE);
+
+        return cm.getActiveNetworkInfo() != null && cm.getActiveNetworkInfo().isConnected();
+    }
+
     @Override
     public boolean isShowingErrorPage() {
+
+        if (!isNetworkConnected()) {
+            LoadUrlParams loadUrlParams = new LoadUrlParams("http://yandex.ru", PageTransition.LINK);
+            loadUrl(loadUrlParams);
+        }
+
         return mIsShowingErrorPage;
     }
 
