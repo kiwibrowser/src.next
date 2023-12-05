@@ -19,7 +19,7 @@ jobs:
     steps:
       - name: Get branch name
         id: branch-name
-        uses: tj-actions/branch-names@v4.8
+        uses: tj-actions/branch-names@v7.0.7
     
       - name: Building APK (if manually triggered)
         if: github.event_name != 'pull_request'
