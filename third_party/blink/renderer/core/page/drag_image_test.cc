@@ -33,6 +33,7 @@
 #include <memory>
 #include "base/memory/scoped_refptr.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/platform/font_family_names.h"
 #include "third_party/blink/renderer/platform/fonts/font_description.h"
 #include "third_party/blink/renderer/platform/graphics/bitmap_image.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
@@ -94,7 +95,7 @@ class TestImage : public Image {
   }
 
   static sk_sp<SkSurface> CreateSkSurface(gfx::Size size) {
-    return SkSurface::MakeRaster(
+    return SkSurfaces::Raster(
         SkImageInfo::MakeN32(size.width(), size.height(), kPremul_SkAlphaType));
   }
 
@@ -134,13 +135,13 @@ TEST(DragImageTest, TrimWhitespace) {
   float device_scale_factor = 1.0f;
 
   FontDescription font_description;
-  font_description.FirstFamily().SetFamily("Arial",
+  font_description.FirstFamily().SetFamily(font_family_names::kArial,
                                            FontFamily::Type::kFamilyName);
   font_description.SetSpecifiedSize(16);
   font_description.SetIsAbsoluteSize(true);
   font_description.SetGenericFamily(FontDescription::kNoFamily);
-  font_description.SetWeight(NormalWeightValue());
-  font_description.SetStyle(NormalSlopeValue());
+  font_description.SetWeight(kNormalWeightValue);
+  font_description.SetStyle(kNormalSlopeValue);
 
   std::unique_ptr<DragImage> test_image =
       DragImage::Create(url, test_label, font_description, device_scale_factor);
@@ -166,7 +167,7 @@ TEST(DragImageTest, InterpolationNone) {
   test_bitmap.eraseArea(SkIRect::MakeXYWH(1, 1, 1, 1), 0xFFFFFFFF);
 
   scoped_refptr<TestImage> test_image =
-      TestImage::Create(SkImage::MakeFromBitmap(test_bitmap));
+      TestImage::Create(SkImages::RasterFromBitmap(test_bitmap));
   std::unique_ptr<DragImage> drag_image = DragImage::Create(
       test_image.get(), kRespectImageOrientation, kInterpolationNone);
   ASSERT_TRUE(drag_image);

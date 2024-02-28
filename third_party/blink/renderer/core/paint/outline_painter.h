@@ -1,11 +1,11 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_OUTLINE_PAINTER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_OUTLINE_PAINTER_H_
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"

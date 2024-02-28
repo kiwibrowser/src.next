@@ -43,6 +43,7 @@ namespace blink {
 
 class CSSParserContext;
 class CSSParserTokenRange;
+class CSSParserTokenOffsets;
 
 class CORE_EXPORT MediaQueryExpValue {
   DISALLOW_NEW();
@@ -54,7 +55,7 @@ class CORE_EXPORT MediaQueryExpValue {
   explicit MediaQueryExpValue(CSSValueID id) : type_(Type::kId), id_(id) {}
   MediaQueryExpValue(double value, CSSPrimitiveValue::UnitType unit)
       : type_(Type::kNumeric), numeric_({value, unit}) {}
-  MediaQueryExpValue(unsigned numerator, unsigned denominator)
+  MediaQueryExpValue(double numerator, double denominator)
       : type_(Type::kRatio), ratio_({numerator, denominator}) {}
   explicit MediaQueryExpValue(const CSSValue& value)
       : type_(Type::kCSSValue), css_value_(&value) {}
@@ -65,28 +66,23 @@ class CORE_EXPORT MediaQueryExpValue {
   bool IsNumeric() const { return type_ == Type::kNumeric; }
   bool IsRatio() const { return type_ == Type::kRatio; }
   bool IsCSSValue() const { return type_ == Type::kCSSValue; }
+  bool IsResolution() const;
 
   CSSValueID Id() const {
     DCHECK(IsId());
     return id_;
   }
 
-  double Value() const {
-    DCHECK(IsNumeric());
-    return numeric_.value;
-  }
+  double Value() const;
 
-  CSSPrimitiveValue::UnitType Unit() const {
-    DCHECK(IsNumeric());
-    return numeric_.unit;
-  }
+  CSSPrimitiveValue::UnitType Unit() const;
 
-  unsigned Numerator() const {
+  double Numerator() const {
     DCHECK(IsRatio());
     return ratio_.numerator;
   }
 
-  unsigned Denominator() const {
+  double Denominator() const {
     DCHECK(IsRatio());
     return ratio_.denominator;
   }
@@ -112,8 +108,9 @@ class CORE_EXPORT MediaQueryExpValue {
 
   String CssText() const;
   bool operator==(const MediaQueryExpValue& other) const {
-    if (type_ != other.type_)
+    if (type_ != other.type_) {
       return false;
+    }
     switch (type_) {
       case Type::kInvalid:
         return true;
@@ -140,12 +137,17 @@ class CORE_EXPORT MediaQueryExpValue {
   static absl::optional<MediaQueryExpValue> Consume(
       const String& lower_media_feature,
       CSSParserTokenRange&,
+      const CSSParserTokenOffsets&,
       const CSSParserContext&);
 
  private:
   enum class Type { kInvalid, kId, kNumeric, kRatio, kCSSValue };
 
   Type type_ = Type::kInvalid;
+
+  // Used when the value can't be represented by the union below (e.g. math
+  // functions). Also used for style features in style container queries.
+  Member<const CSSValue> css_value_;
 
   union {
     CSSValueID id_;
@@ -154,14 +156,10 @@ class CORE_EXPORT MediaQueryExpValue {
       CSSPrimitiveValue::UnitType unit;
     } numeric_;
     struct {
-      unsigned numerator;
-      unsigned denominator;
+      double numerator;
+      double denominator;
     } ratio_;
   };
-
-  // Used when the value can't be represented by the above union (e.g. math
-  // functions). Also used for style features in style container queries.
-  Member<const CSSValue> css_value_;
 };
 
 // https://drafts.csswg.org/mediaqueries-4/#mq-syntax
@@ -256,6 +254,7 @@ class CORE_EXPORT MediaQueryExp {
   // Returns an invalid MediaQueryExp if the arguments are invalid.
   static MediaQueryExp Create(const String& media_feature,
                               CSSParserTokenRange&,
+                              const CSSParserTokenOffsets&,
                               const CSSParserContext&);
   static MediaQueryExp Create(const String& media_feature,
                               const MediaQueryExpBounds&);
@@ -317,6 +316,8 @@ class CORE_EXPORT MediaQueryExpNode
     kFeatureInlineSize = 1 << 4,
     kFeatureBlockSize = 1 << 5,
     kFeatureStyle = 1 << 6,
+    kFeatureSticky = 1 << 7,
+    kFeatureSnap = 1 << 8,
   };
 
   using FeatureFlags = unsigned;

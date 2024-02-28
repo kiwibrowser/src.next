@@ -1,12 +1,13 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/frame/root_frame_viewport.h"
 
-#include "base/barrier_closure.h"
-#include "base/callback.h"
-#include "base/callback_helpers.h"
+#include "base/barrier_callback.h"
+#include "base/functional/callback.h"
+#include "base/functional/callback_helpers.h"
+#include "base/task/single_thread_task_runner.h"
 #include "cc/input/snap_selection_strategy.h"
 #include "third_party/blink/public/mojom/scroll/scroll_into_view_params.mojom-blink.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
@@ -15,7 +16,9 @@
 #include "third_party/blink/renderer/core/layout/scroll_anchor.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/scroll/scroll_alignment.h"
+#include "third_party/blink/renderer/core/scroll/scroll_animator.h"
 #include "third_party/blink/renderer/core/scroll/scroll_animator_base.h"
+#include "third_party/blink/renderer/core/scroll/scrollable_area.h"
 #include "third_party/blink/renderer/core/scroll/smooth_scroll_sequencer.h"
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -44,6 +47,31 @@ gfx::RectF GetUserScrollableRect(const ScrollableArea& area) {
     user_scrollable_rect.set_height(0);
   }
   return user_scrollable_rect;
+}
+
+static base::RepeatingCallback<void(ScrollableArea::ScrollCompletionMode)>
+MakeViewportScrollCompletion(ScrollableArea::ScrollCallback callback) {
+  return callback
+             ? base::BarrierCallback<ScrollableArea::ScrollCompletionMode>(
+                   2, WTF::BindOnce(
+                          [](ScrollableArea::ScrollCallback on_finish,
+                             const std::vector<
+                                 ScrollableArea::ScrollCompletionMode>
+                                 completion_modes) {
+                            auto completion_mode =
+                                ScrollableArea::ScrollCompletionMode::kFinished;
+                            for (auto mode : completion_modes) {
+                              if (mode == ScrollableArea::ScrollCompletionMode::
+                                              kInterruptedByScroll) {
+                                completion_mode = ScrollableArea::
+                                    ScrollCompletionMode::kInterruptedByScroll;
+                              }
+                            }
+                            std::move(on_finish).Run(completion_mode);
+                          },
+                          std::move(callback)))
+             : base::RepeatingCallback<void(
+                   ScrollableArea::ScrollCompletionMode)>();
 }
 
 }  // namespace
@@ -205,7 +233,7 @@ PhysicalRect RootFrameViewport::VisibleScrollSnapportRect(
     return visible_scroll_snapport;
 
   const ComputedStyle* style = LayoutViewport().GetLayoutBox()->Style();
-  LayoutRectOutsets padding(
+  visible_scroll_snapport.ContractEdges(
       MinimumValueForLength(style->ScrollPaddingTop(),
                             visible_scroll_snapport.Height()),
       MinimumValueForLength(style->ScrollPaddingRight(),
@@ -214,7 +242,6 @@ PhysicalRect RootFrameViewport::VisibleScrollSnapportRect(
                             visible_scroll_snapport.Height()),
       MinimumValueForLength(style->ScrollPaddingLeft(),
                             visible_scroll_snapport.Width()));
-  visible_scroll_snapport.Contract(padding);
 
   return visible_scroll_snapport;
 }
@@ -282,7 +309,7 @@ void RootFrameViewport::ApplyPendingHistoryRestoreScrollOffset() {
   pending_view_state_.reset();
 }
 
-void RootFrameViewport::SetScrollOffset(
+bool RootFrameViewport::SetScrollOffset(
     const ScrollOffset& offset,
     mojom::blink::ScrollType scroll_type,
     mojom::blink::ScrollBehavior scroll_behavior,
@@ -293,28 +320,28 @@ void RootFrameViewport::SetScrollOffset(
     scroll_behavior = ScrollBehaviorStyle();
 
   if (scroll_type == mojom::blink::ScrollType::kAnchoring) {
-    DistributeScrollBetweenViewports(offset, scroll_type, scroll_behavior,
-                                     kLayoutViewport, std::move(on_finish));
-    return;
+    return DistributeScrollBetweenViewports(offset, scroll_type,
+                                            scroll_behavior, kLayoutViewport,
+                                            std::move(on_finish));
   }
 
   if (scroll_behavior == mojom::blink::ScrollBehavior::kSmooth) {
-    DistributeScrollBetweenViewports(offset, scroll_type, scroll_behavior,
-                                     kVisualViewport, std::move(on_finish));
-    return;
+    return DistributeScrollBetweenViewports(offset, scroll_type,
+                                            scroll_behavior, kVisualViewport,
+                                            std::move(on_finish));
   }
 
   ScrollOffset clamped_offset = ClampScrollOffset(offset);
-  ScrollableArea::SetScrollOffset(clamped_offset, scroll_type, scroll_behavior,
-                                  std::move(on_finish));
+  return ScrollableArea::SetScrollOffset(clamped_offset, scroll_type,
+                                         scroll_behavior, std::move(on_finish));
 }
 
 mojom::blink::ScrollBehavior RootFrameViewport::ScrollBehaviorStyle() const {
   return LayoutViewport().ScrollBehaviorStyle();
 }
 
-mojom::blink::ColorScheme RootFrameViewport::UsedColorScheme() const {
-  return LayoutViewport().UsedColorScheme();
+mojom::blink::ColorScheme RootFrameViewport::UsedColorSchemeScrollbars() const {
+  return LayoutViewport().UsedColorSchemeScrollbars();
 }
 
 ScrollOffset RootFrameViewport::ClampToUserScrollableOffset(
@@ -358,6 +385,7 @@ PhysicalRect RootFrameViewport::ScrollIntoView(
 
   if (new_scroll_offset != GetScrollOffset()) {
     if (params->is_for_scroll_sequence) {
+      CHECK(GetSmoothScrollSequencer());
       DCHECK(params->type == mojom::blink::ScrollType::kProgrammatic ||
              params->type == mojom::blink::ScrollType::kUser);
       mojom::blink::ScrollBehavior behavior = DetermineScrollBehavior(
@@ -389,7 +417,7 @@ void RootFrameViewport::UpdateScrollOffset(
                                    kVisualViewport);
 }
 
-void RootFrameViewport::DistributeScrollBetweenViewports(
+bool RootFrameViewport::DistributeScrollBetweenViewports(
     const ScrollOffset& offset,
     mojom::blink::ScrollType scroll_type,
     mojom::blink::ScrollBehavior behavior,
@@ -405,9 +433,11 @@ void RootFrameViewport::DistributeScrollBetweenViewports(
   ScrollOffset delta = offset - old_offset;
 
   if (delta.IsZero()) {
-    if (on_finish)
-      std::move(on_finish).Run();
-    return;
+    if (on_finish) {
+      std::move(on_finish).Run(
+          ScrollableArea::ScrollCompletionMode::kZeroDelta);
+    }
+    return false;
   }
 
   ScrollableArea& primary =
@@ -428,8 +458,7 @@ void RootFrameViewport::DistributeScrollBetweenViewports(
   ScrollOffset secondary_offset = secondary.ClampScrollOffset(
       secondary.GetScrollAnimator().CurrentOffset() + unconsumed_by_primary);
 
-  auto all_done = on_finish ? base::BarrierClosure(2, std::move(on_finish))
-                            : base::RepeatingClosure();
+  auto all_done = MakeViewportScrollCompletion(std::move(on_finish));
 
   // DistributeScrollBetweenViewports can be called from SetScrollOffset,
   // so we assume that aborting sequenced smooth scrolls has been handled.
@@ -438,12 +467,13 @@ void RootFrameViewport::DistributeScrollBetweenViewports(
 
   // Actually apply the scroll the layout viewport first so that the DOM event
   // is dispatched to the DOMWindow before the VisualViewport.
-  LayoutViewport().SetScrollOffset(
+  bool did_scroll = LayoutViewport().SetScrollOffset(
       scroll_first == kLayoutViewport ? primary_offset : secondary_offset,
       scroll_type, behavior, all_done);
-  GetVisualViewport().SetScrollOffset(
+  did_scroll |= GetVisualViewport().SetScrollOffset(
       scroll_first == kVisualViewport ? primary_offset : secondary_offset,
       scroll_type, behavior, all_done);
+  return did_scroll;
 }
 
 gfx::Vector2d RootFrameViewport::ScrollOffsetInt() const {
@@ -517,8 +547,6 @@ ScrollResult RootFrameViewport::UserScroll(
     ui::ScrollGranularity granularity,
     const ScrollOffset& delta,
     ScrollableArea::ScrollCallback on_finish) {
-  base::ScopedClosureRunner run_on_return(std::move(on_finish));
-
   // TODO(bokan/ymalik): Once smooth scrolling is permanently enabled we
   // should be able to remove this method override and use the base class
   // version: ScrollableArea::userScroll.
@@ -547,10 +575,32 @@ ScrollResult RootFrameViewport::UserScroll(
       LayoutViewport().UserInputScrollable(kVerticalScrollbar)
           ? layout_delta.y()
           : 0);
+  ScrollOffset layout_consumed_delta =
+      LayoutViewport().GetScrollAnimator().ComputeDeltaToConsume(
+          scrollable_axis_delta);
+
+  if (ScrollAnimatorEnabled()) {
+    bool visual_viewport_has_running_animation =
+        GetVisualViewport().GetScrollAnimator().HasRunningAnimation();
+    bool layout_viewport_has_running_animation =
+        LayoutViewport().GetScrollAnimator().HasRunningAnimation();
+    // We reset |user_scroll_sequence_affects_layout_viewport_| only if this
+    // UserScroll is not a continuation of a longer sequence because an earlier
+    // UserScroll in the sequence may have already affected the layout
+    // viewport.
+    if (!visual_viewport_has_running_animation &&
+        !layout_viewport_has_running_animation) {
+      user_scroll_sequence_affects_layout_viewport_ = false;
+    }
+  }
 
   // If there won't be any scrolling, bail early so we don't produce any side
   // effects like cancelling existing animations.
-  if (visual_consumed_delta.IsZero() && scrollable_axis_delta.IsZero()) {
+  if (visual_consumed_delta.IsZero() && layout_consumed_delta.IsZero()) {
+    if (on_finish) {
+      std::move(on_finish).Run(
+          ScrollableArea::ScrollCompletionMode::kZeroDelta);
+    }
     return ScrollResult(false, false, pixel_delta.x(), pixel_delta.y());
   }
 
@@ -563,13 +613,23 @@ ScrollResult RootFrameViewport::UserScroll(
   if (visual_consumed_delta == pixel_delta) {
     ScrollResult visual_result =
         GetVisualViewport().GetScrollAnimator().UserScroll(
-            granularity, visual_consumed_delta, run_on_return.Release());
+            granularity, visual_consumed_delta, std::move(on_finish));
     return visual_result;
   }
 
-  ScrollableArea::ScrollCallback callback = run_on_return.Release();
-  auto all_done = callback ? base::BarrierClosure(2, std::move(callback))
-                           : base::RepeatingClosure();
+  if (!layout_consumed_delta.IsZero()) {
+    user_scroll_sequence_affects_layout_viewport_ = true;
+  }
+
+  if (layout_consumed_delta == pixel_delta) {
+    ScrollResult layout_result =
+        LayoutViewport().GetScrollAnimator().UserScroll(
+            granularity, scrollable_axis_delta, std::move(on_finish));
+    return layout_result;
+  }
+
+  auto all_done = MakeViewportScrollCompletion(std::move(on_finish));
+
   ScrollResult visual_result =
       GetVisualViewport().GetScrollAnimator().UserScroll(
           granularity, visual_consumed_delta, all_done);
@@ -661,14 +721,6 @@ void RootFrameViewport::SetSnapContainerDataNeedsUpdate(bool needs_update) {
   LayoutViewport().SetSnapContainerDataNeedsUpdate(needs_update);
 }
 
-bool RootFrameViewport::NeedsResnap() const {
-  return LayoutViewport().NeedsResnap();
-}
-
-void RootFrameViewport::SetNeedsResnap(bool needs_resnap) {
-  LayoutViewport().SetNeedsResnap(needs_resnap);
-}
-
 absl::optional<gfx::PointF> RootFrameViewport::GetSnapPositionAndSetTarget(
     const cc::SnapSelectionStrategy& strategy) {
   return LayoutViewport().GetSnapPositionAndSetTarget(strategy);
@@ -688,6 +740,40 @@ void RootFrameViewport::Trace(Visitor* visitor) const {
   visitor->Trace(visual_viewport_);
   visitor->Trace(layout_viewport_);
   ScrollableArea::Trace(visitor);
+}
+
+void RootFrameViewport::UpdateSnappedTargetsAndEnqueueSnapChanged() {
+  LayoutViewport().UpdateSnappedTargetsAndEnqueueSnapChanged();
+}
+
+const cc::SnappedTargetData* RootFrameViewport::GetSnapChangingTargetData()
+    const {
+  return LayoutViewport().GetSnapChangingTargetData();
+}
+
+void RootFrameViewport::SetSnapChangingTargetData(
+    absl::optional<cc::SnappedTargetData> data) {
+  LayoutViewport().SetSnapChangingTargetData(data);
+}
+
+void RootFrameViewport::UpdateSnapChangingTargetsAndEnqueueSnapChanging(
+    const gfx::PointF& scroll_offset) {
+  LayoutViewport().UpdateSnapChangingTargetsAndEnqueueSnapChanging(
+      scroll_offset);
+}
+
+const cc::SnapSelectionStrategy* RootFrameViewport::GetImplSnapStrategy()
+    const {
+  return LayoutViewport().GetImplSnapStrategy();
+}
+
+void RootFrameViewport::SetImplSnapStrategy(
+    std::unique_ptr<cc::SnapSelectionStrategy> strategy) {
+  LayoutViewport().SetImplSnapStrategy(std::move(strategy));
+}
+
+void RootFrameViewport::EnqueueSnapChangingEventFromImplIfNeeded() {
+  LayoutViewport().EnqueueSnapChangingEventFromImplIfNeeded();
 }
 
 }  // namespace blink

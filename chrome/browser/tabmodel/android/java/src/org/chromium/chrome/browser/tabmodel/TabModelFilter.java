@@ -77,12 +77,16 @@ public abstract class TabModelFilter implements TabModelObserver, TabList {
         mFilteredObservers.clear();
     }
 
-    /**
-     * @return The {@link TabModel} that the filter is acting on.
-     */
-    @VisibleForTesting(otherwise = VisibleForTesting.PROTECTED)
+    /** Returns the {@link TabModel} that the filter is acting on. */
     public TabModel getTabModel() {
         return mTabModel;
+    }
+
+    /**
+     * @return The total tab count in the underlying {@link TabModel}.
+     */
+    public int getTotalTabCount() {
+        return mTabModel.getCount();
     }
 
     /**
@@ -146,6 +150,15 @@ public abstract class TabModelFilter implements TabModelObserver, TabList {
     }
 
     /**
+     * Returns a valid position to add or move a tab to this model in the context of any related
+     * tabs.
+     * @param tab The tab to be added/moved.
+     * @param proposedPosition The current or proposed position of the tab in the model.
+     * @return a valid position close to proposedPosition that respects related tab ordering rules.
+     */
+    public abstract int getValidPosition(Tab tab, int proposedPosition);
+
+    /**
      * Concrete class requires to define what's the behavior when {@link TabModel} added a
      * {@link Tab}.
      * @param tab {@link Tab} had added to {@link TabModel}.
@@ -166,14 +179,10 @@ public abstract class TabModelFilter implements TabModelObserver, TabList {
      */
     protected abstract void selectTab(Tab tab);
 
-    /**
-     * Concrete class requires to define the ordering of each Tab within the filter.
-     */
+    /** Concrete class requires to define the ordering of each Tab within the filter. */
     protected abstract void reorder();
 
-    /**
-     * Concrete class requires to define what to clean up.
-     */
+    /** Concrete class requires to define what to clean up. */
     protected abstract void resetFilterStateInternal();
 
     /**
@@ -258,10 +267,14 @@ public abstract class TabModelFilter implements TabModelObserver, TabList {
     }
 
     @Override
-    public void didAddTab(Tab tab, @TabLaunchType int type, @TabCreationState int creationState) {
+    public void didAddTab(
+            Tab tab,
+            @TabLaunchType int type,
+            @TabCreationState int creationState,
+            boolean markedForSelection) {
         addTab(tab);
         for (TabModelObserver observer : mFilteredObservers) {
-            observer.didAddTab(tab, type, creationState);
+            observer.didAddTab(tab, type, creationState, markedForSelection);
         }
     }
 

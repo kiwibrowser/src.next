@@ -9,7 +9,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/raw_ptr.h"
-#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/observer_list.h"
 #include "base/version.h"
 #include "components/keyed_service/core/keyed_service.h"
@@ -79,7 +79,7 @@ class ExtensionRegistry : public KeyedService {
 
   // Returns the set of all installed extensions, regardless of state (enabled,
   // disabled, etc). Equivalent to GenerateInstalledExtensionSet(EVERYTHING).
-  std::unique_ptr<ExtensionSet> GenerateInstalledExtensionsSet() const;
+  ExtensionSet GenerateInstalledExtensionsSet() const;
 
   // Returns a set of all extensions in the subsets specified by |include_mask|.
   //  * enabled_extensions()     --> ExtensionRegistry::ENABLED
@@ -87,8 +87,7 @@ class ExtensionRegistry : public KeyedService {
   //  * terminated_extensions()  --> ExtensionRegistry::TERMINATED
   //  * blocklisted_extensions() --> ExtensionRegistry::BLOCKLISTED
   //  * blocked_extensions()     --> ExtensionRegistry::BLOCKED
-  std::unique_ptr<ExtensionSet> GenerateInstalledExtensionsSet(
-      int include_mask) const;
+  ExtensionSet GenerateInstalledExtensionsSet(int include_mask) const;
 
   // Returns the current version of the extension with the given |id|, if
   // one exists.

@@ -37,14 +37,14 @@
 namespace blink {
 
 Attr::Attr(Element& element, const QualifiedName& name)
-    : Node(&element.GetDocument(), kCreateOther),
+    : Node(&element.GetDocument(), kCreateAttribute),
       element_(&element),
       name_(name) {}
 
 Attr::Attr(Document& document,
            const QualifiedName& name,
            const AtomicString& standalone_value)
-    : Node(&document, kCreateOther),
+    : Node(&document, kCreateAttribute),
       name_(name),
       standalone_value_or_attached_local_name_(standalone_value) {}
 
@@ -99,7 +99,11 @@ void Attr::setTextContentForBinding(const V8UnionStringOrTrustedScript* value,
   setNodeValue(string_value, exception_state);
 }
 
-Node* Attr::Clone(Document& factory, CloneChildrenFlag) const {
+Node* Attr::Clone(Document& factory,
+                  NodeCloningData&,
+                  ContainerNode* append_to,
+                  ExceptionState& append_exception_state) const {
+  DCHECK_EQ(append_to, nullptr) << "Attr::Clone() doesn't support append_to";
   return MakeGarbageCollected<Attr>(factory, name_, value());
 }
 

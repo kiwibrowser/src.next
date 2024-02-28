@@ -11,11 +11,11 @@ import 'chrome://resources/polymer/v3_0/iron-icon/iron-icon.js';
 import './strings.m.js';
 import './shared_vars.css.js';
 
-import {CrButtonElement} from 'chrome://resources/cr_elements/cr_button/cr_button.js';
-import {CrDialogElement} from 'chrome://resources/cr_elements/cr_dialog/cr_dialog.js';
-import {assert} from 'chrome://resources/js/assert_ts.js';
-import {I18nMixin} from 'chrome://resources/js/i18n_mixin.js';
-import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+import type {CrButtonElement} from 'chrome://resources/cr_elements/cr_button/cr_button.js';
+import type {CrDialogElement} from 'chrome://resources/cr_elements/cr_dialog/cr_dialog.js';
+import {I18nMixin} from 'chrome://resources/cr_elements/i18n_mixin.js';
+import {assert} from 'chrome://resources/js/assert.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {getTemplate} from './runtime_hosts_dialog.html.js';
@@ -215,7 +215,7 @@ export class ExtensionsRuntimeHostsDialogElement extends
     return getMatchingUserSpecifiedSites(this.restrictedSites, this.site_);
   }
 
-  private onCancelTap_() {
+  private onCancelClick_() {
     this.$.dialog.cancel();
   }
 
@@ -223,7 +223,7 @@ export class ExtensionsRuntimeHostsDialogElement extends
    * The tap handler for the submit button (adds the pattern and closes
    * the dialog).
    */
-  private onSubmitTap_() {
+  private onSubmitClick_() {
     chrome.metricsPrivate.recordUserAction(
         'Extensions.Settings.Hosts.AddHostDialogSubmitted');
     if (this.currentSite !== null) {

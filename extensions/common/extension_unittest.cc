@@ -4,6 +4,9 @@
 
 #include "extensions/common/extension.h"
 
+#include <optional>
+#include <string_view>
+
 #include "base/command_line.h"
 #include "base/test/scoped_command_line.h"
 #include "base/test/scoped_feature_list.h"
@@ -11,9 +14,7 @@
 #include "extensions/common/extension_features.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/switches.h"
-#include "extensions/common/value_builder.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 using extensions::mojom::ManifestLocation;
 
@@ -28,15 +29,15 @@ std::string GetVersionTooHighWarning(int max_version, int supplied_version) {
 }
 
 testing::AssertionResult RunManifestVersionSuccess(
-    std::unique_ptr<base::DictionaryValue> manifest,
+    base::Value::Dict manifest,
     Manifest::Type expected_type,
     int expected_manifest_version,
-    base::StringPiece expected_warning = "",
+    std::string_view expected_warning = "",
     Extension::InitFromValueFlags custom_flag = Extension::NO_FLAGS,
     ManifestLocation manifest_location = ManifestLocation::kInternal) {
   std::string error;
   scoped_refptr<const Extension> extension = Extension::Create(
-      base::FilePath(), manifest_location, *manifest, custom_flag, &error);
+      base::FilePath(), manifest_location, manifest, custom_flag, &error);
   if (!extension) {
     return testing::AssertionFailure()
            << "Extension creation failed: " << error;
@@ -70,12 +71,12 @@ testing::AssertionResult RunManifestVersionSuccess(
 }
 
 testing::AssertionResult RunManifestVersionFailure(
-    std::unique_ptr<base::DictionaryValue> manifest,
+    base::Value::Dict manifest,
     Extension::InitFromValueFlags custom_flag = Extension::NO_FLAGS) {
   std::string error;
   scoped_refptr<const Extension> extension =
-      Extension::Create(base::FilePath(), ManifestLocation::kInternal,
-                        *manifest, custom_flag, &error);
+      Extension::Create(base::FilePath(), ManifestLocation::kInternal, manifest,
+                        custom_flag, &error);
   if (extension)
     return testing::AssertionFailure() << "Extension creation succeeded.";
 
@@ -83,13 +84,13 @@ testing::AssertionResult RunManifestVersionFailure(
 }
 
 testing::AssertionResult RunCreationWithFlags(
-    const base::DictionaryValue* manifest,
+    const base::Value::Dict& manifest,
     mojom::ManifestLocation location,
     Manifest::Type expected_type,
     Extension::InitFromValueFlags custom_flag = Extension::NO_FLAGS) {
   std::string error;
   scoped_refptr<const Extension> extension = Extension::Create(
-      base::FilePath(), location, *manifest, custom_flag, &error);
+      base::FilePath(), location, manifest, custom_flag, &error);
   if (!extension) {
     return testing::AssertionFailure()
            << "Extension creation failed: " << error;
@@ -108,14 +109,14 @@ testing::AssertionResult RunCreationWithFlags(
 // that don't depend on //chrome into here.
 
 TEST(ExtensionTest, ExtensionManifestVersions) {
-  auto get_manifest = [](absl::optional<int> manifest_version) {
-    DictionaryBuilder builder;
-    builder.Set("name", "My Extension")
-        .Set("version", "0.1")
-        .Set("description", "An awesome extension");
+  auto get_manifest = [](std::optional<int> manifest_version) {
+    auto manifest = base::Value::Dict()
+                        .Set("name", "My Extension")
+                        .Set("version", "0.1")
+                        .Set("description", "An awesome extension");
     if (manifest_version)
-      builder.Set("manifest_version", *manifest_version);
-    return builder.Build();
+      manifest.Set("manifest_version", *manifest_version);
+    return manifest;
   };
 
   const Manifest::Type kType = Manifest::TYPE_EXTENSION;
@@ -133,7 +134,7 @@ TEST(ExtensionTest, ExtensionManifestVersions) {
   // Manifest v1 is deprecated, and should not load.
   EXPECT_TRUE(RunManifestVersionFailure(get_manifest(1)));
   // Omitting the key defaults to v1 for extensions.
-  EXPECT_TRUE(RunManifestVersionFailure(get_manifest(absl::nullopt)));
+  EXPECT_TRUE(RunManifestVersionFailure(get_manifest(std::nullopt)));
 
   // '0' and '-1' are invalid values.
   EXPECT_TRUE(RunManifestVersionFailure(get_manifest(0)));
@@ -146,23 +147,23 @@ TEST(ExtensionTest, ExtensionManifestVersions) {
         switches::kAllowLegacyExtensionManifests);
     EXPECT_TRUE(RunManifestVersionSuccess(get_manifest(1), kType, 1));
     EXPECT_TRUE(
-        RunManifestVersionSuccess(get_manifest(absl::nullopt), kType, 1));
+        RunManifestVersionSuccess(get_manifest(std::nullopt), kType, 1));
   }
 }
 
 TEST(ExtensionTest, PlatformAppManifestVersions) {
-  auto get_manifest = [](absl::optional<int> manifest_version) {
-    DictionaryBuilder background;
-    background.Set("scripts", ListBuilder().Append("background.js").Build());
-    DictionaryBuilder builder;
-    builder.Set("name", "My Platform App")
-        .Set("version", "0.1")
-        .Set("description", "A platform app")
-        .Set("app",
-             DictionaryBuilder().Set("background", background.Build()).Build());
+  auto get_manifest = [](std::optional<int> manifest_version) {
+    base::Value::Dict background;
+    background.Set("scripts", base::Value::List().Append("background.js"));
+    auto manifest = base::Value::Dict()
+                        .Set("name", "My Platform App")
+                        .Set("version", "0.1")
+                        .Set("description", "A platform app")
+                        .Set("app", base::Value::Dict().Set(
+                                        "background", std::move(background)));
     if (manifest_version)
-      builder.Set("manifest_version", *manifest_version);
-    return builder.Build();
+      manifest.Set("manifest_version", *manifest_version);
+    return manifest;
   };
 
   const Manifest::Type kType = Manifest::TYPE_PLATFORM_APP;
@@ -172,7 +173,7 @@ TEST(ExtensionTest, PlatformAppManifestVersions) {
                                         GetVersionTooHighWarning(3, 4)));
 
   // Omitting the key defaults to v2 for platform apps.
-  EXPECT_TRUE(RunManifestVersionSuccess(get_manifest(absl::nullopt), kType, 2));
+  EXPECT_TRUE(RunManifestVersionSuccess(get_manifest(std::nullopt), kType, 2));
 
   // Manifest v1 is deprecated, and should not load.
   EXPECT_TRUE(RunManifestVersionFailure(get_manifest(1)));
@@ -192,17 +193,17 @@ TEST(ExtensionTest, PlatformAppManifestVersions) {
 }
 
 TEST(ExtensionTest, HostedAppManifestVersions) {
-  auto get_manifest = [](absl::optional<int> manifest_version) {
-    DictionaryBuilder builder;
-    DictionaryBuilder app;
-    app.Set("urls", ListBuilder().Append("http://example.com").Build());
-    builder.Set("name", "My Hosted App")
-        .Set("version", "0.1")
-        .Set("description", "A hosted app")
-        .Set("app", app.Build());
+  auto get_manifest = [](std::optional<int> manifest_version) {
+    base::Value::Dict app;
+    app.Set("urls", base::Value::List().Append("http://example.com"));
+    auto manifest = base::Value::Dict()
+                        .Set("name", "My Hosted App")
+                        .Set("version", "0.1")
+                        .Set("description", "A hosted app")
+                        .Set("app", std::move(app));
     if (manifest_version)
-      builder.Set("manifest_version", *manifest_version);
-    return builder.Build();
+      manifest.Set("manifest_version", *manifest_version);
+    return manifest;
   };
 
   const Manifest::Type kType = Manifest::TYPE_HOSTED_APP;
@@ -214,7 +215,7 @@ TEST(ExtensionTest, HostedAppManifestVersions) {
   // Manifest v1 is deprecated, but should still load for hosted apps.
   EXPECT_TRUE(RunManifestVersionSuccess(get_manifest(1), kType, 1));
   // Omitting the key defaults to v1 for hosted apps, and v1 is still allowed.
-  EXPECT_TRUE(RunManifestVersionSuccess(get_manifest(absl::nullopt), kType, 1));
+  EXPECT_TRUE(RunManifestVersionSuccess(get_manifest(std::nullopt), kType, 1));
 
   // Requiring the modern manifest version should make hosted apps require v2.
   EXPECT_TRUE(RunManifestVersionFailure(
@@ -222,15 +223,15 @@ TEST(ExtensionTest, HostedAppManifestVersions) {
 }
 
 TEST(ExtensionTest, UserScriptManifestVersions) {
-  auto get_manifest = [](absl::optional<int> manifest_version) {
-    DictionaryBuilder builder;
-    builder.Set("name", "My Extension")
-        .Set("version", "0.1")
-        .Set("description", "An awesome extension")
-        .Set("converted_from_user_script", true);
+  auto get_manifest = [](std::optional<int> manifest_version) {
+    auto manifest = base::Value::Dict()
+                        .Set("name", "My Extension")
+                        .Set("version", "0.1")
+                        .Set("description", "An awesome extension")
+                        .Set("converted_from_user_script", true);
     if (manifest_version)
-      builder.Set("manifest_version", *manifest_version);
-    return builder.Build();
+      manifest.Set("manifest_version", *manifest_version);
+    return manifest;
   };
 
   const Manifest::Type kType = Manifest::TYPE_USER_SCRIPT;
@@ -242,7 +243,7 @@ TEST(ExtensionTest, UserScriptManifestVersions) {
   // Manifest v1 is deprecated, but should still load for user scripts.
   EXPECT_TRUE(RunManifestVersionSuccess(get_manifest(1), kType, 1));
   // Omitting the key defaults to v1 for user scripts, but v1 is still allowed.
-  EXPECT_TRUE(RunManifestVersionSuccess(get_manifest(absl::nullopt), kType, 1));
+  EXPECT_TRUE(RunManifestVersionSuccess(get_manifest(std::nullopt), kType, 1));
 
   // Requiring the modern manifest version should make user scripts require v2.
   EXPECT_TRUE(RunManifestVersionFailure(
@@ -250,19 +251,18 @@ TEST(ExtensionTest, UserScriptManifestVersions) {
 }
 
 TEST(ExtensionTest, LoginScreenFlag) {
-  DictionaryBuilder builder;
-  builder.Set("name", "My Extension")
-      .Set("version", "0.1")
-      .Set("description", "An awesome extension")
-      .Set("manifest_version", 2);
-  std::unique_ptr<base::DictionaryValue> manifest = builder.Build();
+  auto manifest = base::Value::Dict()
+                      .Set("name", "My Extension")
+                      .Set("version", "0.1")
+                      .Set("description", "An awesome extension")
+                      .Set("manifest_version", 2);
 
-  EXPECT_TRUE(
-      RunCreationWithFlags(manifest.get(), ManifestLocation::kExternalPolicy,
-                           Manifest::TYPE_EXTENSION, Extension::NO_FLAGS));
-  EXPECT_TRUE(RunCreationWithFlags(
-      manifest.get(), ManifestLocation::kExternalPolicy,
-      Manifest::TYPE_LOGIN_SCREEN_EXTENSION, Extension::FOR_LOGIN_SCREEN));
+  EXPECT_TRUE(RunCreationWithFlags(manifest, ManifestLocation::kExternalPolicy,
+                                   Manifest::TYPE_EXTENSION,
+                                   Extension::NO_FLAGS));
+  EXPECT_TRUE(RunCreationWithFlags(manifest, ManifestLocation::kExternalPolicy,
+                                   Manifest::TYPE_LOGIN_SCREEN_EXTENSION,
+                                   Extension::FOR_LOGIN_SCREEN));
 }
 
 }  // namespace extensions

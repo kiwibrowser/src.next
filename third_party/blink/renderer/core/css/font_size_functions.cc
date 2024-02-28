@@ -33,6 +33,8 @@
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
+#include "third_party/blink/renderer/platform/fonts/font_description.h"
+#include "third_party/blink/renderer/platform/fonts/simple_font_data.h"
 
 namespace blink {
 
@@ -46,8 +48,9 @@ float FontSizeFunctions::GetComputedSizeFromSpecifiedSize(
   // exempt from minimum font size rules. Acid3 relies on this for pixel-perfect
   // rendering. This is also compatible with other browsers that have minimum
   // font size settings (e.g. Firefox).
-  if (fabsf(specified_size) < std::numeric_limits<float>::epsilon())
+  if (fabsf(specified_size) < std::numeric_limits<float>::epsilon()) {
     return 0.0f;
+  }
 
   Settings* settings = document->GetSettings();
   if (apply_minimum_font_size && settings) {
@@ -67,15 +70,17 @@ float FontSizeFunctions::GetComputedSizeFromSpecifiedSize(
     int min_logical_size = settings->GetMinimumLogicalFontSize();
 
     // Apply the hard minimum first.
-    if (specified_size < min_size)
+    if (specified_size < min_size) {
       specified_size = min_size;
+    }
 
     // Now apply the "smart minimum". The font size must either be relative to
     // the user default or the original size must have been acceptable. In other
     // words, we only apply the smart minimum whenever we're positive doing so
     // won't disrupt the layout.
-    if (specified_size < min_logical_size && !is_absolute_size)
+    if (specified_size < min_logical_size && !is_absolute_size) {
       specified_size = min_logical_size;
+    }
   }
   // Also clamp to a reasonable maximum to prevent insane font sizes from
   // causing crashes on various platforms (I'm looking at you, Windows.)
@@ -128,8 +133,9 @@ static int inline RowFromMediumFontSizeInRange(const Settings* settings,
   medium_size = settings ? (is_monospace ? settings->GetDefaultFixedFontSize()
                                          : settings->GetDefaultFontSize())
                          : kDefaultMediumFontSize;
-  if (medium_size >= kFontSizeTableMin && medium_size <= kFontSizeTableMax)
+  if (medium_size >= kFontSizeTableMin && medium_size <= kFontSizeTableMax) {
     return medium_size - kFontSizeTableMin;
+  }
   return -1;
 }
 
@@ -164,8 +170,9 @@ static int FindNearestLegacyFontSize(int pixel_font_size,
   // Ignore table[0] because xx-small does not correspond to any legacy font
   // size.
   for (int i = 1; i < kTotalKeywords - 1; i++) {
-    if (pixel_font_size * 2 < (table[i] + table[i + 1]) * multiplier)
+    if (pixel_font_size * 2 < (table[i] + table[i + 1]) * multiplier) {
       return i;
+    }
   }
   return kTotalKeywords - 1;
 }
@@ -174,8 +181,9 @@ int FontSizeFunctions::LegacyFontSize(const Document* document,
                                       int pixel_font_size,
                                       bool is_monospace) {
   const Settings* settings = document->GetSettings();
-  if (!settings)
+  if (!settings) {
     return 1;
+  }
 
   bool quirks_mode = document->InQuirksMode();
   int medium_size = 0;
@@ -189,6 +197,69 @@ int FontSizeFunctions::LegacyFontSize(const Document* document,
 
   return FindNearestLegacyFontSize<float>(pixel_font_size, kFontSizeFactors,
                                           medium_size);
+}
+
+static float AspectValue(const SimpleFontData& font_data,
+                         FontSizeAdjust::Metric metric,
+                         float computed_size) {
+  DCHECK(computed_size);
+  const FontMetrics& font_metrics = font_data.GetFontMetrics();
+  // FIXME: The behavior for missing metrics has yet to be defined.
+  // https://github.com/w3c/csswg-drafts/issues/6384
+  float aspect_value = 1.0;
+  switch (metric) {
+    case FontSizeAdjust::Metric::kCapHeight:
+      if (font_metrics.CapHeight() > 0) {
+        aspect_value = font_metrics.CapHeight() / computed_size;
+      }
+      break;
+    case FontSizeAdjust::Metric::kChWidth:
+      if (font_metrics.HasZeroWidth()) {
+        aspect_value = font_metrics.ZeroWidth() / computed_size;
+      }
+      break;
+    case FontSizeAdjust::Metric::kIcWidth:
+      if (const absl::optional<float> size =
+              font_data.IdeographicAdvanceWidth()) {
+        aspect_value = *size / computed_size;
+      }
+      break;
+    case FontSizeAdjust::Metric::kExHeight:
+    default:
+      if (font_metrics.HasXHeight()) {
+        aspect_value = font_metrics.XHeight() / computed_size;
+      }
+  }
+  return aspect_value;
+}
+
+absl::optional<float> FontSizeFunctions::FontAspectValue(
+    const SimpleFontData* font_data,
+    FontSizeAdjust::Metric metric,
+    float computed_size) {
+  if (!font_data || !computed_size) {
+    return absl::nullopt;
+  }
+  return AspectValue(*font_data, metric, computed_size);
+}
+
+absl::optional<float> FontSizeFunctions::MetricsMultiplierAdjustedFontSize(
+    const SimpleFontData* font_data,
+    const FontDescription& font_description) {
+  DCHECK(font_data);
+  const float computed_size = font_description.ComputedSize();
+  const FontSizeAdjust size_adjust = font_description.SizeAdjust();
+  if (!computed_size ||
+      size_adjust.Value() == FontSizeAdjust::kFontSizeAdjustNone) {
+    return absl::nullopt;
+  }
+
+  float aspect_value =
+      AspectValue(*font_data, size_adjust.GetMetric(), computed_size);
+  if (!aspect_value) {
+    return absl::nullopt;
+  }
+  return (size_adjust.Value() / aspect_value) * computed_size;
 }
 
 }  // namespace blink

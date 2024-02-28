@@ -10,7 +10,6 @@
 #include <algorithm>
 
 #include "base/check.h"
-#include "base/cxx17_backports.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
@@ -18,7 +17,6 @@
 #include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
 #include "content/public/common/color_parser.h"
@@ -140,7 +138,7 @@ bool RenderIconForVisibilityAnalysis(const SkBitmap& icon,
   }
   rendered_icon->eraseColor(background_color);
   SkCanvas offscreen(*rendered_icon, SkSurfaceProps{});
-  offscreen.drawImage(SkImage::MakeFromBitmap(icon), 0, 0);
+  offscreen.drawImage(SkImages::RasterFromBitmap(icon), 0, 0);
   offscreen.drawColor(background_color, SkBlendMode::kDifference);
 
   return true;

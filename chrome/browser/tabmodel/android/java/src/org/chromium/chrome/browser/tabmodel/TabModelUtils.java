@@ -4,9 +4,10 @@
 
 package org.chromium.chrome.browser.tabmodel;
 
+import androidx.annotation.NonNull;
+
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabSelectionType;
-import org.chromium.chrome.browser.tab.state.CriticalPersistedTabData;
 import org.chromium.content_public.browser.WebContents;
 
 import java.util.ArrayList;
@@ -47,7 +48,7 @@ public class TabModelUtils {
      */
     public static boolean closeTabById(TabModel model, int tabId, boolean canUndo) {
         Tab tab = TabModelUtils.getTabById(model, tabId);
-        if (tab == null) return false;
+        if (tab == null || tab.isClosing()) return false;
 
         return model.closeTab(tab, true, false, canUndo);
     }
@@ -75,7 +76,8 @@ public class TabModelUtils {
 
         for (int i = 0; i < count; i++) {
             Tab tab = model.getTabAt(i);
-            if (tab.getId() == tabId) return i;
+            assert tab != null : "getTabAt() shouldn't return a null Tab from TabModel.";
+            if (tab != null && tab.getId() == tabId) return i;
         }
 
         return TabModel.INVALID_TAB_INDEX;
@@ -146,6 +148,27 @@ public class TabModelUtils {
     }
 
     /**
+     * Selects a tab by its ID in the tab model selector.
+     *
+     * @param selector The {@link TabModelSelector} to act on.
+     * @param tabId The tab ID to select.
+     * @param type {@link TabSelectionType} how the tab selection was initiated.
+     * @param skipLoadingTab Whether to skip loading the Tab.
+     */
+    public static void selectTabById(
+            @NonNull TabModelSelector selector,
+            int tabId,
+            @TabSelectionType int tabSelectionType,
+            boolean skipLoadingTab) {
+        if (tabId == Tab.INVALID_TAB_ID) return;
+
+        TabModel model = selector.getModelForTabId(tabId);
+        if (model == null) return;
+
+        model.setIndex(getTabIndexById(model, tabId), tabSelectionType, skipLoadingTab);
+    }
+
+    /**
      * A helper method that automatically passes {@link TabSelectionType#FROM_USER} as the selection
      * type to {@link TabModel#setIndex(int, TabSelectionType)}.
      * @param model The {@link TabModel} to act on.
@@ -176,11 +199,9 @@ public class TabModelUtils {
      * @param tabId The ID of the Tab whose children should be returned.
      */
     public static List<Tab> getChildTabs(TabList model, int tabId) {
-        Tab tab = model.getTabAt(tabId);
-
         ArrayList<Tab> childTabs = new ArrayList<Tab>();
         for (int i = 0; i < model.getCount(); i++) {
-            if (CriticalPersistedTabData.from(model.getTabAt(i)).getParentId() == tabId) {
+            if (model.getTabAt(i).getParentId() == tabId) {
                 childTabs.add(model.getTabAt(i));
             }
         }
@@ -213,9 +234,10 @@ public class TabModelUtils {
             final Tab currentTab = model.getTabAt(i);
             if (currentTab.getId() == tabId || currentTab.isClosing()) continue;
 
-            final long currentTime = CriticalPersistedTabData.from(currentTab).getTimestampMillis();
-            if (currentTime != CriticalPersistedTabData.INVALID_TIMESTAMP
-                    && mostRecentTabTime < currentTime) {
+            final long currentTime = currentTab.getTimestampMillis();
+            // TODO(b/301642179) Consider using Optional on Tab interface for getTimestampMillis()
+            // to signal that the timestamp is unknown.
+            if (currentTime != Tab.INVALID_TIMESTAMP && mostRecentTabTime < currentTime) {
                 mostRecentTabTime = currentTime;
                 mostRecentTab = currentTab;
             }

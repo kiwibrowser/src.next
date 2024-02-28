@@ -7,11 +7,11 @@
 
 #include <memory>
 
+#include "base/auto_reset.h"
 #include "base/gtest_prod_util.h"
 #include "chrome/browser/chrome_content_browser_client_parts.h"
 #include "components/download/public/common/quarantine_connection.h"
 #include "content/public/browser/browser_or_resource_context.h"
-#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/network/public/mojom/network_context.mojom-forward.h"
 #include "services/network/public/mojom/url_loader_factory.mojom-forward.h"
 #include "ui/base/page_transition_types.h"
@@ -66,6 +66,9 @@ class ChromeContentBrowserClientExtensionsPart
   static bool DoesSiteRequireDedicatedProcess(
       content::BrowserContext* browser_context,
       const GURL& effective_site_url);
+  static bool ShouldAllowCrossProcessSandboxedFrameForPrecursor(
+      content::BrowserContext* browser_context,
+      const GURL& precursor);
   static bool CanCommitURL(content::RenderProcessHost* process_host,
                            const GURL& url);
   static bool IsSuitableHost(Profile* profile,
@@ -82,6 +85,12 @@ class ChromeContentBrowserClientExtensionsPart
                                  const GURL& first_party_url,
                                  const GURL& script_url,
                                  content::BrowserContext* context);
+  static bool MayDeleteServiceWorkerRegistration(
+      const GURL& scope,
+      content::BrowserContext* browser_context);
+  static bool ShouldTryToUpdateServiceWorkerRegistration(
+      const GURL& scope,
+      content::BrowserContext* browser_context);
   static std::vector<url::Origin> GetOriginsRequiringDedicatedProcess();
 
   // Helper function to call InfoMap::SetSigninProcess().
@@ -98,8 +107,20 @@ class ChromeContentBrowserClientExtensionsPart
       bool is_for_isolated_world,
       network::mojom::URLLoaderFactoryParams* factory_params);
 
+  // Checks if the component is a loaded component extension or the ODFS
+  // external component extension.
   static bool IsBuiltinComponent(content::BrowserContext* browser_context,
                                  const url::Origin& origin);
+
+  // Checks if the given context support extensions, based on the profile type.
+  static bool AreExtensionsDisabledForProfile(
+      content::BrowserContext* browser_context);
+
+  // Temporarily allows unregistration of the service worker with the given
+  // `scope` for testing purposes; unregistration is allowed while the returned
+  // AutoReset remains in scope.
+  static base::AutoReset<const GURL*>
+  AllowServiceWorkerUnregistrationForScopeForTesting(const GURL* scope);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ChromeContentBrowserClientExtensionsPartTest,
@@ -107,8 +128,8 @@ class ChromeContentBrowserClientExtensionsPart
 
   // ChromeContentBrowserClientParts:
   void RenderProcessWillLaunch(content::RenderProcessHost* host) override;
-  void SiteInstanceGotProcess(content::SiteInstance* site_instance) override;
-  void SiteInstanceDeleting(content::SiteInstance* site_instance) override;
+  void SiteInstanceGotProcessAndSite(
+      content::SiteInstance* site_instance) override;
   void OverrideWebkitPrefs(content::WebContents* web_contents,
                            blink::web_pref::WebPreferences* web_prefs) override;
   bool OverrideWebPreferencesAfterNavigation(
@@ -133,6 +154,12 @@ class ChromeContentBrowserClientExtensionsPart
       service_manager::BinderRegistry* registry,
       blink::AssociatedInterfaceRegistry* associated_registry,
       content::RenderProcessHost* render_process_host) override;
+  void ExposeInterfacesToRendererForServiceWorker(
+      const content::ServiceWorkerVersionBaseInfo& service_worker_version_info,
+      blink::AssociatedInterfaceRegistry& associated_registry) override;
+  void ExposeInterfacesToRendererForRenderFrameHost(
+      content::RenderFrameHost& frame_host,
+      blink::AssociatedInterfaceRegistry& associated_registry) override;
 };
 
 }  // namespace extensions

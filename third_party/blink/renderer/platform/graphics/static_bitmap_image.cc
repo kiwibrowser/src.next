@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,12 +32,12 @@ scoped_refptr<StaticBitmapImage> StaticBitmapImage::Create(
     const SkImageInfo& info,
     ImageOrientation orientation) {
   return UnacceleratedStaticBitmapImage::Create(
-      SkImage::MakeRasterData(info, std::move(data), info.minRowBytes()),
+      SkImages::RasterFromData(info, std::move(data), info.minRowBytes()),
       orientation);
 }
 
 gfx::Size StaticBitmapImage::SizeWithConfig(SizeConfig config) const {
-  auto info = GetSkImageInfoInternal();
+  auto info = GetSkImageInfo();
   gfx::Size size(info.width(), info.height());
   if (config.apply_orientation && orientation_.UsesWidthAsHeight())
     size.Transpose();
@@ -101,7 +101,7 @@ void StaticBitmapImage::DrawHelper(cc::PaintCanvas* canvas,
     canvas->translate(adjusted_dst_rect.x(), adjusted_dst_rect.y());
     adjusted_dst_rect.set_origin(gfx::PointF());
 
-    canvas->concat(AffineTransformToSkMatrix(
+    canvas->concat(AffineTransformToSkM44(
         orientation_.TransformFromDefault(adjusted_dst_rect.size())));
 
     if (orientation_.UsesWidthAsHeight())

@@ -6,46 +6,53 @@
 #include "base/strings/string_piece.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/threading/platform_thread.h"
+#include "chrome/browser/policy/policy_test_utils.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/metrics/content/subprocess_metrics_provider.h"
 #include "components/network_session_configurator/common/network_switches.h"
+#include "components/policy/policy_constants.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
+#include "content/public/test/test_navigation_observer.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "pdf/buildflags.h"
+#include "services/network/public/cpp/content_security_policy/content_security_policy.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/mojom/cross_origin_opener_policy.mojom.h"
 #include "third_party/blink/public/common/features.h"
 
+#if BUILDFLAG(ENABLE_PDF)
+#include "base/test/with_feature_override.h"
+#include "pdf/pdf_features.h"
+#endif
+
 namespace {
 const int kWasmPageSize = 1 << 16;
-}  // namespace
+
+// Path to a response that passes Private Network Access checks.
+constexpr char kPnaPath[] =
+    "/set-header"
+    "?Access-Control-Allow-Origin: *"
+    "&Access-Control-Allow-Private-Network: true";
 
 // Web platform security features are implemented by content/ and blink/.
 // However, since ContentBrowserClientImpl::LogWebFeatureForCurrentPage() is
 // currently left blank in content/, metrics logging can't be tested from
 // content/. So it is tested from chrome/ instead.
-class ChromeWebPlatformSecurityMetricsBrowserTest
-    : public InProcessBrowserTest {
+class ChromeWebPlatformSecurityMetricsBrowserTest : public policy::PolicyTest {
  public:
   using WebFeature = blink::mojom::WebFeature;
 
   ChromeWebPlatformSecurityMetricsBrowserTest()
       : https_server_(net::EmbeddedTestServer::TYPE_HTTPS),
         http_server_(net::EmbeddedTestServer::TYPE_HTTP) {
-    features_.InitWithFeatures(
-        {
-            // Enabled:
-            network::features::kCrossOriginOpenerPolicy,
-            // SharedArrayBuffer is needed for these tests.
-            features::kSharedArrayBuffer,
-        },
-        {});
+    features_.InitWithFeatures(GetEnabledFeatures(), GetDisabledFeatures());
   }
 
   content::WebContents* web_contents() const {
@@ -94,33 +101,53 @@ class ChromeWebPlatformSecurityMetricsBrowserTest
   // Fetch the Blink.UseCounter.Features histogram in every renderer process
   // until reaching, but not exceeding, |expected_count|.
   void CheckCounter(WebFeature feature, int expected_count) {
-    CheckFeatureBucketCount("Blink.UseCounter.Features", feature,
-                            expected_count);
+    CheckHistogramCount("Blink.UseCounter.Features", feature, expected_count);
   }
 
   // Fetch the Blink.UseCounter.MainFrame.Features histogram in every renderer
   // process until reaching, but not exceeding, |expected_count|.
   void CheckCounterMainFrame(WebFeature feature, int expected_count) {
-    CheckFeatureBucketCount("Blink.UseCounter.MainFrame.Features", feature,
-                            expected_count);
+    CheckHistogramCount("Blink.UseCounter.MainFrame.Features", feature,
+                        expected_count);
   }
 
-  // Fetch the |histogram|'s |feature| in every renderer process until reaching,
+  // Fetch the |histogram|'s |bucket| in every renderer process until reaching,
   // but not exceeding, |expected_count|.
-  void CheckFeatureBucketCount(base::StringPiece histogram,
-                               WebFeature feature,
-                               int expected_count) {
+  template <typename T>
+  void CheckHistogramCount(base::StringPiece histogram,
+                           T bucket,
+                           int expected_count) {
     while (true) {
       content::FetchHistogramsFromChildProcesses();
       metrics::SubprocessMetricsProvider::MergeHistogramDeltasForTesting();
 
-      int count = histogram_.GetBucketCount(histogram, feature);
+      int count = histogram_.GetBucketCount(histogram, bucket);
       CHECK_LE(count, expected_count);
       if (count == expected_count)
         return;
 
       base::PlatformThread::Sleep(base::Milliseconds(5));
     }
+  }
+
+  virtual std::vector<base::test::FeatureRef> GetEnabledFeatures() const {
+    return {
+        network::features::kCrossOriginOpenerPolicy,
+        // SharedArrayBuffer is needed for these tests.
+        features::kSharedArrayBuffer,
+        // Some PNA worker feature relies on this.
+        // TODO(https://crbug.com/1430451): Remove this once PNA for workers
+        // metric logging doesn't rely on kPlzDedicatedWorker
+        blink::features::kPlzDedicatedWorker,
+    };
+  }
+
+  virtual std::vector<base::test::FeatureRef> GetDisabledFeatures() const {
+    return {
+        // Disabled because some subtests set document.domain and this
+        // feature flag prevents that:
+        blink::features::kOriginAgentClusterDefaultEnabled,
+    };
   }
 
  private:
@@ -141,8 +168,7 @@ class ChromeWebPlatformSecurityMetricsBrowserTest
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) final {
-    // For anonymous iframe:
-    command_line->AppendSwitch(switches::kEnableBlinkTestFeatures);
+    // For https_server()
     command_line->AppendSwitch(switches::kIgnoreCertificateErrors);
   }
 
@@ -154,6 +180,20 @@ class ChromeWebPlatformSecurityMetricsBrowserTest
   base::test::ScopedFeatureList features_;
 };
 
+// Return the child of `parent`.
+// Precondition: the number of children must be one.
+content::RenderFrameHost* GetChild(content::RenderFrameHost& parent) {
+  content::RenderFrameHost* child_rfh = nullptr;
+  parent.ForEachRenderFrameHost([&](content::RenderFrameHost* rfh) {
+    if (&parent == rfh->GetParent()) {
+      CHECK(!child_rfh) << "Multiple children found";
+      child_rfh = rfh;
+    }
+  });
+  CHECK(child_rfh) << "No children found";
+  return child_rfh;
+}
+
 // Check the kCrossOriginOpenerPolicyReporting feature usage. No header => 0
 // count.
 IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
@@ -162,6 +202,250 @@ IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
   GURL url = https_server().GetURL("a.com", "/title1.html");
   EXPECT_TRUE(content::NavigateToURL(web_contents(), url));
   ExpectHistogramIncreasedBy(0);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       PrivateNetworkAccessIgnoredCrossSitePreflightError) {
+  ASSERT_TRUE(content::NavigateToURL(
+      web_contents(),
+      https_server().GetURL(
+          "a.com",
+          "/private_network_access/no-favicon-treat-as-public-address.html")));
+
+  ASSERT_EQ(true, content::EvalJs(
+                      web_contents(),
+                      content::JsReplace(
+                          "fetch($1).then(response => response.ok)",
+                          https_server().GetURL("b.com", "/cors-ok.txt"))));
+
+  CheckCounter(WebFeature::kPrivateNetworkAccessPreflightWarning, 1);
+  CheckCounter(
+      WebFeature::kPrivateNetworkAccessIgnoredCrossOriginPreflightError, 1);
+  CheckCounter(WebFeature::kPrivateNetworkAccessIgnoredCrossSitePreflightError,
+               1);
+}
+
+IN_PROC_BROWSER_TEST_F(
+    ChromeWebPlatformSecurityMetricsBrowserTest,
+    PrivateNetworkAccessIgnoredCrossOriginSameSitePreflightError) {
+  ASSERT_TRUE(content::NavigateToURL(
+      web_contents(),
+      https_server().GetURL(
+          "a.com",
+          "/private_network_access/no-favicon-treat-as-public-address.html")));
+
+  ASSERT_EQ(true, content::EvalJs(web_contents(),
+                                  content::JsReplace(
+                                      "fetch($1).then(response => response.ok)",
+                                      https_server().GetURL("subdomain.a.com",
+                                                            "/cors-ok.txt"))));
+
+  CheckCounter(WebFeature::kPrivateNetworkAccessPreflightWarning, 1);
+  CheckCounter(
+      WebFeature::kPrivateNetworkAccessIgnoredCrossOriginPreflightError, 1);
+  CheckCounter(WebFeature::kPrivateNetworkAccessIgnoredCrossSitePreflightError,
+               0);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       PrivateNetworkAccessSameOriginNoIgnoredPreflightError) {
+  ASSERT_TRUE(content::NavigateToURL(
+      web_contents(),
+      https_server().GetURL(
+          "a.com",
+          "/private_network_access/no-favicon-treat-as-public-address.html")));
+
+  ASSERT_EQ(true, content::EvalJs(
+                      web_contents(),
+                      content::JsReplace(
+                          "fetch($1).then(response => response.ok)",
+                          https_server().GetURL("a.com", "/cors-ok.txt"))));
+
+  CheckCounter(WebFeature::kPrivateNetworkAccessPreflightWarning, 0);
+  CheckCounter(
+      WebFeature::kPrivateNetworkAccessIgnoredCrossOriginPreflightError, 0);
+  CheckCounter(WebFeature::kPrivateNetworkAccessIgnoredCrossSitePreflightError,
+               0);
+}
+
+// This test verifies that when a secure context served from the public address
+// space loads a resource from the private network, the correct WebFeature is
+// use-counted.
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       PrivateNetworkAccessFetchWithPreflight) {
+  ASSERT_TRUE(content::NavigateToURL(
+      web_contents(),
+      https_server().GetURL(
+          "a.com",
+          "/private_network_access/no-favicon-treat-as-public-address.html")));
+
+  ASSERT_EQ(true,
+            content::EvalJs(
+                web_contents(),
+                content::JsReplace("fetch($1).then(response => response.ok)",
+                                   https_server().GetURL("b.com", kPnaPath))));
+
+  CheckCounter(WebFeature::kAddressSpacePublicSecureContextEmbeddedLocal, 1);
+  CheckCounter(WebFeature::kPrivateNetworkAccessPreflightSuccess, 1);
+}
+
+// This test verifies that when a preflight request is sent ahead of a private
+// network request, the server replies with Access-Control-Allow-Origin but
+// without Access-Control-Allow-Private-Network, and enforcement is not enabled,
+// the correct WebFeature is use-counted to reflect the suppressed error.
+IN_PROC_BROWSER_TEST_F(
+    ChromeWebPlatformSecurityMetricsBrowserTest,
+    PrivateNetworkAccessFetchWithPreflightRepliedWithoutPNAHeaders) {
+  ASSERT_EQ(true, content::NavigateToURL(
+                      web_contents(),
+                      https_server().GetURL(
+                          "a.com",
+                          "/private_network_access/"
+                          "no-favicon-treat-as-public-address.html")));
+
+  // The server does not reply with valid CORS headers, so the preflight fails.
+  // The enforcement feature is not enabled however, so the error is suppressed.
+  // Instead, a warning is shown in DevTools and a WebFeature use-counted.
+  ASSERT_EQ(true, content::EvalJs(
+                      web_contents(),
+                      content::JsReplace(
+                          "fetch($1).then(response => response.ok)",
+                          https_server().GetURL("b.com", "/cors-ok.txt"))));
+
+  CheckCounter(WebFeature::kAddressSpacePublicSecureContextEmbeddedLocal, 1);
+  CheckCounter(WebFeature::kPrivateNetworkAccessPreflightWarning, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(
+    ChromeWebPlatformSecurityMetricsBrowserTest,
+    PrivateNetworkAccessPolicyEnabledFetchWithPreflightRepliedWithoutPNAHeaders) {
+  policy::PolicyMap policies;
+  SetPolicy(&policies, policy::key::kPrivateNetworkAccessRestrictionsEnabled,
+            base::Value(true));
+  UpdateProviderPolicy(policies);
+
+  ASSERT_EQ(true, content::NavigateToURL(
+                      web_contents(),
+                      https_server().GetURL(
+                          "a.com",
+                          "/private_network_access/"
+                          "no-favicon-treat-as-public-address.html")));
+
+  // The server does not reply with valid CORS headers, so the preflight fails.
+  // The enforcement feature is not enabled however, so the error is suppressed.
+  // Instead, a warning is shown in DevTools and a WebFeature use-counted.
+  ASSERT_EQ(false,
+            content::EvalJs(
+                web_contents(),
+                content::JsReplace(
+                    "fetch($1).then(response => response.ok, error => false)",
+                    https_server().GetURL("b.com", "/cors-ok.txt"))));
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       PrivateNetworkAccessPolicyEnabledFetchWithPreflight) {
+  policy::PolicyMap policies;
+  SetPolicy(&policies, policy::key::kPrivateNetworkAccessRestrictionsEnabled,
+            base::Value(true));
+  UpdateProviderPolicy(policies);
+
+  ASSERT_EQ(true, content::NavigateToURL(
+                      web_contents(),
+                      https_server().GetURL(
+                          "a.com",
+                          "/private_network_access/"
+                          "no-favicon-treat-as-public-address.html")));
+
+  // The server does not reply with valid CORS headers, so the preflight fails.
+  // The enforcement feature is not enabled however, so the error is suppressed.
+  // Instead, a warning is shown in DevTools and a WebFeature use-counted.
+  ASSERT_EQ(true,
+            content::EvalJs(
+                web_contents(),
+                content::JsReplace(
+                    "fetch($1).then(response => response.ok, error => false)",
+                    https_server().GetURL("b.com", kPnaPath))));
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       PrivateNetworkAccessFetchInWorker) {
+  ASSERT_EQ(true,
+            content::NavigateToURL(
+                web_contents(), https_server().GetURL("a.com",
+                                                      "/private_network_access/"
+                                                      "no-favicon.html")));
+
+  base::StringPiece kScriptTemplate = R"(
+    (async () => {
+      const worker = new Worker("/workers/fetcher_treat_as_public.js");
+
+      const messagePromise = new Promise((resolve) => {
+        const listener = (event) => resolve(event.data);
+        worker.addEventListener("message", listener, { once: true });
+      });
+
+      worker.postMessage($1);
+
+      const { error, ok } = await messagePromise;
+      if (error !== undefined) {
+        throw(error);
+      }
+
+      return ok;
+    })()
+  )";
+
+  ASSERT_EQ(true,
+            content::EvalJs(web_contents(),
+                            content::JsReplace(kScriptTemplate,
+                                               https_server().GetURL(
+                                                   "b.com", "/cors-ok.txt"))));
+
+  CheckCounter(WebFeature::kPrivateNetworkAccessWithinWorker, 1);
+  CheckCounter(WebFeature::kPrivateNetworkAccessPreflightWarning, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       PrivateNetworkAccessFetchInSharedWorker) {
+  ASSERT_EQ(true,
+            content::NavigateToURL(
+                web_contents(), https_server().GetURL("a.com",
+                                                      "/private_network_access/"
+                                                      "no-favicon.html")));
+
+  base::StringPiece kScriptTemplate = R"(
+    (async () => {
+      const worker = await new Promise((resolve, reject) => {
+        const worker =
+            new SharedWorker("/workers/shared_fetcher_treat_as_public.js");
+        worker.port.addEventListener("message", () => resolve(worker));
+        worker.addEventListener("error", reject);
+        worker.port.start();
+      });
+
+      const messagePromise = new Promise((resolve) => {
+        const listener = (event) => resolve(event.data);
+        worker.port.addEventListener("message", listener, { once: true });
+      });
+
+      worker.port.postMessage($1);
+
+      const { error, ok } = await messagePromise;
+      if (error !== undefined) {
+        throw(error);
+      }
+
+      return ok;
+    })()
+  )";
+  ASSERT_EQ(true,
+            content::EvalJs(web_contents(),
+                            content::JsReplace(kScriptTemplate,
+                                               https_server().GetURL(
+                                                   "b.com", "/cors-ok.txt"))));
+
+  CheckCounter(WebFeature::kPrivateNetworkAccessWithinWorker, 1);
+  CheckCounter(WebFeature::kPrivateNetworkAccessPreflightWarning, 1);
 }
 
 // Check the kCrossOriginOpenerPolicyReporting feature usage. COOP-Report-Only +
@@ -285,6 +569,62 @@ IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
   EXPECT_TRUE(content::NavigateToURL(web_contents(), main_document_url));
   LoadIFrame(sub_document_url);
   ExpectHistogramIncreasedBy(1);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       LogCSPFrameSrcWildcardMatchFeature) {
+  struct {
+    const char* csp_frame_src;
+    const char* sub_document_url;
+    int expected_kCspWouldBlockIfWildcardDoesNotMatchWs;
+    int expected_kCspWouldBlockIfWildcardDoesNotMatchFtp;
+  } test_cases[] = {
+      {"*", "http://example.com", 0, 0},
+      // Feature shouldn't be logged if matches explicitly.
+      {"ftp:*", "ftp://example.com", 0, 0},
+      {"ws:*", "ws://example.com", 0, 0},
+      {"wss:*", "wss://example.com", 0, 0},
+      // Feature should be logged if matched with wildcard.
+      {
+          "*",
+          "ftp://example.com",
+          0,
+          base::FeatureList::IsEnabled(
+              network::features::kCspStopMatchingWildcardDirectivesToFtp)
+              ? 0
+              : 1,
+      },
+      {"*", "ws://example.com", 1, 0},
+      {"*", "wss://example.com", 1, 0},
+  };
+  int total_kCspWouldBlockIfWildcardDoesNotMatchWs = 0;
+  int total_kCspWouldBlockIfWildcardDoesNotMatchFtp = 0;
+  for (const auto& test_case : test_cases) {
+    GURL main_document_url = https_server().GetURL(
+        "a.com",
+        base::StrCat({"/set-header?Content-Security-Policy: frame-src ",
+                      test_case.csp_frame_src, ";"}));
+    url::Origin main_document_origin = url::Origin::Create(main_document_url);
+    GURL sub_document_url = GURL(test_case.sub_document_url);
+    EXPECT_TRUE(content::NavigateToURL(web_contents(), main_document_url));
+
+    content::TestNavigationObserver load_observer(web_contents());
+    EXPECT_TRUE(
+        content::ExecJs(web_contents(), content::JsReplace(R"(
+      let iframe = document.createElement("iframe");
+      iframe.src = $1;
+      document.body.appendChild(iframe);
+    )",
+                                                           sub_document_url)));
+    load_observer.Wait();
+
+    CheckCounter(WebFeature::kCspWouldBlockIfWildcardDoesNotMatchWs,
+                 total_kCspWouldBlockIfWildcardDoesNotMatchWs +=
+                 test_case.expected_kCspWouldBlockIfWildcardDoesNotMatchWs);
+    CheckCounter(WebFeature::kCspWouldBlockIfWildcardDoesNotMatchFtp,
+                 total_kCspWouldBlockIfWildcardDoesNotMatchFtp +=
+                 test_case.expected_kCspWouldBlockIfWildcardDoesNotMatchFtp);
+  }
 }
 
 // Check kCrossOriginSubframeWithoutEmbeddingControl reporting. Cross-origin
@@ -1792,10 +2132,12 @@ IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
   EXPECT_TRUE(content::NavigateToURL(web_contents(), url));
   EXPECT_TRUE(content::ExecJs(web_contents(), R"(
     const iframe = document.createElement("iframe");
-    iframe.anonymous = false;
+    iframe.credentialless = false;
     document.body.appendChild(iframe);
   )"));
   CheckCounter(WebFeature::kAnonymousIframe, 0);
+  CheckHistogramCount("Navigation.AnonymousIframeIsSandboxed", false, 0);
+  CheckHistogramCount("Navigation.AnonymousIframeIsSandboxed", true, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
@@ -1804,10 +2146,12 @@ IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
   EXPECT_TRUE(content::NavigateToURL(web_contents(), url));
   EXPECT_TRUE(content::ExecJs(web_contents(), R"(
     const iframe = document.createElement("iframe");
-    iframe.anonymous = true;
+    iframe.credentialless = true;
     document.body.appendChild(iframe);
   )"));
   CheckCounter(WebFeature::kAnonymousIframe, 1);
+  CheckHistogramCount("Navigation.AnonymousIframeIsSandboxed", false, 1);
+  CheckHistogramCount("Navigation.AnonymousIframeIsSandboxed", true, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
@@ -1818,12 +2162,14 @@ IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
     new Promise(resolve => {
       let iframe = document.createElement("iframe");
       iframe.src = location.href;
-      iframe.anonymous = false;
+      iframe.credentialless = false;
       iframe.onload = resolve;
       document.body.appendChild(iframe);
     });
   )"));
   CheckCounter(WebFeature::kAnonymousIframe, 0);
+  CheckHistogramCount("Navigation.AnonymousIframeIsSandboxed", false, 0);
+  CheckHistogramCount("Navigation.AnonymousIframeIsSandboxed", true, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
@@ -1834,12 +2180,510 @@ IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
     new Promise(resolve => {
       let iframe = document.createElement("iframe");
       iframe.src = location.href;
-      iframe.anonymous = true;
+      iframe.credentialless = true;
       iframe.onload = resolve;
       document.body.appendChild(iframe);
     });
   )"));
   CheckCounter(WebFeature::kAnonymousIframe, 1);
+  CheckHistogramCount("Navigation.AnonymousIframeIsSandboxed", false, 1);
+  CheckHistogramCount("Navigation.AnonymousIframeIsSandboxed", true, 0);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       AnonymousIframeIsSandboxedControl) {
+  GURL url = https_server().GetURL("a.test", "/empty.html");
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), url));
+  EXPECT_TRUE(content::ExecJs(web_contents(), R"(
+    new Promise(resolve => {
+      let iframe = document.createElement("iframe");
+      iframe.src = location.href;
+      iframe.onload = resolve;
+      document.body.appendChild(iframe);
+    });
+  )"));
+  CheckCounter(WebFeature::kAnonymousIframe, 0);
+  CheckHistogramCount("Navigation.AnonymousIframeIsSandboxed", false, 0);
+  CheckHistogramCount("Navigation.AnonymousIframeIsSandboxed", true, 0);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       AnonymousIframeIsSandboxed) {
+  GURL url = https_server().GetURL("a.test", "/empty.html");
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), url));
+  EXPECT_TRUE(content::ExecJs(web_contents(), R"(
+    const createIframe = sandbox => {
+      let iframe = document.createElement("iframe");
+      iframe.src = location.href;
+      iframe.credentialless = true;
+      if (sandbox)
+        iframe.sandbox = "";
+      document.body.appendChild(iframe);
+      return new Promise(resolve => iframe.onload = resolve);
+    };
+    Promise.all([
+      createIframe(false),
+      createIframe(false),
+      createIframe(false),
+      createIframe(true),
+      createIframe(true),
+    ]);
+  )"));
+  CheckCounter(WebFeature::kAnonymousIframe, 1);
+  CheckHistogramCount("Navigation.AnonymousIframeIsSandboxed", false, 3);
+  CheckHistogramCount("Navigation.AnonymousIframeIsSandboxed", true, 2);
+}
+
+using SameDocumentCrossOriginInitiatorTest =
+    ChromeWebPlatformSecurityMetricsBrowserTest;
+
+IN_PROC_BROWSER_TEST_F(SameDocumentCrossOriginInitiatorTest, SameOrigin) {
+  const GURL parent_url = https_server().GetURL("a.test", "/empty.html");
+  const GURL child_url = https_server().GetURL("a.test", "/empty.html");
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), parent_url));
+  LoadIFrame(child_url);
+  CheckCounter(WebFeature::kSameDocumentCrossOriginInitiator, 0);
+  EXPECT_TRUE(content::ExecJs(
+      web_contents(), "document.querySelector('iframe').src += '#foo';"));
+  CheckCounter(WebFeature::kSameDocumentCrossOriginInitiator, 0);
+}
+
+IN_PROC_BROWSER_TEST_F(SameDocumentCrossOriginInitiatorTest, SameSite) {
+  const GURL parent_url = https_server().GetURL("a.a.test", "/empty.html");
+  const GURL child_url = https_server().GetURL("b.a.test", "/empty.html");
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), parent_url));
+  LoadIFrame(child_url);
+  CheckCounter(WebFeature::kSameDocumentCrossOriginInitiator, 0);
+  EXPECT_TRUE(content::ExecJs(
+      web_contents(), "document.querySelector('iframe').src += '#foo';"));
+  EXPECT_TRUE(content::WaitForLoadStop(web_contents()));
+  // TODO(https://crbug.com/1408429) It seems the initiator origin is wrong,
+  // e.g. `child_url` instead of `parent_url`, causing the metrics not to be
+  // recorded.
+  CheckCounter(WebFeature::kSameDocumentCrossOriginInitiator, 0);
+}
+
+IN_PROC_BROWSER_TEST_F(SameDocumentCrossOriginInitiatorTest, CrossOrigin) {
+  const GURL parent_url = https_server().GetURL("a.test", "/empty.html");
+  const GURL child_url = https_server().GetURL("b.test", "/empty.html");
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), parent_url));
+  LoadIFrame(child_url);
+  CheckCounter(WebFeature::kSameDocumentCrossOriginInitiator, 0);
+  EXPECT_TRUE(content::ExecJs(
+      web_contents(), "document.querySelector('iframe').src += '#foo';"));
+  EXPECT_TRUE(content::WaitForLoadStop(web_contents()));
+  CheckCounter(WebFeature::kSameDocumentCrossOriginInitiator, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(SameDocumentCrossOriginInitiatorTest,
+                       SameOriginInitiated) {
+  const GURL parent_url = https_server().GetURL("a.test", "/empty.html");
+  const GURL child_url = https_server().GetURL("b.test", "/empty.html");
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), parent_url));
+  LoadIFrame(child_url);
+  CheckCounter(WebFeature::kSameDocumentCrossOriginInitiator, 0);
+  EXPECT_TRUE(
+      content::ExecJs(GetChild(*(web_contents()->GetPrimaryMainFrame())),
+                      "location.href += '#foo';"));
+  EXPECT_TRUE(content::WaitForLoadStop(web_contents()));
+  CheckCounter(WebFeature::kSameDocumentCrossOriginInitiator, 0);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       JavascriptUrlNavigationInIFrame) {
+  GURL url = https_server().GetURL("a.test", "/empty.html");
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), url));
+  EXPECT_TRUE(content::ExecJs(web_contents(), R"(
+    new Promise(resolve => {
+      let iframe = document.createElement("iframe");
+      iframe.src = 'javascript:1';
+      iframe.onload = resolve;
+      document.body.appendChild(iframe);
+    });
+  )"));
+  CheckCounter(WebFeature::kExecutedEmptyJavaScriptURLFromFrame, 0);
+  CheckCounter(WebFeature::kExecutedJavaScriptURLFromFrame, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       EmptyStringJavascriptUrlNavigationInIFrame) {
+  GURL url = https_server().GetURL("a.test", "/empty.html");
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), url));
+  EXPECT_TRUE(content::ExecJs(web_contents(), R"(
+    new Promise(resolve => {
+      let iframe = document.createElement("iframe");
+      iframe.src = 'javascript:""';
+      iframe.onload = resolve;
+      document.body.appendChild(iframe);
+    });
+  )"));
+  CheckCounter(WebFeature::kExecutedEmptyJavaScriptURLFromFrame, 1);
+  CheckCounter(WebFeature::kExecutedJavaScriptURLFromFrame, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       JavascriptUrlNavigationInTopFrame) {
+  GURL url = https_server().GetURL("a.test", "/empty.html");
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), url));
+  EXPECT_TRUE(content::ExecJs(web_contents(), R"(
+    location.href = 'javascript:""';
+  )"));
+  CheckCounter(WebFeature::kExecutedEmptyJavaScriptURLFromFrame, 0);
+  CheckCounter(WebFeature::kExecutedJavaScriptURLFromFrame, 0);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       DanglingMarkupInIframeName) {
+  GURL url = https_server().GetURL("a.test", "/empty.html");
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), url));
+  EXPECT_TRUE(content::ExecJs(web_contents(), R"(
+    new Promise(resolve => {
+      let iframe = document.createElement("iframe");
+      iframe.src = '/empty.html';
+      iframe.name = "<\n>";
+      iframe.onload = resolve;
+      document.body.appendChild(iframe);
+    });
+  )"));
+  CheckCounter(WebFeature::kDanglingMarkupInWindowName, 1);
+  CheckCounter(WebFeature::kDanglingMarkupInWindowNameNotEndsWithNewLineOrGT,
+               0);
+  CheckCounter(WebFeature::kDanglingMarkupInWindowNameNotEndsWithGT, 0);
+  CheckCounter(WebFeature::kDanglingMarkupInTarget, 0);
+  CheckCounter(WebFeature::kDanglingMarkupInTargetNotEndsWithGT, 0);
+  CheckCounter(WebFeature::kDanglingMarkupInTargetNotEndsWithNewLineOrGT, 0);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       DanglingMarkupInNameWithGreaterThan) {
+  GURL url = https_server().GetURL("a.test", "/empty.html");
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), url));
+  EXPECT_TRUE(content::ExecJs(web_contents(), R"(
+    new Promise(resolve => {
+      let iframe = document.createElement("iframe");
+      iframe.src = '/empty.html';
+      iframe.name = "<\n";
+      iframe.onload = resolve;
+      document.body.appendChild(iframe);
+    });
+  )"));
+  CheckCounter(WebFeature::kDanglingMarkupInWindowName, 1);
+  CheckCounter(WebFeature::kDanglingMarkupInWindowNameNotEndsWithNewLineOrGT,
+               0);
+  CheckCounter(WebFeature::kDanglingMarkupInWindowNameNotEndsWithGT, 1);
+  CheckCounter(WebFeature::kDanglingMarkupInTarget, 0);
+  CheckCounter(WebFeature::kDanglingMarkupInTargetNotEndsWithGT, 0);
+  CheckCounter(WebFeature::kDanglingMarkupInTargetNotEndsWithNewLineOrGT, 0);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       DanglingMarkupInNameWithNewLineOrGreaterThan) {
+  GURL url = https_server().GetURL("a.test", "/empty.html");
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), url));
+  EXPECT_TRUE(content::ExecJs(web_contents(), R"(
+    new Promise(resolve => {
+      let iframe = document.createElement("iframe");
+      iframe.src = '/empty.html';
+      iframe.name = "<\ntest";
+      iframe.onload = resolve;
+      document.body.appendChild(iframe);
+    });
+  )"));
+
+  CheckCounter(WebFeature::kDanglingMarkupInWindowName, 1);
+  CheckCounter(WebFeature::kDanglingMarkupInWindowNameNotEndsWithNewLineOrGT,
+               1);
+  CheckCounter(WebFeature::kDanglingMarkupInWindowNameNotEndsWithGT, 1);
+  CheckCounter(WebFeature::kDanglingMarkupInTarget, 0);
+  CheckCounter(WebFeature::kDanglingMarkupInTargetNotEndsWithGT, 0);
+  CheckCounter(WebFeature::kDanglingMarkupInTargetNotEndsWithNewLineOrGT, 0);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       DanglingMarkupInTarget) {
+  GURL url = https_server().GetURL("a.test", "/empty.html");
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), url));
+  EXPECT_TRUE(content::ExecJs(web_contents(), R"(
+    let link = document.createElement("a");
+    link.href = '/empty.html';
+    link.target = "<\n>";
+    document.body.appendChild(link);
+    link.click();
+  )"));
+
+  CheckCounter(WebFeature::kDanglingMarkupInWindowName, 0);
+  CheckCounter(WebFeature::kDanglingMarkupInWindowNameNotEndsWithNewLineOrGT,
+               0);
+  CheckCounter(WebFeature::kDanglingMarkupInWindowNameNotEndsWithGT, 0);
+  CheckCounter(WebFeature::kDanglingMarkupInTarget, 1);
+  CheckCounter(WebFeature::kDanglingMarkupInTargetNotEndsWithGT, 0);
+  CheckCounter(WebFeature::kDanglingMarkupInTargetNotEndsWithNewLineOrGT, 0);
+}
+
+// TODO(https://crbug.com/1487325): Fix and reenable the test for Mac.
+#if BUILDFLAG(IS_MAC)
+#define MAYBE_DanglingMarkupInTargetWithNewLineOrGreaterThan \
+  DISABLED_DanglingMarkupInTargetWithNewLineOrGreaterThan
+#else
+#define MAYBE_DanglingMarkupInTargetWithNewLineOrGreaterThan \
+  DanglingMarkupInTargetWithNewLineOrGreaterThan
+#endif
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       MAYBE_DanglingMarkupInTargetWithNewLineOrGreaterThan) {
+  GURL url = https_server().GetURL("a.test", "/empty.html");
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), url));
+  EXPECT_TRUE(content::ExecJs(web_contents(), R"(
+    document.write("<a>test</a>");
+    let link = document.querySelector("a");
+    link.href = '/empty.html';
+    link.target = "<\n";
+    link.click();
+  )"));
+
+  CheckCounter(WebFeature::kDanglingMarkupInWindowName, 0);
+  CheckCounter(WebFeature::kDanglingMarkupInWindowNameNotEndsWithNewLineOrGT,
+               0);
+  CheckCounter(WebFeature::kDanglingMarkupInWindowNameNotEndsWithGT, 0);
+  CheckCounter(WebFeature::kDanglingMarkupInTarget, 1);
+  CheckCounter(WebFeature::kDanglingMarkupInTargetNotEndsWithGT, 1);
+  CheckCounter(WebFeature::kDanglingMarkupInTargetNotEndsWithNewLineOrGT, 0);
+
+  EXPECT_TRUE(content::ExecJs(web_contents(), R"(
+    document.write("<base><a>test</a>");
+    let base = document.querySelector("base");
+    base.target = "<\ntest";
+    let link = document.querySelector("a");
+    link.href = '/empty.html';
+    link.click();
+  )"));
+  CheckCounter(WebFeature::kDanglingMarkupInWindowName, 0);
+  CheckCounter(WebFeature::kDanglingMarkupInWindowNameNotEndsWithNewLineOrGT,
+               0);
+  CheckCounter(WebFeature::kDanglingMarkupInWindowNameNotEndsWithGT, 0);
+  CheckCounter(WebFeature::kDanglingMarkupInTarget, 2);
+  CheckCounter(WebFeature::kDanglingMarkupInTargetNotEndsWithGT, 2);
+  CheckCounter(WebFeature::kDanglingMarkupInTargetNotEndsWithNewLineOrGT, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       DocumentOpenAliasedOriginDocumentDomain) {
+  GURL url = https_server().GetURL("sub.a.test", "/empty.html");
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), url));
+  EXPECT_TRUE(content::ExecJs(web_contents(), R"(
+    const iframe = document.createElement("iframe");
+    iframe.src = location.href;
+    iframe.onload = () => {
+      iframe.contentDocument.write("<div></div>");
+      document.domain = "a.test";
+    };
+    document.body.appendChild(iframe);
+  )"));
+
+  CheckCounter(WebFeature::kDocumentOpenAliasedOriginDocumentDomain, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       CrossWindowAccessToHTMLDocument) {
+  EXPECT_TRUE(content::NavigateToURL(web_contents(),
+                                     https_server().GetURL("/empty.html")));
+
+  LoadIFrame(https_server().GetURL("/hello.html"));
+  CheckCounter(WebFeature::kCrossWindowAccessToBrowserGeneratedDocument, 0);
+
+  EXPECT_TRUE(content::ExecJs(web_contents(), R"(
+    window.frames[0].contentDocument;
+  )"));
+
+  // Plain HTML should not count as a browser-generated document.
+  CheckCounter(WebFeature::kCrossWindowAccessToBrowserGeneratedDocument, 0);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       CrossWindowAccessToXHTMLDocument) {
+  EXPECT_TRUE(content::NavigateToURL(web_contents(),
+                                     https_server().GetURL("/empty.html")));
+
+  LoadIFrame(https_server().GetURL("/security/minimal.xhtml"));
+
+  CheckCounter(WebFeature::kCrossWindowAccessToBrowserGeneratedDocument, 0);
+
+  EXPECT_TRUE(content::ExecJs(web_contents(), R"(
+    window.frames[0].contentDocument;
+  )"));
+
+  // XHTML should not count as a browser-generated document, even though it is
+  // technically XML.
+  CheckCounter(WebFeature::kCrossWindowAccessToBrowserGeneratedDocument, 0);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       CrossWindowAccessToSVGDocument) {
+  EXPECT_TRUE(content::NavigateToURL(web_contents(),
+                                     https_server().GetURL("/empty.html")));
+
+  LoadIFrame(https_server().GetURL("/circle.svg"));
+
+  CheckCounter(WebFeature::kCrossWindowAccessToBrowserGeneratedDocument, 0);
+
+  EXPECT_TRUE(content::ExecJs(web_contents(), R"(
+    window.frames[0].contentDocument;
+  )"));
+
+  // SVG should not count as a browser-generated document, even though it is
+  // technically XML.
+  CheckCounter(WebFeature::kCrossWindowAccessToBrowserGeneratedDocument, 0);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       CrossWindowAccessToImageDocument) {
+  EXPECT_TRUE(content::NavigateToURL(web_contents(),
+                                     https_server().GetURL("/empty.html")));
+
+  LoadIFrame(https_server().GetURL("/image.jpg"));
+
+  CheckCounter(WebFeature::kCrossWindowAccessToBrowserGeneratedDocument, 0);
+
+  EXPECT_TRUE(content::ExecJs(web_contents(), R"(
+    window.frames[0].contentDocument;
+  )"));
+  CheckCounter(WebFeature::kCrossWindowAccessToBrowserGeneratedDocument, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       CrossWindowAccessToMediaDocument) {
+  EXPECT_TRUE(content::NavigateToURL(web_contents(),
+                                     https_server().GetURL("/empty.html")));
+
+  LoadIFrame(https_server().GetURL("/media/bear.mp4"));
+
+  CheckCounter(WebFeature::kCrossWindowAccessToBrowserGeneratedDocument, 0);
+
+  EXPECT_TRUE(content::ExecJs(web_contents(), R"(
+    window.frames[0].contentDocument;
+  )"));
+  CheckCounter(WebFeature::kCrossWindowAccessToBrowserGeneratedDocument, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       CrossWindowAccessToTextDocument) {
+  EXPECT_TRUE(content::NavigateToURL(web_contents(),
+                                     https_server().GetURL("/empty.html")));
+
+  LoadIFrame(https_server().GetURL("/site_isolation/valid.json"));
+
+  CheckCounter(WebFeature::kCrossWindowAccessToBrowserGeneratedDocument, 0);
+
+  EXPECT_TRUE(content::ExecJs(web_contents(), R"(
+    window.frames[0].contentDocument;
+  )"));
+  CheckCounter(WebFeature::kCrossWindowAccessToBrowserGeneratedDocument, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       CrossWindowAccessToXMLDocument) {
+  EXPECT_TRUE(content::NavigateToURL(web_contents(),
+                                     https_server().GetURL("/empty.html")));
+
+  LoadIFrame(https_server().GetURL("/site_isolation/valid.xml"));
+
+  CheckCounter(WebFeature::kCrossWindowAccessToBrowserGeneratedDocument, 0);
+
+  EXPECT_TRUE(content::ExecJs(web_contents(), R"(
+    window.frames[0].contentDocument;
+  )"));
+  CheckCounter(WebFeature::kCrossWindowAccessToBrowserGeneratedDocument, 1);
+}
+
+#if BUILDFLAG(ENABLE_PDF)
+class ChromeWebPlatformSecurityMetricsBrowserPdfTest
+    : public base::test::WithFeatureOverride,
+      public ChromeWebPlatformSecurityMetricsBrowserTest {
+ public:
+  ChromeWebPlatformSecurityMetricsBrowserPdfTest()
+      : base::test::WithFeatureOverride(chrome_pdf::features::kPdfOopif),
+        ChromeWebPlatformSecurityMetricsBrowserTest() {}
+
+  bool UseOopif() const { return GetParam(); }
+
+  std::vector<base::test::FeatureRef> GetEnabledFeatures() const override {
+    std::vector<base::test::FeatureRef> enabled =
+        ChromeWebPlatformSecurityMetricsBrowserTest::GetEnabledFeatures();
+    if (UseOopif()) {
+      enabled.push_back(chrome_pdf::features::kPdfOopif);
+    }
+    return enabled;
+  }
+
+  std::vector<base::test::FeatureRef> GetDisabledFeatures() const override {
+    std::vector<base::test::FeatureRef> disabled =
+        ChromeWebPlatformSecurityMetricsBrowserTest::GetDisabledFeatures();
+    if (!UseOopif()) {
+      disabled.push_back(chrome_pdf::features::kPdfOopif);
+    }
+    return disabled;
+  }
+};
+
+IN_PROC_BROWSER_TEST_P(ChromeWebPlatformSecurityMetricsBrowserPdfTest,
+                       CrossWindowAccessToPluginDocument) {
+  // TODO(crbug.com/1445746): Remove this once the test passes for OOPIF PDF.
+  if (UseOopif()) {
+    GTEST_SKIP();
+  }
+
+  EXPECT_TRUE(content::NavigateToURL(web_contents(),
+                                     https_server().GetURL("/empty.html")));
+
+  LoadIFrame(https_server().GetURL("/site_isolation/fake.pdf"));
+
+  CheckCounter(WebFeature::kCrossWindowAccessToBrowserGeneratedDocument, 0);
+
+  // This should throw a `SecurityError` according to the spec, but does not due
+  // to https://crbug.com/1257611.
+  EXPECT_TRUE(content::ExecJs(web_contents(), R"(
+    window.frames[0].contentDocument;
+  )"));
+
+  // We would like to count such accesses for the purposes of estimating the
+  // impact of fixing https://crbug.com/1257611, but it does not seem to be as
+  // easy as for other document classes. The enclosing document does not seem to
+  // count as a "plugin document".
+  CheckCounter(WebFeature::kCrossWindowAccessToBrowserGeneratedDocument, 0);
+
+  // Accessing the inner frame throws a `SecurityError`, however.
+  EXPECT_EQ("SecurityError", content::EvalJs(web_contents(), R"(
+    (() => {
+      try {
+        window.frames[0].frames[0].contentDocument;
+      } catch (e) {
+        return e.name;
+      }
+      return "success";
+    })()
+  )"));
+}
+
+// TODO(crbug.com/1445746): Stop testing both modes after OOPIF PDF viewer
+// launches.
+INSTANTIATE_FEATURE_OVERRIDE_TEST_SUITE(
+    ChromeWebPlatformSecurityMetricsBrowserPdfTest);
+#endif
+
+IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
+                       CSPEESameOriginWithSameCSPHeader) {
+  GURL url = http_server().GetURL("a.test",
+                                  "/set-header?"
+                                  "Content-Security-Policy: img-src 'none'");
+
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), url));
+  EXPECT_TRUE(content::ExecJs(web_contents(), content::JsReplace(R"(
+    const iframe = document.createElement("iframe");
+    iframe.csp = "img-src 'none'";
+    iframe.src = $1;
+    document.body.appendChild(iframe);
+  )",
+                                                                 url)));
+  CheckCounter(WebFeature::kCSPEESameOriginBlanketEnforcement, 0);
 }
 
 // TODO(arthursonzogni): Add basic test(s) for the WebFeatures:
@@ -1849,3 +2693,5 @@ IN_PROC_BROWSER_TEST_F(ChromeWebPlatformSecurityMetricsBrowserTest,
 //
 // Added by:
 // https://chromium-review.googlesource.com/c/chromium/src/+/2122140
+
+}  // namespace

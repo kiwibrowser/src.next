@@ -12,7 +12,6 @@ import android.os.Process;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.IntentUtils;
-import org.chromium.build.annotations.MainDex;
 
 /**
  * Kills and (optionally) restarts the main Chrome process, then immediately kills itself.
@@ -25,7 +24,6 @@ import org.chromium.build.annotations.MainDex;
  * process' Activities.  It works around an Android framework issue for alarms set via the
  * AlarmManager, which requires a minimum alarm duration of 5 seconds: https://crbug.com/515919.
  */
-@MainDex // Runs in a separate process.
 public class BrowserRestartActivity extends Activity {
     public static final String EXTRA_MAIN_PID =
             "org.chromium.chrome.browser.BrowserRestartActivity.main_pid";
@@ -54,15 +52,16 @@ public class BrowserRestartActivity extends Activity {
 
         // Kill the main Chrome process.
         Intent intent = getIntent();
-        int mainBrowserPid = IntentUtils.safeGetIntExtra(
-                intent, BrowserRestartActivity.EXTRA_MAIN_PID, -1);
+        int mainBrowserPid =
+                IntentUtils.safeGetIntExtra(intent, BrowserRestartActivity.EXTRA_MAIN_PID, -1);
         assert mainBrowserPid != -1;
         assert mainBrowserPid != Process.myPid();
         Process.killProcess(mainBrowserPid);
 
         // Fire an Intent to restart Chrome, if necessary.
-        boolean restart = IntentUtils.safeGetBooleanExtra(
-                intent, BrowserRestartActivity.EXTRA_RESTART, false);
+        boolean restart =
+                IntentUtils.safeGetBooleanExtra(
+                        intent, BrowserRestartActivity.EXTRA_RESTART, false);
         if (restart) {
             Context context = ContextUtils.getApplicationContext();
             Intent restartIntent = new Intent(Intent.ACTION_MAIN);

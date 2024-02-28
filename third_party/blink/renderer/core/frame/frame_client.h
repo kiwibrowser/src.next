@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include "base/unguessable_token.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/dom/dom_node_ids.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace gfx {
@@ -43,6 +44,12 @@ class CORE_EXPORT FrameClient : public GarbageCollected<FrameClient> {
   // the viewport dimensions themselves changed. Only invoked on the main frame.
   virtual void OnMainFrameViewportRectangleChanged(
       const gfx::Rect& main_frame_viewport_rect) {}
+
+  // Called when an image ad rectangle changed. An empty `image_ad_rect` is used
+  // to signal the removal of the rectangle. Only invoked on the main frame.
+  virtual void OnMainFrameImageAdRectangleChanged(
+      DOMNodeId element_id,
+      const gfx::Rect& image_ad_rect) {}
 
   virtual ~FrameClient() = default;
 

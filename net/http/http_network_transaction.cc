@@ -9,11 +9,11 @@
 #include <vector>
 
 #include "base/base64url.h"
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/compiler_specific.h"
 #include "base/feature_list.h"
 #include "base/format_macros.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
@@ -30,6 +30,7 @@
 #include "net/base/load_flags.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/net_errors.h"
+#include "net/base/proxy_chain.h"
 #include "net/base/proxy_server.h"
 #include "net/base/transport_info.h"
 #include "net/base/upload_data_stream.h"
@@ -43,6 +44,7 @@
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_basic_stream.h"
 #include "net/http/http_chunked_decoder.h"
+#include "net/http/http_connection_info.h"
 #include "net/http/http_log_util.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_request_headers.h"
@@ -57,6 +59,7 @@
 #include "net/http/transport_security_state.h"
 #include "net/http/url_security_manager.h"
 #include "net/log/net_log_event_type.h"
+#include "net/proxy_resolution/proxy_info.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/next_proto.h"
 #include "net/socket/transport_client_socket_pool.h"
@@ -96,15 +99,63 @@ const size_t kMaxRetryAttempts = 2;
 // looping forever, bound the number of restarts.
 const size_t kMaxRestarts = 32;
 
-void SetProxyInfoInReponse(const ProxyInfo& proxy_info,
-                           HttpResponseInfo* response_info) {
-  response_info->was_fetched_via_proxy = !proxy_info.is_direct();
-  if (response_info->was_fetched_via_proxy && !proxy_info.is_empty())
-    response_info->proxy_server = proxy_info.proxy_server();
-  else if (!response_info->was_fetched_via_proxy && proxy_info.is_direct())
-    response_info->proxy_server = ProxyServer::Direct();
-  else
-    response_info->proxy_server = ProxyServer();
+// Returns true when Early Hints are allowed on the given protocol.
+bool EarlyHintsAreAllowedOn(HttpConnectionInfo connection_info) {
+  switch (connection_info) {
+    case HttpConnectionInfo::kHTTP0_9:
+    case HttpConnectionInfo::kHTTP1_0:
+      return false;
+    case HttpConnectionInfo::kHTTP1_1:
+      return base::FeatureList::IsEnabled(features::kEnableEarlyHintsOnHttp11);
+    default:
+      // Implicitly allow HttpConnectionInfo::kUNKNOWN because this is the
+      // default value and ConnectionInfo isn't always set.
+      return true;
+  }
+}
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class WebSocketFallbackResult {
+  kSuccessHttp11 = 0,
+  kSuccessHttp2,
+  kSuccessHttp11AfterFallback,
+  kFailure,
+  kFailureAfterFallback,
+  kMaxValue = kFailureAfterFallback,
+};
+
+WebSocketFallbackResult CalculateWebSocketFallbackResult(
+    int result,
+    bool http_1_1_was_required,
+    HttpConnectionInfoCoarse connection_info) {
+  if (result == OK) {
+    if (connection_info == HttpConnectionInfoCoarse::kHTTP2) {
+      return WebSocketFallbackResult::kSuccessHttp2;
+    }
+    return http_1_1_was_required
+               ? WebSocketFallbackResult::kSuccessHttp11AfterFallback
+               : WebSocketFallbackResult::kSuccessHttp11;
+  }
+
+  return http_1_1_was_required ? WebSocketFallbackResult::kFailureAfterFallback
+                               : WebSocketFallbackResult::kFailure;
+}
+
+void RecordWebSocketFallbackResult(int result,
+                                   bool http_1_1_was_required,
+                                   HttpConnectionInfoCoarse connection_info) {
+  CHECK_NE(connection_info, HttpConnectionInfoCoarse::kQUIC);
+
+  // `connection_info` could be kOTHER in tests.
+  if (connection_info == HttpConnectionInfoCoarse::kOTHER) {
+    return;
+  }
+
+  base::UmaHistogramEnumeration(
+      "Net.WebSocket.FallbackResult",
+      CalculateWebSocketFallbackResult(result, http_1_1_was_required,
+                                       connection_info));
 }
 
 }  // namespace
@@ -124,6 +175,15 @@ HttpNetworkTransaction::~HttpNetworkTransaction() {
   // this network transaction was prematurely cancelled.
   GenerateNetworkErrorLoggingReport(ERR_ABORTED);
 #endif  // BUILDFLAG(ENABLE_REPORTING)
+
+  if (quic_protocol_error_retry_delay_) {
+    base::UmaHistogramTimes(
+        IsGoogleHostWithAlpnH3(url_.host())
+            ? "Net.QuicProtocolErrorRetryDelayH3SupportedGoogleHost.Failure"
+            : "Net.QuicProtocolErrorRetryDelay.Failure",
+        *quic_protocol_error_retry_delay_);
+  }
+
   if (stream_.get()) {
     // TODO(mbelshe): The stream_ should be able to compute whether or not the
     //                stream should be kept alive.  No reason to compute here
@@ -151,10 +211,11 @@ int HttpNetworkTransaction::Start(const HttpRequestInfo* request_info,
     return ERR_CACHE_MISS;
 
   DCHECK(request_info->traffic_annotation.is_valid());
+  DCHECK(request_info->IsConsistent());
   net_log_ = net_log;
   request_ = request_info;
   url_ = request_->url;
-  network_isolation_key_ = request_->network_isolation_key;
+  network_anonymization_key_ = request_->network_anonymization_key;
 #if BUILDFLAG(ENABLE_REPORTING)
   // Store values for later use in NEL report generation.
   request_method_ = request_->method;
@@ -163,13 +224,8 @@ int HttpNetworkTransaction::Start(const HttpRequestInfo* request_info,
   request_->extra_headers.GetHeader(HttpRequestHeaders::kUserAgent,
                                     &request_user_agent_);
   request_reporting_upload_depth_ = request_->reporting_upload_depth;
-  start_timeticks_ = base::TimeTicks::Now();
 #endif  // BUILDFLAG(ENABLE_REPORTING)
-
-  if (request_->load_flags & LOAD_DISABLE_CERT_NETWORK_FETCHES) {
-    server_ssl_config_.disable_cert_verification_network_fetches = true;
-    proxy_ssl_config_.disable_cert_verification_network_fetches = true;
-  }
+  start_timeticks_ = base::TimeTicks::Now();
 
   if (request_->idempotency == IDEMPOTENT ||
       (request_->idempotency == DEFAULT_IDEMPOTENCY &&
@@ -308,7 +364,7 @@ void HttpNetworkTransaction::PrepareForAuthRestart(HttpAuth::Target target) {
   if (target == HttpAuth::AUTH_SERVER &&
       auth_controllers_[target]->NeedsHTTP11()) {
     session_->http_server_properties()->SetHTTP11Required(
-        url::SchemeHostPort(request_->url), network_isolation_key_);
+        url::SchemeHostPort(request_->url), network_anonymization_key_);
   }
 
   bool keep_alive = false;
@@ -319,7 +375,7 @@ void HttpNetworkTransaction::PrepareForAuthRestart(HttpAuth::Target target) {
     // it first.
     if (!stream_->IsResponseBodyComplete()) {
       next_state_ = STATE_DRAIN_BODY_FOR_AUTH_RESTART;
-      read_buf_ = base::MakeRefCounted<IOBuffer>(
+      read_buf_ = base::MakeRefCounted<IOBufferWithSize>(
           kDrainBodyBufferSize);  // A bit bucket.
       read_buf_len_ = kDrainBodyBufferSize;
       return;
@@ -522,6 +578,17 @@ void HttpNetworkTransaction::SetResponseHeadersCallback(
   response_headers_callback_ = std::move(callback);
 }
 
+void HttpNetworkTransaction::SetModifyRequestHeadersCallback(
+    base::RepeatingCallback<void(net::HttpRequestHeaders*)> callback) {
+  modify_headers_callbacks_ = std::move(callback);
+}
+
+void HttpNetworkTransaction::SetIsSharedDictionaryReadAllowedCallback(
+    base::RepeatingCallback<bool()> callback) {
+  // This method should not be called for this class.
+  NOTREACHED();
+}
+
 int HttpNetworkTransaction::ResumeNetworkStart() {
   DCHECK_EQ(next_state_, STATE_CREATE_STREAM);
   return DoLoop(OK);
@@ -536,8 +603,11 @@ void HttpNetworkTransaction::CloseConnectionOnDestruction() {
   close_connection_on_destruction_ = true;
 }
 
-void HttpNetworkTransaction::OnStreamReady(const SSLConfig& used_ssl_config,
-                                           const ProxyInfo& used_proxy_info,
+bool HttpNetworkTransaction::IsMdlMatchForMetrics() const {
+  return proxy_info_.is_mdl_match();
+}
+
+void HttpNetworkTransaction::OnStreamReady(const ProxyInfo& used_proxy_info,
                                            std::unique_ptr<HttpStream> stream) {
   DCHECK_EQ(STATE_CREATE_STREAM_COMPLETE, next_state_);
   DCHECK(stream_request_.get());
@@ -548,61 +618,63 @@ void HttpNetworkTransaction::OnStreamReady(const SSLConfig& used_ssl_config,
   }
   stream_ = std::move(stream);
   stream_->SetRequestHeadersCallback(request_headers_callback_);
-  server_ssl_config_ = used_ssl_config;
   proxy_info_ = used_proxy_info;
-  response_.was_alpn_negotiated = stream_request_->was_alpn_negotiated();
+  // TODO(crbug.com/621512): Remove `was_alpn_negotiated` when we remove
+  // chrome.loadTimes API.
+  response_.was_alpn_negotiated =
+      stream_request_->negotiated_protocol() != kProtoUnknown;
   response_.alpn_negotiated_protocol =
       NextProtoToString(stream_request_->negotiated_protocol());
-  response_.was_fetched_via_spdy = stream_request_->using_spdy();
+  response_.alternate_protocol_usage =
+      stream_request_->alternate_protocol_usage();
+  // TODO(crbug.com/1286835): Stop using `was_fetched_via_spdy`.
+  response_.was_fetched_via_spdy =
+      stream_request_->negotiated_protocol() == kProtoHTTP2;
   response_.dns_aliases = stream_->GetDnsAliases();
-  SetProxyInfoInReponse(used_proxy_info, &response_);
+  SetProxyInfoInResponse(used_proxy_info, &response_);
   OnIOComplete(OK);
 }
 
 void HttpNetworkTransaction::OnBidirectionalStreamImplReady(
-    const SSLConfig& used_ssl_config,
     const ProxyInfo& used_proxy_info,
     std::unique_ptr<BidirectionalStreamImpl> stream) {
   NOTREACHED();
 }
 
 void HttpNetworkTransaction::OnWebSocketHandshakeStreamReady(
-    const SSLConfig& used_ssl_config,
     const ProxyInfo& used_proxy_info,
     std::unique_ptr<WebSocketHandshakeStreamBase> stream) {
-  OnStreamReady(used_ssl_config, used_proxy_info, std::move(stream));
+  OnStreamReady(used_proxy_info, std::move(stream));
 }
 
 void HttpNetworkTransaction::OnStreamFailed(
     int result,
     const NetErrorDetails& net_error_details,
-    const SSLConfig& used_ssl_config,
     const ProxyInfo& used_proxy_info,
     ResolveErrorInfo resolve_error_info) {
   DCHECK_EQ(STATE_CREATE_STREAM_COMPLETE, next_state_);
   DCHECK_NE(OK, result);
   DCHECK(stream_request_.get());
   DCHECK(!stream_.get());
-  server_ssl_config_ = used_ssl_config;
   net_error_details_ = net_error_details;
   proxy_info_ = used_proxy_info;
-  SetProxyInfoInReponse(used_proxy_info, &response_);
+  SetProxyInfoInResponse(used_proxy_info, &response_);
   response_.resolve_error_info = resolve_error_info;
 
   OnIOComplete(result);
 }
 
-void HttpNetworkTransaction::OnCertificateError(
-    int result,
-    const SSLConfig& used_ssl_config,
-    const SSLInfo& ssl_info) {
+void HttpNetworkTransaction::OnCertificateError(int result,
+                                                const SSLInfo& ssl_info) {
   DCHECK_EQ(STATE_CREATE_STREAM_COMPLETE, next_state_);
   DCHECK_NE(OK, result);
   DCHECK(stream_request_.get());
   DCHECK(!stream_.get());
 
   response_.ssl_info = ssl_info;
-  server_ssl_config_ = used_ssl_config;
+  if (ssl_info.cert) {
+    observed_bad_certs_.emplace_back(ssl_info.cert, ssl_info.cert_status);
+  }
 
   // TODO(mbelshe):  For now, we're going to pass the error through, and that
   // will close the stream_request in all cases.  This means that we're always
@@ -615,7 +687,6 @@ void HttpNetworkTransaction::OnCertificateError(
 
 void HttpNetworkTransaction::OnNeedsProxyAuth(
     const HttpResponseInfo& proxy_response,
-    const SSLConfig& used_ssl_config,
     const ProxyInfo& used_proxy_info,
     HttpAuthController* auth_controller) {
   DCHECK(stream_request_.get());
@@ -625,7 +696,7 @@ void HttpNetworkTransaction::OnNeedsProxyAuth(
   response_.headers = proxy_response.headers;
   response_.auth_challenge = proxy_response.auth_challenge;
   response_.did_use_http_auth = proxy_response.did_use_http_auth;
-  SetProxyInfoInReponse(used_proxy_info, &response_);
+  SetProxyInfoInResponse(used_proxy_info, &response_);
 
   if (!ContentEncodingsValid()) {
     DoCallback(ERR_CONTENT_DECODING_FAILED);
@@ -633,7 +704,6 @@ void HttpNetworkTransaction::OnNeedsProxyAuth(
   }
 
   headers_valid_ = true;
-  server_ssl_config_ = used_ssl_config;
   proxy_info_ = used_proxy_info;
 
   auth_controllers_[HttpAuth::AUTH_PROXY] = auth_controller;
@@ -642,12 +712,9 @@ void HttpNetworkTransaction::OnNeedsProxyAuth(
   DoCallback(OK);
 }
 
-void HttpNetworkTransaction::OnNeedsClientAuth(
-    const SSLConfig& used_ssl_config,
-    SSLCertRequestInfo* cert_info) {
+void HttpNetworkTransaction::OnNeedsClientAuth(SSLCertRequestInfo* cert_info) {
   DCHECK_EQ(STATE_CREATE_STREAM_COMPLETE, next_state_);
 
-  server_ssl_config_ = used_ssl_config;
   response_.cert_request_info = cert_info;
   OnIOComplete(ERR_SSL_CLIENT_AUTH_CERT_NEEDED);
 }
@@ -665,8 +732,8 @@ bool HttpNetworkTransaction::IsSecureRequest() const {
 }
 
 bool HttpNetworkTransaction::UsingHttpProxyWithoutTunnel() const {
-  return proxy_info_.is_http_like() &&
-         !(request_->url.SchemeIs("https") || request_->url.SchemeIsWSOrWSS());
+  return proxy_info_.proxy_chain().is_get_to_proxy_allowed() &&
+         request_->url.SchemeIs("http");
 }
 
 void HttpNetworkTransaction::DoCallback(int rv) {
@@ -822,12 +889,12 @@ int HttpNetworkTransaction::DoCreateStream() {
   if (ForWebSocketHandshake()) {
     stream_request_ =
         session_->http_stream_factory()->RequestWebSocketHandshakeStream(
-            *request_, priority_, server_ssl_config_, proxy_ssl_config_, this,
-            websocket_handshake_stream_base_create_helper_,
+            *request_, priority_, /*allowed_bad_certs=*/observed_bad_certs_,
+            this, websocket_handshake_stream_base_create_helper_,
             enable_ip_based_pooling_, enable_alternative_services_, net_log_);
   } else {
     stream_request_ = session_->http_stream_factory()->RequestStream(
-        *request_, priority_, server_ssl_config_, proxy_ssl_config_, this,
+        *request_, priority_, /*allowed_bad_certs=*/observed_bad_certs_, this,
         enable_ip_based_pooling_, enable_alternative_services_, net_log_);
   }
   DCHECK(stream_request_.get());
@@ -842,11 +909,11 @@ int HttpNetworkTransaction::DoCreateStreamComplete(int result) {
   } else if (result == ERR_HTTP_1_1_REQUIRED ||
              result == ERR_PROXY_HTTP_1_1_REQUIRED) {
     return HandleHttp11Required(result);
+  } else {
+    // Handle possible client certificate errors that may have occurred if the
+    // stream used SSL for one or more of the layers.
+    result = HandleSSLClientAuthError(result);
   }
-
-  // Handle possible client certificate errors that may have occurred if the
-  // stream used SSL for one or more of the layers.
-  result = HandleSSLClientAuthError(result);
 
   // At this point we are done with the stream_request_.
   stream_request_.reset();
@@ -907,9 +974,20 @@ int HttpNetworkTransaction::DoConnectedCallback() {
   if (!proxy_info_.is_direct()) {
     type = TransportType::kProxied;
   }
+
+  bool is_issued_by_known_root = false;
+  if (IsSecureRequest()) {
+    SSLInfo ssl_info;
+    CHECK(stream_);
+    stream_->GetSSLInfo(&ssl_info);
+    is_issued_by_known_root = ssl_info.is_issued_by_known_root;
+  }
+
   return connected_callback_.Run(
       TransportInfo(type, remote_endpoint_,
-                    std::string{stream_->GetAcceptChViaAlps()}),
+                    std::string{stream_->GetAcceptChViaAlps()},
+                    is_issued_by_known_root,
+                    NextProtoFromString(response_.alpn_negotiated_protocol)),
       base::BindOnce(&HttpNetworkTransaction::ResumeAfterConnected,
                      base::Unretained(this)));
 }
@@ -935,7 +1013,7 @@ int HttpNetworkTransaction::DoGenerateProxyAuthToken() {
   HttpAuth::Target target = HttpAuth::AUTH_PROXY;
   if (!auth_controllers_[target].get())
     auth_controllers_[target] = base::MakeRefCounted<HttpAuthController>(
-        target, AuthURL(target), request_->network_isolation_key,
+        target, AuthURL(target), request_->network_anonymization_key,
         session_->http_auth_cache(), session_->http_auth_handler_factory(),
         session_->host_resolver());
   return auth_controllers_[target]->MaybeGenerateAuthToken(request_,
@@ -955,7 +1033,7 @@ int HttpNetworkTransaction::DoGenerateServerAuthToken() {
   HttpAuth::Target target = HttpAuth::AUTH_SERVER;
   if (!auth_controllers_[target].get()) {
     auth_controllers_[target] = base::MakeRefCounted<HttpAuthController>(
-        target, AuthURL(target), request_->network_isolation_key,
+        target, AuthURL(target), request_->network_anonymization_key,
         session_->http_auth_cache(), session_->http_auth_handler_factory(),
         session_->host_resolver());
     if (request_->load_flags & LOAD_DO_NOT_USE_EMBEDDED_IDENTITY)
@@ -1023,7 +1101,20 @@ int HttpNetworkTransaction::BuildRequestHeaders(
     auth_controllers_[HttpAuth::AUTH_SERVER]->AddAuthorizationHeader(
         &request_headers_);
 
+  if (net::features::kIpPrivacyAddHeaderToProxiedRequests.Get() &&
+      proxy_info_.is_for_ip_protection()) {
+    CHECK(!proxy_info_.is_direct() ||
+          net::features::kIpPrivacyDirectOnly.Get());
+    if (!proxy_info_.is_direct()) {
+      request_headers_.SetHeader("IP-Protection", "1");
+    }
+  }
+
   request_headers_.MergeFrom(request_->extra_headers);
+
+  if (modify_headers_callbacks_) {
+    modify_headers_callbacks_.Run(&request_headers_);
+  }
 
   response_.did_use_http_auth =
       request_headers_.HasHeader(HttpRequestHeaders::kAuthorization) ||
@@ -1126,6 +1217,12 @@ int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
   if (result == ERR_CONNECTION_CLOSED && response_.headers.get())
     result = OK;
 
+  if (ForWebSocketHandshake()) {
+    RecordWebSocketFallbackResult(
+        result, http_1_1_was_required_,
+        HttpConnectionInfoToCoarse(response_.connection_info));
+  }
+
   if (result < 0)
     return HandleIOError(result);
 
@@ -1139,15 +1236,20 @@ int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
         response_.headers.get());
 
     // Early Hints does not make sense for a WebSocket handshake.
-    if (ForWebSocketHandshake())
+    if (ForWebSocketHandshake()) {
       return ERR_FAILED;
+    }
 
-    // TODO(crbug.com/671310): Validate headers? It seems that
-    // "Content-Encoding" etc should not appear.
+    // TODO(https://crbug.com/671310): Validate headers?  "Content-Encoding" etc
+    // should not appear since informational responses can't contain content.
+    // https://www.rfc-editor.org/rfc/rfc9110#name-informational-1xx
 
-    if (early_response_headers_callback_)
+    if (EarlyHintsAreAllowedOn(response_.connection_info) &&
+        early_response_headers_callback_) {
       early_response_headers_callback_.Run(std::move(response_.headers));
+    }
 
+    // Reset response headers for the final response.
     response_.headers =
         base::MakeRefCounted<HttpResponseHeaders>(std::string());
     next_state_ = STATE_READ_HEADERS;
@@ -1161,8 +1263,8 @@ int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
   // retry the request for HTTP/1.1 but not HTTP/2 or QUIC because those
   // multiplex requests and have no need for 408.
   if (response_.headers->response_code() == HTTP_REQUEST_TIMEOUT &&
-      HttpResponseInfo::ConnectionInfoToCoarse(response_.connection_info) ==
-          HttpResponseInfo::CONNECTION_INFO_COARSE_HTTP1 &&
+      HttpConnectionInfoToCoarse(response_.connection_info) ==
+          HttpConnectionInfoCoarse::kHTTP1 &&
       stream_->IsConnectionReused()) {
 #if BUILDFLAG(ENABLE_REPORTING)
     GenerateNetworkErrorLoggingReport(OK);
@@ -1172,7 +1274,7 @@ int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
         response_.headers->response_code());
     // This will close the socket - it would be weird to try and reuse it, even
     // if the server doesn't actually close it.
-    ResetConnectionAndRequestForResend();
+    ResetConnectionAndRequestForResend(RetryReason::kHttpRequestTimeout);
     return OK;
   }
 
@@ -1198,9 +1300,9 @@ int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
   // Check for an intermediate 100 Continue response.  An origin server is
   // allowed to send this response even if we didn't ask for it, so we just
   // need to skip over it.
-  // We treat any other 1xx in this same way (although in practice getting
-  // a 1xx that isn't a 100 is rare).
-  // Unless this is a WebSocket request, in which case we pass it on up.
+  // We treat any other 1xx in this same way unless:
+  //  * The response is 103, which is already handled above
+  //  * This is a WebSocket request, in which case we pass it on up.
   if (response_.headers->response_code() / 100 == 1 &&
       !ForWebSocketHandshake()) {
     response_.headers =
@@ -1224,7 +1326,7 @@ int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
     enable_alternative_services_ = false;
     net_log_.AddEvent(
         NetLogEventType::HTTP_TRANSACTION_RESTART_MISDIRECTED_REQUEST);
-    ResetConnectionAndRequestForResend();
+    ResetConnectionAndRequestForResend(RetryReason::kHttpMisdirectedRequest);
     return OK;
   }
 
@@ -1233,7 +1335,7 @@ int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
     if (response_.ssl_info.is_valid() &&
         !IsCertStatusError(response_.ssl_info.cert_status)) {
       session_->http_stream_factory()->ProcessAlternativeServices(
-          session_, network_isolation_key_, response_.headers.get(),
+          session_, network_anonymization_key_, response_.headers.get(),
           url::SchemeHostPort(request_->url));
     }
   }
@@ -1286,9 +1388,7 @@ int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
 
 int HttpNetworkTransaction::DoReadBody() {
   DCHECK(read_buf_.get());
-  // TODO(https://crbug.com/1335423): Change to DCHECK_GT() or remove after bug
-  // is fixed.
-  CHECK_GT(read_buf_len_, 0);
+  DCHECK_GT(read_buf_len_, 0);
   DCHECK(stream_ != nullptr);
 
   next_state_ = STATE_READ_BODY_COMPLETE;
@@ -1332,12 +1432,21 @@ int HttpNetworkTransaction::DoReadBodyComplete(int result) {
       HistogramBrokenAlternateProtocolLocation(
           BROKEN_ALTERNATE_PROTOCOL_LOCATION_HTTP_NETWORK_TRANSACTION);
       session_->http_server_properties()->MarkAlternativeServiceBroken(
-          retried_alternative_service_, network_isolation_key_);
+          retried_alternative_service_, network_anonymization_key_);
     }
 
 #if BUILDFLAG(ENABLE_REPORTING)
     GenerateNetworkErrorLoggingReport(result);
 #endif  // BUILDFLAG(ENABLE_REPORTING)
+
+    if (result == OK && quic_protocol_error_retry_delay_) {
+      base::UmaHistogramTimes(
+          IsGoogleHostWithAlpnH3(url_.host())
+              ? "Net.QuicProtocolErrorRetryDelayH3SupportedGoogleHost.Success"
+              : "Net.QuicProtocolErrorRetryDelay.Success",
+          *quic_protocol_error_retry_delay_);
+      quic_protocol_error_retry_delay_.reset();
+    }
   }
 
   // Clear these to avoid leaving around old state.
@@ -1402,7 +1511,7 @@ void HttpNetworkTransaction::ProcessReportToHeader() {
     return;
 
   reporting_service->ProcessReportToHeader(url::Origin::Create(url_),
-                                           network_isolation_key_, value);
+                                           network_anonymization_key_, value);
 }
 
 void HttpNetworkTransaction::ProcessNetworkErrorLoggingHeader() {
@@ -1432,7 +1541,7 @@ void HttpNetworkTransaction::ProcessNetworkErrorLoggingHeader() {
   if (remote_endpoint_.address().empty())
     return;
 
-  network_error_logging_service->OnHeader(network_isolation_key_,
+  network_error_logging_service->OnHeader(network_anonymization_key_,
                                           url::Origin::Create(url_),
                                           remote_endpoint_.address(), value);
 }
@@ -1473,7 +1582,7 @@ void HttpNetworkTransaction::GenerateNetworkErrorLoggingReport(int rv) {
 
   NetworkErrorLoggingService::RequestDetails details;
 
-  details.network_isolation_key = network_isolation_key_;
+  details.network_anonymization_key = network_anonymization_key_;
   details.uri = url_;
   if (!request_referrer_.empty())
     details.referrer = GURL(request_referrer_);
@@ -1517,9 +1626,11 @@ int HttpNetworkTransaction::HandleHttp11Required(int error) {
   DCHECK(error == ERR_HTTP_1_1_REQUIRED ||
          error == ERR_PROXY_HTTP_1_1_REQUIRED);
 
+  http_1_1_was_required_ = true;
+
   // HttpServerProperties should have been updated, so when the request is sent
   // again, it will automatically use HTTP/1.1.
-  ResetConnectionAndRequestForResend();
+  ResetConnectionAndRequestForResend(RetryReason::kHttp11Required);
   return OK;
 }
 
@@ -1541,37 +1652,78 @@ int HttpNetworkTransaction::HandleSSLClientAuthError(int error) {
   // origin and proxy errors.
   //
   // See https://crbug.com/828965.
-  bool is_server = !UsingHttpProxyWithoutTunnel();
-  HostPortPair host_port_pair =
-      is_server ? HostPortPair::FromURL(request_->url)
-                : proxy_info_.proxy_server().host_port_pair();
+  if (error != ERR_SSL_PROTOCOL_ERROR && !IsClientCertificateError(error)) {
+    return error;
+  }
 
-  if (error == ERR_SSL_PROTOCOL_ERROR || IsClientCertificateError(error)) {
-    DCHECK((is_server && IsSecureRequest()) ||
-           proxy_info_.is_secure_http_like());
-    if (session_->ssl_client_context()->ClearClientCertificate(
-            host_port_pair)) {
-      // The private key handle may have gone stale due to, e.g., the user
-      // unplugging their smartcard. Operating systems do not provide reliable
-      // notifications for this, so if the signature failed and the user was
-      // not already prompted for certificate on this request, retry to ask
-      // the user for a new one.
-      //
-      // TODO(davidben): There is no corresponding feature for proxy client
-      // certificates. Ideally this would live at a lower level, common to both,
-      // but |configured_client_cert_for_server_| is not accessible below the
-      // socket pools.
-      if (is_server && error == ERR_SSL_CLIENT_AUTH_SIGNATURE_FAILED &&
-          !configured_client_cert_for_server_ && !HasExceededMaxRetries()) {
-        retry_attempts_++;
-        net_log_.AddEventWithNetErrorCode(
-            NetLogEventType::HTTP_TRANSACTION_RESTART_AFTER_ERROR, error);
-        ResetConnectionAndRequestForResend();
-        return OK;
-      }
+  bool is_server = !UsingHttpProxyWithoutTunnel();
+  HostPortPair host_port_pair;
+  // TODO(https://crbug.com/1491092): Remove check and return error when
+  // multi-proxy chain.
+  if (is_server) {
+    host_port_pair = HostPortPair::FromURL(request_->url);
+  } else {
+    CHECK(proxy_info_.proxy_chain().is_single_proxy());
+    host_port_pair = proxy_info_.proxy_chain()
+                         .GetProxyServer(/*chain_index=*/0)
+                         .host_port_pair();
+  }
+
+  DCHECK((is_server && IsSecureRequest()) || proxy_info_.is_secure_http_like());
+  if (session_->ssl_client_context()->ClearClientCertificate(host_port_pair)) {
+    // The private key handle may have gone stale due to, e.g., the user
+    // unplugging their smartcard. Operating systems do not provide reliable
+    // notifications for this, so if the signature failed and the user was
+    // not already prompted for certificate on this request, retry to ask
+    // the user for a new one.
+    //
+    // TODO(davidben): There is no corresponding feature for proxy client
+    // certificates. Ideally this would live at a lower level, common to both,
+    // but |configured_client_cert_for_server_| is not accessible below the
+    // socket pools.
+    if (is_server && error == ERR_SSL_CLIENT_AUTH_SIGNATURE_FAILED &&
+        !configured_client_cert_for_server_ && !HasExceededMaxRetries()) {
+      retry_attempts_++;
+      net_log_.AddEventWithNetErrorCode(
+          NetLogEventType::HTTP_TRANSACTION_RESTART_AFTER_ERROR, error);
+      ResetConnectionAndRequestForResend(
+          RetryReason::kSslClientAuthSignatureFailed);
+      return OK;
     }
   }
   return error;
+}
+
+// static
+absl::optional<HttpNetworkTransaction::RetryReason>
+HttpNetworkTransaction::GetRetryReasonForIOError(int error) {
+  switch (error) {
+    case ERR_CONNECTION_RESET:
+      return RetryReason::kConnectionReset;
+    case ERR_CONNECTION_CLOSED:
+      return RetryReason::kConnectionClosed;
+    case ERR_CONNECTION_ABORTED:
+      return RetryReason::kConnectionAborted;
+    case ERR_SOCKET_NOT_CONNECTED:
+      return RetryReason::kSocketNotConnected;
+    case ERR_EMPTY_RESPONSE:
+      return RetryReason::kEmptyResponse;
+    case ERR_EARLY_DATA_REJECTED:
+      return RetryReason::kEarlyDataRejected;
+    case ERR_WRONG_VERSION_ON_EARLY_DATA:
+      return RetryReason::kWrongVersionOnEarlyData;
+    case ERR_HTTP2_PING_FAILED:
+      return RetryReason::kHttp2PingFailed;
+    case ERR_HTTP2_SERVER_REFUSED_STREAM:
+      return RetryReason::kHttp2ServerRefusedStream;
+    case ERR_QUIC_HANDSHAKE_FAILED:
+      return RetryReason::kQuicHandshakeFailed;
+    case ERR_QUIC_GOAWAY_REQUEST_CAN_BE_RETRIED:
+      return RetryReason::kQuicGoawayRequestCanBeRetried;
+    case ERR_QUIC_PROTOCOL_ERROR:
+      return RetryReason::kQuicProtocolError;
+  }
+  return absl::nullopt;
 }
 
 // This method determines whether it is safe to resend the request after an
@@ -1588,14 +1740,19 @@ int HttpNetworkTransaction::HandleIOError(int error) {
   GenerateNetworkErrorLoggingReportIfError(error);
 #endif  // BUILDFLAG(ENABLE_REPORTING)
 
-  switch (error) {
+  absl::optional<HttpNetworkTransaction::RetryReason> retry_reason =
+      GetRetryReasonForIOError(error);
+  if (!retry_reason) {
+    return error;
+  }
+  switch (*retry_reason) {
     // If we try to reuse a connection that the server is in the process of
     // closing, we may end up successfully writing out our request (or a
     // portion of our request) only to find a connection error when we try to
     // read from (or finish writing to) the socket.
-    case ERR_CONNECTION_RESET:
-    case ERR_CONNECTION_CLOSED:
-    case ERR_CONNECTION_ABORTED:
+    case RetryReason::kConnectionReset:
+    case RetryReason::kConnectionClosed:
+    case RetryReason::kConnectionAborted:
     // There can be a race between the socket pool checking checking whether a
     // socket is still connected, receiving the FIN, and sending/reading data
     // on a reused socket.  If we receive the FIN between the connectedness
@@ -1603,62 +1760,72 @@ int HttpNetworkTransaction::HandleIOError(int error) {
     // is disconnected when we get a ERR_SOCKET_NOT_CONNECTED.  This will most
     // likely happen when trying to retrieve its IP address.
     // See http://crbug.com/105824 for more details.
-    case ERR_SOCKET_NOT_CONNECTED:
+    case RetryReason::kSocketNotConnected:
     // If a socket is closed on its initial request, HttpStreamParser returns
     // ERR_EMPTY_RESPONSE. This may still be close/reuse race if the socket was
     // preconnected but failed to be used before the server timed it out.
-    case ERR_EMPTY_RESPONSE:
+    case RetryReason::kEmptyResponse:
       if (ShouldResendRequest()) {
         net_log_.AddEventWithNetErrorCode(
             NetLogEventType::HTTP_TRANSACTION_RESTART_AFTER_ERROR, error);
-        ResetConnectionAndRequestForResend();
+        ResetConnectionAndRequestForResend(*retry_reason);
         error = OK;
       }
       break;
-    case ERR_EARLY_DATA_REJECTED:
-    case ERR_WRONG_VERSION_ON_EARLY_DATA:
+    case RetryReason::kEarlyDataRejected:
+    case RetryReason::kWrongVersionOnEarlyData:
       net_log_.AddEventWithNetErrorCode(
           NetLogEventType::HTTP_TRANSACTION_RESTART_AFTER_ERROR, error);
-      // Disable early data on the SSLConfig on a reset.
+      // Disable early data on a reset.
       can_send_early_data_ = false;
-      ResetConnectionAndRequestForResend();
+      ResetConnectionAndRequestForResend(*retry_reason);
       error = OK;
       break;
-    case ERR_HTTP2_PING_FAILED:
-    case ERR_HTTP2_SERVER_REFUSED_STREAM:
-    case ERR_HTTP2_PUSHED_STREAM_NOT_AVAILABLE:
-    case ERR_HTTP2_CLAIMED_PUSHED_STREAM_RESET_BY_SERVER:
-    case ERR_HTTP2_PUSHED_RESPONSE_DOES_NOT_MATCH:
-    case ERR_QUIC_HANDSHAKE_FAILED:
-    case ERR_QUIC_GOAWAY_REQUEST_CAN_BE_RETRIED:
+    case RetryReason::kHttp2PingFailed:
+    case RetryReason::kHttp2ServerRefusedStream:
+    case RetryReason::kQuicHandshakeFailed:
+    case RetryReason::kQuicGoawayRequestCanBeRetried:
       if (HasExceededMaxRetries())
         break;
       net_log_.AddEventWithNetErrorCode(
           NetLogEventType::HTTP_TRANSACTION_RESTART_AFTER_ERROR, error);
       retry_attempts_++;
-      ResetConnectionAndRequestForResend();
+      ResetConnectionAndRequestForResend(*retry_reason);
       error = OK;
       break;
-    case ERR_QUIC_PROTOCOL_ERROR:
-      if (GetResponseHeaders() != nullptr ||
-          !stream_->GetAlternativeService(&retried_alternative_service_)) {
+    case RetryReason::kQuicProtocolError:
+      if (GetResponseHeaders() != nullptr) {
         // If the response headers have already been received and passed up
-        // then the request can not be retried. Also, if there was no
-        // alternative service used for this request, then there is no
-        // alternative service to be disabled.
+        // then the request can not be retried.
+        RecordQuicProtocolErrorMetrics(
+            QuicProtocolErrorRetryStatus::kNoRetryHeaderReceived);
         break;
       }
-      if (HasExceededMaxRetries())
+      if (!stream_->GetAlternativeService(&retried_alternative_service_)) {
+        // If there was no alternative service used for this request, then there
+        // is no alternative service to be disabled.  Note: We expect this
+        // doesn't happen. But records the UMA just in case.
+        RecordQuicProtocolErrorMetrics(
+            QuicProtocolErrorRetryStatus::kNoRetryNoAlternativeService);
         break;
+      }
+      if (HasExceededMaxRetries()) {
+        RecordQuicProtocolErrorMetrics(
+            QuicProtocolErrorRetryStatus::kNoRetryExceededMaxRetries);
+        break;
+      }
+
       if (session_->http_server_properties()->IsAlternativeServiceBroken(
-              retried_alternative_service_, network_isolation_key_)) {
+              retried_alternative_service_, network_anonymization_key_)) {
         // If the alternative service was marked as broken while the request
         // was in flight, retry the request which will not use the broken
         // alternative service.
+        RecordQuicProtocolErrorMetrics(
+            QuicProtocolErrorRetryStatus::kRetryAltServiceBroken);
         net_log_.AddEventWithNetErrorCode(
             NetLogEventType::HTTP_TRANSACTION_RESTART_AFTER_ERROR, error);
         retry_attempts_++;
-        ResetConnectionAndRequestForResend();
+        ResetConnectionAndRequestForResend(*retry_reason);
         error = OK;
       } else if (session_->context()
                      .quic_context->params()
@@ -1666,13 +1833,23 @@ int HttpNetworkTransaction::HandleIOError(int error) {
         // Disable alternative services for this request and retry it. If the
         // retry succeeds, then the alternative service will be marked as
         // broken then.
+        RecordQuicProtocolErrorMetrics(
+            QuicProtocolErrorRetryStatus::kRetryAltServiceNotBroken);
         enable_alternative_services_ = false;
         net_log_.AddEventWithNetErrorCode(
             NetLogEventType::HTTP_TRANSACTION_RESTART_AFTER_ERROR, error);
         retry_attempts_++;
-        ResetConnectionAndRequestForResend();
+        ResetConnectionAndRequestForResend(*retry_reason);
         error = OK;
       }
+      break;
+
+    // The following reasons are not covered here.
+    case RetryReason::kHttpRequestTimeout:
+    case RetryReason::kHttpMisdirectedRequest:
+    case RetryReason::kHttp11Required:
+    case RetryReason::kSslClientAuthSignatureFailed:
+      NOTREACHED();
       break;
   }
   return error;
@@ -1697,15 +1874,15 @@ void HttpNetworkTransaction::ResetStateForAuthRestart() {
   headers_valid_ = false;
   request_headers_.Clear();
   response_ = HttpResponseInfo();
-  SetProxyInfoInReponse(proxy_info_, &response_);
+  SetProxyInfoInResponse(proxy_info_, &response_);
   establishing_tunnel_ = false;
   remote_endpoint_ = IPEndPoint();
   net_error_details_.quic_broken = false;
   net_error_details_.quic_connection_error = quic::QUIC_NO_ERROR;
 #if BUILDFLAG(ENABLE_REPORTING)
   network_error_logging_report_generated_ = false;
-  start_timeticks_ = base::TimeTicks::Now();
 #endif  // BUILDFLAG(ENABLE_REPORTING)
+  start_timeticks_ = base::TimeTicks::Now();
 }
 
 void HttpNetworkTransaction::CacheNetErrorDetailsAndResetStream() {
@@ -1737,7 +1914,20 @@ bool HttpNetworkTransaction::CheckMaxRestarts() {
   return num_restarts_ < kMaxRestarts;
 }
 
-void HttpNetworkTransaction::ResetConnectionAndRequestForResend() {
+void HttpNetworkTransaction::ResetConnectionAndRequestForResend(
+    RetryReason retry_reason) {
+  // TODO:(crbug.com/1495705): Remove this CHECK after fixing the bug.
+  CHECK(request_);
+  base::UmaHistogramEnumeration(
+      IsGoogleHostWithAlpnH3(url_.host())
+          ? "Net.NetworkTransactionH3SupportedGoogleHost.RetryReason"
+          : "Net.NetworkTransaction.RetryReason",
+      retry_reason);
+  if (retry_reason == RetryReason::kQuicProtocolError) {
+    quic_protocol_error_retry_delay_ =
+        base::TimeTicks::Now() - start_timeticks_;
+  }
+
   if (stream_.get()) {
     stream_->Close(true);
     CacheNetErrorDetailsAndResetStream();
@@ -1752,13 +1942,17 @@ void HttpNetworkTransaction::ResetConnectionAndRequestForResend() {
 #if BUILDFLAG(ENABLE_REPORTING)
   // Reset for new request.
   network_error_logging_report_generated_ = false;
-  start_timeticks_ = base::TimeTicks::Now();
 #endif  // BUILDFLAG(ENABLE_REPORTING)
+  start_timeticks_ = base::TimeTicks::Now();
 
   ResetStateForRestart();
 }
 
 bool HttpNetworkTransaction::ShouldApplyProxyAuth() const {
+  // TODO(https://crbug.com/1491092): Update to handle multi-proxy chains.
+  if (proxy_info_.proxy_chain().is_multi_proxy()) {
+    return false;
+  }
   return UsingHttpProxyWithoutTunnel();
 }
 
@@ -1803,16 +1997,20 @@ bool HttpNetworkTransaction::HaveAuth(HttpAuth::Target target) const {
 GURL HttpNetworkTransaction::AuthURL(HttpAuth::Target target) const {
   switch (target) {
     case HttpAuth::AUTH_PROXY: {
-      if (!proxy_info_.proxy_server().is_valid() ||
-          proxy_info_.proxy_server().is_direct()) {
-        return GURL();  // There is no proxy server.
+      // TODO(https://crbug.com/1491092): Update to handle multi-proxy chain.
+      if (!proxy_info_.proxy_chain().IsValid() ||
+          proxy_info_.proxy_chain().is_direct() ||
+          !proxy_info_.proxy_chain().is_single_proxy()) {
+        return GURL();  // There is no proxy chain.
       }
       // TODO(https://crbug.com/1103768): Mapping proxy addresses to
       // URLs is a lossy conversion, shouldn't do this.
       const char* scheme =
           proxy_info_.is_secure_http_like() ? "https://" : "http://";
-      return GURL(scheme +
-                  proxy_info_.proxy_server().host_port_pair().ToString());
+      return GURL(scheme + proxy_info_.proxy_chain()
+                               .GetProxyServer(/*chain_index=*/0)
+                               .host_port_pair()
+                               .ToString());
     }
     case HttpAuth::AUTH_SERVER:
       if (ForWebSocketHandshake()) {
@@ -1877,12 +2075,65 @@ bool HttpNetworkTransaction::ContentEncodingsValid() const {
 
   // Temporary workaround for http://crbug.com/714514
   if (headers->IsRedirect(nullptr)) {
-    UMA_HISTOGRAM_BOOLEAN("Net.RedirectWithUnadvertisedContentEncoding",
-                          !result);
     return true;
   }
 
   return result;
+}
+
+void HttpNetworkTransaction::RecordQuicProtocolErrorMetrics(
+    QuicProtocolErrorRetryStatus retry_status) {
+  std::string histogram = "Net.QuicProtocolError";
+  if (IsGoogleHostWithAlpnH3(url_.host())) {
+    histogram += "H3SupportedGoogleHost";
+  }
+  base::UmaHistogramEnumeration(histogram + ".RetryStatus", retry_status);
+
+  if (!stream_) {
+    return;
+  }
+  absl::optional<quic::QuicErrorCode> connection_error =
+      stream_->GetQuicErrorCode();
+  absl::optional<quic::QuicRstStreamErrorCode> stream_error =
+      stream_->GetQuicRstStreamErrorCode();
+  if (!connection_error || !stream_error) {
+    return;
+  }
+  switch (retry_status) {
+    case QuicProtocolErrorRetryStatus::kNoRetryExceededMaxRetries:
+      histogram += ".NoRetryExceededMaxRetries";
+      break;
+    case QuicProtocolErrorRetryStatus::kNoRetryHeaderReceived:
+      histogram += ".NoRetryHeaderReceived";
+      break;
+    case QuicProtocolErrorRetryStatus::kNoRetryNoAlternativeService:
+      histogram += ".NoRetryNoAlternativeService";
+      break;
+    case QuicProtocolErrorRetryStatus::kRetryAltServiceBroken:
+      histogram += ".RetryAltServiceBroken";
+      break;
+    case QuicProtocolErrorRetryStatus::kRetryAltServiceNotBroken:
+      histogram += ".RetryAltServiceNotBroken";
+      break;
+  }
+  base::UmaHistogramSparse(histogram + ".QuicErrorCode", *connection_error);
+  base::UmaHistogramSparse(histogram + ".QuicStreamErrorCode", *stream_error);
+}
+
+// static
+void HttpNetworkTransaction::SetProxyInfoInResponse(
+    const ProxyInfo& proxy_info,
+    HttpResponseInfo* response_info) {
+  response_info->was_fetched_via_proxy = !proxy_info.is_direct();
+  response_info->was_ip_protected = proxy_info.is_for_ip_protection();
+  response_info->was_mdl_match = proxy_info.is_mdl_match();
+  if (response_info->was_fetched_via_proxy && !proxy_info.is_empty()) {
+    response_info->proxy_chain = proxy_info.proxy_chain();
+  } else if (!response_info->was_fetched_via_proxy && proxy_info.is_direct()) {
+    response_info->proxy_chain = ProxyChain::Direct();
+  } else {
+    response_info->proxy_chain = ProxyChain();
+  }
 }
 
 }  // namespace net

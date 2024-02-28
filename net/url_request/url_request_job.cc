@@ -6,15 +6,14 @@
 
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/compiler_specific.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/location.h"
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/single_thread_task_runner.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "net/base/auth.h"
 #include "net/base/features.h"
@@ -23,8 +22,10 @@
 #include "net/base/load_states.h"
 #include "net/base/net_errors.h"
 #include "net/base/network_delegate.h"
-#include "net/base/proxy_server.h"
+#include "net/base/proxy_chain.h"
+#include "net/base/schemeful_site.h"
 #include "net/cert/x509_certificate.h"
+#include "net/cookies/cookie_setting_override.h"
 #include "net/log/net_log.h"
 #include "net/log/net_log_capture_mode.h"
 #include "net/log/net_log_event_type.h"
@@ -39,10 +40,10 @@ namespace net {
 namespace {
 
 // Callback for TYPE_URL_REQUEST_FILTERS_SET net-internals event.
-base::Value SourceStreamSetParams(SourceStream* source_stream) {
+base::Value::Dict SourceStreamSetParams(SourceStream* source_stream) {
   base::Value::Dict event_params;
   event_params.Set("filters", source_stream->Description());
-  return base::Value(std::move(event_params));
+  return event_params;
 }
 
 }  // namespace
@@ -84,7 +85,12 @@ class URLRequestJob::URLRequestJobSourceStream : public SourceStream {
   const raw_ptr<URLRequestJob> job_;
 };
 
-URLRequestJob::URLRequestJob(URLRequest* request) : request_(request) {}
+URLRequestJob::URLRequestJob(URLRequest* request)
+    : request_(request),
+      request_initiator_site_(request->initiator().has_value()
+                                  ? absl::make_optional(net::SchemefulSite(
+                                        request->initiator().value()))
+                                  : absl::nullopt) {}
 
 URLRequestJob::~URLRequestJob() = default;
 
@@ -398,9 +404,13 @@ void URLRequestJob::NotifySSLCertificateError(int net_error,
   request_->NotifySSLCertificateError(net_error, ssl_info, fatal);
 }
 
-bool URLRequestJob::CanSetCookie(const net::CanonicalCookie& cookie,
-                                 CookieOptions* options) const {
-  return request_->CanSetCookie(cookie, options);
+bool URLRequestJob::CanSetCookie(
+    const net::CanonicalCookie& cookie,
+    CookieOptions* options,
+    const net::FirstPartySetMetadata& first_party_set_metadata,
+    CookieInclusionStatus* inclusion_status) const {
+  return request_->CanSetCookie(cookie, options, first_party_set_metadata,
+                                inclusion_status);
 }
 
 void URLRequestJob::NotifyHeadersComplete() {
@@ -590,7 +600,7 @@ void URLRequestJob::OnDone(int net_error, bool notify_done) {
   if (notify_done) {
     // Complete this notification later.  This prevents us from re-entering the
     // delegate if we're done because of a synchronous call.
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE,
         base::BindOnce(&URLRequestJob::NotifyDone, weak_factory_.GetWeakPtr()));
   }
@@ -642,8 +652,8 @@ std::unique_ptr<SourceStream> URLRequestJob::SetUpSourceStream() {
   return std::make_unique<URLRequestJobSourceStream>(this);
 }
 
-void URLRequestJob::SetProxyServer(const ProxyServer& proxy_server) {
-  request_->proxy_server_ = proxy_server;
+void URLRequestJob::SetProxyChain(const ProxyChain& proxy_chain) {
+  request_->proxy_chain_ = proxy_chain;
 }
 
 void URLRequestJob::SourceStreamReadComplete(bool synchronous, int result) {

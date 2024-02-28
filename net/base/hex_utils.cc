@@ -5,21 +5,20 @@
 #include "net/base/hex_utils.h"
 
 #include "base/check.h"
-#include "base/strings/abseil_string_conversions.h"
 #include "base/strings/string_number_conversions.h"
 #include "net/third_party/quiche/src/quiche/common/quiche_text_utils.h"
 
 namespace net {
 
-std::string HexDecode(base::StringPiece hex) {
+std::string HexDecode(std::string_view hex) {
   std::string output;
   const bool success = base::HexStringToString(hex, &output);
   DCHECK(success);
   return output;
 }
 
-std::string HexDump(base::StringPiece input) {
-  return quiche::QuicheTextUtils::HexDump(base::StringPieceToStringView(input));
+std::string HexDump(std::string_view input) {
+  return quiche::QuicheTextUtils::HexDump(input);
 }
 
 }  // namespace net

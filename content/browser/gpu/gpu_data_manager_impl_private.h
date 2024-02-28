@@ -11,6 +11,7 @@
 #include <list>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -27,7 +28,6 @@
 #include "content/common/content_export.h"
 #include "media/base/supported_video_decoder_config.h"
 #include "media/video/video_encode_accelerator.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/display/display_observer.h"
 #include "ui/gl/gpu_preference.h"
 
@@ -71,7 +71,7 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
 
   void UpdateGpuInfo(
       const gpu::GPUInfo& gpu_info,
-      const absl::optional<gpu::GPUInfo>& optional_gpu_info_for_hardware_gpu);
+      const std::optional<gpu::GPUInfo>& optional_gpu_info_for_hardware_gpu);
 #if BUILDFLAG(IS_WIN)
   void UpdateDxDiagNode(const gpu::DxDiagNode& dx_diagnostics);
   void UpdateDx12Info(uint32_t d3d12_feature_level);
@@ -85,13 +85,13 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
   void UpdateVulkanRequestStatus(bool request_continues);
   bool Dx12Requested() const;
   bool VulkanRequested() const;
-  void PostCreateThreads();
   void TerminateInfoCollectionGpuProcess();
 #endif
+  void PostCreateThreads();
   void UpdateDawnInfo(const std::vector<std::string>& dawn_info_list);
 
   void UpdateGpuFeatureInfo(const gpu::GpuFeatureInfo& gpu_feature_info,
-                            const absl::optional<gpu::GpuFeatureInfo>&
+                            const std::optional<gpu::GpuFeatureInfo>&
                                 gpu_feature_info_for_hardware_gpu);
   void UpdateGpuExtraInfo(const gfx::GpuExtraInfo& process_info);
   void UpdateMojoMediaVideoDecoderCapabilities(
@@ -150,6 +150,11 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
   void OnDisplayRemoved(const display::Display& old_display);
   void OnDisplayMetricsChanged(const display::Display& display,
                                uint32_t changed_metrics);
+
+#if BUILDFLAG(IS_LINUX)
+  bool IsGpuMemoryBufferNV12Supported();
+  void SetGpuMemoryBufferNV12Supported(bool supported);
+#endif  // BUILDFLAG(IS_LINUX)
 
  private:
   friend class GpuDataManagerImplPrivateTest;
@@ -226,10 +231,10 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
   // Notify all observers whenever there is a GPU info update.
   void NotifyGpuInfoUpdate();
 
-  void RequestDxDiagNodeData();
+  void RequestDxDiagNodeData(bool delayed);
   void RequestGpuSupportedDx12Version(bool delayed);
   void RequestGpuSupportedVulkanVersion(bool delayed);
-  void RequestDawnInfo();
+  void RequestDawnInfo(bool delayed, bool collect_metrics);
   void RequestMojoMediaVideoCapabilities();
 
   void RecordCompositingMode();
@@ -249,7 +254,6 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
   bool gpu_info_vulkan_requested_ = false;
   bool gpu_info_vulkan_request_failed_ = false;
 #endif
-  bool gpu_info_dawn_toggles_requested_ = false;
   // The Dawn info queried from the GPU process.
   std::vector<std::string> dawn_info_list_;
 
@@ -277,7 +281,7 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
   // Order of gpu process fallback states, used as a stack.
   std::vector<gpu::GpuMode> fallback_modes_;
 
-  absl::optional<display::ScopedOptionalDisplayObserver> display_observer_;
+  std::optional<display::ScopedOptionalDisplayObserver> display_observer_;
 
   // Used to tell if the gpu was disabled by an explicit call to
   // DisableHardwareAcceleration(), rather than by fallback.
@@ -302,6 +306,9 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
   bool application_is_visible_ = true;
 
   bool disable_gpu_compositing_ = false;
+#if BUILDFLAG(IS_LINUX)
+  bool is_gpu_memory_buffer_NV12_supported_ = false;
+#endif  // BUILDFLAG(IS_LINUX)
 };
 
 }  // namespace content

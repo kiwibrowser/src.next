@@ -7,9 +7,9 @@
 #include <string>
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -36,6 +36,7 @@
 #include "extensions/browser/requirements_checker.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_features.h"
 #include "extensions/common/extension_l10n_util.h"
 #include "extensions/common/file_util.h"
 #include "extensions/common/manifest.h"
@@ -83,7 +84,7 @@ scoped_refptr<UnpackedInstaller> UnpackedInstaller::Create(
 }
 
 UnpackedInstaller::UnpackedInstaller(ExtensionService* extension_service)
-    : service_weak_(extension_service->AsWeakPtr()),
+    : service_weak_(extension_service->AsExtensionServiceWeakPtr()),
       profile_(extension_service->profile()),
       require_modern_manifest_version_(true),
       be_noisy_on_failure_(true) {
@@ -110,7 +111,7 @@ bool UnpackedInstaller::LoadFromCommandLine(const base::FilePath& path_in,
     return false;
   // Load extensions from the command line synchronously to avoid a race
   // between extension loading and loading an URL from the command line.
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlocking allow_blocking;
 
   extension_path_ =
       base::MakeAbsoluteFilePath(path_util::ResolveHomeDirectory(path_in));
@@ -242,6 +243,12 @@ int UnpackedInstaller::GetFlags() {
   if (require_modern_manifest_version_)
     result |= Extension::REQUIRE_MODERN_MANIFEST_VERSION;
 
+  if (base::FeatureList::IsEnabled(
+          extensions_features::
+              kAllowWithholdingExtensionPermissionsOnInstall)) {
+    result |= Extension::WITHHOLD_PERMISSIONS;
+  }
+
   return result;
 }
 
@@ -266,8 +273,7 @@ bool UnpackedInstaller::LoadExtension(mojom::ManifestLocation location,
 
   return extension() &&
          extension_l10n_util::ValidateExtensionLocales(
-             extension_path_, extension()->manifest()->value()->GetDict(),
-             error) &&
+             extension_path_, *extension()->manifest()->value(), error) &&
          IndexAndPersistRulesIfNeeded(error);
 }
 

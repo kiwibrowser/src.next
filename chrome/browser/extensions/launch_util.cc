@@ -10,7 +10,6 @@
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/extension_sync_service.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/web_applications/extensions/bookmark_app_util.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
@@ -31,8 +30,9 @@ const char kPrefLaunchType[] = "launchType";
 
 LaunchType GetLaunchType(const ExtensionPrefs* prefs,
                          const Extension* extension) {
-  if (!extension)
+  if (!extension) {
     return LAUNCH_TYPE_INVALID;
+  }
   LaunchType result = LAUNCH_TYPE_DEFAULT;
 
   int value = GetLaunchTypePrefValue(prefs, extension->id());
@@ -65,7 +65,7 @@ void SetLaunchType(content::BrowserContext* context,
 
   ExtensionPrefs::Get(context)->UpdateExtensionPref(
       extension_id, kPrefLaunchType,
-      std::make_unique<base::Value>(static_cast<int>(launch_type)));
+      base::Value(static_cast<int>(launch_type)));
 
   // Sync the launch type.
   const Extension* extension =
@@ -80,7 +80,7 @@ apps::LaunchContainer GetLaunchContainer(const ExtensionPrefs* prefs,
   apps::LaunchContainer manifest_launch_container =
       AppLaunchInfo::GetLaunchContainer(extension);
 
-  absl::optional<apps::LaunchContainer> result;
+  std::optional<apps::LaunchContainer> result;
 
   if (manifest_launch_container ==
       apps::LaunchContainer::kLaunchContainerPanelDeprecated) {

@@ -10,11 +10,12 @@
 #include <string>
 #include <utility>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
+#include "components/grit/ukm_resources.h"
+#include "components/grit/ukm_resources_map.h"
 #include "components/ukm/debug/ukm_debug_data_extractor.h"
 #include "components/ukm/ukm_service.h"
-#include "content/grit/content_resources.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/web_contents.h"
@@ -27,13 +28,12 @@
 namespace content {
 namespace {
 
-WebUIDataSource* CreateUkmHTMLSource() {
-  WebUIDataSource* source = WebUIDataSource::Create(kChromeUIUkmHost);
+void CreateAndAddUkmHTMLSource(BrowserContext* browser_context) {
+  WebUIDataSource* source =
+      WebUIDataSource::CreateAndAdd(browser_context, kChromeUIUkmHost);
 
-  source->AddResourcePath("ukm_internals.js", IDR_UKM_INTERNALS_JS);
-  source->AddResourcePath("ukm_internals.css", IDR_UKM_INTERNALS_CSS);
-  source->SetDefaultResource(IDR_UKM_INTERNALS_HTML);
-  return source;
+  source->AddResourcePaths(base::make_span(kUkmResources, kUkmResourcesSize));
+  source->SetDefaultResource(IDR_UKM_UKM_INTERNALS_HTML);
 }
 
 // This class receives javascript messages from the renderer.
@@ -98,9 +98,7 @@ UkmInternalsUI::UkmInternalsUI(WebUI* web_ui) : WebUIController(web_ui) {
   web_ui->AddMessageHandler(std::make_unique<UkmMessageHandler>(ukm_service));
 
   // Set up the chrome://ukm/ source.
-  BrowserContext* browser_context =
-      web_ui->GetWebContents()->GetBrowserContext();
-  WebUIDataSource::Add(browser_context, CreateUkmHTMLSource());
+  CreateAndAddUkmHTMLSource(web_ui->GetWebContents()->GetBrowserContext());
 }
 
 }  // namespace content

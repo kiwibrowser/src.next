@@ -26,8 +26,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_SEGMENTED_FONT_FACE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_SEGMENTED_FONT_FACE_H_
 
-#include "base/callback.h"
 #include "base/containers/lru_cache.h"
+#include "base/functional/callback.h"
 #include "third_party/blink/renderer/platform/fonts/font_cache_key.h"
 #include "third_party/blink/renderer/platform/fonts/font_selection_types.h"
 #include "third_party/blink/renderer/platform/fonts/segmented_font_data.h"
@@ -108,7 +108,7 @@ class CSSSegmentedFontFace final
 
   scoped_refptr<FontData> GetFontData(const FontDescription&);
 
-  bool CheckFont(const String&) const;
+  bool CheckFont(UChar32) const;
   void Match(const String&, HeapVector<Member<FontFace>>*) const;
   void WillUseFontData(const FontDescription&, const String& text);
   void WillUseRange(const FontDescription&, const blink::FontDataForRangeSet&);

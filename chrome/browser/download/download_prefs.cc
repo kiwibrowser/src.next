@@ -6,17 +6,16 @@
 
 #include <stddef.h>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/check.h"
-#include "base/cxx17_backports.h"
 #include "base/feature_list.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/no_destructor.h"
-#include "base/notreached.h"
 #include "base/path_service.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -33,7 +32,6 @@
 #include "chrome/browser/download/download_target_determiner.h"
 #include "chrome/browser/download/trusted_sources_manager.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
@@ -61,6 +59,10 @@
 #include "chrome/browser/ui/pdf/adobe_reader_info_win.h"
 #endif
 
+#if BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/flags/android/chrome_feature_list.h"
+#endif
+
 using content::BrowserContext;
 using content::BrowserThread;
 using content::DownloadManager;
@@ -84,7 +86,6 @@ bool DownloadPathIsDangerous(const base::FilePath& download_path) {
 #else
   base::FilePath desktop_dir;
   if (!base::PathService::Get(base::DIR_USER_DESKTOP, &desktop_dir)) {
-    NOTREACHED();
     return false;
   }
   return (download_path == desktop_dir);
@@ -108,14 +109,12 @@ class DefaultDownloadDirectory {
 
   void Initialize() {
     if (!base::PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS, &path_)) {
-      NOTREACHED();
+      base::GetTempDir(&path_);
     }
     if (DownloadPathIsDangerous(path_)) {
       // This is only useful on platforms that support
       // DIR_DEFAULT_DOWNLOADS_SAFE.
-      if (!base::PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS_SAFE, &path_)) {
-        NOTREACHED();
-      }
+      base::PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS_SAFE, &path_);
     }
   }
 
@@ -148,13 +147,11 @@ DownloadPrefs::DownloadPrefs(Profile* profile) : profile_(profile) {
                                     prefs::kDownloadDefaultDirectory};
   for (const char* path_pref : kPathPrefs) {
     const PrefService::Preference* pref = prefs->FindPreference(path_pref);
-    const base::FilePath current = prefs->GetFilePath(path_pref);
-    base::FilePath migrated;
     // Update the download directory if the pref is from user pref store or
     // default pref.
-    LOG(ERROR) << "DownloadPrefs::DownloadPrefs" << pref->IsUserControlled()
-               << "," << pref->IsDefaultValue() << "," << current.value();
     if (pref->IsUserControlled()) {
+      const base::FilePath current = prefs->GetFilePath(path_pref);
+      base::FilePath migrated;
       if (!current.empty() &&
           file_manager::util::MigratePathFromOldFormat(
               profile_, GetDefaultDownloadDirectory(), current, &migrated)) {
@@ -213,6 +210,9 @@ DownloadPrefs::DownloadPrefs(Profile* profile) : profile_(profile) {
   prompt_for_download_android_.Init(prefs::kPromptForDownloadAndroid, prefs);
   RecordDownloadPromptStatus(
       static_cast<DownloadPromptStatus>(*prompt_for_download_android_));
+  if (base::FeatureList::IsEnabled(chrome::android::kOpenDownloadDialog)) {
+    auto_open_pdf_enabled_.Init(prefs::kAutoOpenPdfEnabled, prefs);
+  }
 #endif
   download_path_.Init(prefs::kDownloadDefaultDirectory, prefs);
   save_file_path_.Init(prefs::kSaveFileDefaultDirectory, prefs);
@@ -220,7 +220,6 @@ DownloadPrefs::DownloadPrefs(Profile* profile) : profile_(profile) {
   safebrowsing_for_trusted_sources_enabled_.Init(
       prefs::kSafeBrowsingForTrustedSourcesEnabled, prefs);
   download_restriction_.Init(prefs::kDownloadRestrictions, prefs);
-  download_bubble_enabled_.Init(prefs::kDownloadBubbleEnabled, prefs);
 
   pref_change_registrar_.Add(
       prefs::kDownloadExtensionsToOpenByPolicy,
@@ -290,7 +289,13 @@ void DownloadPrefs::RegisterProfilePrefs(
   registry->RegisterIntegerPref(prefs::kSaveFileType,
                                 content::SAVE_PAGE_TYPE_AS_COMPLETE_HTML);
   registry->RegisterIntegerPref(prefs::kDownloadRestrictions, 0);
-  registry->RegisterBooleanPref(prefs::kDownloadBubbleEnabled, true);
+  // The following two prefs are ignored on ChromeOS Lacros if SysUI integration
+  // is enabled.
+  // TODO(chlily): Clean them up once SysUI integration is enabled by default.
+  registry->RegisterBooleanPref(prefs::kDownloadBubblePartialViewEnabled, true);
+  registry->RegisterIntegerPref(prefs::kDownloadBubblePartialViewImpressions,
+                                0);
+
   registry->RegisterBooleanPref(prefs::kSafeBrowsingForTrustedSourcesEnabled,
                                 true);
 
@@ -299,8 +304,6 @@ void DownloadPrefs::RegisterProfilePrefs(
                                  default_download_path);
   registry->RegisterFilePathPref(prefs::kSaveFileDefaultDirectory,
                                  default_download_path);
-  registry->RegisterTimePref(prefs::kDownloadLastCompleteTime,
-                             /*default_value=*/base::Time());
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || \
     BUILDFLAG(IS_MAC)
   registry->RegisterBooleanPref(prefs::kOpenPdfDownloadInSystemReader, false);
@@ -315,6 +318,9 @@ void DownloadPrefs::RegisterProfilePrefs(
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
 
   registry->RegisterBooleanPref(prefs::kShowMissingSdCardErrorAndroid, true);
+  if (base::FeatureList::IsEnabled(chrome::android::kOpenDownloadDialog)) {
+    registry->RegisterBooleanPref(prefs::kAutoOpenPdfEnabled, false);
+  }
 #endif
 }
 
@@ -378,15 +384,6 @@ void DownloadPrefs::SetSaveFileType(int type) {
   save_file_type_.SetValue(type);
 }
 
-base::Time DownloadPrefs::GetLastCompleteTime() {
-  return profile_->GetPrefs()->GetTime(prefs::kDownloadLastCompleteTime);
-}
-
-void DownloadPrefs::SetLastCompleteTime(const base::Time& last_complete_time) {
-  profile_->GetPrefs()->SetTime(prefs::kDownloadLastCompleteTime,
-                                last_complete_time);
-}
-
 bool DownloadPrefs::PromptForDownload() const {
   // If the DownloadDirectory policy is set, then |prompt_for_download_| should
   // always be false.
@@ -405,14 +402,6 @@ bool DownloadPrefs::PromptForDownload() const {
 #else
   return *prompt_for_download_;
 #endif
-}
-
-bool DownloadPrefs::PromptDownloadLater() const {
-  return false;
-}
-
-bool DownloadPrefs::HasDownloadLaterPromptShown() const {
-  return false;
 }
 
 bool DownloadPrefs::IsDownloadPathManaged() const {
@@ -525,6 +514,15 @@ void DownloadPrefs::ResetAutoOpenByUser() {
 void DownloadPrefs::SkipSanitizeDownloadTargetPathForTesting() {
   skip_sanitize_download_target_path_for_testing_ = true;
 }
+
+#if BUILDFLAG(IS_ANDROID)
+bool DownloadPrefs::IsAutoOpenPdfEnabled() {
+  if (!base::FeatureList::IsEnabled(chrome::android::kOpenDownloadDialog)) {
+    return false;
+  }
+  return *auto_open_pdf_enabled_;
+}
+#endif
 
 void DownloadPrefs::SaveAutoOpenState() {
   std::string extensions;

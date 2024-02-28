@@ -10,7 +10,7 @@
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
 #include "content/public/common/zygote/zygote_buildflags.h"
 
-#if BUILDFLAG(USE_ZYGOTE_HANDLE)
+#if BUILDFLAG(USE_ZYGOTE)
 #include "content/public/common/zygote/zygote_handle.h"  // nogncheck
 #endif
 
@@ -30,12 +30,13 @@ class CONTENT_EXPORT PpapiPluginSandboxedProcessLauncherDelegate
 
 #if BUILDFLAG(IS_WIN)
   std::string GetSandboxTag() override;
-  bool PreSpawnTarget(sandbox::TargetPolicy* policy) override;
+  bool InitializeConfig(sandbox::TargetConfig* config) override;
+  bool AllowWindowsFontsDir() override;
 #endif  // BUILDFLAG(IS_WIN)
 
-#if BUILDFLAG(USE_ZYGOTE_HANDLE)
-  ZygoteHandle GetZygote() override;
-#endif  // BUILDFLAG(USE_ZYGOTE_HANDLE)
+#if BUILDFLAG(USE_ZYGOTE)
+  ZygoteCommunication* GetZygote() override;
+#endif  // BUILDFLAG(USE_ZYGOTE)
 
   sandbox::mojom::Sandbox GetSandboxType() override;
 
@@ -46,4 +47,4 @@ class CONTENT_EXPORT PpapiPluginSandboxedProcessLauncherDelegate
 };
 }  // namespace content
 
-#endif
+#endif  // CONTENT_BROWSER_PPAPI_PLUGIN_SANDBOXED_PROCESS_LAUNCHER_DELEGATE_H_

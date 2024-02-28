@@ -1,9 +1,10 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/platform/graphics/mailbox_ref.h"
 
+#include "base/task/single_thread_task_runner.h"
 #include "gpu/command_buffer/client/raster_interface.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"

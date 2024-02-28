@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/bind.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/memory/raw_ptr.h"
 #include "base/path_service.h"
@@ -11,8 +11,8 @@
 #include "base/scoped_observation.h"
 #include "base/strings/stringprintf.h"
 #include "base/task/single_thread_task_runner.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "build/buildflag.h"
 #include "build/chromeos_buildflags.h"
@@ -21,7 +21,7 @@
 #include "chrome/browser/background/background_contents_service_observer.h"
 #include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/chrome_browser_main_extra_parts_nacl_deprecation.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -32,7 +32,6 @@
 #include "chrome/common/chrome_paths.h"
 #include "components/embedder_support/switches.h"
 #include "components/nacl/common/buildflags.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -51,7 +50,7 @@
 #endif
 
 #if BUILDFLAG(IS_MAC)
-#include "base/mac/scoped_nsautorelease_pool.h"
+#include "base/apple/scoped_nsautorelease_pool.h"
 #endif
 
 using extensions::Extension;
@@ -142,12 +141,8 @@ class AppBackgroundPageApiTest : public extensions::ExtensionApiTest {
     }
     base::FilePath manifest_path =
         app_dir_.GetPath().AppendASCII("manifest.json");
-    int bytes_written = base::WriteFile(manifest_path,
-                                        app_manifest.data(),
-                                        app_manifest.size());
-    if (bytes_written != static_cast<int>(app_manifest.size())) {
-      LOG(ERROR) << "Unable to write complete manifest to file. Return code="
-                 << bytes_written;
+    if (!base::WriteFile(manifest_path, app_manifest)) {
+      LOG(ERROR) << "Unable to write manifest to file.";
       return false;
     }
     *app_dir = app_dir_.GetPath();
@@ -168,7 +163,7 @@ class AppBackgroundPageApiTest : public extensions::ExtensionApiTest {
   }
 
   void UnloadExtensionViaTask(const std::string& id) {
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE, base::BindOnce(&AppBackgroundPageApiTest::UnloadExtension,
                                   base::Unretained(this), id));
   }
@@ -183,7 +178,9 @@ namespace {
 // Native Client embeds.
 class AppBackgroundPageNaClTest : public AppBackgroundPageApiTest {
  public:
-  AppBackgroundPageNaClTest() : extension_(nullptr) {}
+  AppBackgroundPageNaClTest() : extension_(nullptr) {
+    feature_list_.InitAndEnableFeature(kNaclAllow);
+  }
   ~AppBackgroundPageNaClTest() override {}
 
   void SetUpOnMainThread() override {
@@ -207,6 +204,7 @@ class AppBackgroundPageNaClTest : public AppBackgroundPageApiTest {
 
  private:
   raw_ptr<const Extension> extension_;
+  base::test::ScopedFeatureList feature_list_;
 };
 
 }  // namespace
@@ -312,12 +310,8 @@ IN_PROC_BROWSER_TEST_F(AppBackgroundPageApiTest, ManifestBackgroundPage) {
   // creating the background page through the manifest (not through
   // window.open).
   EXPECT_FALSE(background_contents->web_contents()->GetOpener());
-  bool window_opener_null_in_js;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-      background_contents->web_contents(),
-      "domAutomationController.send(window.opener == null);",
-      &window_opener_null_in_js));
-  EXPECT_TRUE(window_opener_null_in_js);
+  EXPECT_EQ(true, content::EvalJs(background_contents->web_contents(),
+                                  "window.opener == null;"));
 
   UnloadExtension(extension->id());
 }
@@ -369,12 +363,8 @@ IN_PROC_BROWSER_TEST_F(AppBackgroundPageApiTest, NoJsBackgroundPage) {
   // Verify that window.opener in the background contents is not set when
   // allow_js_access=false.
   EXPECT_FALSE(background_contents->web_contents()->GetOpener());
-  bool window_opener_null_in_js;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-      background_contents->web_contents(),
-      "domAutomationController.send(window.opener == null);",
-      &window_opener_null_in_js));
-  EXPECT_TRUE(window_opener_null_in_js);
+  EXPECT_EQ(true, content::EvalJs(background_contents->web_contents(),
+                                  "window.opener == null;"));
 
   // Verify multiple BackgroundContents don't get opened despite multiple
   // window.open calls.
@@ -420,12 +410,8 @@ IN_PROC_BROWSER_TEST_F(AppBackgroundPageApiTest, NoJsManifestBackgroundPage) {
   // creating the background page through the manifest (not through
   // window.open).
   EXPECT_FALSE(background_contents->web_contents()->GetOpener());
-  bool window_opener_null_in_js;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-      background_contents->web_contents(),
-      "domAutomationController.send(window.opener == null);",
-      &window_opener_null_in_js));
-  EXPECT_TRUE(window_opener_null_in_js);
+  EXPECT_EQ(true, content::EvalJs(background_contents->web_contents(),
+                                  "window.opener == null;"));
 
   // window.open should return null.
   ASSERT_TRUE(RunExtensionTest("app_background_page/no_js_manifest")) <<
@@ -433,11 +419,8 @@ IN_PROC_BROWSER_TEST_F(AppBackgroundPageApiTest, NoJsManifestBackgroundPage) {
 
   // Verify that window.opener in the background contents is still not set.
   EXPECT_FALSE(background_contents->web_contents()->GetOpener());
-  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-      background_contents->web_contents(),
-      "domAutomationController.send(window.opener == null);",
-      &window_opener_null_in_js));
-  EXPECT_TRUE(window_opener_null_in_js);
+  EXPECT_EQ(true, content::EvalJs(background_contents->web_contents(),
+                                  "window.opener == null;"));
 
   UnloadExtension(extension->id());
 }
@@ -528,7 +511,13 @@ IN_PROC_BROWSER_TEST_F(AppBackgroundPageApiTest, OpenPopupFromBGPage) {
 
 // Partly a regression test for crbug.com/756465. Namely, that window.open
 // correctly matches an app URL with a path component.
-IN_PROC_BROWSER_TEST_F(AppBackgroundPageApiTest, OpenThenClose) {
+// Flaky on Chrome OS https://crbug.com/1462141.
+#if BUILDFLAG(IS_CHROMEOS)
+#define MAYBE_OpenThenClose DISABLED_OpenThenClose
+#else
+#define MAYBE_OpenThenClose OpenThenClose
+#endif
+IN_PROC_BROWSER_TEST_F(AppBackgroundPageApiTest, MAYBE_OpenThenClose) {
   std::string app_manifest = base::StringPrintf(
       "{"
       "  \"name\": \"App\","
@@ -570,11 +559,10 @@ IN_PROC_BROWSER_TEST_F(AppBackgroundPageApiTest, OpenThenClose) {
   content::RenderFrameHost* background_opener =
       background_contents->web_contents()->GetOpener();
   ASSERT_TRUE(background_opener);
-  std::string window_opener_href;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
-      background_contents->web_contents(),
-      "domAutomationController.send(window.opener.location.href);",
-      &window_opener_href));
+  std::string window_opener_href =
+      content::EvalJs(background_contents->web_contents(),
+                      "window.opener.location.href;")
+          .ExtractString();
   EXPECT_EQ(window_opener_href,
             background_opener->GetLastCommittedURL().spec());
 

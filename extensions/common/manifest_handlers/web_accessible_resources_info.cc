@@ -5,6 +5,8 @@
 #include "extensions/common/manifest_handlers/web_accessible_resources_info.h"
 
 #include <stddef.h>
+
+#include <string_view>
 #include <utility>
 
 #include "base/containers/contains.h"
@@ -55,8 +57,7 @@ std::unique_ptr<WebAccessibleResourcesInfo> ParseResourceStringList(
     std::u16string* error) {
   WebAccessibleResourcesMv2ManifestKeys manifest_keys;
   if (!WebAccessibleResourcesMv2ManifestKeys::ParseFromDictionary(
-          extension.manifest()->available_values().GetDict(), &manifest_keys,
-          error)) {
+          extension.manifest()->available_values(), manifest_keys, *error)) {
     return nullptr;
   }
 
@@ -85,7 +86,7 @@ std::unique_ptr<WebAccessibleResourcesInfo> ParseEntryList(
     const Extension& extension,
     std::u16string* error) {
   auto info = std::make_unique<WebAccessibleResourcesInfo>();
-  auto get_error = [](size_t i, base::StringPiece message) {
+  auto get_error = [](size_t i, std::string_view message) {
     return ErrorUtils::FormatErrorMessageUTF16(
         errors::kInvalidWebAccessibleResource, base::NumberToString(i),
         message);
@@ -93,8 +94,7 @@ std::unique_ptr<WebAccessibleResourcesInfo> ParseEntryList(
 
   WebAccessibleResourcesManifestKeys manifest_keys;
   if (!WebAccessibleResourcesManifestKeys::ParseFromDictionary(
-          extension.manifest()->available_values().GetDict(), &manifest_keys,
-          error)) {
+          extension.manifest()->available_values(), manifest_keys, *error)) {
     return nullptr;
   }
 
@@ -172,7 +172,7 @@ WebAccessibleResourcesInfo::~WebAccessibleResourcesInfo() = default;
 bool WebAccessibleResourcesInfo::IsResourceWebAccessible(
     const Extension* extension,
     const std::string& relative_path,
-    const absl::optional<url::Origin>& initiator_origin) {
+    const url::Origin* initiator_origin) {
   GURL initiator_url;
   if (initiator_origin) {
     if (initiator_origin->opaque()) {
@@ -249,17 +249,15 @@ WebAccessibleResourcesInfo::Entry::Entry(URLPatternSet resources,
 
 WebAccessibleResourcesHandler::WebAccessibleResourcesHandler() = default;
 
-WebAccessibleResourcesHandler::~WebAccessibleResourcesHandler() {
-}
+WebAccessibleResourcesHandler::~WebAccessibleResourcesHandler() = default;
 
 bool WebAccessibleResourcesHandler::Parse(Extension* extension,
                                           std::u16string* error) {
   auto info = extension->manifest_version() < 3
                   ? ParseResourceStringList(*extension, error)
                   : ParseEntryList(*extension, error);
-  if (!info) {
+  if (!info)
     return false;
-  }
   extension->SetManifestData(
       WebAccessibleResourcesManifestKeys::kWebAccessibleResources,
       std::move(info));

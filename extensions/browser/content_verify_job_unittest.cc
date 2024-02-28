@@ -2,14 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/files/scoped_temp_dir.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "base/path_service.h"
 #include "base/test/bind.h"
+#include "base/values.h"
 #include "base/version.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -19,11 +19,10 @@
 #include "extensions/browser/content_verifier.h"
 #include "extensions/browser/content_verifier/test_utils.h"
 #include "extensions/browser/extensions_test.h"
-#include "extensions/browser/info_map.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_paths.h"
 #include "extensions/common/file_util.h"
-#include "extensions/common/value_builder.h"
+#include "extensions/test/test_extension_dir.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/zlib/google/zip.h"
@@ -54,17 +53,11 @@ std::string GetVerifiedContents(const Extension& extension) {
   return verified_contents;
 }
 
-void WriteManifest(const base::FilePath& extension_root) {
-  std::string json = DictionaryBuilder()
+void WriteManifest(TestExtensionDir* dir) {
+  dir->WriteManifest(base::Value::Dict()
                          .Set("manifest_version", 2)
                          .Set("name", "Test extension")
-                         .Set("version", "1.0")
-                         .ToJSON();
-
-  base::FilePath manifest_path =
-      extension_root.Append(base::FilePath(FILE_PATH_LITERAL("manifest.json")));
-  ASSERT_EQ(static_cast<int>(json.size()),
-            base::WriteFile(manifest_path, json.data(), json.size()));
+                         .Set("version", "1.0"));
 }
 
 void WriteComputedHashes(
@@ -108,12 +101,10 @@ class ContentVerifyJobUnittest : public ExtensionsTest {
   void SetUp() override {
     ExtensionsTest::SetUp();
 
-    extension_info_map_ = base::MakeRefCounted<InfoMap>();
     auto delegate = std::make_unique<MockContentVerifierDelegate>();
     content_verifier_delegate_ = delegate.get();
     content_verifier_ = base::MakeRefCounted<ContentVerifier>(
         &testing_context_, std::move(delegate));
-    extension_info_map_->SetContentVerifier(content_verifier_.get());
   }
 
   void TearDown() override {
@@ -184,22 +175,18 @@ class ContentVerifyJobUnittest : public ExtensionsTest {
   // Returns an extension after extracting and loading it from a .zip file.
   // The extension may be expected to have verified_contents.json in it.
   scoped_refptr<Extension> LoadTestExtensionFromZipPathToTempDir(
-      base::ScopedTempDir* temp_dir,
+      TestExtensionDir* temp_dir,
       const std::string& zip_directory_name,
       const std::string& zip_filename) {
-    if (!temp_dir->CreateUniqueTempDir()) {
-      ADD_FAILURE() << "Failed to create temp dir.";
-      return nullptr;
-    }
-    base::FilePath unzipped_path = temp_dir->GetPath();
+    base::FilePath unzipped_path = temp_dir->UnpackedPath();
     base::FilePath test_dir_base = GetTestPath(zip_directory_name);
     scoped_refptr<Extension> extension =
         content_verifier_test_utils::UnzipToDirAndLoadExtension(
             test_dir_base.AppendASCII(zip_filename), unzipped_path);
     // If needed, make sure there is a verified_contents.json file there as this
     // test cannot fetch it.
-    if (extension &&
-        content_verifier_delegate()->GetVerifierSourceType(*extension) ==
+    EXPECT_TRUE(extension);
+    if (content_verifier_delegate()->GetVerifierSourceType(*extension) ==
             ContentVerifierDelegate::VerifierSourceType::SIGNED_HASHES &&
         !base::PathExists(
             file_util::GetVerifiedContentsPath(extension->path()))) {
@@ -214,24 +201,20 @@ class ContentVerifyJobUnittest : public ExtensionsTest {
   // |create_callback|. This callback is expected to create all required
   // extension resources in |extension_path|, including manifest.json.
   scoped_refptr<Extension> CreateAndLoadTestExtensionToTempDir(
-      base::ScopedTempDir* temp_dir,
-      absl::optional<std::map<base::FilePath, std::string>>
+      TestExtensionDir* temp_dir,
+      std::optional<std::map<base::FilePath, std::string>>
           resources_for_hashes) {
-    if (!temp_dir->CreateUniqueTempDir()) {
-      ADD_FAILURE() << "Failed to create temp dir.";
-      return nullptr;
+    WriteManifest(temp_dir);
+
+    if (resources_for_hashes) {
+      WriteComputedHashes(temp_dir->UnpackedPath(),
+                          resources_for_hashes.value());
     }
-    base::FilePath extension_root = temp_dir->GetPath();
-
-    WriteManifest(extension_root);
-
-    if (resources_for_hashes)
-      WriteComputedHashes(extension_root, resources_for_hashes.value());
 
     std::string error;
     scoped_refptr<Extension> extension = file_util::LoadExtension(
-        extension_root, mojom::ManifestLocation::kInternal, /*flags=*/0,
-        &error);
+        temp_dir->UnpackedPath(), mojom::ManifestLocation::kInternal,
+        Extension::InitFromValueFlags::NO_FLAGS, &error);
     EXPECT_NE(nullptr, extension.get()) << " error:'" << error << "'";
 
     content_verifier_->OnExtensionLoaded(&testing_context_, extension.get());
@@ -251,7 +234,6 @@ class ContentVerifyJobUnittest : public ExtensionsTest {
                                   base::Unretained(content_verifier_.get())));
   }
 
-  scoped_refptr<InfoMap> extension_info_map_;
   scoped_refptr<ContentVerifier> content_verifier_;
   raw_ptr<MockContentVerifierDelegate> content_verifier_delegate_ =
       nullptr;  // Owned by |content_verifier_|.
@@ -262,11 +244,11 @@ class ContentVerifyJobUnittest : public ExtensionsTest {
 // Also tests that non-existent file request does not trigger content
 // verification failure.
 TEST_F(ContentVerifyJobUnittest, DeletedAndMissingFiles) {
-  base::ScopedTempDir temp_dir;
+  TestExtensionDir temp_dir;
   scoped_refptr<Extension> extension = LoadTestExtensionFromZipPathToTempDir(
       &temp_dir, "with_verified_contents", "source_all.zip");
   ASSERT_TRUE(extension.get());
-  base::FilePath unzipped_path = temp_dir.GetPath();
+  base::FilePath unzipped_path = temp_dir.UnpackedPath();
 
   const base::FilePath::CharType kExistentResource[] =
       FILE_PATH_LITERAL("background.js");
@@ -317,8 +299,7 @@ TEST_F(ContentVerifyJobUnittest, DeletedAndMissingFiles) {
 
     base::FilePath full_path = unzipped_path.Append(unexpected_resource_path);
     const std::string kContent("42");
-    EXPECT_EQ(static_cast<int>(kContent.size()),
-              base::WriteFile(full_path, kContent.data(), kContent.size()));
+    EXPECT_TRUE(base::WriteFile(full_path, kContent));
 
     std::string contents;
     base::ReadFileToString(full_path, &contents);
@@ -402,7 +383,7 @@ void WriteEmptyComputedHashes(const base::FilePath& extension_path) {
 // Tests that deletion of an extension resource and invalid hash for it in
 // computed_hashes.json won't result in bypassing corruption check.
 TEST_F(ContentVerifyJobUnittest, DeletedResourceAndCorruptedComputedHashes) {
-  base::ScopedTempDir temp_dir;
+  TestExtensionDir temp_dir;
 
   const base::FilePath::CharType kResource[] =
       FILE_PATH_LITERAL("background.js");
@@ -416,7 +397,7 @@ TEST_F(ContentVerifyJobUnittest, DeletedResourceAndCorruptedComputedHashes) {
   // computed_hashes.json. Reload content verifier's cache after that because
   // content verifier may read computed_hashes.json with old values upon
   // extension loading.
-  base::FilePath unzipped_path = temp_dir.GetPath();
+  base::FilePath unzipped_path = temp_dir.UnpackedPath();
   WriteIncorrectComputedHashes(unzipped_path, resource_path);
   EXPECT_TRUE(
       base::DeleteFile(unzipped_path.Append(base::FilePath(kResource))));
@@ -435,7 +416,7 @@ TEST_F(ContentVerifyJobUnittest, DeletedResourceAndCorruptedComputedHashes) {
 // Tests that deletion of an extension resource and removing its entry from
 // computed_hashes.json won't result in bypassing corruption check.
 TEST_F(ContentVerifyJobUnittest, DeletedResourceAndCleanedComputedHashes) {
-  base::ScopedTempDir temp_dir;
+  TestExtensionDir temp_dir;
 
   const base::FilePath::CharType kResource[] =
       FILE_PATH_LITERAL("background.js");
@@ -449,7 +430,7 @@ TEST_F(ContentVerifyJobUnittest, DeletedResourceAndCleanedComputedHashes) {
   // computed_hashes.json. Reload content verifier's cache after that because
   // content verifier may read computed_hashes.json with old values upon
   // extension loading.
-  base::FilePath unzipped_path = temp_dir.GetPath();
+  base::FilePath unzipped_path = temp_dir.UnpackedPath();
   WriteEmptyComputedHashes(unzipped_path);
   EXPECT_TRUE(
       base::DeleteFile(unzipped_path.Append(base::FilePath(kResource))));
@@ -468,12 +449,12 @@ TEST_F(ContentVerifyJobUnittest, DeletedResourceAndCleanedComputedHashes) {
 // Tests that extension resources that are originally 0 byte behave correctly
 // with content verification.
 TEST_F(ContentVerifyJobUnittest, LegitimateZeroByteFile) {
-  base::ScopedTempDir temp_dir;
+  TestExtensionDir temp_dir;
   // |extension| has a 0 byte background.js file in it.
   scoped_refptr<Extension> extension = LoadTestExtensionFromZipPathToTempDir(
       &temp_dir, "zero_byte_file", "source.zip");
   ASSERT_TRUE(extension.get());
-  base::FilePath unzipped_path = temp_dir.GetPath();
+  base::FilePath unzipped_path = temp_dir.UnpackedPath();
 
   const base::FilePath::CharType kResource[] =
       FILE_PATH_LITERAL("background.js");
@@ -499,11 +480,11 @@ TEST_F(ContentVerifyJobUnittest, LegitimateZeroByteFile) {
 // Regression test for https://crbug.com/720597, where content verification
 // always failed for sizes multiple of content hash's block size (4096 bytes).
 TEST_F(ContentVerifyJobUnittest, DifferentSizedFiles) {
-  base::ScopedTempDir temp_dir;
+  TestExtensionDir temp_dir;
   scoped_refptr<Extension> extension = LoadTestExtensionFromZipPathToTempDir(
       &temp_dir, "different_sized_files", "source.zip");
   ASSERT_TRUE(extension.get());
-  base::FilePath unzipped_path = temp_dir.GetPath();
+  base::FilePath unzipped_path = temp_dir.UnpackedPath();
 
   const struct {
     const char* name;
@@ -526,11 +507,11 @@ TEST_F(ContentVerifyJobUnittest, DifferentSizedFiles) {
 // Tests that if both file contents and hash are modified, corruption will still
 // be detected.
 TEST_F(ContentVerifyJobUnittest, ModifiedComputedHashes) {
-  base::ScopedTempDir temp_dir;
+  TestExtensionDir temp_dir;
   scoped_refptr<Extension> extension = LoadTestExtensionFromZipPathToTempDir(
       &temp_dir, "with_verified_contents_corrupted", "source_all.zip");
   ASSERT_TRUE(extension.get());
-  base::FilePath unzipped_path = temp_dir.GetPath();
+  base::FilePath unzipped_path = temp_dir.UnpackedPath();
 
   const base::FilePath::CharType kExistentResource[] =
       FILE_PATH_LITERAL("background.js");
@@ -555,7 +536,7 @@ using ContentVerifyJobWithoutSignedHashesUnittest = ContentVerifyJobUnittest;
 // Tests that without verified_contents.json file computes_hashes.json file is
 // loaded correctly and appropriate error is reported when load fails.
 TEST_F(ContentVerifyJobWithoutSignedHashesUnittest, ComputedHashesLoad) {
-  base::ScopedTempDir temp_dir;
+  TestExtensionDir temp_dir;
   content_verifier_delegate()->SetVerifierSourceType(
       ContentVerifierDelegate::VerifierSourceType::UNSIGNED_HASHES);
 
@@ -571,7 +552,7 @@ TEST_F(ContentVerifyJobWithoutSignedHashesUnittest, ComputedHashesLoad) {
   scoped_refptr<Extension> extension =
       CreateAndLoadTestExtensionToTempDir(&temp_dir, std::move(resource_map));
   ASSERT_TRUE(extension);
-  base::FilePath unzipped_path = temp_dir.GetPath();
+  base::FilePath unzipped_path = temp_dir.UnpackedPath();
 
   {
     // Case where computed_hashes.json is on its place and correct.
@@ -585,10 +566,8 @@ TEST_F(ContentVerifyJobWithoutSignedHashesUnittest, ComputedHashesLoad) {
 
   {
     // Case where computed_hashes.json is corrupted.
-    ASSERT_EQ(
-        static_cast<int>(kCorruptedContents.size()),
-        base::WriteFile(file_util::GetComputedHashesPath(unzipped_path),
-                        kCorruptedContents.data(), kCorruptedContents.size()));
+    ASSERT_TRUE(base::WriteFile(file_util::GetComputedHashesPath(unzipped_path),
+                                kCorruptedContents));
 
     TestContentVerifySingleJobObserver observer(extension->id(), kResourcePath);
     content_verifier()->ClearCacheForTesting();
@@ -613,7 +592,7 @@ TEST_F(ContentVerifyJobWithoutSignedHashesUnittest, ComputedHashesLoad) {
 
 // Tests that extension without verified_contents.json is checked properly.
 TEST_F(ContentVerifyJobWithoutSignedHashesUnittest, UnverifiedExtension) {
-  base::ScopedTempDir temp_dir;
+  TestExtensionDir temp_dir;
   content_verifier_delegate()->SetVerifierSourceType(
       ContentVerifierDelegate::VerifierSourceType::UNSIGNED_HASHES);
 
@@ -633,18 +612,14 @@ TEST_F(ContentVerifyJobWithoutSignedHashesUnittest, UnverifiedExtension) {
   scoped_refptr<Extension> extension =
       CreateAndLoadTestExtensionToTempDir(&temp_dir, std::move(resource_map));
   ASSERT_TRUE(extension);
-  base::FilePath unzipped_path = temp_dir.GetPath();
+  base::FilePath unzipped_path = temp_dir.UnpackedPath();
 
-  ASSERT_EQ(static_cast<int>(kOkContents.size()),
-            base::WriteFile(unzipped_path.Append(kResourceOkPath),
-                            kOkContents.data(), kOkContents.size()));
-  ASSERT_EQ(
-      static_cast<int>(kCorruptedContents.size()),
-      base::WriteFile(unzipped_path.Append(kResourceCorruptedPath),
-                      kCorruptedContents.data(), kCorruptedContents.size()));
-  ASSERT_EQ(static_cast<int>(kOkContents.size()),
-            base::WriteFile(unzipped_path.Append(kResourceUnexpectedPath),
-                            kOkContents.data(), kOkContents.size()));
+  ASSERT_TRUE(
+      base::WriteFile(unzipped_path.Append(kResourceOkPath), kOkContents));
+  ASSERT_TRUE(base::WriteFile(unzipped_path.Append(kResourceCorruptedPath),
+                              kCorruptedContents));
+  ASSERT_TRUE(base::WriteFile(unzipped_path.Append(kResourceUnexpectedPath),
+                              kOkContents));
 
   {
     // Sanity check that an unmodified file passes content verification.
@@ -687,20 +662,18 @@ TEST_F(ContentVerifyJobWithoutSignedHashesUnittest, UnverifiedExtension) {
 // Tests that extension without any hashes (both verified_contents.json and
 // computed_hashes.json are missing) is checked properly.
 TEST_F(ContentVerifyJobWithoutSignedHashesUnittest, ExtensionWithoutHashes) {
-  base::ScopedTempDir temp_dir;
+  TestExtensionDir temp_dir;
   content_verifier_delegate()->SetVerifierSourceType(
       ContentVerifierDelegate::VerifierSourceType::UNSIGNED_HASHES);
 
   const base::FilePath kResourcePath(FILE_PATH_LITERAL("script-ok.js"));
 
   scoped_refptr<Extension> extension =
-      CreateAndLoadTestExtensionToTempDir(&temp_dir, absl::nullopt);
+      CreateAndLoadTestExtensionToTempDir(&temp_dir, std::nullopt);
   ASSERT_TRUE(extension);
-  base::FilePath unzipped_path = temp_dir.GetPath();
+  base::FilePath unzipped_path = temp_dir.UnpackedPath();
   const std::string kContents = "console.log('Nothing special');";
-  ASSERT_EQ(static_cast<int>(kContents.size()),
-            base::WriteFile(unzipped_path.Append(kResourcePath),
-                            kContents.data(), kContents.size()));
+  ASSERT_TRUE(base::WriteFile(unzipped_path.Append(kResourcePath), kContents));
 
   {
     // Make sure good file passes content verification.
@@ -734,11 +707,11 @@ class ContentMismatchUnittest
   // by |run_mode|.
   void RunContentMismatchTest(const std::string& content_to_append_for_mismatch,
                               ContentVerifyJobAsyncRunMode run_mode) {
-    base::ScopedTempDir temp_dir;
+    TestExtensionDir temp_dir;
     scoped_refptr<Extension> extension = LoadTestExtensionFromZipPathToTempDir(
         &temp_dir, "with_verified_contents", "source_all.zip");
     ASSERT_TRUE(extension.get());
-    base::FilePath unzipped_path = temp_dir.GetPath();
+    base::FilePath unzipped_path = temp_dir.UnpackedPath();
 
     const base::FilePath::CharType kResource[] =
         FILE_PATH_LITERAL("background.js");
@@ -792,8 +765,9 @@ class ContentVerifyJobWithHashFetchUnittest : public ContentVerifyJobUnittest {
   // Responds to hash fetch request.
   void RespondToClientIfReady() {
     DCHECK(verified_contents_);
-    if (!client_ || !ready_to_respond_)
+    if (!client_ || !ready_to_respond_) {
       return;
+    }
     content::URLLoaderInterceptor::WriteResponse(
         std::string(), *verified_contents_, client_.get());
   }
@@ -827,8 +801,9 @@ class ContentVerifyJobWithHashFetchUnittest : public ContentVerifyJobUnittest {
  private:
   bool InterceptHashFetch(
       content::URLLoaderInterceptor::RequestParams* params) {
-    if (params->url_request.url.path_piece() != "/getsignature")
+    if (params->url_request.url.path_piece() != "/getsignature") {
       return false;
+    }
 
     client_ = std::move(params->client);
     RespondToClientIfReady();
@@ -844,12 +819,12 @@ class ContentVerifyJobWithHashFetchUnittest : public ContentVerifyJobUnittest {
   bool ready_to_respond_ = false;
 
   // Copy of the contents of verified_contents.json.
-  absl::optional<std::string> verified_contents_;
+  std::optional<std::string> verified_contents_;
 };
 
 // Regression test for https://crbug.com/995436.
 TEST_F(ContentVerifyJobWithHashFetchUnittest, ReadErrorBeforeHashReady) {
-  base::ScopedTempDir temp_dir;
+  TestExtensionDir temp_dir;
   scoped_refptr<Extension> extension = LoadTestExtensionFromZipPathToTempDir(
       &temp_dir, "with_verified_contents", "source_all.zip");
   ASSERT_TRUE(extension.get());

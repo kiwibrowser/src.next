@@ -210,7 +210,7 @@ bool ParseHelper(Extension* extension,
 
   const base::Value* permissions = nullptr;
   if (!extension->manifest()->GetList(key, &permissions)) {
-    *error = base::UTF8ToUTF16(errors::kInvalidPermissions);
+    *error = errors::kInvalidPermissions;
     return false;
   }
 
@@ -220,11 +220,9 @@ bool ParseHelper(Extension* extension,
 
   std::vector<std::string> host_data;
   if (!APIPermissionSet::ParseFromJSON(
-          permissions,
-          APIPermissionSet::kDisallowInternalPermissions,
-          api_permissions,
-          error,
-          &host_data)) {
+          permissions->GetList(),
+          APIPermissionSet::kDisallowInternalPermissions, api_permissions,
+          error, &host_data)) {
     return false;
   }
 
@@ -235,6 +233,9 @@ bool ParseHelper(Extension* extension,
   for (APIPermissionSet::const_iterator iter = api_permissions->begin();
        iter != api_permissions->end();
        ++iter) {
+    // All internal permissions should have been filtered out above.
+    DCHECK(!iter->info()->is_internal()) << iter->name();
+
     const Feature* feature = permission_features->GetFeature(iter->name());
 
     // The feature should exist since we just got an APIPermission for it. The

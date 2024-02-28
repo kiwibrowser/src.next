@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -114,6 +114,8 @@ TEST_F(CSSPrimitiveValueTest, IsResolution) {
   EXPECT_FALSE(Create({5.0, UnitType::kNumber})->IsResolution());
   EXPECT_FALSE(Create({5.0, UnitType::kDegrees})->IsResolution());
   EXPECT_TRUE(Create({5.0, UnitType::kDotsPerPixel})->IsResolution());
+  EXPECT_TRUE(Create({5.0, UnitType::kX})->IsResolution());
+  EXPECT_TRUE(Create({5.0, UnitType::kDotsPerInch})->IsResolution());
   EXPECT_TRUE(Create({5.0, UnitType::kDotsPerCentimeter})->IsResolution());
 }
 
@@ -163,8 +165,7 @@ TEST_F(CSSPrimitiveValueTest, NaNLengthClamp) {
   UnitValue b = {1, UnitType::kPixels};
   CSSPrimitiveValue* value = CreateAddition(a, b);
   CSSToLengthConversionData conversion_data;
-  EXPECT_EQ(std::numeric_limits<double>::max(),
-            value->ComputeLength<double>(conversion_data));
+  EXPECT_EQ(0.0, value->ComputeLength<double>(conversion_data));
 }
 
 TEST_F(CSSPrimitiveValueTest, PositiveInfinityPercentLengthClamp) {
@@ -188,7 +189,7 @@ TEST_F(CSSPrimitiveValueTest, NaNPercentLengthClamp) {
       {-std::numeric_limits<double>::quiet_NaN(), UnitType::kPercentage});
   CSSToLengthConversionData conversion_data;
   Length length = value->ConvertToLength(conversion_data);
-  EXPECT_EQ(std::numeric_limits<float>::max(), length.Percent());
+  EXPECT_EQ(0.0, length.Percent());
 }
 
 TEST_F(CSSPrimitiveValueTest, GetDoubleValueWithoutClampingAllowNaN) {
@@ -217,7 +218,7 @@ TEST_F(CSSPrimitiveValueTest,
 TEST_F(CSSPrimitiveValueTest, GetDoubleValueClampNaN) {
   CSSPrimitiveValue* value =
       Create({std::numeric_limits<double>::quiet_NaN(), UnitType::kPixels});
-  EXPECT_EQ(std::numeric_limits<double>::max(), value->GetDoubleValue());
+  EXPECT_EQ(0.0, value->GetDoubleValue());
 }
 
 TEST_F(CSSPrimitiveValueTest, GetDoubleValueClampPositiveInfinity) {
@@ -241,8 +242,6 @@ TEST_F(CSSPrimitiveValueTest, TestCanonicalizingNumberUnitCategory) {
 }
 
 TEST_F(CSSPrimitiveValueTest, HasContainerRelativeUnits) {
-  ScopedCSSContainerQueriesForTest scoped_feature(true);
-
   EXPECT_TRUE(HasContainerRelativeUnits("1cqw"));
   EXPECT_TRUE(HasContainerRelativeUnits("1cqh"));
   EXPECT_TRUE(HasContainerRelativeUnits("1cqi"));

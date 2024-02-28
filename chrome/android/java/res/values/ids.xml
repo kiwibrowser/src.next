@@ -92,9 +92,6 @@ found in the LICENSE file.
     <!-- Menu item IDs for FullscreenActivities -->
     <item type="id" name="contextmenu_open_in_chrome" />
 
-    <!-- VR constants -->
-    <item type="id" name="vr_overlay_view" />
-
     <!-- Tags -->
     <item type="id" name="highlight_color" />
     <item type="id" name="context_menu_delegate" />
@@ -104,10 +101,10 @@ found in the LICENSE file.
     <item type="id" name="ntp_feed_header_menu_item_activity" />
     <item type="id" name="ntp_feed_header_menu_item_interest" />
     <item type="id" name="ntp_feed_header_menu_item_reactions" />
-    <item type="id" name="ntp_feed_header_menu_item_autoplay" />
     <item type="id" name="ntp_feed_header_menu_item_learn" />
     <item type="id" name="ntp_feed_header_menu_item_toggle_switch" />
 
     <!-- Custom Tabs -->
     <item type="id" name="view_id_tag_key" />
+    <item type="id" name="custom_tabs_toolbar_tintable" />
 </resources>

@@ -27,7 +27,7 @@ class BASE_EXPORT Version {
   Version(const Version& other);
 
   // Initializes from a decimal dotted version number, like "0.1.1".
-  // Each component is limited to a uint16_t. Call IsValid() to learn
+  // Each component is limited to a uint32_t. Call IsValid() to learn
   // the outcome.
   explicit Version(StringPiece version_str);
 
@@ -46,7 +46,7 @@ class BASE_EXPORT Version {
   // Version behavior (IsValid) if no wildcard is present.
   static bool IsValidWildcardString(StringPiece wildcard_string);
 
-  // Returns -1, 0, 1 for <, ==, >.
+  // Returns -1, 0, 1 for <, ==, >. `this` and `other` must both be valid.
   int CompareTo(const Version& other) const;
 
   // Given a valid version object, compare if a |wildcard_string| results in a

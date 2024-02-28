@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/layout/layout_block.h"
 #include "third_party/blink/renderer/core/layout/layout_block_flow.h"
-#include "third_party/blink/renderer/core/layout/ng/ng_layout_result.h"
+#include "third_party/blink/renderer/core/layout/layout_result.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 
@@ -21,19 +21,17 @@ namespace blink {
 class LayoutBlockTest : public RenderingTest {};
 
 TEST_F(LayoutBlockTest, LayoutNameCalledWithNullStyle) {
-  scoped_refptr<ComputedStyle> style =
-      GetDocument().GetStyleResolver().CreateComputedStyle();
-  LayoutObject* obj = LayoutBlockFlow::CreateAnonymous(&GetDocument(), style,
-                                                       LegacyLayout::kAuto);
+  const ComputedStyle& style = GetDocument().GetStyleResolver().InitialStyle();
+  LayoutObject* obj = LayoutBlockFlow::CreateAnonymous(&GetDocument(), &style);
   obj->SetStyle(nullptr, LayoutObject::ApplyStyleChanges::kNo);
   EXPECT_FALSE(obj->Style());
   EXPECT_THAT(obj->DecoratedName().Ascii(),
-              MatchesRegex("LayoutN?G?BlockFlow \\(anonymous\\)"));
+              MatchesRegex("LayoutN?G?BlockFlow \\(anonymous, inline\\)"));
   obj->Destroy();
 }
 
 TEST_F(LayoutBlockTest, WidthAvailableToChildrenChanged) {
-  USE_NON_OVERLAY_SCROLLBARS();
+  USE_NON_OVERLAY_SCROLLBARS_OR_QUIT();
 
   SetBodyInnerHTML(R"HTML(
     <!DOCTYPE html>
@@ -46,7 +44,7 @@ TEST_F(LayoutBlockTest, WidthAvailableToChildrenChanged) {
       <div style='height:20px'>Item</div>
     </div>
   )HTML");
-  Element* list_element = GetDocument().getElementById("list");
+  Element* list_element = GetDocument().getElementById(AtomicString("list"));
   ASSERT_TRUE(list_element);
   auto* list_box = list_element->GetLayoutBox();
   Element* item_element = ElementTraversal::FirstChild(*list_element);
@@ -68,16 +66,13 @@ TEST_F(LayoutBlockTest, WidthAvailableToChildrenChanged) {
 TEST_F(LayoutBlockTest, OverflowWithTransformAndPerspective) {
   SetBodyInnerHTML(R"HTML(
     <div id='target' style='width: 100px; height: 100px; overflow: scroll;
-        perspective: 200px;'>
+        perspective: 100px;'>
       <div style='transform: rotateY(-45deg); width: 140px; height: 100px'>
       </div>
     </div>
   )HTML");
   auto* scroller = GetLayoutBoxByElementId("target");
-  if (RuntimeEnabledFeatures::LayoutNGEnabled())
-    EXPECT_EQ(140.0, scroller->LayoutOverflowRect().Width().ToFloat());
-  else
-    EXPECT_EQ(119.5, scroller->LayoutOverflowRect().Width().ToFloat());
+  EXPECT_EQ(187.625, scroller->ScrollableOverflowRect().Width().ToFloat());
 }
 
 TEST_F(LayoutBlockTest, NestedInlineVisualOverflow) {
@@ -90,8 +85,7 @@ TEST_F(LayoutBlockTest, NestedInlineVisualOverflow) {
   )HTML");
 
   auto* target = GetLayoutBoxByElementId("target");
-  EXPECT_EQ(LayoutRect(-15, 0, 40, 40), target->VisualOverflowRect());
-  EXPECT_EQ(PhysicalRect(-15, 0, 40, 40), target->PhysicalVisualOverflowRect());
+  EXPECT_EQ(PhysicalRect(-15, 0, 40, 40), target->VisualOverflowRect());
 }
 
 TEST_F(LayoutBlockTest, NestedInlineVisualOverflowVerticalRL) {
@@ -106,8 +100,7 @@ TEST_F(LayoutBlockTest, NestedInlineVisualOverflowVerticalRL) {
   )HTML");
 
   auto* target = GetLayoutBoxByElementId("target");
-  EXPECT_EQ(LayoutRect(-15, 0, 40, 40), target->VisualOverflowRect());
-  EXPECT_EQ(PhysicalRect(-25, 0, 40, 40), target->PhysicalVisualOverflowRect());
+  EXPECT_EQ(PhysicalRect(-25, 0, 40, 40), target->VisualOverflowRect());
 }
 
 TEST_F(LayoutBlockTest, ContainmentStyleChange) {
@@ -125,36 +118,25 @@ TEST_F(LayoutBlockTest, ContainmentStyleChange) {
     </div>
   )HTML");
 
-  Element* target_element = GetDocument().getElementById("target");
+  Element* target_element =
+      GetDocument().getElementById(AtomicString("target"));
   auto* target = To<LayoutBlockFlow>(target_element->GetLayoutObject());
-  auto* contained = GetLayoutBoxByElementId("contained");
-  if (target->IsLayoutNGObject()) {
-    EXPECT_TRUE(target->GetCachedLayoutResult()
-                    ->PhysicalFragment()
-                    .HasOutOfFlowFragmentChild());
-  } else {
-    EXPECT_TRUE(target->PositionedObjects()->Contains(contained));
-  }
+  EXPECT_TRUE(target->GetSingleCachedLayoutResult()
+                  ->GetPhysicalFragment()
+                  .HasOutOfFlowFragmentChild());
 
   // Remove layout containment. This should cause |contained| to now be
   // in the positioned objects set for the LayoutView, not |target|.
-  target_element->setAttribute(html_names::kStyleAttr, "contain:style");
+  target_element->setAttribute(html_names::kStyleAttr,
+                               AtomicString("contain:style"));
   UpdateAllLifecyclePhasesForTest();
-  if (target->IsLayoutNGObject()) {
-    EXPECT_FALSE(target->GetCachedLayoutResult()
-                     ->PhysicalFragment()
-                     .HasOutOfFlowFragmentChild());
-  } else {
-    EXPECT_FALSE(target->PositionedObjects());
-  }
+  EXPECT_FALSE(target->GetSingleCachedLayoutResult()
+                   ->GetPhysicalFragment()
+                   .HasOutOfFlowFragmentChild());
   const LayoutView* view = GetDocument().GetLayoutView();
-  if (view->IsLayoutNGObject()) {
-    EXPECT_TRUE(view->GetCachedLayoutResult()
-                    ->PhysicalFragment()
-                    .HasOutOfFlowFragmentChild());
-  } else {
-    EXPECT_TRUE(view->PositionedObjects()->Contains(contained));
-  }
+  EXPECT_TRUE(view->GetSingleCachedLayoutResult()
+                  ->GetPhysicalFragment()
+                  .HasOutOfFlowFragmentChild());
 }
 
 }  // namespace blink

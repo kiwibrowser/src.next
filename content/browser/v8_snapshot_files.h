@@ -9,6 +9,8 @@
 #include <string>
 
 #include "base/files/file_path.h"
+#include "base/files/scoped_file.h"
+#include "third_party/abseil-cpp/absl/types/variant.h"
 
 namespace content {
 
@@ -16,9 +18,10 @@ namespace content {
 // that use V8. Note that this is defined on all platforms even though it may
 // be empty or unused on some.
 //
-// This mapping can be passed to
-// `BrowserChildProcessHost::LaunchWithPreloadedFiles()`.
-std::map<std::string, base::FilePath> GetV8SnapshotFilesToPreload();
+// This mapping can be used in `content::ChildProcessLauncherFileData` when
+// constructing a ChildProcessLauncher.
+std::map<std::string, absl::variant<base::FilePath, base::ScopedFD>>
+GetV8SnapshotFilesToPreload();
 
 }  // namespace content
 

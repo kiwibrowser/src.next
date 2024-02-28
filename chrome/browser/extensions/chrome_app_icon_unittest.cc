@@ -6,8 +6,7 @@
 #include <utility>
 #include <vector>
 
-#include "ash/public/cpp/app_list/app_list_config.h"
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/run_loop.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/chrome_app_icon.h"
@@ -28,9 +27,10 @@
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "ash/components/arc/test/fake_app_instance.h"
+#include "ash/public/cpp/app_list/app_list_config.h"
+#include "chrome/browser/ash/app_list/arc/arc_app_test.h"
 #include "chrome/browser/ash/arc/arc_util.h"
-#include "chrome/browser/chromeos/extensions/gfx_utils.h"
-#include "chrome/browser/ui/app_list/arc/arc_app_test.h"
+#include "chrome/browser/ash/extensions/gfx_utils.h"
 #include "ui/chromeos/resources/grit/ui_chromeos_resources.h"
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
@@ -113,8 +113,11 @@ class TestAppIconLoader : public AppIconLoaderDelegate {
   ~TestAppIconLoader() override = default;
 
   // AppIconLoaderDelegate:
-  void OnAppImageUpdated(const std::string& app_id,
-                         const gfx::ImageSkia& image) override {
+  void OnAppImageUpdated(
+      const std::string& app_id,
+      const gfx::ImageSkia& image,
+      bool is_placeholder_icon,
+      const std::optional<gfx::ImageSkia>& badge_image) override {
     image_skia_ = image;
   }
 
@@ -201,11 +204,10 @@ class ChromeAppIconTest : public ExtensionServiceTestBase {
   void SetUp() override {
     ExtensionServiceTestBase::SetUp();
 
-    const base::FilePath source_install_dir =
-        data_dir().AppendASCII("app_list").AppendASCII("Extensions");
-    const base::FilePath pref_path =
-        source_install_dir.DirName().Append(chrome::kPreferencesFilename);
-    InitializeInstalledExtensionService(pref_path, source_install_dir);
+    ExtensionServiceInitParams params;
+    ASSERT_TRUE(params.ConfigureByTestDataDirectory(
+        data_dir().AppendASCII("app_list")));
+    InitializeExtensionService(params);
     service_->Init();
   }
 };

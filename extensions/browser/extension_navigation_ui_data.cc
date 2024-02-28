@@ -24,7 +24,7 @@ content::GlobalRenderFrameHostId GetFrameRoutingId(
 
 }  // namespace
 
-ExtensionNavigationUIData::ExtensionNavigationUIData() {}
+ExtensionNavigationUIData::ExtensionNavigationUIData() = default;
 
 ExtensionNavigationUIData::ExtensionNavigationUIData(
     content::NavigationHandle* navigation_handle,
@@ -83,8 +83,8 @@ ExtensionNavigationUIData::CreateForMainFrameNavigation(
       // the current document isn't relevant to the new navigation.
       /*document_id=*/ExtensionApiFrameIdMap::DocumentId(),
       /*parent_document_id=*/ExtensionApiFrameIdMap::DocumentId(),
-      api::extension_types::FRAME_TYPE_OUTERMOST_FRAME,
-      api::extension_types::DOCUMENT_LIFECYCLE_ACTIVE));
+      api::extension_types::FrameType::kOutermostFrame,
+      api::extension_types::DocumentLifecycle::kActive));
 }
 
 std::unique_ptr<ExtensionNavigationUIData> ExtensionNavigationUIData::DeepCopy()

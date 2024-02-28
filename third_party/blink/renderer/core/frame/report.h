@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,7 +37,7 @@ class CORE_EXPORT Report : public ScriptWrappable {
 
   String type() const { return type_; }
   String url() const { return url_; }
-  ReportBody* body() const { return body_; }
+  ReportBody* body() const { return body_.Get(); }
 
   void Trace(Visitor* visitor) const override {
     visitor->Trace(body_);

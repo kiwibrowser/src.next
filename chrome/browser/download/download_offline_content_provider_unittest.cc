@@ -6,10 +6,10 @@
 
 #include <utility>
 
-#include "base/callback_helpers.h"
-#include "base/guid.h"
+#include "base/functional/callback_helpers.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/test_simple_task_runner.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/uuid.h"
 #include "components/download/public/common/mock_download_item.h"
 #include "components/download/public/common/mock_simple_download_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -29,9 +29,9 @@ class DownloadOfflineContentProviderTest : public testing::Test {
  public:
   DownloadOfflineContentProviderTest()
       : task_runner_(new base::TestSimpleTaskRunner),
-        handle_(task_runner_),
+        current_default_handle_(task_runner_),
         provider_(&aggregator_, kTestDownloadNamespace),
-        coordinator_(base::NullCallback(), false) {}
+        coordinator_(base::NullCallback()) {}
 
   DownloadOfflineContentProviderTest(
       const DownloadOfflineContentProviderTest&) = delete;
@@ -48,7 +48,7 @@ class DownloadOfflineContentProviderTest : public testing::Test {
 
  protected:
   scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
-  base::ThreadTaskRunnerHandle handle_;
+  base::SingleThreadTaskRunner::CurrentDefaultHandle current_default_handle_;
   OfflineContentAggregator aggregator_;
   DownloadOfflineContentProvider provider_;
   SimpleDownloadManagerCoordinator coordinator_;
@@ -56,7 +56,7 @@ class DownloadOfflineContentProviderTest : public testing::Test {
 };
 
 TEST_F(DownloadOfflineContentProviderTest, PauseDownloadBeforeInit) {
-  std::string guid = base::GenerateGUID();
+  std::string guid = base::Uuid::GenerateRandomV4().AsLowercaseString();
   ContentId id(kTestDownloadNamespace, guid);
 
   std::unique_ptr<download::MockDownloadItem> item(
@@ -75,7 +75,7 @@ TEST_F(DownloadOfflineContentProviderTest, PauseDownloadBeforeInit) {
 }
 
 TEST_F(DownloadOfflineContentProviderTest, PauseDownloadAfterReducedModeInit) {
-  std::string guid = base::GenerateGUID();
+  std::string guid = base::Uuid::GenerateRandomV4().AsLowercaseString();
   ContentId id(kTestDownloadNamespace, guid);
 
   std::unique_ptr<download::MockDownloadItem> item(
@@ -91,7 +91,7 @@ TEST_F(DownloadOfflineContentProviderTest, PauseDownloadAfterReducedModeInit) {
 }
 
 TEST_F(DownloadOfflineContentProviderTest, PauseDownloadAfterFullBrowserStart) {
-  std::string guid = base::GenerateGUID();
+  std::string guid = base::Uuid::GenerateRandomV4().AsLowercaseString();
   ContentId id(kTestDownloadNamespace, guid);
 
   std::unique_ptr<download::MockDownloadItem> item(

@@ -4,7 +4,6 @@
 
 #include "content/public/common/content_client.h"
 
-#include "base/files/file_path.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/no_destructor.h"
 #include "base/notreached.h"
@@ -21,9 +20,15 @@ namespace content {
 
 static ContentClient* g_client;
 
+static bool g_can_change_browser_client = true;
+
 class InternalTestInitializer {
  public:
   static ContentBrowserClient* SetBrowser(ContentBrowserClient* b) {
+    CHECK(g_can_change_browser_client)
+        << "The wrong ContentBrowserClient subclass is being used. In "
+           "content_browsertests, subclass "
+           "ContentBrowserTestContentBrowserClient.";
     ContentBrowserClient* rv = g_client->browser_;
     g_client->browser_ = b;
     return rv;
@@ -41,6 +46,20 @@ class InternalTestInitializer {
     return rv;
   }
 };
+
+// static
+void ContentClient::SetCanChangeContentBrowserClientForTesting(bool value) {
+  g_can_change_browser_client = value;
+}
+
+// static
+void ContentClient::SetBrowserClientAlwaysAllowForTesting(
+    ContentBrowserClient* b) {
+  bool old = g_can_change_browser_client;
+  g_can_change_browser_client = true;
+  SetBrowserClientForTesting(b);  // IN-TEST
+  g_can_change_browser_client = old;
+}
 
 void SetContentClient(ContentClient* client) {
   g_client = client;
@@ -108,15 +127,6 @@ gfx::Image& ContentClient::GetNativeImageNamed(int resource_id) {
   static base::NoDestructor<gfx::Image> kEmptyImage;
   return *kEmptyImage;
 }
-
-#if BUILDFLAG(IS_MAC)
-base::FilePath ContentClient::GetChildProcessPath(
-    int child_flags,
-    const base::FilePath& helpers_path) {
-  NOTIMPLEMENTED();
-  return base::FilePath();
-}
-#endif
 
 std::string ContentClient::GetProcessTypeNameInEnglish(int type) {
   NOTIMPLEMENTED();

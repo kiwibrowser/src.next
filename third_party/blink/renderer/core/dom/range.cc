@@ -54,10 +54,10 @@
 #include "third_party/blink/renderer/core/highlight/highlight_registry.h"
 #include "third_party/blink/renderer/core/html/html_body_element.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
-#include "third_party/blink/renderer/core/layout/deferred_shaping_controller.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_text.h"
 #include "third_party/blink/renderer/core/layout/layout_text_fragment.h"
+#include "third_party/blink/renderer/core/page/scrolling/sync_scroll_attempt_heuristic.h"
 #include "third_party/blink/renderer/core/svg/svg_svg_element.h"
 #include "third_party/blink/renderer/core/trustedtypes/trusted_types_util.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
@@ -719,14 +719,25 @@ Node* Range::ProcessAncestorsAndTheirSiblings(
       break;
     ancestors.push_back(runner);
   }
+  // Both https://dom.spec.whatwg.org/#concept-range-clone and
+  // https://dom.spec.whatwg.org/#concept-range-extract specify (in various
+  // ways) that nodes are to be processed in tree order. But the algorithm below
+  // processes in depth first order instead. So clone the nodes first here,
+  // in reverse order, so upgrades happen in the proper order.
+  HeapVector<Member<Node>> cloned_ancestors(ancestors.size(), nullptr);
+  auto clone_ptr = cloned_ancestors.rbegin();
+  for (auto it = ancestors.rbegin(); it != ancestors.rend(); ++it) {
+    *(clone_ptr++) = (*it)->cloneNode(false);
+  }
 
   Node* first_child_in_ancestor_to_process =
       direction == kProcessContentsForward ? container->nextSibling()
                                            : container->previousSibling();
-  for (const auto& ancestor : ancestors) {
+  for (wtf_size_t i = 0; i < ancestors.size(); ++i) {
+    const auto& ancestor = ancestors[i];
     if (action == kExtractContents || action == kCloneContents) {
       // Might have been removed already during mutation event.
-      if (Node* cloned_ancestor = ancestor->cloneNode(false)) {
+      if (auto cloned_ancestor = cloned_ancestors[i]) {
         cloned_ancestor->appendChild(cloned_container, exception_state);
         cloned_container = cloned_ancestor;
       }
@@ -1414,19 +1425,21 @@ void Range::FixupRemovedChildrenAcrossShadowBoundary(ContainerNode& container) {
   BoundaryShadowNodeChildrenWillBeRemoved(end_, container);
 }
 
-static inline void BoundaryNodeWillBeRemoved(RangeBoundaryPoint& boundary,
+// Returns true if `boundary` was modified.
+static inline bool BoundaryNodeWillBeRemoved(RangeBoundaryPoint& boundary,
                                              Node& node_to_be_removed) {
   if (boundary.ChildBefore() == node_to_be_removed) {
     boundary.ChildBeforeWillBeRemoved();
-    return;
+    return true;
   }
 
   for (Node* n = &boundary.Container(); n; n = n->parentNode()) {
     if (n == node_to_be_removed) {
       boundary.SetToBeforeChild(node_to_be_removed);
-      return;
+      return true;
     }
   }
+  return false;
 }
 
 static inline void BoundaryShadowNodeWillBeRemoved(RangeBoundaryPoint& boundary,
@@ -1450,8 +1463,14 @@ void Range::NodeWillBeRemoved(Node& node) {
   // should change following if-statement to DCHECK(!node->parentNode).
   if (!node.parentNode())
     return;
-  BoundaryNodeWillBeRemoved(start_, node);
-  BoundaryNodeWillBeRemoved(end_, node);
+  const bool is_collapsed = collapsed();
+  const bool start_updated = BoundaryNodeWillBeRemoved(start_, node);
+  if (is_collapsed) {
+    if (start_updated)
+      end_ = start_;
+  } else {
+    BoundaryNodeWillBeRemoved(end_, node);
+  }
 }
 
 void Range::FixupRemovedNodeAcrossShadowBoundary(Node& node) {
@@ -1593,10 +1612,9 @@ void Range::expand(const String& unit, ExceptionState& exception_state) {
 }
 
 DOMRectList* Range::getClientRects() const {
-  if (owner_document_->View()) {
-    DeferredShapingController::From(*owner_document_)
-        ->ReshapeAllDeferred(ReshapeReason::kGeometryApi);
-  }
+  // TODO(crbug.com/1499981): This should be removed once synchronized scrolling
+  // impact is understood.
+  SyncScrollAttemptHeuristic::DidAccessScrollOffset();
   DisplayLockUtilities::ScopedForcedUpdate force_locks(
       this, DisplayLockContext::ForcedPhase::kLayout);
   owner_document_->UpdateStyleAndLayout(DocumentUpdateReason::kJavaScript);
@@ -1608,6 +1626,9 @@ DOMRectList* Range::getClientRects() const {
 }
 
 DOMRect* Range::getBoundingClientRect() const {
+  // TODO(crbug.com/1499981): This should be removed once synchronized scrolling
+  // impact is understood.
+  SyncScrollAttemptHeuristic::DidAccessScrollOffset();
   return DOMRect::FromRectF(BoundingRect());
 }
 
@@ -1720,10 +1741,6 @@ void Range::GetBorderAndTextQuads(Vector<gfx::QuadF>& quads) const {
 }
 
 gfx::RectF Range::BoundingRect() const {
-  if (owner_document_->View()) {
-    DeferredShapingController::From(*owner_document_)
-        ->ReshapeAllDeferred(ReshapeReason::kGeometryApi);
-  }
   absl::optional<DisplayLockUtilities::ScopedForcedUpdate> force_locks;
   if (!collapsed()) {
     force_locks = DisplayLockUtilities::ScopedForcedUpdate(
@@ -1742,7 +1759,7 @@ gfx::RectF Range::BoundingRect() const {
     result.Union(quad.BoundingBox());  // Skips empty rects.
 
   // If all rects are empty, return the first rect.
-  if (result.IsEmpty() && !quads.IsEmpty())
+  if (result.IsEmpty() && !quads.empty())
     return quads.front().BoundingBox();
 
   return result;

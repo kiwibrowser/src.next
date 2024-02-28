@@ -4,7 +4,7 @@
 
 #include <map>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/devtools/devtools_window_testing.h"
@@ -47,8 +47,8 @@ class ExtensionNavigationUIDataObserver : public content::WebContentsObserver {
       const ExtensionNavigationUIDataObserver&) = delete;
 
   const ExtensionNavigationUIData* GetExtensionNavigationUIData(
-      content::RenderFrameHost* rfh) const {
-    auto iter = navigation_ui_data_map_.find(rfh);
+      content::RenderFrameHost* render_frame_host) const {
+    auto iter = navigation_ui_data_map_.find(render_frame_host);
     if (iter == navigation_ui_data_map_.end())
       return nullptr;
     return iter->second.get();
@@ -60,10 +60,11 @@ class ExtensionNavigationUIDataObserver : public content::WebContentsObserver {
     if (!navigation_handle->HasCommitted())
       return;
 
-    content::RenderFrameHost* rfh = navigation_handle->GetRenderFrameHost();
+    content::RenderFrameHost* render_frame_host =
+        navigation_handle->GetRenderFrameHost();
     const auto* data = static_cast<const ChromeNavigationUIData*>(
         navigation_handle->GetNavigationUIData());
-    navigation_ui_data_map_[rfh] =
+    navigation_ui_data_map_[render_frame_host] =
         data->GetExtensionNavigationUIData()->DeepCopy();
   }
 
@@ -86,10 +87,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, WebContents) {
       browser(),
       GURL("chrome-extension://behllobkkfkfnphdnhnkndlbkcpglgmj/page.html")));
 
-  bool result = false;
-  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-      GetActiveWebContents(browser()), "testTabsAPI()", &result));
-  EXPECT_TRUE(result);
+  EXPECT_EQ(true,
+            content::EvalJs(GetActiveWebContents(browser()), "testTabsAPI()"));
 
   // There was a bug where we would crash if we navigated to a page in the same
   // extension because no new render view was getting created, so we would not
@@ -97,10 +96,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, WebContents) {
   ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(),
       GURL("chrome-extension://behllobkkfkfnphdnhnkndlbkcpglgmj/page.html")));
-  result = false;
-  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-      GetActiveWebContents(browser()), "testTabsAPI()", &result));
-  EXPECT_TRUE(result);
+  EXPECT_EQ(true,
+            content::EvalJs(GetActiveWebContents(browser()), "testTabsAPI()"));
 }
 
 // Ensure that platform app frames can't be loaded in a tab even on a redirect.
@@ -152,7 +149,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, BackgroundPageNavigation) {
     ASSERT_TRUE(ExecuteScriptInBackgroundPageNoWait(
         extension->id(),
         base::StringPrintf(kScript, target_url.spec().c_str())));
-    navigation_observer.WaitForNavigationFinished();
+    ASSERT_TRUE(navigation_observer.WaitForNavigationFinished());
     EXPECT_FALSE(navigation_observer.was_committed());
     EXPECT_EQ(extension->GetResourceURL("background.html"),
               background_contents->GetLastCommittedURL());
@@ -167,7 +164,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, BackgroundPageNavigation) {
     ASSERT_TRUE(ExecuteScriptInBackgroundPageNoWait(
         extension->id(),
         base::StringPrintf(kScript, target_url.spec().c_str())));
-    navigation_observer.WaitForNavigationFinished();
+    ASSERT_TRUE(navigation_observer.WaitForNavigationFinished());
     EXPECT_TRUE(navigation_observer.was_committed());
     EXPECT_EQ(target_url, background_contents->GetLastCommittedURL());
   }
@@ -181,7 +178,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, BackgroundPageNavigation) {
     ASSERT_TRUE(ExecuteScriptInBackgroundPageNoWait(
         extension->id(),
         base::StringPrintf(kScript, target_url.spec().c_str())));
-    navigation_observer.WaitForNavigationFinished();
+    ASSERT_TRUE(navigation_observer.WaitForNavigationFinished());
     EXPECT_TRUE(navigation_observer.was_committed());
     EXPECT_EQ(target_url, background_contents->GetLastCommittedURL());
   }

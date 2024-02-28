@@ -35,6 +35,15 @@ class ChromeExtensionFrameHost : public ExtensionFrameHost {
                           GetAppInstallStateCallback callback) override;
   void WatchedPageChange(
       const std::vector<std::string>& css_selectors) override;
+  void DetailedConsoleMessageAdded(
+      const std::u16string& message,
+      const std::u16string& source,
+      const StackTrace& stack_trace,
+      blink::mojom::ConsoleMessageLevel level) override;
+  void ContentScriptsExecuting(
+      const base::flat_map<std::string, std::vector<std::string>>&
+          extension_id_to_scripts,
+      const GURL& frame_url) override;
 };
 
 }  // namespace extensions

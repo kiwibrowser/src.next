@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,14 +21,14 @@ class CORE_EXPORT StyleRuleFontPaletteValues : public StyleRuleBase {
   ~StyleRuleFontPaletteValues();
 
   AtomicString GetName() const { return name_; }
-  const CSSValue* GetFontFamily() const { return font_family_; }
-  const CSSValue* GetBasePalette() const { return base_palette_; }
-  const CSSValue* GetOverrideColors() const { return override_colors_; }
+  const CSSValue* GetFontFamily() const;
+  const CSSValue* GetBasePalette() const;
+  const CSSValue* GetOverrideColors() const;
 
-  AtomicString GetFontFamilyAsString() const;
   FontPalette::BasePaletteValue GetBasePaletteIndex() const;
   Vector<FontPalette::FontPaletteOverride> GetOverrideColorsAsVector() const;
 
+  MutableCSSPropertyValueSet& MutableProperties();
   StyleRuleFontPaletteValues* Copy() const {
     return MakeGarbageCollected<StyleRuleFontPaletteValues>(*this);
   }
@@ -39,9 +39,7 @@ class CORE_EXPORT StyleRuleFontPaletteValues : public StyleRuleBase {
   Member<const CSSValue>& GetDescriptorReference(AtRuleDescriptorID);
 
   AtomicString name_;
-  Member<const CSSValue> font_family_;
-  Member<const CSSValue> base_palette_;
-  Member<const CSSValue> override_colors_;
+  Member<CSSPropertyValueSet> properties_;
 };
 
 template <>

@@ -46,7 +46,8 @@ class ExtensionActionManagerFactory : public BrowserContextKeyedServiceFactory {
 
   content::BrowserContext* GetBrowserContextToUse(
       content::BrowserContext* context) const override {
-    return ExtensionsBrowserClient::Get()->GetOriginalContext(context);
+    return ExtensionsBrowserClient::Get()->GetContextRedirectedToOriginal(
+        context, /*force_guest_profile=*/true);
   }
 };
 
@@ -115,6 +116,11 @@ ExtensionAction* ExtensionActionManager::GetExtensionAction(
   ExtensionAction* raw_action = action.get();
   actions_[extension.id()] = std::move(action);
   return raw_action;
+}
+
+// static
+void ExtensionActionManager::EnsureFactoryBuilt() {
+  ExtensionActionManagerFactory::GetInstance();
 }
 
 }  // namespace extensions

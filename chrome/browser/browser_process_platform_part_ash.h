@@ -17,6 +17,8 @@ class Profile;
 
 namespace ash {
 class AccountManagerFactory;
+class AshProxyMonitor;
+class BrowserContextFlusher;
 class ChromeSessionManager;
 class ChromeUserManager;
 class InSessionPasswordChangeManager;
@@ -67,6 +69,9 @@ class BrowserProcessPlatformPart : public BrowserProcessPlatformPartChromeOS {
   void InitializeSchedulerConfigurationManager();
   void ShutdownSchedulerConfigurationManager();
 
+  void InitializeAshProxyMonitor();
+  void ShutdownAshProxyMonitor();
+
   // Initializes all services that need the primary profile. Gets called as soon
   // as the primary profile is available, which implies that the primary user
   // has logged in. The services are shut down automatically when the primary
@@ -111,6 +116,8 @@ class BrowserProcessPlatformPart : public BrowserProcessPlatformPartChromeOS {
     return cros_component_manager_;
   }
 
+  ash::AshProxyMonitor* ash_proxy_monitor() { return ash_proxy_monitor_.get(); }
+
   ash::system::TimeZoneResolverManager* GetTimezoneResolverManager();
 
   ash::TimeZoneResolver* GetTimezoneResolver();
@@ -128,6 +135,8 @@ class BrowserProcessPlatformPart : public BrowserProcessPlatformPartChromeOS {
     return in_session_password_change_manager_.get();
   }
 
+  static void EnsureFactoryBuilt();
+
  protected:
   // BrowserProcessPlatformPartChromeOS:
   bool CanRestoreUrlsForProfile(const Profile* profile) const override;
@@ -143,6 +152,8 @@ class BrowserProcessPlatformPart : public BrowserProcessPlatformPartChromeOS {
 
   bool created_profile_helper_;
   std::unique_ptr<ash::ProfileHelper> profile_helper_;
+
+  std::unique_ptr<ash::BrowserContextFlusher> browser_context_flusher_;
 
   std::unique_ptr<ash::system::AutomaticRebootManager>
       automatic_reboot_manager_;
@@ -177,6 +188,8 @@ class BrowserProcessPlatformPart : public BrowserProcessPlatformPartChromeOS {
 
   std::unique_ptr<ash::SchedulerConfigurationManager>
       scheduler_configuration_manager_;
+
+  std::unique_ptr<ash::AshProxyMonitor> ash_proxy_monitor_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 };

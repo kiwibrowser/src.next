@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/html/forms/text_control_element.h"
-#include "third_party/blink/renderer/core/layout/api/selection_state.h"
 #include "third_party/blink/renderer/core/layout/geometry/physical_rect.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
+#include "third_party/blink/renderer/core/layout/selection_state.h"
 #include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller.h"
@@ -159,7 +159,7 @@ SelectionBoundsRecorder::~SelectionBoundsRecorder() {
                    PhysicalOffset(end->edge_end));
   }
 
-  paint_controller_.RecordSelection(start, end);
+  paint_controller_.RecordSelection(start, end, "");
 }
 
 bool SelectionBoundsRecorder::ShouldRecordSelection(

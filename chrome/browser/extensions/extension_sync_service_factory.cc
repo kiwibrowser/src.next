@@ -22,21 +22,29 @@ ExtensionSyncService* ExtensionSyncServiceFactory::GetForBrowserContext(
 
 // static
 ExtensionSyncServiceFactory* ExtensionSyncServiceFactory::GetInstance() {
-  return base::Singleton<ExtensionSyncServiceFactory>::get();
+  static base::NoDestructor<ExtensionSyncServiceFactory> instance;
+  return instance.get();
 }
 
 ExtensionSyncServiceFactory::ExtensionSyncServiceFactory()
     : ProfileKeyedServiceFactory(
           "ExtensionSyncService",
-          ProfileSelections::BuildRedirectedInIncognito()) {
+          ProfileSelections::Builder()
+              .WithRegular(ProfileSelection::kRedirectedToOriginal)
+              // TODO(crbug.com/1418376): Check if this service is needed in
+              // Guest mode.
+              .WithGuest(ProfileSelection::kRedirectedToOriginal)
+              .Build()) {
   DependsOn(extensions::ExtensionPrefsFactory::GetInstance());
   DependsOn(extensions::ExtensionRegistryFactory::GetInstance());
   DependsOn(extensions::ExtensionSystemFactory::GetInstance());
 }
 
-ExtensionSyncServiceFactory::~ExtensionSyncServiceFactory() {}
+ExtensionSyncServiceFactory::~ExtensionSyncServiceFactory() = default;
 
-KeyedService* ExtensionSyncServiceFactory::BuildServiceInstanceFor(
+std::unique_ptr<KeyedService>
+ExtensionSyncServiceFactory::BuildServiceInstanceForBrowserContext(
     content::BrowserContext* context) const {
-  return new ExtensionSyncService(Profile::FromBrowserContext(context));
+  return std::make_unique<ExtensionSyncService>(
+      Profile::FromBrowserContext(context));
 }

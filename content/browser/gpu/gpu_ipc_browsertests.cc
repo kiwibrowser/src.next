@@ -7,10 +7,11 @@
 #include "base/run_loop.h"
 #include "build/build_config.h"
 #include "components/viz/common/gpu/context_provider.h"
+#include "components/viz/test/gpu_host_impl_test_api.h"
 #include "content/browser/browser_main_loop.h"
 #include "content/browser/compositor/image_transport_factory.h"
 #include "content/browser/gpu/gpu_process_host.h"
-#include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/gpu_utils.h"
 #include "content/public/common/content_switches.h"
@@ -25,7 +26,9 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkSurface.h"
+#include "third_party/skia/include/gpu/GpuTypes.h"
 #include "third_party/skia/include/gpu/GrDirectContext.h"
+#include "third_party/skia/include/gpu/ganesh/SkSurfaceGanesh.h"
 #include "ui/gl/gl_switches.h"
 
 namespace {
@@ -67,7 +70,7 @@ class ContextTestBase : public content::ContentBrowserTest {
 
     provider_ =
         content::GpuBrowsertestCreateContext(std::move(gpu_channel_host));
-    auto result = provider_->BindToCurrentThread();
+    auto result = provider_->BindToCurrentSequence();
     CHECK_EQ(result, gpu::ContextResult::kSuccess);
     gl_ = provider_->ContextGL();
     context_support_ = provider_->ContextSupport();
@@ -89,11 +92,25 @@ class ContextTestBase : public content::ContentBrowserTest {
   scoped_refptr<viz::ContextProviderCommandBuffer> provider_;
 };
 
+class TestGpuHostImplDelegate
+    : public viz::GpuHostImplTestApi::HookDelegateBase {
+ public:
+  TestGpuHostImplDelegate() = default;
+  ~TestGpuHostImplDelegate() override = default;
+
+  TestGpuHostImplDelegate(const TestGpuHostImplDelegate&) = delete;
+  TestGpuHostImplDelegate& operator=(const TestGpuHostImplDelegate&) = delete;
+
+  // viz::GpuHostImpl::Delegate
+  bool GpuAccessAllowed() const override { return false; }
+};
+
 }  // namespace
 
 // Include the shared tests.
 #define CONTEXT_TEST_F IN_PROC_BROWSER_TEST_F
-#include "base/bind.h"
+#include "base/functional/bind.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/chromeos_buildflags.h"
 #include "content/public/browser/browser_thread.h"
 #include "gpu/ipc/client/gpu_context_tests.h"
@@ -211,13 +228,13 @@ IN_PROC_BROWSER_TEST_F(BrowserGpuChannelHostFactoryTest,
   // retain the host after provider is destroyed.
   scoped_refptr<viz::ContextProviderCommandBuffer> provider =
       content::GpuBrowsertestCreateContext(GetGpuChannel());
-  ASSERT_EQ(provider->BindToCurrentThread(), gpu::ContextResult::kSuccess);
+  ASSERT_EQ(provider->BindToCurrentSequence(), gpu::ContextResult::kSuccess);
 
   sk_sp<GrDirectContext> gr_context = sk_ref_sp(provider->GrContext());
 
   SkImageInfo info = SkImageInfo::MakeN32Premul(100, 100);
-  sk_sp<SkSurface> surface = SkSurface::MakeRenderTarget(
-      gr_context.get(), SkBudgeted::kNo, info);
+  sk_sp<SkSurface> surface =
+      SkSurfaces::RenderTarget(gr_context.get(), skgpu::Budgeted::kNo, info);
   EXPECT_TRUE(surface);
 
   // Destroy the GL context after we made a surface.
@@ -225,7 +242,7 @@ IN_PROC_BROWSER_TEST_F(BrowserGpuChannelHostFactoryTest,
 
   // New surfaces will fail to create now.
   sk_sp<SkSurface> surface2 =
-      SkSurface::MakeRenderTarget(gr_context.get(), SkBudgeted::kNo, info);
+      SkSurfaces::RenderTarget(gr_context.get(), skgpu::Budgeted::kNo, info);
   EXPECT_FALSE(surface2);
 
   // Drop our reference to the gr_context also.
@@ -261,8 +278,8 @@ IN_PROC_BROWSER_TEST_F(BrowserGpuChannelHostFactoryTest,
   scoped_refptr<viz::ContextProviderCommandBuffer> provider =
       content::GpuBrowsertestCreateContext(GetGpuChannel());
   ContextLostRunLoop run_loop(provider.get());
-  ASSERT_EQ(provider->BindToCurrentThread(), gpu::ContextResult::kSuccess);
-  GpuProcessHost::CallOnIO(FROM_HERE, GPU_PROCESS_KIND_SANDBOXED,
+  ASSERT_EQ(provider->BindToCurrentSequence(), gpu::ContextResult::kSuccess);
+  GpuProcessHost::CallOnUI(FROM_HERE, GPU_PROCESS_KIND_SANDBOXED,
                            false /* force_create */,
                            base::BindOnce([](GpuProcessHost* host) {
                              if (host)
@@ -285,19 +302,12 @@ IN_PROC_BROWSER_TEST_F(BrowserGpuChannelHostFactoryTest,
   DCHECK(!IsChannelEstablished());
   EstablishAndWait();
 
-  // This is for an offscreen context, so the default framebuffer doesn't need
-  // any alpha, depth, stencil, antialiasing.
   gpu::ContextCreationAttribs attributes;
-  attributes.alpha_size = -1;
-  attributes.depth_size = 0;
-  attributes.stencil_size = 0;
-  attributes.samples = 0;
-  attributes.sample_buffers = 0;
   attributes.bind_generates_resource = false;
 
   auto impl = std::make_unique<gpu::CommandBufferProxyImpl>(
-      GetGpuChannel(), GetFactory()->GetGpuMemoryBufferManager(),
-      content::kGpuStreamIdDefault, base::ThreadTaskRunnerHandle::Get());
+      GetGpuChannel(), content::kGpuStreamIdDefault,
+      base::SingleThreadTaskRunner::GetCurrentDefault());
   ASSERT_EQ(
       impl->Initialize(gpu::kNullSurfaceHandle, nullptr,
                        content::kGpuStreamPriorityDefault, attributes, GURL()),
@@ -340,5 +350,25 @@ IN_PROC_BROWSER_TEST_F(BrowserGpuChannelHostFactoryTest,
   EXPECT_GE(id, 0);
 }
 #endif
+
+IN_PROC_BROWSER_TEST_F(BrowserGpuChannelHostFactoryTest,
+                       CallbackOnSynchronousFailure) {
+  // Ensure that there is no pending establish request.
+  EstablishAndWait();
+
+  viz::GpuHostImplTestApi test_api(GpuProcessHost::Get()->gpu_host());
+
+  // This delegate disallows GPU access, which will cause EstablishGpuChannel()
+  // to fail synchronously.
+  test_api.HookDelegate(std::make_unique<TestGpuHostImplDelegate>());
+
+  bool event = false;
+  GetFactory()->EstablishGpuChannel(
+      base::BindOnce(&BrowserGpuChannelHostFactoryTest::Signal,
+                     base::Unretained(this), &event));
+
+  // Expect that the callback has been called.
+  EXPECT_TRUE(event);
+}
 
 }  // namespace content

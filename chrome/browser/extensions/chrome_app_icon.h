@@ -8,7 +8,7 @@
 #include <memory>
 #include <string>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "build/chromeos_buildflags.h"
 #include "extensions/browser/extension_icon_image.h"
@@ -93,7 +93,8 @@ class ChromeAppIcon : public IconImage::Observer {
 
   // Unowned pointers.
   const raw_ptr<ChromeAppIconDelegate> delegate_;
-  const raw_ptr<content::BrowserContext> browser_context_;
+  const raw_ptr<content::BrowserContext, AcrossTasksDanglingUntriaged>
+      browser_context_;
 
   // Called when this instance of ChromeAppIcon is destroyed.
   DestroyedCallback destroyed_callback_;

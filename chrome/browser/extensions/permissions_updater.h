@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "base/callback_forward.h"
+#include "base/functional/callback_forward.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "extensions/browser/extension_event_histogram_value.h"
@@ -149,6 +149,8 @@ class PermissionsUpdater {
   // testing behavior that is impossible in production.
   void AddPermissionsForTesting(const Extension& extension,
                                 const PermissionSet& permissions);
+
+  static void EnsureAssociatedFactoryBuilt();
 
  private:
   class NetworkPermissionsUpdateHelper;

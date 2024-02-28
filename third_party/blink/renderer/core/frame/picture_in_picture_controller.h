@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,6 +37,10 @@ class CORE_EXPORT PictureInPictureController
   // returns false if PictureInPictureController is not attached to a document.
   static bool IsElementInPictureInPicture(const Element*);
 
+  // Returns whether the document has a Document Picture-in-Picture window. It
+  // returns false if PictureInPictureController is not attached to a document.
+  static bool HasDocumentPictureInPictureWindow(const Document&);
+
   // List of Picture-in-Picture support statuses. If status is kEnabled,
   // Picture-in-Picture is enabled for a document or element, otherwise it is
   // not supported.
@@ -49,6 +53,10 @@ class CORE_EXPORT PictureInPictureController
     kDisabledByPermissionsPolicy,
     kDisabledByAttribute,
     kAutoPipAndroid,
+
+    // An active document that's already a picture-in-picture document may not
+    // re-enter picture-in-picture mode.
+    kDocumentPip,
   };
 
   // Enter Picture-in-Picture for a video element and resolve promise if any.
@@ -66,15 +74,6 @@ class CORE_EXPORT PictureInPictureController
 
   // Should be called when an element has exited Picture-in-Picture.
   virtual void OnExitedPictureInPicture(ScriptPromiseResolver*) = 0;
-
-  // Add video element to the list of video elements for the associated document
-  // that are eligible to Auto Picture-in-Picture.
-  virtual void AddToAutoPictureInPictureElementsList(HTMLVideoElement*) = 0;
-
-  // Remove video element from the list of video elements for the associated
-  // document that are eligible to Auto Picture-in-Picture.
-  virtual void RemoveFromAutoPictureInPictureElementsList(
-      HTMLVideoElement*) = 0;
 
   // Notifies that one of the states used by Picture-in-Picture has changed.
   virtual void OnPictureInPictureStateChange() = 0;
@@ -96,6 +95,13 @@ class CORE_EXPORT PictureInPictureController
   // It is protected so that clients use the static method
   // IsElementInPictureInPicture() that avoids creating the controller.
   virtual bool IsPictureInPictureElement(const Element*) const = 0;
+
+#if !BUILDFLAG(IS_ANDROID)
+  // Returns whether the document has a Document Picture-in-Picture window.
+  // It is protected so that clients use the static method
+  // HasDocumentPictureInPictureWindow() that avoids creating the controller.
+  virtual bool HasDocumentPictureInPictureWindow() const = 0;
+#endif  // !BUILDFLAG(IS_ANDROID)
 };
 
 }  // namespace blink

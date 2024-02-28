@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,7 +38,7 @@ void FrameRequestCallbackCollection::CancelFrameCallback(CallbackId id) {
       frame_callbacks_.EraseAt(i);
       DEVTOOLS_TIMELINE_TRACE_EVENT_INSTANT(
           "CancelAnimationFrame", inspector_animation_frame_event::Data,
-          context_, id);
+          context_.Get(), id);
       return;
     }
   }
@@ -48,7 +48,7 @@ void FrameRequestCallbackCollection::CancelFrameCallback(CallbackId id) {
       probe::BreakableLocation(context_, "cancelAnimationFrame");
       DEVTOOLS_TIMELINE_TRACE_EVENT_INSTANT(
           "CancelAnimationFrame", inspector_animation_frame_event::Data,
-          context_, id);
+          context_.Get(), id);
       callback->SetIsCancelled(true);
       // will be removed at the end of ExecuteCallbacks()
       return;
@@ -66,7 +66,7 @@ void FrameRequestCallbackCollection::ExecuteFrameCallbacks(
 
   // First, generate a list of callbacks to consider.  Callbacks registered from
   // this point on are considered only for the "next" frame, not this one.
-  DCHECK(callbacks_to_invoke_.IsEmpty());
+  DCHECK(callbacks_to_invoke_.empty());
   swap(callbacks_to_invoke_, frame_callbacks_);
 
   for (const auto& callback : callbacks_to_invoke_) {

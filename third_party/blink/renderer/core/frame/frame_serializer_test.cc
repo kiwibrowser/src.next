@@ -31,10 +31,10 @@
 #include "third_party/blink/renderer/core/frame/frame_serializer.h"
 
 #include <string>
+
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_url.h"
-#include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/platform/web_url_response.h"
 #include "third_party/blink/public/web/web_settings.h"
@@ -47,8 +47,10 @@
 #include "third_party/blink/renderer/platform/loader/fetch/resource_error.h"
 #include "third_party/blink/renderer/platform/mhtml/serialized_resource.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
+#include "third_party/blink/renderer/platform/testing/url_loader_mock_factory.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 #include "third_party/blink/renderer/platform/wtf/deque.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -70,7 +72,7 @@ class FrameSerializerTest : public testing::Test,
   }
 
   void TearDown() override {
-    WebURLLoaderMockFactory::GetSingletonInstance()
+    URLLoaderMockFactory::GetSingletonInstance()
         ->UnregisterAllURLsAndClearMemoryCache();
   }
 
@@ -99,7 +101,7 @@ class FrameSerializerTest : public testing::Test,
     response.SetMimeType("text/html");
     response.SetHttpStatusCode(status_code);
 
-    WebURLLoaderMockFactory::GetSingletonInstance()->RegisterErrorURL(
+    URLLoaderMockFactory::GetSingletonInstance()->RegisterErrorURL(
         KURL(base_url_, file), response, WebURLError(error));
   }
 
@@ -134,7 +136,7 @@ class FrameSerializerTest : public testing::Test,
                                         const char* mime_type) {
     String mime(mime_type);
     for (const SerializedResource& resource : resources_) {
-      if (resource.url == url && !resource.data->IsEmpty() &&
+      if (resource.url == url && !resource.data->empty() &&
           (mime.IsNull() || EqualIgnoringASCIICase(resource.mime_type, mime)))
         return &resource;
     }
@@ -192,6 +194,7 @@ class FrameSerializerTest : public testing::Test,
     return skip_urls_.Contains(url);
   }
 
+  test::TaskEnvironment task_environment_;
   ScopedTestingPlatformSupport<TestingPlatformSupport> platform_;
   frame_test_helpers::WebViewHelper helper_;
   std::string folder_;

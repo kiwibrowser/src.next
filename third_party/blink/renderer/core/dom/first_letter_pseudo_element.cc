@@ -24,16 +24,19 @@
 
 #include "third_party/blink/renderer/core/dom/first_letter_pseudo_element.h"
 
+#include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
+#include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/css/style_request.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/layout/generated_children.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_object_inlines.h"
 #include "third_party/blink/renderer/core/layout/layout_text.h"
 #include "third_party/blink/renderer/core/layout/layout_text_fragment.h"
-#include "third_party/blink/renderer/core/layout/ng/list/layout_ng_list_item.h"
+#include "third_party/blink/renderer/core/layout/list/layout_list_item.h"
 #include "third_party/blink/renderer/platform/text/text_break_iterator.h"
 #include "third_party/blink/renderer/platform/wtf/text/unicode.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -53,11 +56,33 @@ static inline bool IsPunctuationForFirstLetter(UChar32 c) {
          char_category == WTF::unicode::kPunctuation_Other;
 }
 
-static inline bool IsSpaceForFirstLetter(UChar c) {
-  return IsSpaceOrNewline(c) || c == WTF::unicode::kNoBreakSpaceCharacter;
+static inline bool IsNewLine(UChar c) {
+  if (c == 0xA || c == 0xD) {
+    return true;
+  }
+
+  return false;
 }
 
-unsigned FirstLetterPseudoElement::FirstLetterLength(const String& text) {
+static inline bool IsSpace(UChar c) {
+  if (IsNewLine(c)) {
+    return false;
+  }
+
+  return IsSpaceOrNewline(c);
+}
+
+static inline bool IsSpaceForFirstLetter(UChar c, bool preserve_breaks) {
+  return (RuntimeEnabledFeatures::
+                      CSSFirstLetterNoNewLineAsPrecedingCharEnabled() &&
+                  preserve_breaks
+              ? IsSpace(c)
+              : IsSpaceOrNewline(c)) ||
+         c == WTF::unicode::kNoBreakSpaceCharacter;
+}
+
+unsigned FirstLetterPseudoElement::FirstLetterLength(const String& text,
+                                                     bool preserve_breaks) {
   unsigned length = 0;
   unsigned text_length = text.length();
 
@@ -65,17 +90,23 @@ unsigned FirstLetterPseudoElement::FirstLetterLength(const String& text) {
     return length;
 
   // Account for leading spaces first.
-  while (length < text_length && IsSpaceForFirstLetter(text[length]))
+  while (length < text_length &&
+         IsSpaceForFirstLetter(text[length], preserve_breaks)) {
     length++;
+  }
+
   // Now account for leading punctuation.
   while (length < text_length &&
-         IsPunctuationForFirstLetter(text.CharacterStartingAt(length)))
+         IsPunctuationForFirstLetter(text.CharacterStartingAt(length))) {
     length += LengthOfGraphemeCluster(text, length);
+  }
 
   // Bail if we didn't find a letter before the end of the text or before a
   // space.
-  if (IsSpaceForFirstLetter(text[length]) || length == text_length)
+  if (IsSpaceForFirstLetter(text[length], preserve_breaks) ||
+      IsNewLine(text[length]) || length == text_length) {
     return 0;
+  }
 
   // Account the next character for first letter.
   length += LengthOfGraphemeCluster(text, length);
@@ -148,24 +179,27 @@ LayoutText* FirstLetterPseudoElement::FirstLetterTextLayoutObject(
         return nullptr;
       // FIXME: If there is leading punctuation in a different LayoutText than
       // the first letter, we'll not apply the correct style to it.
-      scoped_refptr<StringImpl> str =
-          layout_text->IsTextFragment()
-              ? To<LayoutTextFragment>(first_letter_text_layout_object)
-                    ->CompleteText()
-              : layout_text->OriginalText();
-      if (FirstLetterLength(str.get()) ||
-          IsInvalidFirstLetterLayoutObject(first_letter_text_layout_object))
+      String str = layout_text->IsTextFragment()
+                       ? To<LayoutTextFragment>(first_letter_text_layout_object)
+                             ->CompleteText()
+                       : layout_text->OriginalText();
+      bool preserve_breaks = ShouldPreserveBreaks(
+          first_letter_text_layout_object->StyleRef().GetWhiteSpaceCollapse());
+      if (FirstLetterLength(str.Impl(), preserve_breaks) ||
+          IsInvalidFirstLetterLayoutObject(first_letter_text_layout_object)) {
         break;
+      }
 
       // In case of inline level content made of punctuation and there is no
       // sibling, we'll apply style to it.
       if (IsParentInlineLayoutObject(first_letter_text_layout_object) &&
-          str->length() && !first_letter_text_layout_object->NextSibling())
+          str.length() && !first_letter_text_layout_object->NextSibling()) {
         break;
+      }
 
       first_letter_text_layout_object =
           first_letter_text_layout_object->NextSibling();
-    } else if (first_letter_text_layout_object->IsListMarkerIncludingAll()) {
+    } else if (first_letter_text_layout_object->IsListMarker()) {
       // The list item marker may have out-of-flow siblings inside an anonymous
       // block. Skip them to make sure we leave the anonymous block before
       // continuing looking for the first letter text.
@@ -187,12 +221,12 @@ LayoutText* FirstLetterPseudoElement::FirstLetterTextLayoutObject(
       first_letter_text_layout_object =
           first_letter_text_layout_object->NextSibling();
     } else if (first_letter_text_layout_object->IsAtomicInlineLevel() ||
-               first_letter_text_layout_object->IsButtonIncludingNG() ||
+               first_letter_text_layout_object->IsButton() ||
                IsMenuList(first_letter_text_layout_object)) {
       return nullptr;
-    } else if (first_letter_text_layout_object
-                   ->IsFlexibleBoxIncludingDeprecatedAndNG() ||
-               first_letter_text_layout_object->IsLayoutGridIncludingNG()) {
+    } else if (first_letter_text_layout_object->IsFlexibleBox() ||
+               first_letter_text_layout_object->IsLayoutGrid() ||
+               first_letter_text_layout_object->IsMathML()) {
       first_letter_text_layout_object =
           first_letter_text_layout_object->NextSibling();
     } else if (!first_letter_text_layout_object->IsInline() &&
@@ -232,6 +266,12 @@ LayoutText* FirstLetterPseudoElement::FirstLetterTextLayoutObject(
       IsInvalidFirstLetterLayoutObject(first_letter_text_layout_object))
     return nullptr;
 
+  // TODO(crbug.com/1501719): See LayoutObject::BehavesLikeBlockContainer().
+  if (parent_layout_object->IsRubyText() &&
+      IsA<HTMLRTElement>(parent_layout_object->GetNode())) {
+    UseCounter::Count(element.GetDocument(),
+                      WebFeature::kPseudoFirstLetterOnRt);
+  }
   return To<LayoutText>(first_letter_text_layout_object);
 }
 
@@ -247,11 +287,14 @@ void FirstLetterPseudoElement::UpdateTextFragments() {
   String old_text(remaining_text_layout_object_->CompleteText());
   DCHECK(old_text.Impl());
 
-  unsigned length = FirstLetterPseudoElement::FirstLetterLength(old_text);
+  bool preserve_breaks = ShouldPreserveBreaks(
+      remaining_text_layout_object_->StyleRef().GetWhiteSpaceCollapse());
+  unsigned length =
+      FirstLetterPseudoElement::FirstLetterLength(old_text, preserve_breaks);
   remaining_text_layout_object_->SetTextFragment(
       old_text.Impl()->Substring(length, old_text.length()), length,
       old_text.length() - length);
-  remaining_text_layout_object_->DirtyLineBoxes();
+  remaining_text_layout_object_->InvalidateInlineItems();
 
   for (auto* child = GetLayoutObject()->SlowFirstChild(); child;
        child = child->NextSibling()) {
@@ -263,7 +306,7 @@ void FirstLetterPseudoElement::UpdateTextFragments() {
 
     child_fragment->SetTextFragment(old_text.Impl()->Substring(0, length), 0,
                                     length);
-    child_fragment->DirtyLineBoxes();
+    child_fragment->InvalidateInlineItems();
 
     // Make sure the first-letter layoutObject is set to require a layout as it
     // needs to re-create the line boxes. The remaining text layoutObject
@@ -311,8 +354,6 @@ void FirstLetterPseudoElement::AttachLayoutTree(AttachContext& context) {
   first_letter_context.next_sibling_valid = true;
   if (first_letter_text) {
     first_letter_context.parent = first_letter_text->Parent();
-    if (first_letter_context.parent->ForceLegacyLayout())
-      first_letter_context.force_legacy_layout = true;
   }
   PseudoElement::AttachLayoutTree(first_letter_context);
   if (first_letter_text)
@@ -324,7 +365,7 @@ void FirstLetterPseudoElement::DetachLayoutTree(bool performing_reattach) {
     if (remaining_text_layout_object_->GetNode() && GetDocument().IsActive()) {
       auto* text_node = To<Text>(remaining_text_layout_object_->GetNode());
       remaining_text_layout_object_->SetTextFragment(
-          text_node->DataImpl(), 0, text_node->DataImpl()->length());
+          text_node->data(), 0, text_node->data().length());
     }
     remaining_text_layout_object_->SetFirstLetterPseudoElement(nullptr);
     remaining_text_layout_object_->SetIsRemainingTextLayoutObject(false);
@@ -334,8 +375,16 @@ void FirstLetterPseudoElement::DetachLayoutTree(bool performing_reattach) {
   PseudoElement::DetachLayoutTree(performing_reattach);
 }
 
-scoped_refptr<ComputedStyle>
-FirstLetterPseudoElement::CustomStyleForLayoutObject(
+LayoutObject* FirstLetterPseudoElement::CreateLayoutObject(
+    const ComputedStyle& style) {
+  if (UNLIKELY(!style.InitialLetter().IsNormal())) {
+    return LayoutObject::CreateBlockFlowOrListItem(this, style);
+  }
+
+  return PseudoElement::CreateLayoutObject(style);
+}
+
+const ComputedStyle* FirstLetterPseudoElement::CustomStyleForLayoutObject(
     const StyleRecalcContext& style_recalc_context) {
   LayoutObject* first_letter_text =
       FirstLetterPseudoElement::FirstLetterTextLayoutObject(*this);
@@ -348,7 +397,8 @@ FirstLetterPseudoElement::CustomStyleForLayoutObject(
                    first_letter_text->Parent()->FirstLineStyle()));
 }
 
-void FirstLetterPseudoElement::AttachFirstLetterTextLayoutObjects(LayoutText* first_letter_text) {
+void FirstLetterPseudoElement::AttachFirstLetterTextLayoutObjects(
+    LayoutText* first_letter_text) {
   DCHECK(first_letter_text);
 
   // The original string is going to be either a generated content string or a
@@ -363,13 +413,17 @@ void FirstLetterPseudoElement::AttachFirstLetterTextLayoutObjects(LayoutText* fi
 
   // FIXME: This would already have been calculated in firstLetterLayoutObject.
   // Can we pass the length through?
-  unsigned length = FirstLetterPseudoElement::FirstLetterLength(old_text);
+  bool preserve_breaks = ShouldPreserveBreaks(
+      first_letter_text->StyleRef().GetWhiteSpaceCollapse());
+  unsigned length =
+      FirstLetterPseudoElement::FirstLetterLength(old_text, preserve_breaks);
 
   // In case of inline level content made of punctuation, we use
-  // first_letter_text length instead of FirstLetterLength.
+  // the whole text length instead of FirstLetterLength.
   if (IsParentInlineLayoutObject(first_letter_text) && length == 0 &&
-      first_letter_text->TextLength())
-    length = first_letter_text->TextLength();
+      old_text.length()) {
+    length = old_text.length();
+  }
 
   unsigned remaining_length = old_text.length() - length;
 
@@ -377,17 +431,13 @@ void FirstLetterPseudoElement::AttachFirstLetterTextLayoutObjects(LayoutText* fi
   // This text fragment might be empty.
   LayoutTextFragment* remaining_text;
 
-  LegacyLayout legacy_layout = first_letter_text->ForceLegacyLayout()
-                                   ? LegacyLayout::kForce
-                                   : LegacyLayout::kAuto;
-
   if (first_letter_text->GetNode()) {
-    remaining_text = LayoutTextFragment::Create(
-        first_letter_text->GetNode(), old_text.Impl(), length, remaining_length,
-        legacy_layout);
+    remaining_text =
+        LayoutTextFragment::Create(first_letter_text->GetNode(),
+                                   old_text.Impl(), length, remaining_length);
   } else {
     remaining_text = LayoutTextFragment::CreateAnonymous(
-        *this, old_text.Impl(), length, remaining_length, legacy_layout);
+        *this, old_text.Impl(), length, remaining_length);
   }
 
   remaining_text->SetFirstLetterPseudoElement(this);
@@ -404,12 +454,31 @@ void FirstLetterPseudoElement::AttachFirstLetterTextLayoutObjects(LayoutText* fi
 
   // Construct text fragment for the first letter.
   const ComputedStyle* const letter_style = GetComputedStyle();
-  LayoutTextFragment* letter = LayoutTextFragment::CreateAnonymous(
-      *this, old_text.Impl(), 0, length, legacy_layout);
+  LayoutTextFragment* letter =
+      LayoutTextFragment::CreateAnonymous(*this, old_text.Impl(), 0, length);
   letter->SetFirstLetterPseudoElement(this);
-  letter->SetStyle(letter_style);
+  if (UNLIKELY(GetLayoutObject()->IsInitialLetterBox())) {
+    const LayoutBlock& paragraph = *GetLayoutObject()->ContainingBlock();
+    // TODO(crbug.com/1393280): Once we can store used font somewhere, we should
+    // compute initial-letter font during layout to take proper effective style.
+    const ComputedStyle& paragraph_style =
+        paragraph.EffectiveStyle(StyleVariant::kFirstLine);
+    const ComputedStyle* initial_letter_text_style =
+        GetDocument().GetStyleResolver().StyleForInitialLetterText(
+            *letter_style, paragraph_style);
+    letter->SetStyle(std::move(initial_letter_text_style));
+  } else {
+    letter->SetStyle(letter_style);
+  }
   GetLayoutObject()->AddChild(letter);
 
+  // AXObjects are normally removed from destroyed layout objects in
+  // Node::DetachLayoutTree(), but as the ::first-letter implementation manually
+  // destroys the layout object for the first letter text, it must manually
+  // remove the accessibility object for it as well.
+  if (auto* cache = GetDocument().ExistingAXObjectCache()) {
+    cache->RemoveAXObjectsInLayoutSubtree(first_letter_text);
+  }
   first_letter_text->Destroy();
 }
 

@@ -5,16 +5,25 @@
 #include "net/http/proxy_fallback.h"
 
 #include "net/base/net_errors.h"
+#include "net/base/proxy_chain.h"
 #include "net/base/proxy_server.h"
 
 namespace net {
 
-NET_EXPORT bool CanFalloverToNextProxy(const ProxyServer& proxy,
+NET_EXPORT bool CanFalloverToNextProxy(const ProxyChain& proxy_chain,
                                        int error,
-                                       int* final_error) {
+                                       int* final_error,
+                                       bool is_for_ip_protection) {
   *final_error = error;
 
-  if (proxy.is_quic()) {
+  if (!proxy_chain.is_direct() &&
+      proxy_chain.GetProxyServer(/*chain_index=*/0).is_quic()) {
+    // TODO(https://crbug.com/1495793): For supporting QUIC with proxy chains
+    // containing more than one proxy server it's unclear whether the proxy
+    // server at chain index 0 is really what we should be doing here. Figure
+    // that out and add tests.
+    CHECK(!proxy_chain.is_multi_proxy());
+
     switch (error) {
       case ERR_QUIC_PROTOCOL_ERROR:
       case ERR_QUIC_HANDSHAKE_FAILED:
@@ -32,12 +41,7 @@ NET_EXPORT bool CanFalloverToNextProxy(const ProxyServer& proxy,
   // to proxy servers.  The hostname in those URLs might fail to resolve if we
   // are still using a non-proxy config.  We need to check if a proxy config
   // now exists that corresponds to a proxy server that could load the URL.
-  //
-  // A failure while establishing a tunnel to the proxy
-  // (ERR_TUNNEL_CONNECTION_FAILED) is NOT considered grounds for fallback.
-  // Other browsers similarly don't fallback, and some client's PAC
-  // configurations rely on this for some degree of content blocking.
-  // See https://crbug.com/680837 for details.
+
   switch (error) {
     case ERR_PROXY_CONNECTION_FAILED:
     case ERR_NAME_NOT_RESOLVED:
@@ -70,6 +74,14 @@ NET_EXPORT bool CanFalloverToNextProxy(const ProxyServer& proxy,
       // ERR_ADDRESS_UNREACHABLE.
       *final_error = ERR_ADDRESS_UNREACHABLE;
       return false;
+
+    case ERR_TUNNEL_CONNECTION_FAILED:
+      // A failure while establishing a tunnel to the proxy is only considered
+      // grounds for fallback when connecting to an IP Protection proxy. Other
+      // browsers similarly don't fallback, and some client's PAC configurations
+      // rely on this for some degree of content blocking. See
+      // https://crbug.com/680837 for details.
+      return is_for_ip_protection;
   }
   return false;
 }

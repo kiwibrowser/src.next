@@ -32,6 +32,7 @@
 namespace blink {
 
 class ComputedStyle;
+class Element;
 
 enum RuleMatchingBehavior { kMatchAllRules, kMatchAllRulesExcludingSMIL };
 
@@ -49,6 +50,11 @@ class StyleRequest {
   const ComputedStyle* parent_override{nullptr};
   const ComputedStyle* layout_parent_override{nullptr};
   const ComputedStyle* originating_element_style{nullptr};
+  // The styled element may be different from the matched element for SVG <use>
+  // instantiations. In those cases we pass in the element that gets the style
+  // as styled_element while the element matching the rules are the one passed
+  // in the ElementResolveContext.
+  Element* styled_element{nullptr};
   RuleMatchingBehavior matching_behavior{kMatchAllRules};
 
   PseudoId pseudo_id{kPseudoIdNone};
@@ -57,6 +63,7 @@ class StyleRequest {
   CustomScrollbar* scrollbar{nullptr};
   AtomicString pseudo_argument{g_null_atom};
   RulesToInclude rules_to_include{kAll};
+  bool can_trigger_animations{true};
 
   explicit StyleRequest(const ComputedStyle* parent_override)
       : parent_override(parent_override),
@@ -64,13 +71,15 @@ class StyleRequest {
 
   StyleRequest(PseudoId pseudo_id,
                const ComputedStyle* parent_override,
+               const ComputedStyle* originating_element_style = nullptr,
                const AtomicString& pseudo_argument = g_null_atom)
       : parent_override(parent_override),
         layout_parent_override(parent_override),
+        originating_element_style(originating_element_style),
         pseudo_id(pseudo_id),
         pseudo_argument(pseudo_argument) {
     DCHECK(!IsTransitionPseudoElement(pseudo_id) ||
-           pseudo_id == kPseudoIdPageTransition || pseudo_argument);
+           pseudo_id == kPseudoIdViewTransition || pseudo_argument);
   }
 
   StyleRequest(PseudoId pseudo_id,

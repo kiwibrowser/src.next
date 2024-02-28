@@ -6,6 +6,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
 #include "chrome/browser/extensions/test_blocklist.h"
+#include "chrome/browser/profiles/profile.h"
 #include "components/safe_browsing/buildflags.h"
 #include "extensions/browser/blocklist_extension_prefs.h"
 #include "extensions/browser/blocklist_state.h"
@@ -57,8 +58,7 @@ class BlocklistStatesInteractionUnitTest : public ExtensionServiceTestBase {
   void SetOmahaBlocklistStateForExtension(const std::string& extension_id,
                                           const std::string& omaha_attribute,
                                           bool value) {
-    base::Value attributes(base::Value::Type::DICTIONARY);
-    attributes.SetBoolKey(omaha_attribute, value);
+    auto attributes = base::Value::Dict().Set(omaha_attribute, value);
     service()->PerformActionBasedOnOmahaAttributes(extension_id, attributes);
   }
 

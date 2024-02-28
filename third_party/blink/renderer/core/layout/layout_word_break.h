@@ -31,9 +31,11 @@
 
 namespace blink {
 
+class HTMLWBRElement;
+
 class LayoutWordBreak : public LayoutText {
  public:
-  explicit LayoutWordBreak(Node* node);
+  explicit LayoutWordBreak(HTMLWBRElement& node);
 
   Position PositionForCaretOffset(unsigned offset) const final;
   absl::optional<unsigned> CaretOffsetForPosition(const Position&) const final;

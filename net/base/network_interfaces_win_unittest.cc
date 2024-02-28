@@ -252,7 +252,6 @@ bool read_int_or_bool(DWORD data_size, PVOID data) {
       return !!*reinterpret_cast<uint32_t*>(data);
     default:
       LOG(FATAL) << "That is not a type I know!";
-      return false;
   }
 }
 
@@ -319,8 +318,14 @@ void TryChangeWifiOptions(int options) {
   EXPECT_EQ(previous_options, GetWifiOptions());
 }
 
+// Test fails on Win Arm64 bots. TODO(https://crbug.com/1425465): Fix on bot.
+#if BUILDFLAG(IS_WIN) && defined(ARCH_CPU_ARM64)
+#define MAYBE_SetWifiOptions DISABLED_SetWifiOptions
+#else
+#define MAYBE_SetWifiOptions SetWifiOptions
+#endif
 // Test SetWifiOptions().
-TEST(NetworkInterfacesTest, SetWifiOptions) {
+TEST(NetworkInterfacesTest, MAYBE_SetWifiOptions) {
   TryChangeWifiOptions(0);
   TryChangeWifiOptions(WIFI_OPTIONS_DISABLE_SCAN);
   TryChangeWifiOptions(WIFI_OPTIONS_MEDIA_STREAMING_MODE);

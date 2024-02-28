@@ -7,8 +7,8 @@
 #include <string>
 #include <vector>
 
-#include "base/bind.h"
-#include "base/callback.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/run_loop.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread.h"
@@ -54,14 +54,14 @@ TEST(HttpAuthPreferencesTest, AuthAndroidNegotiateAccountType) {
 }
 #endif  // BUILDFLAG(IS_ANDROID)
 
-#if BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX)
 TEST(HttpAuthPreferencesTest, AllowGssapiLibraryLoad) {
   HttpAuthPreferences http_auth_preferences;
   EXPECT_TRUE(http_auth_preferences.AllowGssapiLibraryLoad());
   http_auth_preferences.set_allow_gssapi_library_load(false);
   EXPECT_FALSE(http_auth_preferences.AllowGssapiLibraryLoad());
 }
-#endif  // BUILDFLAG(IS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX)
 
 TEST(HttpAuthPreferencesTest, AuthServerAllowlist) {
   HttpAuthPreferences http_auth_preferences;

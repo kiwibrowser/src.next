@@ -18,9 +18,9 @@ class RenderFrameHost;
 class WebContents;
 }
 
-namespace gfx {
-class Rect;
-}  // namespace gfx
+namespace blink::mojom {
+class WindowFeatures;
+}
 
 namespace extensions {
 class Extension;
@@ -49,7 +49,7 @@ class ExtensionHostDelegate {
   virtual void CreateTab(std::unique_ptr<content::WebContents> web_contents,
                          const std::string& extension_id,
                          WindowOpenDisposition disposition,
-                         const gfx::Rect& initial_rect,
+                         const blink::mojom::WindowFeatures& window_features,
                          bool user_gesture) = 0;
 
   // Requests access to an audio or video media stream. Invokes |callback|
@@ -65,7 +65,7 @@ class ExtensionHostDelegate {
   // or MEDIA_DEVICE_VIDEO_CAPTURE.
   virtual bool CheckMediaAccessPermission(
       content::RenderFrameHost* render_frame_host,
-      const GURL& security_origin,
+      const url::Origin& security_origin,
       blink::mojom::MediaStreamType type,
       const Extension* extension) = 0;
 

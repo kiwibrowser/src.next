@@ -52,8 +52,9 @@ String CSSPageRule::selectorText() const {
   const CSSSelector* selector = page_rule_->Selector();
   if (selector) {
     String page_specification = selector->SelectorText();
-    if (!page_specification.IsEmpty())
+    if (!page_specification.empty()) {
       text.Append(page_specification);
+    }
   }
   return text.ReleaseString();
 }
@@ -63,15 +64,16 @@ void CSSPageRule::setSelectorText(const ExecutionContext* execution_context,
   auto* context = MakeGarbageCollected<CSSParserContext>(
       ParserContext(execution_context->GetSecureContextMode()));
   DCHECK(context);
-  CSSSelectorList selector_list = CSSParser::ParsePageSelector(
+  CSSSelectorList* selector_list = CSSParser::ParsePageSelector(
       *context, parentStyleSheet() ? parentStyleSheet()->Contents() : nullptr,
       selector_text);
-  if (!selector_list.IsValid())
+  if (!selector_list || !selector_list->IsValid()) {
     return;
+  }
 
   CSSStyleSheet::RuleMutationScope mutation_scope(this);
 
-  page_rule_->WrapperAdoptSelectorList(std::move(selector_list));
+  page_rule_->WrapperAdoptSelectorList(selector_list);
 }
 
 String CSSPageRule::cssText() const {
@@ -79,13 +81,32 @@ String CSSPageRule::cssText() const {
   result.Append("@page ");
   String page_selectors = selectorText();
   result.Append(page_selectors);
-  if (!page_selectors.IsEmpty())
+  if (!page_selectors.empty()) {
     result.Append(' ');
+  }
   result.Append("{ ");
   String decls = page_rule_->Properties().AsText();
   result.Append(decls);
-  if (!decls.IsEmpty())
+  if (!decls.empty()) {
     result.Append(' ');
+  }
+
+  // TODO(sesse): Figure out a spec for serializing these rules.
+  // In particular, is it fine that we always put declarations first
+  // and then the @ rules in turn? And that we don't deduplicate them?
+  for (const StyleRuleBase* child_rule : page_rule_->ChildRules()) {
+    const StyleRulePageMargin* margin_rule =
+        To<StyleRulePageMargin>(child_rule);
+    result.Append(CssAtRuleIDToString(margin_rule->ID()));
+    result.Append(" { ");
+    String sub_decls = margin_rule->Properties().AsText();
+    result.Append(sub_decls);
+    if (!sub_decls.empty()) {
+      result.Append(' ');
+    }
+    result.Append("} ");
+  }
+
   result.Append('}');
   return result.ReleaseString();
 }
@@ -93,8 +114,9 @@ String CSSPageRule::cssText() const {
 void CSSPageRule::Reattach(StyleRuleBase* rule) {
   DCHECK(rule);
   page_rule_ = To<StyleRulePage>(rule);
-  if (properties_cssom_wrapper_)
+  if (properties_cssom_wrapper_) {
     properties_cssom_wrapper_->Reattach(page_rule_->MutableProperties());
+  }
 }
 
 void CSSPageRule::Trace(Visitor* visitor) const {

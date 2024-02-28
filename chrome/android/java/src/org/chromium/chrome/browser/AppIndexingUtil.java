@@ -13,6 +13,7 @@ import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.Callback;
+import org.chromium.base.ResettersForTesting;
 import org.chromium.base.SysUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.metrics.RecordHistogram;
@@ -30,9 +31,7 @@ import org.chromium.url.GURL;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 
-/**
- * This is the top-level CopylessPaste metadata extraction for AppIndexing.
- */
+/** This is the top-level CopylessPaste metadata extraction for AppIndexing. */
 public class AppIndexingUtil {
     private static final int CACHE_SIZE = 100;
     private static final int CACHE_VISIT_CUTOFF_MS = (int) DateUtils.HOUR_IN_MILLIS;
@@ -57,21 +56,23 @@ public class AppIndexingUtil {
 
     AppIndexingUtil(@Nullable TabModelSelector mTabModelSelectorImpl) {
         if (mTabModelSelectorImpl != null && isEnabledForDevice()) {
-            mObserver = new TabModelSelectorTabObserver(mTabModelSelectorImpl) {
-                @Override
-                public void onPageLoadFinished(final Tab tab, GURL url) {
-                    // Part of scroll jank investigation http://crbug.com/1311003. Will remove
-                    // TraceEvent after the investigation is complete.
-                    try (TraceEvent te = TraceEvent.scoped("AppIndexingUtil::onPageLoadFinished")) {
-                        extractDocumentMetadata(tab);
-                    }
-                }
+            mObserver =
+                    new TabModelSelectorTabObserver(mTabModelSelectorImpl) {
+                        @Override
+                        public void onPageLoadFinished(final Tab tab, GURL url) {
+                            // Part of scroll jank investigation http://crbug.com/1311003. Will
+                            // remove TraceEvent after the investigation is complete.
+                            try (TraceEvent te =
+                                    TraceEvent.scoped("AppIndexingUtil::onPageLoadFinished")) {
+                                extractDocumentMetadata(tab);
+                            }
+                        }
 
-                @Override
-                public void didFirstVisuallyNonEmptyPaint(Tab tab) {
-                    reportPageView(tab);
-                }
-            };
+                        @Override
+                        public void didFirstVisuallyNonEmptyPaint(Tab tab) {
+                            reportPageView(tab);
+                        }
+                    };
         }
     }
 
@@ -112,15 +113,16 @@ public class AppIndexingUtil {
             if (documentMetadata == null) {
                 return;
             }
-            documentMetadata.getEntities(webpage -> {
-                documentMetadata.close();
-                putCacheEntry(url, webpage != null);
-                if (sCallbackForTesting != null) {
-                    sCallbackForTesting.onResult(webpage);
-                }
-                if (webpage == null) return;
-                getAppIndexingReporter().reportWebPage(webpage);
-            });
+            documentMetadata.getEntities(
+                    webpage -> {
+                        documentMetadata.close();
+                        putCacheEntry(url, webpage != null);
+                        if (sCallbackForTesting != null) {
+                            sCallbackForTesting.onResult(webpage);
+                        }
+                        if (webpage == null) return;
+                        getAppIndexingReporter().reportWebPage(webpage);
+                    });
         }
     }
 
@@ -130,9 +132,9 @@ public class AppIndexingUtil {
         getAppIndexingReporter().reportWebPageView(tab.getUrl().getSpec(), tab.getTitle());
     }
 
-    @VisibleForTesting
     static void setCallbackForTesting(Callback<WebPage> callback) {
         sCallbackForTesting = callback;
+        ResettersForTesting.register(() -> sCallbackForTesting = null);
     }
 
     private boolean wasPageVisitedRecently(String url) {

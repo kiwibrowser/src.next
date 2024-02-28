@@ -5,9 +5,10 @@
 #include "chrome/browser/download/android/chrome_duplicate_download_infobar_delegate.h"
 
 #include <memory>
+#include <optional>
 
 #include "base/android/path_utils.h"
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/memory/ptr_util.h"
 #include "chrome/browser/download/android/download_controller.h"
 #include "chrome/browser/download/android/download_dialog_utils.h"
@@ -18,7 +19,7 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_item_utils.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "ui/shell_dialogs/selected_file_info.h"
 
 namespace android {
 
@@ -54,8 +55,6 @@ ChromeDuplicateDownloadInfoBarDelegate::ChromeDuplicateDownloadInfoBarDelegate(
       file_path_(file_path),
       file_selected_callback_(std::move(file_selected_callback)) {
   download_item_->AddObserver(this);
-  DuplicateDownloadInfoBar::RecordDuplicateDownloadInfobarEvent(
-      false, DuplicateDownloadInfobarEvent::kShown);
 }
 
 infobars::InfoBarDelegate::InfoBarIdentifier
@@ -64,8 +63,6 @@ ChromeDuplicateDownloadInfoBarDelegate::GetIdentifier() const {
 }
 
 bool ChromeDuplicateDownloadInfoBarDelegate::Accept() {
-  DuplicateDownloadInfoBar::RecordDuplicateDownloadInfobarEvent(
-      false, DuplicateDownloadInfobarEvent::kAccepted);
   if (!download_item_) {
     return true;
   }
@@ -85,13 +82,11 @@ bool ChromeDuplicateDownloadInfoBarDelegate::Accept() {
 }
 
 bool ChromeDuplicateDownloadInfoBarDelegate::Cancel() {
-  DuplicateDownloadInfoBar::RecordDuplicateDownloadInfobarEvent(
-      false, DuplicateDownloadInfobarEvent::kCanceled);
   if (!download_item_)
     return true;
 
   std::move(file_selected_callback_)
-      .Run(DownloadConfirmationResult::CANCELED, base::FilePath());
+      .Run(DownloadConfirmationResult::CANCELED, ui::SelectedFileInfo());
   return true;
 }
 
@@ -100,12 +95,10 @@ std::string ChromeDuplicateDownloadInfoBarDelegate::GetFilePath() const {
 }
 
 void ChromeDuplicateDownloadInfoBarDelegate::InfoBarDismissed() {
-  DuplicateDownloadInfoBar::RecordDuplicateDownloadInfobarEvent(
-      false, DuplicateDownloadInfobarEvent::kDismissed);
   Cancel();
 }
 
-absl::optional<Profile::OTRProfileID>
+std::optional<Profile::OTRProfileID>
 ChromeDuplicateDownloadInfoBarDelegate::GetOTRProfileID() const {
   content::BrowserContext* browser_context =
       content::DownloadItemUtils::GetBrowserContext(download_item_);
@@ -115,7 +108,7 @@ ChromeDuplicateDownloadInfoBarDelegate::GetOTRProfileID() const {
     return Profile::FromBrowserContext(browser_context)->GetOTRProfileID();
   }
   // If belongs to the regular profile, then OTRProfileID should be null.
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 }  // namespace android

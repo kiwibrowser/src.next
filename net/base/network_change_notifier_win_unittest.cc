@@ -6,11 +6,10 @@
 
 #include <utility>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/run_loop.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
-#include "base/threading/thread_task_runner_handle.h"
-#include "base/win/windows_version.h"
 #include "net/base/network_change_notifier.h"
 #include "net/base/network_change_notifier_factory.h"
 #include "net/test/test_with_task_environment.h"
@@ -32,7 +31,8 @@ class TestNetworkChangeNotifierWin : public NetworkChangeNotifierWin {
     last_computed_connection_type_ = NetworkChangeNotifier::CONNECTION_UNKNOWN;
     last_announced_offline_ = false;
     last_computed_connection_cost_ = ConnectionCost::CONNECTION_COST_UNKNOWN;
-    sequence_runner_for_registration_ = base::SequencedTaskRunnerHandle::Get();
+    sequence_runner_for_registration_ =
+        base::SequencedTaskRunner::GetCurrentDefault();
   }
 
   TestNetworkChangeNotifierWin(const TestNetworkChangeNotifierWin&) = delete;
@@ -48,7 +48,7 @@ class TestNetworkChangeNotifierWin : public NetworkChangeNotifierWin {
   // From NetworkChangeNotifierWin.
   void RecomputeCurrentConnectionTypeOnBlockingSequence(
       base::OnceCallback<void(ConnectionType)> reply_callback) const override {
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE, base::BindOnce(std::move(reply_callback),
                                   NetworkChangeNotifier::CONNECTION_UNKNOWN));
   }
@@ -72,11 +72,6 @@ class TestIPAddressObserver : public NetworkChangeNotifier::IPAddressObserver {
 
   MOCK_METHOD0(OnIPAddressChanged, void());
 };
-
-bool ExitMessageLoopAndReturnFalse() {
-  base::RunLoop::QuitCurrentWhenIdleDeprecated();
-  return false;
-}
 
 class NetworkChangeNotifierWinTest : public TestWithTaskEnvironment {
  public:
@@ -195,6 +190,7 @@ class NetworkChangeNotifierWinTest : public TestWithTaskEnvironment {
   // failure.  Simulates a failure on the resulting call to
   // WatchForAddressChangeInternal.
   void RetryAndFail() {
+    base::RunLoop loop;
     EXPECT_FALSE(network_change_notifier_.is_watching());
     EXPECT_LT(0, network_change_notifier_.sequential_failures());
 
@@ -206,9 +202,12 @@ class NetworkChangeNotifierWinTest : public TestWithTaskEnvironment {
         // Due to an expected race, it's theoretically possible for more than
         // one call to occur, though unlikely.
         .Times(AtLeast(1))
-        .WillRepeatedly(Invoke(ExitMessageLoopAndReturnFalse));
+        .WillRepeatedly(Invoke([&loop]() {
+          loop.QuitWhenIdle();
+          return false;
+        }));
 
-    base::RunLoop().Run();
+    loop.Run();
 
     EXPECT_FALSE(network_change_notifier_.is_watching());
     EXPECT_LT(initial_sequential_failures,
@@ -307,10 +306,6 @@ class TestConnectionCostObserver
 };
 
 TEST_F(NetworkChangeNotifierWinTest, NetworkCostManagerIntegration) {
-  // NetworkCostManager integration only exist on Win10+.
-  if (base::win::GetVersion() < base::win::Version::WIN10)
-    return;
-
   // Upon creation, none of the NetworkCostManager integration should be
   // initialized yet.
   ASSERT_FALSE(HasNetworkCostManager());

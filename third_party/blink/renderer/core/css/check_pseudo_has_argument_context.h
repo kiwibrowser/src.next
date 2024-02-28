@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -127,10 +127,6 @@ class CORE_EXPORT CheckPseudoHasArgumentContext {
   static_assert((kDepthBits + kAdjacentBits + kTraversalScopeBits) <=
                     sizeof(CheckPseudoHasArgumentTraversalType) * 8,
                 "traversal type size check");
-
-  inline const CSSSelector* GetCurrentRelationAndNextCompound(
-      const CSSSelector* compound_selector,
-      CSSSelector::RelationType& relation);
 
   // Indicate the :has argument relative type and subtree traversal scope.
   // If 'adjacent_distance_limit' is integer max, it means that all the

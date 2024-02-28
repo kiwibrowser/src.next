@@ -7,12 +7,12 @@
 
 #include <stdint.h>
 
+#include <compare>
 #include <string>
-#include <tuple>
 
 #include "base/base_export.h"
 #include "base/containers/span.h"
-#include "base/hash/hash.h"
+#include "base/strings/string_piece.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
@@ -37,7 +37,8 @@ class BASE_EXPORT Token {
   constexpr Token& operator=(Token&&) = default;
 
   // Constructs a new Token with random |high| and |low| values taken from a
-  // cryptographically strong random source.
+  // cryptographically strong random source. The result's |is_zero()| is
+  // guaranteed to be false.
   static Token CreateRandom();
 
   // The high and low 64 bits of this Token.
@@ -50,18 +51,10 @@ class BASE_EXPORT Token {
     return as_bytes(make_span(words_));
   }
 
-  constexpr bool operator==(const Token& other) const {
-    return words_[0] == other.words_[0] && words_[1] == other.words_[1];
-  }
-
-  constexpr bool operator!=(const Token& other) const {
-    return !(*this == other);
-  }
-
-  constexpr bool operator<(const Token& other) const {
-    return std::tie(words_[0], words_[1]) <
-           std::tie(other.words_[0], other.words_[1]);
-  }
+  friend constexpr auto operator<=>(const Token& lhs,
+                                    const Token& rhs) = default;
+  friend constexpr bool operator==(const Token& lhs,
+                                   const Token& rhs) = default;
 
   // Generates a string representation of this Token useful for e.g. logging.
   std::string ToString() const;
@@ -79,10 +72,8 @@ class BASE_EXPORT Token {
 };
 
 // For use in std::unordered_map.
-struct TokenHash {
-  size_t operator()(const base::Token& token) const {
-    return base::HashInts64(token.high(), token.low());
-  }
+struct BASE_EXPORT TokenHash {
+  size_t operator()(const Token& token) const;
 };
 
 class Pickle;

@@ -9,19 +9,19 @@
 
 #include <utility>
 
-#include "base/bind.h"
+#include "base/feature_list.h"
+#include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
-#include "base/task/task_runner_util.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/thread.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/win/windows_version.h"
+#include "net/base/features.h"
 #include "net/base/winsock_init.h"
 #include "net/base/winsock_util.h"
 
@@ -122,7 +122,7 @@ NetworkChangeNotifierWin::NetworkChangeNotifierWin()
       last_announced_offline_(last_computed_connection_type_ ==
                               CONNECTION_NONE),
       sequence_runner_for_registration_(
-          base::SequencedTaskRunnerHandle::Get()) {
+          base::SequencedTaskRunner::GetCurrentDefault()) {
   memset(&addr_overlapped_, 0, sizeof addr_overlapped_);
   addr_overlapped_.hEvent = WSACreateEvent();
 }
@@ -153,6 +153,43 @@ NetworkChangeNotifierWin::NetworkChangeCalculatorParamsWin() {
   params.connection_type_offline_delay_ = base::Milliseconds(1500);
   params.connection_type_online_delay_ = base::Milliseconds(500);
   return params;
+}
+
+// static
+NetworkChangeNotifier::ConnectionType
+NetworkChangeNotifierWin::RecomputeCurrentConnectionTypeModern() {
+  using GetNetworkConnectivityHintType =
+      decltype(&::GetNetworkConnectivityHint);
+
+  // This API is only available on Windows 10 Build 19041. However, it works
+  // inside the Network Service Sandbox, so is preferred. See
+  GetNetworkConnectivityHintType get_network_connectivity_hint =
+      reinterpret_cast<GetNetworkConnectivityHintType>(::GetProcAddress(
+          ::GetModuleHandleA("iphlpapi.dll"), "GetNetworkConnectivityHint"));
+  if (!get_network_connectivity_hint) {
+    return NetworkChangeNotifier::CONNECTION_UNKNOWN;
+  }
+  NL_NETWORK_CONNECTIVITY_HINT hint;
+  // https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getnetworkconnectivityhint.
+  auto ret = get_network_connectivity_hint(&hint);
+  if (ret != NO_ERROR) {
+    return NetworkChangeNotifier::CONNECTION_UNKNOWN;
+  }
+
+  switch (hint.ConnectivityLevel) {
+    case NetworkConnectivityLevelHintUnknown:
+      return NetworkChangeNotifier::CONNECTION_UNKNOWN;
+    case NetworkConnectivityLevelHintNone:
+    case NetworkConnectivityLevelHintHidden:
+      return NetworkChangeNotifier::CONNECTION_NONE;
+    case NetworkConnectivityLevelHintLocalAccess:
+    case NetworkConnectivityLevelHintInternetAccess:
+    case NetworkConnectivityLevelHintConstrainedInternetAccess:
+      // TODO(droger): Return something more detailed than CONNECTION_UNKNOWN.
+      return ConnectionTypeFromInterfaces();
+  }
+
+  NOTREACHED_NORETURN();
 }
 
 // This implementation does not return the actual connection type but merely
@@ -206,6 +243,12 @@ NetworkChangeNotifierWin::NetworkChangeCalculatorParamsWin() {
 // static
 NetworkChangeNotifier::ConnectionType
 NetworkChangeNotifierWin::RecomputeCurrentConnectionType() {
+  if (base::win::GetVersion() >= base::win::Version::WIN10_20H1 &&
+      base::FeatureList::IsEnabled(
+          features::kEnableGetNetworkConnectivityHintAPI)) {
+    return RecomputeCurrentConnectionTypeModern();
+  }
+
   EnsureWinsockInit();
 
   // The following code was adapted from:
@@ -273,8 +316,8 @@ void NetworkChangeNotifierWin::RecomputeCurrentConnectionTypeOnBlockingSequence(
     base::OnceCallback<void(ConnectionType)> reply_callback) const {
   // Unretained is safe in this call because this object owns the thread and the
   // thread is stopped in this object's destructor.
-  base::PostTaskAndReplyWithResult(
-      blocking_task_runner_.get(), FROM_HERE,
+  blocking_task_runner_->PostTaskAndReplyWithResult(
+      FROM_HERE,
       base::BindOnce(&NetworkChangeNotifierWin::RecomputeCurrentConnectionType),
       std::move(reply_callback));
 }
@@ -282,10 +325,6 @@ void NetworkChangeNotifierWin::RecomputeCurrentConnectionTypeOnBlockingSequence(
 NetworkChangeNotifier::ConnectionCost
 NetworkChangeNotifierWin::GetCurrentConnectionCost() {
   InitializeConnectionCost();
-
-  // Pre-Win10 use the default logic.
-  if (base::win::GetVersion() < base::win::Version::WIN10)
-    return NetworkChangeNotifier::GetCurrentConnectionCost();
 
   // If we don't have the event sink we aren't registered for automatic updates.
   // In that case, we need to update the value at the time it is requested.
@@ -296,12 +335,6 @@ NetworkChangeNotifierWin::GetCurrentConnectionCost() {
 }
 
 bool NetworkChangeNotifierWin::InitializeConnectionCostOnce() {
-  // Pre-Win10 this information cannot be retrieved and cached.
-  if (base::win::GetVersion() < base::win::Version::WIN10) {
-    SetCurrentConnectionCost(CONNECTION_COST_UNKNOWN);
-    return true;
-  }
-
   HRESULT hr =
       ::CoCreateInstance(CLSID_NetworkListManager, nullptr, CLSCTX_ALL,
                          IID_INetworkCostManager, &network_cost_manager_);
@@ -444,7 +477,7 @@ void NetworkChangeNotifierWin::WatchForAddressChange() {
   if (!WatchForAddressChangeInternal()) {
     ++sequential_failures_;
 
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE,
         base::BindOnce(&NetworkChangeNotifierWin::WatchForAddressChange,
                        weak_factory_.GetWeakPtr()),

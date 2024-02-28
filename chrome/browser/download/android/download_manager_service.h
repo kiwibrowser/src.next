@@ -6,11 +6,13 @@
 #define CHROME_BROWSER_DOWNLOAD_ANDROID_DOWNLOAD_MANAGER_SERVICE_H_
 
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/android/scoped_java_ref.h"
-#include "base/callback.h"
+#include "base/functional/callback.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/scoped_multi_source_observation.h"
 #include "chrome/browser/download/android/download_open_source.h"
@@ -88,15 +90,7 @@ class DownloadManagerService
   void ResumeDownload(JNIEnv* env,
                       jobject obj,
                       const JavaParamRef<jstring>& jdownload_guid,
-                      const JavaParamRef<jobject>& j_profile_key,
-                      bool has_user_gesture);
-
-  // Called to retry a download.
-  void RetryDownload(JNIEnv* env,
-                     jobject obj,
-                     const JavaParamRef<jstring>& jdownload_guid,
-                     const JavaParamRef<jobject>& j_profile_key,
-                     bool has_user_gesture);
+                      const JavaParamRef<jobject>& j_profile_key);
 
   // Called to cancel a download item that has GUID equal to |jdownload_guid|.
   // If the DownloadItem is not yet created, retry after a while.
@@ -180,8 +174,8 @@ class DownloadManagerService
       const JavaParamRef<jstring>& jtarget_path);
 
   // Retrives the in-progress manager and give up the ownership.
-  download::InProgressDownloadManager* RetriveInProgressDownloadManager(
-      content::BrowserContext* context);
+  std::unique_ptr<download::InProgressDownloadManager>
+  RetrieveInProgressDownloadManager(content::BrowserContext* context);
 
   // Gets a download item from DownloadManager or InProgressManager.
   download::DownloadItem* GetDownload(const std::string& download_guid,
@@ -205,15 +199,15 @@ class DownloadManagerService
   friend class DownloadManagerServiceTest;
   friend struct base::DefaultSingletonTraits<DownloadManagerService>;
 
+  enum DownloadAction { RESUME, PAUSE, CANCEL, REMOVE, UNKNOWN };
+
+  using PendingDownloadActions = std::map<std::string, DownloadAction>;
+  using Coordinators =
+      std::map<ProfileKey*, download::SimpleDownloadManagerCoordinator*>;
+
   // Helper function to start the download resumption.
   void ResumeDownloadInternal(const std::string& download_guid,
-                              ProfileKey* profile_key,
-                              bool has_user_gesture);
-
-  // Helper function to retry the download.
-  void RetryDownloadInternal(const std::string& download_guid,
-                             ProfileKey* profile_key,
-                             bool has_user_gesture);
+                              ProfileKey* profile_key);
 
   // Helper function to cancel a download.
   void CancelDownloadInternal(const std::string& download_guid,
@@ -267,35 +261,20 @@ class DownloadManagerService
   bool is_manager_initialized_;
   bool is_pending_downloads_loaded_;
 
-  std::vector<ProfileKey*> profiles_with_pending_get_downloads_actions_;
+  std::vector<raw_ptr<ProfileKey, VectorExperimental>>
+      profiles_with_pending_get_downloads_actions_;
 
-  enum DownloadAction { RESUME, RETRY, PAUSE, CANCEL, REMOVE, UNKNOWN };
-
-  // Holds params provided to the download function calls.
-  struct DownloadActionParams {
-    explicit DownloadActionParams(DownloadAction download_action);
-    DownloadActionParams(DownloadAction download_action, bool user_gesture);
-    DownloadActionParams(const DownloadActionParams& other);
-
-    ~DownloadActionParams() = default;
-
-    DownloadAction action;
-    bool has_user_gesture;
-  };
-
-  using PendingDownloadActions = std::map<std::string, DownloadActionParams>;
   PendingDownloadActions pending_actions_;
 
   void EnqueueDownloadAction(const std::string& download_guid,
-                             const DownloadActionParams& params);
+                             DownloadAction download_action);
 
   ResumeCallback resume_callback_for_testing_;
 
   base::ScopedMultiSourceObservation<Profile, ProfileObserver>
       observed_profiles_{this};
 
-  std::map<ProfileKey*, download::SimpleDownloadManagerCoordinator*>
-      coordinators_;
+  Coordinators coordinators_;
 };
 
 #endif  // CHROME_BROWSER_DOWNLOAD_ANDROID_DOWNLOAD_MANAGER_SERVICE_H_

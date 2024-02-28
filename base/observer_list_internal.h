@@ -16,7 +16,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list_types.h"
 
-#if EXPENSIVE_DCHECKS_ARE_ON()
+#if DCHECK_IS_ON()
 #include "base/debug/stack_trace.h"
 #endif
 
@@ -42,20 +42,22 @@ class BASE_EXPORT UncheckedObserverAdapter {
   template <class ObserverType>
   static ObserverType* Get(const UncheckedObserverAdapter& adapter) {
     static_assert(
-        !std::is_base_of<CheckedObserver, ObserverType>::value,
+        !std::is_base_of_v<CheckedObserver, ObserverType>,
         "CheckedObserver classes must not use ObserverList<T>::Unchecked.");
     return static_cast<ObserverType*>(adapter.ptr_);
   }
 
-#if EXPENSIVE_DCHECKS_ARE_ON()
-  std::string GetCreationStackString() const { return stack_.ToString(); }
-#endif  // EXPENSIVE_DCHECKS_ARE_ON()
+#if DCHECK_IS_ON()
+  std::string GetCreationStackString() const {
+    return "Observer created at:\n" + stack_.ToString();
+  }
+#endif  // DCHECK_IS_ON()
 
  private:
-  raw_ptr<void, DanglingUntriaged> ptr_;
-#if EXPENSIVE_DCHECKS_ARE_ON()
+  raw_ptr<void, AcrossTasksDanglingUntriaged> ptr_;
+#if DCHECK_IS_ON()
   base::debug::StackTrace stack_;
-#endif  // EXPENSIVE_DCHECKS_ARE_ON()
+#endif  // DCHECK_IS_ON()
 };
 
 // Adapter for CheckedObserver types so that they can use the same syntax as a
@@ -100,20 +102,20 @@ class BASE_EXPORT CheckedObserverAdapter {
   template <class ObserverType>
   static ObserverType* Get(const CheckedObserverAdapter& adapter) {
     static_assert(
-        std::is_base_of<CheckedObserver, ObserverType>::value,
+        std::is_base_of_v<CheckedObserver, ObserverType>,
         "Observers should inherit from base::CheckedObserver. "
         "Use ObserverList<T>::Unchecked to observe with raw pointers.");
     DCHECK(adapter.weak_ptr_);
     return static_cast<ObserverType*>(adapter.weak_ptr_.get());
   }
 
-#if EXPENSIVE_DCHECKS_ARE_ON()
+#if DCHECK_IS_ON()
   std::string GetCreationStackString() const { return stack_.ToString(); }
 #endif
 
  private:
   WeakPtr<CheckedObserver> weak_ptr_;
-#if EXPENSIVE_DCHECKS_ARE_ON()
+#if DCHECK_IS_ON()
   base::debug::StackTrace stack_;
 #endif
 };

@@ -1,16 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<issues format="6" by="lint 7.4.0-alpha05" type="baseline" client="" dependencies="true" name="" variant="all" version="7.4.0-alpha05">
-
-    <issue
-        id="LintError"
-        message="../../remoting/android/lint-baseline.xml (relative to /usr/local/google/home/wnwen/z1/src/out/Debug) does not exist"
-        errorLine1="  &lt;baseline file=&quot;../../remoting/android/lint-baseline.xml&quot;/>"
-        errorLine2="  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="project.xml"
-            line="5"
-            column="3"/>
-    </issue>
+<issues format="6" by="lint 8.3.0-alpha12" type="baseline" client="" dependencies="true" name="" variant="all" version="8.3.0-alpha12">
 
     <issue
         id="WrongConstant"
@@ -18,8 +7,8 @@
         errorLine1="        if (mDrawerLayout.isDrawerOpen(Gravity.START)) {"
         errorLine2="                                       ~~~~~~~~~~~~~">
         <location
-            file="$SRC/remoting/android/java/src/org/chromium/chromoting/Chromoting.java"
-            line="204"
+            file="../../remoting/android/java/src/org/chromium/chromoting/Chromoting.java"
+            line="203"
             column="40"/>
     </issue>
 
@@ -29,8 +18,8 @@
         errorLine1="            mDrawerLayout.closeDrawer(Gravity.START);"
         errorLine2="                                      ~~~~~~~~~~~~~">
         <location
-            file="$SRC/remoting/android/java/src/org/chromium/chromoting/Chromoting.java"
-            line="205"
+            file="../../remoting/android/java/src/org/chromium/chromoting/Chromoting.java"
+            line="204"
             column="39"/>
     </issue>
 
@@ -40,8 +29,8 @@
         errorLine1="                        if (mDrawerLayout.isDrawerOpen(Gravity.START)) {"
         errorLine2="                                                       ~~~~~~~~~~~~~">
         <location
-            file="$SRC/remoting/android/java/src/org/chromium/chromoting/Chromoting.java"
-            line="292"
+            file="../../remoting/android/java/src/org/chromium/chromoting/Chromoting.java"
+            line="291"
             column="56"/>
     </issue>
 
@@ -51,8 +40,8 @@
         errorLine1="                            mDrawerLayout.closeDrawer(Gravity.START);"
         errorLine2="                                                      ~~~~~~~~~~~~~">
         <location
-            file="$SRC/remoting/android/java/src/org/chromium/chromoting/Chromoting.java"
-            line="293"
+            file="../../remoting/android/java/src/org/chromium/chromoting/Chromoting.java"
+            line="292"
             column="55"/>
     </issue>
 
@@ -62,20 +51,9 @@
         errorLine1="                            mDrawerLayout.openDrawer(Gravity.START);"
         errorLine2="                                                     ~~~~~~~~~~~~~">
         <location
-            file="$SRC/remoting/android/java/src/org/chromium/chromoting/Chromoting.java"
-            line="295"
+            file="../../remoting/android/java/src/org/chromium/chromoting/Chromoting.java"
+            line="294"
             column="54"/>
-    </issue>
-
-    <issue
-        id="WrongConstant"
-        message="Must be one of: InputMode.UNKNOWN, InputMode.TRACKPAD, InputMode.TOUCH"
-        errorLine1="        for (int i = 0; i &lt; InputMode.NUM_ENTRIES; i++) {"
-        errorLine2="                                      ~~~~~~~~~~~">
-        <location
-            file="$SRC/remoting/android/java/src/org/chromium/chromoting/Desktop.java"
-            line="351"
-            column="39"/>
     </issue>
 
     <issue
@@ -84,7 +62,7 @@
         errorLine1="        android:drawableStart=&quot;@drawable/ic_host_online&quot;"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="$SRC/remoting/android/java/res/layout/host_online.xml"
+            file="../../remoting/android/java/res/layout/host_online.xml"
             line="28"
             column="9"/>
     </issue>
@@ -95,8 +73,8 @@
         errorLine1="        mWebView.getSettings().setJavaScriptEnabled(true);"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="$SRC/remoting/android/java/src/org/chromium/chromoting/help/HelpActivity.java"
-            line="91"
+            file="../../remoting/android/java/src/org/chromium/chromoting/help/HelpActivity.java"
+            line="89"
             column="9"/>
     </issue>
 
@@ -106,8 +84,8 @@
         errorLine1="        webView.getSettings().setJavaScriptEnabled(true);"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="$SRC/remoting/android/java/src/org/chromium/chromoting/WebViewActivity.java"
-            line="46"
+            file="../../remoting/android/java/src/org/chromium/chromoting/WebViewActivity.java"
+            line="44"
             column="9"/>
     </issue>
 
@@ -117,97 +95,9 @@
         errorLine1="  &lt;application android:label=&quot;@string/product_name_android&quot; android:name=&quot;org.chromium.chromoting.RemotingApplication&quot; android:icon=&quot;@mipmap/ic_launcher&quot; android:theme=&quot;@style/BaseTheme&quot; android:allowBackup=&quot;false&quot; android:resizeableActivity=&quot;true&quot; android:supportsPictureInPicture=&quot;false&quot;>"
         errorLine2="                                                                                                                                                                                                                ~~~~~">
         <location
-            file="gen/remoting/android/remoting_apk__lint/gen/remoting/android/AndroidManifest.xml"
+            file="gen/remoting/android/remoting_apk__lint/AndroidManifest.xml"
             line="16"
             column="209"/>
-    </issue>
-
-    <issue
-        id="ObsoleteSdkInt"
-        message="Unnecessary; SDK_INT is always >= 23"
-        errorLine1="        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="$SRC/remoting/android/java/src/org/chromium/chromoting/accountswitcher/AccountManagerCompat.java"
-            line="25"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="ObsoleteSdkInt"
-        message="Unnecessary; SDK_INT is always >= 23"
-        errorLine1="        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="$SRC/remoting/android/java/src/org/chromium/chromoting/Chromoting.java"
-            line="628"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="ObsoleteSdkInt"
-        message="Unnecessary; SDK_INT is always >= 23"
-        errorLine1="        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="$SRC/remoting/android/java/src/org/chromium/chromoting/Desktop.java"
-            line="183"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="ObsoleteSdkInt"
-        message="Unnecessary; SDK_INT is always >= 23"
-        errorLine1="        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {"
-        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="$SRC/remoting/android/java/src/org/chromium/chromoting/Desktop.java"
-            line="221"
-            column="20"/>
-    </issue>
-
-    <issue
-        id="ObsoleteSdkInt"
-        message="Unnecessary; SDK_INT is always >= 23"
-        errorLine1="        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="$SRC/remoting/android/java/src/org/chromium/chromoting/Desktop.java"
-            line="280"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="ObsoleteSdkInt"
-        message="Unnecessary; SDK_INT is always >= 23"
-        errorLine1="        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="$SRC/remoting/android/java/src/org/chromium/chromoting/Desktop.java"
-            line="512"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="ObsoleteSdkInt"
-        message="Unnecessary; SDK_INT is always >= 23"
-        errorLine1="        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="$SRC/remoting/android/java/src/org/chromium/chromoting/Desktop.java"
-            line="521"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="ObsoleteSdkInt"
-        message="Unnecessary; SDK_INT is always >= 23"
-        errorLine1="        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="$SRC/remoting/android/java/src/org/chromium/chromoting/Desktop.java"
-            line="605"
-            column="13"/>
     </issue>
 
     <issue
@@ -216,7 +106,7 @@
         errorLine1="&lt;adaptive-icon xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;>"
         errorLine2="^">
         <location
-            file="$SRC/remoting/android/java/res/mipmap-anydpi-v26/ic_launcher.xml"
+            file="../../remoting/android/java/res/mipmap-anydpi-v26/ic_launcher.xml"
             line="2"
             column="1"/>
     </issue>
@@ -227,7 +117,7 @@
         errorLine1="    public final boolean onTouchEvent(MotionEvent event) {"
         errorLine2="                         ~~~~~~~~~~~~">
         <location
-            file="$SRC/remoting/android/java/src/org/chromium/chromoting/DesktopView.java"
+            file="../../remoting/android/java/src/org/chromium/chromoting/DesktopView.java"
             line="85"
             column="26"/>
     </issue>
@@ -236,7 +126,7 @@
         id="RtlEnabled"
         message="The project references RTL attributes, but does not explicitly enable or disable RTL support with `android:supportsRtl` in the manifest">
         <location
-            file="gen/remoting/android/remoting_apk__lint/gen/remoting/android/AndroidManifest.xml"/>
+            file="gen/remoting/android/remoting_apk__lint/AndroidManifest.xml"/>
     </issue>
 
 </issues>

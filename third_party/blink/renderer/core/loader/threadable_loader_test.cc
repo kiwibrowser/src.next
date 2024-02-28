@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,8 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
+#include "third_party/blink/public/mojom/timing/resource_timing.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/task_type.h"
-#include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/platform/web_url_response.h"
 #include "third_party/blink/public/platform/web_worker_fetch_context.h"
@@ -31,9 +31,8 @@
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
-#include "third_party/blink/renderer/platform/loader/fetch/resource_timing_info.h"
-#include "third_party/blink/renderer/platform/loader/testing/web_url_loader_factory_with_mock.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
+#include "third_party/blink/renderer/platform/testing/url_loader_mock_factory.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
@@ -159,6 +158,7 @@ class ThreadableLoaderTestHelper final {
     loader_ = nullptr;
   }
   void ClearLoader() { loader_ = nullptr; }
+
   Checkpoint& GetCheckpoint() { return checkpoint_; }
   void CallCheckpoint(int n) { checkpoint_.Call(n); }
 
@@ -199,6 +199,7 @@ class ThreadableLoaderTest : public testing::Test {
   void CancelLoader() { helper_->CancelLoader(); }
   void CancelAndClearLoader() { helper_->CancelAndClearLoader(); }
   void ClearLoader() { helper_->ClearLoader(); }
+
   Checkpoint& GetCheckpoint() { return helper_->GetCheckpoint(); }
   void CallCheckpoint(int n) { helper_->CallCheckpoint(n); }
 
@@ -472,6 +473,8 @@ TEST_F(ThreadableLoaderTest, ClearInRedirectDidFinishLoading) {
   CallCheckpoint(2);
   ServeRequests();
 }
+
+// TODO(crbug.com/1356128): Add unit tests to cover histogram logging.
 
 }  // namespace
 

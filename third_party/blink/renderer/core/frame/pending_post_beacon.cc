@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,15 +18,21 @@ namespace blink {
 
 // static
 PendingPostBeacon* PendingPostBeacon::Create(ExecutionContext* ec,
-                                             const String& target_url) {
+                                             const String& target_url,
+                                             ExceptionState& exception_state) {
   auto* options = PendingBeaconOptions::Create();
-  return PendingPostBeacon::Create(ec, target_url, options);
+  return PendingPostBeacon::Create(ec, target_url, options, exception_state);
 }
 
 // static
 PendingPostBeacon* PendingPostBeacon::Create(ExecutionContext* ec,
                                              const String& target_url,
-                                             PendingBeaconOptions* options) {
+                                             PendingBeaconOptions* options,
+                                             ExceptionState& exception_state) {
+  if (!CanSendBeacon(target_url, *ec, exception_state)) {
+    return nullptr;
+  }
+
   return MakeGarbageCollected<PendingPostBeacon>(
       ec, target_url, options->backgroundTimeout(), options->timeout(),
       base::PassKey<PendingPostBeacon>());

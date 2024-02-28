@@ -40,7 +40,7 @@ class ReauthTabHelperTest : public ChromeRenderViewHostTestHarness {
   const GURL& reauth_url() { return reauth_url_; }
 
  private:
-  raw_ptr<ReauthTabHelper> tab_helper_ = nullptr;
+  raw_ptr<ReauthTabHelper, DanglingUntriaged> tab_helper_ = nullptr;
   base::MockOnceCallback<void(signin::ReauthResult)> mock_callback_;
   const GURL reauth_url_;
 };
@@ -153,16 +153,10 @@ TEST_F(ReauthTabHelperTest, WebContentsDestroyed) {
 
 class ReauthTabHelperPrerenderTest : public ReauthTabHelperTest {
  public:
-  ReauthTabHelperPrerenderTest() {
-    feature_list_.InitWithFeatures(
-        {blink::features::kPrerender2},
-        // Disable the memory requirement of Prerender2 so the test can run on
-        // any bot.
-        {blink::features::kPrerender2MemoryControls});
-  }
+  ReauthTabHelperPrerenderTest() = default;
 
  private:
-  base::test::ScopedFeatureList feature_list_;
+  content::test::ScopedPrerenderFeatureList prerender_feature_list_;
 };
 
 TEST_F(ReauthTabHelperPrerenderTest,

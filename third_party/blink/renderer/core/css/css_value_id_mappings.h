@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_VALUE_ID_MAPPINGS_H_
 
 #include "base/notreached.h"
+#include "third_party/blink/renderer/core/animation/effect_model.h"
 #include "third_party/blink/renderer/core/css/css_value_id_mappings_generated.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 
@@ -26,49 +27,88 @@ inline CSSValueID PlatformEnumToCSSValueID(T v) {
 
 template <>
 inline UnicodeBidi CssValueIDToPlatformEnum(CSSValueID v) {
-  if (v == CSSValueID::kWebkitIsolate)
+  if (v == CSSValueID::kWebkitIsolate) {
     return UnicodeBidi::kIsolate;
-  if (v == CSSValueID::kWebkitIsolateOverride)
+  }
+  if (v == CSSValueID::kWebkitIsolateOverride) {
     return UnicodeBidi::kIsolateOverride;
-  if (v == CSSValueID::kWebkitPlaintext)
+  }
+  if (v == CSSValueID::kWebkitPlaintext) {
     return UnicodeBidi::kPlaintext;
+  }
   return detail::cssValueIDToPlatformEnumGenerated<UnicodeBidi>(v);
 }
 
 template <>
 inline EBoxOrient CssValueIDToPlatformEnum(CSSValueID v) {
-  if (v == CSSValueID::kInlineAxis)
+  if (v == CSSValueID::kInlineAxis) {
     return EBoxOrient::kHorizontal;
-  if (v == CSSValueID::kBlockAxis)
+  }
+  if (v == CSSValueID::kBlockAxis) {
     return EBoxOrient::kVertical;
+  }
 
   return detail::cssValueIDToPlatformEnumGenerated<EBoxOrient>(v);
 }
 
 template <>
 inline ETextCombine CssValueIDToPlatformEnum(CSSValueID v) {
-  if (v == CSSValueID::kHorizontal)  // -webkit-text-combine
+  if (v == CSSValueID::kHorizontal) {  // -webkit-text-combine
     return ETextCombine::kAll;
+  }
   return detail::cssValueIDToPlatformEnumGenerated<ETextCombine>(v);
 }
 
 template <>
 inline ETextAlign CssValueIDToPlatformEnum(CSSValueID v) {
   if (v ==
-      CSSValueID::kWebkitAuto)  // Legacy -webkit-auto. Eqiuvalent to start.
+      CSSValueID::kWebkitAuto) {  // Legacy -webkit-auto. Eqiuvalent to start.
     return ETextAlign::kStart;
-  if (v == CSSValueID::kInternalCenter)
+  }
+  if (v == CSSValueID::kInternalCenter) {
     return ETextAlign::kCenter;
+  }
   return detail::cssValueIDToPlatformEnumGenerated<ETextAlign>(v);
 }
 
 template <>
+inline CSSValueID PlatformEnumToCSSValueID(EffectModel::CompositeOperation v) {
+  switch (v) {
+    case EffectModel::kCompositeReplace:
+      return CSSValueID::kReplace;
+    case EffectModel::kCompositeAdd:
+      return CSSValueID::kAdd;
+    case EffectModel::kCompositeAccumulate:
+      return CSSValueID::kAccumulate;
+  }
+  NOTREACHED();
+  return CSSValueID::kReplace;
+}
+
+template <>
+inline EffectModel::CompositeOperation CssValueIDToPlatformEnum(CSSValueID v) {
+  switch (v) {
+    case CSSValueID::kReplace:
+      return EffectModel::kCompositeReplace;
+    case CSSValueID::kAdd:
+      return EffectModel::kCompositeAdd;
+    case CSSValueID::kAccumulate:
+      return EffectModel::kCompositeAccumulate;
+    default:
+      NOTREACHED();
+      return EffectModel::kCompositeReplace;
+  }
+}
+
+template <>
 inline ETextOrientation CssValueIDToPlatformEnum(CSSValueID v) {
-  if (v ==
-      CSSValueID::kSidewaysRight)  // Legacy -webkit-auto. Eqiuvalent to start.
+  if (v == CSSValueID::kSidewaysRight) {  // Legacy -webkit-auto. Eqiuvalent to
+                                          // start.
     return ETextOrientation::kSideways;
-  if (v == CSSValueID::kVerticalRight)
+  }
+  if (v == CSSValueID::kVerticalRight) {
     return ETextOrientation::kMixed;
+  }
   return detail::cssValueIDToPlatformEnumGenerated<ETextOrientation>(v);
 }
 
@@ -107,71 +147,107 @@ inline WritingMode CssValueIDToPlatformEnum(CSSValueID v) {
 
 template <>
 inline ECursor CssValueIDToPlatformEnum(CSSValueID v) {
-  if (v == CSSValueID::kWebkitZoomIn)
+  if (v == CSSValueID::kWebkitZoomIn) {
     return ECursor::kZoomIn;
-  if (v == CSSValueID::kWebkitZoomOut)
+  }
+  if (v == CSSValueID::kWebkitZoomOut) {
     return ECursor::kZoomOut;
-  if (v == CSSValueID::kWebkitGrab)
+  }
+  if (v == CSSValueID::kWebkitGrab) {
     return ECursor::kGrab;
-  if (v == CSSValueID::kWebkitGrabbing)
+  }
+  if (v == CSSValueID::kWebkitGrabbing) {
     return ECursor::kGrabbing;
+  }
   return detail::cssValueIDToPlatformEnumGenerated<ECursor>(v);
 }
 
 template <>
 inline EDisplay CssValueIDToPlatformEnum(CSSValueID v) {
-  if (v == CSSValueID::kNone)
+  if (v == CSSValueID::kNone) {
     return EDisplay::kNone;
-  if (v == CSSValueID::kInline)
+  }
+  if (v == CSSValueID::kInline) {
     return EDisplay::kInline;
-  if (v == CSSValueID::kBlock)
+  }
+  if (v == CSSValueID::kBlock || v == CSSValueID::kFlow) {
     return EDisplay::kBlock;
-  if (v == CSSValueID::kFlowRoot)
+  }
+  if (v == CSSValueID::kFlowRoot) {
     return EDisplay::kFlowRoot;
-  if (v == CSSValueID::kListItem)
+  }
+  if (v == CSSValueID::kListItem) {
     return EDisplay::kListItem;
-  if (v == CSSValueID::kInlineBlock)
+  }
+  if (v == CSSValueID::kInlineBlock) {
     return EDisplay::kInlineBlock;
-  if (v == CSSValueID::kTable)
+  }
+  if (v == CSSValueID::kTable) {
     return EDisplay::kTable;
-  if (v == CSSValueID::kInlineTable)
+  }
+  if (v == CSSValueID::kInlineTable) {
     return EDisplay::kInlineTable;
-  if (v == CSSValueID::kTableRowGroup)
+  }
+  if (v == CSSValueID::kTableRowGroup) {
     return EDisplay::kTableRowGroup;
-  if (v == CSSValueID::kTableHeaderGroup)
+  }
+  if (v == CSSValueID::kTableHeaderGroup) {
     return EDisplay::kTableHeaderGroup;
-  if (v == CSSValueID::kTableFooterGroup)
+  }
+  if (v == CSSValueID::kTableFooterGroup) {
     return EDisplay::kTableFooterGroup;
-  if (v == CSSValueID::kTableRow)
+  }
+  if (v == CSSValueID::kTableRow) {
     return EDisplay::kTableRow;
-  if (v == CSSValueID::kTableColumnGroup)
+  }
+  if (v == CSSValueID::kTableColumnGroup) {
     return EDisplay::kTableColumnGroup;
-  if (v == CSSValueID::kTableColumn)
+  }
+  if (v == CSSValueID::kTableColumn) {
     return EDisplay::kTableColumn;
-  if (v == CSSValueID::kTableCell)
+  }
+  if (v == CSSValueID::kTableCell) {
     return EDisplay::kTableCell;
-  if (v == CSSValueID::kTableCaption)
+  }
+  if (v == CSSValueID::kTableCaption) {
     return EDisplay::kTableCaption;
-  if (v == CSSValueID::kWebkitBox)
+  }
+  if (v == CSSValueID::kWebkitBox) {
     return EDisplay::kWebkitBox;
-  if (v == CSSValueID::kWebkitInlineBox)
+  }
+  if (v == CSSValueID::kWebkitInlineBox) {
     return EDisplay::kWebkitInlineBox;
-  if (v == CSSValueID::kFlex)
+  }
+  if (v == CSSValueID::kFlex) {
     return EDisplay::kFlex;
-  if (v == CSSValueID::kInlineFlex)
+  }
+  if (v == CSSValueID::kInlineFlex) {
     return EDisplay::kInlineFlex;
-  if (v == CSSValueID::kGrid)
+  }
+  if (v == CSSValueID::kGrid) {
     return EDisplay::kGrid;
-  if (v == CSSValueID::kInlineGrid)
+  }
+  if (v == CSSValueID::kInlineGrid) {
     return EDisplay::kInlineGrid;
-  if (v == CSSValueID::kContents)
+  }
+  if (v == CSSValueID::kContents) {
     return EDisplay::kContents;
-  if (v == CSSValueID::kWebkitFlex)
+  }
+  if (v == CSSValueID::kWebkitFlex) {
     return EDisplay::kFlex;
-  if (v == CSSValueID::kWebkitInlineFlex)
+  }
+  if (v == CSSValueID::kWebkitInlineFlex) {
     return EDisplay::kInlineFlex;
-  if (v == CSSValueID::kMath)
+  }
+  if (v == CSSValueID::kMath) {
     return EDisplay::kMath;
+  }
+  if (v == CSSValueID::kRuby) {
+    return EDisplay::kRuby;
+  }
+  if (v == CSSValueID::kRubyText) {
+    return EDisplay::kRubyText;
+  }
 
   NOTREACHED();
   return EDisplay::kInline;
@@ -179,61 +255,92 @@ inline EDisplay CssValueIDToPlatformEnum(CSSValueID v) {
 
 template <>
 inline EUserSelect CssValueIDToPlatformEnum(CSSValueID v) {
-  if (v == CSSValueID::kAuto)
+  if (v == CSSValueID::kAuto) {
     return EUserSelect::kAuto;
+  }
   return detail::cssValueIDToPlatformEnumGenerated<EUserSelect>(v);
 }
 
 template <>
 inline CSSValueID PlatformEnumToCSSValueID(EDisplay v) {
-  if (v == EDisplay::kNone)
+  if (v == EDisplay::kNone) {
     return CSSValueID::kNone;
-  if (v == EDisplay::kInline)
+  }
+  if (v == EDisplay::kInline) {
     return CSSValueID::kInline;
-  if (v == EDisplay::kBlock)
+  }
+  if (v == EDisplay::kBlock) {
     return CSSValueID::kBlock;
-  if (v == EDisplay::kFlowRoot)
+  }
+  if (v == EDisplay::kFlowRoot) {
     return CSSValueID::kFlowRoot;
-  if (v == EDisplay::kListItem)
+  }
+  if (v == EDisplay::kListItem) {
     return CSSValueID::kListItem;
-  if (v == EDisplay::kInlineBlock)
+  }
+  if (v == EDisplay::kInlineBlock) {
     return CSSValueID::kInlineBlock;
-  if (v == EDisplay::kTable)
+  }
+  if (v == EDisplay::kTable) {
     return CSSValueID::kTable;
-  if (v == EDisplay::kInlineTable)
+  }
+  if (v == EDisplay::kInlineTable) {
     return CSSValueID::kInlineTable;
-  if (v == EDisplay::kTableRowGroup)
+  }
+  if (v == EDisplay::kTableRowGroup) {
     return CSSValueID::kTableRowGroup;
-  if (v == EDisplay::kTableHeaderGroup)
+  }
+  if (v == EDisplay::kTableHeaderGroup) {
     return CSSValueID::kTableHeaderGroup;
-  if (v == EDisplay::kTableFooterGroup)
+  }
+  if (v == EDisplay::kTableFooterGroup) {
     return CSSValueID::kTableFooterGroup;
-  if (v == EDisplay::kTableRow)
+  }
+  if (v == EDisplay::kTableRow) {
     return CSSValueID::kTableRow;
-  if (v == EDisplay::kTableColumnGroup)
+  }
+  if (v == EDisplay::kTableColumnGroup) {
     return CSSValueID::kTableColumnGroup;
-  if (v == EDisplay::kTableColumn)
+  }
+  if (v == EDisplay::kTableColumn) {
     return CSSValueID::kTableColumn;
-  if (v == EDisplay::kTableCell)
+  }
+  if (v == EDisplay::kTableCell) {
     return CSSValueID::kTableCell;
-  if (v == EDisplay::kTableCaption)
+  }
+  if (v == EDisplay::kTableCaption) {
     return CSSValueID::kTableCaption;
-  if (v == EDisplay::kWebkitBox)
+  }
+  if (v == EDisplay::kWebkitBox) {
     return CSSValueID::kWebkitBox;
-  if (v == EDisplay::kWebkitInlineBox)
+  }
+  if (v == EDisplay::kWebkitInlineBox) {
     return CSSValueID::kWebkitInlineBox;
-  if (v == EDisplay::kFlex)
+  }
+  if (v == EDisplay::kFlex) {
     return CSSValueID::kFlex;
-  if (v == EDisplay::kInlineFlex)
+  }
+  if (v == EDisplay::kInlineFlex) {
     return CSSValueID::kInlineFlex;
-  if (v == EDisplay::kGrid)
+  }
+  if (v == EDisplay::kGrid) {
     return CSSValueID::kGrid;
-  if (v == EDisplay::kInlineGrid)
+  }
+  if (v == EDisplay::kInlineGrid) {
     return CSSValueID::kInlineGrid;
-  if (v == EDisplay::kContents)
+  }
+  if (v == EDisplay::kContents) {
     return CSSValueID::kContents;
-  if (v == EDisplay::kMath)
+  }
+  if (v == EDisplay::kMath) {
     return CSSValueID::kMath;
+  }
+  if (v == EDisplay::kRuby) {
+    return CSSValueID::kRuby;
+  }
+  if (v == EDisplay::kRubyText) {
+    return CSSValueID::kRubyText;
+  }
 
   NOTREACHED();
   return CSSValueID::kInline;
@@ -241,12 +348,15 @@ inline CSSValueID PlatformEnumToCSSValueID(EDisplay v) {
 
 template <>
 inline PageOrientation CssValueIDToPlatformEnum(CSSValueID v) {
-  if (v == CSSValueID::kUpright)
+  if (v == CSSValueID::kUpright) {
     return PageOrientation::kUpright;
-  if (v == CSSValueID::kRotateLeft)
+  }
+  if (v == CSSValueID::kRotateLeft) {
     return PageOrientation::kRotateLeft;
-  if (v == CSSValueID::kRotateRight)
+  }
+  if (v == CSSValueID::kRotateRight) {
     return PageOrientation::kRotateRight;
+  }
 
   NOTREACHED();
   return PageOrientation::kUpright;
@@ -254,15 +364,160 @@ inline PageOrientation CssValueIDToPlatformEnum(CSSValueID v) {
 
 template <>
 inline ScrollbarGutter CssValueIDToPlatformEnum(CSSValueID v) {
-  if (v == CSSValueID::kAuto)
+  if (v == CSSValueID::kAuto) {
     return kScrollbarGutterAuto;
-  if (v == CSSValueID::kStable)
+  }
+  if (v == CSSValueID::kStable) {
     return kScrollbarGutterStable;
-  if (v == CSSValueID::kBothEdges)
+  }
+  if (v == CSSValueID::kBothEdges) {
     return kScrollbarGutterBothEdges;
+  }
 
   NOTREACHED();
   return kScrollbarGutterAuto;
+}
+
+template <>
+inline EWhiteSpace CssValueIDToPlatformEnum(CSSValueID v) {
+  switch (v) {
+    case CSSValueID::kNormal:
+      return EWhiteSpace::kNormal;
+    case CSSValueID::kPre:
+      return EWhiteSpace::kPre;
+    case CSSValueID::kPreWrap:
+      return EWhiteSpace::kPreWrap;
+    case CSSValueID::kPreLine:
+      return EWhiteSpace::kPreLine;
+    case CSSValueID::kNowrap:
+      return EWhiteSpace::kNowrap;
+    case CSSValueID::kBreakSpaces:
+      return EWhiteSpace::kBreakSpaces;
+    default:
+      NOTREACHED();
+      return EWhiteSpace::kNormal;
+  }
+}
+
+template <>
+inline CSSValueID PlatformEnumToCSSValueID(EWhiteSpace v) {
+  switch (v) {
+    case EWhiteSpace::kNormal:
+      return CSSValueID::kNormal;
+    case EWhiteSpace::kNowrap:
+      return CSSValueID::kNowrap;
+    case EWhiteSpace::kPre:
+      return CSSValueID::kPre;
+    case EWhiteSpace::kPreLine:
+      return CSSValueID::kPreLine;
+    case EWhiteSpace::kPreWrap:
+      return CSSValueID::kPreWrap;
+    case EWhiteSpace::kBreakSpaces:
+      return CSSValueID::kBreakSpaces;
+  }
+  NOTREACHED();
+  return CSSValueID::kNone;
+}
+
+template <>
+inline WhiteSpaceCollapse CssValueIDToPlatformEnum(CSSValueID v) {
+  switch (v) {
+    case CSSValueID::kCollapse:
+      return WhiteSpaceCollapse::kCollapse;
+    case CSSValueID::kPreserve:
+      return WhiteSpaceCollapse::kPreserve;
+    case CSSValueID::kPreserveBreaks:
+      return WhiteSpaceCollapse::kPreserveBreaks;
+    case CSSValueID::kBreakSpaces:
+      return WhiteSpaceCollapse::kBreakSpaces;
+    default:
+      NOTREACHED();
+      return WhiteSpaceCollapse::kCollapse;
+  }
+}
+
+template <>
+inline CSSValueID PlatformEnumToCSSValueID(WhiteSpaceCollapse v) {
+  switch (v) {
+    case WhiteSpaceCollapse::kCollapse:
+      return CSSValueID::kCollapse;
+    case WhiteSpaceCollapse::kPreserveBreaks:
+      return CSSValueID::kPreserveBreaks;
+    case WhiteSpaceCollapse::kPreserve:
+      return CSSValueID::kPreserve;
+    case WhiteSpaceCollapse::kBreakSpaces:
+      return CSSValueID::kBreakSpaces;
+  }
+  NOTREACHED();
+  return CSSValueID::kNone;
+}
+
+template <>
+inline TextSpacingTrim CssValueIDToPlatformEnum(CSSValueID v) {
+  switch (v) {
+    case CSSValueID::kNormal:
+      return TextSpacingTrim::kNormal;
+    case CSSValueID::kTrimStart:
+      return TextSpacingTrim::kTrimStart;
+    case CSSValueID::kSpaceAll:
+      return TextSpacingTrim::kSpaceAll;
+    case CSSValueID::kSpaceFirst:
+      return TextSpacingTrim::kSpaceFirst;
+    default:
+      NOTREACHED();
+      return TextSpacingTrim::kNormal;
+  }
+}
+
+template <>
+inline CSSValueID PlatformEnumToCSSValueID(TextSpacingTrim v) {
+  switch (v) {
+    case TextSpacingTrim::kNormal:
+      return CSSValueID::kNormal;
+    case TextSpacingTrim::kTrimStart:
+      return CSSValueID::kTrimStart;
+    case TextSpacingTrim::kSpaceAll:
+      return CSSValueID::kSpaceAll;
+    case TextSpacingTrim::kSpaceFirst:
+      return CSSValueID::kSpaceFirst;
+  }
+  NOTREACHED();
+  return CSSValueID::kNone;
+}
+
+template <>
+inline TextWrap CssValueIDToPlatformEnum(CSSValueID v) {
+  switch (v) {
+    case CSSValueID::kWrap:
+      return TextWrap::kWrap;
+    case CSSValueID::kNowrap:
+      return TextWrap::kNoWrap;
+    case CSSValueID::kBalance:
+      return TextWrap::kBalance;
+    case CSSValueID::kPretty:
+      DCHECK(RuntimeEnabledFeatures::CSSTextWrapPrettyEnabled());
+      return TextWrap::kPretty;
+    default:
+      NOTREACHED();
+      return TextWrap::kWrap;
+  }
+}
+
+template <>
+inline CSSValueID PlatformEnumToCSSValueID(TextWrap v) {
+  switch (v) {
+    case TextWrap::kWrap:
+      return CSSValueID::kWrap;
+    case TextWrap::kNoWrap:
+      return CSSValueID::kNowrap;
+    case TextWrap::kBalance:
+      return CSSValueID::kBalance;
+    case TextWrap::kPretty:
+      DCHECK(RuntimeEnabledFeatures::CSSTextWrapPrettyEnabled());
+      return CSSValueID::kPretty;
+  }
+  NOTREACHED();
+  return CSSValueID::kNone;
 }
 
 }  // namespace blink

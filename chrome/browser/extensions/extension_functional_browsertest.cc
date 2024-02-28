@@ -5,7 +5,9 @@
 #include <stddef.h>
 
 #include "base/files/file_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/test_future.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
@@ -16,7 +18,6 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -25,10 +26,11 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/extension_util.h"
-#include "extensions/browser/notification_types.h"
 #include "extensions/browser/test_extension_registry_observer.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using base::test::TestFuture;
 
 namespace extensions {
 
@@ -50,11 +52,14 @@ class ExtensionFunctionalTest : public ExtensionBrowserTest {
     installer->set_off_store_install_allow_reason(
         CrxInstaller::OffStoreInstallAllowedInTest);
 
-    observer_->Watch(NOTIFICATION_CRX_INSTALLER_DONE,
-                     content::Source<CrxInstaller>(installer.get()));
-
+    TestFuture<std::optional<CrxInstallError>> installer_done_future;
+    installer->AddInstallerCallback(
+        installer_done_future
+            .GetCallback<const std::optional<CrxInstallError>&>());
     installer->InstallCrx(path);
-    observer_->Wait();
+
+    const std::optional<CrxInstallError>& error = installer_done_future.Get();
+    EXPECT_FALSE(error);
 
     size_t num_after = registry->enabled_extensions().size();
     EXPECT_EQ(num_before + 1, num_after);
@@ -117,20 +122,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionFunctionalTest,
       tab1->GetSiteInstance()->IsRelatedSiteInstance(tab2->GetSiteInstance()));
 
   // Name the 2 frames.
-  EXPECT_TRUE(content::ExecuteScript(tab1, "window.name = 'tab1';"));
-  EXPECT_TRUE(content::ExecuteScript(tab2, "window.name = 'tab2';"));
+  EXPECT_TRUE(content::ExecJs(tab1, "window.name = 'tab1';"));
+  EXPECT_TRUE(content::ExecJs(tab2, "window.name = 'tab2';"));
 
   // Open a new window from tab1 and store it in tab1_popup.
   content::RenderFrameHost* tab1_popup = nullptr;
   {
     content::WebContentsAddedObserver new_window_observer;
-    bool did_create_popup = false;
-    ASSERT_TRUE(ExecuteScriptAndExtractBool(
-        tab1,
-        "window.domAutomationController.send("
-        "    !!window.open('about:blank', 'new_popup'));",
-        &did_create_popup));
-    ASSERT_TRUE(did_create_popup);
+    ASSERT_EQ(true, EvalJs(tab1, "!!window.open('about:blank', 'new_popup');"));
     content::WebContents* popup_window = new_window_observer.GetWebContents();
     EXPECT_TRUE(WaitForLoadStop(popup_window));
     tab1_popup = popup_window->GetPrimaryMainFrame();
@@ -139,12 +138,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionFunctionalTest,
 
   // Verify that |tab1_popup| can find unrelated frames from the same extension
   // (i.e. that it can find |tab2|.
-  std::string location_of_opened_window;
-  EXPECT_TRUE(ExecuteScriptAndExtractString(
-      tab1_popup,
-      "var w = window.open('', 'tab2');\n"
-      "window.domAutomationController.send(w.location.href);",
-      &location_of_opened_window));
+  std::string location_of_opened_window =
+      EvalJs(tab1_popup,
+             "var w = window.open('', 'tab2');\n"
+             "w.location.href;")
+          .ExtractString();
   EXPECT_EQ(tab2->GetLastCommittedURL(), location_of_opened_window);
 }
 
@@ -156,7 +154,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionFunctionalTest, DownloadExtensionResource) {
   ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("download")));
   download_observer.WaitForFinished();
 
-  std::vector<download::DownloadItem*> download_items;
+  std::vector<raw_ptr<download::DownloadItem, VectorExperimental>>
+      download_items;
   download_manager->GetAllDownloads(&download_items);
 
   base::ScopedAllowBlockingForTesting allow_blocking;

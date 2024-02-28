@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
+#include "base/functional/callback_helpers.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -132,7 +132,7 @@ IN_PROC_BROWSER_TEST_F(MouseEventsTest, MouseDownOnBrowserCaption) {
 }
 #endif
 
-#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || defined(USE_OZONE)
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_OZONE)
 // Test that a mouseleave is not triggered when showing the context menu.
 // If the test is failed, it means that Blink gets the mouseleave event
 // when showing the context menu and it could make the unexpecting

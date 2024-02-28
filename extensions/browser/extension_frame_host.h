@@ -17,6 +17,9 @@ class WebContents;
 
 namespace extensions {
 
+class Extension;
+class ProcessManager;
+
 // Implements the mojo interface of extensions::mojom::LocalFrameHost.
 // ExtensionWebContentsObserver creates and owns this class and it's destroyed
 // when WebContents is destroyed.
@@ -29,7 +32,7 @@ class ExtensionFrameHost : public mojom::LocalFrameHost {
 
   void BindLocalFrameHost(
       mojo::PendingAssociatedReceiver<mojom::LocalFrameHost> receiver,
-      content::RenderFrameHost* rfh);
+      content::RenderFrameHost* render_frame_host);
 
   content::RenderFrameHostReceiverSet<mojom::LocalFrameHost>&
   receivers_for_testing() {
@@ -46,13 +49,52 @@ class ExtensionFrameHost : public mojom::LocalFrameHost {
                           GetAppInstallStateCallback callback) override;
   void Request(mojom::RequestParamsPtr params,
                RequestCallback callback) override;
+  void ResponseAck(const base::Uuid& request_uuid) override;
   void WatchedPageChange(
       const std::vector<std::string>& css_selectors) override;
+  void DetailedConsoleMessageAdded(
+      const std::u16string& message,
+      const std::u16string& source,
+      const StackTrace& stack_trace,
+      blink::mojom::ConsoleMessageLevel level) override;
+  void ContentScriptsExecuting(
+      const base::flat_map<std::string, std::vector<std::string>>&
+          extension_id_to_scripts,
+      const GURL& frame_url) override;
+  void IncrementLazyKeepaliveCount() override;
+  void DecrementLazyKeepaliveCount() override;
+  void UpdateDraggableRegions(
+      std::vector<mojom::DraggableRegionPtr> regions) override;
+  void AppWindowReady() override;
+  void OpenChannelToExtension(
+      extensions::mojom::ExternalConnectionInfoPtr info,
+      extensions::mojom::ChannelType channel_type,
+      const std::string& channel_name,
+      const PortId& port_id,
+      mojo::PendingAssociatedRemote<extensions::mojom::MessagePort> port,
+      mojo::PendingAssociatedReceiver<extensions::mojom::MessagePortHost>
+          port_host) override;
+  void OpenChannelToNativeApp(
+      const std::string& native_app_name,
+      const PortId& port_id,
+      mojo::PendingAssociatedRemote<extensions::mojom::MessagePort> port,
+      mojo::PendingAssociatedReceiver<extensions::mojom::MessagePortHost>
+          port_host) override;
+  void OpenChannelToTab(
+      int32_t tab_id,
+      int32_t frame_id,
+      const std::optional<std::string>& document_id,
+      extensions::mojom::ChannelType channel_type,
+      const std::string& channel_name,
+      const PortId& port_id,
+      mojo::PendingAssociatedRemote<extensions::mojom::MessagePort> port,
+      mojo::PendingAssociatedReceiver<extensions::mojom::MessagePortHost>
+          port_host) override;
 
  protected:
-  content::WebContents* web_contents() { return web_contents_; }
+  const Extension* GetExtension(ProcessManager* process_manager,
+                                content::RenderFrameHost* frame);
 
- private:
   // This raw pointer is safe to use because ExtensionWebContentsObserver whose
   // lifetime is tied to the WebContents owns this instance.
   raw_ptr<content::WebContents> web_contents_;

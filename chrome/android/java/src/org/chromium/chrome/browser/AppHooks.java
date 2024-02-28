@@ -4,22 +4,11 @@
 
 package org.chromium.chrome.browser;
 
-import android.content.pm.PackageInfo;
-import android.content.pm.PackageManager;
-
 import androidx.annotation.Nullable;
-import androidx.annotation.VisibleForTesting;
-
-import com.google.android.gms.common.ConnectionResult;
-import com.google.android.gms.common.GoogleApiAvailability;
 
 import org.chromium.base.ContextUtils;
-import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.ResettersForTesting;
 import org.chromium.chrome.browser.customtabs.CustomTabsConnection;
-import org.chromium.chrome.browser.directactions.DirectActionCoordinator;
-import org.chromium.chrome.browser.feedback.FeedbackReporter;
-import org.chromium.chrome.browser.feedback.HelpAndFeedbackLauncher;
-import org.chromium.chrome.browser.feedback.HelpAndFeedbackLauncherImpl;
 import org.chromium.chrome.browser.gsa.GSAHelper;
 import org.chromium.chrome.browser.historyreport.AppIndexingReporter;
 import org.chromium.chrome.browser.init.ChromeStartupDelegate;
@@ -33,22 +22,15 @@ import org.chromium.chrome.browser.partnerbookmarks.PartnerBookmarksProviderIter
 import org.chromium.chrome.browser.password_manager.GooglePasswordManagerUIProvider;
 import org.chromium.chrome.browser.policy.PolicyAuditor;
 import org.chromium.chrome.browser.rlz.RevenueStats;
-import org.chromium.chrome.browser.survey.SurveyController;
 import org.chromium.chrome.browser.sync.TrustedVaultClient;
 import org.chromium.chrome.browser.ui.signin.GoogleActivityController;
 import org.chromium.chrome.browser.usage_stats.DigitalWellbeingClient;
 import org.chromium.chrome.browser.webapps.GooglePlayWebApkInstallDelegate;
-import org.chromium.chrome.browser.xsurface.ProcessScope;
-import org.chromium.chrome.browser.xsurface.ProcessScopeDependencyProvider;
-import org.chromium.chrome.modules.image_editor.ImageEditorModuleProvider;
 import org.chromium.components.policy.AppRestrictionsProvider;
 import org.chromium.components.policy.CombinedPolicyProvider;
 import org.chromium.components.signin.AccountManagerDelegate;
 import org.chromium.components.signin.SystemAccountManagerDelegate;
 import org.chromium.components.webapps.AppDetailsDelegate;
-
-import java.util.Collections;
-import java.util.List;
 
 /**
  * Base class for defining methods where different behavior is required by downstream targets.
@@ -59,20 +41,18 @@ import java.util.List;
  * go/apphooks-migration should be followed to solve this class of problems.
  */
 public abstract class AppHooks {
-    private static AppHooksImpl sInstance;
+    private static AppHooksImpl sInstanceForTesting;
 
-    /**
-     * Sets a mocked instance for testing.
-     */
-    @VisibleForTesting
+    /** Sets a mocked instance for testing. */
     public static void setInstanceForTesting(AppHooksImpl instance) {
-        sInstance = instance;
+        sInstanceForTesting = instance;
+        ResettersForTesting.register(() -> sInstanceForTesting = null);
     }
 
-    @CalledByNative
     public static AppHooks get() {
-        if (sInstance == null) sInstance = new AppHooksImpl();
-        return sInstance;
+        if (sInstanceForTesting != null) return sInstanceForTesting;
+        // R8 can better optimize if we return a new instance each time.
+        return new AppHooksImpl();
     }
 
     /**
@@ -108,29 +88,6 @@ public abstract class AppHooks {
     }
 
     /**
-     * Returns a new {@link DirectActionCoordinator} instance, if available.
-     */
-    @Nullable
-    public DirectActionCoordinator createDirectActionCoordinator() {
-        return null;
-    }
-
-    /**
-     * Creates a new {@link SurveyController}.
-     * @return The created {@link SurveyController}.
-     */
-    public SurveyController createSurveyController() {
-        return new SurveyController();
-    }
-
-    /**
-     * @return An instance of {@link FeedbackReporter} to report feedback.
-     */
-    public FeedbackReporter createFeedbackReporter() {
-        return new FeedbackReporter() {};
-    }
-
-    /**
      * @return An instance of GoogleActivityController.
      */
     public GoogleActivityController createGoogleActivityController() {
@@ -143,13 +100,6 @@ public abstract class AppHooks {
      */
     public GSAHelper createGsaHelper() {
         return new GSAHelper();
-    }
-
-    /**
-     * Returns a new instance of HelpAndFeedbackLauncher.
-     */
-    public HelpAndFeedbackLauncher createHelpAndFeedbackLauncher() {
-        return new HelpAndFeedbackLauncherImpl();
     }
 
     public InstantAppsHandler createInstantAppsHandler() {
@@ -186,9 +136,7 @@ public abstract class AppHooks {
         return new RevenueStats();
     }
 
-    /**
-     * Returns a new instance of VariationsSession.
-     */
+    /** Returns a new instance of VariationsSession. */
     public VariationsSession createVariationsSession() {
         return new VariationsSession();
     }
@@ -212,14 +160,6 @@ public abstract class AppHooks {
     }
 
     /**
-     * @return A list of allowlisted app package names whose completed notifications
-     * we should suppress.
-     */
-    public List<String> getOfflinePagesSuppressNotificationPackages() {
-        return Collections.emptyList();
-    }
-
-    /**
      * @return An iterator of partner bookmarks.
      */
     @Nullable
@@ -234,70 +174,23 @@ public abstract class AppHooks {
         return new DigitalWellbeingClient();
     }
 
-    /**
-     * Checks the Google Play services availability on the this device.
-     *
-     * This is a workaround for the
-     * versioned API of {@link GoogleApiAvailability#isGooglePlayServicesAvailable()}. The current
-     * Google Play services SDK version doesn't have this API yet.
-     *
-     * TODO(zqzhang): Remove this method after the SDK is updated.
-     *
-     * @return status code indicating whether there was an error. The possible return values are the
-     * same as {@link GoogleApiAvailability#isGooglePlayServicesAvailable()}.
-     */
-    public int isGoogleApiAvailableWithMinApkVersion(int minApkVersion) {
-        try {
-            PackageInfo gmsPackageInfo =
-                    ContextUtils.getApplicationContext().getPackageManager().getPackageInfo(
-                            GoogleApiAvailability.GOOGLE_PLAY_SERVICES_PACKAGE, /* flags= */ 0);
-            int apkVersion = gmsPackageInfo.versionCode;
-            if (apkVersion >= minApkVersion) return ConnectionResult.SUCCESS;
-        } catch (PackageManager.NameNotFoundException e) {
-            return ConnectionResult.SERVICE_MISSING;
-        }
-        return ConnectionResult.SERVICE_VERSION_UPDATE_REQUIRED;
-    }
-
-    /**
-     * Returns a new {@link TrustedVaultClient.Backend} instance.
-     */
+    /** Returns a new {@link TrustedVaultClient.Backend} instance. */
     public TrustedVaultClient.Backend createSyncTrustedVaultClientBackend() {
         return new TrustedVaultClient.EmptyBackend();
     }
 
-    /**
-     * This is deprecated, and should not be called. Use FeedHooks instead.
-     */
-    public @Nullable ProcessScope getExternalSurfaceProcessScope(
-            ProcessScopeDependencyProvider dependencies) {
-        return null;
-    }
-
-    /**
-     * Returns the URL to the WebAPK creation/update server.
-     */
+    /** Returns the URL to the WebAPK creation/update server. */
     public String getWebApkServerUrl() {
         return "";
     }
 
-    /**
-     * Returns a Chime Delegate if the chime module is defined.
-     */
+    /** Returns a Chime Delegate if the chime module is defined. */
     public ChimeDelegate getChimeDelegate() {
         return new ChimeDelegate();
     }
 
-    public @Nullable ImageEditorModuleProvider getImageEditorModuleProvider() {
-        return null;
-    }
-
     public ChromeStartupDelegate createChromeStartupDelegate() {
         return new ChromeStartupDelegate();
-    }
-
-    public boolean canStartForegroundServiceWhileInvisible() {
-        return true;
     }
 
     public String getDefaultQueryTilesServerUrl() {

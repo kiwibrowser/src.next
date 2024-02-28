@@ -4,12 +4,12 @@
 
 #include "chrome/browser/signin/dice_intercepted_session_startup_helper.h"
 
-#include <algorithm>
 #include <vector>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/containers/contains.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "chrome/browser/signin/account_reconcilor_factory.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
@@ -17,6 +17,7 @@
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/common/webui_url_constants.h"
 #include "components/signin/public/base/multilogin_parameters.h"
+#include "components/signin/public/base/signin_metrics.h"
 #include "components/signin/public/identity_manager/accounts_cookie_mutator.h"
 #include "components/signin/public/identity_manager/accounts_in_cookie_jar_info.h"
 #include "components/signin/public/identity_manager/set_accounts_in_cookie_result.h"
@@ -33,10 +34,7 @@ bool CookieInfoContains(const signin::AccountsInCookieJarInfo& cookie_info,
                         const CoreAccountId& account_id) {
   const std::vector<gaia::ListedAccount>& accounts =
       cookie_info.signed_in_accounts;
-  return std::find_if(accounts.begin(), accounts.end(),
-                      [&account_id](const gaia::ListedAccount& account) {
-                        return account.id == account_id;
-                      }) != accounts.end();
+  return base::Contains(accounts, account_id, &gaia::ListedAccount::id);
 }
 
 }  // namespace
@@ -77,7 +75,7 @@ void DiceInterceptedSessionStartupHelper::Startup(base::OnceClosure callback) {
     // Adding accounts to the cookies can be an expensive operation. In
     // particular the ExternalCCResult fetch may time out after multiple seconds
     // (see kExternalCCResultTimeoutSeconds and https://crbug.com/750316#c37).
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE, on_cookie_update_timeout_.callback(), base::Seconds(12));
 
     accounts_in_cookie_observer_.Observe(identity_manager);
@@ -104,14 +102,14 @@ void DiceInterceptedSessionStartupHelper::OnAccountsInCookieUpdated(
 void DiceInterceptedSessionStartupHelper::OnStateChanged(
     signin_metrics::AccountReconcilorState state) {
   DCHECK(!use_multilogin_);
-  if (state == signin_metrics::ACCOUNT_RECONCILOR_ERROR) {
+  if (state == signin_metrics::AccountReconcilorState::kError) {
     reconcile_error_encountered_ = true;
     return;
   }
 
   // TODO(https://crbug.com/1051864): remove this when the cookie updates are
   // correctly sent after reconciliation.
-  if (state == signin_metrics::ACCOUNT_RECONCILOR_OK) {
+  if (state == signin_metrics::AccountReconcilorState::kOk) {
     signin::IdentityManager* identity_manager =
         IdentityManagerFactory::GetForProfile(profile_);
     // GetAccountsInCookieJar() automatically re-schedules a /ListAccounts call

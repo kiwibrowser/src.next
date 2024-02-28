@@ -17,8 +17,6 @@
 #include <vector>
 
 #include "base/base_switches.h"
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/dcheck_is_on.h"
 #include "base/enterprise_util.h"
@@ -27,36 +25,35 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/important_file_writer_cleaner.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/i18n/rtl.h"
 #include "base/location.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/no_destructor.h"
 #include "base/path_service.h"
 #include "base/scoped_native_library.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/thread_pool.h"
-#include "base/threading/sequenced_task_runner_handle.h"
 #include "base/trace_event/base_tracing.h"
 #include "base/version.h"
 #include "base/win/pe_image.h"
 #include "base/win/registry.h"
 #include "base/win/win_util.h"
-#include "base/win/windows_version.h"
 #include "base/win/wrapped_window_proc.h"
 #include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/browser/about_flags.h"
+#include "chrome/browser/active_use_util.h"
 #include "chrome/browser/browser_features.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/enterprise/browser_management/management_service_factory.h"
+#include "chrome/browser/enterprise/platform_auth/platform_auth_policy_observer.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/os_crypt/app_bound_encryption_metrics_win.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_shortcut_manager.h"
-#include "chrome/browser/safe_browsing/chrome_cleaner/settings_resetter_win.h"
-#include "chrome/browser/safe_browsing/settings_reset_prompt/settings_reset_prompt_config.h"
-#include "chrome/browser/safe_browsing/settings_reset_prompt/settings_reset_prompt_util_win.h"
 #include "chrome/browser/shell_integration_win.h"
 #include "chrome/browser/ui/accessibility_util.h"
 #include "chrome/browser/ui/simple_message_box.h"
@@ -67,6 +64,7 @@
 #include "chrome/browser/web_applications/os_integration/web_app_handler_registration_utils_win.h"
 #include "chrome/browser/web_applications/os_integration/web_app_shortcut.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
+#include "chrome/browser/web_applications/web_app_registrar.h"
 #include "chrome/browser/win/browser_util.h"
 #include "chrome/browser/win/chrome_elf_init.h"
 #include "chrome/browser/win/conflicts/enumerate_input_method_editors.h"
@@ -83,7 +81,7 @@
 #include "chrome/common/crash_keys.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/branded_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/install_static/install_details.h"
 #include "chrome/installer/util/helper.h"
@@ -95,11 +93,12 @@
 #include "components/crash/core/app/crash_export_thunks.h"
 #include "components/crash/core/app/dump_hung_process_with_ptype.h"
 #include "components/crash/core/common/crash_key.h"
-#include "components/os_crypt/os_crypt.h"
+#include "components/os_crypt/sync/os_crypt.h"
 #include "components/policy/core/common/management/management_service.h"
 #include "components/prefs/pref_service.h"
 #include "components/version_info/channel.h"
 #include "components/version_info/version_info.h"
+#include "components/webapps/common/web_app_id.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
@@ -110,7 +109,6 @@
 #include "ui/base/ui_base_switches.h"
 #include "ui/base/win/hidden_window.h"
 #include "ui/base/win/message_box_win.h"
-#include "ui/display/win/dpi.h"
 #include "ui/gfx/switches.h"
 #include "ui/gfx/system_fonts_win.h"
 #include "ui/gfx/win/crash_id_helper.h"
@@ -138,13 +136,6 @@ void DumpHungRendererProcessImpl(const base::Process& renderer) {
   crash_reporter::DumpHungProcessWithPtype(renderer, "hung-renderer");
 }
 
-// gfx::Font callbacks
-void AdjustUIFont(gfx::win::FontAdjustment* font_adjustment) {
-  l10n_util::NeedOverrideDefaultUIFont(&font_adjustment->font_family_override,
-                                       &font_adjustment->font_scale);
-  font_adjustment->font_scale *= display::win::GetAccessibilityFontScale();
-}
-
 int GetMinimumFontSize() {
   int min_font_size;
   base::StringToInt(l10n_util::GetStringUTF16(IDS_MINIMUM_UI_FONT_SIZE),
@@ -157,72 +148,12 @@ class TranslationDelegate : public installer::TranslationDelegate {
   std::wstring GetLocalizedString(int installer_string_id) override;
 };
 
-void DetectFaultTolerantHeap() {
-  enum FTHFlags {
-    FTH_HKLM = 1,
-    FTH_HKCU = 2,
-    FTH_ACLAYERS_LOADED = 4,
-    FTH_ACXTRNAL_LOADED = 8,
-    FTH_FLAGS_COUNT = 16
-  };
-
-  // The Fault Tolerant Heap (FTH) is enabled on some customer machines and is
-  // affecting their performance. We need to know how many machines are
-  // affected in order to decide what to do.
-
-  // The main way that the FTH is enabled is by having a value set in
-  // HKLM\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers
-  // whose name is the full path to the executable and whose data is the
-  // string FaultTolerantHeap. Some documents suggest that this data may also
-  // be found in HKCU. There have also been cases observed where this registry
-  // key is set but the FTH is not enabled, so we also look for AcXtrnal.dll
-  // and AcLayers.dll which are used to implement the FTH on Windows 7 and 8
-  // respectively.
-
-  // Get the module path so that we can look for it in the registry.
-  wchar_t module_path[MAX_PATH];
-  GetModuleFileName(NULL, module_path, ARRAYSIZE(module_path));
-  // Force null-termination, necessary on Windows XP.
-  module_path[ARRAYSIZE(module_path)-1] = 0;
-
-  const wchar_t* const kRegPath = L"Software\\Microsoft\\Windows NT\\"
-        L"CurrentVersion\\AppCompatFlags\\Layers";
-  const wchar_t* const kFTHData = L"FaultTolerantHeap";
-  // We always want to read from the 64-bit version of the registry if present,
-  // since that is what the OS looks at, even for 32-bit processes.
-  const DWORD kRegFlags = KEY_READ | KEY_WOW64_64KEY;
-
-  base::win::RegKey FTH_HKLM_reg(HKEY_LOCAL_MACHINE, kRegPath, kRegFlags);
-  FTHFlags detected = FTHFlags();
-  std::wstring chrome_app_compat;
-  if (FTH_HKLM_reg.ReadValue(module_path, &chrome_app_compat) == 0) {
-    // This *usually* indicates that the fault tolerant heap is enabled.
-    if (wcsicmp(chrome_app_compat.c_str(), kFTHData) == 0)
-      detected = static_cast<FTHFlags>(detected | FTH_HKLM);
-  }
-
-  base::win::RegKey FTH_HKCU_reg(HKEY_CURRENT_USER, kRegPath, kRegFlags);
-  if (FTH_HKCU_reg.ReadValue(module_path, &chrome_app_compat) == 0) {
-    if (wcsicmp(chrome_app_compat.c_str(), kFTHData) == 0)
-      detected = static_cast<FTHFlags>(detected | FTH_HKCU);
-  }
-
-  // Look for the DLLs used to implement the FTH and other compat hacks.
-  if (GetModuleHandleW(L"AcLayers.dll") != NULL)
-    detected = static_cast<FTHFlags>(detected | FTH_ACLAYERS_LOADED);
-  if (GetModuleHandleW(L"AcXtrnal.dll") != NULL)
-    detected = static_cast<FTHFlags>(detected | FTH_ACXTRNAL_LOADED);
-
-  UMA_HISTOGRAM_ENUMERATION("FaultTolerantHeap", detected, FTH_FLAGS_COUNT);
-}
-
 void DelayedRecordProcessorMetrics() {
   mojo::Remote<chrome::mojom::ProcessorMetrics> remote_util_win =
       LaunchProcessorMetricsService();
   auto* remote_util_win_ptr = remote_util_win.get();
   remote_util_win_ptr->RecordProcessorMetrics(
-      base::BindOnce([](mojo::Remote<chrome::mojom::ProcessorMetrics>) {},
-                     std::move(remote_util_win)));
+      base::DoNothingWithBoundArgs(std::move(remote_util_win)));
 }
 
 // Initializes the ModuleDatabase on its owning sequence. Also starts the
@@ -303,8 +234,6 @@ void HandleModuleLoadEventWithoutTimeDateStamp(
 
   // Simple sanity check.
   got_time_date_stamp = got_time_date_stamp && size_of_image == module_size;
-  UMA_HISTOGRAM_BOOLEAN("ThirdPartyModules.TimeDateStampObtained",
-                        got_time_date_stamp);
 
   // Drop the load event if it's not possible to get the time date stamp.
   if (!got_time_date_stamp)
@@ -394,15 +323,6 @@ void ShowCloseBrowserFirstMessageBox() {
       l10n_util::GetStringUTF16(IDS_UNINSTALL_CLOSE_APP));
 }
 
-void MaybePostSettingsResetPrompt() {
-  if (base::FeatureList::IsEnabled(safe_browsing::kSettingsResetPrompt)) {
-    content::GetUIThreadTaskRunner({base::TaskPriority::BEST_EFFORT})
-        ->PostTask(FROM_HERE,
-                   base::BindOnce(
-                       safe_browsing::MaybeShowSettingsResetPromptWithDelay));
-  }
-}
-
 // Updates all Progressive Web App launchers in |profile_dir| to the latest
 // version.
 void UpdatePwaLaunchersForProfile(const base::FilePath& profile_dir) {
@@ -416,11 +336,11 @@ void UpdatePwaLaunchersForProfile(const base::FilePath& profile_dir) {
   auto* provider = web_app::WebAppProvider::GetForWebApps(profile);
   if (!provider)
     return;
-  web_app::WebAppRegistrar& registrar = provider->registrar();
+  web_app::WebAppRegistrar& registrar = provider->registrar_unsafe();
 
   // Create a vector of all PWA-launcher paths in |profile_dir|.
   std::vector<base::FilePath> pwa_launcher_paths;
-  for (const web_app::AppId& app_id : registrar.GetAppIds()) {
+  for (const webapps::AppId& app_id : registrar.GetAppIds()) {
     base::FilePath web_app_path =
         web_app::GetOsIntegrationResourcesDirectoryForApp(profile_dir, app_id,
                                                           GURL());
@@ -512,7 +432,7 @@ void ChromeBrowserMainPartsWin::ToolkitInitialized() {
   DCHECK_NE(base::PlatformThread::CurrentId(), base::kInvalidThreadId);
   gfx::CrashIdHelper::RegisterMainThread(base::PlatformThread::CurrentId());
   ChromeBrowserMainParts::ToolkitInitialized();
-  gfx::win::SetAdjustFontCallback(&AdjustUIFont);
+  gfx::win::SetAdjustFontCallback(&l10n_util::AdjustUiFont);
   gfx::win::SetGetMinimumFontSizeCallback(&GetMinimumFontSize);
 }
 
@@ -527,6 +447,8 @@ void ChromeBrowserMainPartsWin::PreCreateMainMessageLoop() {
   // Initialize the OSCrypt.
   bool os_crypt_init = OSCrypt::Init(local_state);
   DCHECK(os_crypt_init);
+
+  base::SetExtraNoExecuteAllowedPath(chrome::DIR_USER_DATA);
 
   ChromeBrowserMainParts::PreCreateMainMessageLoop();
   if (!is_integration_test()) {
@@ -568,6 +490,10 @@ int ChromeBrowserMainPartsWin::PreCreateThreads() {
 void ChromeBrowserMainPartsWin::PostMainMessageLoopRun() {
   base::ImportantFileWriterCleaner::GetInstance().Stop();
 
+  // The `ProfileManager` has been destroyed, so no new platform authentication
+  // requests will be created.
+  platform_auth_policy_observer_.reset();
+
   ChromeBrowserMainParts::PostMainMessageLoopRun();
 }
 
@@ -575,6 +501,21 @@ void ChromeBrowserMainPartsWin::ShowMissingLocaleMessageBox() {
   ui::MessageBox(NULL, base::ASCIIToWide(kMissingLocaleDataMessage),
                  base::ASCIIToWide(kMissingLocaleDataTitle),
                  MB_OK | MB_ICONERROR | MB_TOPMOST);
+}
+
+void ChromeBrowserMainPartsWin::PreProfileInit() {
+  ChromeBrowserMainParts::PreProfileInit();
+
+  // Create the module database and hook up the in-process module watcher. This
+  // needs to be done before any child processes are initialized as the
+  // `ModuleDatabase` is an endpoint for IPC from child processes.
+  SetupModuleDatabase(&module_watcher_);
+
+  // Start up the platform auth SSO policy observer.
+  PrefService* const local_state = g_browser_process->local_state();
+  if (local_state)
+    platform_auth_policy_observer_ =
+        std::make_unique<PlatformAuthPolicyObserver>(local_state);
 }
 
 void ChromeBrowserMainPartsWin::PostProfileInit(Profile* profile,
@@ -585,38 +526,13 @@ void ChromeBrowserMainPartsWin::PostProfileInit(Profile* profile,
   if (!is_initial_profile)
     return;
 
-#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-  // Explicitly disable the third-party modules blocking.
-  //
-  // Because the blocking code lives in chrome_elf, it is not possible to check
-  // the feature (via the FeatureList API) or the policy to control whether it
-  // is enabled or not.
-  //
-  // What truly controls if the blocking is enabled is the presence of the
-  // module blocklist cache file. This means that to disable the feature, the
-  // cache must be deleted and the browser relaunched.
-  if (!ModuleDatabase::IsThirdPartyBlockingPolicyEnabled() ||
-      !ModuleBlocklistCacheUpdater::IsBlockingEnabled())
-    ThirdPartyConflictsManager::DisableThirdPartyModuleBlocking(
-        base::ThreadPool::CreateTaskRunner(
-            {base::TaskPriority::BEST_EFFORT,
-             base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN,
-             base::MayBlock()})
-            .get());
-#endif
-
-  // Create the module database and hook up the in-process module watcher. This
-  // needs to be done before any child processes are initialized as the
-  // ModuleDatabase is an endpoint for IPC from child processes.
-  SetupModuleDatabase(&module_watcher_);
-
   // If Chrome was launched by a Progressive Web App launcher that needs to be
   // updated, update all launchers for this profile.
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kAppId) &&
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kPwaLauncherVersion) != chrome::kChromeVersion) {
     content::BrowserThread::PostBestEffortTask(
-        FROM_HERE, base::SequencedTaskRunnerHandle::Get(),
+        FROM_HERE, base::SequencedTaskRunner::GetCurrentDefault(),
         base::BindOnce(&UpdatePwaLaunchersForProfile, profile->GetPath()));
   }
 }
@@ -630,27 +546,11 @@ void ChromeBrowserMainPartsWin::PostBrowserStart() {
 
   InitializeChromeElf();
 
-  // Reset settings for the current profile if it's tagged to be reset after a
-  // complete run of the Chrome Cleanup tool. If post-cleanup settings reset is
-  // enabled, we delay checks for settings reset prompt until the scheduled
-  // reset is finished.
-  if (safe_browsing::PostCleanupSettingsResetter::IsEnabled() &&
-      !base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kAppId)) {
-    // Using last opened profiles, because we want to find reset the profile
-    // that was open in the last Chrome run, which may not be open yet in
-    // the current run.
-    safe_browsing::PostCleanupSettingsResetter().ResetTaggedProfiles(
-        g_browser_process->profile_manager()->GetLastOpenedProfiles(),
-        base::BindOnce(&MaybePostSettingsResetPrompt),
-        std::make_unique<
-            safe_browsing::PostCleanupSettingsResetter::Delegate>());
-  } else {
-    MaybePostSettingsResetPrompt();
+#if BUILDFLAG(USE_GOOGLE_UPDATE_INTEGRATION)
+  if constexpr (kShouldRecordActiveUse) {
+    did_run_updater_.emplace();
   }
-  // Record UMA data about whether the fault-tolerant heap is enabled.
-  // Use a delayed task to minimize the impact on startup time.
-  content::GetUIThreadTaskRunner({})->PostDelayedTask(
-      FROM_HERE, base::BindOnce(&DetectFaultTolerantHeap), base::Minutes(1));
+#endif
 
   // Query feature first, to include full population in field trial.
   if (base::FeatureList::IsEnabled(features::kAppBoundEncryptionMetrics) &&
@@ -659,16 +559,12 @@ void ChromeBrowserMainPartsWin::PostBrowserStart() {
   }
 
   // Record Processor Metrics. This is very low priority, hence posting as
-  // BEST_EFFORT to start after Chrome startup has completed. This metric is
-  // only available starting Windows 10.
-  if (base::win::OSInfo::GetInstance()->version() >=
-      base::win::Version::WIN10) {
-    scoped_refptr<base::SequencedTaskRunner> task_runner =
-        base::ThreadPool::CreateSequencedTaskRunner(
-            {base::MayBlock(), base::TaskPriority::BEST_EFFORT});
-    task_runner->PostTask(FROM_HERE,
-                          base::BindOnce(&DelayedRecordProcessorMetrics));
-  }
+  // BEST_EFFORT to start after Chrome startup has completed.
+  scoped_refptr<base::SequencedTaskRunner> task_runner =
+      base::ThreadPool::CreateSequencedTaskRunner(
+          {base::MayBlock(), base::TaskPriority::BEST_EFFORT});
+  task_runner->PostTask(FROM_HERE,
+                        base::BindOnce(&DelayedRecordProcessorMetrics));
 
   // Write current executable path to the User Data directory to inform
   // Progressive Web App launchers, which run from within the User Data
@@ -684,8 +580,7 @@ void ChromeBrowserMainPartsWin::PostBrowserStart() {
       base::BindOnce(&web_app::RecordPwaLauncherResult));
 
   // Possibly migrate pinned taskbar shortcuts.
-  content::GetUIThreadTaskRunner({base::TaskPriority::BEST_EFFORT,
-                                  base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})
+  content::GetUIThreadTaskRunner({base::TaskPriority::BEST_EFFORT})
       ->PostTask(FROM_HERE,
                  base::BindOnce(&MigratePinnedTaskBarShortcutsIfNeeded));
 
@@ -793,9 +688,10 @@ bool ChromeBrowserMainPartsWin::CheckMachineLevelInstall() {
   if (version.IsValid()) {
     base::FilePath exe_path;
     base::PathService::Get(base::DIR_EXE, &exe_path);
-    std::wstring exe = exe_path.value();
-    base::FilePath user_exe_path(installer::GetChromeInstallPath(false));
-    if (base::FilePath::CompareEqualIgnoreCase(exe, user_exe_path.value())) {
+    const base::FilePath user_exe_path(
+        installer::GetInstalledDirectory(/*system_install=*/false));
+    if (base::FilePath::CompareEqualIgnoreCase(exe_path.value(),
+                                               user_exe_path.value())) {
       base::CommandLine uninstall_cmd(
           InstallUtil::GetChromeUninstallCmd(false));
       if (!uninstall_cmd.GetProgram().empty()) {
@@ -876,6 +772,10 @@ base::CommandLine ChromeBrowserMainPartsWin::GetRestartCommandLine(
   if (!command_line.HasSwitch(switches::kRestoreLastSession))
     restart_command.AppendSwitch(switches::kRestoreLastSession);
 
+  // This is used when recording launch mode metric.
+  if (!command_line.HasSwitch(switches::kRestart))
+    restart_command.AppendSwitch(switches::kRestart);
+
   // TODO(crbug.com/964541): Remove other unneeded switches, including
   // duplicates, perhaps harmonize with switches::RemoveSwitchesForAutostart.
   return restart_command;
@@ -936,6 +836,26 @@ void ChromeBrowserMainPartsWin::SetupModuleDatabase(
     std::unique_ptr<ModuleWatcher>* module_watcher) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(module_watcher);
+
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  // Explicitly disable the third-party modules blocking.
+  //
+  // Because the blocking code lives in chrome_elf, it is not possible to check
+  // the feature (via the FeatureList API) or the policy to control whether it
+  // is enabled or not.
+  //
+  // What truly controls if the blocking is enabled is the presence of the
+  // module blocklist cache file. This means that to disable the feature, the
+  // cache must be deleted and the browser relaunched.
+  if (!ModuleDatabase::IsThirdPartyBlockingPolicyEnabled() ||
+      !ModuleBlocklistCacheUpdater::IsBlockingEnabled())
+    ThirdPartyConflictsManager::DisableThirdPartyModuleBlocking(
+        base::ThreadPool::CreateTaskRunner(
+            {base::TaskPriority::BEST_EFFORT,
+             base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN,
+             base::MayBlock()})
+            .get());
+#endif
 
   bool third_party_blocking_policy_enabled =
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)

@@ -8,8 +8,8 @@
 #include <memory>
 #include <utility>
 
-#include "base/bind.h"
 #include "base/compiler_specific.h"
+#include "base/functional/bind.h"
 #include "base/logging.h"
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
@@ -20,6 +20,7 @@
 #include "net/base/ip_endpoint.h"
 #include "net/base/upload_data_stream.h"
 #include "net/http/http_chunked_decoder.h"
+#include "net/http/http_connection_info.h"
 #include "net/http/http_log_util.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_request_info.h"
@@ -54,14 +55,14 @@ std::string GetResponseHeaderLines(const HttpResponseHeaders& headers) {
   return cr_separated_headers;
 }
 
-base::Value NetLogSendRequestBodyParams(uint64_t length,
-                                        bool is_chunked,
-                                        bool did_merge) {
+base::Value::Dict NetLogSendRequestBodyParams(uint64_t length,
+                                              bool is_chunked,
+                                              bool did_merge) {
   base::Value::Dict dict;
   dict.Set("length", static_cast<int>(length));
   dict.Set("is_chunked", is_chunked);
   dict.Set("did_merge", did_merge);
-  return base::Value(std::move(dict));
+  return dict;
 }
 
 void NetLogSendRequestBody(const NetLogWithSource& net_log,
@@ -112,10 +113,10 @@ bool ShouldTryReadingOnUploadError(int error_code) {
 // // size() == BytesRemaining() == BytesConsumed() == 0.
 // // data() points to the beginning of the buffer.
 //
-class HttpStreamParser::SeekableIOBuffer : public IOBuffer {
+class HttpStreamParser::SeekableIOBuffer : public IOBufferWithSize {
  public:
   explicit SeekableIOBuffer(int capacity)
-      : IOBuffer(capacity), real_data_(data_), capacity_(capacity) {}
+      : IOBufferWithSize(capacity), real_data_(data_), capacity_(capacity) {}
 
   // DidConsume() changes the |data_| pointer so that |data_| always points
   // to the first unconsumed byte.
@@ -166,7 +167,8 @@ class HttpStreamParser::SeekableIOBuffer : public IOBuffer {
     data_ = real_data_;
   }
 
-  raw_ptr<char> real_data_;
+  // DanglingUntriaged because it is assigned a DanglingUntriaged pointer.
+  raw_ptr<char, AcrossTasksDanglingUntriaged | AllowPtrArithmetic> real_data_;
   const int capacity_;
   int size_ = 0;
   int used_ = 0;
@@ -244,8 +246,8 @@ int HttpStreamParser::SendRequest(
   if (ShouldMergeRequestHeadersAndBody(request, request_->upload_data_stream)) {
     int merged_size = static_cast<int>(
         request_headers_length_ + request_->upload_data_stream->size());
-    scoped_refptr<IOBuffer> merged_request_headers_and_body =
-        base::MakeRefCounted<IOBuffer>(merged_size);
+    auto merged_request_headers_and_body =
+        base::MakeRefCounted<IOBufferWithSize>(merged_size);
     // We'll repurpose |request_headers_| to store the merged headers and
     // body.
     request_headers_ = base::MakeRefCounted<DrainableIOBuffer>(
@@ -277,10 +279,11 @@ int HttpStreamParser::SendRequest(
   if (!did_merge) {
     // If we didn't merge the body with the headers, then |request_headers_|
     // contains just the HTTP headers.
+    size_t request_size = request.size();
     scoped_refptr<StringIOBuffer> headers_io_buf =
-        base::MakeRefCounted<StringIOBuffer>(request);
+        base::MakeRefCounted<StringIOBuffer>(std::move(request));
     request_headers_ = base::MakeRefCounted<DrainableIOBuffer>(
-        std::move(headers_io_buf), request.size());
+        std::move(headers_io_buf), request_size);
   }
 
   result = DoLoop(OK);
@@ -1030,11 +1033,11 @@ int HttpStreamParser::ParseResponseHeaders(int end_offset) {
 
   response_->headers = headers;
   if (headers->GetHttpVersion() == HttpVersion(0, 9)) {
-    response_->connection_info = HttpResponseInfo::CONNECTION_INFO_HTTP0_9;
+    response_->connection_info = HttpConnectionInfo::kHTTP0_9;
   } else if (headers->GetHttpVersion() == HttpVersion(1, 0)) {
-    response_->connection_info = HttpResponseInfo::CONNECTION_INFO_HTTP1_0;
+    response_->connection_info = HttpConnectionInfo::kHTTP1_0;
   } else if (headers->GetHttpVersion() == HttpVersion(1, 1)) {
-    response_->connection_info = HttpResponseInfo::CONNECTION_INFO_HTTP1_1;
+    response_->connection_info = HttpConnectionInfo::kHTTP1_1;
   }
   DVLOG(1) << __func__ << "() content_length = \""
            << response_->headers->GetContentLength() << "\n\""
@@ -1135,13 +1138,6 @@ void HttpStreamParser::OnConnectionClose() {
   stream_socket_ = nullptr;
 }
 
-void HttpStreamParser::GetSSLInfo(SSLInfo* ssl_info) {
-  if (!request_->url.SchemeIsCryptographic() ||
-      !stream_socket_->GetSSLInfo(ssl_info)) {
-    ssl_info->Reset();
-  }
-}
-
 void HttpStreamParser::GetSSLCertRequestInfo(
     SSLCertRequestInfo* cert_request_info) {
   cert_request_info->Reset();
@@ -1149,7 +1145,7 @@ void HttpStreamParser::GetSSLCertRequestInfo(
     stream_socket_->GetSSLCertRequestInfo(cert_request_info);
 }
 
-int HttpStreamParser::EncodeChunk(const base::StringPiece& payload,
+int HttpStreamParser::EncodeChunk(base::StringPiece payload,
                                   char* output,
                                   size_t output_size) {
   if (output_size < payload.size() + kChunkHeaderFooterSize)

@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_EXTENSIONS_CRX_INSTALLER_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -29,7 +30,6 @@
 #include "extensions/browser/sandboxed_unpacker.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 class ExtensionServiceTest;
 class ScopedProfileKeepAlive;
@@ -146,6 +146,13 @@ class CrxInstaller : public SandboxedUnpackerClient, public ProfileObserver {
   void InitializeCreationFlagsForUpdate(const Extension* extension,
                                         const int initial_flags);
 
+  // Adds a callback that will be run once the installation finishes
+  // (successfully or not).
+  // The added callbacks will be run in the order in which they were added
+  // (FIFO).
+  // Virtual for testing.
+  virtual void AddInstallerCallback(InstallerResultCallback callback);
+
   int creation_flags() const { return creation_flags_; }
   void set_creation_flags(int val) { creation_flags_ = val; }
 
@@ -162,11 +169,6 @@ class CrxInstaller : public SandboxedUnpackerClient, public ProfileObserver {
   // Expected SHA256 hash sum for the package.
   const std::string& expected_hash() const { return expected_hash_; }
   void set_expected_hash(const std::string& val) { expected_hash_ = val; }
-
-  bool verification_check_failed() const { return verification_check_failed_; }
-  void set_verification_check_failed(bool val) {
-    verification_check_failed_ = val;
-  }
 
   // Set the exact version the installed extension should have. If
   // |fail_install_if_unexpected| is true, installation will fail if the actual
@@ -196,6 +198,7 @@ class CrxInstaller : public SandboxedUnpackerClient, public ProfileObserver {
     else
       creation_flags_ &= ~Extension::FROM_WEBSTORE;
   }
+  void set_withhold_permissions();
 
   // If |apps_require_extension_mime_type_| is set to true, be sure to set
   // |original_mime_type_| as well.
@@ -240,9 +243,6 @@ class CrxInstaller : public SandboxedUnpackerClient, public ProfileObserver {
     set_install_flag(kInstallFlagBypassedSafeBrowsingFriction, val);
   }
 
-  // Virtual for testing.
-  virtual void set_installer_callback(InstallerResultCallback callback);
-
   // Callback to be invoked when the crx file has passed the expectations check
   // after unpack success and the ownership of the crx file lies with the
   // installer. The callback is passed the ownership of the crx file.
@@ -259,10 +259,16 @@ class CrxInstaller : public SandboxedUnpackerClient, public ProfileObserver {
   // invalid if this isn't an update.
   const base::Version& current_version() const { return current_version_; }
 
+ protected:
+  // Run all callbacks received in AddInstallerCallback with the given error.
+  // Protected so that FakeCrxInstaller can expose it.
+  void RunInstallerCallbacks(const std::optional<CrxInstallError>& error);
+
  private:
   friend class ::ExtensionServiceTest;
   friend class BookmarkAppInstallFinalizerTest;
   friend class ExtensionUpdaterTest;
+  friend class FakeCrxInstaller;
   friend class MockCrxInstaller;
 
   CrxInstaller(base::WeakPtr<ExtensionService> service_weak,
@@ -275,11 +281,11 @@ class CrxInstaller : public SandboxedUnpackerClient, public ProfileObserver {
 
   // Called after OnUnpackSuccess check to see whether the install expectations
   // are met and the install process should continue.
-  absl::optional<CrxInstallError> CheckExpectations(const Extension* extension);
+  std::optional<CrxInstallError> CheckExpectations(const Extension* extension);
 
   // Called after OnUnpackSuccess as a last check to see whether the install
   // should complete.
-  absl::optional<CrxInstallError> AllowInstall(const Extension* extension);
+  std::optional<CrxInstallError> AllowInstall(const Extension* extension);
 
   // To check whether we need to compute hashes or not, we have to make a query
   // to ContentVerifier, and that should be done on the UI thread.
@@ -299,7 +305,7 @@ class CrxInstaller : public SandboxedUnpackerClient, public ProfileObserver {
   void OnUnpackFailure(const CrxInstallError& error) override;
   void OnUnpackSuccess(const base::FilePath& temp_dir,
                        const base::FilePath& extension_dir,
-                       std::unique_ptr<base::DictionaryValue> original_manifest,
+                       std::unique_ptr<base::Value::Dict> original_manifest,
                        const Extension* extension,
                        const SkBitmap& install_icon,
                        declarative_net_request::RulesetInstallPrefs
@@ -340,7 +346,7 @@ class CrxInstaller : public SandboxedUnpackerClient, public ProfileObserver {
   // Always report from the UI thread.
   void ReportInstallationStage(InstallationStage stage);
   void NotifyCrxInstallBegin();
-  void NotifyCrxInstallComplete(const absl::optional<CrxInstallError>& error);
+  void NotifyCrxInstallComplete(const std::optional<CrxInstallError>& error);
 
   // Deletes temporary directory and crx file if needed.
   void CleanupTempFiles();
@@ -358,7 +364,7 @@ class CrxInstaller : public SandboxedUnpackerClient, public ProfileObserver {
   virtual void OnUnpackSuccessOnSharedFileThread(
       base::FilePath temp_dir,
       base::FilePath extension_dir,
-      std::unique_ptr<base::DictionaryValue> original_manifest,
+      std::unique_ptr<base::Value::Dict> original_manifest,
       scoped_refptr<const Extension> extension,
       SkBitmap install_icon,
       declarative_net_request::RulesetInstallPrefs ruleset_install_prefs);
@@ -374,7 +380,7 @@ class CrxInstaller : public SandboxedUnpackerClient, public ProfileObserver {
   base::SequencedTaskRunner* GetUnpackerTaskRunner();
 
   // The Profile the extension is being installed in.
-  raw_ptr<Profile> profile_;
+  raw_ptr<Profile, DanglingUntriaged> profile_;
 
   // Prevent Profile destruction until the CrxInstaller is done.
   std::unique_ptr<ScopedProfileKeepAlive> profile_keep_alive_;
@@ -411,14 +417,10 @@ class CrxInstaller : public SandboxedUnpackerClient, public ProfileObserver {
   // An expected hash sum for the .crx file.
   std::string expected_hash_;
 
-  // True if installation failed due to a hash sum mismatch or expectations
-  // mismatch.
-  bool verification_check_failed_;
-
   // A copy of the expected manifest, before any transformations like
   // localization have taken place. If |approved_| is true, then the extension's
   // manifest must match this for the install to proceed.
-  std::unique_ptr<base::DictionaryValue> expected_manifest_;
+  std::unique_ptr<base::Value::Dict> expected_manifest_;
 
   // The level of checking when comparing the actual manifest against
   // the |expected_manifest_|.
@@ -453,7 +455,7 @@ class CrxInstaller : public SandboxedUnpackerClient, public ProfileObserver {
 
   // A copy of the unmodified original manifest, before any transformations like
   // localization have taken place.
-  std::unique_ptr<base::DictionaryValue> original_manifest_;
+  std::unique_ptr<base::Value::Dict> original_manifest_;
 
   // If valid, contains the current version of the extension we're
   // installing (for upgrades).
@@ -549,7 +551,7 @@ class CrxInstaller : public SandboxedUnpackerClient, public ProfileObserver {
   std::unique_ptr<PreloadCheckGroup> check_group_;
 
   // Invoked when the install is completed.
-  InstallerResultCallback installer_callback_;
+  std::vector<InstallerResultCallback> installer_callbacks_;
 
   // Invoked when the expectations from CRXFileInfo match with the crx file
   // after unpack success.

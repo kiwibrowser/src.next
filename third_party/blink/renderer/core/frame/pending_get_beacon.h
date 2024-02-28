@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,20 +11,23 @@
 namespace blink {
 
 class PendingBeaconOptions;
+class ExceptionState;
 class ExecutionContext;
 
 // Implementation of the PendingGetBeacon API.
-// https://github.com/WICG/unload-beacon/blob/main/README.md
+// https://github.com/WICG/pending-beacon/blob/main/README.md
 class CORE_EXPORT PendingGetBeacon : public PendingBeacon {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   static PendingGetBeacon* Create(ExecutionContext* context,
-                                  const String& target_url);
+                                  const String& target_url,
+                                  ExceptionState& exception_state);
 
   static PendingGetBeacon* Create(ExecutionContext* context,
                                   const String& target_url,
-                                  PendingBeaconOptions* options);
+                                  PendingBeaconOptions* options,
+                                  ExceptionState& exception_state);
 
   explicit PendingGetBeacon(ExecutionContext* context,
                             const String& url,
@@ -32,7 +35,7 @@ class CORE_EXPORT PendingGetBeacon : public PendingBeacon {
                             int32_t timeout,
                             base::PassKey<PendingGetBeacon> key);
 
-  void setURL(const String& url);
+  void setURL(const String& url, ExceptionState& exception_state);
 };
 
 }  // namespace blink

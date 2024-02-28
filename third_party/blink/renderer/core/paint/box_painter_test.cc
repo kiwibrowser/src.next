@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -191,8 +191,6 @@ TEST_P(BoxPainterTest, ScrollHitTestProperties) {
   // The scroll hit test should be after the container background but before the
   // scrolled contents.
   EXPECT_EQ(kBackgroundPaintInBorderBoxSpace,
-            container.ComputeBackgroundPaintLocationIfComposited());
-  EXPECT_EQ(kBackgroundPaintInBorderBoxSpace,
             container.GetBackgroundPaintLocation());
   EXPECT_THAT(ContentDisplayItems(),
               ElementsAre(VIEW_SCROLLING_BACKGROUND_DISPLAY_ITEM,
@@ -223,20 +221,20 @@ TEST_P(BoxPainterTest, ScrollHitTestProperties) {
 
   // We always create scroll node for the root layer.
   const auto& root_transform =
-      ToUnaliased(paint_chunks.begin()->properties.Transform());
+      ToUnaliased(paint_chunks[0].properties.Transform());
   EXPECT_NE(nullptr, root_transform.ScrollNode());
 
   // The container's background chunk should not scroll and therefore should use
   // the root transform. Its local transform is actually a paint offset
   // transform.
   const auto& container_transform =
-      ToUnaliased((paint_chunks.begin() + 1)->properties.Transform());
+      ToUnaliased(paint_chunks[1].properties.Transform());
   EXPECT_EQ(&root_transform, container_transform.Parent());
   EXPECT_EQ(nullptr, container_transform.ScrollNode());
 
   // The scroll hit test should not be scrolled and should not be clipped.
   // Its local transform is actually a paint offset transform.
-  const auto& scroll_hit_test_chunk = *(paint_chunks.begin() + 2);
+  const auto& scroll_hit_test_chunk = paint_chunks[2];
   const auto& scroll_hit_test_transform =
       ToUnaliased(scroll_hit_test_chunk.properties.Transform());
   EXPECT_EQ(nullptr, scroll_hit_test_transform.ScrollNode());
@@ -247,7 +245,7 @@ TEST_P(BoxPainterTest, ScrollHitTestProperties) {
             scroll_hit_test_clip.PaintClipRect().Rect());
 
   // The scrolled contents should be scrolled and clipped.
-  const auto& contents_chunk = *(paint_chunks.begin() + 3);
+  const auto& contents_chunk = paint_chunks[3];
   const auto& contents_transform =
       ToUnaliased(contents_chunk.properties.Transform());
   const auto* contents_scroll = contents_transform.ScrollNode();
@@ -277,18 +275,17 @@ TEST_P(BoxPainterTest, ScrollerUnderInlineTransform3DSceneLeafCrash) {
   // This should not crash.
 }
 
-size_t CountDrawImagesWithConstraint(const cc::PaintOpBuffer* buffer,
+size_t CountDrawImagesWithConstraint(const cc::PaintRecord& record,
                                      SkCanvas::SrcRectConstraint constraint) {
   size_t count = 0;
-  for (cc::PaintOpBuffer::Iterator it(buffer); it; ++it) {
-    if (it->GetType() == cc::PaintOpType::DrawImageRect) {
-      const auto& image_op = static_cast<cc::DrawImageRectOp&>(*it);
+  for (const cc::PaintOp& op : record) {
+    if (op.GetType() == cc::PaintOpType::kDrawImageRect) {
+      const auto& image_op = static_cast<const cc::DrawImageRectOp&>(op);
       if (image_op.constraint == constraint)
         ++count;
-    } else if (it->GetType() == cc::PaintOpType::DrawRecord) {
-      const auto& record_op = static_cast<cc::DrawRecordOp&>(*it);
-      count +=
-          CountDrawImagesWithConstraint(record_op.record.get(), constraint);
+    } else if (op.GetType() == cc::PaintOpType::kDrawRecord) {
+      const auto& record_op = static_cast<const cc::DrawRecordOp&>(op);
+      count += CountDrawImagesWithConstraint(record_op.record, constraint);
     }
   }
   return count;
@@ -309,9 +306,9 @@ TEST_P(BoxPainterTest, ImageClampingMode) {
     <div id="test"></div>
   )HTML");
 
-  sk_sp<PaintRecord> record = GetDocument().View()->GetPaintRecord();
+  PaintRecord record = GetDocument().View()->GetPaintRecord();
   EXPECT_EQ(1U, CountDrawImagesWithConstraint(
-                    record.get(), SkCanvas::kFast_SrcRectConstraint));
+                    record, SkCanvas::kFast_SrcRectConstraint));
 }
 
 }  // namespace blink

@@ -4,10 +4,10 @@
 
 #include "extensions/browser/json_file_sanitizer.h"
 
-#include "base/bind.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
 #include "base/json/json_string_value_serializer.h"
-#include "base/task/task_runner_util.h"
+#include "base/task/sequenced_task_runner.h"
 #include "extensions/browser/extension_file_task_runner.h"
 #include "services/data_decoder/public/cpp/data_decoder.h"
 
@@ -60,7 +60,7 @@ JsonFileSanitizer::~JsonFileSanitizer() = default;
 
 void JsonFileSanitizer::Start(data_decoder::DataDecoder* decoder) {
   if (file_paths_.empty()) {
-    base::SequencedTaskRunnerHandle::Get()->PostTask(
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE, base::BindOnce(&JsonFileSanitizer::ReportSuccess,
                                   weak_factory_.GetWeakPtr()));
     return;
@@ -70,9 +70,8 @@ void JsonFileSanitizer::Start(data_decoder::DataDecoder* decoder) {
       json_parser_.BindNewPipeAndPassReceiver());
 
   for (const base::FilePath& path : file_paths_) {
-    base::PostTaskAndReplyWithResult(
-        io_task_runner_.get(), FROM_HERE,
-        base::BindOnce(&ReadAndDeleteTextFile, path),
+    io_task_runner_->PostTaskAndReplyWithResult(
+        FROM_HERE, base::BindOnce(&ReadAndDeleteTextFile, path),
         base::BindOnce(&JsonFileSanitizer::JsonFileRead,
                        weak_factory_.GetWeakPtr(), path));
   }
@@ -97,8 +96,8 @@ void JsonFileSanitizer::JsonFileRead(
 
 void JsonFileSanitizer::JsonParsingDone(
     const base::FilePath& file_path,
-    absl::optional<base::Value> json_value,
-    const absl::optional<std::string>& error) {
+    std::optional<base::Value> json_value,
+    const std::optional<std::string>& error) {
   if (!json_value || !json_value->is_dict()) {
     ReportError(Status::kDecodingError, error ? *error : std::string());
     return;
@@ -114,8 +113,8 @@ void JsonFileSanitizer::JsonParsingDone(
   }
 
   int size = static_cast<int>(json_string.length());
-  base::PostTaskAndReplyWithResult(
-      io_task_runner_.get(), FROM_HERE,
+  io_task_runner_->PostTaskAndReplyWithResult(
+      FROM_HERE,
       base::BindOnce(&WriteStringToFile, std::move(json_string), file_path),
       base::BindOnce(&JsonFileSanitizer::JsonFileWritten,
                      weak_factory_.GetWeakPtr(), file_path, size));

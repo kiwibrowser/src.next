@@ -8,10 +8,6 @@ See http://dev.chromium.org/developers/how-tos/depottools/presubmit-scripts
 for more details on the presubmit API built into depot_tools.
 """
 
-
-USE_PYTHON3 = True
-
-
 def CheckChangeLintsClean(input_api, output_api):
   """Makes sure that the code is cpplint clean."""
   # lint_filters=[] stops the OFF_BY_DEFAULT_LINT_FILTERS from being disabled,
@@ -20,7 +16,7 @@ def CheckChangeLintsClean(input_api, output_api):
   # The only valid extensions for cpplint are .cc, .h, .cpp, .cu, and .ch.
   # Only process those extensions which are used in Chromium, in directories
   # that currently lint clean.
-  CLEAN_CPP_FILES_ONLY = (r'base[\\/]win[\\/].*\.(cc|h)$', )
+  CLEAN_CPP_FILES_ONLY = (r'base/win/.*\.(cc|h)$', )
   source_file_filter = lambda x: input_api.FilterSourceFile(
       x,
       files_to_check=CLEAN_CPP_FILES_ONLY,
@@ -40,7 +36,7 @@ def _CheckNoInterfacesInBase(input_api, output_api):
         not "/test/" in f.LocalPath() and
         not f.LocalPath().endswith('.java') and
         not f.LocalPath().endswith('_unittest.mm') and
-        not f.LocalPath().endswith('mac/sdk_forward_declarations.h')):
+        not f.LocalPath().endswith('_spi.h')):
       contents = input_api.ReadFile(f)
       if pattern.search(contents):
         files.append(f)
@@ -90,9 +86,9 @@ def _CheckNoTraceEventInclude(input_api, output_api):
     r".*\.(h|cc|mm)$",
   ]
   files_to_skip = [
-    r".*[\\/]test[\\/].*",
-    r".*[\\/]trace_event[\\/].*",
-    r".*[\\/]tracing[\\/].*",
+    r".*/test/.*",
+    r".*/trace_event/.*",
+    r".*/tracing/.*",
   ]
 
   locations = _FindLocations(input_api, discouraged_includes, files_to_check,
@@ -123,9 +119,9 @@ def _WarnPbzeroIncludes(input_api, output_api):
     r".*\.(h|cc|mm)$",
   ]
   files_to_skip = [
-    r".*[\\/]test[\\/].*",
-    r".*[\\/]trace_event[\\/].*",
-    r".*[\\/]tracing[\\/].*",
+    r".*/test/.*",
+    r".*/trace_event/.*",
+    r".*/tracing/.*",
   ]
 
   locations = _FindLocations(input_api, warn_includes, files_to_check,

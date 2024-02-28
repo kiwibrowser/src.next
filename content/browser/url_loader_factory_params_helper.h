@@ -23,6 +23,7 @@ namespace content {
 class NavigationRequest;
 class RenderFrameHostImpl;
 class RenderProcessHost;
+class SharedDictionaryAccessObserver;
 
 // URLLoaderFactoryParamsHelper encapsulates details of how to create
 // network::mojom::URLLoaderFactoryParams (taking //content-focused parameters,
@@ -54,7 +55,11 @@ class URLLoaderFactoryParamsHelper {
       mojo::PendingRemote<network::mojom::CrossOriginEmbedderPolicyReporter>
           coep_reporter,
       RenderProcessHost* process,
-      network::mojom::TrustTokenRedemptionPolicy trust_token_redemption_policy,
+      network::mojom::TrustTokenOperationPolicyVerdict
+          trust_token_issuance_policy,
+      network::mojom::TrustTokenOperationPolicyVerdict
+          trust_token_redemption_policy,
+      net::CookieSettingOverrides cookie_setting_overrides,
       base::StringPiece debug_tag);
 
   // Creates URLLoaderFactoryParams to be used by |isolated_world_origin| hosted
@@ -68,11 +73,16 @@ class URLLoaderFactoryParamsHelper {
       const url::Origin& main_world_origin,
       const net::IsolationInfo& isolation_info,
       network::mojom::ClientSecurityStatePtr client_security_state,
-      network::mojom::TrustTokenRedemptionPolicy trust_token_redemption_policy);
+      network::mojom::TrustTokenOperationPolicyVerdict
+          trust_token_issuance_policy,
+      network::mojom::TrustTokenOperationPolicyVerdict
+          trust_token_redemption_policy,
+      net::CookieSettingOverrides cookie_setting_overrides);
 
   static network::mojom::URLLoaderFactoryParamsPtr CreateForPrefetch(
       RenderFrameHostImpl* frame,
-      network::mojom::ClientSecurityStatePtr client_security_state);
+      network::mojom::ClientSecurityStatePtr client_security_state,
+      net::CookieSettingOverrides cookie_setting_overrides);
 
   // Creates URLLoaderFactoryParams for either fetching the worker script or for
   // fetches initiated from a worker.
@@ -97,8 +107,11 @@ class URLLoaderFactoryParamsHelper {
       const url::Origin& tentative_origin,
       NavigationRequest& navigation_request,
       const network::mojom::EarlyHints& early_hints,
-      mojo::PendingRemote<network::mojom::CookieAccessObserver>
-          cookie_observer);
+      mojo::PendingRemote<network::mojom::CookieAccessObserver> cookie_observer,
+      mojo::PendingRemote<network::mojom::TrustTokenAccessObserver>
+          trust_token_observer,
+      mojo::PendingRemote<network::mojom::SharedDictionaryAccessObserver>
+          shared_dictionary_observer);
 
  private:
   // Only static methods.

@@ -1,8 +1,10 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/layout/layout_quote.h"
+#include "third_party/blink/renderer/core/css/css_style_sheet.h"
+#include "third_party/blink/renderer/core/css/style_sheet_list.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 
 namespace blink {
@@ -37,7 +39,10 @@ class LayoutQuoteTest : public RenderingTest {
 // crbug.com/1290851
 TEST_F(LayoutQuoteTest, Locale) {
   SetBodyInnerHTML(R"HTML(
-    <div lang="en">
+    <style>
+    #en { font-weight: bold; }
+    </style>
+    <div id="en" lang="en">
       English
       <q id="ja" lang="ja">
         Japanese
@@ -62,6 +67,16 @@ TEST_F(LayoutQuoteTest, Locale) {
   LayoutQuoteTest::CheckQuoteLayoutObjectChildrenLang("fr", "fr", "ja");
 
   // When the lang is not defined, all lang should be dependent on parent "ja".
+  LayoutQuoteTest::CheckQuoteLayoutObjectChildrenLang("nan", "ja", "ja");
+
+  // Rendered layout object lang should persist after changes.
+  // crbug.com/1366233
+  To<CSSStyleSheet>(GetDocument().StyleSheets().item(0))
+      ->removeRule(0, ASSERT_NO_EXCEPTION);
+  UpdateAllLifecyclePhasesForTest();
+
+  LayoutQuoteTest::CheckQuoteLayoutObjectChildrenLang("ja", "ja", "en");
+  LayoutQuoteTest::CheckQuoteLayoutObjectChildrenLang("fr", "fr", "ja");
   LayoutQuoteTest::CheckQuoteLayoutObjectChildrenLang("nan", "ja", "ja");
 }
 

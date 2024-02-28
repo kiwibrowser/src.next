@@ -5,7 +5,7 @@
 #ifndef CONTENT_BROWSER_BROWSER_INTERFACE_BINDERS_H_
 #define CONTENT_BROWSER_BROWSER_INTERFACE_BINDERS_H_
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "content/common/content_export.h"
 #include "mojo/public/cpp/bindings/binder_map.h"
 #include "services/device/public/mojom/battery_monitor.mojom-forward.h"
@@ -77,13 +77,6 @@ using BatteryMonitorBinder = base::RepeatingCallback<void(
     mojo::PendingReceiver<device::mojom::BatteryMonitor>)>;
 CONTENT_EXPORT void OverrideBatteryMonitorBinderForTesting(
     BatteryMonitorBinder binder);
-
-// Allows tests to override how frame hosts binds DevicePostureProvider
-// receivers.
-using DevicePostureProviderBinder = base::RepeatingCallback<void(
-    mojo::PendingReceiver<device::mojom::DevicePostureProvider>)>;
-CONTENT_EXPORT void OverrideDevicePostureProviderBinderForTesting(
-    DevicePostureProviderBinder binder);
 
 // Allows tests to override how frame hosts bind VibrationManager receivers.
 using VibrationManagerBinder = base::RepeatingCallback<void(

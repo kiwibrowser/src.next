@@ -14,8 +14,8 @@ import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 
+import androidx.annotation.ColorInt;
 import androidx.annotation.Nullable;
-import androidx.annotation.StringRes;
 import androidx.appcompat.content.res.AppCompatResources;
 
 import org.chromium.chrome.browser.tabmodel.IncognitoStateProvider;
@@ -23,8 +23,6 @@ import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.toolbar.IncognitoToggleTabLayout;
 import org.chromium.chrome.browser.toolbar.NewTabButton;
 import org.chromium.chrome.browser.toolbar.R;
-import org.chromium.chrome.browser.toolbar.TabCountProvider;
-import org.chromium.components.browser_ui.styles.ChromeColors;
 import org.chromium.components.browser_ui.widget.highlight.ViewHighlighter;
 import org.chromium.components.browser_ui.widget.highlight.ViewHighlighter.HighlightParams;
 import org.chromium.components.browser_ui.widget.highlight.ViewHighlighter.HighlightShape;
@@ -36,10 +34,8 @@ class StartSurfaceToolbarView extends RelativeLayout {
     private boolean mShouldShowNewTabViewText;
     private View mTabSwitcherButtonView;
 
-    @Nullable
-    private IncognitoToggleTabLayout mIncognitoToggleTabLayout;
-    @Nullable
-    private ImageButton mIdentityDiscButton;
+    @Nullable private IncognitoToggleTabLayout mIncognitoToggleTabLayout;
+    @Nullable private ImageButton mIdentityDiscButton;
     private ColorStateList mLightIconTint;
     private ColorStateList mDarkIconTint;
 
@@ -60,12 +56,8 @@ class StartSurfaceToolbarView extends RelativeLayout {
         mIncognitoToggleTabLayout = (IncognitoToggleTabLayout) incognitoToggleTabsStub.inflate();
         mIdentityDiscButton = findViewById(R.id.identity_disc_button);
         mTabSwitcherButtonView = findViewById(R.id.start_tab_switcher_button);
-        updatePrimaryColorAndTint(false);
+        setIconTint();
         mNewTabButton.setStartSurfaceEnabled(true);
-    }
-
-    void setGridTabSwitcherEnabled(boolean isGridTabSwitcherEnabled) {
-        mNewTabButton.setGridTabSwitcherEnabled(isGridTabSwitcherEnabled);
     }
 
     /**
@@ -94,15 +86,14 @@ class StartSurfaceToolbarView extends RelativeLayout {
      * @param isVisible Whether the menu button is visible.
      */
     void setMenuButtonVisibility(boolean isVisible) {
-        // TODO(crbug.com/1258204): Update the paddings of mIdentityDiscButton when it's moved to
-        // start and remove final values here.
-        final int buttonPaddingLeft = getContext().getResources().getDimensionPixelOffset(
-                R.dimen.start_surface_toolbar_button_padding_to_button);
         final int buttonPaddingRight =
-                (isVisible ? buttonPaddingLeft
-                           : getContext().getResources().getDimensionPixelOffset(
-                                   R.dimen.start_surface_toolbar_button_padding_to_edge));
-        mIdentityDiscButton.setPadding(buttonPaddingLeft, 0, buttonPaddingRight, 0);
+                (isVisible
+                        ? 0
+                        : getContext()
+                                .getResources()
+                                .getDimensionPixelOffset(
+                                        R.dimen.start_surface_toolbar_button_padding_to_edge));
+        mIdentityDiscButton.setPadding(0, 0, buttonPaddingRight, 0);
     }
 
     /**
@@ -148,11 +139,6 @@ class StartSurfaceToolbarView extends RelativeLayout {
         } else {
             ViewHighlighter.turnOffHighlight(mNewTabButton);
         }
-    }
-
-    /** Called when incognito mode changes. */
-    void updateIncognito(boolean isIncognito) {
-        updatePrimaryColorAndTint(isIncognito);
     }
 
     /**
@@ -204,12 +190,11 @@ class StartSurfaceToolbarView extends RelativeLayout {
     }
 
     /**
-     * Updates idnetity disc content description.
-     * @param contentDescriptionResId The new description for the button.
+     * Updates identity disc content description.
+     * @param contentDescription The new description for the button.
      */
-    void setIdentityDiscContentDescription(@StringRes int contentDescriptionResId) {
-        mIdentityDiscButton.setContentDescription(
-                getContext().getResources().getString(contentDescriptionResId));
+    void setIdentityDiscContentDescription(String contentDescription) {
+        mIdentityDiscButton.setContentDescription(contentDescription);
     }
 
     /**
@@ -230,16 +215,6 @@ class StartSurfaceToolbarView extends RelativeLayout {
      */
     void setTabSwitcherButtonVisibility(boolean isVisible) {
         mTabSwitcherButtonView.setVisibility(getVisibility(isVisible));
-    }
-
-    /**
-     * Set TabCountProvider for incognito toggle view.
-     * @param tabCountProvider The {@link TabCountProvider} to update the incognito toggle view.
-     */
-    void setTabCountProvider(TabCountProvider tabCountProvider) {
-        if (mIncognitoToggleTabLayout != null) {
-            mIncognitoToggleTabLayout.setTabCountProvider(tabCountProvider);
-        }
     }
 
     /**
@@ -267,26 +242,35 @@ class StartSurfaceToolbarView extends RelativeLayout {
         // tab button (UrlBar is invisible to users). Check crbug.com/1081538 for more
         // details.
         if (mShouldShowNewTabViewText) {
-            mNewTabViewWithText.getParent().requestChildFocus(
-                    mNewTabViewWithText, mNewTabViewWithText);
+            mNewTabViewWithText
+                    .getParent()
+                    .requestChildFocus(mNewTabViewWithText, mNewTabViewWithText);
         } else {
             mNewTabViewWithText.getParent().requestChildFocus(mNewTabButton, mNewTabButton);
         }
     }
 
-    private void updatePrimaryColorAndTint(boolean isIncognito) {
-        int primaryColor = ChromeColors.getPrimaryBackgroundColor(getContext(), isIncognito);
-        setBackgroundColor(primaryColor);
-
+    private void setIconTint() {
         if (mLightIconTint == null) {
-            mLightIconTint = AppCompatResources.getColorStateList(
-                    getContext(), R.color.default_icon_color_light_tint_list);
-            mDarkIconTint = AppCompatResources.getColorStateList(
-                    getContext(), R.color.default_icon_color_tint_list);
+            mLightIconTint =
+                    AppCompatResources.getColorStateList(
+                            getContext(), R.color.default_icon_color_light_tint_list);
+            mDarkIconTint =
+                    AppCompatResources.getColorStateList(
+                            getContext(), R.color.default_icon_color_tint_list);
         }
     }
 
     private int getVisibility(boolean isVisible) {
         return isVisible ? View.VISIBLE : View.GONE;
+    }
+
+    /**
+     * Update the background color of the toolbar based on whether it is in the Grid tab switcher
+     * or in the Start surface with either non-incognito mode or incognito mode.
+     * @param backgroundColor The background color of the toolbar.
+     */
+    protected void setToolbarBackgroundColor(@ColorInt int backgroundColor) {
+        setBackgroundColor(backgroundColor);
     }
 }

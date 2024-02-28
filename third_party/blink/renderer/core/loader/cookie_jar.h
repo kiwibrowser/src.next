@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
-#include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -30,18 +29,23 @@ class CookieJar : public GarbageCollected<CookieJar> {
       mojo::PendingRemote<network::mojom::blink::RestrictedCookieManager>
           cookie_manager);
 
-  // This function checks subresource requests for the partitioned cookies
-  // origin trial. We only consider requests that:
-  // - have a Set-Cookie header
-  // - have Partitioned in the cookie line
-  // If both of these conditions are met, we check if the response contains an
-  // Origin-Trial header with a valid token. If it does not, we revert that
-  // URL's partitioned cookies to unpartitioned.
-  // TODO(https://crbug.com/1296161): Delete this function.
-  void CheckPartitionedCookiesOriginTrial(const ResourceResponse& response);
+  // Invalidate cached string. To be called explicitly from Document. This is
+  // used in cases where a Document action could change the ability for
+  // CookieJar to return values to JS without changing the value of the cookies
+  // themselves. For example changing storage access can stop the JS from being
+  // able to access the document's Cookie without the value ever changing. In
+  // that case it's faulty to treat a subsequent request as a cache hit so we
+  // invalidate.
+  void InvalidateCache();
 
  private:
-  bool RequestRestrictedCookieManagerIfNeeded();
+  void RequestRestrictedCookieManagerIfNeeded();
+  void OnBackendDisconnect();
+  uint64_t GetSharedCookieVersion();
+
+  // Returns true if last_cookies_ is not guaranteed to be up to date and an IPC
+  // is needed to get the current cookie string.
+  bool IPCNeeded();
 
   // Updates the fake cookie cache after a
   // RestrictedCookieManager::GetCookiesString request returns.
@@ -51,7 +55,8 @@ class CookieJar : public GarbageCollected<CookieJar> {
   // to determine if the current request could have been served from a real
   // cache.
   void UpdateCacheAfterGetRequest(const KURL& cookie_url,
-                                  const String& cookie_string);
+                                  const String& cookie_string,
+                                  uint64_t new_version);
 
   HeapMojoRemote<network::mojom::blink::RestrictedCookieManager> backend_;
   Member<blink::Document> document_;
@@ -71,6 +76,16 @@ class CookieJar : public GarbageCollected<CookieJar> {
   // along with `last_cookies_hash_` when updating the histogram that tracks
   // cookie access results.
   bool last_operation_was_set_{false};
+
+  bool shared_memory_initialized_ = false;
+  base::ReadOnlySharedMemoryRegion mapped_region_;
+  base::ReadOnlySharedMemoryMapping mapping_;
+
+  uint64_t last_version_ = network::mojom::blink::kInvalidCookieVersion;
+
+  // Last received cookie string. Null if there is no last cached-version. Can
+  // be empty since that is a valid cookie string.
+  String last_cookies_;
 };
 
 }  // namespace blink

@@ -10,11 +10,11 @@
 #include <iterator>
 #include <vector>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/task/single_thread_task_runner.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "components/safe_browsing/core/browser/db/util.h"
 #include "components/safe_browsing/core/browser/db/v4_protocol_manager_util.h"
@@ -29,8 +29,7 @@ FakeSafeBrowsingDatabaseManager::FakeSafeBrowsingDatabaseManager(bool enabled)
           content::GetIOThreadTaskRunner({})),
       enabled_(enabled) {}
 
-FakeSafeBrowsingDatabaseManager::~FakeSafeBrowsingDatabaseManager() {
-}
+FakeSafeBrowsingDatabaseManager::~FakeSafeBrowsingDatabaseManager() {}
 
 FakeSafeBrowsingDatabaseManager& FakeSafeBrowsingDatabaseManager::Enable() {
   enabled_ = true;
@@ -56,21 +55,26 @@ FakeSafeBrowsingDatabaseManager& FakeSafeBrowsingDatabaseManager::SetUnsafe(
 }
 
 FakeSafeBrowsingDatabaseManager& FakeSafeBrowsingDatabaseManager::SetUnsafe(
-    const std::string& a, const std::string& b) {
+    const std::string& a,
+    const std::string& b) {
   SetUnsafe(a);
   unsafe_ids_.insert(b);
   return *this;
 }
 
 FakeSafeBrowsingDatabaseManager& FakeSafeBrowsingDatabaseManager::SetUnsafe(
-    const std::string& a, const std::string& b, const std::string& c) {
+    const std::string& a,
+    const std::string& b,
+    const std::string& c) {
   SetUnsafe(a, b);
   unsafe_ids_.insert(c);
   return *this;
 }
 
 FakeSafeBrowsingDatabaseManager& FakeSafeBrowsingDatabaseManager::SetUnsafe(
-    const std::string& a, const std::string& b, const std::string& c,
+    const std::string& a,
+    const std::string& b,
+    const std::string& c,
     const std::string& d) {
   SetUnsafe(a, b, c);
   unsafe_ids_.insert(d);
@@ -99,13 +103,13 @@ bool FakeSafeBrowsingDatabaseManager::CheckExtensionIDs(
   if (!enabled_)
     return true;
 
-  std::set<safe_browsing::FullHash> unsafe_extension_ids;
+  std::set<safe_browsing::FullHashStr> unsafe_extension_ids;
   for (const auto& extension_id : extension_ids) {
     if (unsafe_ids_.count(extension_id))
       unsafe_extension_ids.insert(extension_id);
   }
 
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE,
       base::BindOnce(
           &SafeBrowsingDatabaseManager::Client::OnCheckExtensionsResult,

@@ -6,7 +6,7 @@
 
 #include <memory>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
@@ -117,10 +117,10 @@ bool DownloadCoreServiceImpl::HasCreatedDownloadManager() {
   return download_manager_created_;
 }
 
-int DownloadCoreServiceImpl::NonMaliciousDownloadCount() const {
+int DownloadCoreServiceImpl::BlockingShutdownCount() const {
   if (!download_manager_created_)
     return 0;
-  return profile_->GetDownloadManager()->NonMaliciousInProgressCount();
+  return profile_->GetDownloadManager()->BlockingShutdownCount();
 }
 
 void DownloadCoreServiceImpl::CancelDownloads() {
@@ -158,15 +158,6 @@ bool DownloadCoreServiceImpl::IsDownloadUiEnabled() {
   return true;
 #else
   return !extension_event_router_ || extension_event_router_->IsUiEnabled();
-#endif
-}
-
-bool DownloadCoreServiceImpl::IsDownloadObservedByExtension() {
-#if BUILDFLAG(IS_ANDROID)
-  return false;
-#else
-  return extension_event_router_ &&
-         extension_event_router_->IsDownloadObservedByExtension();
 #endif
 }
 

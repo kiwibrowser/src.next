@@ -1,10 +1,11 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_PENDING_BEACON_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_PENDING_BEACON_H_
 
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/public/mojom/frame/pending_beacon.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -21,7 +22,7 @@ class ExceptionState;
 class ExecutionContext;
 
 // Implementation of the PendingBeacon API.
-// https://github.com/WICG/unload-beacon/blob/main/README.md
+// https://github.com/WICG/pending-beacon/blob/main/README.md
 // Note that the lifetime of a PendingBeacon instance is not the same as the JS
 // scope where the instance is created. Rather, it stays alive until
 //   - roughly when `sendNow()` or `deactivate()` is called (may still be alive
@@ -77,9 +78,15 @@ class CORE_EXPORT PendingBeacon
                          int32_t background_timeout,
                          int32_t timeout);
 
-  void SetURLInternal(const String& url);
+  void SetURLInternal(const String& url, ExceptionState& exception_state);
   void SetDataInternal(const BeaconData& beacon_data,
                        ExceptionState& exception_state);
+  // Tells if `url` can be used by PendingBeacon.
+  // Returns false and populates `exception_state` with TypeError if `url` has
+  // a protocol component and is non-https.
+  static bool CanSendBeacon(const String& url,
+                            const ExecutionContext& ec,
+                            ExceptionState& exception_state);
 
  private:
   // A convenient method to return a TaskRunner which is able to keep working

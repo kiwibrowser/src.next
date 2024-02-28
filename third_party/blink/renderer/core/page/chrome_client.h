@@ -53,10 +53,10 @@
 #include "third_party/blink/renderer/platform/graphics/touch_action.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
-#include "third_party/blink/renderer/platform/transforms/transformation_matrix.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "ui/gfx/delegated_ink_metadata.h"
+#include "ui/gfx/geometry/transform.h"
 #include "ui/gfx/geometry/vector2d_f.h"
 
 // To avoid conflicts with the CreateWindow macro from the Windows SDK...
@@ -117,7 +117,6 @@ struct WebWindowFeatures;
 namespace mojom {
 namespace blink {
 class TextAutosizerPageInfo;
-class WindowFeatures;
 }
 }  // namespace mojom
 
@@ -141,13 +140,20 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
 
   virtual void SetWindowRect(const gfx::Rect&, LocalFrame&) = 0;
 
+  virtual void Minimize(LocalFrame&) = 0;
+  virtual void Maximize(LocalFrame&) = 0;
+  virtual void Restore(LocalFrame&) = 0;
+  virtual void SetResizable(bool resizable, LocalFrame&) = 0;
+
   // For non-composited WebViews that exist to contribute to a "parent" WebView
   // painting. This informs the client of the area that needs to be redrawn.
   virtual void InvalidateContainer() = 0;
 
-  // Converts the rect from the viewport coordinates to screen coordinates.
-  virtual gfx::Rect ViewportToScreen(const gfx::Rect&,
-                                     const LocalFrameView*) const = 0;
+  // Converts the rect from local root coordinates (using the local root of the
+  // given LocalFrameView) to screen coordinates. Performs the visual viewport
+  // transform.
+  virtual gfx::Rect LocalRootToScreenDIPs(const gfx::Rect&,
+                                          const LocalFrameView*) const = 0;
 
   void ScheduleAnimation(const LocalFrameView* view) {
     ScheduleAnimation(view, base::TimeDelta());
@@ -170,6 +176,10 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
   virtual void TakeFocus(mojom::blink::FocusType) = 0;
 
   virtual void SetKeyboardFocusURL(Element*) {}
+
+  // Returns true if the page should support drag regions via the app-region
+  // CSS property.
+  virtual bool SupportsAppRegion() = 0;
 
   // Allow document lifecycle updates to be run in order to produce composited
   // outputs. Updates are blocked from occurring during loading navigation in
@@ -207,6 +217,13 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
   virtual std::unique_ptr<cc::ScopedPauseRendering> PauseRendering(
       LocalFrame& main_frame) = 0;
 
+  // Returns the maximum bounds for buffers allocated for rasterization and
+  // compositing.
+  // Returns null if the compositing stack has not been initialized yet.
+  // |frame| must be a local frame.
+  virtual absl::optional<int> GetMaxRenderBufferBounds(
+      LocalFrame& frame) const = 0;
+
   // Start a system drag and drop operation.
   //
   // The `cursor_offset` is the offset of the drag-point from the top-left of
@@ -243,7 +260,6 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
   virtual void Show(LocalFrame& frame,
                     LocalFrame& opener_frame,
                     NavigationPolicy navigation_policy,
-                    const mojom::blink::WindowFeatures& window_features,
                     bool consumed_user_gesture) = 0;
 
   // All the parameters should be in viewport space. That is, if an event
@@ -255,18 +271,19 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
                              const gfx::PointF& position_in_viewport,
                              const gfx::Vector2dF& velocity_in_viewport) = 0;
 
-  // Causes a gesture event of |injected_type| to be dispatched at a later
-  // point in time. |injected_type| is required to be one of
-  // GestureScroll{Begin,Update,End}. If the main thread is currently handling
-  // an input event, the gesture will be dispatched immediately after the
-  // current event is finished being processed.
+  // For a scrollbar scroll action, injects a gesture event of |injected_type|
+  // to be dispatched at a later point in time. |injected_type| is required to
+  // be one of GestureScroll{Begin,Update,End}. If the main thread is currently
+  // handling an input event, the gesture will be dispatched immediately after
+  // the current event is finished being processed.
   // If there is no input event being handled, the gesture is queued up
   // on the main thread's input event queue.
   // The dispatched gesture will scroll the ScrollableArea identified by
   // |scrollable_area_element_id| by the given delta+granularity.
-  virtual void InjectGestureScrollEvent(
+  // See also InputHandlerProxy::InjectScrollbarGestureScroll() which may
+  // shortcut callers of this function for composited scrollbars.
+  virtual void InjectScrollbarGestureScroll(
       LocalFrame& local_frame,
-      WebGestureDevice device,
       const gfx::Vector2dF& delta,
       ui::ScrollGranularity granularity,
       CompositorElementId scrollable_area_element_id,
@@ -309,7 +326,7 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
                                     LocalFrame*,
                                     bool is_reload);
 
-  virtual void CloseWindowSoon() = 0;
+  virtual void CloseWindow() = 0;
 
   bool OpenJavaScriptAlert(LocalFrame*, const String&);
   bool OpenJavaScriptConfirm(LocalFrame*, const String&);
@@ -483,14 +500,23 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
 
   virtual bool IsChromeClientImpl() const { return false; }
 
-  virtual void DidAssociateFormControlsAfterLoad(LocalFrame*) {}
+  virtual void DidChangeFormRelatedElementDynamically(
+      LocalFrame*,
+      HTMLElement*,
+      WebFormRelatedChangeType) {}
   virtual void DidChangeValueInTextField(HTMLFormControlElement&) {}
+  virtual void DidUserChangeContentEditableContent(Element&) {}
   virtual void DidEndEditingOnTextField(HTMLInputElement&) {}
   virtual void HandleKeyboardEventOnTextField(HTMLInputElement&,
                                               KeyboardEvent&) {}
   virtual void TextFieldDataListChanged(HTMLInputElement&) {}
+
+  // Called when the selected option of a <select> control is changed as a
+  // result of user activation - see
+  // https://html.spec.whatwg.org/multipage/interaction.html#tracking-user-activation
   virtual void DidChangeSelectionInSelectControl(HTMLFormControlElement&) {}
-  virtual void SelectFieldOptionsChanged(HTMLFormControlElement&) {}
+
+  virtual void SelectOrSelectListFieldOptionsChanged(HTMLFormControlElement&) {}
   virtual void AjaxSucceeded(LocalFrame*) {}
   // Called when |element| is in autofilled state and the value has been changed
   // by JavaScript. |old_value| contains the value before being changed.
@@ -500,8 +526,8 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
   // Input method editor related functions.
   virtual void ShowVirtualKeyboardOnElementFocus(LocalFrame&) {}
 
-  virtual TransformationMatrix GetDeviceEmulationTransform() const {
-    return TransformationMatrix();
+  virtual gfx::Transform GetDeviceEmulationTransform() const {
+    return gfx::Transform();
   }
 
   virtual void OnMouseDown(Node&) {}
@@ -565,6 +591,8 @@ class CORE_EXPORT ChromeClient : public GarbageCollected<ChromeClient> {
   virtual void FormElementReset(HTMLFormElement& element) {}
 
   virtual void PasswordFieldReset(HTMLInputElement& element) {}
+
+  virtual float ZoomFactorForViewportLayout() { return 1; }
 
  protected:
   ChromeClient() = default;

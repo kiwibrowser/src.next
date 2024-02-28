@@ -4,9 +4,9 @@
 
 #include "chrome/browser/extensions/blocklist.h"
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/run_loop.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/task/single_thread_task_runner.h"
 #include "chrome/browser/extensions/blocklist_state_fetcher.h"
 #include "chrome/browser/extensions/fake_safe_browsing_database_manager.h"
 #include "chrome/browser/extensions/scoped_database_manager_for_test.h"
@@ -22,11 +22,10 @@ namespace {
 
 class BlocklistTest : public testing::Test {
  public:
-  BlocklistTest() : test_prefs_(base::ThreadTaskRunnerHandle::Get()) {}
+  BlocklistTest()
+      : test_prefs_(base::SingleThreadTaskRunner::GetCurrentDefault()) {}
 
  protected:
-  ExtensionPrefs* prefs() { return test_prefs_.prefs(); }
-
   std::string AddExtension(const std::string& id) {
     return test_prefs_.AddExtension(id)->id();
   }
@@ -49,7 +48,7 @@ TEST_F(BlocklistTest, OnlyIncludesRequestedIDs) {
   std::string b = AddExtension("b");
   std::string c = AddExtension("c");
 
-  Blocklist blocklist(prefs());
+  Blocklist blocklist;
   TestBlocklist tester(&blocklist);
   tester.SetBlocklistState(a, BLOCKLISTED_MALWARE, false);
   tester.SetBlocklistState(b, BLOCKLISTED_MALWARE, false);
@@ -69,7 +68,7 @@ TEST_F(BlocklistTest, OnlyIncludesRequestedIDs) {
 TEST_F(BlocklistTest, SafeBrowsing) {
   std::string a = AddExtension("a");
 
-  Blocklist blocklist(prefs());
+  Blocklist blocklist;
   TestBlocklist tester(&blocklist);
   tester.DisableSafeBrowsing();
 
@@ -92,7 +91,7 @@ TEST_F(BlocklistTest, SafeBrowsing) {
 
 // Test getting different blocklist states from Blocklist.
 TEST_F(BlocklistTest, GetBlocklistStates) {
-  Blocklist blocklist(prefs());
+  Blocklist blocklist;
   TestBlocklist tester(&blocklist);
 
   std::string a = AddExtension("a");
@@ -140,7 +139,7 @@ TEST_F(BlocklistTest, GetBlocklistStates) {
 // Test both Blocklist and BlocklistStateFetcher by requesting the blocklist
 // states, sending fake requests and parsing the responses.
 TEST_F(BlocklistTest, FetchBlocklistStates) {
-  Blocklist blocklist(prefs());
+  Blocklist blocklist;
   scoped_refptr<FakeSafeBrowsingDatabaseManager> blocklist_db(
       new FakeSafeBrowsingDatabaseManager(true));
   ScopedDatabaseManagerForTest scoped_blocklist_db(blocklist_db);

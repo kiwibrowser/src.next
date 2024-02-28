@@ -27,8 +27,10 @@
 
 #include "third_party/blink/renderer/core/dom/events/event_dispatcher.h"
 
+#include "base/feature_list.h"
 #include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/input/web_keyboard_event.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
 #include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
@@ -41,10 +43,12 @@
 #include "third_party/blink/renderer/core/dom/events/window_event_context.h"
 #include "third_party/blink/renderer/core/dom/node.h"
 #include "third_party/blink/renderer/core/editing/editor.h"
+#include "third_party/blink/renderer/core/event_type_names.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
 #include "third_party/blink/renderer/core/events/mouse_event.h"
 #include "third_party/blink/renderer/core/events/simulated_event_util.h"
 #include "third_party/blink/renderer/core/events/text_event.h"
+#include "third_party/blink/renderer/core/execution_context/agent.h"
 #include "third_party/blink/renderer/core/frame/ad_tracker.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -61,7 +65,6 @@
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/keyboard_codes.h"
 #include "ui/events/keycodes/dom/keycode_converter.h"
-
 namespace blink {
 
 DispatchEventResult EventDispatcher::DispatchEvent(Node& node, Event& event) {
@@ -187,7 +190,8 @@ DispatchEventResult EventDispatcher::Dispatch() {
     return DispatchEventResult::kNotCanceled;
   }
   std::unique_ptr<EventTiming> eventTiming;
-  LocalFrame* frame = node_->GetDocument().GetFrame();
+  auto& document = node_->GetDocument();
+  LocalFrame* frame = document.GetFrame();
   LocalDOMWindow* window = nullptr;
   if (frame) {
     window = frame->DomWindow();
@@ -206,19 +210,38 @@ DispatchEventResult EventDispatcher::Dispatch() {
   const bool is_click =
       event_->IsMouseEvent() && event_->type() == event_type_names::kClick;
 
+  Node* target_node = event_->target() ? event_->target()->ToNode() : nullptr;
+  const bool is_target_body_element =
+      target_node && target_node->IsHTMLElement() &&
+      DynamicTo<HTMLElement>(target_node)->IsHTMLBodyElement();
+  const bool is_unfocused_keyboard_event =
+      event_->IsKeyboardEvent() &&
+      (event_->type() == event_type_names::kKeydown ||
+       event_->type() == event_type_names::kKeypress ||
+       event_->type() == event_type_names::kKeyup) &&
+      is_target_body_element;
+
   std::unique_ptr<SoftNavigationEventScope> soft_navigation_scope;
-  if (is_click && event_->isTrusted() && frame) {
-    if (window && frame->IsMainFrame()) {
+  if ((is_click || is_unfocused_keyboard_event) && event_->isTrusted() &&
+      frame) {
+    if (window && frame->IsMainFrame() &&
+        base::FeatureList::IsEnabled(features::kSoftNavigationDetection)) {
+      bool is_new_interaction =
+          is_click || (event_->type() == event_type_names::kKeydown);
       soft_navigation_scope = std::make_unique<SoftNavigationEventScope>(
           SoftNavigationHeuristics::From(*window),
-          ToScriptStateForMainWorld(frame));
+          is_unfocused_keyboard_event
+              ? SoftNavigationHeuristics::EventScopeType::kKeyboard
+              : SoftNavigationHeuristics::EventScopeType::kClick,
+          is_new_interaction);
     }
     // A genuine mouse click cannot be triggered by script so we don't expect
     // there are any script in the stack.
-    DCHECK(!frame->GetAdTracker() || !frame->GetAdTracker()->IsAdScriptInStack(
-                                         AdTracker::StackType::kBottomAndTop));
-    if (frame->IsAdFrame()) {
-      UseCounter::Count(node_->GetDocument(), WebFeature::kAdClick);
+    DCHECK(!is_click || !frame->GetAdTracker() ||
+           !frame->GetAdTracker()->IsAdScriptInStack(
+               AdTracker::StackType::kBottomAndTop));
+    if (is_click && frame->IsAdFrame()) {
+      UseCounter::Count(document, WebFeature::kAdClick);
     }
   }
 
@@ -252,7 +275,8 @@ DispatchEventResult EventDispatcher::Dispatch() {
 #endif
   DCHECK(event_->target());
   DEVTOOLS_TIMELINE_TRACE_EVENT("EventDispatch",
-                                inspector_event_dispatch_event::Data, *event_);
+                                inspector_event_dispatch_event::Data, *event_,
+                                document.GetAgent().isolate());
   EventDispatchHandlingState* pre_dispatch_event_handler_result = nullptr;
   if (DispatchEventPreProcess(activation_target,
                               pre_dispatch_event_handler_result) ==
@@ -265,9 +289,6 @@ DispatchEventResult EventDispatcher::Dispatch() {
                            pre_dispatch_event_handler_result);
 
   auto result = EventTarget::GetDispatchEventResult(*event_);
-  if (soft_navigation_scope) {
-    soft_navigation_scope->SetResult(result);
-  }
 
   return result;
 }
@@ -404,16 +425,16 @@ inline void EventDispatcher::DispatchEventPostProcess(
     // Non-bubbling events call only one default event handler, the one for the
     // target.
     node_->DefaultEventHandler(*event_);
-    DCHECK(!event_->defaultPrevented());
     // For bubbling events, call default event handlers on the same targets in
     // the same order as the bubbling phase.
-    if (!event_->DefaultHandled() && event_->bubbles()) {
+    if (!event_->DefaultHandled() && !event_->defaultPrevented() &&
+        event_->bubbles()) {
       wtf_size_t size = event_->GetEventPath().size();
       for (wtf_size_t i = 1; i < size; ++i) {
         event_->GetEventPath()[i].GetNode().DefaultEventHandler(*event_);
-        DCHECK(!event_->defaultPrevented());
-        if (event_->DefaultHandled())
+        if (event_->DefaultHandled() || event_->defaultPrevented()) {
           break;
+        }
       }
     }
   } else {

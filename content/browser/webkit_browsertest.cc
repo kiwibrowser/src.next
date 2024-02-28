@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
@@ -45,7 +45,7 @@ bool AbortOnEndInterceptor(URLLoaderInterceptor::RequestParams* params) {
            producer_handle->WriteData(body.data(), &bytes_written,
                                       MOJO_WRITE_DATA_FLAG_ALL_OR_NONE));
   params->client->OnReceiveResponse(std::move(response),
-                                    std::move(consumer_handle), absl::nullopt);
+                                    std::move(consumer_handle), std::nullopt);
 
   params->client->OnComplete(
       network::URLLoaderCompletionStatus(net::ERR_CONNECTION_ABORTED));

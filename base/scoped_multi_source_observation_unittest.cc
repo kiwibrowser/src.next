@@ -5,7 +5,9 @@
 #include "base/scoped_multi_source_observation.h"
 
 #include "base/containers/contains.h"
+#include "base/memory/raw_ptr.h"
 #include "base/ranges/algorithm.h"
+#include "base/scoped_observation_traits.h"
 #include "base/test/gtest_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -23,7 +25,7 @@ class TestSource {
   size_t num_observers() const { return observers_.size(); }
 
  private:
-  std::vector<TestSourceObserver*> observers_;
+  std::vector<raw_ptr<TestSourceObserver, VectorExperimental>> observers_;
 };
 
 void TestSource::AddObserver(TestSourceObserver* observer) {
@@ -190,11 +192,22 @@ class TestSourceWithNonDefaultNames {
 
 using TestScopedMultiSourceObservationWithNonDefaultNames =
     ScopedMultiSourceObservation<TestSourceWithNonDefaultNames,
-                                 TestSourceObserver,
-                                 &TestSourceWithNonDefaultNames::AddFoo,
-                                 &TestSourceWithNonDefaultNames::RemoveFoo>;
+                                 TestSourceObserver>;
 
 }  // namespace
+
+template <>
+struct ScopedObservationTraits<TestSourceWithNonDefaultNames,
+                               TestSourceObserver> {
+  static void AddObserver(TestSourceWithNonDefaultNames* source,
+                          TestSourceObserver* observer) {
+    source->AddFoo(observer);
+  }
+  static void RemoveObserver(TestSourceWithNonDefaultNames* source,
+                             TestSourceObserver* observer) {
+    source->RemoveFoo(observer);
+  }
+};
 
 TEST_F(ScopedMultiSourceObservationTest, NonDefaultNames) {
   TestSourceWithNonDefaultNames nds1;

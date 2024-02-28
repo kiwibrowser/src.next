@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,7 +39,7 @@ void ResourceLoadObserverForWorker::WillSendRequest(
     RenderBlockingBehavior render_blocking_behavior,
     const Resource* resource) {
   probe::WillSendRequest(
-      probe_, nullptr,
+      worker_fetch_context_->GetExecutionContext(), nullptr,
       fetcher_properties_->GetFetchClientSettingsObject().GlobalObjectUrl(),
       request, redirect_response, options, resource_type,
       render_blocking_behavior, base::TimeTicks::Now());
@@ -112,11 +112,9 @@ void ResourceLoadObserverForWorker::DidFinishLoading(
     uint64_t identifier,
     base::TimeTicks finish_time,
     int64_t encoded_data_length,
-    int64_t decoded_body_length,
-    bool should_report_corb_blocking) {
+    int64_t decoded_body_length) {
   probe::DidFinishLoading(probe_, identifier, nullptr, finish_time,
-                          encoded_data_length, decoded_body_length,
-                          should_report_corb_blocking);
+                          encoded_data_length, decoded_body_length);
 }
 
 void ResourceLoadObserverForWorker::DidFailLoading(const KURL&,

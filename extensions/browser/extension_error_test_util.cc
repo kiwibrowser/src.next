@@ -38,7 +38,7 @@ std::unique_ptr<ExtensionError> CreateNewRuntimeError(
       new RuntimeError(extension_id, from_incognito, source,
                        base::UTF8ToUTF16(message), stack_trace,
                        GURL::EmptyGURL(),  // no context url
-                       logging::LOG_ERROR,
+                       logging::LOGGING_ERROR,
                        0,    // Render frame id
                        0));  // Render process id
 }
@@ -53,8 +53,8 @@ std::unique_ptr<ExtensionError> CreateNewManifestError(
     const std::string& extension_id,
     const std::string& message) {
   return std::unique_ptr<ExtensionError>(
-      new ManifestError(extension_id, base::UTF8ToUTF16(message),
-                        std::u16string(), std::u16string()));
+      new ManifestError(extension_id, base::UTF8ToUTF16(message), std::string(),
+                        std::u16string()));
 }
 
 }  // namespace error_test_util

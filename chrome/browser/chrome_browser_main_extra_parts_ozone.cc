@@ -4,10 +4,12 @@
 
 #include "chrome/browser/chrome_browser_main_extra_parts_ozone.h"
 
-#include "base/bind.h"
-#include "base/callback.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/logging.h"
-#include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/lifetime/application_lifetime_desktop.h"
+#include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
 #include "ui/ozone/public/ozone_platform.h"
 
 ChromeBrowserMainExtraPartsOzone::ChromeBrowserMainExtraPartsOzone() = default;
@@ -24,7 +26,8 @@ void ChromeBrowserMainExtraPartsOzone::PostCreateMainMessageLoop() {
     LOG(FATAL) << "Browser failed to shutdown.";
   });
   ui::OzonePlatform::GetInstance()->PostCreateMainMessageLoop(
-      std::move(shutdown_cb));
+      std::move(shutdown_cb),
+      content::GetUIThreadTaskRunner({content::BrowserTaskType::kUserInput}));
 }
 
 void ChromeBrowserMainExtraPartsOzone::PostMainMessageLoopRun() {

@@ -45,12 +45,23 @@ TEST(SigninPromoTest, TestReauthURL) {
 TEST(SigninPromoTest, SigninURLForDice) {
   EXPECT_EQ(
       "https://accounts.google.com/signin/chrome/sync?ssp=1&"
+      "color_scheme=dark&flow=promo",
+      GetChromeSyncURLForDice(
+          {.request_dark_scheme = true, .flow = signin::Flow::PROMO}));
+  EXPECT_EQ(
+      "https://accounts.google.com/signin/chrome/sync?ssp=1&"
       "email_hint=email%40gmail.com&continue=https%3A%2F%2Fcontinue_url%2F",
-      GetChromeSyncURLForDice("email@gmail.com", "https://continue_url/"));
+      GetChromeSyncURLForDice(
+          {"email@gmail.com", GURL("https://continue_url/")}));
+  EXPECT_EQ(
+      "https://accounts.google.com/signin/chrome/"
+      "sync?ssp=1&flow=embedded_promo",
+      GetChromeSyncURLForDice({.flow = signin::Flow::EMBEDDED_PROMO}));
   EXPECT_EQ(
       "https://accounts.google.com/AddSession?"
       "Email=email%40gmail.com&continue=https%3A%2F%2Fcontinue_url%2F",
-      GetAddAccountURLForDice("email@gmail.com", "https://continue_url/"));
+      GetAddAccountURLForDice("email@gmail.com",
+                              GURL("https://continue_url/")));
 }
 
 }  // namespace signin

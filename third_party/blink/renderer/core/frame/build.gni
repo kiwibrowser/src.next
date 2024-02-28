@@ -1,4 +1,4 @@
-# Copyright 2020 The Chromium Authors. All rights reserved.
+# Copyright 2020 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -7,8 +7,8 @@ blink_core_sources_frame = [
   "ad_tracker.h",
   "ad_script_identifier.cc",
   "ad_script_identifier.h",
-  "attribution_response_parsing.cc",
-  "attribution_response_parsing.h",
+  "animation_frame_timing_monitor.cc",
+  "animation_frame_timing_monitor.h",
   "attribution_src_loader.cc",
   "attribution_src_loader.h",
   "bar_prop.cc",
@@ -36,10 +36,13 @@ blink_core_sources_frame = [
   "csp/trusted_types_directive.h",
   "dactyloscoper.cc",
   "dactyloscoper.h",
+  "font_matching_metrics.cc",
+  "font_matching_metrics.h",
   "frame_content_as_text.h",
   "frame_content_as_text.cc",
   "deprecation/deprecation.cc",
   "deprecation/deprecation.h",
+  "deprecation/deprecation_info.h",
   "deprecation/deprecation_report_body.cc",
   "deprecation/deprecation_report_body.h",
   "device_single_window_event_controller.cc",
@@ -50,10 +53,6 @@ blink_core_sources_frame = [
   "display_cutout_client_impl.h",
   "document_policy_violation_report_body.cc",
   "document_policy_violation_report_body.h",
-  "dom_timer.cc",
-  "dom_timer.h",
-  "dom_timer_coordinator.cc",
-  "dom_timer_coordinator.h",
   "dom_visual_viewport.cc",
   "dom_visual_viewport.h",
   "dom_window.cc",
@@ -236,6 +235,8 @@ blink_core_sources_frame = [
   "web_remote_frame_impl.cc",
   "web_remote_frame_impl.h",
   "window_event_handlers.h",
+  "window_properties.cc",
+  "window_properties.h",
   "window_or_worker_global_scope.cc",
   "window_or_worker_global_scope.h",
 ]
@@ -255,7 +256,6 @@ if (target_os != "android") {
 
 blink_core_tests_frame = [
   "ad_tracker_test.cc",
-  "attribution_response_parsing_test.cc",
   "attribution_src_loader_test.cc",
   "browser_controls_test.cc",
   "child_frame_compositing_helper_test.cc",
@@ -264,11 +264,11 @@ blink_core_tests_frame = [
   "csp/csp_directive_list_test.cc",
   "csp/csp_source_test.cc",
   "csp/source_list_directive_test.cc",
+  "csp/test_util.h",
   "csp/trusted_types_directive_test.cc",
   "deprecation/deprecation_report_body_test.cc",
   "document_loading_rendering_test.cc",
   "document_policy_violation_report_body_test.cc",
-  "dom_timer_test.cc",
   "find_in_page_test.cc",
   "frame_content_as_text_test.cc",
   "frame_overlay_test.cc",

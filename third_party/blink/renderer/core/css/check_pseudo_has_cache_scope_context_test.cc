@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,9 @@
 #include "third_party/blink/renderer/core/css/css_selector_list.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
-#include "third_party/blink/renderer/core/css/parser/css_parser_selector.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/html/html_document.h"
+#include "third_party/blink/renderer/core/testing/null_execution_context.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 
 namespace blink {
@@ -74,20 +74,19 @@ class CheckPseudoHasCacheScopeContextTest : public PageTestBase {
       const ExpectedResultCacheEntry (&expected_result_cache_entries)[length],
       unsigned expected_fast_reject_filter_cache_count,
       unsigned expected_bloom_filter_allocation_count) const {
-    Arena arena;
-    CSSSelectorVector</*UseArena=*/true> selector_vector =
-        CSSParser::ParseSelector</*UseArena=*/true>(
-            MakeGarbageCollected<CSSParserContext>(
-                *document, NullURL(), true /* origin_clean */, Referrer(),
-                WTF::TextEncoding(), CSSParserContext::kSnapshotProfile),
-            nullptr, selector_text, arena);
-    CSSSelectorList selector_list =
-        CSSSelectorList::AdoptSelectorVector</*UseArena=*/true>(
-            selector_vector);
+    HeapVector<CSSSelector> arena;
+    base::span<CSSSelector> selector_vector = CSSParser::ParseSelector(
+        MakeGarbageCollected<CSSParserContext>(
+            *document, NullURL(), true /* origin_clean */, Referrer()),
+        CSSNestingType::kNone,
+        /*parent_rule_for_nesting=*/nullptr, /*is_within_scope=*/false, nullptr,
+        selector_text, arena);
+    CSSSelectorList* selector_list =
+        CSSSelectorList::AdoptSelectorVector(selector_vector);
     const CSSSelector* selector = nullptr;
-    for (selector = selector_list.First();
+    for (selector = selector_list->First();
          selector && selector->GetPseudoType() != CSSSelector::kPseudoHas;
-         selector = selector->TagHistory()) {
+         selector = selector->NextSimpleSelector()) {
     }
     if (!selector) {
       ADD_FAILURE() << "Failed : " << query_name << " (Cannot find :has() in "
@@ -109,8 +108,8 @@ class CheckPseudoHasCacheScopeContextTest : public PageTestBase {
       String test_name =
           String::Format("[%s] cache result of %s", query_name.Utf8().c_str(),
                          expected_result_cache_entry.element_query);
-      Element* element =
-          document->QuerySelector(expected_result_cache_entry.element_query);
+      Element* element = document->QuerySelector(
+          AtomicString(expected_result_cache_entry.element_query));
       DCHECK(element) << "Failed to get `"
                       << expected_result_cache_entry.element_query << "'";
 
@@ -159,7 +158,7 @@ class CheckPseudoHasCacheScopeContextTest : public PageTestBase {
                    unsigned expected_fast_reject_filter_cache_count,
                    unsigned expected_bloom_filter_allocation_count) const {
     Element* query_scope_element =
-        document->getElementById(query_scope_element_id);
+        document->getElementById(AtomicString(query_scope_element_id));
     ASSERT_TRUE(query_scope_element);
 
     CheckPseudoHasCacheScope cache_scope(document);
@@ -168,7 +167,7 @@ class CheckPseudoHasCacheScopeContextTest : public PageTestBase {
                                        query_scope_element_id, selector_text);
 
     EXPECT_EQ(expected_match_result,
-              query_scope_element->matches(selector_text))
+              query_scope_element->matches(AtomicString(selector_text)))
         << "Failed : " << query_name;
 
     CheckCacheResults(
@@ -189,7 +188,7 @@ class CheckPseudoHasCacheScopeContextTest : public PageTestBase {
       unsigned expected_fast_reject_filter_cache_count,
       unsigned expected_bloom_filter_allocation_count) const {
     Element* query_scope_element =
-        document->getElementById(query_scope_element_id);
+        document->getElementById(AtomicString(query_scope_element_id));
     ASSERT_TRUE(query_scope_element);
 
     CheckPseudoHasCacheScope cache_scope(document);
@@ -198,15 +197,15 @@ class CheckPseudoHasCacheScopeContextTest : public PageTestBase {
                                        query_scope_element_id, selector_text);
 
     StaticElementList* result =
-        query_scope_element->QuerySelectorAll(selector_text);
+        query_scope_element->QuerySelectorAll(AtomicString(selector_text));
 
     EXPECT_EQ(query_result_size, result->length()) << "Failed : " << query_name;
     unsigned size_max = query_result_size > result->length() ? query_result_size
                                                              : result->length();
     for (unsigned i = 0; i < size_max; ++i) {
-      EXPECT_EQ(
-          (i < query_result_size ? expected_results[i] : "<null>"),
-          (i < result->length() ? result->item(i)->GetIdAttribute() : "<null>"))
+      EXPECT_EQ((i < query_result_size ? expected_results[i] : "<null>"),
+                (i < result->length() ? result->item(i)->GetIdAttribute()
+                                      : AtomicString()))
           << "Failed :" << query_name << " result at index " << i;
     }
 
@@ -221,7 +220,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest,
        Case1StartsWithDescendantCombinator) {
   // CheckPseudoHasArgumentTraversalScope::kSubtree
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -397,7 +398,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest,
 TEST_F(CheckPseudoHasCacheScopeContextTest, Case1StartsWithChildCombinator) {
   // CheckPseudoHasArgumentTraversalScope::kSubtree
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -628,7 +631,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest, Case1StartsWithChildCombinator) {
 TEST_F(CheckPseudoHasCacheScopeContextTest, Case2StartsWithIndirectAdjacent) {
   // CheckPseudoHasArgumentTraversalScope::kAllNextSiblings
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -732,7 +737,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest, Case2StartsWithIndirectAdjacent) {
 TEST_F(CheckPseudoHasCacheScopeContextTest, Case2StartsWithDirectAdjacent) {
   // CheckPseudoHasArgumentTraversalScope::kAllNextSiblings
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -926,7 +933,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest, Case2StartsWithDirectAdjacent) {
 TEST_F(CheckPseudoHasCacheScopeContextTest, Case3) {
   // CheckPseudoHasArgumentTraversalScope::kOneNextSiblingSubtree
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -1144,7 +1153,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest, Case3) {
 TEST_F(CheckPseudoHasCacheScopeContextTest, Case4) {
   // CheckPseudoHasArgumentTraversalScope::kAllNextSiblingSubtrees
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -1451,7 +1462,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest,
        QuerySelectorAllCase1StartsWithDescendantCombinator) {
   // CheckPseudoHasArgumentTraversalScope::kSubtree
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -1685,7 +1698,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest,
        QuerySelectorAllCase1StartsWithChildCombinator) {
   // CheckPseudoHasArgumentTraversalScope::kSubtree
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -1785,7 +1800,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest,
        QuerySelectorAllCase1StartsWithChildCombinatorNonSubjectHas) {
   // CheckPseudoHasArgumentTraversalScope::kSubtree
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -1952,7 +1969,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest,
        QuerySelectorAllCase2NonSubjectHas) {
   // CheckPseudoHasArgumentTraversalScope::kAllNextSiblings
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -2072,7 +2091,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest,
        QuerySelectorAllCase3NonSubjectHas) {
   // CheckPseudoHasArgumentTraversalScope::kOneNextSiblingSubtree
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -2164,7 +2185,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest,
        QuerySelectorAllCase4NonSubjectHas) {
   // CheckPseudoHasArgumentTraversalScope::kAllNextSiblingSubtrees
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -2261,7 +2284,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest,
        QuerySelectorAllCase4StartsWithDirectAdjacentCombinator) {
   // CheckPseudoHasArgumentTraversalScope::kAllNextSiblingSubtrees
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -2459,7 +2484,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest,
 TEST_F(CheckPseudoHasCacheScopeContextTest, QuerySelectorAllCase5) {
   // CheckPseudoHasArgumentTraversalScope::kOneNextSibling
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -2542,7 +2569,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest, QuerySelectorAllCase5) {
 TEST_F(CheckPseudoHasCacheScopeContextTest, QuerySelectorAllCase6) {
   // CheckPseudoHasArgumentTraversalScope::kFixedDepthDescendants
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -2645,7 +2674,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest, QuerySelectorAllCase6) {
 TEST_F(CheckPseudoHasCacheScopeContextTest, QuerySelectorAllCase7) {
   // CheckPseudoHasArgumentTraversalScope::kOneNextSiblingFixedDepthDescendants
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -2724,7 +2755,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest, QuerySelectorAllCase7) {
 TEST_F(CheckPseudoHasCacheScopeContextTest, QuerySelectorAllCase8) {
   // CheckPseudoHasArgumentTraversalScope::kAllNextSiblingsFixedDepthDescendants
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>

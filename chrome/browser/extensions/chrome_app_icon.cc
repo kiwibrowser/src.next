@@ -10,6 +10,7 @@
 #include "chrome/browser/extensions/chrome_app_icon_delegate.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/browser/extension_util.h"
 #include "extensions/common/manifest_handlers/icons_handler.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/rect.h"
@@ -17,7 +18,7 @@
 #include "ui/gfx/image/image_skia_operations.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "chrome/browser/chromeos/extensions/gfx_utils.h"
+#include "chrome/browser/ash/extensions/gfx_utils.h"
 #endif
 
 namespace extensions {

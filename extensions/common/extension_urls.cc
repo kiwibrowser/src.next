@@ -4,11 +4,14 @@
 
 #include "extensions/common/extension_urls.h"
 
+#include <string_view>
+
 #include "base/strings/escape.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/extension_features.h"
 #include "extensions/common/extensions_client.h"
 #include "net/base/url_util.h"
 #include "url/gurl.h"
@@ -27,9 +30,13 @@ bool IsSourceFromAnExtension(const std::u16string& source) {
 namespace extension_urls {
 
 const char kChromeWebstoreBaseURL[] = "https://chrome.google.com/webstore";
-const char kNewChromeWebstoreBaseURL[] = "https://webstore.google.com/";
+const char kNewChromeWebstoreBaseURL[] = "https://chromewebstore.google.com/";
 const char kChromeWebstoreUpdateURL[] =
     "https://clients2.google.com/service/update2/crx";
+
+const char kAppMenuUtmSource[] = "ext_app_menu";
+const char kExtensionsMenuUtmSource[] = "ext_extensions_menu";
+const char kExtensionsSidebarUtmSource[] = "ext_sidebar";
 
 GURL GetWebstoreLaunchURL() {
   extensions::ExtensionsClient* client = extensions::ExtensionsClient::Get();
@@ -45,11 +52,20 @@ GURL GetNewWebstoreLaunchURL() {
   return GURL(kNewChromeWebstoreBaseURL);
 }
 
+GURL AppendUtmSource(const GURL& url, std::string_view utm_source_value) {
+  return net::AppendQueryParameter(url, "utm_source", utm_source_value);
+}
+
 // TODO(csharrison,devlin): Migrate the following methods to return
 // GURLs.
 // TODO(devlin): Try to use GURL methods like Resolve instead of string
 // concatenation.
 std::string GetWebstoreExtensionsCategoryURL() {
+  // TODO(crbug.com/1488136): Refactor this check into
+  // extension_urls::GetWebstoreLaunchURL() and fix tests relying on it.
+  if (base::FeatureList::IsEnabled(extensions_features::kNewWebstoreURL)) {
+    return GetNewWebstoreLaunchURL().spec() + "category/extensions";
+  }
   return GetWebstoreLaunchURL().spec() + "/category/extensions";
 }
 
@@ -103,7 +119,7 @@ bool IsBlocklistUpdateUrl(const GURL& url) {
   return false;
 }
 
-bool IsSafeBrowsingUrl(const url::Origin& origin, base::StringPiece path) {
+bool IsSafeBrowsingUrl(const url::Origin& origin, std::string_view path) {
   return origin.DomainIs("sb-ssl.google.com") ||
          origin.DomainIs("safebrowsing.googleapis.com") ||
          (origin.DomainIs("safebrowsing.google.com") &&

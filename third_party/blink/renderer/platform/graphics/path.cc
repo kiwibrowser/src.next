@@ -192,8 +192,8 @@ Path& Path::Transform(const AffineTransform& xform) {
   return *this;
 }
 
-Path& Path::Transform(const TransformationMatrix& transformation_matrix) {
-  path_.transform(TransformationMatrixToSkMatrix(transformation_matrix));
+Path& Path::Transform(const gfx::Transform& transform) {
+  path_.transform(gfx::TransformToFlattenedSkMatrix(transform));
   return *this;
 }
 
@@ -277,6 +277,11 @@ bool Path::IsEmpty() const {
 
 bool Path::IsClosed() const {
   return path_.isLastContourClosed();
+}
+
+bool Path::IsLine() const {
+  SkPoint dummy_line[2];
+  return path_.isLine(dummy_line);
 }
 
 void Path::SetIsVolatile(bool is_volatile) {

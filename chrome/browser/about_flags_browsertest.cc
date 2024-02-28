@@ -61,77 +61,80 @@ const char kSanitizedInputAndCommandLine[] =
 void SimulateTextType(content::WebContents* contents,
                       const char* experiment_id,
                       const char* text) {
-  EXPECT_TRUE(content::ExecuteScript(
-      contents, base::StringPrintf(
-                    "var parent = document.getElementById('%s');"
-                    "var textarea = parent.getElementsByTagName('textarea')[0];"
-                    "textarea.focus();"
-                    "textarea.value = `%s`;"
-                    "textarea.onchange();",
-                    experiment_id, text)));
+  EXPECT_TRUE(content::ExecJs(
+      contents,
+      base::StringPrintf(
+          "var parent = "
+          "document.querySelector('flags-app').shadowRoot.getElementById('%s');"
+          "var textarea = parent.getElementsByTagName('textarea')[0];"
+          "textarea.focus();"
+          "textarea.value = `%s`;"
+          "textarea.dispatchEvent(new Event('change'));",
+          experiment_id, text)));
 }
 
 void ToggleEnableDropdown(content::WebContents* contents,
                           const char* experiment_id,
                           bool enable) {
-  EXPECT_TRUE(content::ExecuteScript(
+  EXPECT_TRUE(content::ExecJs(
       contents,
       base::StringPrintf(
-          "var k = document.getElementById('%s');"
-          "var s = k.getElementsByClassName('experiment-enable-disable')[0];"
+          "var k = "
+          "document.querySelector('flags-app').shadowRoot.getElementById('%s');"
+          "var s = "
+          "k.shadowRoot."
+          "querySelector('.experiment-enable-disable');"
           "s.focus();"
           "s.selectedIndex = %d;"
-          "s.onchange();",
+          "s.dispatchEvent(new Event('change'));",
           experiment_id, enable ? 1 : 0)));
 }
 
 std::string GetOriginListText(content::WebContents* contents,
                               const char* experiment_id) {
-  std::string text;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
-      contents,
-      base::StringPrintf(
-          "var k = document.getElementById('%s');"
-          "var s = k.getElementsByClassName('experiment-origin-list-value')[0];"
-          "window.domAutomationController.send(s.value );",
-          experiment_id),
-      &text));
-  return text;
+  return content::EvalJs(
+             contents,
+             base::StringPrintf(
+                 "var k = "
+                 "document.querySelector('flags-app').shadowRoot."
+                 "getElementById('%s');"
+                 "var s = "
+                 "k.getElementsByClassName('experiment-origin-list-value')[0];"
+                 "s.value;",
+                 experiment_id))
+      .ExtractString();
 }
 
 bool IsDropdownEnabled(content::WebContents* contents,
                        const char* experiment_id) {
-  bool result = false;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-      contents,
-      base::StringPrintf(
-          "var k = document.getElementById('%s');"
-          "var s = k.getElementsByClassName('experiment-enable-disable')[0];"
-          "window.domAutomationController.send(s.value == 'enabled');",
-          experiment_id),
-      &result));
-  return result;
+  return content::EvalJs(
+             contents,
+             base::StringPrintf(
+                 "var k = "
+                 "document.querySelector('flags-app').shadowRoot."
+                 "getElementById('%s');"
+                 "var s = "
+                 "k.getElementsByClassName('experiment-enable-disable')[0];"
+                 "s.value == 'enabled';",
+                 experiment_id))
+      .ExtractBool();
 }
 
 bool IsFlagPresent(content::WebContents* contents, const char* experiment_id) {
-  bool result = false;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-      contents,
-      base::StringPrintf("var k = document.getElementById('%s');"
-                         "window.domAutomationController.send(k != null);",
-                         experiment_id),
-      &result));
-  return result;
+  return content::EvalJs(contents,
+                         base::StringPrintf("var k = "
+                                            "document.querySelector('flags-app'"
+                                            ").shadowRoot.getElementById('%s');"
+                                            "k != null;",
+                                            experiment_id))
+      .ExtractBool();
 }
 
 void WaitForExperimentalFeatures(content::WebContents* contents) {
-  bool unused;
-  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
+  ASSERT_TRUE(content::ExecJs(
       contents,
-      "experimentalFeaturesReadyForTest.then(() => {"
-      "  window.domAutomationController.send(true);"
-      "});",
-      &unused));
+      "var k = document.querySelector('flags-app');"
+      "k.experimentalFeaturesReadyForTesting().then(() => true);"));
 }
 
 const std::vector<flags_ui::FeatureEntry> GetFeatureEntries(
@@ -323,39 +326,12 @@ IN_PROC_BROWSER_TEST_P(AboutFlagsBrowserTest, DISABLED_OriginFlagEnabled) {
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(kSwitchName));
 }
 
-class AboutFlagsUnexpiredBrowserTest : public AboutFlagsBrowserTest {
- public:
-  AboutFlagsUnexpiredBrowserTest() {
-    const base::Feature* unexpire =
-        flags::GetUnexpireFeatureForMilestone(CHROME_VERSION_MAJOR - 1);
-    feature_list_.InitWithFeatures({*unexpire}, {});
-  }
-};
-
-INSTANTIATE_TEST_SUITE_P(All,
-                         AboutFlagsUnexpiredBrowserTest,
-                         ::testing::Values(true));
-
-// Crashes on Win.  http://crbug.com/1108357
-#if BUILDFLAG(IS_WIN)
-#define MAYBE_ExpiryHidesFlag DISABLED_ExpiryHidesFlag
-#else
-#define MAYBE_ExpiryHidesFlag ExpiryHidesFlag
-#endif
-IN_PROC_BROWSER_TEST_P(AboutFlagsBrowserTest, MAYBE_ExpiryHidesFlag) {
+IN_PROC_BROWSER_TEST_P(AboutFlagsBrowserTest, ExpiryHidesFlag) {
   NavigateToFlagsPage();
   content::WebContents* contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   EXPECT_TRUE(IsFlagPresent(contents, kFlagName));
   EXPECT_FALSE(IsFlagPresent(contents, kExpiredFlagName));
-}
-
-IN_PROC_BROWSER_TEST_P(AboutFlagsUnexpiredBrowserTest, MAYBE_ExpiryHidesFlag) {
-  NavigateToFlagsPage();
-  content::WebContents* contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  EXPECT_TRUE(IsFlagPresent(contents, kFlagName));
-  EXPECT_TRUE(IsFlagPresent(contents, kExpiredFlagName));
 }
 
 #if !BUILDFLAG(IS_CHROMEOS_ASH)
@@ -418,8 +394,11 @@ IN_PROC_BROWSER_TEST_P(AboutFlagsBrowserTest, FormRestore) {
   EXPECT_TRUE(content::ExecJs(
       contents,
       base::StringPrintf(
-          "var k = document.getElementById('%s');"
-          "var s = k.getElementsByClassName('experiment-enable-disable')[0];"
+          "var k = "
+          "document.querySelector('flags-app').shadowRoot.getElementById('%s');"
+          "var s = "
+          "k.shadowRoot."
+          "querySelector('.experiment-enable-disable');"
           "delete s.internal_name;"
           "const e = document.createEvent('HTMLEvents');"
           "e.initEvent('change', true, true);"

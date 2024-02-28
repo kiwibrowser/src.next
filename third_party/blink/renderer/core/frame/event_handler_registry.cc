@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -188,9 +188,10 @@ void EventHandlerRegistry::DidMoveIntoPage(EventTarget& target) {
       continue;
     for (wtf_size_t count = listeners->size(); count > 0; --count) {
       EventHandlerClass handler_class;
-      if (!EventTypeToClass(event_types[i], (*listeners)[count - 1].Options(),
-                            &handler_class))
+      if (!EventTypeToClass(event_types[i], (*listeners)[count - 1]->Options(),
+                            &handler_class)) {
         continue;
+      }
 
       DidAddEventHandler(target, handler_class);
     }
@@ -287,11 +288,6 @@ void EventHandlerRegistry::NotifyHandlersChanged(
     if (auto* node = target->ToNode()) {
       if (auto* layout_object = node->GetLayoutObject()) {
         layout_object->MarkEffectiveAllowedTouchActionChanged();
-        auto* continuation = layout_object->VirtualContinuation();
-        while (continuation) {
-          continuation->MarkEffectiveAllowedTouchActionChanged();
-          continuation = continuation->VirtualContinuation();
-        }
       }
     } else if (auto* dom_window = target->ToLocalDOMWindow()) {
       // This event handler is on a window. Ensure the layout view is
@@ -304,11 +300,6 @@ void EventHandlerRegistry::NotifyHandlersChanged(
     if (auto* node = target->ToNode()) {
       if (auto* layout_object = node->GetLayoutObject()) {
         layout_object->MarkBlockingWheelEventHandlerChanged();
-        auto* continuation = layout_object->VirtualContinuation();
-        while (continuation) {
-          continuation->MarkBlockingWheelEventHandlerChanged();
-          continuation = continuation->VirtualContinuation();
-        }
       }
     } else if (auto* dom_window = target->ToLocalDOMWindow()) {
       // This event handler is on a window. Ensure the layout view is

@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/feature_list.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/token.h"
 #include "base/values.h"
 #include "chrome/browser/apps/app_service/web_contents_app_id_utils.h"
@@ -115,7 +116,7 @@ std::map<std::string, std::string> BrowserLiveTabContext::GetExtraDataForTab(
 
 #if defined(TOOLKIT_VIEWS)
   if (IsSideSearchEnabled(browser_->profile())) {
-    absl::optional<std::pair<std::string, std::string>> side_search_data =
+    std::optional<std::pair<std::string, std::string>> side_search_data =
         side_search::MaybeGetSideSearchTabRestoreData(
             browser_->tab_strip_model()->GetWebContentsAt(index));
     if (side_search_data.has_value())
@@ -131,7 +132,7 @@ BrowserLiveTabContext::GetExtraDataForWindow() const {
   return std::map<std::string, std::string>();
 }
 
-absl::optional<tab_groups::TabGroupId> BrowserLiveTabContext::GetTabGroupForTab(
+std::optional<tab_groups::TabGroupId> BrowserLiveTabContext::GetTabGroupForTab(
     int index) const {
   return browser_->tab_strip_model()->GetTabGroupForTab(index);
 }
@@ -173,7 +174,7 @@ sessions::LiveTab* BrowserLiveTabContext::AddRestoredTab(
     int tab_index,
     int selected_navigation,
     const std::string& extension_app_id,
-    absl::optional<tab_groups::TabGroupId> group,
+    std::optional<tab_groups::TabGroupId> group,
     const tab_groups::TabGroupVisualData& group_visual_data,
     bool select,
     bool pin,
@@ -189,8 +190,8 @@ sessions::LiveTab* BrowserLiveTabContext::AddRestoredTab(
           : nullptr;
 
   TabGroupModel* group_model = browser_->tab_strip_model()->group_model();
-  const bool first_tab_in_group =
-      group.has_value() ? !group_model->ContainsTabGroup(group.value()) : false;
+  const bool first_tab_in_group = group_model && group.has_value() &&
+                                  !group_model->ContainsTabGroup(group.value());
 
   bool restored_from_closed_tab_cache = false;
   WebContents* web_contents = nullptr;
@@ -218,6 +219,10 @@ sessions::LiveTab* BrowserLiveTabContext::AddRestoredTab(
         group, select, pin, base::TimeTicks(), storage_namespace,
         user_agent_override, extra_data, false /* from_session_restore */);
   }
+
+  // Record the metrics for restoring closed tabs. Set to true when the tab is
+  // restored from closed tab cache and false otherwise.
+  UMA_HISTOGRAM_BOOLEAN("Tab.RestoreClosedTab", restored_from_closed_tab_cache);
 
   // Only update the metadata if the group doesn't already exist since the
   // existing group has the latest metadata, which may have changed from the
@@ -253,7 +258,7 @@ sessions::LiveTab* BrowserLiveTabContext::AddRestoredTab(
 
 sessions::LiveTab* BrowserLiveTabContext::ReplaceRestoredTab(
     const std::vector<sessions::SerializedNavigationEntry>& navigations,
-    absl::optional<tab_groups::TabGroupId> group,
+    std::optional<tab_groups::TabGroupId> group,
     int selected_navigation,
     const std::string& extension_app_id,
     const sessions::PlatformSpecificTabData* tab_platform_data,
@@ -318,15 +323,19 @@ sessions::LiveTabContext* BrowserLiveTabContext::Create(
 // static
 sessions::LiveTabContext* BrowserLiveTabContext::FindContextForWebContents(
     const WebContents* contents) {
-  Browser* browser = chrome::FindBrowserWithWebContents(contents);
-  return browser ? browser->live_tab_context() : nullptr;
+  Browser* browser = chrome::FindBrowserWithTab(contents);
+  return browser && !browser->is_delete_scheduled()
+             ? browser->live_tab_context()
+             : nullptr;
 }
 
 // static
 sessions::LiveTabContext* BrowserLiveTabContext::FindContextWithID(
     SessionID desired_id) {
   Browser* browser = chrome::FindBrowserWithID(desired_id);
-  return browser ? browser->live_tab_context() : nullptr;
+  return browser && !browser->is_delete_scheduled()
+             ? browser->live_tab_context()
+             : nullptr;
 }
 
 // static
@@ -334,5 +343,7 @@ sessions::LiveTabContext* BrowserLiveTabContext::FindContextWithGroup(
     tab_groups::TabGroupId group,
     Profile* profile) {
   Browser* browser = chrome::FindBrowserWithGroup(group, profile);
-  return browser ? browser->live_tab_context() : nullptr;
+  return browser && !browser->is_delete_scheduled()
+             ? browser->live_tab_context()
+             : nullptr;
 }

@@ -12,6 +12,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "extensions/common/extension_id.h"
 #include "extensions/common/stack_frame.h"
 #include "url/gurl.h"
 
@@ -38,7 +39,7 @@ class ExtensionError {
   bool IsEqual(const ExtensionError* rhs) const;
 
   Type type() const { return type_; }
-  const std::string& extension_id() const { return extension_id_; }
+  const ExtensionId& extension_id() const { return extension_id_; }
   int id() const { return id_; }
   void set_id(int id) { id_ = id; }
   bool from_incognito() const { return from_incognito_; }
@@ -50,7 +51,7 @@ class ExtensionError {
 
  protected:
   ExtensionError(Type type,
-                 const std::string& extension_id,
+                 const ExtensionId& extension_id,
                  bool from_incognito,
                  logging::LogSeverity level,
                  const std::u16string& source,
@@ -61,7 +62,7 @@ class ExtensionError {
   // Which type of error this is.
   Type type_;
   // The ID of the extension which caused the error.
-  std::string extension_id_;
+  ExtensionId extension_id_;
   // The id of this particular error. This can be zero if the id is never set.
   int id_;
   // Whether or not the error was caused while incognito.
@@ -82,7 +83,7 @@ class ManifestError : public ExtensionError {
  public:
   ManifestError(const std::string& extension_id,
                 const std::u16string& message,
-                const std::u16string& manifest_key,
+                const std::string& manifest_key,
                 const std::u16string& manifest_specific);
 
   ManifestError(const ManifestError&) = delete;
@@ -92,7 +93,7 @@ class ManifestError : public ExtensionError {
 
   std::string GetDebugString() const override;
 
-  const std::u16string& manifest_key() const { return manifest_key_; }
+  const std::string& manifest_key() const { return manifest_key_; }
   const std::u16string& manifest_specific() const { return manifest_specific_; }
 
  private:
@@ -100,7 +101,7 @@ class ManifestError : public ExtensionError {
 
   // If present, this indicates the feature in the manifest which caused the
   // error.
-  std::u16string manifest_key_;
+  std::string manifest_key_;
   // If present, this is a more-specific location of the error - for instance,
   // a specific permission which is incorrect, rather than simply "permissions".
   std::u16string manifest_specific_;

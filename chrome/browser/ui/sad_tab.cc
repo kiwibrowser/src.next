@@ -27,6 +27,7 @@
 
 #if BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/memory/oom_memory_details.h"
+#include "chromeos/components/kiosk/kiosk_utils.h"
 #endif
 
 namespace {
@@ -62,7 +63,7 @@ bool IsRepeatedlyCrashing() {
 
 bool AreOtherTabsOpen() {
   size_t tab_count = 0;
-  for (auto* browser : *BrowserList::GetInstance()) {
+  for (Browser* browser : *BrowserList::GetInstance()) {
     tab_count += browser->tab_strip_model()->count();
     if (tab_count > 1U)
       break;
@@ -208,7 +209,7 @@ void SadTab::PerformAction(SadTab::Action action) {
                   ui_metrics::SadTabEvent::BUTTON_CLICKED);
       if (show_feedback_button_) {
         ShowFeedbackPage(
-            chrome::FindBrowserWithWebContents(web_contents_),
+            chrome::FindBrowserWithTab(web_contents_),
             chrome::kFeedbackSourceSadTabPage,
             std::string() /* description_template */,
             l10n_util::GetStringUTF8(kind_ == SAD_TAB_KIND_CRASHED
@@ -237,11 +238,6 @@ SadTab::SadTab(content::WebContents* web_contents, SadTabKind kind)
       is_repeatedly_crashing_(IsRepeatedlyCrashing()),
       show_feedback_button_(false),
       recorded_paint_(false) {
-#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-  // Only Google Chrome-branded browsers may show the Feedback button.
-  show_feedback_button_ = is_repeatedly_crashing_;
-#endif
-
   switch (kind) {
     case SAD_TAB_KIND_CRASHED:
     case SAD_TAB_KIND_OOM:
@@ -260,4 +256,16 @@ SadTab::SadTab(content::WebContents* web_contents, SadTabKind kind)
                    << web_contents->GetURL().DeprecatedGetOriginAsURL().spec();
       break;
   }
+
+#if BUILDFLAG(IS_CHROMEOS)
+  // Sending feedback is not allowed in the ChromeOS Kiosk mode.
+  if (chromeos::IsKioskSession()) {
+    return;
+  }
+#endif  // BUILDFLAG(IS_CHROMEOS)
+
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  // Only Google Chrome-branded browsers may show the Feedback button.
+  show_feedback_button_ = is_repeatedly_crashing_;
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 }

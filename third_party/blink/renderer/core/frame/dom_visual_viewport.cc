@@ -35,6 +35,7 @@
 #include "third_party/blink/renderer/core/geometry/dom_rect.h"
 #include "third_party/blink/renderer/core/layout/adjust_for_absolute_zoom.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/page/scrolling/sync_scroll_attempt_heuristic.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/widget/frame_widget.h"
@@ -48,7 +49,7 @@ DOMVisualViewport::~DOMVisualViewport() = default;
 
 void DOMVisualViewport::Trace(Visitor* visitor) const {
   visitor->Trace(window_);
-  EventTargetWithInlineData::Trace(visitor);
+  EventTarget::Trace(visitor);
 }
 
 const AtomicString& DOMVisualViewport::InterfaceName() const {
@@ -94,6 +95,10 @@ float DOMVisualViewport::pageLeft() const {
   if (!view || !view->LayoutViewport())
     return 0;
 
+  // TODO(crbug.com/1499981): This should be removed once synchronized scrolling
+  // impact is understood.
+  SyncScrollAttemptHeuristic::DidAccessScrollOffset();
+
   frame->GetDocument()->UpdateStyleAndLayout(DocumentUpdateReason::kJavaScript);
   float viewport_x = view->LayoutViewport()->GetScrollOffset().x();
 
@@ -116,6 +121,10 @@ float DOMVisualViewport::pageTop() const {
   LocalFrameView* view = frame->View();
   if (!view || !view->LayoutViewport())
     return 0;
+
+  // TODO(crbug.com/1499981): This should be removed once synchronized scrolling
+  // impact is understood.
+  SyncScrollAttemptHeuristic::DidAccessScrollOffset();
 
   frame->GetDocument()->UpdateStyleAndLayout(DocumentUpdateReason::kJavaScript);
   float viewport_y = view->LayoutViewport()->GetScrollOffset().y();
@@ -188,8 +197,10 @@ double DOMVisualViewport::scale() const {
 absl::optional<HeapVector<Member<DOMRect>>> DOMVisualViewport::segments()
     const {
   LocalFrame* frame = window_->GetFrame();
-  if (!frame || !frame->IsOutermostMainFrame())
+  if (!frame || !frame->GetWidgetForLocalRoot() ||
+      !frame->IsOutermostMainFrame()) {
     return absl::nullopt;
+  }
 
   WebVector<gfx::Rect> web_segments =
       frame->GetWidgetForLocalRoot()->WindowSegments();

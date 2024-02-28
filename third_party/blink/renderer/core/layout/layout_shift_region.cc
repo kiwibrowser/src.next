@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,10 +47,7 @@ class BasicIntervals {
   Vector<int> endpoints_;
   // Use int64_t which is larger than real |int| since the empty value of the
   // key is max and deleted value of the key is max - 1 in HashMap.
-  HashMap<int64_t,
-          unsigned,
-          WTF::IntHash<int64_t>,
-          WTF::UnsignedWithZeroKeyHashTraits<int64_t>>
+  HashMap<int64_t, unsigned, IntWithZeroKeyHashTraits<int64_t>>
       endpoint_to_index_;
 
 #if DCHECK_IS_ON()
@@ -310,7 +307,7 @@ uint64_t Sweeper::SweepImpl(SegmentTree& tree,
 }  // namespace
 
 uint64_t LayoutShiftRegion::Area() const {
-  if (rects_.IsEmpty())
+  if (rects_.empty())
     return 0;
 
   // Optimization: for a single rect, we don't need Sweeper.

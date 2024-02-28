@@ -7,10 +7,11 @@
 #include <stdint.h>
 
 #include "base/base64.h"
-#include "base/bind.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "build/build_config.h"
@@ -18,7 +19,6 @@
 #include "chrome/browser/download/download_crx_util.h"
 #include "chrome/browser/download/download_ui_model.h"
 #include "chrome/browser/image_decoder/image_decoder.h"
-#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/url_constants.h"
 #include "components/google/core/common/google_util.h"
 #include "content/public/browser/browser_thread.h"

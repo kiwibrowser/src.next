@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@ namespace blink {
 
 class DisplayItemClient;
 class GraphicsContext;
+class HitTestLocation;
 class LayoutObject;
 
 class CORE_EXPORT ClipPathClipper {
@@ -24,9 +25,7 @@ class CORE_EXPORT ClipPathClipper {
                                        const LayoutObject&,
                                        const DisplayItemClient&);
 
-  // Returns the reference box used by CSS clip-path. For HTML objects,
-  // this is the border box of the element. For SVG objects this is the
-  // object bounding box.
+  // Returns the reference box used by CSS clip-path.
   static gfx::RectF LocalReferenceBox(const LayoutObject&);
 
   // Returns the bounding box of the computed clip path, which could be
@@ -35,17 +34,26 @@ class CORE_EXPORT ClipPathClipper {
   static absl::optional<gfx::RectF> LocalClipPathBoundingBox(
       const LayoutObject&);
 
-  // Returns true if the object has a clip-path that must be implemented with
-  // a mask.
-  static bool ShouldUseMaskBasedClip(const LayoutObject&);
-
   // The argument |clip_path_owner| is the layout object that owns the
   // ClipPathOperation we are currently processing. Usually it is the
   // same as the layout object getting clipped, but in the case of nested
   // clip-path, it could be one of the SVG clip path in the chain.
   // Returns the path if the clip-path can use path-based clip.
   static absl::optional<Path> PathBasedClip(
-      const LayoutObject& clip_path_owner);
+      const LayoutObject& clip_path_owner,
+      const bool is_in_block_fragmentation);
+
+  // Returns true if `location` intersects the `clip_path_owner`'s clip-path.
+  // `reference_box`, which should be calculated from `reference_box_object`, is
+  // used to resolve 'objectBoundingBox' units/percentages.
+  static bool HitTest(const LayoutObject& clip_path_owner,
+                      const gfx::RectF& reference_box,
+                      const LayoutObject& reference_box_object,
+                      const HitTestLocation& location);
+
+  // Like the above, but derives the reference box from the LayoutObject using
+  // `LocalReferenceBox()`.
+  static bool HitTest(const LayoutObject&, const HitTestLocation& location);
 };
 
 }  // namespace blink

@@ -61,10 +61,6 @@ bool WebstoreReinstaller::ShouldShowPostInstallUI() const {
   return false;
 }
 
-bool WebstoreReinstaller::ShouldShowAppInstalledBubble() const {
-  return false;
-}
-
 content::WebContents* WebstoreReinstaller::GetWebContents() const {
   return web_contents();
 }
@@ -77,6 +73,10 @@ void WebstoreReinstaller::WebContentsDestroyed() {
 
 void WebstoreReinstaller::OnInstallPromptDone(
     ExtensionInstallPrompt::DoneCallbackPayload payload) {
+  // This dialog doesn't support the "withhold permissions" checkbox.
+  DCHECK_NE(payload.result,
+            ExtensionInstallPrompt::Result::ACCEPTED_WITH_WITHHELD_PERMISSIONS);
+
   if (payload.result != ExtensionInstallPrompt::Result::ACCEPTED) {
     WebstoreStandaloneInstaller::OnInstallPromptDone(std::move(payload));
     return;

@@ -29,18 +29,18 @@ scoped_refptr<Extension> CreateTestExtension(const std::string& name,
 #endif
   path = path.AppendASCII(name);
 
-  base::DictionaryValue manifest;
-  manifest.SetStringKey("name", name);
-  manifest.SetStringKey("version", "1");
-  manifest.SetIntKey("manifest_version", 2);
+  auto manifest = base::Value::Dict()
+                      .Set("name", name)
+                      .Set("version", "1")
+                      .Set("manifest_version", 2);
 
   if (!launch_url.empty())
-    manifest.SetStringPath("app.launch.web_url", launch_url);
+    manifest.SetByDottedPath("app.launch.web_url", launch_url);
 
   if (!extent.empty()) {
-    base::Value urls(base::Value::Type::LIST);
+    base::Value::List urls;
     urls.Append(extent);
-    manifest.SetPath("app.urls", std::move(urls));
+    manifest.SetByDottedPath("app.urls", std::move(urls));
   }
 
   std::string error;

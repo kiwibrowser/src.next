@@ -34,6 +34,7 @@
 #include "third_party/blink/renderer/core/dom/container_node.h"
 #include "third_party/blink/renderer/core/dom/document_fragment.h"
 #include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/dom/element_rare_data_field.h"
 #include "third_party/blink/renderer/core/dom/tree_scope.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
@@ -49,7 +50,9 @@ class WhitespaceAttacher;
 
 enum class ShadowRootType { kOpen, kClosed, kUserAgent };
 
-class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
+class CORE_EXPORT ShadowRoot final : public DocumentFragment,
+                                     public TreeScope,
+                                     public ElementRareDataField {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -113,7 +116,7 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
     return *slot_assignment_;
   }
 
-  bool HasSlotAssignment() { return slot_assignment_; }
+  bool HasSlotAssignment() { return slot_assignment_ != nullptr; }
 
   HTMLSlotElement* AssignedSlotFor(const Node&);
   void DidAddSlot(HTMLSlotElement&);
@@ -122,13 +125,15 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
 
   void DistributeIfNeeded();
 
-  Element* ActiveElement() const;
-
   String innerHTML() const;
   String getInnerHTML(const GetInnerHTMLOptions* options) const;
   void setInnerHTML(const String&, ExceptionState& = ASSERT_NO_EXCEPTION);
+  void setHTMLUnsafe(const String& html, ExceptionState&);
 
-  Node* Clone(Document&, CloneChildrenFlag) const override;
+  Node* Clone(Document& factory,
+              NodeCloningData& data,
+              ContainerNode* append_to,
+              ExceptionState& append_exception_state) const override;
 
   void SetDelegatesFocus(bool flag) { delegates_focus_ = flag; }
   bool delegatesFocus() const { return delegates_focus_; }
@@ -179,12 +184,10 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
     return has_focusgroup_attribute_on_descendant_;
   }
 
-  bool ContainsShadowRoots() const { return child_shadow_root_count_; }
+  void SetRegistry(CustomElementRegistry*);
+  CustomElementRegistry* registry() const { return registry_.Get(); }
 
-  StyleSheetList& StyleSheets();
-  void SetStyleSheets(StyleSheetList* style_sheet_list) {
-    style_sheet_list_ = style_sheet_list;
-  }
+  bool ContainsShadowRoots() const { return child_shadow_root_count_; }
 
   void Trace(Visitor*) const override;
 
@@ -210,8 +213,8 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
     --child_shadow_root_count_;
   }
 
-  Member<StyleSheetList> style_sheet_list_;
   Member<SlotAssignment> slot_assignment_;
+  Member<CustomElementRegistry> registry_;
   unsigned child_shadow_root_count_ : 16;
   unsigned type_ : 2;
   unsigned registered_with_parent_shadow_root_ : 1;
@@ -223,10 +226,6 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
   unsigned has_focusgroup_attribute_on_descendant_ : 1;
   unsigned unused_ : 7;
 };
-
-inline Element* ShadowRoot::ActiveElement() const {
-  return AdjustedFocusedElement();
-}
 
 inline bool Node::IsInUserAgentShadowRoot() const {
   return ContainingShadowRoot() && ContainingShadowRoot()->IsUserAgent();

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #include "third_party/blink/renderer/core/frame/pending_beacon_dispatcher.h"
@@ -20,6 +20,7 @@
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/googletest/src/googlemock/include/gmock/gmock-matchers.h"
 #include "third_party/googletest/src/googlemock/include/gmock/gmock-more-matchers.h"
@@ -76,7 +77,7 @@ class MockPendingBeacon : public GarbageCollected<MockPendingBeacon>,
     on_send_.Run(id_);
     PendingBeaconDispatcher::From(*ec_)->Unregister(this);
   }
-  ExecutionContext* GetExecutionContext() override { return ec_; }
+  ExecutionContext* GetExecutionContext() override { return ec_.Get(); }
   bool IsPending() const override { return is_pending_; }
   void MarkNotPending() override { is_pending_ = false; }
 
@@ -115,6 +116,9 @@ class PendingBeaconDispatcherTestBase : public ::testing::Test {
     }
     return beacons;
   }
+
+ private:
+  test::TaskEnvironment task_environment_;
 };
 
 struct BeaconIdToTimeoutsTestType {
@@ -328,9 +332,8 @@ TEST_F(PendingBeaconDispatcherBackgroundTimeoutBundledTest,
 class PendingBeaconDispatcherOnPagehideTest
     : public PendingBeaconDispatcherTestBase {
   void SetUp() override {
-    const std::vector<base::test::ScopedFeatureList::FeatureAndParams>
-        enabled_features = {{blink::features::kPendingBeaconAPI,
-                             {{"send_on_navigation", "true"}}}};
+    const std::vector<base::test::FeatureRefAndParams> enabled_features = {
+        {blink::features::kPendingBeaconAPI, {{"send_on_navigation", "true"}}}};
     feature_list_.InitWithFeaturesAndParameters(enabled_features, {});
     PendingBeaconDispatcherTestBase::SetUp();
   }

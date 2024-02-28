@@ -7,10 +7,10 @@
 #include <dlfcn.h>
 #include <mach-o/getsect.h>
 
+#include "base/apple/scoped_cftyperef.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
-#include "base/mac/scoped_cftyperef.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
@@ -27,20 +27,20 @@ static NativeLibraryObjCStatus GetObjCStatusForImage(
 
   // See if the image contains an "ObjC image info" segment. This method
   // of testing is used in _CFBundleGrokObjcImageInfoFromFile in
-  // CF-744/CFBundle.c, around lines 2447-2474.
+  // CF-1153.18/CFBundle_Grok.c, around line 349.
   //
   // In 64-bit images, ObjC can be recognized in __DATA,__objc_imageinfo.
-  const section_64* section = getsectbynamefromheader_64(
-      reinterpret_cast<const struct mach_header_64*>(info.dli_fbase), SEG_DATA,
-      "__objc_imageinfo");
-  if (section)
+  const auto* header =
+      reinterpret_cast<const struct mach_header_64*>(info.dli_fbase);
+  unsigned long size = 0;
+  getsectiondata(header, SEG_DATA, "__objc_imageinfo", &size);
+  if (size > 0) {
     return OBJC_PRESENT;
+  }
   // ....except when "SharedRegionEncodingV2" is on, it's in
   // __DATA_CONST,__objc_image_info (see https://crbug.com/1220459#c16)
-  section = getsectbynamefromheader_64(
-      reinterpret_cast<const struct mach_header_64*>(info.dli_fbase),
-      "__DATA_CONST", "__objc_imageinfo");
-  return section ? OBJC_PRESENT : OBJC_NOT_PRESENT;
+  getsectiondata(header, "__DATA_CONST", "__objc_imageinfo", &size);
+  return size > 0 ? OBJC_PRESENT : OBJC_NOT_PRESENT;
 }
 
 std::string NativeLibraryLoadError::ToString() const {
@@ -64,7 +64,7 @@ NativeLibrary LoadNativeLibraryWithOptions(const FilePath& library_path,
     native_lib->objc_status = OBJC_UNKNOWN;
     return native_lib;
   }
-  ScopedCFTypeRef<CFURLRef> url(CFURLCreateFromFileSystemRepresentation(
+  apple::ScopedCFTypeRef<CFURLRef> url(CFURLCreateFromFileSystemRepresentation(
       kCFAllocatorDefault, (const UInt8*)library_path.value().c_str(),
       checked_cast<CFIndex>(library_path.value().length()), true));
   if (!url)
@@ -76,7 +76,6 @@ NativeLibrary LoadNativeLibraryWithOptions(const FilePath& library_path,
   NativeLibrary native_lib = new NativeLibraryStruct();
   native_lib->type = BUNDLE;
   native_lib->bundle = bundle;
-  native_lib->bundle_resource_ref = CFBundleOpenBundleResourceMap(bundle);
   native_lib->objc_status = OBJC_UNKNOWN;
   return native_lib;
 }
@@ -84,8 +83,6 @@ NativeLibrary LoadNativeLibraryWithOptions(const FilePath& library_path,
 void UnloadNativeLibrary(NativeLibrary library) {
   if (library->objc_status == OBJC_NOT_PRESENT) {
     if (library->type == BUNDLE) {
-      CFBundleCloseBundleResourceMap(library->bundle,
-                                     library->bundle_resource_ref);
       CFRelease(library->bundle);
     } else {
       dlclose(library->dylib);
@@ -101,17 +98,17 @@ void UnloadNativeLibrary(NativeLibrary library) {
 }
 
 void* GetFunctionPointerFromNativeLibrary(NativeLibrary library,
-                                          StringPiece name) {
+                                          const char* name) {
   void* function_pointer = nullptr;
 
   // Get the function pointer using the right API for the type.
   if (library->type == BUNDLE) {
-    ScopedCFTypeRef<CFStringRef> symbol_name(CFStringCreateWithCString(
-        kCFAllocatorDefault, name.data(), kCFStringEncodingUTF8));
-    function_pointer = CFBundleGetFunctionPointerForName(library->bundle,
-                                                         symbol_name);
+    apple::ScopedCFTypeRef<CFStringRef> symbol_name(CFStringCreateWithCString(
+        kCFAllocatorDefault, name, kCFStringEncodingUTF8));
+    function_pointer =
+        CFBundleGetFunctionPointerForName(library->bundle, symbol_name.get());
   } else {
-    function_pointer = dlsym(library->dylib, name.data());
+    function_pointer = dlsym(library->dylib, name);
   }
 
   // If this library hasn't been tested for having ObjC, use the function

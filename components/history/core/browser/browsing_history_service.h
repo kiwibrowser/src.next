@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-#include "base/callback_forward.h"
+#include "base/functional/callback_forward.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
@@ -28,8 +28,8 @@
 #include "components/history/core/browser/url_row.h"
 #include "components/history/core/browser/web_history_service.h"
 #include "components/history/core/browser/web_history_service_observer.h"
-#include "components/sync/driver/sync_service.h"
-#include "components/sync/driver/sync_service_observer.h"
+#include "components/sync/service/sync_service.h"
+#include "components/sync/service/sync_service_observer.h"
 #include "url/gurl.h"
 
 FORWARD_DECLARE_TEST(BrowsingHistoryHandlerTest, ObservingWebHistoryDeletions);
@@ -224,10 +224,11 @@ class BrowsingHistoryService : public HistoryServiceObserver,
   void WebHistoryTimeout(scoped_refptr<QueryHistoryState> state);
 
   // Callback from the WebHistoryService when a query has completed.
-  void WebHistoryQueryComplete(scoped_refptr<QueryHistoryState> state,
-                               base::Time start_time,
-                               WebHistoryService::Request* request,
-                               const base::Value* results_value);
+  void WebHistoryQueryComplete(
+      scoped_refptr<QueryHistoryState> state,
+      base::Time start_time,
+      WebHistoryService::Request* request,
+      base::optional_ref<const base::Value::Dict> results_dict);
 
   // Callback telling us whether other forms of browsing history were found
   // on the history server.
@@ -254,7 +255,7 @@ class BrowsingHistoryService : public HistoryServiceObserver,
   // Deleting the request will cancel it.
   std::unique_ptr<WebHistoryService::Request> web_history_request_;
 
-  // True if there is a pending delete requests to the history service.
+  // True if there is a pending delete requests to the web service.
   bool has_pending_delete_request_ = false;
 
   // Tracker for delete requests to the history service.

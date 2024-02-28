@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,17 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
+#include "third_party/blink/renderer/core/testing/null_execution_context.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 
 namespace blink {
 
 class TreeScopeTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    document_ = Document::CreateForTest();
+    document_ =
+        Document::CreateForTest(execution_context_.GetExecutionContext());
     Element* html = document_->CreateRawElement(html_names::kHTMLTag);
     document_->AppendChild(html);
     body_ = document_->CreateRawElement(html_names::kBodyTag);
@@ -23,8 +26,13 @@ class TreeScopeTest : public ::testing::Test {
   }
   Document* GetDocument() { return document_; }
   Element* GetBody() { return body_; }
+  ExecutionContext& GetExecutionContext() {
+    return execution_context_.GetExecutionContext();
+  }
 
  private:
+  test::TaskEnvironment task_environment_;
+  ScopedNullExecutionContext execution_context_;
   Persistent<Document> document_;
   Persistent<Element> body_;
 };
@@ -99,7 +107,7 @@ TEST_F(TreeScopeTest, CommonAncestorOfTreesAtDifferentDepths) {
 }
 
 TEST_F(TreeScopeTest, CommonAncestorOfTreesInDifferentDocuments) {
-  auto* document2 = Document::CreateForTest();
+  auto* document2 = Document::CreateForTest(GetExecutionContext());
   EXPECT_EQ(nullptr, GetDocument()->CommonAncestorTreeScope(*document2));
   EXPECT_EQ(nullptr, document2->CommonAncestorTreeScope(*GetDocument()));
 }

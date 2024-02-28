@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,15 +17,17 @@ namespace blink {
 static bool CanHaveGeneratedChildren(const LayoutObject& layout_object) {
   // FIXME: LayoutMedia::layout makes assumptions about what children are
   // allowed so we can't support generated content.
-  if (layout_object.IsMedia() || layout_object.IsTextControlIncludingNG() ||
-      IsMenuList(&layout_object))
+  if (layout_object.IsMedia() || layout_object.IsTextControl() ||
+      IsMenuList(&layout_object)) {
     return false;
+  }
 
   // Input elements can't have generated children, but button elements can.
   // We'll write the code assuming any other button types that might emerge in
   // the future can also have children.
-  if (layout_object.IsButtonIncludingNG())
+  if (layout_object.IsButton()) {
     return !IsA<HTMLInputElement>(*layout_object.GetNode());
+  }
 
   return layout_object.CanHaveChildren();
 }

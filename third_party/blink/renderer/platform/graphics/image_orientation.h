@@ -28,6 +28,7 @@
 
 #include <stdint.h>
 
+#include "third_party/blink/renderer/platform/graphics/image_orientation_enum.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
@@ -39,27 +40,7 @@ namespace blink {
 
 class AffineTransform;
 
-// This enum intentionally matches the orientation values from the EXIF spec.
-// See JEITA CP-3451, page 18. http://www.exif.org/Exif2-2.PDF
-// These values are persisted to logs. Entries should not be renumbered and
-// numeric values should never be reused.
-enum class ImageOrientationEnum : int8_t {
-  // "TopLeft" means that the 0 row starts at the Top, the 0 column starts at
-  // the Left.
-  kOriginTopLeft = 1,      // default
-  kOriginTopRight = 2,     // mirror along y-axis
-  kOriginBottomRight = 3,  // 180 degree rotation
-  kOriginBottomLeft = 4,   // mirror along the x-axis
-  kOriginLeftTop = 5,      // mirror along x-axis + 270 degree CW rotation
-  kOriginRightTop = 6,     // 90 degree CW rotation
-  kOriginRightBottom = 7,  // mirror along x-axis + 90 degree CW rotation
-  kOriginLeftBottom = 8,   // 270 degree CW rotation
-  // All other values are "reserved" as of EXIF 2.2
-  kDefault = kOriginTopLeft,
-  kMaxValue = kOriginLeftBottom,
-};
-
-enum RespectImageOrientationEnum {
+enum RespectImageOrientationEnum : uint8_t {
   kDoNotRespectImageOrientation = 0,
   kRespectImageOrientation = 1
 };
@@ -77,20 +58,14 @@ class PLATFORM_EXPORT ImageOrientation final {
     return orientation_ >= ImageOrientationEnum::kOriginLeftTop;
   }
 
-  // ImageOrientationEnum currently matches EXIF values, however code outside
-  // this function should never assume that.
-  static ImageOrientation FromEXIFValue(int exif_value) {
-    // Values direct from images may be invalid, in which case we use the
-    // default.
-    if (exif_value < static_cast<int>(ImageOrientationEnum::kOriginTopLeft) ||
-        exif_value > static_cast<int>(ImageOrientationEnum::kOriginLeftBottom))
-      return ImageOrientationEnum::kDefault;
-    return static_cast<ImageOrientationEnum>(exif_value);
-  }
-
   // This transform can be used for drawing an image according to the
   // orientation. It should be used in a right-handed coordinate system.
   AffineTransform TransformFromDefault(const gfx::SizeF& drawn_size) const;
+
+  // This transform can be used to reverse an image orientation, it's for
+  // drawing an image according to the way it is encoded. It should be used in a
+  // right-handed coordinate system.
+  AffineTransform TransformToDefault(const gfx::SizeF& drawn_size) const;
 
   inline bool operator==(const ImageOrientation& other) const {
     return other.orientation_ == orientation_;

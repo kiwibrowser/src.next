@@ -6,43 +6,39 @@
 
 #include <vector>
 
+#include "base/check_is_test.h"
 #include "base/check_op.h"
 #include "base/command_line.h"
-#include "base/feature_list.h"
-#include "base/metrics/field_trial.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_sync_service.h"
-#include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/extensions/permissions_updater.h"
-#include "chrome/browser/extensions/scripting_permissions_modifier.h"
 #include "chrome/browser/extensions/shared_module_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
-#include "chrome/browser/web_applications/extensions/bookmark_app_util.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/url_handlers/url_handlers_parser.h"
 #include "chrome/common/extensions/sync_helper.h"
+#include "chrome/common/pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "components/variations/variations_associated_data.h"
-#include "components/webapps/browser/banners/app_banner_manager.h"
 #include "content/public/browser/site_instance.h"
 #include "extensions/browser/disable_reason.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/extension_util.h"
+#include "extensions/browser/pref_names.h"
+#include "extensions/browser/renderer_startup_helper.h"
+#include "extensions/browser/user_script_manager.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_icon_set.h"
 #include "extensions/common/extension_urls.h"
-#include "extensions/common/manifest.h"
-#include "extensions/common/manifest_handlers/app_isolation_info.h"
+#include "extensions/common/features/feature_developer_mode_only.h"
 #include "extensions/common/manifest_handlers/incognito_info.h"
 #include "extensions/common/manifest_handlers/permissions_parser.h"
 #include "extensions/common/permissions/permissions_data.h"
-#include "extensions/grit/extensions_browser_resources.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "url/gurl.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -56,15 +52,8 @@ namespace util {
 namespace {
 
 // Returns |extension_id|. See note below.
-std::string ReloadExtensionIfEnabled(const std::string& extension_id,
-                                     content::BrowserContext* context) {
-  ExtensionRegistry* registry = ExtensionRegistry::Get(context);
-  bool extension_is_enabled =
-      registry->enabled_extensions().Contains(extension_id);
-
-  if (!extension_is_enabled)
-    return extension_id;
-
+std::string ReloadExtension(const std::string& extension_id,
+                            content::BrowserContext* context) {
   // When we reload the extension the ID may be invalidated if we've passed it
   // by const ref everywhere. Make a copy to be safe. http://crbug.com/103762
   std::string id = extension_id;
@@ -75,25 +64,87 @@ std::string ReloadExtensionIfEnabled(const std::string& extension_id,
   return id;
 }
 
-}  // namespace
+std::string ReloadExtensionIfEnabled(const std::string& extension_id,
+                                     content::BrowserContext* context) {
+  ExtensionRegistry* registry = ExtensionRegistry::Get(context);
+  bool extension_is_enabled =
+      registry->enabled_extensions().Contains(extension_id);
 
-bool HasIsolatedStorage(const std::string& extension_id,
-                        content::BrowserContext* context) {
-  const Extension* extension =
-      ExtensionRegistry::Get(context)->enabled_extensions().GetByID(
-          extension_id);
+  if (!extension_is_enabled) {
+    return extension_id;
+  }
+  return ReloadExtension(extension_id, context);
+}
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-  const bool is_policy_extension =
-      extension && Manifest::IsPolicyLocation(extension->location());
+// Returns true if the extension ID is found in the InstallForceList policy. Is
+// checked by HasIsolatedStorage() when the extension is not found in the
+// registry.
+bool IsForceInstalledExtension(const ExtensionId& extension_id,
+                               content::BrowserContext* context) {
+  ExtensionPrefs* extension_prefs = ExtensionPrefs::Get(context);
+  const PrefService::Preference* const pref =
+      extension_prefs->pref_service()->FindPreference(
+          pref_names::kInstallForceList);
+  if (!pref || !pref->IsManaged() ||
+      pref->GetType() != base::Value::Type::DICT) {
+    return false;
+  }
+  for (const auto item : pref->GetValue()->GetDict()) {
+    if (extension_id == item.first) {
+      return true;
+    }
+  }
+  return false;
+}
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+
+// Returns true if the profile is a sign-in profile and the extension is policy
+// installed. `is_policy_installed` can be passed to the method if its value is
+// known (i.e. the extension was found in the registry and the extension
+// location was checked). If no value is passed for `is_policy_installed`, the
+// force-installed list will be queried for the extension ID.
+bool IsLoginScreenExtension(
+    ExtensionId extension_id,
+    content::BrowserContext* context,
+    std::optional<bool> is_policy_installed = std::nullopt) {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  // Verify the force-installed extension list if no value for
+  // `is_policy_installed` was passed.
+  if (is_policy_installed == std::nullopt) {
+    is_policy_installed = IsForceInstalledExtension(extension_id, context);
+  }
   Profile* profile = Profile::FromBrowserContext(context);
-  if (profile && ash::ProfileHelper::IsSigninProfile(profile) &&
-      is_policy_extension) {
+  return profile && ash::ProfileHelper::IsSigninProfile(profile) &&
+         is_policy_installed.value();
+#else
+  return false;
+#endif
+}
+
+}  // namespace
+
+bool HasIsolatedStorage(const ExtensionId& extension_id,
+                        content::BrowserContext* context) {
+  const Extension* extension =
+      ExtensionRegistry::Get(context)->GetInstalledExtension(extension_id);
+  // Extension is null when the extension is cleaned up after it's unloaded and
+  // won't be present in the ExtensionRegistry.
+  return extension ? HasIsolatedStorage(*extension, context)
+                   : IsLoginScreenExtension(extension_id, context);
+}
+
+bool HasIsolatedStorage(const Extension& extension,
+                        content::BrowserContext* context) {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  const bool is_policy_extension =
+      Manifest::IsPolicyLocation(extension.location());
+  if (IsLoginScreenExtension(extension.id(), context, is_policy_extension)) {
     return true;
   }
 #endif
 
-  return extension && AppIsolationInfo::HasIsolatedStorage(extension);
+  return extension.is_platform_app();
 }
 
 void SetIsIncognitoEnabled(const std::string& extension_id,
@@ -148,48 +199,19 @@ void SetIsIncognitoEnabled(const std::string& extension_id,
   }
 }
 
-bool CanLoadInIncognito(const Extension* extension,
-                        content::BrowserContext* context) {
-  CHECK(extension);
-  if (extension->is_hosted_app())
-    return true;
-  // Packaged apps and regular extensions need to be enabled specifically for
-  // incognito (and split mode should be set).
-  return IncognitoInfo::IsSplitMode(extension) &&
-         IsIncognitoEnabled(extension->id(), context);
-}
-
-bool AllowFileAccess(const std::string& extension_id,
-                     content::BrowserContext* context) {
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-             ::switches::kDisableExtensionsFileAccessCheck) ||
-         ExtensionPrefs::Get(context)->AllowFileAccess(extension_id);
-}
-
 void SetAllowFileAccess(const std::string& extension_id,
                         content::BrowserContext* context,
                         bool allow) {
-  // Reload to update browser state. Only bother if the value changed and the
-  // extension is actually enabled, since there is no UI otherwise.
-  if (allow == AllowFileAccess(extension_id, context))
+  // Reload to update browser state if the value changed. We need to reload even
+  // if the extension is disabled, in order to make sure file access is
+  // reinitialized correctly.
+  if (allow == util::AllowFileAccess(extension_id, context)) {
     return;
+  }
 
   ExtensionPrefs::Get(context)->SetAllowFileAccess(extension_id, allow);
 
-  ReloadExtensionIfEnabled(extension_id, context);
-}
-
-bool IsAppLaunchable(const std::string& extension_id,
-                     content::BrowserContext* context) {
-  int reason = ExtensionPrefs::Get(context)->GetDisableReasons(extension_id);
-  return !((reason & disable_reason::DISABLE_UNSUPPORTED_REQUIREMENT) ||
-           (reason & disable_reason::DISABLE_CORRUPTED));
-}
-
-bool IsAppLaunchableWithoutEnabling(const std::string& extension_id,
-                                    content::BrowserContext* context) {
-  return ExtensionRegistry::Get(context)->GetExtensionById(
-             extension_id, ExtensionRegistry::ENABLED) != nullptr;
+  ReloadExtension(extension_id, context);
 }
 
 bool ShouldSync(const Extension* extension,
@@ -215,8 +237,8 @@ bool IsExtensionIdle(const std::string& extension_id,
   ids_to_check.push_back(extension_id);
 
   const Extension* extension =
-      ExtensionRegistry::Get(context)
-          ->GetExtensionById(extension_id, ExtensionRegistry::ENABLED);
+      ExtensionRegistry::Get(context)->enabled_extensions().GetByID(
+          extension_id);
   if (extension && extension->is_shared_module()) {
     // We have to check all the extensions that use this shared module for idle
     // to tell whether it is really 'idle'.
@@ -269,16 +291,6 @@ base::Value::Dict GetExtensionInfo(const Extension* extension) {
   return dict;
 }
 
-const gfx::ImageSkia& GetDefaultAppIcon() {
-  return *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-      IDR_APP_DEFAULT_ICON);
-}
-
-const gfx::ImageSkia& GetDefaultExtensionIcon() {
-  return *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-      IDR_EXTENSION_DEFAULT_ICON);
-}
-
 std::unique_ptr<const PermissionSet> GetInstallPromptPermissionSetForExtension(
     const Extension* extension,
     Profile* profile,
@@ -321,6 +333,28 @@ std::vector<content::BrowserContext*> GetAllRelatedProfiles(
   }
 
   return related_contexts;
+}
+
+void SetDeveloperModeForProfile(Profile* profile, bool in_developer_mode) {
+  profile->GetPrefs()->SetBoolean(prefs::kExtensionsUIDeveloperMode,
+                                  in_developer_mode);
+  SetCurrentDeveloperMode(util::GetBrowserContextId(profile),
+                          in_developer_mode);
+  RendererStartupHelperFactory::GetForBrowserContext(profile)
+      ->OnDeveloperModeChanged(in_developer_mode);
+
+  // kDynamicUserScript scripts are allowed if and only if the user is in dev
+  // mode (since they allow raw code execution). Notify the user script manager
+  // to properly enable or disable any scripts.
+  UserScriptManager* user_script_manager =
+      ExtensionSystem::Get(profile)->user_script_manager();
+  if (!user_script_manager) {
+    CHECK_IS_TEST();  // `user_script_manager` can be null in unit tests.
+    return;
+  }
+
+  user_script_manager->SetUserScriptSourceEnabledForExtensions(
+      UserScript::Source::kDynamicUserScript, in_developer_mode);
 }
 
 }  // namespace util

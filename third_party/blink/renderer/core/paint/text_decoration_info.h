@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,11 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_TEXT_DECORATION_INFO_H_
 
 #include "base/types/strong_alias.h"
-#include "cc/paint/paint_op_buffer.h"
+#include "cc/paint/paint_record.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/geometry/physical_offset.h"
+#include "third_party/blink/renderer/core/paint/line_relative_rect.h"
 #include "third_party/blink/renderer/core/paint/text_paint_style.h"
 #include "third_party/blink/renderer/core/style/applied_text_decoration.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
@@ -23,11 +24,11 @@
 namespace blink {
 
 class ComputedStyle;
+class DecoratingBox;
 class Font;
-class NGDecoratingBox;
-class NGInlinePaintContext;
+class InlinePaintContext;
 class SimpleFontData;
-class TextDecorationOffsetBase;
+class TextDecorationOffset;
 
 enum class ResolvedUnderlinePosition {
   kNearAlphabeticBaselineAuto,
@@ -46,22 +47,19 @@ class CORE_EXPORT TextDecorationInfo {
 
  public:
   TextDecorationInfo(
-      PhysicalOffset local_origin,
+      LineRelativeOffset local_origin,
       LayoutUnit width,
       const ComputedStyle& target_style,
-      const NGInlinePaintContext* inline_context,
+      const InlinePaintContext* inline_context,
       const absl::optional<AppliedTextDecoration> selection_text_decoration,
+      const AppliedTextDecoration* decoration_override = nullptr,
       const Font* font_override = nullptr,
       MinimumThickness1 minimum_thickness1 = MinimumThickness1(true),
-      float scaling_factor = 1.0f,
-      // Following arguments are used only in legacy. They're deprecated.
-      absl::optional<FontBaseline> baseline_type_override = absl::nullopt,
-      const ComputedStyle* decorating_box_style = nullptr);
+      float scaling_factor = 1.0f);
 
-  const AppliedTextDecoration& GetAppliedTextDecoration() const {
-    DCHECK(applied_text_decoration_);
-    return *applied_text_decoration_;
-  }
+  wtf_size_t AppliedDecorationCount() const;
+  const AppliedTextDecoration& AppliedDecoration(wtf_size_t) const;
+  bool HasDecorationOverride() const { return !!decoration_override_; }
 
   // Returns whether any of the decoration indices in AppliedTextDecoration
   // have any of the given lines.
@@ -103,22 +101,21 @@ class CORE_EXPORT TextDecorationInfo {
   // through. Must be called before trying to paint or compute bounds
   // for a line.
   void SetLineData(TextDecorationLine line, float line_offset);
-  void SetUnderlineLineData(const TextDecorationOffsetBase& decoration_offset);
-  void SetOverlineLineData(const TextDecorationOffsetBase& decoration_offset);
+  void SetUnderlineLineData(const TextDecorationOffset& decoration_offset);
+  void SetOverlineLineData(const TextDecorationOffset& decoration_offset);
   void SetLineThroughLineData();
-  void SetSpellingOrGrammarErrorLineData(const TextDecorationOffsetBase&);
+  void SetSpellingOrGrammarErrorLineData(const TextDecorationOffset&);
 
   // These methods do not depend on |SetDecorationIndex|.
   LayoutUnit Width() const { return width_; }
   const ComputedStyle& TargetStyle() const { return target_style_; }
   float TargetAscent() const { return target_ascent_; }
   // Returns the scaling factor for the decoration.
-  // It can be different from NGFragmentItem::SvgScalingFactor() if the
+  // It can be different from FragmentItem::SvgScalingFactor() if the
   // text works as a resource.
   float ScalingFactor() const { return scaling_factor_; }
-  bool ShouldAntialias() const { return antialias_; }
   float InkSkipClipUpper(float bounds_upper) const {
-    return -TargetAscent() + bounds_upper - local_origin_.top.ToFloat();
+    return -TargetAscent() + bounds_upper - local_origin_.line_over.ToFloat();
   }
 
   // |SetDecorationIndex| may change the results of these methods.
@@ -139,12 +136,13 @@ class CORE_EXPORT TextDecorationInfo {
   // SetLineData must be called before using the remaining methods.
   gfx::PointF StartPoint() const;
   float DoubleOffset() const;
+  bool ShouldAntialias() const;
 
   // Compute bounds for the given line and the current decoration.
   gfx::RectF Bounds() const;
 
   // Returns tile record and coordinates for wavy decorations.
-  sk_sp<cc::PaintRecord> WavyTileRecord() const;
+  cc::PaintRecord WavyTileRecord() const;
   gfx::RectF WavyPaintRect() const;
   gfx::RectF WavyTileRect() const;
 
@@ -161,7 +159,7 @@ class CORE_EXPORT TextDecorationInfo {
       const TextDecorationThickness& applied_decoration_thickness,
       const ComputedStyle* decorating_box_style) const;
   void ComputeWavyLineData(gfx::RectF& pattern_rect,
-                           sk_sp<cc::PaintRecord>& tile_record) const;
+                           cc::PaintRecord& tile_record) const;
 
   gfx::RectF BoundsForDottedOrDashed() const;
   gfx::RectF BoundsForWavy() const;
@@ -181,8 +179,8 @@ class CORE_EXPORT TextDecorationInfo {
   const ComputedStyle* decorating_box_style_ = nullptr;
 
   // Decorating box properties for the current |decoration_index_|.
-  const NGInlinePaintContext* const inline_context_ = nullptr;
-  const NGDecoratingBox* decorating_box_ = nullptr;
+  const InlinePaintContext* const inline_context_ = nullptr;
+  const DecoratingBox* decorating_box_ = nullptr;
   const AppliedTextDecoration* applied_text_decoration_ = nullptr;
   const absl::optional<AppliedTextDecoration> selection_text_decoration_;
   const Font* font_ = nullptr;
@@ -191,12 +189,11 @@ class CORE_EXPORT TextDecorationInfo {
   // These "overrides" fields force using the specified style or font instead
   // of the one from the decorating box. Note that using them means that the
   // [decorating box] is not supported.
+  const AppliedTextDecoration* const decoration_override_ = nullptr;
   const Font* const font_override_ = nullptr;
-  const ComputedStyle* const decorating_box_style_override_ = nullptr;
-  const absl::optional<FontBaseline> baseline_type_override_;
 
   // Geometry of the target text/box.
-  const PhysicalOffset local_origin_;
+  const LineRelativeOffset local_origin_;
   const LayoutUnit width_;
 
   // Cached properties for the current |decoration_index_|.
@@ -214,7 +211,7 @@ class CORE_EXPORT TextDecorationInfo {
   // Ideally we would build a vector of the TextDecorationLine instances needing
   // ‘line-through’, but this is a rare case so better to avoid vector overhead.
   TextDecorationLine lines_ = TextDecorationLine::kNone;
-  const TextDecorationLine union_all_lines_ = TextDecorationLine::kNone;
+  TextDecorationLine union_all_lines_ = TextDecorationLine::kNone;
 
   ResolvedUnderlinePosition original_underline_position_ =
       ResolvedUnderlinePosition::kNearAlphabeticBaselineAuto;
@@ -226,7 +223,7 @@ class CORE_EXPORT TextDecorationInfo {
   bool flip_underline_and_overline_ = false;
   bool use_decorating_box_ = false;
   const bool minimum_thickness_is_one_ = false;
-  const bool antialias_ = false;
+  bool antialias_ = false;
 
   struct LineData {
     STACK_ALLOCATED();
@@ -242,7 +239,7 @@ class CORE_EXPORT TextDecorationInfo {
     // Only used for kWavy lines.
     int wavy_offset_factor;
     gfx::RectF wavy_pattern_rect;
-    sk_sp<cc::PaintRecord> wavy_tile_record;
+    cc::PaintRecord wavy_tile_record;
   };
   LineData line_data_;
   absl::optional<Color> highlight_override_;

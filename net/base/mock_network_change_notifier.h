@@ -61,6 +61,12 @@ class MockNetworkChangeNotifier : public NetworkChangeNotifier {
     connection_cost_ = connection_cost;
   }
 
+  bool IsDefaultNetworkActiveInternal() override;
+
+  void SetIsDefaultNetworkActiveInternalForTesting(bool is_active) {
+    is_default_network_active_ = is_active;
+  }
+
   // Tells this class to ignore its cached connection cost value and instead
   // call the base class's implementation. This is intended to allow tests to
   // mock the product code's fallback to the default implementation in certain
@@ -78,17 +84,29 @@ class MockNetworkChangeNotifier : public NetworkChangeNotifier {
   // use_default_connection_cost_implementation is set to true.
   ConnectionCost GetCurrentConnectionCost() override;
 
+#if BUILDFLAG(IS_LINUX)
+  void SetAddressMapOwnerLinux(AddressMapOwnerLinux* address_map_owner) {
+    address_map_owner_ = address_map_owner;
+  }
+
+  AddressMapOwnerLinux* GetAddressMapOwnerInternal() override;
+#endif
+
  private:
   // Create using MockNetworkChangeNotifier::Create().
   explicit MockNetworkChangeNotifier(
       std::unique_ptr<SystemDnsConfigChangeNotifier> dns_config_notifier);
 
   bool force_network_handles_supported_ = false;
+  bool is_default_network_active_ = true;
   ConnectionType connection_type_ = CONNECTION_UNKNOWN;
   ConnectionCost connection_cost_ = CONNECTION_COST_UNKNOWN;
   bool use_default_connection_cost_implementation_ = false;
   NetworkChangeNotifier::NetworkList connected_networks_;
   std::unique_ptr<SystemDnsConfigChangeNotifier> dns_config_notifier_;
+#if BUILDFLAG(IS_LINUX)
+  raw_ptr<AddressMapOwnerLinux> address_map_owner_ = nullptr;
+#endif
 };
 
 // Class to replace existing NetworkChangeNotifier singleton with a

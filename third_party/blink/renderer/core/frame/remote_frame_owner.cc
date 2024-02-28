@@ -1,11 +1,12 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be found
-// in the LICENSE file.
+// Copyright 2015 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/frame/remote_frame_owner.h"
 
 #include "third_party/blink/public/mojom/frame/frame.mojom-blink.h"
 #include "third_party/blink/public/mojom/frame/intrinsic_sizing_info.mojom-blink.h"
+#include "third_party/blink/public/mojom/timing/resource_timing.mojom-blink-forward.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -15,7 +16,6 @@
 #include "third_party/blink/renderer/core/frame/web_remote_frame_impl.h"
 #include "third_party/blink/renderer/core/layout/intrinsic_sizing_info.h"
 #include "third_party/blink/renderer/core/timing/performance.h"
-#include "third_party/blink/renderer/platform/loader/fetch/resource_timing_info.h"
 
 namespace blink {
 
@@ -52,14 +52,12 @@ void RemoteFrameOwner::ClearContentFrame() {
   frame_ = nullptr;
 }
 
-void RemoteFrameOwner::AddResourceTiming(const ResourceTimingInfo& info) {
+void RemoteFrameOwner::AddResourceTiming(
+    mojom::blink::ResourceTimingInfoPtr info) {
+  DCHECK(info);
   LocalFrame* frame = To<LocalFrame>(frame_.Get());
-  mojom::blink::ResourceTimingInfoPtr resource_timing =
-      Performance::GenerateResourceTiming(
-          *frame->Tree().Parent()->GetSecurityContext()->GetSecurityOrigin(),
-          info, *frame->DomWindow());
   frame->GetLocalFrameHostRemote().ForwardResourceTimingToParent(
-      std::move(resource_timing));
+      std::move(info));
 }
 
 void RemoteFrameOwner::DispatchLoad() {

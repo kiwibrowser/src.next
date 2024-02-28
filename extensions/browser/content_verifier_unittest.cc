@@ -7,6 +7,7 @@
 #include "base/files/file_path.h"
 #include "base/memory/raw_ptr.h"
 #include "base/path_service.h"
+#include "base/strings/string_util.h"
 #include "base/values.h"
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
@@ -57,8 +58,9 @@ base::FilePath ToFirstLetterUppercasePath(const base::FilePath& path) {
   // Note: if there are no lowercase letters in |path|, this method returns
   // |path|.
   for (auto& c : path_copy) {
-    if (std::islower(c)) {
-      c = base::ToUpperASCII(c);
+    const auto upper_c = base::ToUpperASCII(c);
+    if (upper_c != c) {
+      c = upper_c;
       break;
     }
   }
@@ -205,34 +207,33 @@ class ContentVerifierTest : public ExtensionsTest {
   // Create a test extension with a content script and possibly a background
   // page or background script.
   scoped_refptr<Extension> CreateTestExtension() {
-    base::DictionaryValue manifest;
-    manifest.SetStringKey("name", "Dummy Extension");
-    manifest.SetStringKey("version", "1");
-    manifest.SetIntKey("manifest_version", 2);
+    auto manifest = base::Value::Dict()
+                        .Set("name", "Dummy Extension")
+                        .Set("version", "1")
+                        .Set("manifest_version", 2);
 
     if (background_manifest_type_ ==
         BackgroundManifestType::kBackgroundScript) {
-      base::Value background_scripts(base::Value::Type::LIST);
+      base::Value::List background_scripts;
       background_scripts.Append("foo/bg.txt");
-      manifest.Set(
-          manifest_keys::kBackgroundScripts,
-          base::Value::ToUniquePtrValue(std::move(background_scripts)));
+      manifest.SetByDottedPath(manifest_keys::kBackgroundScripts,
+                               std::move(background_scripts));
     } else if (background_manifest_type_ ==
                BackgroundManifestType::kBackgroundPage) {
-      manifest.SetStringPath(manifest_keys::kBackgroundPage, "foo/page.txt");
+      manifest.SetByDottedPath(manifest_keys::kBackgroundPage, "foo/page.txt");
     }
 
-    base::Value content_scripts(base::Value::Type::LIST);
-    base::Value content_script(base::Value::Type::DICTIONARY);
-    base::Value js_files(base::Value::Type::LIST);
-    base::Value matches(base::Value::Type::LIST);
+    base::Value::List content_scripts;
+    base::Value::Dict content_script;
+    base::Value::List js_files;
+    base::Value::List matches;
     js_files.Append("foo/content.txt");
-    content_script.SetPath("js", std::move(js_files));
+    content_script.Set("js", std::move(js_files));
     matches.Append("http://*/*");
-    content_script.SetPath("matches", std::move(matches));
+    content_script.Set("matches", std::move(matches));
     content_scripts.Append(std::move(content_script));
     manifest.Set(api::content_scripts::ManifestKeys::kContentScripts,
-                 base::Value::ToUniquePtrValue(std::move(content_scripts)));
+                 std::move(content_scripts));
 
     base::FilePath path;
     EXPECT_TRUE(base::PathService::Get(DIR_TEST_DATA, &path));

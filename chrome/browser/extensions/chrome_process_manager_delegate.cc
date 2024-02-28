@@ -34,20 +34,15 @@ ChromeProcessManagerDelegate::ChromeProcessManagerDelegate() {
   BrowserList::AddObserver(this);
   DCHECK(g_browser_process);
   // The profile manager can be null in unit tests.
-  if (g_browser_process->profile_manager()) {
-    g_browser_process->profile_manager()->AddObserver(this);
-    // All profiles must be observed, so make sure none have been created that
-    // we missed.
-    DCHECK_EQ(0U,
-              g_browser_process->profile_manager()->GetLoadedProfiles().size());
+  if (ProfileManager* profile_manager = g_browser_process->profile_manager()) {
+    profile_manager_observation_.Observe(profile_manager);
+    // All profiles must be observed, so make sure none have been created
+    // that we missed.
+    DCHECK_EQ(0U, profile_manager->GetLoadedProfiles().size());
   }
 }
 
 ChromeProcessManagerDelegate::~ChromeProcessManagerDelegate() {
-  // |this| is owned by the BrowserProcess and outlives the ProfileManager, so
-  // we don't call RemoveObserver. The |g_browser_process| pointer is already
-  // set to null so we can't directly verify that the profile manager is already
-  // destroyed.
   DCHECK(!g_browser_process)
       << "ChromeProcessManagerDelegate expects to be shut down during "
          "BrowserProcess shutdown, after |g_browser_process| is set to null";
@@ -85,13 +80,13 @@ bool ChromeProcessManagerDelegate::IsExtensionBackgroundPageAllowed(
     }
 
     // Get login screen apps installed by policy.
-    std::unique_ptr<base::DictionaryValue> login_screen_apps_list =
+    base::Value::Dict login_screen_apps_list =
         ExtensionManagementFactory::GetForBrowserContext(context)
             ->GetForceInstallList();
 
     // For the ChromeOS login profile, only allow apps installed by device
     // policy or that are explicitly allowlisted.
-    return login_screen_apps_list->FindKey(extension.id()) ||
+    return login_screen_apps_list.Find(extension.id()) ||
            IsComponentExtensionAllowlistedForSignInProfile(extension.id());
   }
 
@@ -143,7 +138,16 @@ void ChromeProcessManagerDelegate::OnProfileAdded(Profile* profile) {
   // The profile might have been initialized asynchronously (in parallel with
   // extension system startup). Now that initialization is complete the
   // ProcessManager can load deferred background pages.
-  ProcessManager::Get(profile)->MaybeCreateStartupBackgroundHosts();
+  //
+  // The process manager service might not be available for some irregular
+  // profiles, like the System Profile.
+  if (ProcessManager* process_manager = ProcessManager::Get(profile)) {
+    process_manager->MaybeCreateStartupBackgroundHosts();
+  }
+}
+
+void ChromeProcessManagerDelegate::OnProfileManagerDestroying() {
+  profile_manager_observation_.Reset();
 }
 
 void ChromeProcessManagerDelegate::OnOffTheRecordProfileCreated(

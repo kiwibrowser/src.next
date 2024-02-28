@@ -13,17 +13,12 @@ bool SetAsDefaultBrowser() {
   return false;
 }
 
-bool SetAsDefaultProtocolClient(const std::string& protocol) {
+bool SetAsDefaultClientForScheme(const std::string& scheme) {
   NOTIMPLEMENTED();
   return false;
 }
 
-DefaultWebClientSetPermission GetDefaultWebClientSetPermission() {
-  NOTIMPLEMENTED();
-  return SET_DEFAULT_NOT_ALLOWED;
-}
-
-std::u16string GetApplicationNameForProtocol(const GURL& url) {
+std::u16string GetApplicationNameForScheme(const GURL& url) {
   NOTIMPLEMENTED();
   return std::u16string();
 }
@@ -37,9 +32,19 @@ bool IsFirefoxDefaultBrowser() {
   return false;
 }
 
-DefaultWebClientState IsDefaultProtocolClient(const std::string& protocol) {
+DefaultWebClientState IsDefaultClientForScheme(const std::string& scheme) {
   NOTIMPLEMENTED();
   return UNKNOWN_DEFAULT;
 }
+
+namespace internal {
+
+DefaultWebClientSetPermission GetPlatformSpecificDefaultWebClientSetPermission(
+    WebClientSetMethod method) {
+  NOTIMPLEMENTED();
+  return SET_DEFAULT_NOT_ALLOWED;
+}
+
+}  // namespace internal
 
 }  // namespace shell_integration

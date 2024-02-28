@@ -7,20 +7,20 @@
 #include <string>
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback.h"
 #include "base/files/file.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/current_thread.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -62,7 +62,7 @@ class FileStreamTest : public PlatformTest, public WithTaskEnvironment {
     PlatformTest::SetUp();
 
     base::CreateTemporaryFile(&temp_file_path_);
-    base::WriteFile(temp_file_path_, kTestData, kTestDataSize);
+    base::WriteFile(temp_file_path_, kTestData);
   }
   void TearDown() override {
     // FileStreamContexts must be asynchronously closed on the file task runner
@@ -83,7 +83,7 @@ namespace {
 
 TEST_F(FileStreamTest, OpenExplicitClose) {
   TestCompletionCallback callback;
-  FileStream stream(base::ThreadTaskRunnerHandle::Get());
+  FileStream stream(base::SingleThreadTaskRunner::GetCurrentDefault());
   int flags = base::File::FLAG_OPEN |
               base::File::FLAG_READ |
               base::File::FLAG_ASYNC;
@@ -98,8 +98,8 @@ TEST_F(FileStreamTest, OpenExplicitClose) {
 
 TEST_F(FileStreamTest, OpenExplicitCloseOrphaned) {
   TestCompletionCallback callback;
-  auto stream =
-      std::make_unique<FileStream>(base::ThreadTaskRunnerHandle::Get());
+  auto stream = std::make_unique<FileStream>(
+      base::SingleThreadTaskRunner::GetCurrentDefault());
   int flags = base::File::FLAG_OPEN | base::File::FLAG_READ |
               base::File::FLAG_ASYNC;
   int rv = stream->Open(temp_file_path(), flags, callback.callback());
@@ -120,15 +120,14 @@ TEST_F(FileStreamTest, UseFileHandle) {
   TestCompletionCallback callback;
   TestInt64CompletionCallback callback64;
   // 1. Test reading with a file handle.
-  ASSERT_EQ(kTestDataSize,
-            base::WriteFile(temp_file_path(), kTestData, kTestDataSize));
+  ASSERT_TRUE(base::WriteFile(temp_file_path(), kTestData));
   int flags = base::File::FLAG_OPEN_ALWAYS | base::File::FLAG_READ |
               base::File::FLAG_ASYNC;
   base::File file1(temp_file_path(), flags);
 
   // Seek to the beginning of the file and read.
   auto read_stream = std::make_unique<FileStream>(
-      std::move(file1), base::ThreadTaskRunnerHandle::Get());
+      std::move(file1), base::SingleThreadTaskRunner::GetCurrentDefault());
   ASSERT_THAT(read_stream->Seek(0, callback64.callback()),
               IsError(ERR_IO_PENDING));
   ASSERT_EQ(0, callback64.WaitForResult());
@@ -147,7 +146,7 @@ TEST_F(FileStreamTest, UseFileHandle) {
   base::File file2(temp_file_path(), flags);
 
   auto write_stream = std::make_unique<FileStream>(
-      std::move(file2), base::ThreadTaskRunnerHandle::Get());
+      std::move(file2), base::SingleThreadTaskRunner::GetCurrentDefault());
   ASSERT_THAT(write_stream->Seek(0, callback64.callback()),
               IsError(ERR_IO_PENDING));
   ASSERT_EQ(0, callback64.WaitForResult());
@@ -169,7 +168,7 @@ TEST_F(FileStreamTest, UseClosedStream) {
   TestCompletionCallback callback;
   TestInt64CompletionCallback callback64;
 
-  FileStream stream(base::ThreadTaskRunnerHandle::Get());
+  FileStream stream(base::SingleThreadTaskRunner::GetCurrentDefault());
 
   EXPECT_FALSE(stream.IsOpen());
 
@@ -188,7 +187,7 @@ TEST_F(FileStreamTest, Read) {
   int64_t file_size;
   EXPECT_TRUE(base::GetFileSize(temp_file_path(), &file_size));
 
-  FileStream stream(base::ThreadTaskRunnerHandle::Get());
+  FileStream stream(base::SingleThreadTaskRunner::GetCurrentDefault());
   int flags = base::File::FLAG_OPEN | base::File::FLAG_READ |
               base::File::FLAG_ASYNC;
   TestCompletionCallback callback;
@@ -217,8 +216,8 @@ TEST_F(FileStreamTest, Read_EarlyDelete) {
   int64_t file_size;
   EXPECT_TRUE(base::GetFileSize(temp_file_path(), &file_size));
 
-  auto stream =
-      std::make_unique<FileStream>(base::ThreadTaskRunnerHandle::Get());
+  auto stream = std::make_unique<FileStream>(
+      base::SingleThreadTaskRunner::GetCurrentDefault());
   int flags = base::File::FLAG_OPEN | base::File::FLAG_READ |
               base::File::FLAG_ASYNC;
   TestCompletionCallback callback;
@@ -244,7 +243,7 @@ TEST_F(FileStreamTest, Read_FromOffset) {
   int64_t file_size;
   EXPECT_TRUE(base::GetFileSize(temp_file_path(), &file_size));
 
-  FileStream stream(base::ThreadTaskRunnerHandle::Get());
+  FileStream stream(base::SingleThreadTaskRunner::GetCurrentDefault());
   int flags = base::File::FLAG_OPEN | base::File::FLAG_READ |
               base::File::FLAG_ASYNC;
   TestCompletionCallback callback;
@@ -279,7 +278,7 @@ TEST_F(FileStreamTest, Read_FromOffset) {
 }
 
 TEST_F(FileStreamTest, Write) {
-  FileStream stream(base::ThreadTaskRunnerHandle::Get());
+  FileStream stream(base::SingleThreadTaskRunner::GetCurrentDefault());
   int flags = base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_WRITE |
               base::File::FLAG_ASYNC;
   TestCompletionCallback callback;
@@ -304,8 +303,8 @@ TEST_F(FileStreamTest, Write) {
 }
 
 TEST_F(FileStreamTest, Write_EarlyDelete) {
-  auto stream =
-      std::make_unique<FileStream>(base::ThreadTaskRunnerHandle::Get());
+  auto stream = std::make_unique<FileStream>(
+      base::SingleThreadTaskRunner::GetCurrentDefault());
   int flags = base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_WRITE |
               base::File::FLAG_ASYNC;
   TestCompletionCallback callback;
@@ -335,7 +334,7 @@ TEST_F(FileStreamTest, Write_FromOffset) {
   int64_t file_size;
   EXPECT_TRUE(base::GetFileSize(temp_file_path(), &file_size));
 
-  FileStream stream(base::ThreadTaskRunnerHandle::Get());
+  FileStream stream(base::SingleThreadTaskRunner::GetCurrentDefault());
   int flags = base::File::FLAG_OPEN | base::File::FLAG_WRITE |
               base::File::FLAG_ASYNC;
   TestCompletionCallback callback;
@@ -375,8 +374,8 @@ TEST_F(FileStreamTest, BasicReadWrite) {
   int64_t file_size;
   EXPECT_TRUE(base::GetFileSize(temp_file_path(), &file_size));
 
-  auto stream =
-      std::make_unique<FileStream>(base::ThreadTaskRunnerHandle::Get());
+  auto stream = std::make_unique<FileStream>(
+      base::SingleThreadTaskRunner::GetCurrentDefault());
   int flags = base::File::FLAG_OPEN | base::File::FLAG_READ |
               base::File::FLAG_WRITE | base::File::FLAG_ASYNC;
   TestCompletionCallback callback;
@@ -430,8 +429,8 @@ TEST_F(FileStreamTest, BasicWriteRead) {
   int64_t file_size;
   EXPECT_TRUE(base::GetFileSize(temp_file_path(), &file_size));
 
-  auto stream =
-      std::make_unique<FileStream>(base::ThreadTaskRunnerHandle::Get());
+  auto stream = std::make_unique<FileStream>(
+      base::SingleThreadTaskRunner::GetCurrentDefault());
   int flags = base::File::FLAG_OPEN | base::File::FLAG_READ |
               base::File::FLAG_WRITE | base::File::FLAG_ASYNC;
   TestCompletionCallback callback;
@@ -518,8 +517,10 @@ class TestWriteReadCompletionCallback {
   int WaitForResult() {
     DCHECK(!waiting_for_result_);
     while (!have_result_) {
+      base::RunLoop loop;
+      quit_closure_ = loop.QuitWhenIdleClosure();
       waiting_for_result_ = true;
-      base::RunLoop().Run();
+      loop.Run();
       waiting_for_result_ = false;
     }
     have_result_ = false;  // auto-reset for next callback
@@ -582,7 +583,7 @@ class TestWriteReadCompletionCallback {
     result_ = *total_bytes_written_;
     have_result_ = true;
     if (waiting_for_result_)
-      base::RunLoop::QuitCurrentWhenIdleDeprecated();
+      std::move(quit_closure_).Run();
   }
 
   int result_ = 0;
@@ -593,14 +594,15 @@ class TestWriteReadCompletionCallback {
   raw_ptr<int> total_bytes_read_;
   raw_ptr<std::string> data_read_;
   scoped_refptr<DrainableIOBuffer> drainable_;
+  base::OnceClosure quit_closure_;
 };
 
 TEST_F(FileStreamTest, WriteRead) {
   int64_t file_size;
   EXPECT_TRUE(base::GetFileSize(temp_file_path(), &file_size));
 
-  auto stream =
-      std::make_unique<FileStream>(base::ThreadTaskRunnerHandle::Get());
+  auto stream = std::make_unique<FileStream>(
+      base::SingleThreadTaskRunner::GetCurrentDefault());
   int flags = base::File::FLAG_OPEN | base::File::FLAG_READ |
               base::File::FLAG_WRITE | base::File::FLAG_ASYNC;
   TestCompletionCallback open_callback;
@@ -616,18 +618,21 @@ TEST_F(FileStreamTest, WriteRead) {
   int total_bytes_written = 0;
   int total_bytes_read = 0;
   std::string data_read;
-  TestWriteReadCompletionCallback callback(stream.get(), &total_bytes_written,
-                                           &total_bytes_read, &data_read);
+  {
+    // `callback` can't outlive `stream`.
+    TestWriteReadCompletionCallback callback(stream.get(), &total_bytes_written,
+                                             &total_bytes_read, &data_read);
 
-  scoped_refptr<IOBufferWithSize> buf = CreateTestDataBuffer();
-  rv = stream->Write(buf.get(), buf->size(), callback.callback());
-  if (rv == ERR_IO_PENDING)
-    rv = callback.WaitForResult();
-  EXPECT_LT(0, rv);
-  EXPECT_EQ(kTestDataSize, total_bytes_written);
+    scoped_refptr<IOBufferWithSize> buf = CreateTestDataBuffer();
+    rv = stream->Write(buf.get(), buf->size(), callback.callback());
+    if (rv == ERR_IO_PENDING) {
+      rv = callback.WaitForResult();
+    }
+    EXPECT_LT(0, rv);
+    EXPECT_EQ(kTestDataSize, total_bytes_written);
 
-  callback.ValidateWrittenData();
-
+    callback.ValidateWrittenData();
+  }
   stream.reset();
 
   EXPECT_TRUE(base::GetFileSize(temp_file_path(), &file_size));
@@ -655,8 +660,10 @@ class TestWriteCloseCompletionCallback {
   int WaitForResult() {
     DCHECK(!waiting_for_result_);
     while (!have_result_) {
+      base::RunLoop loop;
+      quit_closure_ = loop.QuitWhenIdleClosure();
       waiting_for_result_ = true;
-      base::RunLoop().Run();
+      loop.Run();
       waiting_for_result_ = false;
     }
     have_result_ = false;  // auto-reset for next callback
@@ -690,7 +697,7 @@ class TestWriteCloseCompletionCallback {
     result_ = *total_bytes_written_;
     have_result_ = true;
     if (waiting_for_result_)
-      base::RunLoop::QuitCurrentWhenIdleDeprecated();
+      std::move(quit_closure_).Run();
   }
 
   int result_ = 0;
@@ -699,14 +706,15 @@ class TestWriteCloseCompletionCallback {
   raw_ptr<FileStream> stream_;
   raw_ptr<int> total_bytes_written_;
   scoped_refptr<DrainableIOBuffer> drainable_;
+  base::OnceClosure quit_closure_;
 };
 
 TEST_F(FileStreamTest, WriteClose) {
   int64_t file_size;
   EXPECT_TRUE(base::GetFileSize(temp_file_path(), &file_size));
 
-  auto stream =
-      std::make_unique<FileStream>(base::ThreadTaskRunnerHandle::Get());
+  auto stream = std::make_unique<FileStream>(
+      base::SingleThreadTaskRunner::GetCurrentDefault());
   int flags = base::File::FLAG_OPEN | base::File::FLAG_READ |
               base::File::FLAG_WRITE | base::File::FLAG_ASYNC;
   TestCompletionCallback open_callback;
@@ -720,15 +728,18 @@ TEST_F(FileStreamTest, WriteClose) {
   EXPECT_EQ(file_size, callback64.WaitForResult());
 
   int total_bytes_written = 0;
-  TestWriteCloseCompletionCallback callback(stream.get(), &total_bytes_written);
-
-  scoped_refptr<IOBufferWithSize> buf = CreateTestDataBuffer();
-  rv = stream->Write(buf.get(), buf->size(), callback.callback());
-  if (rv == ERR_IO_PENDING)
-    total_bytes_written = callback.WaitForResult();
-  EXPECT_LT(0, total_bytes_written);
-  EXPECT_EQ(kTestDataSize, total_bytes_written);
-
+  {
+    // `callback` can't outlive `stream`.
+    TestWriteCloseCompletionCallback callback(stream.get(),
+                                              &total_bytes_written);
+    scoped_refptr<IOBufferWithSize> buf = CreateTestDataBuffer();
+    rv = stream->Write(buf.get(), buf->size(), callback.callback());
+    if (rv == ERR_IO_PENDING) {
+      total_bytes_written = callback.WaitForResult();
+    }
+    EXPECT_LT(0, total_bytes_written);
+    EXPECT_EQ(kTestDataSize, total_bytes_written);
+  }
   stream.reset();
 
   EXPECT_TRUE(base::GetFileSize(temp_file_path(), &file_size));
@@ -773,9 +784,9 @@ TEST_F(FileStreamTest, WriteError) {
   ASSERT_TRUE(file.IsValid());
 
   auto stream = std::make_unique<FileStream>(
-      std::move(file), base::ThreadTaskRunnerHandle::Get());
+      std::move(file), base::SingleThreadTaskRunner::GetCurrentDefault());
 
-  scoped_refptr<IOBuffer> buf = base::MakeRefCounted<IOBuffer>(1);
+  scoped_refptr<IOBuffer> buf = base::MakeRefCounted<IOBufferWithSize>(1);
   buf->data()[0] = 0;
 
   TestCompletionCallback callback;
@@ -798,9 +809,9 @@ TEST_F(FileStreamTest, ReadError) {
   ASSERT_TRUE(file.IsValid());
 
   auto stream = std::make_unique<FileStream>(
-      std::move(file), base::ThreadTaskRunnerHandle::Get());
+      std::move(file), base::SingleThreadTaskRunner::GetCurrentDefault());
 
-  scoped_refptr<IOBuffer> buf = base::MakeRefCounted<IOBuffer>(1);
+  scoped_refptr<IOBuffer> buf = base::MakeRefCounted<IOBufferWithSize>(1);
   TestCompletionCallback callback;
   int rv = stream->Read(buf.get(), 1, callback.callback());
   if (rv == ERR_IO_PENDING)
@@ -822,7 +833,8 @@ TEST_F(FileStreamTest, AsyncFlagMismatch) {
   base::File lying_file(file.TakePlatformFile(), true);
   ASSERT_TRUE(lying_file.IsValid());
 
-  FileStream stream(std::move(lying_file), base::ThreadTaskRunnerHandle::Get());
+  FileStream stream(std::move(lying_file),
+                    base::SingleThreadTaskRunner::GetCurrentDefault());
   ASSERT_FALSE(stream.IsOpen());
   TestCompletionCallback callback;
   scoped_refptr<IOBufferWithSize> buf =
@@ -836,7 +848,7 @@ TEST_F(FileStreamTest, AsyncFlagMismatch) {
 // TODO(https://crbug.com/894599): flaky on both android and cronet bots.
 TEST_F(FileStreamTest, DISABLED_ContentUriRead) {
   base::FilePath test_dir;
-  base::PathService::Get(base::DIR_SOURCE_ROOT, &test_dir);
+  base::PathService::Get(base::DIR_SRC_TEST_DATA_ROOT, &test_dir);
   test_dir = test_dir.AppendASCII("net");
   test_dir = test_dir.AppendASCII("data");
   test_dir = test_dir.AppendASCII("file_stream_unittest");
@@ -852,7 +864,7 @@ TEST_F(FileStreamTest, DISABLED_ContentUriRead) {
   EXPECT_TRUE(base::GetFileSize(path, &file_size));
   EXPECT_LT(0, file_size);
 
-  FileStream stream(base::ThreadTaskRunnerHandle::Get());
+  FileStream stream(base::SingleThreadTaskRunner::GetCurrentDefault());
   int flags = base::File::FLAG_OPEN | base::File::FLAG_READ |
               base::File::FLAG_ASYNC;
   TestCompletionCallback callback;

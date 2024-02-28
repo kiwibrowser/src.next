@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,8 +32,9 @@ LocalFontFaceSource::~LocalFontFaceSource() {}
 bool LocalFontFaceSource::IsLocalNonBlocking() const {
   FontUniqueNameLookup* unique_name_lookup =
       FontGlobalContext::Get().GetFontUniqueNameLookup();
-  if (!unique_name_lookup)
+  if (!unique_name_lookup) {
     return true;
+  }
   return unique_name_lookup->IsFontUniqueNameLookupReadyForSyncLookup();
 }
 
@@ -43,10 +44,11 @@ bool LocalFontFaceSource::IsLocalFontAvailable(
   // TODO(crbug.com/1025945): Properly handle Windows prior to 10 and Android.
   bool font_available = FontCache::Get().IsPlatformFontUniqueNameMatchAvailable(
       font_description, font_name_);
-  if (font_available)
+  if (font_available) {
     font_selector_->ReportSuccessfulLocalFontMatch(font_name_);
-  else
+  } else {
     font_selector_->ReportFailedLocalFontMatch(font_name_);
+  }
   return font_available;
 }
 
@@ -78,8 +80,9 @@ scoped_refptr<SimpleFontData> LocalFontFaceSource::CreateFontData(
   probe::LocalFontsEnabled(font_selector_->GetExecutionContext(),
                            &local_fonts_enabled);
 
-  if (!local_fonts_enabled)
+  if (!local_fonts_enabled) {
     return nullptr;
+  }
 
   if (IsValid() && IsLoading()) {
     scoped_refptr<SimpleFontData> fallback_font_data =
@@ -102,9 +105,9 @@ scoped_refptr<SimpleFontData> LocalFontFaceSource::CreateFontData(
   // pass font_description to avoid breaking Google Fonts.
   FontDescription unstyled_description(font_description);
 #if !BUILDFLAG(IS_ANDROID)
-  unstyled_description.SetStretch(NormalWidthValue());
-  unstyled_description.SetStyle(NormalSlopeValue());
-  unstyled_description.SetWeight(NormalWeightValue());
+  unstyled_description.SetStretch(kNormalWidthValue);
+  unstyled_description.SetStyle(kNormalSlopeValue);
+  unstyled_description.SetWeight(kNormalWeightValue);
 #endif
   // TODO(https://crbug.com/1302264): Enable passing down of font-palette
   // information here (font_description.GetFontPalette()).
@@ -116,15 +119,16 @@ scoped_refptr<SimpleFontData> LocalFontFaceSource::CreateFontData(
 }
 
 void LocalFontFaceSource::BeginLoadIfNeeded() {
-  if (IsLoaded())
+  if (IsLoaded()) {
     return;
+  }
 
   FontUniqueNameLookup* unique_name_lookup =
       FontGlobalContext::Get().GetFontUniqueNameLookup();
   DCHECK(unique_name_lookup);
   unique_name_lookup->PrepareFontUniqueNameLookup(
-      WTF::Bind(&LocalFontFaceSource::NotifyFontUniqueNameLookupReady,
-                WrapWeakPersistent(this)));
+      WTF::BindOnce(&LocalFontFaceSource::NotifyFontUniqueNameLookupReady,
+                    WrapWeakPersistent(this)));
   face_->DidBeginLoad();
 }
 
@@ -150,8 +154,9 @@ bool LocalFontFaceSource::IsValid() const {
 }
 
 void LocalFontFaceSource::LocalFontHistograms::Record(bool load_success) {
-  if (reported_)
+  if (reported_) {
     return;
+  }
   reported_ = true;
   base::UmaHistogramBoolean("WebFont.LocalFontUsed", load_success);
 }

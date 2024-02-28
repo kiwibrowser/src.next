@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,15 +21,13 @@ String CSSLayerBlockRule::name() const {
 
 String CSSLayerBlockRule::cssText() const {
   StringBuilder result;
-  result.Append("@layer ");
+  result.Append("@layer");
   const String& layer_name = name();
   if (layer_name.length()) {
-    result.Append(layer_name);
     result.Append(" ");
+    result.Append(layer_name);
   }
-  result.Append("{\n");
   AppendCSSTextForItems(result);
-  result.Append('}');
   return result.ReleaseString();
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,7 +42,7 @@ class CORE_EXPORT StyleTraversalRoot {
   // the flat for the given subclass.
   virtual void SubtreeModified(ContainerNode& parent) = 0;
 
-  Node* GetRootNode() const { return root_node_; }
+  Node* GetRootNode() const { return root_node_.Get(); }
   void Clear() {
     root_node_ = nullptr;
     root_type_ = RootType::kSingleRoot;

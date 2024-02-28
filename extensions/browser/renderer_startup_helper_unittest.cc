@@ -116,6 +116,8 @@ class RendererStartupHelperInterceptor : public RendererStartupHelper,
   void SetScriptingAllowlist(
       const std::vector<std::string>& extension_ids) override {}
 
+  void UpdateUserScriptWorld(mojom::UserScriptWorldInfoPtr info) override {}
+
   void ShouldSuspend(ShouldSuspendCallback callback) override {
     std::move(callback).Run();
   }
@@ -206,44 +208,36 @@ class RendererStartupHelperTest : public ExtensionsTest {
   }
 
   scoped_refptr<const Extension> CreateExtension(const std::string& id_input) {
-    std::unique_ptr<base::DictionaryValue> manifest =
-        DictionaryBuilder()
-            .Set("name", "extension")
-            .Set("description", "an extension")
-            .Set("manifest_version", 2)
-            .Set("version", "0.1")
-            .Build();
+    base::Value::Dict manifest = base::Value::Dict()
+                                     .Set("name", "extension")
+                                     .Set("description", "an extension")
+                                     .Set("manifest_version", 2)
+                                     .Set("version", "0.1");
     return CreateExtension(id_input, std::move(manifest));
   }
 
   scoped_refptr<const Extension> CreateTheme(const std::string& id_input) {
-    std::unique_ptr<base::DictionaryValue> manifest =
-        DictionaryBuilder()
-            .Set("name", "theme")
-            .Set("description", "a theme")
-            .Set("theme", DictionaryBuilder().Build())
-            .Set("manifest_version", 2)
-            .Set("version", "0.1")
-            .Build();
+    base::Value::Dict manifest = base::Value::Dict()
+                                     .Set("name", "theme")
+                                     .Set("description", "a theme")
+                                     .Set("theme", base::Value::Dict())
+                                     .Set("manifest_version", 2)
+                                     .Set("version", "0.1");
     return CreateExtension(id_input, std::move(manifest));
   }
 
   scoped_refptr<const Extension> CreatePlatformApp(
       const std::string& id_input) {
-    std::unique_ptr<base::Value> background =
-        DictionaryBuilder()
-            .Set("scripts", ListBuilder().Append("background.js").Build())
-            .Build();
-    std::unique_ptr<base::DictionaryValue> manifest =
-        DictionaryBuilder()
+    base::Value::Dict background = base::Value::Dict().Set(
+        "scripts", base::Value::List().Append("background.js"));
+    base::Value::Dict manifest =
+        base::Value::Dict()
             .Set("name", "platform_app")
             .Set("description", "a platform app")
-            .Set("app", DictionaryBuilder()
-                            .Set("background", std::move(background))
-                            .Build())
+            .Set("app",
+                 base::Value::Dict().Set("background", std::move(background)))
             .Set("manifest_version", 2)
-            .Set("version", "0.1")
-            .Build();
+            .Set("version", "0.1");
     return CreateExtension(id_input, std::move(manifest));
   }
 
@@ -277,16 +271,15 @@ class RendererStartupHelperTest : public ExtensionsTest {
   }
 
   std::unique_ptr<RendererStartupHelperInterceptor> helper_;
-  raw_ptr<ExtensionRegistry> registry_;  // Weak.
+  raw_ptr<ExtensionRegistry, DanglingUntriaged> registry_;  // Weak.
   std::unique_ptr<content::MockRenderProcessHost> render_process_host_;
   std::unique_ptr<content::MockRenderProcessHost>
       incognito_render_process_host_;
   scoped_refptr<const Extension> extension_;
 
  private:
-  scoped_refptr<const Extension> CreateExtension(
-      const std::string& id_input,
-      std::unique_ptr<base::DictionaryValue> manifest) {
+  scoped_refptr<const Extension> CreateExtension(const std::string& id_input,
+                                                 base::Value::Dict manifest) {
     return ExtensionBuilder()
         .SetManifest(std::move(manifest))
         .SetID(crx_file::id_util::GenerateId(id_input))

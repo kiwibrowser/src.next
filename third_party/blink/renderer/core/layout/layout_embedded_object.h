@@ -58,14 +58,13 @@ class LayoutEmbeddedObject final : public LayoutEmbeddedContent {
                      const PhysicalOffset& paint_offset) const final;
 
   void UpdateLayout() final;
+  void UpdateAfterLayout() final;
 
-  bool IsOfType(LayoutObjectType type) const override {
+  bool IsEmbeddedObject() const final {
     NOT_DESTROYED();
-    return type == kLayoutObjectEmbeddedObject ||
-           LayoutEmbeddedContent::IsOfType(type);
+    return true;
   }
   void ComputeIntrinsicSizingInfo(IntrinsicSizingInfo&) const override;
-  bool NeedsPreferredWidthsRecalculation() const override;
 
   PluginAvailability plugin_availability_ = kPluginAvailable;
   String unavailable_plugin_replacement_text_;

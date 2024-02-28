@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,7 +29,6 @@ ComputePendingSheetTypeAndRenderBlockingBehavior(Element& sheet_owner,
                               : RenderBlockingBehavior::kBlocking);
   }
   bool potentially_render_blocking =
-      RuntimeEnabledFeatures::BlockingAttributeEnabled() &&
       IsA<HTMLElement>(sheet_owner) &&
       To<HTMLElement>(sheet_owner).IsPotentiallyRenderBlocking();
   return potentially_render_blocking

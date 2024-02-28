@@ -4,241 +4,404 @@
 
 package org.chromium.chrome.browser.toolbar.top;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.when;
+
 import android.view.View;
 
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.Mockito;
-import org.mockito.MockitoAnnotations;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
-import org.robolectric.annotation.Config;
+import org.robolectric.shadows.ShadowLooper;
 
-import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.base.FeatureList;
+import org.chromium.base.FeatureList.TestValues;
 import org.chromium.base.metrics.UmaRecorderHolder;
 import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.OneshotSupplierImpl;
 import org.chromium.base.supplier.Supplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
-import org.chromium.base.test.util.DisabledTest;
+import org.chromium.base.test.util.Features.DisableFeatures;
+import org.chromium.base.test.util.Features.EnableFeatures;
+import org.chromium.base.test.util.Features.JUnitProcessor;
+import org.chromium.base.test.util.HistogramWatcher;
 import org.chromium.base.test.util.JniMocker;
 import org.chromium.cc.input.BrowserControlsState;
+import org.chromium.chrome.browser.browser_controls.BrowserStateBrowserControlsVisibilityDelegate;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.fullscreen.FullscreenManager;
+import org.chromium.chrome.browser.layouts.LayoutStateProvider;
+import org.chromium.chrome.browser.layouts.LayoutType;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.toolbar.ToolbarFeatures;
 import org.chromium.chrome.browser.toolbar.top.CaptureReadinessResult.TopToolbarAllowCaptureReason;
 import org.chromium.chrome.browser.toolbar.top.CaptureReadinessResult.TopToolbarBlockCaptureReason;
 import org.chromium.chrome.browser.toolbar.top.ToolbarControlContainer.ToolbarViewResourceAdapter;
-import org.chromium.chrome.browser.toolbar.top.ToolbarSnapshotState.ToolbarSnapshotDifference;
-import org.chromium.chrome.test.util.browser.Features.EnableFeatures;
-import org.chromium.chrome.test.util.browser.Features.JUnitProcessor;
+import org.chromium.chrome.browser.toolbar.top.ToolbarControlContainer.ToolbarViewResourceAdapter.ToolbarInMotionStage;
 
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 
-/** Unit tests for ToolbarControlContainer. */
+/** Unit tests for {@link ToolbarControlContainer}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(shadows = {HomeButtonCoordinatorTest.ShadowChromeFeatureList.class})
 @EnableFeatures(ChromeFeatureList.SUPPRESS_TOOLBAR_CAPTURES)
 public class ToolbarControlContainerTest {
-    @Rule
-    public MockitoRule rule = MockitoJUnit.rule();
-    @Rule
-    public JniMocker mJniMocker = new JniMocker();
-    @Rule
-    public TestRule mFeaturesProcessor = new JUnitProcessor();
+    private static final String BLOCK_NAME = "Android.TopToolbar.BlockCaptureReason";
+    private static final String ALLOW_NAME = "Android.TopToolbar.AllowCaptureReason";
+    private static final String DIFFERENCE_NAME = "Android.TopToolbar.SnapshotDifference";
+    private static final String MOTION_STAGE_NAME = "Android.TopToolbar.InMotionStage";
 
-    @Mock
-    private ResourceFactory.Natives mResourceFactoryJni;
-    @Mock
-    private View mToolbarContainer;
-    @Mock
-    private Toolbar mToolbar;
-    @Mock
-    private Tab mTab;
+    @Rule public MockitoRule rule = MockitoJUnit.rule();
+    @Rule public JniMocker mJniMocker = new JniMocker();
+    @Rule public TestRule mFeaturesProcessor = new JUnitProcessor();
 
-    Supplier<Tab> mTabSupplier = () -> mTab;
-    ObservableSupplierImpl<Integer> mConstraintsSupplier = new ObservableSupplierImpl<>();
+    @Mock private ResourceFactory.Natives mResourceFactoryJni;
+    @Mock private View mToolbarContainer;
+    @Mock private View mToolbarHairline;
+    @Mock private Toolbar mToolbar;
+    @Mock private Tab mTab;
+    @Mock private LayoutStateProvider mLayoutStateProvider;
+    @Mock private FullscreenManager mFullscreenManager;
 
-    @Before
-    public void before() {
-        MockitoAnnotations.initMocks(this);
-        mJniMocker.mock(ResourceFactoryJni.TEST_HOOKS, mResourceFactoryJni);
-        UmaRecorderHolder.resetForTesting();
-        Mockito.when(mToolbarContainer.getWidth()).thenReturn(1);
-        Mockito.when(mToolbarContainer.getHeight()).thenReturn(1);
-        mConstraintsSupplier.set(BrowserControlsState.BOTH);
-    }
+    private final Supplier<Tab> mTabSupplier = () -> mTab;
+    private final ObservableSupplierImpl<Boolean> mCompositorInMotionSupplier =
+            new ObservableSupplierImpl<>();
+    private final BrowserStateBrowserControlsVisibilityDelegate
+            mBrowserStateBrowserControlsVisibilityDelegate =
+                    new BrowserStateBrowserControlsVisibilityDelegate(
+                            new ObservableSupplierImpl<>(false));
+    private final AtomicInteger mOnResourceRequestedCount = new AtomicInteger();
 
-    @Test
-    @DisabledTest(message = "Temporarily disabled due to https://crbug.com/1344612")
-    public void testIsDirty() {
-        ToolbarViewResourceAdapter adapter =
-                new ToolbarViewResourceAdapter(mToolbarContainer, false);
-        adapter.setOnResourceReadyCallback((resource) -> {});
+    private boolean mIsVisible;
+    private final BooleanSupplier mIsVisibleSupplier = () -> mIsVisible;
 
-        Assert.assertEquals(0,
-                RecordHistogram.getHistogramTotalCountForTesting(
-                        "Android.TopToolbar.BlockCaptureReason"));
-        Assert.assertEquals(0,
-                RecordHistogram.getHistogramTotalCountForTesting(
-                        "Android.TopToolbar.AllowCaptureReason"));
-        Assert.assertEquals(0,
-                RecordHistogram.getHistogramTotalCountForTesting(
-                        "Android.TopToolbar.SnapshotDifference"));
+    private boolean mHasTestConstraintsOverride;
+    private final ObservableSupplierImpl<Integer> mConstraintsSupplier =
+            new ObservableSupplierImpl<>();
+    private final OneshotSupplierImpl<LayoutStateProvider> mLayoutStateProviderSupplier =
+            new OneshotSupplierImpl<>();
 
-        Assert.assertFalse(adapter.isDirty());
-        Assert.assertEquals(1,
-                RecordHistogram.getHistogramValueCountForTesting(
-                        "Android.TopToolbar.BlockCaptureReason",
-                        TopToolbarBlockCaptureReason.TOOLBAR_OR_RESULT_NULL));
+    private ToolbarViewResourceAdapter mAdapter;
 
-        adapter.setPostInitializationDependencies(mToolbar, mConstraintsSupplier, mTabSupplier);
-        Assert.assertFalse(adapter.isDirty());
-        Assert.assertEquals(2,
-                RecordHistogram.getHistogramValueCountForTesting(
-                        "Android.TopToolbar.BlockCaptureReason",
-                        TopToolbarBlockCaptureReason.TOOLBAR_OR_RESULT_NULL));
-
-        Mockito.when(mToolbar.isReadyForTextureCapture())
-                .thenReturn(CaptureReadinessResult.unknown(true));
-        Assert.assertTrue(adapter.isDirty());
-        Assert.assertEquals(1,
-                RecordHistogram.getHistogramValueCountForTesting(
-                        "Android.TopToolbar.AllowCaptureReason",
-                        TopToolbarBlockCaptureReason.UNKNOWN));
-
-        adapter.triggerBitmapCapture();
-        Assert.assertFalse(adapter.isDirty());
-        Assert.assertEquals(1,
-                RecordHistogram.getHistogramValueCountForTesting(
-                        "Android.TopToolbar.BlockCaptureReason",
-                        TopToolbarBlockCaptureReason.VIEW_NOT_DIRTY));
-        Assert.assertEquals(0,
-                RecordHistogram.getHistogramTotalCountForTesting(
-                        "Android.TopToolbar.SnapshotDifference"));
-        Assert.assertEquals(1,
-                RecordHistogram.getHistogramValueCountForTesting(
-                        "Android.TopToolbar.AllowCaptureReason",
-                        TopToolbarBlockCaptureReason.UNKNOWN));
-
-        adapter.forceInvalidate();
-        Assert.assertTrue(adapter.isDirty());
-        Assert.assertEquals(2,
-                RecordHistogram.getHistogramValueCountForTesting(
-                        "Android.TopToolbar.AllowCaptureReason",
-                        TopToolbarBlockCaptureReason.UNKNOWN));
-        Assert.assertEquals(0,
-                RecordHistogram.getHistogramTotalCountForTesting(
-                        "Android.TopToolbar.SnapshotDifference"));
-    }
-
-    @Test
-    public void testIsDirty_BlockedReason() {
-        ToolbarViewResourceAdapter adapter =
-                new ToolbarViewResourceAdapter(mToolbarContainer, false);
-        adapter.setPostInitializationDependencies(mToolbar, mConstraintsSupplier, mTabSupplier);
-        Mockito.when(mToolbar.isReadyForTextureCapture())
-                .thenReturn(CaptureReadinessResult.notReady(
-                        TopToolbarBlockCaptureReason.SNAPSHOT_SAME));
-        Assert.assertFalse(adapter.isDirty());
-        Assert.assertEquals(1,
-                RecordHistogram.getHistogramValueCountForTesting(
-                        "Android.TopToolbar.BlockCaptureReason",
-                        TopToolbarBlockCaptureReason.SNAPSHOT_SAME));
-    }
-
-    @Test
-    public void testIsDirty_AllowForced() {
-        ToolbarViewResourceAdapter adapter =
-                new ToolbarViewResourceAdapter(mToolbarContainer, false);
-        adapter.setPostInitializationDependencies(mToolbar, mConstraintsSupplier, mTabSupplier);
-        Mockito.when(mToolbar.isReadyForTextureCapture())
-                .thenReturn(CaptureReadinessResult.readyForced());
-        Assert.assertTrue(adapter.isDirty());
-        Assert.assertEquals(1,
-                RecordHistogram.getHistogramValueCountForTesting(
-                        "Android.TopToolbar.AllowCaptureReason",
-                        TopToolbarAllowCaptureReason.FORCE_CAPTURE));
-        Assert.assertEquals(0,
-                RecordHistogram.getHistogramTotalCountForTesting(
-                        "Android.TopToolbar.SnapshotDifference"));
-    }
-
-    @Test
-    public void testIsDirty_AllowSnapshotReason() {
-        ToolbarViewResourceAdapter adapter =
-                new ToolbarViewResourceAdapter(mToolbarContainer, false);
-        adapter.setPostInitializationDependencies(mToolbar, mConstraintsSupplier, mTabSupplier);
-        Mockito.when(mToolbar.isReadyForTextureCapture())
-                .thenReturn(CaptureReadinessResult.readyWithSnapshotDifference(
-                        ToolbarSnapshotDifference.URL_TEXT));
-        Assert.assertTrue(adapter.isDirty());
-        Assert.assertEquals(1,
-                RecordHistogram.getHistogramValueCountForTesting(
-                        "Android.TopToolbar.AllowCaptureReason",
-                        TopToolbarAllowCaptureReason.SNAPSHOT_DIFFERENCE));
-        Assert.assertEquals(1,
-                RecordHistogram.getHistogramValueCountForTesting(
-                        "Android.TopToolbar.SnapshotDifference",
-                        ToolbarSnapshotDifference.URL_TEXT));
-    }
-
-    @Test
-    public void testIsDirty_ConstraintsSupplier() {
-        AtomicInteger onResourceRequestedCount = new AtomicInteger();
-        ToolbarViewResourceAdapter adapter =
+    private void makeAdapter() {
+        mAdapter =
                 new ToolbarViewResourceAdapter(mToolbarContainer, false) {
                     @Override
                     public void onResourceRequested() {
                         // No-op normal functionality and just count calls instead.
-                        onResourceRequestedCount.getAndIncrement();
+                        mOnResourceRequestedCount.getAndIncrement();
                     }
                 };
-        adapter.setPostInitializationDependencies(mToolbar, mConstraintsSupplier, mTabSupplier);
-        Mockito.when(mToolbar.isReadyForTextureCapture())
-                .thenReturn(CaptureReadinessResult.readyWithSnapshotDifference(
-                        ToolbarSnapshotDifference.URL_TEXT));
-        Mockito.when(mTab.isNativePage()).thenReturn(false);
-        mConstraintsSupplier.set(null);
+    }
 
-        Assert.assertFalse(adapter.isDirty());
-        Assert.assertEquals(1,
-                RecordHistogram.getHistogramValueCountForTesting(
-                        "Android.TopToolbar.BlockCaptureReason",
-                        TopToolbarBlockCaptureReason.BROWSER_CONTROLS_LOCKED));
-        Assert.assertEquals(0, onResourceRequestedCount.get());
+    private void initAdapter() {
+        mAdapter.setPostInitializationDependencies(
+                mToolbar,
+                mConstraintsSupplier,
+                mTabSupplier,
+                mCompositorInMotionSupplier,
+                mBrowserStateBrowserControlsVisibilityDelegate,
+                mIsVisibleSupplier,
+                mLayoutStateProviderSupplier,
+                mFullscreenManager);
+        // The adapter may observe some of these already, which will post events.
+        ShadowLooper.idleMainLooper();
+        // The initial addObserver triggers an event that we don't care about. Reset count.
+        mOnResourceRequestedCount.set(0);
+    }
+
+    private void makeAndInitAdapter() {
+        makeAdapter();
+        initAdapter();
+    }
+
+    private boolean didAdapterLockControls() {
+        return mBrowserStateBrowserControlsVisibilityDelegate.get() == BrowserControlsState.SHOWN;
+    }
+
+    private void verifyRequestsOnInMotionChange(boolean inMotion, boolean expectResourceRequested) {
+        assertNotEquals(inMotion, mCompositorInMotionSupplier.get().booleanValue());
+        int requestCount = mOnResourceRequestedCount.get();
+        mCompositorInMotionSupplier.set(inMotion);
+        ShadowLooper.idleMainLooper();
+        int expectedCount = requestCount + (expectResourceRequested ? 1 : 0);
+        assertEquals(expectedCount, mOnResourceRequestedCount.get());
+    }
+
+    private void setConstraintsOverride(Integer value) {
+        mHasTestConstraintsOverride = true;
+        mConstraintsSupplier.set(value);
+    }
+
+    private void mockIsReadyDifference(@ToolbarSnapshotDifference int difference) {
+        when(mToolbar.isReadyForTextureCapture())
+                .thenReturn(CaptureReadinessResult.readyWithSnapshotDifference(difference));
+    }
+
+    private void verifyIsDirtyWasBlocked(@TopToolbarBlockCaptureReason int reason) {
+        verifyIsDirtyHelper(false, reason, null, null);
+    }
+
+    private void verifyIsDirtyWasAllowed(@TopToolbarAllowCaptureReason int reason) {
+        verifyIsDirtyHelper(true, null, reason, null);
+    }
+
+    private void verifyIsDirtyWasAllowedForSnapshot(@ToolbarSnapshotDifference int difference) {
+        verifyIsDirtyHelper(
+                true, null, TopToolbarAllowCaptureReason.SNAPSHOT_DIFFERENCE, difference);
+    }
+
+    private void verifyIsDirtyHelper(
+            boolean isDirty, Integer blockValue, Integer allowValue, Integer differenceValue) {
+        HistogramWatcher.Builder builder = HistogramWatcher.newBuilder();
+        expectIntRecord(builder, BLOCK_NAME, blockValue);
+        expectIntRecord(builder, ALLOW_NAME, allowValue);
+        expectIntRecord(builder, DIFFERENCE_NAME, differenceValue);
+        HistogramWatcher histogramWatcher = builder.build();
+        assertEquals(isDirty, mAdapter.isDirty());
+        histogramWatcher.assertExpected();
+    }
+
+    private void expectIntRecord(HistogramWatcher.Builder builder, String name, Integer value) {
+        if (value == null) {
+            builder.expectNoRecords(name);
+        } else {
+            builder.expectIntRecord(name, value.intValue());
+        }
+    }
+
+    @Before
+    public void before() {
+        mJniMocker.mock(ResourceFactoryJni.TEST_HOOKS, mResourceFactoryJni);
+        UmaRecorderHolder.resetForTesting();
+        when(mToolbarContainer.getWidth()).thenReturn(1);
+        when(mToolbarContainer.getHeight()).thenReturn(1);
+        when(mToolbarContainer.findViewById(anyInt())).thenReturn(mToolbarHairline);
+        when(mToolbarHairline.getHeight()).thenReturn(1);
+        mBrowserStateBrowserControlsVisibilityDelegate.set(BrowserControlsState.BOTH);
+        mCompositorInMotionSupplier.set(false);
+        mBrowserStateBrowserControlsVisibilityDelegate.addObserver(
+                result -> {
+                    if (!mHasTestConstraintsOverride) {
+                        mConstraintsSupplier.set(result);
+                    }
+                });
+    }
+
+    @Test
+    public void testIsDirty() {
+        makeAdapter();
+        mAdapter.addOnResourceReadyCallback((resource) -> {});
+        verifyIsDirtyWasBlocked(TopToolbarBlockCaptureReason.TOOLBAR_OR_RESULT_NULL);
+
+        initAdapter();
+        verifyIsDirtyWasBlocked(TopToolbarBlockCaptureReason.TOOLBAR_OR_RESULT_NULL);
+
+        when(mToolbar.isReadyForTextureCapture()).thenReturn(CaptureReadinessResult.unknown(true));
+        verifyIsDirtyWasAllowed(TopToolbarAllowCaptureReason.UNKNOWN);
+
+        mAdapter.triggerBitmapCapture();
+        verifyIsDirtyWasBlocked(TopToolbarBlockCaptureReason.VIEW_NOT_DIRTY);
+
+        mAdapter.forceInvalidate();
+        verifyIsDirtyWasAllowed(TopToolbarAllowCaptureReason.UNKNOWN);
+    }
+
+    @Test
+    public void testIsDirty_BlockedReason() {
+        final @TopToolbarBlockCaptureReason int reason = TopToolbarBlockCaptureReason.SNAPSHOT_SAME;
+        makeAndInitAdapter();
+        when(mToolbar.isReadyForTextureCapture())
+                .thenReturn(CaptureReadinessResult.notReady(reason));
+
+        verifyIsDirtyWasBlocked(reason);
+        assertTrue(mAdapter.getDirtyRect().isEmpty());
+    }
+
+    @Test
+    public void testIsDirty_AllowForced() {
+        makeAndInitAdapter();
+        when(mToolbar.isReadyForTextureCapture()).thenReturn(CaptureReadinessResult.readyForced());
+        verifyIsDirtyWasAllowed(TopToolbarAllowCaptureReason.FORCE_CAPTURE);
+    }
+
+    @Test
+    public void testIsDirty_AllowSnapshotReason() {
+        final @ToolbarSnapshotDifference int difference = ToolbarSnapshotDifference.URL_TEXT;
+        makeAndInitAdapter();
+        mockIsReadyDifference(ToolbarSnapshotDifference.URL_TEXT);
+
+        verifyIsDirtyWasAllowedForSnapshot(difference);
+    }
+
+    @Test
+    public void testIsDirty_ConstraintsSupplier() {
+        makeAndInitAdapter();
+
+        final @ToolbarSnapshotDifference int difference = ToolbarSnapshotDifference.URL_TEXT;
+        mockIsReadyDifference(difference);
+        when(mTab.isNativePage()).thenReturn(false);
+        setConstraintsOverride(null);
+
+        verifyIsDirtyWasBlocked(TopToolbarBlockCaptureReason.BROWSER_CONTROLS_LOCKED);
+        assertEquals(0, mOnResourceRequestedCount.get());
 
         // SHOWN should be treated as still locked.
-        mConstraintsSupplier.set(BrowserControlsState.SHOWN);
-        Assert.assertEquals(0, onResourceRequestedCount.get());
+        setConstraintsOverride(BrowserControlsState.SHOWN);
+        assertEquals(0, mOnResourceRequestedCount.get());
 
         // BOTH should cause a new onResourceRequested call.
-        mConstraintsSupplier.set(BrowserControlsState.BOTH);
-        Assert.assertEquals(1, onResourceRequestedCount.get());
+        setConstraintsOverride(BrowserControlsState.BOTH);
+        ShadowLooper.idleMainLooper();
+        assertEquals(1, mOnResourceRequestedCount.get());
 
         // The constraints should no longer block isDirty/captures.
-        Assert.assertTrue(adapter.isDirty());
+        verifyIsDirtyWasAllowedForSnapshot(difference);
 
         // Shouldn't be an observer subscribed now, changes shouldn't call onResourceRequested.
-        mConstraintsSupplier.set(BrowserControlsState.SHOWN);
-        mConstraintsSupplier.set(BrowserControlsState.BOTH);
-        Assert.assertEquals(1, onResourceRequestedCount.get());
+        setConstraintsOverride(BrowserControlsState.SHOWN);
+        setConstraintsOverride(BrowserControlsState.BOTH);
+        assertEquals(1, mOnResourceRequestedCount.get());
+    }
+
+    @Test
+    public void testIsDirty_InMotion() {
+        makeAndInitAdapter();
+        mockIsReadyDifference(ToolbarSnapshotDifference.URL_TEXT);
+        when(mTab.isNativePage()).thenReturn(false);
+        mIsVisible = false;
+
+        HistogramWatcher histogramWatcher =
+                HistogramWatcher.newBuilder().expectNoRecords(BLOCK_NAME).build();
+        verifyRequestsOnInMotionChange(/* inMotion= */ true, /* expectResourceRequested= */ false);
+        histogramWatcher.assertExpected();
+
+        verifyIsDirtyWasBlocked(TopToolbarBlockCaptureReason.COMPOSITOR_IN_MOTION);
+        assertFalse(didAdapterLockControls());
+
+        verifyRequestsOnInMotionChange(/* inMotion= */ false, /* expectResourceRequested= */ true);
+    }
+
+    @Test
+    public void testIsDirty_InMotion2() {
+        makeAndInitAdapter();
+        mockIsReadyDifference(ToolbarSnapshotDifference.URL_TEXT);
+        when(mTab.isNativePage()).thenReturn(false);
+        mIsVisible = true;
+
+        try (HistogramWatcher ignored =
+                HistogramWatcher.newBuilder()
+                        .expectIntRecord(
+                                MOTION_STAGE_NAME, ToolbarInMotionStage.SUPPRESSION_ENABLED)
+                        .expectIntRecord(MOTION_STAGE_NAME, ToolbarInMotionStage.READINESS_CHECKED)
+                        .expectIntRecord(
+                                BLOCK_NAME, TopToolbarBlockCaptureReason.COMPOSITOR_IN_MOTION)
+                        .build()) {
+            verifyRequestsOnInMotionChange(
+                    /* inMotion= */ true, /* expectResourceRequested= */ false);
+        }
+        assertTrue(didAdapterLockControls());
+
+        try (HistogramWatcher ignored =
+                HistogramWatcher.newBuilder()
+                        .expectIntRecord(
+                                MOTION_STAGE_NAME, ToolbarInMotionStage.SUPPRESSION_ENABLED)
+                        .expectNoRecords(BLOCK_NAME)
+                        .expectNoRecords(ALLOW_NAME)
+                        .build()) {
+            verifyRequestsOnInMotionChange(
+                    /* inMotion= */ false, /* expectResourceRequested= */ true);
+        }
+        assertFalse(didAdapterLockControls());
+    }
+
+    @Test
+    @DisableFeatures(ChromeFeatureList.RECORD_SUPPRESSION_METRICS)
+    public void testIsDirty_InMotion2_NoMetrics() {
+        assertFalse(ToolbarFeatures.shouldRecordSuppressionMetrics());
+
+        HistogramWatcher histogramWatcher =
+                HistogramWatcher.newBuilder()
+                        .expectNoRecords("Android.TopToolbar.InMotion")
+                        .expectNoRecords("Android.TopToolbar.InMotionStage")
+                        .build();
+        makeAndInitAdapter();
+        mockIsReadyDifference(ToolbarSnapshotDifference.URL_TEXT);
+        when(mTab.isNativePage()).thenReturn(false);
+        mIsVisible = true;
+
+        verifyRequestsOnInMotionChange(/* inMotion= */ true, /* expectResourceRequested= */ false);
+        assertTrue(didAdapterLockControls());
+        verifyRequestsOnInMotionChange(/* inMotion= */ false, /* expectResourceRequested= */ true);
+        assertFalse(didAdapterLockControls());
+        histogramWatcher.assertExpected();
     }
 
     @Test
     public void testIsDirty_ConstraintsIgnoredOnNativePage() {
-        ToolbarViewResourceAdapter adapter =
-                new ToolbarViewResourceAdapter(mToolbarContainer, false);
-        adapter.setPostInitializationDependencies(mToolbar, mConstraintsSupplier, mTabSupplier);
-        Mockito.when(mToolbar.isReadyForTextureCapture())
-                .thenReturn(CaptureReadinessResult.readyWithSnapshotDifference(
-                        ToolbarSnapshotDifference.URL_TEXT));
-        Mockito.when(mTab.isNativePage()).thenReturn(true);
-        mConstraintsSupplier.set(BrowserControlsState.SHOWN);
+        makeAndInitAdapter();
+        final @ToolbarSnapshotDifference int difference = ToolbarSnapshotDifference.URL_TEXT;
+        mockIsReadyDifference(difference);
+        when(mTab.isNativePage()).thenReturn(true);
+        setConstraintsOverride(BrowserControlsState.SHOWN);
 
-        Assert.assertTrue(adapter.isDirty());
+        verifyIsDirtyWasAllowedForSnapshot(difference);
+    }
+
+    @Test
+    public void testInMotion_viewNotVisible() {
+        makeAndInitAdapter();
+        mockIsReadyDifference(ToolbarSnapshotDifference.URL_TEXT);
+        mIsVisible = false;
+
+        verifyRequestsOnInMotionChange(true, false);
+    }
+
+    @Test
+    public void testIsDirty_InMotionAndToolbarSwipe() {
+        makeAndInitAdapter();
+        verifyRequestsOnInMotionChange(true, false);
+        mockIsReadyDifference(ToolbarSnapshotDifference.URL_TEXT);
+        when(mLayoutStateProvider.getActiveLayoutType()).thenReturn(LayoutType.BROWSING);
+        mLayoutStateProviderSupplier.set(mLayoutStateProvider);
+        // The supplier posts the notification so idle to let it through.
+        ShadowLooper.idleMainLooper();
+
+        verifyIsDirtyWasBlocked(TopToolbarBlockCaptureReason.COMPOSITOR_IN_MOTION);
+
+        // TOOLBAR_SWIPE should bypass the in motion check and return dirty.
+        when(mLayoutStateProvider.getActiveLayoutType()).thenReturn(LayoutType.TOOLBAR_SWIPE);
+
+        verifyIsDirtyWasAllowedForSnapshot(ToolbarSnapshotDifference.URL_TEXT);
+    }
+
+    @Test
+    public void testIsDirty_Fullscreen() {
+        TestValues testValues = new TestValues();
+        testValues.addFeatureFlagOverride(ChromeFeatureList.SUPPRESS_TOOLBAR_CAPTURES, true);
+        testValues.addFieldTrialParamOverride(
+                ChromeFeatureList.SUPPRESS_TOOLBAR_CAPTURES,
+                ToolbarFeatures.BLOCK_FOR_FULLSCREEN,
+                "true");
+        FeatureList.setTestValues(testValues);
+
+        final @ToolbarSnapshotDifference int difference = ToolbarSnapshotDifference.URL_TEXT;
+        when(mFullscreenManager.getPersistentFullscreenMode()).thenReturn(true);
+        makeAndInitAdapter();
+        mockIsReadyDifference(difference);
+
+        verifyIsDirtyWasBlocked(TopToolbarBlockCaptureReason.FULLSCREEN);
+
+        when(mFullscreenManager.getPersistentFullscreenMode()).thenReturn(false);
+        verifyIsDirtyWasAllowedForSnapshot(difference);
     }
 }

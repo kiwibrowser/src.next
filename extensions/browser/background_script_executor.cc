@@ -4,11 +4,10 @@
 
 #include "extensions/browser/background_script_executor.h"
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/json/json_reader.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/service_worker_context.h"
-#include "content/public/browser/storage_partition.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/service_worker_test_helpers.h"
 #include "extensions/browser/extension_host.h"
@@ -134,7 +133,7 @@ base::Value BackgroundScriptExecutor::WaitForResult() {
     AddTestFailure("Failed to wait for message");
     return base::Value();
   }
-  absl::optional<base::Value> value =
+  std::optional<base::Value> value =
       base::JSONReader::Read(next_message, base::JSON_ALLOW_TRAILING_COMMAS);
   if (!value) {
     AddTestFailure("Received bad message: " + next_message);
@@ -155,11 +154,33 @@ bool BackgroundScriptExecutor::ExecuteScriptInServiceWorker() {
     script_result_queue_ = std::make_unique<ScriptResultQueue>();
 
   content::ServiceWorkerContext* service_worker_context =
-      util::GetStoragePartitionForExtensionId(extension_->id(),
-                                              browser_context_)
-          ->GetServiceWorkerContext();
+      util::GetServiceWorkerContextForExtensionId(extension_->id(),
+                                                  browser_context_);
+
   service_worker_context->ExecuteScriptForTest(  // IN-TEST
-      script_, worker_ids[0].version_id, base::DoNothing());
+      script_, worker_ids[0].version_id,
+      base::BindOnce(
+          [](std::string script, base::Value _ignored_value,
+             const std::optional<std::string>& error) {
+            // `_ignored_value` is ignored, because extension tests are expected
+            // to communicate their result via `chrome.test.sendScriptResult`
+            // instead (see also `BackgroundScriptExecutor::WaitForResult`).
+            //
+            // OTOH, we don't want to `base::DoNothing::Once` when
+            // `error.has_value()`, because it oftentimes means that a newly
+            // authored test has some bugs, throws an exception, and will never
+            // call `chrome.test.sendScriptResult`.  To help debug these
+            // scenarios we try to at least report the (asynchronously reported)
+            // exception via `LOG(WARNING)`.
+            if (error.has_value()) {
+              LOG(WARNING)
+                  << "BackgroundScriptExecutor::ExecuteScriptInServiceWorker "
+                  << "resulted in the following exception:\n    "
+                  << error.value() << "\nwhen executing the following script:\n"
+                  << script;
+            }
+          },
+          script_));
   return true;
 }
 

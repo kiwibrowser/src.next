@@ -9,8 +9,8 @@
 
 #include <memory>
 
-#include "base/bind.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/functional/bind.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
@@ -192,8 +192,8 @@ class TopSitesImplTest : public HistoryUnitTestBase {
                         RedirectList redirects = RedirectList()) {
     if (redirects.empty())
       redirects.emplace_back(url);
-    history_service()->AddPage(url, time, reinterpret_cast<ContextID>(1), 0,
-                               GURL(), redirects, ui::PAGE_TRANSITION_TYPED,
+    history_service()->AddPage(url, time, 1, 0, GURL(), redirects,
+                               ui::PAGE_TRANSITION_TYPED,
                                history::SOURCE_BROWSED, false);
     if (!title.empty())
       history_service()->SetPageTitle(url, title);
@@ -202,13 +202,15 @@ class TopSitesImplTest : public HistoryUnitTestBase {
   // Adds a search results page to history.
   bool AddSearchResultsPageToHistory(const std::u16string& search_terms,
                                      GURL* url) {
-    bool success = GetSearchResultsPageForDefaultSearchProvider(
-        *default_search_provider(), template_url_service()->search_terms_data(),
-        search_terms, url);
+    *url = template_url_service()->GenerateSearchURLForDefaultSearchProvider(
+        search_terms);
+    if (!url->is_valid()) {
+      return false;
+    }
     AddPageToHistory(*url);
     history_service()->SetKeywordSearchTermsForURL(
         *url, default_search_provider()->id(), search_terms);
-    return success;
+    return true;
   }
 
   // Deletes a url.
@@ -427,8 +429,7 @@ TEST_F(TopSitesImplTest, GetMostVisitedURLsAndQueries) {
     feature_list.InitAndDisableFeature(kOrganicRepeatableQueries);
     base::HistogramTester histogram_tester;
 
-    StartQueryForMostVisited();
-    WaitForHistory();
+    RefreshTopSitesAndRecreate();
 
     TopSitesQuerier querier;
     querier.QueryTopSites(top_sites(), false);
@@ -443,14 +444,17 @@ TEST_F(TopSitesImplTest, GetMostVisitedURLsAndQueries) {
     EXPECT_EQ(srp_2, querier.urls()[0].url);
     EXPECT_EQ(news, querier.urls()[1].url);
 
-    histogram_tester.ExpectTotalCount(
-        "History.TopSites.SearchTermsExtractionTime", 0);
-    histogram_tester.ExpectTotalCount(
-        "History.TopSites.SearchTermsExtractedCount", 0);
+    histogram_tester.ExpectTotalCount("History.TopSites.QueryFromHistoryTime",
+                                      1);
+    histogram_tester.ExpectTotalCount("History.QueryMostRepeatedQueriesTimeV2",
+                                      0);
   }
   {
     base::test::ScopedFeatureList feature_list;
-    feature_list.InitAndEnableFeature(kOrganicRepeatableQueries);
+    feature_list.InitAndEnableFeatureWithParameters(
+        kOrganicRepeatableQueries,
+        {{kRepeatableQueriesIgnoreDuplicateVisits.name, "false"},
+         {kRepeatableQueriesMinVisitCount.name, "1"}});
     base::HistogramTester histogram_tester;
 
     RefreshTopSitesAndRecreate();
@@ -468,18 +472,18 @@ TEST_F(TopSitesImplTest, GetMostVisitedURLsAndQueries) {
     EXPECT_EQ(srp_1, querier.urls()[1].url);
     EXPECT_EQ(srp_2, querier.urls()[2].url);
 
-    histogram_tester.ExpectTotalCount(
-        "History.TopSites.SearchTermsExtractionTime", 1);
-    histogram_tester.ExpectTotalCount(
-        "History.TopSites.SearchTermsExtractedCount", 1);
-    histogram_tester.ExpectUniqueSample(
-        "History.TopSites.SearchTermsExtractedCount", 2, 1);
+    histogram_tester.ExpectTotalCount("History.TopSites.QueryFromHistoryTime",
+                                      1);
+    histogram_tester.ExpectTotalCount("History.QueryMostRepeatedQueriesTimeV2",
+                                      1);
   }
   {
     base::test::ScopedFeatureList feature_list;
     feature_list.InitAndEnableFeatureWithParameters(
         kOrganicRepeatableQueries,
-        {{kPrivilegeRepeatableQueries.name, "true"}});
+        {{kPrivilegeRepeatableQueries.name, "true"},
+         {kRepeatableQueriesIgnoreDuplicateVisits.name, "false"},
+         {kRepeatableQueriesMinVisitCount.name, "1"}});
     base::HistogramTester histogram_tester;
 
     RefreshTopSitesAndRecreate();
@@ -496,18 +500,19 @@ TEST_F(TopSitesImplTest, GetMostVisitedURLsAndQueries) {
     EXPECT_EQ(srp_2, querier.urls()[1].url);
     EXPECT_EQ(news, querier.urls()[2].url);
 
-    histogram_tester.ExpectTotalCount(
-        "History.TopSites.SearchTermsExtractionTime", 1);
-    histogram_tester.ExpectTotalCount(
-        "History.TopSites.SearchTermsExtractedCount", 1);
-    histogram_tester.ExpectUniqueSample(
-        "History.TopSites.SearchTermsExtractedCount", 2, 1);
+    histogram_tester.ExpectTotalCount("History.TopSites.QueryFromHistoryTime",
+                                      1);
+    histogram_tester.ExpectTotalCount("History.QueryMostRepeatedQueriesTimeV2",
+                                      1);
   }
   {
     base::test::ScopedFeatureList feature_list;
     feature_list.InitAndEnableFeatureWithParameters(
-        kOrganicRepeatableQueries, {{kPrivilegeRepeatableQueries.name, "true"},
-                                    {kMaxNumRepeatableQueries.name, "1"}});
+        kOrganicRepeatableQueries,
+        {{kPrivilegeRepeatableQueries.name, "true"},
+         {kMaxNumRepeatableQueries.name, "1"},
+         {kRepeatableQueriesIgnoreDuplicateVisits.name, "false"},
+         {kRepeatableQueriesMinVisitCount.name, "1"}});
     base::HistogramTester histogram_tester;
 
     RefreshTopSitesAndRecreate();
@@ -523,12 +528,10 @@ TEST_F(TopSitesImplTest, GetMostVisitedURLsAndQueries) {
     EXPECT_EQ(srp_1, querier.urls()[0].url);
     EXPECT_EQ(news, querier.urls()[1].url);
 
-    histogram_tester.ExpectTotalCount(
-        "History.TopSites.SearchTermsExtractionTime", 1);
-    histogram_tester.ExpectTotalCount(
-        "History.TopSites.SearchTermsExtractedCount", 1);
-    histogram_tester.ExpectUniqueSample(
-        "History.TopSites.SearchTermsExtractedCount", 2, 1);
+    histogram_tester.ExpectTotalCount("History.TopSites.QueryFromHistoryTime",
+                                      1);
+    histogram_tester.ExpectTotalCount("History.QueryMostRepeatedQueriesTimeV2",
+                                      1);
   }
 }
 
@@ -581,10 +584,7 @@ TEST_F(TopSitesImplTest, SaveToDB) {
   AddPageToHistory(asdf_url, asdf_title);
 
   // Make TopSites reread from the db.
-  StartQueryForMostVisited();
-  WaitForHistory();
-
-  RecreateTopSitesAndBlock();
+  RefreshTopSitesAndRecreate();
 
   {
     TopSitesQuerier querier;

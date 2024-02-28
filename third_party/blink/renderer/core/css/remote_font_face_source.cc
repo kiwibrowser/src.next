@@ -1,10 +1,11 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/css/remote_font_face_source.h"
 
 #include "base/metrics/histogram_functions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/permissions_policy/permissions_policy_feature.mojom-blink.h"
 #include "third_party/blink/public/platform/task_type.h"
@@ -14,8 +15,10 @@
 #include "third_party/blink/renderer/core/css/font_face_set_document.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
+#include "third_party/blink/renderer/core/lcp_critical_path_predictor/lcp_critical_path_predictor.h"
 #include "third_party/blink/renderer/core/loader/subresource_integrity_helper.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
@@ -61,16 +64,19 @@ RemoteFontFaceSource::ComputeFontDisplayAutoPeriod() const {
     using Mode = features::AlignFontDisplayAutoTimeoutWithLCPGoalMode;
     Mode mode =
         features::kAlignFontDisplayAutoTimeoutWithLCPGoalModeParam.Get();
-    if (mode == Mode::kToSwapPeriod)
+    if (mode == Mode::kToSwapPeriod) {
       return kSwapPeriod;
+    }
     DCHECK_EQ(Mode::kToFailurePeriod, mode);
-    if (custom_font_data_ && !custom_font_data_->MayBeIconFont())
+    if (custom_font_data_ && !custom_font_data_->MayBeIconFont()) {
       return kFailurePeriod;
+    }
     return kSwapPeriod;
   }
 
-  if (is_intervention_triggered_)
+  if (is_intervention_triggered_) {
     return kSwapPeriod;
+  }
 
   switch (phase_) {
     case kNoLimitExceeded:
@@ -125,8 +131,9 @@ RemoteFontFaceSource::DisplayPeriod RemoteFontFaceSource::ComputePeriod()
       if (GetDocument()->RenderingHasBegun()) {
         if (FinishedFromMemoryCache() ||
             finished_before_document_rendering_begin_ ||
-            !paint_requested_while_pending_)
+            !paint_requested_while_pending_) {
           return kSwapPeriod;
+        }
         return kFailurePeriod;
       }
 
@@ -144,9 +151,6 @@ RemoteFontFaceSource::RemoteFontFaceSource(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner)
     : face_(css_font_face),
       font_selector_(font_selector),
-#if defined(USE_PARALLEL_TEXT_SHAPING)
-      task_runner_(task_runner),
-#endif
       // No need to report the violation here since the font is not loaded yet
       display_(
           GetFontDisplayWithDocumentPolicyCheck(display,
@@ -183,14 +187,16 @@ bool RemoteFontFaceSource::IsValid() const {
 
 void RemoteFontFaceSource::NotifyFinished(Resource* resource) {
   ExecutionContext* execution_context = font_selector_->GetExecutionContext();
-  if (!execution_context)
+  if (!execution_context) {
     return;
+  }
   DCHECK(execution_context->IsContextThread());
   // Prevent promise rejection while shutting down the document.
   // See crbug.com/960290
   auto* window = DynamicTo<LocalDOMWindow>(execution_context);
-  if (window && window->document()->IsDetached())
+  if (window && window->document()->IsDetached()) {
     return;
+  }
 
   auto* font = To<FontResource>(resource);
   histograms_.RecordRemoteFont(font);
@@ -225,7 +231,7 @@ void RemoteFontFaceSource::NotifyFinished(Resource* resource) {
         mojom::ConsoleMessageSource::kOther,
         mojom::ConsoleMessageLevel::kWarning,
         "Failed to decode downloaded font: " + font->Url().ElidedString()));
-    if (!font->OtsParsingMessage().IsEmpty()) {
+    if (!font->OtsParsingMessage().empty()) {
       execution_context->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
           mojom::ConsoleMessageSource::kOther,
           mojom::ConsoleMessageLevel::kWarning,
@@ -238,16 +244,19 @@ void RemoteFontFaceSource::NotifyFinished(Resource* resource) {
   PruneTable();
 
   if (GetDocument()) {
-    if (!GetDocument()->RenderingHasBegun())
+    if (!GetDocument()->RenderingHasBegun()) {
       finished_before_document_rendering_begin_ = true;
-    if (!FontFaceSetDocument::From(*GetDocument())->HasReachedLCPLimit())
+    }
+    if (!FontFaceSetDocument::From(*GetDocument())->HasReachedLCPLimit()) {
       finished_before_lcp_limit_ = true;
+    }
   }
 
-  if (FinishedFromMemoryCache())
+  if (FinishedFromMemoryCache()) {
     period_ = kNotApplicablePeriod;
-  else
+  } else {
     UpdatePeriod();
+  }
 
   if (face_->FontLoaded(this)) {
     font_selector_->FontFaceInvalidated(
@@ -260,15 +269,17 @@ void RemoteFontFaceSource::NotifyFinished(Resource* resource) {
 }
 
 void RemoteFontFaceSource::FontLoadShortLimitExceeded(FontResource*) {
-  if (IsLoaded())
+  if (IsLoaded()) {
     return;
+  }
   phase_ = kShortLimitExceeded;
   UpdatePeriod();
 }
 
 void RemoteFontFaceSource::FontLoadLongLimitExceeded(FontResource*) {
-  if (IsLoaded())
+  if (IsLoaded()) {
     return;
+  }
   phase_ = kLongLimitExceeded;
   UpdatePeriod();
 
@@ -279,8 +290,9 @@ void RemoteFontFaceSource::SetDisplay(FontDisplay display) {
   // TODO(ksakamoto): If the font is loaded and in the failure period,
   // changing it to block or swap period should update the font rendering
   // using the loaded font.
-  if (IsLoaded())
+  if (IsLoaded()) {
     return;
+  }
   display_ = GetFontDisplayWithDocumentPolicyCheck(
       display, font_selector_, ReportOptions::kReportOnFailure);
   UpdatePeriod();
@@ -320,8 +332,9 @@ FontDisplay RemoteFontFaceSource::GetFontDisplayWithDocumentPolicyCheck(
 }
 
 bool RemoteFontFaceSource::ShouldTriggerWebFontsIntervention() {
-  if (!IsA<LocalDOMWindow>(font_selector_->GetExecutionContext()))
+  if (!IsA<LocalDOMWindow>(font_selector_->GetExecutionContext())) {
     return false;
+  }
 
   WebEffectiveConnectionType connection_type =
       GetNetworkStateNotifier().EffectiveType();
@@ -340,10 +353,12 @@ bool RemoteFontFaceSource::IsLowPriorityLoadingAllowedForRemoteFont() const {
 scoped_refptr<SimpleFontData> RemoteFontFaceSource::CreateFontData(
     const FontDescription& font_description,
     const FontSelectionCapabilities& font_selection_capabilities) {
-  if (period_ == kFailurePeriod || !IsValid())
+  if (period_ == kFailurePeriod || !IsValid()) {
     return nullptr;
-  if (!IsLoaded())
+  }
+  if (!IsLoaded()) {
     return CreateLoadingFallbackFontData(font_description);
+  }
   DCHECK(custom_font_data_);
 
   histograms_.RecordFallbackTime();
@@ -358,8 +373,12 @@ scoped_refptr<SimpleFontData> RemoteFontFaceSource::CreateFontData(
               font_description.SyntheticItalicAllowed(),
           font_description.GetFontSelectionRequest(),
           font_selection_capabilities, font_description.FontOpticalSizing(),
-          font_description.TextRendering(), font_description.Orientation(),
-          font_description.VariationSettings(),
+          font_description.TextRendering(),
+          font_description.GetFontVariantAlternates()
+              ? font_description.GetFontVariantAlternates()
+                    ->GetResolvedFontFeatures()
+              : ResolvedFontFeatures(),
+          font_description.Orientation(), font_description.VariationSettings(),
           font_description.GetFontPalette()),
       CustomFontData::Create());
 }
@@ -383,34 +402,21 @@ RemoteFontFaceSource::CreateLoadingFallbackFontData(
 }
 
 void RemoteFontFaceSource::BeginLoadIfNeeded() {
-  if (IsLoaded())
-    return;
-  ExecutionContext* const execution_context =
-      font_selector_->GetExecutionContext();
-  if (!execution_context)
-    return;
-#if defined(USE_PARALLEL_TEXT_SHAPING)
-  if (!execution_context->IsContextThread()) {
-    // Following tests reache here.
-    //  * fast/css3-text/css3-text-decoration/text-decoration-skip-ink-links.html
-    //  * fast/css3-text/css3-word-break/word-break-break-all-in-span.html
-    //  * virtual/text-antialias/justify-vertical.html
-    //  * virtual/text-antialias/line-break-8bit-after-16bit.html
-    // Note: |ExecutionContext::GetTaskRunner()| works only for context
-    // thread, so we ask main thread to handle |BeginLoadIfNeeded()|.
-    PostCrossThreadTask(
-        *task_runner_, FROM_HERE,
-        CrossThreadBindOnce(&RemoteFontFaceSource::BeginLoadIfNeeded,
-                            WrapCrossThreadPersistent(this)));
+  if (IsLoaded()) {
     return;
   }
-#endif
+  ExecutionContext* const execution_context =
+      font_selector_->GetExecutionContext();
+  if (!execution_context) {
+    return;
+  }
 
   DCHECK(GetResource());
 
   SetDisplay(face_->GetFontFace()->GetFontDisplay());
 
   auto* font = To<FontResource>(GetResource());
+  CHECK(font);
   if (font->StillNeedsLoad()) {
     if (font->IsLowPriorityLoadingAllowedForRemoteFont()) {
       execution_context->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
@@ -425,8 +431,19 @@ void RemoteFontFaceSource::BeginLoadIfNeeded() {
       // that this font is not required for painting the text.
       font->DidChangePriority(ResourceLoadPriority::kVeryLow, 0);
     }
-    if (execution_context->Fetcher()->StartLoad(font))
+    if (execution_context->Fetcher()->StartLoad(font)) {
       histograms_.LoadStarted();
+      if (LocalDOMWindow* window =
+              DynamicTo<LocalDOMWindow>(execution_context)) {
+        if (LocalFrame* frame = window->GetFrame()) {
+          if (frame->IsOutermostMainFrame()) {
+            if (LCPCriticalPathPredictor* lcpp = frame->GetLCPP()) {
+              lcpp->OnFontFetched(font->Url());
+            }
+          }
+        }
+      }
+    }
   }
 
   // Start the timers upon the first load request from RemoteFontFaceSource.
@@ -446,8 +463,9 @@ void RemoteFontFaceSource::Trace(Visitor* visitor) const {
 }
 
 void RemoteFontFaceSource::FontLoadHistograms::LoadStarted() {
-  if (load_start_time_.is_null())
+  if (load_start_time_.is_null()) {
     load_start_time_ = base::TimeTicks::Now();
+  }
 }
 
 void RemoteFontFaceSource::FontLoadHistograms::FallbackFontPainted(
@@ -475,8 +493,9 @@ void RemoteFontFaceSource::PaintRequested() {
 }
 
 void RemoteFontFaceSource::FontLoadHistograms::RecordFallbackTime() {
-  if (blank_paint_time_.is_null() || blank_paint_time_recorded_)
+  if (blank_paint_time_.is_null() || blank_paint_time_recorded_) {
     return;
+  }
   // TODO(https://crbug.com/1049257): This time should be recorded using a more
   // appropriate UMA helper, since >1% of samples are in the overflow bucket.
   base::TimeDelta duration = base::TimeTicks::Now() - blank_paint_time_;
@@ -498,15 +517,17 @@ void RemoteFontFaceSource::FontLoadHistograms::RecordRemoteFont(
 
 void RemoteFontFaceSource::FontLoadHistograms::MaySetDataSource(
     DataSource data_source) {
-  if (data_source_ != kFromUnknown)
+  if (data_source_ != kFromUnknown) {
     return;
+  }
   // Classify as memory cache hit if |load_start_time_| is not set, i.e.
   // this RemoteFontFaceSource instance didn't trigger FontResource
   // loading.
-  if (load_start_time_.is_null())
+  if (load_start_time_.is_null()) {
     data_source_ = kFromMemoryCache;
-  else
+  } else {
     data_source_ = data_source;
+  }
 }
 
 void RemoteFontFaceSource::FontLoadHistograms::RecordLoadTimeHistogram(
@@ -521,25 +542,6 @@ void RemoteFontFaceSource::FontLoadHistograms::RecordLoadTimeHistogram(
     base::UmaHistogramTimes("WebFont.DownloadTime.LoadError", delta);
     return;
   }
-
-  size_t size = font->EncodedSize();
-  if (size < 10 * 1024) {
-    base::UmaHistogramTimes("WebFont.DownloadTime.0.Under10KB", delta);
-    return;
-  }
-  if (size < 50 * 1024) {
-    base::UmaHistogramTimes("WebFont.DownloadTime.1.10KBTo50KB", delta);
-    return;
-  }
-  if (size < 100 * 1024) {
-    base::UmaHistogramTimes("WebFont.DownloadTime.2.50KBTo100KB", delta);
-    return;
-  }
-  if (size < 1024 * 1024) {
-    base::UmaHistogramTimes("WebFont.DownloadTime.3.100KBTo1MB", delta);
-    return;
-  }
-  base::UmaHistogramTimes("WebFont.DownloadTime.4.Over1MB", delta);
 }
 
 RemoteFontFaceSource::FontLoadHistograms::CacheHitMetrics

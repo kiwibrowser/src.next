@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,25 +31,26 @@ class CheckPseudoHasFastRejectFilterTest : public PageTestBase {
     for (unsigned i = 0; i < length; i++) {
       NonThrowableExceptionState no_exceptions;
       Element* element = GetDocument().CreateElementForBinding(
-          element_info_list[i].tag_name, nullptr, no_exceptions);
-      element->setAttribute(html_names::kIdAttr, element_info_list[i].id);
+          AtomicString(element_info_list[i].tag_name), nullptr, no_exceptions);
+      element->setAttribute(html_names::kIdAttr,
+                            AtomicString(element_info_list[i].id));
       element->setAttribute(html_names::kClassAttr,
-                            element_info_list[i].class_names);
-      element->setAttribute(element_info_list[i].attribute_name,
-                            element_info_list[i].attribute_value);
+                            AtomicString(element_info_list[i].class_names));
+      element->setAttribute(AtomicString(element_info_list[i].attribute_name),
+                            AtomicString(element_info_list[i].attribute_value));
       filter.AddElementIdentifierHashes(*element);
     }
   }
 
   bool CheckFastReject(CheckPseudoHasFastRejectFilter& filter,
                        const char* selector_text) {
-    CSSSelectorList selector_list =
+    CSSSelectorList* selector_list =
         css_test_helpers::ParseSelectorList(selector_text);
 
-    EXPECT_EQ(selector_list.First()->GetPseudoType(), CSSSelector::kPseudoHas);
+    EXPECT_EQ(selector_list->First()->GetPseudoType(), CSSSelector::kPseudoHas);
 
     CheckPseudoHasArgumentContext context(
-        selector_list.First()->SelectorList()->First());
+        selector_list->First()->SelectorList()->First());
 
     return filter.FastReject(context.GetPseudoHasArgumentHashes());
   }

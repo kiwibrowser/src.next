@@ -15,7 +15,14 @@
 #include "components/signin/core/browser/about_signin_internals.h"
 
 AboutSigninInternalsFactory::AboutSigninInternalsFactory()
-    : ProfileKeyedServiceFactory("AboutSigninInternals") {
+    : ProfileKeyedServiceFactory(
+          "AboutSigninInternals",
+          ProfileSelections::Builder()
+              .WithRegular(ProfileSelection::kOriginalOnly)
+              // TODO(crbug.com/1418376): Check if this service is needed in
+              // Guest mode.
+              .WithGuest(ProfileSelection::kOriginalOnly)
+              .Build()) {
   DependsOn(ChromeSigninClientFactory::GetInstance());
   DependsOn(SigninErrorControllerFactory::GetInstance());
   DependsOn(AccountReconcilorFactory::GetInstance());
@@ -23,7 +30,7 @@ AboutSigninInternalsFactory::AboutSigninInternalsFactory()
   DependsOn(AccountConsistencyModeManagerFactory::GetInstance());
 }
 
-AboutSigninInternalsFactory::~AboutSigninInternalsFactory() {}
+AboutSigninInternalsFactory::~AboutSigninInternalsFactory() = default;
 
 // static
 AboutSigninInternals* AboutSigninInternalsFactory::GetForProfile(
@@ -34,7 +41,8 @@ AboutSigninInternals* AboutSigninInternalsFactory::GetForProfile(
 
 // static
 AboutSigninInternalsFactory* AboutSigninInternalsFactory::GetInstance() {
-  return base::Singleton<AboutSigninInternalsFactory>::get();
+  static base::NoDestructor<AboutSigninInternalsFactory> instance;
+  return instance.get();
 }
 
 void AboutSigninInternalsFactory::RegisterProfilePrefs(

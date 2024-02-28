@@ -5,7 +5,22 @@
 #ifndef BASE_IMMEDIATE_CRASH_H_
 #define BASE_IMMEDIATE_CRASH_H_
 
+#include "base/fuzzing_buildflags.h"
 #include "build/build_config.h"
+
+#if BUILDFLAG(USE_FUZZING_ENGINE)
+#include <stdlib.h>
+
+#if BUILDFLAG(IS_LINUX)
+// The fuzzing coverage display wants to record coverage even
+// for failure cases. It's Linux-only. So on Linux, dump coverage
+// before we immediately exit. We provide a weak symbol so that
+// this causes no link problems on configurations that don't involve
+// coverage.
+extern "C" int __attribute__((weak)) __llvm_profile_write_file(void);
+#endif  // BUILDFLAG(IS_LINUX)
+
+#endif  // BUILDFLAG(USE_FUZZING_ENGINE)
 
 // Crashes in the fastest possible way with no attempt at logging.
 // There are several constraints; see http://crbug.com/664209 for more context.
@@ -24,6 +39,8 @@
 //   __builtin_unreachable() is used to provide that hint here. clang also uses
 //   this as a heuristic to pack the instructions in the function epilogue to
 //   improve code density.
+// - base::ImmediateCrash() is used in allocation hooks. To prevent recursions,
+//   TRAP_SEQUENCE_() must not allocate.
 //
 // Additional properties that are nice to have:
 // - TRAP_SEQUENCE_() should be as compact as possible.
@@ -126,43 +143,43 @@
     TRAP_SEQUENCE2_();   \
   } while (false)
 
-// CHECK() and the trap sequence can be invoked from a constexpr function.
-// This could make compilation fail on GCC, as it forbids directly using inline
-// asm inside a constexpr function. However, it allows calling a lambda
-// expression including the same asm.
-// The side effect is that the top of the stacktrace will not point to the
-// calling function, but to this anonymous lambda. This is still useful as the
-// full name of the lambda will typically include the name of the function that
-// calls CHECK() and the debugger will still break at the right line of code.
-#if !defined(COMPILER_GCC) || defined(__clang__)
-
-#define WRAPPED_TRAP_SEQUENCE_() TRAP_SEQUENCE_()
-
+// This version of ALWAYS_INLINE inlines even in is_debug=true.
+// TODO(pbos): See if NDEBUG can be dropped from ALWAYS_INLINE as well, and if
+// so merge. Otherwise document why it cannot inline in debug in
+// base/compiler_specific.h.
+#if defined(COMPILER_GCC)
+#define IMMEDIATE_CRASH_ALWAYS_INLINE inline __attribute__((__always_inline__))
+#elif defined(COMPILER_MSVC)
+#define IMMEDIATE_CRASH_ALWAYS_INLINE __forceinline
 #else
+#define IMMEDIATE_CRASH_ALWAYS_INLINE inline
+#endif
 
-#define WRAPPED_TRAP_SEQUENCE_() \
-  do {                           \
-    [] { TRAP_SEQUENCE_(); }();  \
-  } while (false)
+namespace base {
 
-#endif  // !defined(COMPILER_GCC) || defined(__clang__)
-
+[[noreturn]] IMMEDIATE_CRASH_ALWAYS_INLINE void ImmediateCrash() {
+#if BUILDFLAG(USE_FUZZING_ENGINE)
+  // If fuzzing, exit in such a way that atexit() handlers are run in order
+  // to write out failing fuzz cases. This is similar
+  // behavior to __sanitizer::Die.
+  // libfuzzer has its own atexit handler which unfortunately calls the
+  // equivalent of base::ImmediateCrash, thus not running any other atexit
+  // handlers. We want to dump coverage information so we'll do that
+  // here explicitly too.
+#if BUILDFLAG(IS_LINUX)
+  if (__llvm_profile_write_file) {
+    __llvm_profile_write_file();
+  }
+#endif  // BUILDFLAG(IS_LINUX)
+  exit(-1);
+#else   // BUILDFLAG(USE_FUZZING_ENGINE)
+  TRAP_SEQUENCE_();
+#endif  // BUILDFLAG(USE_FUZZING_ENGINE)
 #if defined(__clang__) || defined(COMPILER_GCC)
-
-// __builtin_unreachable() hints to the compiler that this is noreturn and can
-// be packed in the function epilogue.
-#define IMMEDIATE_CRASH()     \
-  ({                          \
-    WRAPPED_TRAP_SEQUENCE_(); \
-    __builtin_unreachable();  \
-  })
-
-#else
-
-// This is supporting non-chromium user of logging.h to build with MSVC, like
-// pdfium. On MSVC there is no __builtin_unreachable().
-#define IMMEDIATE_CRASH() WRAPPED_TRAP_SEQUENCE_()
-
+  __builtin_unreachable();
 #endif  // defined(__clang__) || defined(COMPILER_GCC)
+}
+
+}  // namespace base
 
 #endif  // BASE_IMMEDIATE_CRASH_H_

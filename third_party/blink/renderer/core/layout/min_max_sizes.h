@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -82,6 +82,19 @@ struct CORE_EXPORT MinMaxSizes {
 };
 
 CORE_EXPORT std::ostream& operator<<(std::ostream&, const MinMaxSizes&);
+
+// The output of the min/max inline size calculation algorithm. Contains the
+// min/max sizes, and if this calculation will change if the block constraints
+// change.
+struct MinMaxSizesResult {
+  MinMaxSizesResult() = default;
+  MinMaxSizesResult(MinMaxSizes sizes, bool depends_on_block_constraints)
+      : sizes(sizes),
+        depends_on_block_constraints(depends_on_block_constraints) {}
+
+  MinMaxSizes sizes;
+  bool depends_on_block_constraints = false;
+};
 
 }  // namespace blink
 

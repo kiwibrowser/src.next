@@ -27,13 +27,12 @@
  * occur after that point will not be respected.
  *
  * Clients should either use the existing shared styling in
- * shared_styles_css.html, '#cr-container-shadow-[top/bottom]' and
+ * cr_shared_style.css, '#cr-container-shadow-[top/bottom]' and
  * '#cr-container-shadow-[top/bottom].has-shadow', or define their own styles.
  */
 
-import {dedupingMixin, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-
-import {assert} from '../js/assert.m.js';
+import {assert} from '//resources/js/assert.js';
+import {dedupingMixin, PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 export enum CrContainerShadowSide {
   TOP = 'top',
@@ -157,7 +156,7 @@ export const CrContainerShadowMixin = dedupingMixin(
         showDropShadows() {
           assert(!this.intersectionObserver_);
           assert(this.sides_);
-          for (const side of this.sides_!) {
+          for (const side of this.sides_) {
             this.dropShadows_.get(side)!.classList.toggle('has-shadow', true);
           }
         }

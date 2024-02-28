@@ -51,7 +51,7 @@
 namespace cc {
 class AnimationHost;
 class AnimationTimeline;
-class ScrollbarLayerBase;
+class SolidColorScrollbarLayer;
 }
 
 namespace blink {
@@ -68,7 +68,7 @@ class TracedValue;
 class TransformPaintPropertyNode;
 struct PaintPropertyTreeBuilderFragmentContext;
 
-enum class OverscrollType { kNone, kTransform, kFilter };
+enum class OverscrollType { kNone, kTransform };
 
 // Represents the visual viewport the user is currently seeing the page through.
 // This class corresponds to the InnerViewport on the compositor. It is a
@@ -94,7 +94,6 @@ enum class OverscrollType { kNone, kTransform, kFilter };
 //           +- scroll_translation_node_ (scroll: scroll_node_)
 // Effect tree:
 //  parent effect state
-//  +- overscroll_elasticity_effect_node_
 //  +- horizontal_scrollbar_effect_node_
 //  +- vertical_scrollbar_effect_node_
 //
@@ -188,11 +187,11 @@ class CORE_EXPORT VisualViewport : public GarbageCollected<VisualViewport>,
   // ScrollableArea implementation
   ChromeClient* GetChromeClient() const override;
   SmoothScrollSequencer* GetSmoothScrollSequencer() const override;
-  void SetScrollOffset(const ScrollOffset&,
+  bool SetScrollOffset(const ScrollOffset&,
                        mojom::blink::ScrollType,
                        mojom::blink::ScrollBehavior,
                        ScrollCallback on_finish) override;
-  void SetScrollOffset(const ScrollOffset&,
+  bool SetScrollOffset(const ScrollOffset&,
                        mojom::blink::ScrollType,
                        mojom::blink::ScrollBehavior =
                            mojom::blink::ScrollBehavior::kInstant) override;
@@ -239,7 +238,7 @@ class CORE_EXPORT VisualViewport : public GarbageCollected<VisualViewport>,
       IncludeScrollbarsInRect = kExcludeScrollbars) const override;
   scoped_refptr<base::SingleThreadTaskRunner> GetTimerTaskRunner()
       const override;
-  mojom::blink::ColorScheme UsedColorScheme() const override;
+  mojom::blink::ColorScheme UsedColorSchemeScrollbars() const override;
   ScrollbarTheme& GetPageScrollbarTheme() const override;
   bool VisualViewportSuppliesScrollbars() const override;
   const Document* GetDocument() const override;
@@ -261,11 +260,6 @@ class CORE_EXPORT VisualViewport : public GarbageCollected<VisualViewport>,
   double VisibleWidthCSSPx() const;
   double VisibleHeightCSSPx() const;
 
-  // Used for gathering data on user pinch-zoom statistics.
-  void UserDidChangeScale();
-  void SendUMAMetrics();
-  void StartTrackingPinchStats();
-
   // Heuristic-based function for determining if we should disable workarounds
   // for viewing websites that are not optimized for mobile devices.
   bool ShouldDisableDesktopWorkarounds() const;
@@ -273,7 +267,6 @@ class CORE_EXPORT VisualViewport : public GarbageCollected<VisualViewport>,
   const TransformPaintPropertyNode* GetDeviceEmulationTransformNode() const;
   const TransformPaintPropertyNode* GetOverscrollElasticityTransformNode()
       const;
-  const EffectPaintPropertyNode* GetOverscrollElasticityEffectNode() const;
   const TransformPaintPropertyNode* GetPageScaleNode() const;
   const TransformPaintPropertyNode* GetScrollTranslationNode() const;
   const ScrollPaintPropertyNode* GetScrollNode() const;
@@ -300,6 +293,7 @@ class CORE_EXPORT VisualViewport : public GarbageCollected<VisualViewport>,
   void Paint(GraphicsContext&) const;
 
   void UsedColorSchemeChanged();
+  void ScrollbarColorChanged();
 
   // Returns whether this VisualViewport is "active", that is, whether it'll
   // affect paint property trees. If false, this renderer cannot be
@@ -316,6 +310,7 @@ class CORE_EXPORT VisualViewport : public GarbageCollected<VisualViewport>,
     overscroll_type_ = type;
     SetNeedsPaintPropertyUpdate();
   }
+  absl::optional<blink::Color> CSSScrollbarThumbColor() const;
 
  private:
   bool DidSetScaleOrLocation(float scale,
@@ -330,6 +325,7 @@ class CORE_EXPORT VisualViewport : public GarbageCollected<VisualViewport>,
   EScrollbarWidth CSSScrollbarWidth() const;
   int ScrollbarThickness() const;
   void UpdateScrollbarLayer(ScrollbarOrientation);
+  void UpdateScrollbarColor(cc::SolidColorScrollbarLayer&);
 
   void NotifyRootFrameViewport() const;
 
@@ -357,8 +353,8 @@ class CORE_EXPORT VisualViewport : public GarbageCollected<VisualViewport>,
   Member<Page> page_;
 
   scoped_refptr<cc::Layer> scroll_layer_;
-  scoped_refptr<cc::ScrollbarLayerBase> scrollbar_layer_horizontal_;
-  scoped_refptr<cc::ScrollbarLayerBase> scrollbar_layer_vertical_;
+  scoped_refptr<cc::SolidColorScrollbarLayer> scrollbar_layer_horizontal_;
+  scoped_refptr<cc::SolidColorScrollbarLayer> scrollbar_layer_vertical_;
 
   PropertyTreeStateOrAlias parent_property_tree_state_;
   scoped_refptr<TransformPaintPropertyNode> device_emulation_transform_node_;
@@ -367,7 +363,6 @@ class CORE_EXPORT VisualViewport : public GarbageCollected<VisualViewport>,
   scoped_refptr<TransformPaintPropertyNode> page_scale_node_;
   scoped_refptr<TransformPaintPropertyNode> scroll_translation_node_;
   scoped_refptr<ScrollPaintPropertyNode> scroll_node_;
-  scoped_refptr<EffectPaintPropertyNode> overscroll_elasticity_effect_node_;
   scoped_refptr<EffectPaintPropertyNode> horizontal_scrollbar_effect_node_;
   scoped_refptr<EffectPaintPropertyNode> vertical_scrollbar_effect_node_;
 
@@ -391,18 +386,11 @@ class CORE_EXPORT VisualViewport : public GarbageCollected<VisualViewport>,
   // they expand or shrink the visible content height.
   float browser_controls_adjustment_;
 
-  // The maximum page scale the user has zoomed to on the current page. Used
-  // only to report statistics about pinch-zoom usage.
-  float max_page_scale_;
-  bool track_pinch_zoom_stats_for_page_;
-
   // For page scale animation on page_scale_node_.
   CompositorElementId page_scale_element_id_;
   // For scrolling, on scroll_layer_, scroll_node_, and scroll element ids of
   // scrollbar layers.
   CompositorElementId scroll_element_id_;
-  // For overscroll elasticity.
-  CompositorElementId elasticity_effect_node_id_;
 
   bool needs_paint_property_update_;
 

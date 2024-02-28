@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -67,8 +67,6 @@ class CORE_EXPORT ThreadedIconLoader final
   absl::optional<gfx::Size> resize_dimensions_;
 
   IconCallback icon_callback_;
-
-  base::TimeTicks start_time_;
 
   bool stopped_ = false;
 };

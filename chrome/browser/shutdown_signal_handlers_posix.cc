@@ -11,13 +11,12 @@
 
 #include <utility>
 
-#include "base/callback.h"
 #include "base/debug/leak_annotations.h"
+#include "base/functional/callback.h"
 #include "base/logging.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/platform_thread.h"
-#include "base/threading/thread_task_runner_handle.h"
 
 namespace {
 
@@ -187,19 +186,11 @@ void InstallShutdownSignalHandlers(
   g_pipe_pid = getpid();
   g_shutdown_pipe_read_fd = pipefd[0];
   g_shutdown_pipe_write_fd = pipefd[1];
-#if !defined(ADDRESS_SANITIZER)
-  const size_t kShutdownDetectorThreadStackSize = PTHREAD_STACK_MIN * 2;
-#else
-  // ASan instrumentation bloats the stack frames, so we need to increase the
-  // stack size to avoid hitting the guard page.
-  const size_t kShutdownDetectorThreadStackSize = PTHREAD_STACK_MIN * 4;
-#endif
   ShutdownDetector* detector = new ShutdownDetector(
       g_shutdown_pipe_read_fd, std::move(shutdown_callback), task_runner);
   // PlatformThread does not delete its delegate.
   ANNOTATE_LEAKING_OBJECT_PTR(detector);
-  if (!base::PlatformThread::CreateNonJoinable(kShutdownDetectorThreadStackSize,
-                                               detector)) {
+  if (!base::PlatformThread::CreateNonJoinable(0, detector)) {
     LOG(DFATAL) << "Failed to create shutdown detector task.";
   }
 

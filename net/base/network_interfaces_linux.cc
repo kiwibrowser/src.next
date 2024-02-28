@@ -5,6 +5,7 @@
 #include "net/base/network_interfaces_linux.h"
 
 #include <memory>
+#include <optional>
 
 #include "build/build_config.h"
 
@@ -18,6 +19,7 @@
 #include <sys/ioctl.h>
 #include <sys/types.h>
 
+#include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_file.h"
 #include "base/strings/escape.h"
@@ -26,15 +28,18 @@
 #include "base/strings/string_util.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
+#include "net/base/address_map_linux.h"
 #include "net/base/address_tracker_linux.h"
+#include "net/base/features.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/base/network_interfaces_posix.h"
 #include "url/gurl.h"
 
 #if BUILDFLAG(IS_ANDROID)
+#include <string_view>
+
 #include "base/android/build_info.h"
-#include "base/strings/string_piece.h"
 #include "net/android/network_library.h"
 #include "net/base/network_interfaces_getifaddrs.h"
 #endif
@@ -229,8 +234,8 @@ bool GetNetworkList(NetworkInterfaceList* networks, int policy) {
     // so use a Chromium's own implementation to workaround.
     // See https://crbug.com/1240237 for more context.
     bool use_alternative_getifaddrs =
-        base::StringPiece(build_info->brand()) == "samsung" &&
-        base::StartsWith(build_info->hardware(), "mt");
+        std::string_view(build_info->brand()) == "samsung" &&
+        std::string_view(build_info->hardware()).starts_with("mt");
     bool ret = internal::GetNetworkListUsingGetifaddrs(
         networks, policy, use_alternative_getifaddrs);
     // Use GetInterfaceConnectionType() to sharpen up interface types.
@@ -238,13 +243,27 @@ bool GetNetworkList(NetworkInterfaceList* networks, int policy) {
       network.type = internal::GetInterfaceConnectionType(network.name);
     return ret;
   }
-#endif
+#endif  // BUILDFLAG(IS_ANDROID)
 
-  internal::AddressTrackerLinux tracker;
-  tracker.Init();
+  const AddressMapOwnerLinux* map_owner = nullptr;
+  std::optional<internal::AddressTrackerLinux> temp_tracker;
+#if BUILDFLAG(IS_LINUX)
+  // If NetworkChangeNotifier already maintains a map owner in this process, use
+  // it.
+  if (base::FeatureList::IsEnabled(features::kAddressTrackerLinuxIsProxied)) {
+    map_owner = NetworkChangeNotifier::GetAddressMapOwner();
+  }
+#endif  // BUILDFLAG(IS_LINUX)
+  if (!map_owner) {
+    // If there is no existing map_owner, create an AddressTrackerLinux and
+    // initialize it.
+    temp_tracker.emplace();
+    temp_tracker->Init();
+    map_owner = &temp_tracker.value();
+  }
 
   return internal::GetNetworkListImpl(
-      networks, policy, tracker.GetOnlineLinks(), tracker.GetAddressMap(),
+      networks, policy, map_owner->GetOnlineLinks(), map_owner->GetAddressMap(),
       &internal::AddressTrackerLinux::GetInterfaceName);
 }
 

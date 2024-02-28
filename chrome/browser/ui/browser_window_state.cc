@@ -10,10 +10,10 @@
 
 #include "base/command_line.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/buildflags.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_service_base.h"
 #include "chrome/browser/sessions/session_service_lookup.h"
 #include "chrome/browser/ui/browser.h"
@@ -31,49 +31,13 @@ namespace {
 bool ParseCommaSeparatedIntegers(const std::string& str,
                                  int* ret_num1,
                                  int* ret_num2) {
-  size_t num1_size = str.find_first_of(',');
-  if (num1_size == std::string::npos)
-    return false;
-
-  size_t num2_pos = num1_size + 1;
-  size_t num2_size = str.size() - num2_pos;
-  int num1 = 0;
-  int num2 = 0;
-  if (!base::StringToInt(str.substr(0, num1_size), &num1) ||
-      !base::StringToInt(str.substr(num2_pos, num2_size), &num2))
-    return false;
-
-  *ret_num1 = num1;
-  *ret_num2 = num2;
-  return true;
+  const size_t comma = str.find(',');
+  return (comma != std::string::npos) &&
+         base::StringToInt(base::StringPiece(str.data(), comma), ret_num1) &&
+         base::StringToInt(
+             base::StringPiece(str.data() + comma + 1, str.size() - comma - 1),
+             ret_num2);
 }
-
-class WindowPlacementPrefUpdate : public DictionaryPrefUpdate {
- public:
-  WindowPlacementPrefUpdate(PrefService* service,
-                            const std::string& window_name)
-      : DictionaryPrefUpdate(service, prefs::kAppWindowPlacement),
-        window_name_(window_name) {}
-
-  WindowPlacementPrefUpdate(const WindowPlacementPrefUpdate&) = delete;
-  WindowPlacementPrefUpdate& operator=(const WindowPlacementPrefUpdate&) =
-      delete;
-
-  ~WindowPlacementPrefUpdate() override {}
-
-  base::Value* Get() override {
-    base::Value* all_apps_dict = DictionaryPrefUpdate::Get();
-    base::Value* this_app_dict = all_apps_dict->FindDictPath(window_name_);
-    if (!this_app_dict) {
-      this_app_dict = all_apps_dict->SetPath(
-          window_name_, base::Value(base::Value::Type::DICTIONARY));
-    }
-    return this_app_dict;
-  }
-
- private:
-  const std::string window_name_;
-};
 
 }  // namespace
 
@@ -95,15 +59,32 @@ std::string GetWindowName(const Browser* browser) {
   }
 }
 
-std::unique_ptr<DictionaryPrefUpdate> GetWindowPlacementDictionaryReadWrite(
+base::Value::Dict& GetWindowPlacementDictionaryReadWrite(
     const std::string& window_name,
-    PrefService* prefs) {
+    PrefService* prefs,
+    std::unique_ptr<ScopedDictPrefUpdate>& scoped_update) {
   DCHECK(!window_name.empty());
-  // A normal DictionaryPrefUpdate will suffice for non-app windows.
+  // Non-app window placements each use their own per-window-name dictionary
+  // preference, so can make a ScopedDictPrefUpdate for the relevant preference,
+  // and return its dictionary directly.
   if (prefs->FindPreference(window_name)) {
-    return std::make_unique<DictionaryPrefUpdate>(prefs, window_name);
+    scoped_update = std::make_unique<ScopedDictPrefUpdate>(prefs, window_name);
+    return scoped_update->Get();
   }
-  return std::make_unique<WindowPlacementPrefUpdate>(prefs, window_name);
+
+  // The window placements for all apps are stored in a single dictionary
+  // preference, with per-window-name nested dictionaries, so need to make
+  // ScopedDictPrefUpdate and then find the relevant dictionary within it, based
+  // on window name.
+  scoped_update =
+      std::make_unique<ScopedDictPrefUpdate>(prefs, prefs::kAppWindowPlacement);
+  base::Value::Dict* this_app_dict =
+      (*scoped_update)->FindDictByDottedPath(window_name);
+  if (this_app_dict)
+    return *this_app_dict;
+  return (*scoped_update)
+      ->SetByDottedPath(window_name, base::Value::Dict())
+      ->GetDict();
 }
 
 const base::Value::Dict* GetWindowPlacementDictionaryReadOnly(

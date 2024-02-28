@@ -35,7 +35,6 @@
 #include "third_party/blink/renderer/core/html/html_olist_element.h"
 #include "third_party/blink/renderer/core/html/list_item_ordinal.h"
 #include "third_party/blink/renderer/core/layout/counter_node.h"
-#include "third_party/blink/renderer/core/layout/layout_list_item.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
@@ -66,8 +65,9 @@ Element* AncestorStyleContainmentObject(const Element& element) {
   for (Element* ancestor = element.GetStyleRecalcParent(); ancestor;
        ancestor = ancestor->GetStyleRecalcParent()) {
     if (const ComputedStyle* style = ancestor->GetComputedStyle()) {
-      if (style->ContainsStyle())
+      if (style->ContainsStyle()) {
         return ancestor;
+      }
     }
   }
   return nullptr;
@@ -87,22 +87,26 @@ Element* PreviousInPreOrderRespectingContainment(const Element& element) {
   while (true) {
     // Find the candidate previous element.
     while (previous && !previous->GetLayoutObject() &&
-           !previous->HasDisplayContentsStyle())
+           !previous->HasDisplayContentsStyle()) {
       previous = ElementTraversal::PreviousIncludingPseudo(*previous);
-    if (!previous)
+    }
+    if (!previous) {
       return nullptr;
+    }
     Element* previous_style_contain_ancestor =
         AncestorStyleContainmentObject(*previous);
     // If the candidate's containment ancestor is the same as elements, then
     // that's a valid candidate.
-    if (previous_style_contain_ancestor == style_contain_ancestor)
+    if (previous_style_contain_ancestor == style_contain_ancestor) {
       return previous;
+    }
 
     // Otherwise, if previous does not have a containment ancestor, it means
     // that we have already escaped `element`'s containment ancestor, so return
     // nullptr.
-    if (!previous_style_contain_ancestor)
+    if (!previous_style_contain_ancestor) {
       return nullptr;
+    }
 
     // If, however, the candidate does have a containment ancestor, it could be
     // that we entered a new sub-containment. Try again starting from the
@@ -117,15 +121,18 @@ Element* PreviousSiblingOrParentRespectingContainment(const Element& element) {
   Element* previous = ElementTraversal::PseudoAwarePreviousSibling(element);
   // Skip display:none elements.
   while (previous && !previous->GetLayoutObject() &&
-         !previous->HasDisplayContentsStyle())
+         !previous->HasDisplayContentsStyle()) {
     previous = ElementTraversal::PseudoAwarePreviousSibling(*previous);
-  if (previous)
+  }
+  if (previous) {
     return previous;
+  }
   previous = element.parentElement();
   if (previous) {
     if (const ComputedStyle* style = previous->GetComputedStyle()) {
-      if (style->ContainsStyle())
+      if (style->ContainsStyle()) {
         return nullptr;
+      }
     }
   }
   return previous;
@@ -147,11 +154,12 @@ LayoutObject* NextInPreOrder(const LayoutObject& object,
           ? ElementTraversal::NextIncludingPseudoSkippingChildren(*self,
                                                                   stay_within)
           : ElementTraversal::NextIncludingPseudo(*self, stay_within);
-  while (next && !next->GetLayoutObject())
+  while (next && !next->GetLayoutObject()) {
     next = skip_descendants
                ? ElementTraversal::NextIncludingPseudoSkippingChildren(
                      *next, stay_within)
                : ElementTraversal::NextIncludingPseudo(*next, stay_within);
+  }
   return next ? next->GetLayoutObject() : nullptr;
 }
 
@@ -162,20 +170,23 @@ bool PlanCounter(LayoutObject& object,
   // Real text nodes don't have their own style so they can't have counters.
   // We can't even look at their styles or we'll see extra resets and
   // increments!
-  if (object.IsText() && !object.IsBR())
+  if (object.IsText() && !object.IsBR()) {
     return false;
+  }
   Node* generating_node = object.GeneratingNode();
   // We must have a generating node or else we cannot have a counter.
-  if (!generating_node)
+  if (!generating_node) {
     return false;
+  }
   const ComputedStyle& style = object.StyleRef();
 
   switch (style.StyleType()) {
     case kPseudoIdNone:
       // Sometimes nodes have more than one layout object. Only the first one
       // gets the counter. See web_tests/http/tests/css/counter-crash.html
-      if (generating_node->GetLayoutObject() != &object)
+      if (generating_node->GetLayoutObject() != &object) {
         return false;
+      }
       break;
     case kPseudoIdBefore:
     case kPseudoIdAfter:
@@ -289,8 +300,9 @@ bool FindPlaceForCounter(LayoutObject& counter_owner,
             // a table but not in a column or row). In these cases the
             // identified previous_sibling will be invalid as its parent is
             // different from our identified parent.
-            if (previous_sibling_protector->Parent() != current_counter)
+            if (previous_sibling_protector->Parent() != current_counter) {
               previous_sibling_protector = nullptr;
+            }
 
             *previous_sibling = previous_sibling_protector;
             return true;
@@ -303,8 +315,9 @@ bool FindPlaceForCounter(LayoutObject& counter_owner,
             // counter that is attached to an ancestor of the placed counter's
             // owner layout object we know we are a sibling of that node.
             if (current_counter->Parent() !=
-                previous_sibling_protector->Parent())
+                previous_sibling_protector->Parent()) {
               return false;
+            }
 
             *parent = current_counter->Parent();
             *previous_sibling = previous_sibling_protector;
@@ -397,16 +410,18 @@ CounterNode* MakeCounterNodeIfNeeded(LayoutObject& object,
     auto it_counter = GetCounterMaps().find(&object);
     if (it_counter != GetCounterMaps().end()) {
       auto it_node = it_counter->value->find(identifier);
-      if (it_node != it_counter->value->end())
+      if (it_node != it_counter->value->end()) {
         return &*it_node->value;
+      }
     }
   }
 
   unsigned type_mask = 0;
   int value = 0;
   if (!PlanCounter(object, identifier, type_mask, value) &&
-      !always_create_counter)
+      !always_create_counter) {
     return nullptr;
+  }
 
   CounterNode* new_parent = nullptr;
   CounterNode* new_previous_sibling = nullptr;
@@ -433,8 +448,9 @@ CounterNode* MakeCounterNodeIfNeeded(LayoutObject& object,
 
   if (FindPlaceForCounter(object, identifier,
                           type_mask & CounterNode::kResetType, &new_parent,
-                          &new_previous_sibling))
+                          &new_previous_sibling)) {
     new_parent->InsertAfter(new_node, new_previous_sibling, identifier);
+  }
   CounterMap* node_map = nullptr;
   if (object.HasCounterNodeMap()) {
     node_map = GetCounterMaps().at(&object);
@@ -448,8 +464,9 @@ CounterNode* MakeCounterNodeIfNeeded(LayoutObject& object,
   // updated by `CounterNode::MoveNonResetSiblingsToChildOf()` above, so we
   // don't need to update descendants. Likewise, if the object has style
   // containment, any descendant should not become parented across the boundary.
-  if (new_node->Parent() || object.ShouldApplyStyleContainment())
+  if (new_node->Parent() || object.ShouldApplyStyleContainment()) {
     return new_node;
+  }
 
   // Checking if some nodes that were previously counter tree root nodes
   // should become children of this node now.
@@ -466,32 +483,36 @@ CounterNode* MakeCounterNodeIfNeeded(LayoutObject& object,
     // cross the boundary which begins right after the object. In other words we
     // skip the descendants of this object.
     skip_descendants = current_layout_object->ShouldApplyStyleContainment();
-    if (!current_layout_object->HasCounterNodeMap())
+    if (!current_layout_object->HasCounterNodeMap()) {
       continue;
+    }
     auto* current_object = maps.at(current_layout_object);
     auto it = current_object->find(identifier);
     CounterNode* current_counter =
         it != current_object->end() ? &*it->value : nullptr;
-    if (!current_counter)
+    if (!current_counter) {
       continue;
+    }
     // At this point we found a counter to reparent. So we don't need to descend
     // into the layout tree further, since any further counters we find would be
     // at most parented to `current_counter` we just found.
     skip_descendants = true;
-    if (current_counter->Parent())
+    if (current_counter->Parent()) {
       continue;
+    }
     if (stay_within == ParentElement(*current_layout_object) &&
-        current_counter->HasResetType())
+        current_counter->HasResetType()) {
       break;
+    }
     new_node->InsertAfter(current_counter, new_node->LastChild(), identifier);
   }
   return new_node;
 }
 
-String GenerateCounterText(const CounterStyle* counter_style,
-                           int value) {
-  if (!counter_style)
+String GenerateCounterText(const CounterStyle* counter_style, int value) {
+  if (!counter_style) {
     return g_empty_string;
+  }
   return counter_style->GenerateRepresentation(value);
 }
 
@@ -522,12 +543,13 @@ void LayoutCounter::WillBeDestroyed() {
     counter_node_->RemoveLayoutObject(this);
     DCHECK(!counter_node_);
   }
-  if (View())
+  if (View()) {
     View()->RemoveLayoutCounter();
+  }
   LayoutText::WillBeDestroyed();
 }
 
-scoped_refptr<StringImpl> LayoutCounter::OriginalText() const {
+String LayoutCounter::OriginalText() const {
   NOT_DESTROYED();
   // Child will be the base of our text that we report. First, we need to find
   // an appropriate child.
@@ -542,16 +564,19 @@ scoped_refptr<StringImpl> LayoutCounter::OriginalText() const {
   // find the container to place the counter on).
   if (!should_create_counter || !counter_node_) {
     while (true) {
-      if (!container)
-        return nullptr;
-      if (!container->IsAnonymous() && !container->IsPseudoElement())
-        return nullptr;  // LayoutCounters are restricted to before, after and
-                         // marker pseudo elements
+      if (!container) {
+        return String();
+      }
+      if (!container->IsAnonymous() && !container->IsPseudoElement()) {
+        return String();  // LayoutCounters are restricted to before, after and
+                          // marker pseudo elements
+      }
       PseudoId container_style = container->StyleRef().StyleType();
       if ((container_style == kPseudoIdBefore) ||
           (container_style == kPseudoIdAfter) ||
-          (container_style == kPseudoIdMarker))
+          (container_style == kPseudoIdMarker)) {
         break;
+      }
       container = container->Parent();
     }
   }
@@ -569,8 +594,9 @@ scoped_refptr<StringImpl> LayoutCounter::OriginalText() const {
     for (auto* scope_ancestor = container; scope_ancestor;
          scope_ancestor = scope_ancestor->Parent()) {
       auto& style = scope_ancestor->StyleRef();
-      if (style.ContainsStyle())
+      if (style.ContainsStyle()) {
         break;
+      }
       const CounterDirectives directives =
           style.GetCounterDirectives(counter_->Identifier());
       if (directives.IsDefined()) {
@@ -606,21 +632,14 @@ scoped_refptr<StringImpl> LayoutCounter::OriginalText() const {
   DCHECK(child);
 
   int value = ValueForText(child);
-  const CounterStyle* counter_style = nullptr;
-  // Note: CSS3 spec doesn't allow 'none' but CSS2.1 allows it. We currently
-  // allow it for backward compatibility.
-  // See https://github.com/w3c/csswg-drafts/issues/5795 for details.
-  if (counter_->ListStyle() != "none") {
-    counter_style =
-        &GetDocument().GetStyleEngine().FindCounterStyleAcrossScopes(
-            counter_->ListStyle(), counter_->GetTreeScope());
-  }
+  const CounterStyle* counter_style = NullableCounterStyle();
   String text = GenerateCounterText(counter_style, value);
-  // If the separator exists, we need to append all of the parent values as well,
-  // including the ones that cross the style containment boundary.
+  // If the separator exists, we need to append all of the parent values as
+  // well, including the ones that cross the style containment boundary.
   if (!counter_->Separator().IsNull()) {
-    if (!child->ActsAsReset())
+    if (!child->ActsAsReset()) {
       child = child->ParentCrossingStyleContainment(counter_->Identifier());
+    }
     bool next_result_uses_parent_value = !child->Parent();
     while (CounterNode* parent =
                child->ParentCrossingStyleContainment(counter_->Identifier())) {
@@ -633,7 +652,7 @@ scoped_refptr<StringImpl> LayoutCounter::OriginalText() const {
     }
   }
 
-  return text.ReleaseImpl();
+  return text;
 }
 
 void LayoutCounter::UpdateCounter() {
@@ -645,8 +664,9 @@ void LayoutCounter::Invalidate() {
   NOT_DESTROYED();
   counter_node_->RemoveLayoutObject(this);
   DCHECK(!counter_node_);
-  if (DocumentBeingDestroyed())
+  if (DocumentBeingDestroyed()) {
     return;
+  }
   SetNeedsLayoutAndIntrinsicWidthsRecalcAndFullPaintInvalidation(
       layout_invalidation_reason::kCountersChanged);
 }
@@ -670,8 +690,9 @@ static void DestroyCounterNodeWithoutMapRemoval(const AtomicString& identifier,
 void LayoutCounter::DestroyCounterNodes(LayoutObject& owner) {
   CounterMaps& maps = GetCounterMaps();
   CounterMaps::iterator maps_iterator = maps.find(&owner);
-  if (maps_iterator == maps.end())
+  if (maps_iterator == maps.end()) {
     return;
+  }
   CounterMap* map = maps_iterator->value;
   CounterMap::const_iterator end = map->end();
   for (CounterMap::const_iterator it = map->begin(); it != end; ++it) {
@@ -679,19 +700,22 @@ void LayoutCounter::DestroyCounterNodes(LayoutObject& owner) {
   }
   maps.erase(maps_iterator);
   owner.SetHasCounterNodeMap(false);
-  if (owner.View())
+  if (owner.View()) {
     owner.View()->SetNeedsMarkerOrCounterUpdate();
+  }
 }
 
 void LayoutCounter::DestroyCounterNode(LayoutObject& owner,
                                        const AtomicString& identifier) {
   auto it = GetCounterMaps().find(&owner);
   CounterMap* map = it != GetCounterMaps().end() ? &*it->value : nullptr;
-  if (!map)
+  if (!map) {
     return;
+  }
   CounterMap::iterator map_iterator = map->find(identifier);
-  if (map_iterator == map->end())
+  if (map_iterator == map->end()) {
     return;
+  }
   DestroyCounterNodeWithoutMapRemoval(identifier, map_iterator->value);
   map->erase(map_iterator);
   // We do not delete "map" here even if empty because we expect to reuse
@@ -712,16 +736,19 @@ void LayoutCounter::LayoutObjectSubtreeWillBeDetached(
     LayoutObject* layout_object) {
   DCHECK(layout_object->View());
   // View should never be non-zero. crbug.com/546939
-  if (!layout_object->View() || !layout_object->View()->HasLayoutCounters())
+  if (!layout_object->View() || !layout_object->View()->HasLayoutCounters()) {
     return;
+  }
 
   LayoutObject* current_layout_object = layout_object->LastLeafChild();
-  if (!current_layout_object)
+  if (!current_layout_object) {
     current_layout_object = layout_object;
+  }
   while (true) {
     DestroyCounterNodes(*current_layout_object);
-    if (current_layout_object == layout_object)
+    if (current_layout_object == layout_object) {
       break;
+    }
     current_layout_object = current_layout_object->PreviousInPreOrder();
   }
 }
@@ -730,13 +757,15 @@ static void UpdateCounters(LayoutObject& layout_object) {
   DCHECK(layout_object.Style());
   const CounterDirectiveMap* directive_map =
       layout_object.StyleRef().GetCounterDirectives();
-  if (!directive_map)
+  if (!directive_map) {
     return;
+  }
   CounterDirectiveMap::const_iterator end = directive_map->end();
   if (!layout_object.HasCounterNodeMap()) {
     for (CounterDirectiveMap::const_iterator it = directive_map->begin();
-         it != end; ++it)
+         it != end; ++it) {
       MakeCounterNodeIfNeeded(layout_object, it->key, false);
+    }
     return;
   }
   auto it_counter = GetCounterMaps().find(&layout_object);
@@ -758,15 +787,20 @@ static void UpdateCounters(LayoutObject& layout_object) {
     FindPlaceForCounter(layout_object, it->key, node->HasResetType(),
                         &new_parent, &new_previous_sibling);
     auto it_node2 = counter_map->find(it->key);
-    if (it_node2 == counter_map->end() || (node != it_node2->value))
+    if (it_node2 == counter_map->end() || (node != it_node2->value)) {
       continue;
+    }
     CounterNode* parent = node->Parent();
-    if (new_parent == parent && new_previous_sibling == node->PreviousSibling())
+    if (new_parent == parent &&
+        new_previous_sibling == node->PreviousSibling()) {
       continue;
-    if (parent)
+    }
+    if (parent) {
       parent->RemoveChild(node);
-    if (new_parent)
+    }
+    if (new_parent) {
       new_parent->InsertAfter(node, new_previous_sibling, it->key);
+    }
   }
 }
 
@@ -774,20 +808,24 @@ void LayoutCounter::LayoutObjectSubtreeAttached(LayoutObject* layout_object) {
   DCHECK(layout_object->View());
   // Only update counters if we have LayoutCounter which is created when we have
   // a content: field with a counter requirement.
-  if (!layout_object->View()->HasLayoutCounters())
+  if (!layout_object->View()->HasLayoutCounters()) {
     return;
+  }
   Node* node = layout_object->GetNode();
-  if (node)
+  if (node) {
     node = node->parentNode();
-  else
+  } else {
     node = layout_object->GeneratingNode();
-  if (node && node->NeedsReattachLayoutTree())
+  }
+  if (node && node->NeedsReattachLayoutTree()) {
     return;  // No need to update if the parent is not attached yet
+  }
 
   // Update the descendants.
   for (LayoutObject* descendant = layout_object; descendant;
-       descendant = descendant->NextInPreOrder(layout_object))
+       descendant = descendant->NextInPreOrder(layout_object)) {
     UpdateCounters(*descendant);
+  }
 
   bool crossed_boundary = false;
   // Since we skipped counter updates if there were no counters, we might need
@@ -795,20 +833,23 @@ void LayoutCounter::LayoutObjectSubtreeAttached(LayoutObject* layout_object) {
   for (LayoutObject* parent = layout_object->Parent(); parent;
        parent = parent->Parent()) {
     crossed_boundary |= parent->ShouldApplyStyleContainment();
-    if (crossed_boundary)
+    if (crossed_boundary) {
       UpdateCounters(*parent);
+    }
   }
 }
 
 void LayoutCounter::LayoutObjectStyleChanged(LayoutObject& layout_object,
                                              const ComputedStyle* old_style,
                                              const ComputedStyle& new_style) {
-  if (layout_object.IsListItemIncludingNG())
+  if (layout_object.IsListItemIncludingNG()) {
     ListItemOrdinal::ItemCounterStyleUpdated(layout_object);
+  }
   Node* node = layout_object.GeneratingNode();
-  if (!node || node->NeedsReattachLayoutTree())
+  if (!node || node->NeedsReattachLayoutTree()) {
     return;  // cannot have generated content or if it can have, it will be
              // handled during attaching
+  }
   const CounterDirectiveMap* old_counter_directives =
       old_style ? old_style->GetCounterDirectives() : nullptr;
   const CounterDirectiveMap* new_counter_directives =
@@ -825,8 +866,9 @@ void LayoutCounter::LayoutObjectStyleChanged(LayoutObject& layout_object,
         CounterDirectiveMap::const_iterator old_map_it =
             old_counter_directives->find(it->key);
         if (old_map_it != old_map_end) {
-          if (old_map_it->value == it->value)
+          if (old_map_it->value == it->value) {
             continue;
+          }
           LayoutCounter::DestroyCounterNode(layout_object, it->key);
         }
         // We must create this node here, because the changed node may be a node
@@ -840,16 +882,19 @@ void LayoutCounter::LayoutObjectStyleChanged(LayoutObject& layout_object,
       for (CounterDirectiveMap::const_iterator it =
                old_counter_directives->begin();
            it != old_map_end; ++it) {
-        if (!new_counter_directives->Contains(it->key))
+        if (!new_counter_directives->Contains(it->key)) {
           LayoutCounter::DestroyCounterNode(layout_object, it->key);
+        }
       }
     } else {
-      if (layout_object.HasCounterNodeMap())
+      if (layout_object.HasCounterNodeMap()) {
         LayoutCounter::DestroyCounterNodes(layout_object);
+      }
     }
   } else if (new_counter_directives) {
-    if (layout_object.HasCounterNodeMap())
+    if (layout_object.HasCounterNodeMap()) {
       LayoutCounter::DestroyCounterNodes(layout_object);
+    }
     CounterDirectiveMap::const_iterator new_map_end =
         new_counter_directives->end();
     for (CounterDirectiveMap::const_iterator it =
@@ -866,9 +911,44 @@ void LayoutCounter::LayoutObjectStyleChanged(LayoutObject& layout_object,
 
 // static
 CounterMap* LayoutCounter::GetCounterMap(LayoutObject* object) {
-  if (object->HasCounterNodeMap())
+  if (object->HasCounterNodeMap()) {
     return GetCounterMaps().at(object);
+  }
   return nullptr;
+}
+
+const CounterStyle* LayoutCounter::NullableCounterStyle() const {
+  // Note: CSS3 spec doesn't allow 'none' but CSS2.1 allows it. We currently
+  // allow it for backward compatibility.
+  // See https://github.com/w3c/csswg-drafts/issues/5795 for details.
+  if (counter_->ListStyle() == "none") {
+    return nullptr;
+  }
+  return &GetDocument().GetStyleEngine().FindCounterStyleAcrossScopes(
+      counter_->ListStyle(), counter_->GetTreeScope());
+}
+
+bool LayoutCounter::IsDirectionalSymbolMarker() const {
+  const auto* counter_style = NullableCounterStyle();
+  if (!counter_style || !counter_style->IsPredefinedSymbolMarker()) {
+    return false;
+  }
+  const AtomicString& list_style = counter_->ListStyle();
+  return list_style == keywords::kDisclosureOpen ||
+         list_style == keywords::kDisclosureClosed;
+}
+
+const AtomicString& LayoutCounter::Separator() const {
+  return counter_->Separator();
+}
+
+// static
+const AtomicString& LayoutCounter::ListStyle(const LayoutObject* object,
+                                             const ComputedStyle& style) {
+  if (const auto* counter = DynamicTo<LayoutCounter>(object)) {
+    return counter->counter_->ListStyle();
+  }
+  return style.ListStyleType()->GetCounterStyleName();
 }
 
 }  // namespace blink
@@ -877,19 +957,22 @@ CounterMap* LayoutCounter::GetCounterMap(LayoutObject* object) {
 
 void ShowCounterLayoutTree(const blink::LayoutObject* layout_object,
                            const char* counter_name) {
-  if (!layout_object)
+  if (!layout_object) {
     return;
+  }
   const blink::LayoutObject* root = layout_object;
-  while (root->Parent())
+  while (root->Parent()) {
     root = root->Parent();
+  }
 
   AtomicString identifier(counter_name);
   for (const blink::LayoutObject* current = root; current;
        current = current->NextInPreOrder()) {
     fprintf(stderr, "%c", (current == layout_object) ? '*' : ' ');
     for (const blink::LayoutObject* parent = current; parent && parent != root;
-         parent = parent->Parent())
+         parent = parent->Parent()) {
       fprintf(stderr, "    ");
+    }
     fprintf(stderr, "%p %s", current, current->DebugName().Utf8().c_str());
     auto* counter_node =
         current->HasCounterNodeMap() && current

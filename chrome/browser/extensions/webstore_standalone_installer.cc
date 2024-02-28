@@ -7,7 +7,7 @@
 #include <memory>
 #include <utility>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/values.h"
 #include "base/version.h"
@@ -142,19 +142,15 @@ void WebstoreStandaloneInstaller::ProceedWithInstallPrompt() {
 scoped_refptr<const Extension>
 WebstoreStandaloneInstaller::GetLocalizedExtensionForDisplay() {
   if (!localized_extension_for_display_.get()) {
-    DCHECK(manifest_.get());
-    if (!manifest_.get())
+    DCHECK(manifest_.has_value());
+    if (!manifest_.has_value())
       return nullptr;
 
     std::string error;
     localized_extension_for_display_ =
         ExtensionInstallPrompt::GetLocalizedExtensionForDisplay(
-            manifest_.get(),
-            Extension::REQUIRE_KEY | Extension::FROM_WEBSTORE,
-            id_,
-            localized_name_,
-            localized_description_,
-            &error);
+            *manifest_, Extension::REQUIRE_KEY | Extension::FROM_WEBSTORE, id_,
+            localized_name_, localized_description_, &error);
   }
   return localized_extension_for_display_.get();
 }
@@ -172,12 +168,8 @@ std::unique_ptr<WebstoreInstaller::Approval>
 WebstoreStandaloneInstaller::CreateApproval() const {
   std::unique_ptr<WebstoreInstaller::Approval> approval(
       WebstoreInstaller::Approval::CreateWithNoInstallPrompt(
-          profile_, id_,
-          base::DictionaryValue::From(
-              base::Value::ToUniquePtrValue(manifest_->Clone())),
-          true));
+          profile_, id_, manifest_->Clone(), true));
   approval->skip_post_install_ui = !ShouldShowPostInstallUI();
-  approval->use_app_installed_bubble = ShouldShowAppInstalledBubble();
   approval->installing_icon = gfx::ImageSkia::CreateFrom1xBitmap(icon_);
   return approval;
 }
@@ -225,8 +217,12 @@ void WebstoreStandaloneInstaller::OnInstallPromptDone(
   }
 
   auto installer = base::MakeRefCounted<WebstoreInstaller>(
-      profile_, this, GetWebContents(), id_, std::move(approval),
-      install_source_);
+      profile_,
+      base::BindOnce(&WebstoreStandaloneInstaller::OnExtensionInstallSuccess,
+                     weak_ptr_factory_.GetWeakPtr()),
+      base::BindOnce(&WebstoreStandaloneInstaller::OnExtensionInstallFailure,
+                     weak_ptr_factory_.GetWeakPtr()),
+      GetWebContents(), id_, std::move(approval), install_source_);
   installer->Start();
 }
 
@@ -239,7 +235,7 @@ void WebstoreStandaloneInstaller::OnWebstoreRequestFailure(
 
 void WebstoreStandaloneInstaller::OnWebstoreResponseParseSuccess(
     const std::string& extension_id,
-    std::unique_ptr<base::DictionaryValue> webstore_data) {
+    const base::Value::Dict& webstore_data) {
   OnWebStoreDataFetcherDone();
 
   if (!CheckRequestorAlive()) {
@@ -247,16 +243,14 @@ void WebstoreStandaloneInstaller::OnWebstoreResponseParseSuccess(
     return;
   }
 
-  absl::optional<double> average_rating_setting =
-      webstore_data->FindDoubleKey(kAverageRatingKey);
-  absl::optional<int> rating_count_setting =
-      webstore_data->FindIntKey(kRatingCountKey);
+  std::optional<double> average_rating_setting =
+      webstore_data.FindDouble(kAverageRatingKey);
+  std::optional<int> rating_count_setting =
+      webstore_data.FindInt(kRatingCountKey);
 
   // Manifest, number of users, average rating and rating count are required.
-  const std::string* manifest =
-      webstore_data->GetDict().FindString(kManifestKey);
-  const std::string* localized_user_count =
-      webstore_data->GetDict().FindString(kUsersKey);
+  const std::string* manifest = webstore_data.FindString(kManifestKey);
+  const std::string* localized_user_count = webstore_data.FindString(kUsersKey);
   if (!manifest || !localized_user_count || !average_rating_setting ||
       !rating_count_setting) {
     CompleteInstall(webstore_install::INVALID_WEBSTORE_RESPONSE,
@@ -269,8 +263,8 @@ void WebstoreStandaloneInstaller::OnWebstoreResponseParseSuccess(
   rating_count_ = *rating_count_setting;
 
   // Showing user count is optional.
-  absl::optional<bool> show_user_count_opt =
-      webstore_data->FindBoolKey(kShowUserCountKey);
+  std::optional<bool> show_user_count_opt =
+      webstore_data.FindBool(kShowUserCountKey);
   show_user_count_ = show_user_count_opt.value_or(true);
 
   if (average_rating_ < ExtensionInstallPrompt::kMinExtensionRating ||
@@ -283,7 +277,7 @@ void WebstoreStandaloneInstaller::OnWebstoreResponseParseSuccess(
   // Localized name and description are optional.
   bool ok = true;
   if (const base::Value* localized_name_in =
-          webstore_data->FindKey(kLocalizedNameKey)) {
+          webstore_data.Find(kLocalizedNameKey)) {
     if (localized_name_in->is_string())
       localized_name_ = localized_name_in->GetString();
     else
@@ -291,7 +285,7 @@ void WebstoreStandaloneInstaller::OnWebstoreResponseParseSuccess(
   }
 
   if (const base::Value* localized_description_in =
-          webstore_data->FindKey(kLocalizedDescriptionKey)) {
+          webstore_data.Find(kLocalizedDescriptionKey)) {
     if (localized_description_in->is_string())
       localized_description_ = localized_description_in->GetString();
     else
@@ -306,7 +300,7 @@ void WebstoreStandaloneInstaller::OnWebstoreResponseParseSuccess(
 
   // Icon URL is optional.
   GURL icon_url;
-  if (const base::Value* icon_url_val = webstore_data->FindKey(kIconUrlKey)) {
+  if (const base::Value* icon_url_val = webstore_data.Find(kIconUrlKey)) {
     const std::string* icon_url_string = icon_url_val->GetIfString();
     if (!icon_url_string) {
       CompleteInstall(webstore_install::INVALID_WEBSTORE_RESPONSE,
@@ -320,9 +314,6 @@ void WebstoreStandaloneInstaller::OnWebstoreResponseParseSuccess(
       return;
     }
   }
-
-  // Assume ownership of webstore_data.
-  webstore_data_ = std::move(webstore_data);
 
   auto helper = base::MakeRefCounted<WebstoreInstallHelper>(
       this, id_, *manifest, icon_url);
@@ -343,7 +334,7 @@ void WebstoreStandaloneInstaller::OnWebstoreResponseParseFailure(
 void WebstoreStandaloneInstaller::OnWebstoreParseSuccess(
     const std::string& id,
     const SkBitmap& icon,
-    std::unique_ptr<base::DictionaryValue> manifest) {
+    base::Value::Dict manifest) {
   CHECK_EQ(id_, id);
 
   if (!CheckRequestorAlive()) {

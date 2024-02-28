@@ -4,8 +4,8 @@
 
 #include "extensions/browser/preload_check_group.h"
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/ref_counted.h"
 #include "extensions/common/extension.h"
 
@@ -13,7 +13,7 @@ namespace extensions {
 
 PreloadCheckGroup::PreloadCheckGroup() : PreloadCheck(nullptr) {}
 
-PreloadCheckGroup::~PreloadCheckGroup() {}
+PreloadCheckGroup::~PreloadCheckGroup() = default;
 
 void PreloadCheckGroup::AddCheck(PreloadCheck* check) {
   DCHECK_EQ(0, running_checks_);
@@ -26,7 +26,7 @@ void PreloadCheckGroup::Start(ResultCallback callback) {
 
   callback_ = std::move(callback);
   running_checks_ = checks_.size();
-  for (auto* check : checks_) {
+  for (extensions::PreloadCheck* check : checks_) {
     check->Start(base::BindOnce(&PreloadCheckGroup::OnCheckComplete,
                                 weak_ptr_factory_.GetWeakPtr()));
     // Synchronous checks may fail immediately.

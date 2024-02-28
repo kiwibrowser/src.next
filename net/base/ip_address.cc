@@ -4,16 +4,25 @@
 
 #include "net/base/ip_address.h"
 
+#include <stddef.h>
+
 #include <algorithm>
+#include <array>
 #include <climits>
+#include <optional>
+#include <string_view>
 
 #include "base/check_op.h"
-#include "base/containers/stack_container.h"
+#include "base/debug/alias.h"
+#include "base/debug/crash_logging.h"
+#include "base/logging.h"
 #include "base/notreached.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/strcat.h"
-#include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/memory_usage_estimator.h"
+#include "base/values.h"
 #include "net/base/parse_number.h"
 #include "url/gurl.h"
 #include "url/url_canon_ip.h"
@@ -112,11 +121,10 @@ bool IsPubliclyRoutableIPv6(const IPAddressBytes& ip_address) {
   return false;
 }
 
-bool ParseIPLiteralToBytes(const base::StringPiece& ip_literal,
-                           IPAddressBytes* bytes) {
+bool ParseIPLiteralToBytes(std::string_view ip_literal, IPAddressBytes* bytes) {
   // |ip_literal| could be either an IPv4 or an IPv6 literal. If it contains
   // a colon however, it must be an IPv6 address.
-  if (ip_literal.find(':') != base::StringPiece::npos) {
+  if (ip_literal.find(':') != std::string_view::npos) {
     // GURL expects IPv6 hostnames to be surrounded with brackets.
     std::string host_brackets = base::StrCat({"[", ip_literal, "]"});
     url::Component host_comp(0, host_brackets.size());
@@ -161,11 +169,45 @@ bool IPAddressBytes::operator<(const IPAddressBytes& other) const {
 }
 
 bool IPAddressBytes::operator==(const IPAddressBytes& other) const {
-  return size_ == other.size_ && std::equal(begin(), end(), other.begin());
+  return base::ranges::equal(*this, other);
 }
 
 bool IPAddressBytes::operator!=(const IPAddressBytes& other) const {
   return !(*this == other);
+}
+
+void IPAddressBytes::Append(const uint8_t* first, const uint8_t* last) {
+  CHECK_LE(first, last);
+  const ptrdiff_t bytes_to_append = last - first;
+  CHECK_LE(bytes_to_append, 16);
+  // Now we know `bytes_to_append` is between 0 and 16 and `size_` is between 0
+  // and 255 so their sum must fit inside a ptrdiff_t type.
+  CHECK_LE(ptrdiff_t{size_} + bytes_to_append, 16);
+  std::copy(first, last, bytes_.data() + size_);
+  size_ += bytes_to_append;
+}
+
+size_t IPAddressBytes::EstimateMemoryUsage() const {
+  return base::trace_event::EstimateMemoryUsage(bytes_);
+}
+
+// static
+std::optional<IPAddress> IPAddress::FromValue(const base::Value& value) {
+  if (!value.is_string()) {
+    return std::nullopt;
+  }
+
+  return IPAddress::FromIPLiteral(value.GetString());
+}
+
+// static
+std::optional<IPAddress> IPAddress::FromIPLiteral(std::string_view ip_literal) {
+  IPAddress address;
+  if (!address.AssignFromIPLiteral(ip_literal)) {
+    return std::nullopt;
+  }
+  DCHECK(address.IsValid());
+  return address;
 }
 
 IPAddress::IPAddress() = default;
@@ -178,10 +220,8 @@ IPAddress::IPAddress(const uint8_t* address, size_t address_len)
     : ip_address_(address, address_len) {}
 
 IPAddress::IPAddress(uint8_t b0, uint8_t b1, uint8_t b2, uint8_t b3) {
-  ip_address_.push_back(b0);
-  ip_address_.push_back(b1);
-  ip_address_.push_back(b2);
-  ip_address_.push_back(b3);
+  const uint8_t bytes[] = {b0, b1, b2, b3};
+  ip_address_.Assign(bytes, std::size(bytes));
 }
 
 IPAddress::IPAddress(uint8_t b0,
@@ -200,22 +240,9 @@ IPAddress::IPAddress(uint8_t b0,
                      uint8_t b13,
                      uint8_t b14,
                      uint8_t b15) {
-  ip_address_.push_back(b0);
-  ip_address_.push_back(b1);
-  ip_address_.push_back(b2);
-  ip_address_.push_back(b3);
-  ip_address_.push_back(b4);
-  ip_address_.push_back(b5);
-  ip_address_.push_back(b6);
-  ip_address_.push_back(b7);
-  ip_address_.push_back(b8);
-  ip_address_.push_back(b9);
-  ip_address_.push_back(b10);
-  ip_address_.push_back(b11);
-  ip_address_.push_back(b12);
-  ip_address_.push_back(b13);
-  ip_address_.push_back(b14);
-  ip_address_.push_back(b15);
+  const uint8_t bytes[] = {b0, b1, b2,  b3,  b4,  b5,  b6,  b7,
+                           b8, b9, b10, b11, b12, b13, b14, b15};
+  ip_address_.Assign(bytes, std::size(bytes));
 }
 
 IPAddress::~IPAddress() = default;
@@ -287,7 +314,12 @@ bool IPAddress::IsLinkLocal() const {
   return false;
 }
 
-bool IPAddress::AssignFromIPLiteral(const base::StringPiece& ip_literal) {
+bool IPAddress::IsUniqueLocalIPv6() const {
+  // [fc00::]/7
+  return IsIPv6() && ((ip_address_[0] & 0xFE) == 0xFC);
+}
+
+bool IPAddress::AssignFromIPLiteral(std::string_view ip_literal) {
   bool success = ParseIPLiteralToBytes(ip_literal, &ip_address_);
   if (!success)
     ip_address_.Resize(0);
@@ -361,6 +393,15 @@ std::string IPAddress::ToString() const {
   return str;
 }
 
+base::Value IPAddress::ToValue() const {
+  DCHECK(IsValid());
+  return base::Value(ToString());
+}
+
+size_t IPAddress::EstimateMemoryUsage() const {
+  return base::trace_event::EstimateMemoryUsage(ip_address_);
+}
+
 std::string IPAddressToStringWithPort(const IPAddress& address, uint16_t port) {
   std::string address_str = address.ToString();
   if (address_str.empty())
@@ -379,24 +420,22 @@ std::string IPAddressToPackedString(const IPAddress& address) {
 }
 
 IPAddress ConvertIPv4ToIPv4MappedIPv6(const IPAddress& address) {
-  DCHECK(address.IsIPv4());
+  CHECK(address.IsIPv4());
   // IPv4-mapped addresses are formed by:
   // <80 bits of zeros>  + <16 bits of ones> + <32-bit IPv4 address>.
-  base::StackVector<uint8_t, 16> bytes;
-  bytes->insert(bytes->end(), std::begin(kIPv4MappedPrefix),
-                std::end(kIPv4MappedPrefix));
-  bytes->insert(bytes->end(), address.bytes().begin(), address.bytes().end());
-  return IPAddress(bytes->data(), bytes->size());
+  IPAddressBytes bytes;
+  bytes.Append(std::begin(kIPv4MappedPrefix), std::end(kIPv4MappedPrefix));
+  bytes.Append(address.bytes().begin(), address.bytes().end());
+  return IPAddress(bytes);
 }
 
 IPAddress ConvertIPv4MappedIPv6ToIPv4(const IPAddress& address) {
   DCHECK(address.IsIPv4MappedIPv6());
 
-  base::StackVector<uint8_t, 16> bytes;
-  bytes->insert(bytes->end(),
-                address.bytes().begin() + std::size(kIPv4MappedPrefix),
-                address.bytes().end());
-  return IPAddress(bytes->data(), bytes->size());
+  IPAddressBytes bytes;
+  bytes.Append(address.bytes().begin() + std::size(kIPv4MappedPrefix),
+               address.bytes().end());
+  return IPAddress(bytes);
 }
 
 bool IPAddressMatchesPrefix(const IPAddress& ip_address,
@@ -404,10 +443,10 @@ bool IPAddressMatchesPrefix(const IPAddress& ip_address,
                             size_t prefix_length_in_bits) {
   // Both the input IP address and the prefix IP address should be either IPv4
   // or IPv6.
-  DCHECK(ip_address.IsValid());
-  DCHECK(ip_prefix.IsValid());
+  CHECK(ip_address.IsValid());
+  CHECK(ip_prefix.IsValid());
 
-  DCHECK_LE(prefix_length_in_bits, ip_prefix.size() * 8);
+  CHECK_LE(prefix_length_in_bits, ip_prefix.size() * 8);
 
   // In case we have an IPv6 / IPv4 mismatch, convert the IPv4 addresses to
   // IPv6 addresses in order to do the comparison.
@@ -425,14 +464,14 @@ bool IPAddressMatchesPrefix(const IPAddress& ip_address,
                               prefix_length_in_bits);
 }
 
-bool ParseCIDRBlock(base::StringPiece cidr_literal,
+bool ParseCIDRBlock(std::string_view cidr_literal,
                     IPAddress* ip_address,
                     size_t* prefix_length_in_bits) {
   // We expect CIDR notation to match one of these two templates:
   //   <IPv4-literal> "/" <number of bits>
   //   <IPv6-literal> "/" <number of bits>
 
-  std::vector<base::StringPiece> parts = base::SplitStringPiece(
+  std::vector<std::string_view> parts = base::SplitStringPiece(
       cidr_literal, "/", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   if (parts.size() != 2)
     return false;
@@ -443,8 +482,9 @@ bool ParseCIDRBlock(base::StringPiece cidr_literal,
 
   // Parse the prefix length.
   uint32_t number_of_bits;
-  if (!ParseUint32(parts[1], &number_of_bits))
+  if (!ParseUint32(parts[1], ParseIntFormat::NON_NEGATIVE, &number_of_bits)) {
     return false;
+  }
 
   // Make sure the prefix length is in a valid range.
   if (number_of_bits > ip_address->size() * 8)
@@ -454,13 +494,12 @@ bool ParseCIDRBlock(base::StringPiece cidr_literal,
   return true;
 }
 
-bool ParseURLHostnameToAddress(const base::StringPiece& hostname,
+bool ParseURLHostnameToAddress(std::string_view hostname,
                                IPAddress* ip_address) {
   if (hostname.size() >= 2 && hostname.front() == '[' &&
       hostname.back() == ']') {
     // Strip the square brackets that surround IPv6 literals.
-    auto ip_literal =
-        base::StringPiece(hostname).substr(1, hostname.size() - 2);
+    auto ip_literal = std::string_view(hostname).substr(1, hostname.size() - 2);
     return ip_address->AssignFromIPLiteral(ip_literal) && ip_address->IsIPv6();
   }
 
@@ -484,10 +523,143 @@ size_t CommonPrefixLength(const IPAddress& a1, const IPAddress& a2) {
 }
 
 size_t MaskPrefixLength(const IPAddress& mask) {
-  base::StackVector<uint8_t, 16> all_ones;
-  all_ones->resize(mask.size(), 0xFF);
-  return CommonPrefixLength(mask,
-                            IPAddress(all_ones->data(), all_ones->size()));
+  IPAddressBytes all_ones;
+  all_ones.Resize(mask.size());
+  std::fill(all_ones.begin(), all_ones.end(), 0xFF);
+  return CommonPrefixLength(mask, IPAddress(all_ones));
+}
+
+Dns64PrefixLength ExtractPref64FromIpv4onlyArpaAAAA(const IPAddress& address) {
+  DCHECK(address.IsIPv6());
+  IPAddress ipv4onlyarpa0(192, 0, 0, 170);
+  IPAddress ipv4onlyarpa1(192, 0, 0, 171);
+  if (std::equal(ipv4onlyarpa0.bytes().begin(), ipv4onlyarpa0.bytes().end(),
+                 address.bytes().begin() + 12u) ||
+      std::equal(ipv4onlyarpa1.bytes().begin(), ipv4onlyarpa1.bytes().end(),
+                 address.bytes().begin() + 12u)) {
+    return Dns64PrefixLength::k96bit;
+  } else if (std::equal(ipv4onlyarpa0.bytes().begin(),
+                        ipv4onlyarpa0.bytes().end(),
+                        address.bytes().begin() + 9u) ||
+             std::equal(ipv4onlyarpa1.bytes().begin(),
+                        ipv4onlyarpa1.bytes().end(),
+                        address.bytes().begin() + 9u)) {
+    return Dns64PrefixLength::k64bit;
+  } else if ((std::equal(ipv4onlyarpa0.bytes().begin(),
+                         ipv4onlyarpa0.bytes().begin() + 1u,
+                         address.bytes().begin() + 7u) &&
+              std::equal(ipv4onlyarpa0.bytes().begin() + 1u,
+                         ipv4onlyarpa0.bytes().end(),
+                         address.bytes().begin() + 9u)) ||
+             (std::equal(ipv4onlyarpa1.bytes().begin(),
+                         ipv4onlyarpa1.bytes().begin() + 1u,
+                         address.bytes().begin() + 7u) &&
+              std::equal(ipv4onlyarpa1.bytes().begin() + 1u,
+                         ipv4onlyarpa1.bytes().end(),
+                         address.bytes().begin() + 9u))) {
+    return Dns64PrefixLength::k56bit;
+  } else if ((std::equal(ipv4onlyarpa0.bytes().begin(),
+                         ipv4onlyarpa0.bytes().begin() + 2u,
+                         address.bytes().begin() + 6u) &&
+              std::equal(ipv4onlyarpa0.bytes().begin() + 2u,
+                         ipv4onlyarpa0.bytes().end(),
+                         address.bytes().begin() + 9u)) ||
+             ((std::equal(ipv4onlyarpa1.bytes().begin(),
+                          ipv4onlyarpa1.bytes().begin() + 2u,
+                          address.bytes().begin() + 6u) &&
+               std::equal(ipv4onlyarpa1.bytes().begin() + 2u,
+                          ipv4onlyarpa1.bytes().end(),
+                          address.bytes().begin() + 9u)))) {
+    return Dns64PrefixLength::k48bit;
+  } else if ((std::equal(ipv4onlyarpa0.bytes().begin(),
+                         ipv4onlyarpa0.bytes().begin() + 3u,
+                         address.bytes().begin() + 5u) &&
+              std::equal(ipv4onlyarpa0.bytes().begin() + 3u,
+                         ipv4onlyarpa0.bytes().end(),
+                         address.bytes().begin() + 9u)) ||
+             (std::equal(ipv4onlyarpa1.bytes().begin(),
+                         ipv4onlyarpa1.bytes().begin() + 3u,
+                         address.bytes().begin() + 5u) &&
+              std::equal(ipv4onlyarpa1.bytes().begin() + 3u,
+                         ipv4onlyarpa1.bytes().end(),
+                         address.bytes().begin() + 9u))) {
+    return Dns64PrefixLength::k40bit;
+  } else if (std::equal(ipv4onlyarpa0.bytes().begin(),
+                        ipv4onlyarpa0.bytes().end(),
+                        address.bytes().begin() + 4u) ||
+             std::equal(ipv4onlyarpa1.bytes().begin(),
+                        ipv4onlyarpa1.bytes().end(),
+                        address.bytes().begin() + 4u)) {
+    return Dns64PrefixLength::k32bit;
+  } else {
+    // if ipv4onlyarpa address is not found return 0
+    return Dns64PrefixLength::kInvalid;
+  }
+}
+
+IPAddress ConvertIPv4ToIPv4EmbeddedIPv6(const IPAddress& ipv4_address,
+                                        const IPAddress& ipv6_address,
+                                        Dns64PrefixLength prefix_length) {
+  DCHECK(ipv4_address.IsIPv4());
+  DCHECK(ipv6_address.IsIPv6());
+
+  IPAddressBytes bytes;
+
+  constexpr uint8_t kZeroBits[8] = {0x00, 0x00, 0x00, 0x00,
+                                    0x00, 0x00, 0x00, 0x00};
+
+  switch (prefix_length) {
+    case Dns64PrefixLength::k96bit:
+      bytes.Append(ipv6_address.bytes().begin(),
+                   ipv6_address.bytes().begin() + 12u);
+      bytes.Append(ipv4_address.bytes().begin(), ipv4_address.bytes().end());
+      return IPAddress(bytes);
+    case Dns64PrefixLength::k64bit:
+      bytes.Append(ipv6_address.bytes().begin(),
+                   ipv6_address.bytes().begin() + 8u);
+      bytes.Append(std::begin(kZeroBits), std::begin(kZeroBits) + 1u);
+      bytes.Append(ipv4_address.bytes().begin(), ipv4_address.bytes().end());
+      bytes.Append(std::begin(kZeroBits), std::begin(kZeroBits) + 3u);
+      return IPAddress(bytes);
+    case Dns64PrefixLength::k56bit:
+      bytes.Append(ipv6_address.bytes().begin(),
+                   ipv6_address.bytes().begin() + 7u);
+      bytes.Append(ipv4_address.bytes().begin(),
+                   ipv4_address.bytes().begin() + 1u);
+      bytes.Append(std::begin(kZeroBits), std::begin(kZeroBits) + 1u);
+      bytes.Append(ipv4_address.bytes().begin() + 1u,
+                   ipv4_address.bytes().end());
+      bytes.Append(std::begin(kZeroBits), std::begin(kZeroBits) + 4u);
+      return IPAddress(bytes);
+    case Dns64PrefixLength::k48bit:
+      bytes.Append(ipv6_address.bytes().begin(),
+                   ipv6_address.bytes().begin() + 6u);
+      bytes.Append(ipv4_address.bytes().begin(),
+                   ipv4_address.bytes().begin() + 2u);
+      bytes.Append(std::begin(kZeroBits), std::begin(kZeroBits) + 1u);
+      bytes.Append(ipv4_address.bytes().begin() + 2u,
+                   ipv4_address.bytes().end());
+      bytes.Append(std::begin(kZeroBits), std::begin(kZeroBits) + 5u);
+      return IPAddress(bytes);
+    case Dns64PrefixLength::k40bit:
+      bytes.Append(ipv6_address.bytes().begin(),
+                   ipv6_address.bytes().begin() + 5u);
+      bytes.Append(ipv4_address.bytes().begin(),
+                   ipv4_address.bytes().begin() + 3u);
+      bytes.Append(std::begin(kZeroBits), std::begin(kZeroBits) + 1u);
+      bytes.Append(ipv4_address.bytes().begin() + 3u,
+                   ipv4_address.bytes().end());
+      bytes.Append(std::begin(kZeroBits), std::begin(kZeroBits) + 6u);
+      return IPAddress(bytes);
+    case Dns64PrefixLength::k32bit:
+      bytes.Append(ipv6_address.bytes().begin(),
+                   ipv6_address.bytes().begin() + 4u);
+      bytes.Append(ipv4_address.bytes().begin(), ipv4_address.bytes().end());
+      bytes.Append(std::begin(kZeroBits), std::begin(kZeroBits) + 8u);
+      return IPAddress(bytes);
+    case Dns64PrefixLength::kInvalid:
+      return ipv4_address;
+  }
 }
 
 }  // namespace net

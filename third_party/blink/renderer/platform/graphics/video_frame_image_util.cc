@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_provider.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/shared_gpu_context.h"
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/skia/include/core/SkColorSpace.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
@@ -152,7 +153,7 @@ scoped_refptr<StaticBitmapImage> CreateImageFromVideoFrame(
         kN32_SkColorType, kUnpremul_SkAlphaType, std::move(sk_color_space));
 
     // Hold a ref by storing it in the release callback.
-    auto release_callback = WTF::Bind(
+    auto release_callback = WTF::BindOnce(
         [](scoped_refptr<media::VideoFrame> frame,
            base::WeakPtr<WebGraphicsContext3DProviderWrapper> context_provider,
            const gpu::SyncToken& sync_token, bool is_lost) {
@@ -178,7 +179,7 @@ scoped_refptr<StaticBitmapImage> CreateImageFromVideoFrame(
         // |is_cross_thread|.
         base::PlatformThreadRef(),
         // The task runner is only used for |release_callback|.
-        Thread::Current()->GetDeprecatedTaskRunner(),
+        ThreadScheduler::Current()->CleanupTaskRunner(),
         std::move(release_callback),
         /*supports_display_compositing=*/true,
         // TODO(junov): Figure out how to determine whether frame is an
@@ -237,6 +238,7 @@ scoped_refptr<StaticBitmapImage> CreateImageFromVideoFrame(
   }
 
   return resource_provider->Snapshot(
+      FlushReason::kNon2DCanvas,
       prefer_tagged_orientation
           ? VideoTransformationToImageOrientation(transform)
           : ImageOrientationEnum::kDefault);
@@ -260,7 +262,7 @@ bool DrawVideoFrameIntoResourceProvider(
       return false;  // Unable to get/create a shared main thread context.
     }
     if (!raster_context_provider->GrContext() &&
-        !raster_context_provider->ContextCapabilities().supports_oop_raster) {
+        !raster_context_provider->ContextCapabilities().gpu_rasterization) {
       DLOG(ERROR) << "Unable to process a texture backed VideoFrame w/o a "
                      "GrContext or OOP raster support.";
       return false;  // The context has been lost.
@@ -268,7 +270,7 @@ bool DrawVideoFrameIntoResourceProvider(
   }
 
   cc::PaintFlags media_flags;
-  media_flags.setAlpha(0xFF);
+  media_flags.setAlphaf(1.0f);
   media_flags.setFilterQuality(cc::PaintFlags::FilterQuality::kLow);
   media_flags.setBlendMode(SkBlendMode::kSrc);
 
@@ -335,17 +337,17 @@ scoped_refptr<viz::RasterContextProvider> GetRasterContextProvider() {
 std::unique_ptr<CanvasResourceProvider> CreateResourceProviderForVideoFrame(
     const SkImageInfo& info,
     viz::RasterContextProvider* raster_context_provider) {
+  constexpr auto kFilterQuality = cc::PaintFlags::FilterQuality::kLow;
+  constexpr auto kShouldInitialize =
+      CanvasResourceProvider::ShouldInitialize::kNo;
   if (!ShouldCreateAcceleratedImages(raster_context_provider)) {
-    return CanvasResourceProvider::CreateBitmapProvider(
-        info, cc::PaintFlags::FilterQuality::kLow,
-        CanvasResourceProvider::ShouldInitialize::kNo);
+    return CanvasResourceProvider::CreateBitmapProvider(info, kFilterQuality,
+                                                        kShouldInitialize);
   }
   return CanvasResourceProvider::CreateSharedImageProvider(
-      info, cc::PaintFlags::FilterQuality::kLow,
-      CanvasResourceProvider::ShouldInitialize::kNo,
+      info, kFilterQuality, kShouldInitialize,
       SharedGpuContext::ContextProviderWrapper(), RasterMode::kGPU,
-      false,  // Origin of GL texture is bottom left on screen
-      gpu::SHARED_IMAGE_USAGE_DISPLAY);
+      gpu::SHARED_IMAGE_USAGE_DISPLAY_READ);
 }
 
 }  // namespace blink

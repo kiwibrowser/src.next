@@ -4,6 +4,7 @@
 
 #include "content/browser/mojo_binder_policy_map_impl.h"
 
+#include "base/feature_list.h"
 #include "base/no_destructor.h"
 #include "content/common/dom_automation_controller.mojom.h"
 #include "content/common/frame.mojom.h"
@@ -13,6 +14,7 @@
 #include "device/gamepad/public/mojom/gamepad.mojom.h"
 #include "media/mojo/mojom/media_player.mojom.h"
 #include "services/network/public/mojom/restricted_cookie_manager.mojom.h"
+#include "third_party/blink/public/mojom/blob/blob_url_store.mojom.h"
 #include "third_party/blink/public/mojom/broadcastchannel/broadcast_channel.mojom.h"
 #include "third_party/blink/public/mojom/cache_storage/cache_storage.mojom.h"
 #include "third_party/blink/public/mojom/clipboard/clipboard.mojom.h"
@@ -20,19 +22,29 @@
 #include "third_party/blink/public/mojom/frame/back_forward_cache_controller.mojom.h"
 #include "third_party/blink/public/mojom/frame/frame.mojom.h"
 #include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom.h"
+#include "third_party/blink/public/mojom/loader/fetch_later.mojom.h"
+#if BUILDFLAG(IS_MAC)
+#include "third_party/blink/public/mojom/input/text_input_host.mojom.h"
+#endif
 #include "third_party/blink/public/mojom/loader/code_cache.mojom.h"
 #include "third_party/blink/public/mojom/manifest/manifest_observer.mojom.h"
 #include "third_party/blink/public/mojom/media/renderer_audio_output_stream_factory.mojom.h"
-#include "third_party/blink/public/mojom/native_io/native_io.mojom.h"
 #include "third_party/blink/public/mojom/notifications/notification_service.mojom.h"
 #include "third_party/blink/public/mojom/page/display_cutout.mojom.h"
 
 namespace content {
 
+#if BUILDFLAG(IS_MAC)
+// Put crbug.com/115920 fix under flag, so we can measure its CWV impact.
+BASE_FEATURE(kTextInputHostMojoCapabilityControlWorkaround,
+             "TextInputHostMojoCapabilityControlWorkaround",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+#endif
+
 namespace {
 
-// Register policies for interfaces registered in `internal::PopulateBinderMap`
-// and `internal::PopulateBinderMapWithContext`.
+// Register same-origin prerendering policies for interfaces registered in
+// `internal::PopulateBinderMap` and `internal::PopulateBinderMapWithContext`.
 void RegisterNonAssociatedPoliciesForSameOriginPrerendering(
     MojoBinderPolicyMap& map) {
   // For Prerendering, kCancel is usually used for those interfaces that cannot
@@ -65,8 +77,6 @@ void RegisterNonAssociatedPoliciesForSameOriginPrerendering(
       MojoBinderNonAssociatedPolicy::kGrant);
   map.SetNonAssociatedPolicy<blink::mojom::IDBFactory>(
       MojoBinderNonAssociatedPolicy::kGrant);
-  map.SetNonAssociatedPolicy<blink::mojom::NativeIOHost>(
-      MojoBinderNonAssociatedPolicy::kGrant);
 
   // Grant this interface because some sync web APIs rely on it; deferring it
   // leads to deadlock. However, granting this interface does not mean that
@@ -81,10 +91,22 @@ void RegisterNonAssociatedPoliciesForSameOriginPrerendering(
   // since we wait for a response from code cache when loading resources.
   map.SetNonAssociatedPolicy<blink::mojom::CodeCacheHost>(
       MojoBinderNonAssociatedPolicy::kGrant);
+
+#if BUILDFLAG(IS_MAC)
+  // Set policy to Grant for TextInputHost.
+  // This is used to return macOS IME sync call results to the browser process,
+  // and will hang entire Chrome if paused.
+  // This is a prospective fix added for crbug.com/1480850
+  if (base::FeatureList::IsEnabled(
+          kTextInputHostMojoCapabilityControlWorkaround)) {
+    map.SetNonAssociatedPolicy<blink::mojom::TextInputHost>(
+        MojoBinderNonAssociatedPolicy::kGrant);
+  }
+#endif
 }
 
-// Register policies for channel-associated interfaces registered in
-// `RenderFrameHostImpl::SetUpMojoIfNeeded()`.
+// Register same-origin prerendering policies for channel-associated interfaces
+// registered in `RenderFrameHostImpl::SetUpMojoIfNeeded()`.
 void RegisterChannelAssociatedPoliciesForSameOriginPrerendering(
     MojoBinderPolicyMap& map) {
   // Basic skeleton. All of them are critical to load a page so their policies
@@ -124,6 +146,32 @@ void RegisterChannelAssociatedPoliciesForSameOriginPrerendering(
   // safe to allow a prerendered document to use it.
   map.SetAssociatedPolicy<blink::mojom::DisplayCutoutHost>(
       MojoBinderAssociatedPolicy::kGrant);
+
+  // Prerendering pages are allowed to create urls for blobs.
+  map.SetAssociatedPolicy<blink::mojom::BlobURLStore>(
+      MojoBinderAssociatedPolicy::kGrant);
+
+  // Pages with FetchLater API calls should be allowed to prerender.
+  // TODO(crbug.com/1465781): Update according to feedback from
+  // https://github.com/WICG/pending-beacon/issues/82
+  map.SetAssociatedPolicy<blink::mojom::FetchLaterLoaderFactory>(
+      MojoBinderAssociatedPolicy::kGrant);
+}
+
+// Register preview policies for interfaces registered in
+// `internal::PopulateBinderMap` and `internal::PopulateBinderMapWithContext`.
+void RegisterNonAssociatedPoliciesForPreview(MojoBinderPolicyMap& map) {
+  // Inherits the policies for same-origin prerendering.
+  // TODO(b:299240273): Adjust policies for preview.
+  RegisterNonAssociatedPoliciesForSameOriginPrerendering(map);
+}
+
+// Register preview policies for channel-associated interfaces registered in
+// `RenderFrameHostImpl::SetUpMojoIfNeeded()`.
+void RegisterChannelAssociatedPoliciesForPreview(MojoBinderPolicyMap& map) {
+  // Inherits the policies for same-origin prerendering.
+  // TODO(b:299240273): Adjust policies for preview.
+  RegisterChannelAssociatedPoliciesForSameOriginPrerendering(map);
 }
 
 // Register mojo binder policies for same-origin prerendering for content/
@@ -132,6 +180,12 @@ void RegisterContentBinderPoliciesForSameOriginPrerendering(
     MojoBinderPolicyMap& map) {
   RegisterNonAssociatedPoliciesForSameOriginPrerendering(map);
   RegisterChannelAssociatedPoliciesForSameOriginPrerendering(map);
+}
+
+// Register mojo binder policies for preview mode for content/ interfaces.
+void RegisterContentBinderPoliciesForPreview(MojoBinderPolicyMap& map) {
+  RegisterNonAssociatedPoliciesForPreview(map);
+  RegisterChannelAssociatedPoliciesForPreview(map);
 }
 
 // A singleton class that stores the `MojoBinderPolicyMap` of interfaces which
@@ -145,6 +199,10 @@ class BrowserInterfaceBrokerMojoBinderPolicyMapHolder {
     GetContentClient()
         ->browser()
         ->RegisterMojoBinderPoliciesForSameOriginPrerendering(same_origin_map_);
+
+    RegisterContentBinderPoliciesForPreview(preview_map_);
+    GetContentClient()->browser()->RegisterMojoBinderPoliciesForPreview(
+        preview_map_);
   }
 
   ~BrowserInterfaceBrokerMojoBinderPolicyMapHolder() = default;
@@ -162,11 +220,16 @@ class BrowserInterfaceBrokerMojoBinderPolicyMapHolder {
   const MojoBinderPolicyMapImpl* GetSameOriginPolicyMap() const {
     return &same_origin_map_;
   }
+  const MojoBinderPolicyMapImpl* GetPreviewPolicyMap() const {
+    return &preview_map_;
+  }
 
  private:
   // TODO(https://crbug.com/1145976): Set default policy map for content/.
   // Changes to `same_origin_map_` require security review.
   MojoBinderPolicyMapImpl same_origin_map_;
+
+  MojoBinderPolicyMapImpl preview_map_;
 };
 
 }  // namespace
@@ -186,6 +249,15 @@ MojoBinderPolicyMapImpl::GetInstanceForSameOriginPrerendering() {
       map;
 
   return map->GetSameOriginPolicyMap();
+}
+
+const MojoBinderPolicyMapImpl*
+MojoBinderPolicyMapImpl::GetInstanceForPreview() {
+  static const base::NoDestructor<
+      BrowserInterfaceBrokerMojoBinderPolicyMapHolder>
+      map;
+
+  return map->GetPreviewPolicyMap();
 }
 
 MojoBinderNonAssociatedPolicy

@@ -145,8 +145,9 @@ double FilterOperationResolver::ResolveNumericArgumentForFunction(
       if (filter.length() == 1) {
         const CSSPrimitiveValue& value = To<CSSPrimitiveValue>(filter.Item(0));
         amount = value.GetDoubleValue();
-        if (value.IsPercentage())
+        if (value.IsPercentage()) {
           amount /= 100;
+        }
       }
       return amount;
     }
@@ -232,10 +233,6 @@ FilterOperations FilterOperationResolver::CreateFilterOperations(
       case CSSValueID::kDropShadow: {
         ShadowData shadow = StyleBuilderConverter::ConvertShadow(
             conversion_data, &state, filter_value->Item(0));
-        // TODO(fs): Resolve 'currentcolor' when constructing the filter chain.
-        if (shadow.GetColor().IsCurrentColor()) {
-          shadow.OverrideColor(state.Style()->GetCurrentColor());
-        }
         operations.Operations().push_back(
             MakeGarbageCollected<DropShadowFilterOperation>(shadow));
         break;
@@ -263,16 +260,18 @@ FilterOperations FilterOperationResolver::CreateOffscreenFilterOperations(
   float zoom = 1.0f;
   CSSToLengthConversionData::FontSizes font_sizes(
       kOffScreenCanvasEmFontSize, kOffScreenCanvasRemFontSize, &font, zoom);
+  CSSToLengthConversionData::LineHeightSize line_height_size;
   CSSToLengthConversionData::ViewportSize viewport_size(0, 0);
   CSSToLengthConversionData::ContainerSizes container_sizes;
+  CSSToLengthConversionData::Flags ignored_flags = 0;
   CSSToLengthConversionData conversion_data(
-      nullptr,  // ComputedStyle
-      WritingMode::kHorizontalTb, font_sizes, viewport_size, container_sizes,
-      1);  // zoom
+      WritingMode::kHorizontalTb, font_sizes, line_height_size, viewport_size,
+      container_sizes, 1 /* zoom */, ignored_flags);
 
   for (auto& curr_value : To<CSSValueList>(in_value)) {
-    if (curr_value->IsURIValue())
+    if (curr_value->IsURIValue()) {
       continue;
+    }
 
     const auto* filter_value = To<CSSFunctionValue>(curr_value.Get());
     FilterOperation::OperationType operation_type =
@@ -316,10 +315,6 @@ FilterOperations FilterOperationResolver::CreateOffscreenFilterOperations(
       case CSSValueID::kDropShadow: {
         ShadowData shadow = StyleBuilderConverter::ConvertShadow(
             conversion_data, nullptr, filter_value->Item(0));
-        // For offscreen canvas, the default color is always black.
-        if (shadow.GetColor().IsCurrentColor()) {
-          shadow.OverrideColor(Color::kBlack);
-        }
         operations.Operations().push_back(
             MakeGarbageCollected<DropShadowFilterOperation>(shadow));
         break;

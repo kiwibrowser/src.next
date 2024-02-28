@@ -22,17 +22,19 @@ import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.util.Features;
+import org.chromium.base.test.util.Features.DisableFeatures;
+import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.night_mode.AutoDarkFeedbackSourceUnitTest.ShadowWebContentsDarkModeController;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.test.util.browser.Features;
 import org.chromium.content_public.browser.BrowserContextHandle;
 import org.chromium.url.GURL;
 
 /** Unit test for {@link AutoDarkFeedbackSource}. */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(shadows = ShadowWebContentsDarkModeController.class)
-@Features.EnableFeatures(ChromeFeatureList.DARKEN_WEBSITES_CHECKBOX_IN_THEMES_SETTING)
+@EnableFeatures(ChromeFeatureList.DARKEN_WEBSITES_CHECKBOX_IN_THEMES_SETTING)
 public class AutoDarkFeedbackSourceUnitTest {
     @Implements(WebContentsDarkModeController.class)
     static class ShadowWebContentsDarkModeController {
@@ -45,15 +47,11 @@ public class AutoDarkFeedbackSourceUnitTest {
         }
     }
 
-    @Rule
-    public MockitoRule mMockitoRule = MockitoJUnit.rule();
-    @Rule
-    public TestRule mProcessor = new Features.JUnitProcessor();
+    @Rule public MockitoRule mMockitoRule = MockitoJUnit.rule();
+    @Rule public TestRule mProcessor = new Features.JUnitProcessor();
 
-    @Mock
-    Profile mProfile;
-    @Mock
-    Context mContext;
+    @Mock Profile mProfile;
+    @Mock Context mContext;
 
     @Before
     public void setup() {
@@ -72,7 +70,7 @@ public class AutoDarkFeedbackSourceUnitTest {
     }
 
     @Test
-    @Features.DisableFeatures(ChromeFeatureList.DARKEN_WEBSITES_CHECKBOX_IN_THEMES_SETTING)
+    @DisableFeatures(ChromeFeatureList.DARKEN_WEBSITES_CHECKBOX_IN_THEMES_SETTING)
     public void testDisabled_FeatureNotEnabled() {
         ShadowWebContentsDarkModeController.sEnabledState = true;
         doTestFeedbackSource(AutoDarkFeedbackSource.DISABLED_VALUE);
@@ -92,8 +90,9 @@ public class AutoDarkFeedbackSourceUnitTest {
 
     private void doTestFeedbackSource(String expectedPsdValue) {
         AutoDarkFeedbackSource source = new AutoDarkFeedbackSource(mProfile, mContext, null);
-        String feedbackPsdValue = source.getFeedback().getOrDefault(
-                AutoDarkFeedbackSource.AUTO_DARK_FEEDBACK_KEY, "");
+        String feedbackPsdValue =
+                source.getFeedback()
+                        .getOrDefault(AutoDarkFeedbackSource.AUTO_DARK_FEEDBACK_KEY, "");
         Assert.assertEquals(
                 "Expected PSD value does not match.", feedbackPsdValue, expectedPsdValue);
     }

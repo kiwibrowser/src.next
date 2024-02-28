@@ -7,6 +7,7 @@
 #include "base/json/json_writer.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/bind.h"
+#include "base/test/values_test_util.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -120,9 +121,8 @@ IN_PROC_BROWSER_TEST_F(ScriptExecutorBrowserTest, MainWorldExecution) {
   content::RenderFrameHost* main_frame = web_contents->GetPrimaryMainFrame();
 
   constexpr char kSetFlagScript[] = "window.mainWorldFlag = 'executionFlag';";
-  // NOTE: We use ExecuteScript() (and not EvalJs or ExecJs) because we
-  // explicitly *need* this to happen in the main world for the test.
-  EXPECT_TRUE(content::ExecuteScript(main_frame, kSetFlagScript));
+  // NOTE: We *need* this to happen in the main world for the test.
+  EXPECT_TRUE(content::ExecJs(main_frame, kSetFlagScript));
 
   ScriptExecutor script_executor(web_contents);
 
@@ -345,8 +345,7 @@ IN_PROC_BROWSER_TEST_F(ScriptExecutorBrowserTest, PromisesResolve) {
 
     ASSERT_EQ(1u, helper.results().size());
     EXPECT_EQ(web_contents->GetLastCommittedURL(), helper.results()[0].url);
-    EXPECT_EQ(base::Value(base::Value::Type::DICTIONARY),
-              helper.results()[0].value);
+    EXPECT_EQ(base::Value(base::Value::Type::DICT), helper.results()[0].value);
     EXPECT_EQ(0, helper.results()[0].frame_id);
     EXPECT_EQ("", helper.results()[0].error);
   }

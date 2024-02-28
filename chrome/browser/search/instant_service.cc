@@ -7,9 +7,9 @@
 #include <stddef.h>
 #include <string>
 
-#include "base/bind.h"
-#include "base/callback.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/memory/ptr_util.h"
 #include "base/observer_list.h"
 #include "base/path_service.h"
@@ -19,7 +19,6 @@
 #include "base/task/thread_pool.h"
 #include "base/time/clock.h"
 #include "build/build_config.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/ntp_tiles/chrome_most_visited_sites_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/instant_service_factory.h"
@@ -46,8 +45,6 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/url_data_source.h"
 #include "extensions/browser/extension_registry.h"
@@ -66,10 +63,6 @@ InstantService::InstantService(Profile* profile)
   // it if we are running in a unit test without the full suite.
   if (!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI))
     return;
-
-  registrar_.Add(this,
-                 content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
-                 content::NotificationService::AllSources());
 
   most_visited_sites_ = ChromeMostVisitedSitesFactory::NewForProfile(profile_);
   if (most_visited_sites_) {
@@ -100,8 +93,12 @@ InstantService::InstantService(Profile* profile)
 
 InstantService::~InstantService() = default;
 
-void InstantService::AddInstantProcess(int process_id) {
-  process_ids_.insert(process_id);
+void InstantService::AddInstantProcess(content::RenderProcessHost* host) {
+  process_ids_.insert(host->GetID());
+  // The same process may be added for multiple WebContents. Only observe once.
+  if (!host_observation_.IsObservingSource(host)) {
+    host_observation_.AddObservation(host);
+  }
 }
 
 bool InstantService::IsInstantProcess(int process_id) const {
@@ -177,26 +174,13 @@ void InstantService::Shutdown() {
   ThemeServiceFactory::GetForProfile(profile_)->RemoveObserver(this);
 }
 
-void InstantService::Observe(int type,
-                             const content::NotificationSource& source,
-                             const content::NotificationDetails& details) {
-  switch (type) {
-    case content::NOTIFICATION_RENDERER_PROCESS_TERMINATED: {
-      content::RenderProcessHost* rph =
-          content::Source<content::RenderProcessHost>(source).ptr();
-      Profile* renderer_profile =
-          static_cast<Profile*>(rph->GetBrowserContext());
-      if (profile_ == renderer_profile)
-        OnRendererProcessTerminated(rph->GetID());
-      break;
-    }
-    default:
-      NOTREACHED() << "Unexpected notification type in InstantService.";
+void InstantService::RenderProcessHostDestroyed(
+    content::RenderProcessHost* host) {
+  Profile* renderer_profile = static_cast<Profile*>(host->GetBrowserContext());
+  if (profile_ == renderer_profile) {
+    process_ids_.erase(host->GetID());
+    host_observation_.RemoveObservation(host);
   }
-}
-
-void InstantService::OnRendererProcessTerminated(int process_id) {
-  process_ids_.erase(process_id);
 }
 
 void InstantService::OnNativeThemeUpdated(ui::NativeTheme* observed_theme) {

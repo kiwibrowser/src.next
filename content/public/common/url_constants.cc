@@ -15,7 +15,6 @@ const char kChromeDevToolsScheme[] = "devtools";
 const char kChromeErrorScheme[] = "chrome-error";
 const char kChromeUIScheme[] = "chrome";
 const char kChromeUIUntrustedScheme[] = "chrome-untrusted";
-const char kGuestScheme[] = "chrome-guest";
 const char kViewSourceScheme[] = "view-source";
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 const char kExternalFileScheme[] = "externalfile";
@@ -36,17 +35,20 @@ const char kChromeUIMediaInternalsHost[] = "media-internals";
 const char kChromeUIMemoryExhaustHost[] = "memory-exhaust";
 const char kChromeUINetworkErrorHost[] = "network-error";
 const char kChromeUINetworkErrorsListingHost[] = "network-errors";
-const char kChromeUIPrerenderInternalsHost[] = "prerender-internals";
 const char kChromeUIPrivateAggregationInternalsHost[] =
     "private-aggregation-internals";
 const char kChromeUIProcessInternalsHost[] = "process-internals";
 const char kChromeUIQuotaInternalsHost[] = "quota-internals";
 const char kChromeUIResourcesHost[] = "resources";
 const char kChromeUIServiceWorkerInternalsHost[] = "serviceworker-internals";
+const char kChromeUITracesInternalsHost[] = "traces-internals";
 const char kChromeUITracingHost[] = "tracing";
 const char kChromeUIUkmHost[] = "ukm";
 const char kChromeUIUntrustedResourcesURL[] = "chrome-untrusted://resources/";
 const char kChromeUIWebRTCInternalsHost[] = "webrtc-internals";
+#if BUILDFLAG(ENABLE_VR)
+const char kChromeUIWebXrInternalsHost[] = "webxr-internals";
+#endif
 
 // This error URL is loaded in normal web renderer processes, so it should not
 // have a chrome:// scheme that might let it be confused with a WebUI page.

@@ -7,14 +7,14 @@
 #include <memory>
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/lazy_instance.h"
 #include "base/run_loop.h"
 #include "content/browser/storage_partition_impl.h"
-#include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"

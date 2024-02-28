@@ -36,7 +36,7 @@
 namespace blink {
 
 class ComputedStyle;
-class Element;
+class LayoutObject;
 class LayoutCustomScrollbarPart;
 
 // Custom scrollbars are created when a box has -webkit-scrollbar* pseudo
@@ -44,14 +44,17 @@ class LayoutCustomScrollbarPart;
 // LayoutCustomScrollbarPart.
 class CORE_EXPORT CustomScrollbar final : public Scrollbar {
  public:
-  CustomScrollbar(ScrollableArea*, ScrollbarOrientation, Element* style_source);
+  CustomScrollbar(ScrollableArea*,
+                  ScrollbarOrientation,
+                  const LayoutObject* style_source,
+                  bool suppress_use_counters = false);
   ~CustomScrollbar() override;
 
   // Return the thickness that a custom scrollbar would have, before actually
   // constructing the real scrollbar.
   static int HypotheticalScrollbarThickness(const ScrollableArea*,
                                             ScrollbarOrientation,
-                                            Element* style_source);
+                                            const LayoutObject* style_source);
 
   gfx::Rect ButtonRect(ScrollbarPart) const;
   gfx::Rect TrackRect(int start_length, int end_length) const;
@@ -65,14 +68,30 @@ class CORE_EXPORT CustomScrollbar final : public Scrollbar {
 
   void PositionScrollbarParts();
 
+  // Custom scrollbars may be translucent.
+  bool IsOpaque() const override { return false; }
+
   LayoutCustomScrollbarPart* GetPart(ScrollbarPart part_type) {
     auto it = parts_.find(part_type);
-    return it != parts_.end() ? it->value : nullptr;
+    return it != parts_.end() ? it->value.Get() : nullptr;
   }
   const LayoutCustomScrollbarPart* GetPart(ScrollbarPart part_type) const {
     auto it = parts_.find(part_type);
-    return it != parts_.end() ? it->value : nullptr;
+    return it != parts_.end() ? it->value.Get() : nullptr;
   }
+
+  // Although this method returns an entire ComputedStyle, it is only used when
+  // computing a cursor to use.
+  // This method implements a cursor-specific, inheritance-like fallback for
+  // ScrollbarParts that aren't used.
+  // For example: without this fallback, hovering over a scrollbar-track on a
+  // scrollbar styled only with `::-webkit-scrollbar` and
+  // `::webkit-scroll-thumb` will surprisingly use the cursor style from the
+  // originating element (the scroller) since the scrollbar-track will not have
+  // a corresponding LayoutCustomScrollbarPart. In this case, it'd be
+  // preferable to use the cursor style set in the `::webkit-scrollbar`
+  const ComputedStyle* GetScrollbarPartStyleForCursor(
+      ScrollbarPart part_type) const;
 
   void InvalidateDisplayItemClientsOfScrollbarParts();
   void ClearPaintFlags();
@@ -94,13 +113,14 @@ class CORE_EXPORT CustomScrollbar final : public Scrollbar {
 
   void DestroyScrollbarParts();
   void UpdateScrollbarParts();
-  scoped_refptr<const ComputedStyle> GetScrollbarPseudoElementStyle(
-      ScrollbarPart,
-      PseudoId);
+  const ComputedStyle* GetScrollbarPseudoElementStyle(ScrollbarPart, PseudoId);
   void UpdateScrollbarPart(ScrollbarPart);
 
   HeapHashMap<ScrollbarPart, Member<LayoutCustomScrollbarPart>> parts_;
   bool needs_position_scrollbar_parts_ = true;
+  // When constructing a CustomScrollbar solely for the purpose of computing
+  // hypothetical thickness, don't record feature usage.
+  bool suppress_use_counters_ = false;
 };
 
 template <>

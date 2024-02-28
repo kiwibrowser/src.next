@@ -78,11 +78,19 @@ class HistoryTabHelperTest : public ChromeRenderViewHostTestHarness {
         profile(), ServiceAccessType::IMPLICIT_ACCESS);
     ASSERT_TRUE(history_service_);
     history_service_->AddPage(
-        page_url_, base::Time::Now(), /*context_id=*/nullptr,
+        page_url_, base::Time::Now(), /*context_id=*/0,
         /*nav_entry_id=*/0,
         /*referrer=*/GURL(), history::RedirectList(), ui::PAGE_TRANSITION_TYPED,
         history::SOURCE_BROWSED, /*did_replace_entry=*/false);
     HistoryTabHelper::CreateForWebContents(web_contents());
+    HistoryTabHelper::FromWebContents(web_contents())
+        ->SetForceEligibleTabForTesting(true);
+  }
+
+  void TearDown() override {
+    // Drop unowned reference before destroying object that owns it.
+    history_service_ = nullptr;
+    ChromeRenderViewHostTestHarness::TearDown();
   }
 
   TestingProfile::TestingFactories GetTestingFactories() const override {
@@ -111,6 +119,23 @@ class HistoryTabHelperTest : public ChromeRenderViewHostTestHarness {
         &tracker_);
     loop.Run();
     return title;
+  }
+
+  base::TimeDelta QueryLastVisitDurationFromHistory(const GURL& url) {
+    base::TimeDelta visit_duration;
+    base::RunLoop loop;
+    history_service_->QueryURL(
+        url, /*want_visits=*/true,
+        base::BindLambdaForTesting([&](history::QueryURLResult result) {
+          EXPECT_TRUE(result.success);
+          if (!result.visits.empty()) {
+            visit_duration = result.visits.back().visit_duration;
+          }
+          loop.Quit();
+        }),
+        &tracker_);
+    loop.Run();
+    return visit_duration;
   }
 
   history::MostVisitedURLList QueryMostVisitedURLs() {
@@ -176,6 +201,25 @@ TEST_F(HistoryTabHelperTest, ShouldLimitTitleUpdatesPerPage) {
   // Further updates should be ignored.
   web_contents()->UpdateTitleForEntry(entry, u"title11");
   EXPECT_EQ("title10", QueryPageTitleFromHistory(page_url_));
+}
+
+TEST_F(HistoryTabHelperTest, ShouldUpdateVisitDurationInHistory) {
+  const GURL url1("https://url1.com");
+  const GURL url2("https://url2.com");
+
+  web_contents_tester()->NavigateAndCommit(url1);
+  // The duration shouldn't be set yet, since the visit is still open.
+  EXPECT_TRUE(QueryLastVisitDurationFromHistory(url1).is_zero());
+
+  // Once the user navigates on, the duration of the first visit should be
+  // populated.
+  web_contents_tester()->NavigateAndCommit(url2);
+  EXPECT_FALSE(QueryLastVisitDurationFromHistory(url1).is_zero());
+  EXPECT_TRUE(QueryLastVisitDurationFromHistory(url2).is_zero());
+
+  // Closing the tab should finish the second visit and populate its duration.
+  DeleteContents();
+  EXPECT_FALSE(QueryLastVisitDurationFromHistory(url2).is_zero());
 }
 
 TEST_F(HistoryTabHelperTest, CreateAddPageArgsReferringURLMainFrameNoReferrer) {
@@ -394,6 +438,26 @@ TEST_F(HistoryTabHelperTest,
 
 #if BUILDFLAG(IS_ANDROID)
 
+TEST_F(HistoryTabHelperTest, CreateAddPageArgsPopulatesAppId) {
+  NiceMock<content::MockNavigationHandle> navigation_handle(web_contents());
+  navigation_handle.set_redirect_chain({GURL("https://someurl.com")});
+
+  std::string raw_response_headers = "HTTP/1.1 234 OK\r\n\r\n";
+  scoped_refptr<net::HttpResponseHeaders> response_headers =
+      net::HttpResponseHeaders::TryToCreate(raw_response_headers);
+  DCHECK(response_headers);
+  navigation_handle.set_response_headers(response_headers);
+
+  history_tab_helper()->SetAppId("org.chromium.testapp");
+
+  history::HistoryAddPageArgs args =
+      history_tab_helper()->CreateHistoryAddPageArgs(
+          GURL("https://someurl.com"), base::Time(), 1, &navigation_handle);
+
+  // Make sure the `app_id` is populated.
+  ASSERT_EQ(*args.app_id, "org.chromium.testapp");
+}
+
 TEST_F(HistoryTabHelperTest, NonFeedNavigationsDoContributeToMostVisited) {
   GURL new_url("http://newurl.com");
 
@@ -433,11 +497,10 @@ class HistoryTabHelperMPArchTest
             {{"implementation_type", "mparch"}});
         break;
       case MPArchType::kPrerender:
-        scoped_feature_list_.InitWithFeatures(
-            {blink::features::kPrerender2},
+        scoped_feature_list_.InitAndDisableFeature(
             // Disable the memory requirement of Prerender2 so the test can run
             // on any bot.
-            {blink::features::kPrerender2MemoryControls});
+            blink::features::kPrerender2MemoryControls);
         break;
     }
   }

@@ -10,11 +10,11 @@
 
 namespace {
 
-#if !_LIBCPP_ENABLE_ASSERTIONS
-#error \
-    "Define _LIBCPP_ENABLE_ASSERTIONS to 1 in \
-buildtools/third_party/libc++/__config_site"
-
+// TODO(thakis): Remove _LIBCPP_ENABLE_ASSERTIONS here once
+// pnacl-saigo's libc++ is new enough.
+#if !_LIBCPP_ENABLE_ASSERTIONS && \
+    _LIBCPP_HARDENING_MODE != _LIBCPP_HARDENING_MODE_EXTENSIVE
+#error "_LIBCPP_HARDENING_MODE not defined"
 #endif
 
 using ::testing::ContainsRegex;
@@ -46,7 +46,7 @@ TEST(LibcppHardeningTest, Assertions) {
 //
 // We also have to prevent this test from running on Android because even though
 // death tests are supported on Android, GTest death tests don't work with
-// IMMEDIATE_CRASH() (https://crbug.com/1353549#c2).
+// base::ImmediateCrash() (https://crbug.com/1353549#c2).
 #if GTEST_HAS_DEATH_TEST && !GTEST_OS_LINUX_ANDROID
   EXPECT_DEATH(vec[3], Not(ContainsRegex(".*assertion.*failed:")));
 #else

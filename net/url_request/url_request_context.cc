@@ -13,15 +13,13 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/types/pass_key.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "net/base/http_user_agent_settings.h"
 #include "net/base/network_delegate.h"
 #include "net/base/proxy_delegate.h"
 #include "net/cert/cert_verifier.h"
-#include "net/cert/ct_policy_enforcer.h"
 #include "net/cert/sct_auditing_delegate.h"
 #include "net/cookies/cookie_store.h"
 #include "net/dns/host_resolver.h"
@@ -79,6 +77,15 @@ URLRequestContext::~URLRequestContext() {
   // down before this cancels the ProxyResolutionService's URLRequests.
   proxy_resolution_service()->OnShutdown();
 
+  // If a ProxyDelegate is set then the builder gave it a pointer to the
+  // ProxyResolutionService, so clear that here to avoid having a dangling
+  // pointer. There's no need to clear the ProxyResolutionService's pointer to
+  // ProxyDelegate because the member destruction order ensures that
+  // ProxyResolutionService is destroyed first.
+  if (proxy_delegate()) {
+    proxy_delegate()->SetProxyResolutionService(nullptr);
+  }
+
   DCHECK(host_resolver());
   host_resolver()->OnShutdown();
 
@@ -127,9 +134,9 @@ std::unique_ptr<URLRequest> URLRequestContext::CreateRequest(
     NetworkTrafficAnnotationTag traffic_annotation,
     bool is_for_websockets,
     const absl::optional<net::NetLogSource> net_log_source) const {
-  return base::WrapUnique(new URLRequest(url, priority, delegate, this,
-                                         traffic_annotation, is_for_websockets,
-                                         net_log_source));
+  return std::make_unique<URLRequest>(
+      base::PassKey<URLRequestContext>(), url, priority, delegate, this,
+      traffic_annotation, is_for_websockets, net_log_source);
 }
 
 void URLRequestContext::AssertNoURLRequests() const {
@@ -198,10 +205,6 @@ void URLRequestContext::set_cookie_store(
 void URLRequestContext::set_transport_security_state(
     std::unique_ptr<TransportSecurityState> state) {
   transport_security_state_ = std::move(state);
-}
-void URLRequestContext::set_ct_policy_enforcer(
-    std::unique_ptr<CTPolicyEnforcer> enforcer) {
-  ct_policy_enforcer_ = std::move(enforcer);
 }
 void URLRequestContext::set_sct_auditing_delegate(
     std::unique_ptr<SCTAuditingDelegate> delegate) {

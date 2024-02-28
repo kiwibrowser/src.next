@@ -56,6 +56,7 @@
 #include "third_party/blink/renderer/platform/fonts/font_selector.h"
 #include "third_party/blink/renderer/platform/graphics/touch_action.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/text/writing_mode.h"
 #include "third_party/blink/renderer/platform/theme/web_theme_engine_helper.h"
 #include "third_party/blink/renderer/platform/web_test_support.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -65,6 +66,8 @@
 // The methods in this file are shared by all themes on every platform.
 
 namespace blink {
+
+using mojom::blink::FormControlType;
 
 namespace {
 
@@ -105,6 +108,33 @@ ControlPart AutoAppearanceFor(const Element& element) {
   return kNoControlPart;
 }
 
+void ResetBorder(ComputedStyleBuilder& builder) {
+  builder.ResetBorderImage();
+  builder.ResetBorderTopStyle();
+  builder.ResetBorderTopWidth();
+  builder.ResetBorderTopColor();
+  builder.ResetBorderRightStyle();
+  builder.ResetBorderRightWidth();
+  builder.ResetBorderRightColor();
+  builder.ResetBorderBottomStyle();
+  builder.ResetBorderBottomWidth();
+  builder.ResetBorderBottomColor();
+  builder.ResetBorderLeftStyle();
+  builder.ResetBorderLeftWidth();
+  builder.ResetBorderLeftColor();
+  builder.ResetBorderTopLeftRadius();
+  builder.ResetBorderTopRightRadius();
+  builder.ResetBorderBottomLeftRadius();
+  builder.ResetBorderBottomRightRadius();
+}
+
+void ResetPadding(ComputedStyleBuilder& builder) {
+  builder.ResetPaddingTop();
+  builder.ResetPaddingRight();
+  builder.ResetPaddingBottom();
+  builder.ResetPaddingLeft();
+}
+
 }  // namespace
 
 LayoutTheme& LayoutTheme::GetTheme() {
@@ -122,16 +152,16 @@ LayoutTheme::LayoutTheme() : has_custom_focus_ring_color_(false) {
 
 ControlPart LayoutTheme::AdjustAppearanceWithAuthorStyle(
     ControlPart part,
-    const ComputedStyle& style) {
-  if (IsControlStyled(part, style))
+    const ComputedStyleBuilder& builder) {
+  if (IsControlStyled(part, builder))
     return part == kMenulistPart ? kMenulistButtonPart : kNoControlPart;
   return part;
 }
 
 ControlPart LayoutTheme::AdjustAppearanceWithElementType(
-    const ComputedStyle& style,
+    const ComputedStyleBuilder& builder,
     const Element* element) {
-  ControlPart part = style.EffectiveAppearance();
+  ControlPart part = builder.EffectiveAppearance();
   if (!element)
     return kNoControlPart;
 
@@ -188,41 +218,44 @@ ControlPart LayoutTheme::AdjustAppearanceWithElementType(
                                                            : auto_appearance;
 
     case kTextFieldPart:
-      if (IsA<HTMLInputElement>(*element) &&
-          To<HTMLInputElement>(*element).type() == input_type_names::kSearch)
+      if (const auto* input_element = DynamicTo<HTMLInputElement>(*element);
+          input_element &&
+          input_element->FormControlType() == FormControlType::kInputSearch) {
         return part;
+      }
       return auto_appearance;
   }
 
   return part;
 }
 
-void LayoutTheme::AdjustStyle(const Element* element, ComputedStyle& style) {
-  ControlPart original_part = style.Appearance();
-  style.SetEffectiveAppearance(original_part);
+void LayoutTheme::AdjustStyle(const Element* element,
+                              ComputedStyleBuilder& builder) {
+  ControlPart original_part = builder.Appearance();
+  builder.SetEffectiveAppearance(original_part);
   if (original_part == ControlPart::kNoControlPart)
     return;
 
   // Force inline and table display styles to be inline-block (except for table-
   // which is block)
-  if (style.Display() == EDisplay::kInline ||
-      style.Display() == EDisplay::kInlineTable ||
-      style.Display() == EDisplay::kTableRowGroup ||
-      style.Display() == EDisplay::kTableHeaderGroup ||
-      style.Display() == EDisplay::kTableFooterGroup ||
-      style.Display() == EDisplay::kTableRow ||
-      style.Display() == EDisplay::kTableColumnGroup ||
-      style.Display() == EDisplay::kTableColumn ||
-      style.Display() == EDisplay::kTableCell ||
-      style.Display() == EDisplay::kTableCaption)
-    style.SetDisplay(EDisplay::kInlineBlock);
-  else if (style.Display() == EDisplay::kListItem ||
-           style.Display() == EDisplay::kTable)
-    style.SetDisplay(EDisplay::kBlock);
+  if (builder.Display() == EDisplay::kInline ||
+      builder.Display() == EDisplay::kInlineTable ||
+      builder.Display() == EDisplay::kTableRowGroup ||
+      builder.Display() == EDisplay::kTableHeaderGroup ||
+      builder.Display() == EDisplay::kTableFooterGroup ||
+      builder.Display() == EDisplay::kTableRow ||
+      builder.Display() == EDisplay::kTableColumnGroup ||
+      builder.Display() == EDisplay::kTableColumn ||
+      builder.Display() == EDisplay::kTableCell ||
+      builder.Display() == EDisplay::kTableCaption)
+    builder.SetDisplay(EDisplay::kInlineBlock);
+  else if (builder.Display() == EDisplay::kListItem ||
+           builder.Display() == EDisplay::kTable)
+    builder.SetDisplay(EDisplay::kBlock);
 
   ControlPart part = AdjustAppearanceWithAuthorStyle(
-      AdjustAppearanceWithElementType(style, element), style);
-  style.SetEffectiveAppearance(part);
+      AdjustAppearanceWithElementType(builder, element), builder);
+  builder.SetEffectiveAppearance(part);
   DCHECK_NE(part, kAutoPart);
   if (part == kNoControlPart)
     return;
@@ -230,29 +263,32 @@ void LayoutTheme::AdjustStyle(const Element* element, ComputedStyle& style) {
   // After this point, a Node must be non-null Element if
   // EffectiveAppearance() != kNoControlPart.
 
-  AdjustControlPartStyle(style);
+  AdjustControlPartStyle(builder);
 
   // Call the appropriate style adjustment method based off the appearance
   // value.
   switch (part) {
     case kMenulistPart:
-      return AdjustMenuListStyle(style);
+      return AdjustMenuListStyle(builder);
     case kMenulistButtonPart:
-      return AdjustMenuListButtonStyle(style);
+      return AdjustMenuListButtonStyle(builder);
     case kSliderThumbHorizontalPart:
     case kSliderThumbVerticalPart:
-      return AdjustSliderThumbStyle(style);
+      return AdjustSliderThumbStyle(builder);
     case kSearchFieldCancelButtonPart:
-      return AdjustSearchFieldCancelButtonStyle(style);
+      return AdjustSearchFieldCancelButtonStyle(builder);
     default:
       break;
   }
 
   if (IsSliderContainer(*element))
-    AdjustSliderContainerStyle(*element, style);
+    AdjustSliderContainerStyle(*element, builder);
 }
 
 String LayoutTheme::ExtraDefaultStyleSheet() {
+  if (RuntimeEnabledFeatures::CssDisplayRubyEnabled()) {
+    return "ruby { display: ruby; }\nruby > rt { display: ruby-text; }\n";
+  }
   return g_empty_string;
 }
 
@@ -366,20 +402,20 @@ Color LayoutTheme::PlatformInactiveListBoxSelectionForegroundColor(
 }
 
 bool LayoutTheme::IsControlStyled(ControlPart part,
-                                  const ComputedStyle& style) const {
+                                  const ComputedStyleBuilder& builder) const {
   switch (part) {
     case kPushButtonPart:
     case kSquareButtonPart:
     case kButtonPart:
     case kProgressBarPart:
-      return style.HasAuthorBackground() || style.HasAuthorBorder();
+      return builder.HasAuthorBackground() || builder.HasAuthorBorder();
 
     case kMenulistPart:
     case kSearchFieldPart:
     case kTextAreaPart:
     case kTextFieldPart:
-      return style.HasAuthorBackground() || style.HasAuthorBorder() ||
-             style.BoxShadow();
+      return builder.HasAuthorBackground() || builder.HasAuthorBorder() ||
+             builder.BoxShadow();
 
     default:
       return false;
@@ -399,64 +435,78 @@ bool LayoutTheme::ShouldDrawDefaultFocusRing(const Node* node,
   return true;
 }
 
-void LayoutTheme::AdjustCheckboxStyle(ComputedStyle& style) const {
+void LayoutTheme::AdjustCheckboxStyle(ComputedStyleBuilder& builder) const {
   // padding - not honored by WinIE, needs to be removed.
-  style.ResetPadding();
+  ResetPadding(builder);
 
   // border - honored by WinIE, but looks terrible (just paints in the control
   // box and turns off the Windows XP theme) for now, we will not honor it.
-  style.ResetBorder();
+  ResetBorder(builder);
 }
 
-void LayoutTheme::AdjustRadioStyle(ComputedStyle& style) const {
+void LayoutTheme::AdjustRadioStyle(ComputedStyleBuilder& builder) const {
   // padding - not honored by WinIE, needs to be removed.
-  style.ResetPadding();
+  ResetPadding(builder);
 
   // border - honored by WinIE, but looks terrible (just paints in the control
   // box and turns off the Windows XP theme) for now, we will not honor it.
-  style.ResetBorder();
+  ResetBorder(builder);
 }
 
-void LayoutTheme::AdjustButtonStyle(ComputedStyle& style) const {}
+void LayoutTheme::AdjustButtonStyle(ComputedStyleBuilder&) const {}
 
-void LayoutTheme::AdjustInnerSpinButtonStyle(ComputedStyle&) const {}
+void LayoutTheme::AdjustInnerSpinButtonStyle(ComputedStyleBuilder&) const {}
 
-void LayoutTheme::AdjustMenuListStyle(ComputedStyle& style) const {
+void LayoutTheme::AdjustMenuListStyle(ComputedStyleBuilder& builder) const {
   // Menulists should have visible overflow
   // https://bugs.webkit.org/show_bug.cgi?id=21287
-  style.SetOverflowX(EOverflow::kVisible);
-  style.SetOverflowY(EOverflow::kVisible);
+  builder.SetOverflowX(EOverflow::kVisible);
+  builder.SetOverflowY(EOverflow::kVisible);
 }
 
-void LayoutTheme::AdjustMenuListButtonStyle(ComputedStyle&) const {}
+void LayoutTheme::AdjustMenuListButtonStyle(ComputedStyleBuilder&) const {}
 
-void LayoutTheme::AdjustSliderContainerStyle(const Element& element,
-                                             ComputedStyle& style) const {
+void LayoutTheme::AdjustSliderContainerStyle(
+    const Element& element,
+    ComputedStyleBuilder& builder) const {
   DCHECK(IsSliderContainer(element));
 
-  if (style.EffectiveAppearance() == kSliderVerticalPart) {
-    style.SetTouchAction(TouchAction::kPanX);
-    style.SetWritingMode(WritingMode::kVerticalRl);
+  if (RuntimeEnabledFeatures::
+          NonStandardAppearanceValueSliderVerticalEnabled() &&
+      builder.EffectiveAppearance() == kSliderVerticalPart) {
+    builder.SetTouchAction(TouchAction::kPanX);
+    builder.SetWritingMode(WritingMode::kVerticalRl);
     // It's always in RTL because the slider value increases up even in LTR.
-    style.SetDirection(TextDirection::kRtl);
+    builder.SetDirection(TextDirection::kRtl);
+  } else if (RuntimeEnabledFeatures::
+                 FormControlsVerticalWritingModeSupportEnabled() &&
+             !IsHorizontalWritingMode(builder.GetWritingMode())) {
+    builder.SetTouchAction(TouchAction::kPanX);
+    // If FormControlsVerticalWritingModeDirectionSupport disabled, then it is
+    // always RTL because the slider value increases up even in LTR.
+    if (!RuntimeEnabledFeatures::
+            FormControlsVerticalWritingModeDirectionSupportEnabled()) {
+      builder.SetDirection(TextDirection::kRtl);
+    }
   } else {
-    style.SetTouchAction(TouchAction::kPanY);
-    style.SetWritingMode(WritingMode::kHorizontalTb);
+    builder.SetTouchAction(TouchAction::kPanY);
+    builder.SetWritingMode(WritingMode::kHorizontalTb);
     if (To<HTMLInputElement>(element.OwnerShadowHost())->list()) {
-      style.SetAlignSelf(StyleSelfAlignmentData(ItemPosition::kCenter,
-                                                OverflowAlignment::kUnsafe));
+      builder.SetAlignSelf(StyleSelfAlignmentData(ItemPosition::kCenter,
+                                                  OverflowAlignment::kUnsafe));
     }
   }
-  style.SetEffectiveAppearance(kNoControlPart);
+  builder.SetEffectiveAppearance(kNoControlPart);
 }
 
-void LayoutTheme::AdjustSliderThumbStyle(ComputedStyle& style) const {
-  AdjustSliderThumbSize(style);
+void LayoutTheme::AdjustSliderThumbStyle(ComputedStyleBuilder& builder) const {
+  AdjustSliderThumbSize(builder);
 }
 
-void LayoutTheme::AdjustSliderThumbSize(ComputedStyle&) const {}
+void LayoutTheme::AdjustSliderThumbSize(ComputedStyleBuilder&) const {}
 
-void LayoutTheme::AdjustSearchFieldCancelButtonStyle(ComputedStyle&) const {}
+void LayoutTheme::AdjustSearchFieldCancelButtonStyle(
+    ComputedStyleBuilder&) const {}
 
 void LayoutTheme::PlatformColorsDidChange() {
   UpdateForcedColorsState();
@@ -541,8 +591,11 @@ void LayoutTheme::SystemFont(CSSValueID system_font_id,
   font_description.SetGenericFamily(FontDescription::kNoFamily);
 }
 
+// TODO(crbug.com/1231644): Use color_provider to get the system colors if
+// available.
 Color LayoutTheme::SystemColor(CSSValueID css_value_id,
-                               mojom::blink::ColorScheme color_scheme) const {
+                               mojom::blink::ColorScheme color_scheme,
+                               const ui::ColorProvider* color_provider) const {
   if (!WebTestSupport::IsRunningWebTest() && InForcedColorsMode())
     return SystemColorFromNativeTheme(css_value_id, color_scheme);
   return DefaultSystemColor(css_value_id, color_scheme);
@@ -555,6 +608,14 @@ Color LayoutTheme::DefaultSystemColor(
   // https://www.w3.org/TR/css-color-4/#deprecated-system-colors.
 
   switch (css_value_id) {
+    case CSSValueID::kAccentcolor:
+      return RuntimeEnabledFeatures::CSSSystemAccentColorEnabled()
+                 ? GetAccentColorOrDefault(color_scheme)
+                 : Color();
+    case CSSValueID::kAccentcolortext:
+      return RuntimeEnabledFeatures::CSSSystemAccentColorEnabled()
+                 ? GetAccentColorText(color_scheme)
+                 : Color();
     case CSSValueID::kActivetext:
       return Color::FromRGBA32(0xFFFF0000);
     case CSSValueID::kButtonborder:
@@ -617,11 +678,9 @@ Color LayoutTheme::DefaultSystemColor(
     case CSSValueID::kInactivecaptiontext:
       return Color::FromRGBA32(0xFF808080);
     case CSSValueID::kHighlight:
-      return Color::FromRGBA32(0xFFB5D5FF);
+      return ActiveSelectionBackgroundColor(color_scheme);
     case CSSValueID::kHighlighttext:
-      return color_scheme == mojom::blink::ColorScheme::kDark
-                 ? Color::FromRGBA32(0xFFFFFFFF)
-                 : Color::FromRGBA32(0xFF000000);
+      return ActiveSelectionForegroundColor(color_scheme);
     case CSSValueID::kLinktext:
       return Color::FromRGBA32(0xFF0000EE);
     case CSSValueID::kMark:
@@ -651,7 +710,8 @@ Color LayoutTheme::DefaultSystemColor(
     default:
       break;
   }
-  NOTREACHED();
+  DUMP_WILL_BE_NOTREACHED_NORETURN()
+      << getValueName(css_value_id) << " is not a recognized system color";
   return Color();
 }
 
@@ -726,20 +786,24 @@ Color LayoutTheme::SystemColorFromNativeTheme(
 
 Color LayoutTheme::PlatformTextSearchHighlightColor(
     bool active_match,
-    mojom::blink::ColorScheme color_scheme) const {
+    mojom::blink::ColorScheme color_scheme,
+    const ui::ColorProvider* color_provider) const {
   if (active_match) {
     if (InForcedColorsMode())
-      return GetTheme().SystemColor(CSSValueID::kHighlight, color_scheme);
+      return GetTheme().SystemColor(CSSValueID::kHighlight, color_scheme,
+                                    color_provider);
     return Color(255, 150, 50);  // Orange.
   }
-  return Color(255, 255, 0);     // Yellow.
+  return Color(255, 255, 0);  // Yellow.
 }
 
 Color LayoutTheme::PlatformTextSearchColor(
     bool active_match,
-    mojom::blink::ColorScheme color_scheme) const {
+    mojom::blink::ColorScheme color_scheme,
+    const ui::ColorProvider* color_provider) const {
   if (InForcedColorsMode() && active_match)
-    return GetTheme().SystemColor(CSSValueID::kHighlighttext, color_scheme);
+    return GetTheme().SystemColor(CSSValueID::kHighlighttext, color_scheme,
+                                  color_provider);
   return Color::kBlack;
 }
 
@@ -748,8 +812,13 @@ Color LayoutTheme::TapHighlightColor() {
 }
 
 void LayoutTheme::SetCustomFocusRingColor(const Color& c) {
+  const bool changed =
+      !has_custom_focus_ring_color_ || custom_focus_ring_color_ != c;
   custom_focus_ring_color_ = c;
   has_custom_focus_ring_color_ = true;
+  if (changed) {
+    Page::PlatformColorsChanged();
+  }
 }
 
 Color LayoutTheme::FocusRingColor(
@@ -770,31 +839,27 @@ String LayoutTheme::DisplayNameForFile(const File& file) const {
   return file.name();
 }
 
-bool LayoutTheme::SupportsCalendarPicker(const AtomicString& type) const {
+bool LayoutTheme::SupportsCalendarPicker(InputType::Type type) const {
   DCHECK(RuntimeEnabledFeatures::InputMultipleFieldsUIEnabled());
-  if (type == input_type_names::kTime)
-    return true;
-
-  return type == input_type_names::kDate ||
-         type == input_type_names::kDatetime ||
-         type == input_type_names::kDatetimeLocal ||
-         type == input_type_names::kMonth || type == input_type_names::kWeek;
+  return type == InputType::Type::kTime || type == InputType::Type::kDate ||
+         type == InputType::Type::kDateTimeLocal ||
+         type == InputType::Type::kMonth || type == InputType::Type::kWeek;
 }
 
-void LayoutTheme::AdjustControlPartStyle(ComputedStyle& style) {
+void LayoutTheme::AdjustControlPartStyle(ComputedStyleBuilder& builder) {
   // Call the appropriate style adjustment method based off the appearance
   // value.
-  switch (style.EffectiveAppearance()) {
+  switch (builder.EffectiveAppearance()) {
     case kCheckboxPart:
-      return AdjustCheckboxStyle(style);
+      return AdjustCheckboxStyle(builder);
     case kRadioPart:
-      return AdjustRadioStyle(style);
+      return AdjustRadioStyle(builder);
     case kPushButtonPart:
     case kSquareButtonPart:
     case kButtonPart:
-      return AdjustButtonStyle(style);
+      return AdjustButtonStyle(builder);
     case kInnerSpinButtonPart:
-      return AdjustInnerSpinButtonStyle(style);
+      return AdjustInnerSpinButtonStyle(builder);
     default:
       break;
   }
@@ -812,6 +877,50 @@ void LayoutTheme::UpdateForcedColorsState() {
   in_forced_colors_mode_ =
       WebThemeEngineHelper::GetNativeThemeEngine()->GetForcedColors() !=
       ForcedColors::kNone;
+}
+
+bool LayoutTheme::IsAccentColorCustomized(
+    mojom::blink::ColorScheme color_scheme) const {
+  if (!RuntimeEnabledFeatures::CSSSystemAccentColorEnabled()) {
+    return false;
+  }
+
+  return WebThemeEngineHelper::GetNativeThemeEngine()
+      ->GetAccentColor()
+      .has_value();
+}
+
+Color LayoutTheme::GetSystemAccentColor(
+    mojom::blink::ColorScheme color_scheme) const {
+  if (!RuntimeEnabledFeatures::CSSSystemAccentColorEnabled()) {
+    return Color();
+  }
+
+  // Currently only plumbed through on ChromeOS.
+  const auto& accent_color =
+      WebThemeEngineHelper::GetNativeThemeEngine()->GetAccentColor();
+  if (!accent_color.has_value()) {
+    return Color();
+  }
+  return Color::FromSkColor(accent_color.value());
+}
+
+Color LayoutTheme::GetAccentColorOrDefault(
+    mojom::blink::ColorScheme color_scheme) const {
+  // This is from the kAccent color from NativeThemeBase::GetControlColor
+  const Color kDefaultAccentColor = Color(0x00, 0x75, 0xFF);
+  Color accent_color = GetSystemAccentColor(color_scheme);
+  return accent_color == Color() ? kDefaultAccentColor : accent_color;
+}
+
+Color LayoutTheme::GetAccentColorText(
+    mojom::blink::ColorScheme color_scheme) const {
+  Color accent_color = GetAccentColorOrDefault(color_scheme);
+  // This logic matches AccentColorText in Firefox. If the accent color to draw
+  // text on is dark, then use white. If it's light, then use dark.
+  return color_utils::GetRelativeLuminance4f(accent_color.toSkColor4f()) <= 128
+             ? Color::kWhite
+             : Color::kBlack;
 }
 
 }  // namespace blink

@@ -18,6 +18,10 @@
 #include "net/base/net_export.h"
 #include "net/base/network_handle.h"
 
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#include "net/base/address_map_linux.h"
+#endif
+
 namespace net {
 
 class NetworkChangeNotifierFactory;
@@ -25,11 +29,11 @@ struct NetworkInterface;
 class SystemDnsConfigChangeNotifier;
 typedef std::vector<NetworkInterface> NetworkInterfaceList;
 
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 namespace internal {
-class AddressTrackerLinux;
-}
+#if BUILDFLAG(IS_FUCHSIA)
+class NetworkInterfaceCache;
 #endif
+}  // namespace internal
 
 // NetworkChangeNotifier monitors the system for network changes, and notifies
 // registered observers of those events.  Observers may register on any thread,
@@ -61,10 +65,7 @@ class NET_EXPORT NetworkChangeNotifier {
   };
 
   // This is the NetInfo v3 set of connection technologies as seen in
-  // http://w3c.github.io/netinfo/. This enum is duplicated in histograms.xml
-  // so be sure to change both at once. Additionally, since this enum is used in
-  // a UMA histogram, it should not be re-ordered and any new values should be
-  // added to the end.
+  // http://w3c.github.io/netinfo/.
   //
   // A Java counterpart will be generated for this enum.
   // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.net
@@ -330,6 +331,20 @@ class NET_EXPORT NetworkChangeNotifier {
         observer_list_;
   };
 
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  // TODO(crbug.com/1347382): Remove this section and align the behavior
+  // with other platforms or confirm that Lacros needs to be separated.
+  static constexpr ConnectionType kDefaultInitialConnectionType =
+      CONNECTION_UNKNOWN;
+  static constexpr ConnectionSubtype kDefaultInitialConnectionSubtype =
+      SUBTYPE_UNKNOWN;
+#else
+  static constexpr ConnectionType kDefaultInitialConnectionType =
+      CONNECTION_NONE;
+  static constexpr ConnectionSubtype kDefaultInitialConnectionSubtype =
+      SUBTYPE_NONE;
+#endif
+
   NetworkChangeNotifier(const NetworkChangeNotifier&) = delete;
   NetworkChangeNotifier& operator=(const NetworkChangeNotifier&) = delete;
   virtual ~NetworkChangeNotifier();
@@ -350,16 +365,8 @@ class NET_EXPORT NetworkChangeNotifier {
   // must do so before any other threads try to access the API below, and it
   // must outlive all other threads which might try to use it.
   static std::unique_ptr<NetworkChangeNotifier> CreateIfNeeded(
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-      // TODO(crbug.com/1347382): Remove this section and align the behavior
-      // with other platforms or confirm that Lacros needs to be separated.
-      NetworkChangeNotifier::ConnectionType initial_type = CONNECTION_UNKNOWN,
-      NetworkChangeNotifier::ConnectionSubtype initial_subtype =
-          SUBTYPE_UNKNOWN);
-#else
-      NetworkChangeNotifier::ConnectionType initial_type = CONNECTION_NONE,
-      NetworkChangeNotifier::ConnectionSubtype initial_subtype = SUBTYPE_NONE);
-#endif
+      ConnectionType initial_type = kDefaultInitialConnectionType,
+      ConnectionSubtype initial_subtype = kDefaultInitialConnectionSubtype);
 
   // Returns the most likely cost attribute for the default network connection.
   // The value does not indicate with absolute certainty if using the connection
@@ -454,7 +461,12 @@ class NET_EXPORT NetworkChangeNotifier {
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   // Returns the AddressTrackerLinux if present.
-  static const internal::AddressTrackerLinux* GetAddressTracker();
+  static AddressMapOwnerLinux* GetAddressMapOwner();
+#endif
+
+#if BUILDFLAG(IS_FUCHSIA)
+  // Returns the NetworkInterfaceCache if present.
+  static const internal::NetworkInterfaceCache* GetNetworkInterfaceCache();
 #endif
 
   // Convenience method to determine if the user is offline.
@@ -610,7 +622,7 @@ class NET_EXPORT NetworkChangeNotifier {
   // |omit_observers_in_constructor_for_testing| is true, internal observers
   // aren't added during construction - this is used to skip registering
   // observers from MockNetworkChangeNotifier, and allow its construction when
-  // SequencedTaskRunnerHandle isn't set.
+  // SingleThreadTaskRunner::CurrentDefaultHandle isn't set.
   explicit NetworkChangeNotifier(
       const NetworkChangeCalculatorParams& params =
           NetworkChangeCalculatorParams(),
@@ -618,10 +630,13 @@ class NET_EXPORT NetworkChangeNotifier {
       bool omit_observers_in_constructor_for_testing = false);
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
-  // Returns the AddressTrackerLinux if present.
-  // TODO(szym): Retrieve AddressMap from NetworkState. http://crbug.com/144212
-  virtual const internal::AddressTrackerLinux*
-      GetAddressTrackerInternal() const;
+  // Returns the AddressMapOwnerLinux if present.
+  virtual AddressMapOwnerLinux* GetAddressMapOwnerInternal();
+#endif
+
+#if BUILDFLAG(IS_FUCHSIA)
+  virtual const internal::NetworkInterfaceCache*
+  GetNetworkInterfaceCacheInternal() const;
 #endif
 
   // These are the actual implementations of the static queryable APIs.

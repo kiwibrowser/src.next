@@ -107,7 +107,7 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager,
 
   void UpdateGpuInfo(
       const gpu::GPUInfo& gpu_info,
-      const absl::optional<gpu::GPUInfo>& gpu_info_for_hardware_gpu);
+      const std::optional<gpu::GPUInfo>& gpu_info_for_hardware_gpu);
 #if BUILDFLAG(IS_WIN)
   void UpdateDxDiagNode(const gpu::DxDiagNode& dx_diagnostics);
   void UpdateDx12Info(uint32_t d3d12_feature_level);
@@ -120,18 +120,18 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager,
   void UpdateVulkanRequestStatus(bool request_continues);
   bool Dx12Requested() const;
   bool VulkanRequested() const;
+  void TerminateInfoCollectionGpuProcess();
+#endif
   // Called from BrowserMainLoop::PostCreateThreads().
   // TODO(content/browser/gpu/OWNERS): This should probably use a
   // BrowserMainParts override instead.
   void PostCreateThreads();
-  void TerminateInfoCollectionGpuProcess();
-#endif
   void UpdateDawnInfo(const std::vector<std::string>& dawn_info_list);
 
   // Update the GPU feature info. This updates the blocklist and enabled status
   // of GPU rasterization. In the future this will be used for more features.
   void UpdateGpuFeatureInfo(const gpu::GpuFeatureInfo& gpu_feature_info,
-                            const absl::optional<gpu::GpuFeatureInfo>&
+                            const std::optional<gpu::GpuFeatureInfo>&
                                 gpu_feature_info_for_hardware_gpu);
   void UpdateGpuExtraInfo(const gfx::GpuExtraInfo& gpu_extra_info);
   void UpdateMojoMediaVideoDecoderCapabilities(
@@ -220,6 +220,11 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager,
   void OnDisplayRemoved(const display::Display& old_display) override;
   void OnDisplayMetricsChanged(const display::Display& display,
                                uint32_t changed_metrics) override;
+
+#if BUILDFLAG(IS_LINUX)
+  bool IsGpuMemoryBufferNV12Supported();
+  void SetGpuMemoryBufferNV12Supported(bool supported);
+#endif  // BUILDFLAG(IS_LINUX)
 
   // Binds a new Mojo receiver to handle requests from a renderer.
   static void BindReceiver(

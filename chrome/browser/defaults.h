@@ -25,28 +25,17 @@ extern const bool kShowHelpMenuItemIcon;
 // bookmarks?
 extern const bool kShowImportOnBookmarkBar;
 
-// Should always open incognito windows when started with --incognito switch?
-extern const bool kAlwaysOpenIncognitoWindow;
+// If true, redefines `--incognito` switch to cause all browsers to be in
+// incognito mode rather than just the initial browser.
+extern const bool kAlwaysOpenIncognitoBrowserIfStartedWithIncognitoSwitch;
 
 // Indicates whether session restore should always create a new
 // tabbed browser. This is true every where except on ChromeOS
 // where we want the desktop to show through in this situation.
 extern const bool kAlwaysCreateTabbedBrowserOnSessionRestore;
 
-// Does the download page have the show in folder option?
-extern const bool kDownloadPageHasShowInFolder;
-
-// If true, we want to automatically start sync signin whenever we have
-// credentials (user doesn't need to go through the startup flow). This is
-// typically enabled on platforms (like ChromeOS) that have their own
-// distinct signin flow.
-extern const bool kSyncAutoStarts;
-
 // Should scroll events on the tabstrip change tabs?
 extern const bool kScrollEventChangesTab;
-
-// Last character display for passwords.
-extern const bool kPasswordEchoEnabled;
 
 //=============================================================================
 // Runtime "const" - set only once after parsing command line option and should
@@ -54,10 +43,6 @@ extern const bool kPasswordEchoEnabled;
 
 // Are bookmark enabled? True by default.
 extern bool bookmarks_enabled;
-
-// Whether HelpApp is enabled. True by default. This is only used by Chrome OS
-// today.
-extern bool enable_help_app;
 
 }  // namespace browser_defaults
 

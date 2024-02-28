@@ -70,12 +70,12 @@ class LayoutMedia : public LayoutImage {
     return "LayoutMedia";
   }
 
- protected:
-  void UpdateLayout() override;
+  LayoutUnit ComputePanelWidth(const PhysicalRect& media_width) const;
 
-  bool IsOfType(LayoutObjectType type) const override {
+ protected:
+  bool IsMedia() const final {
     NOT_DESTROYED();
-    return type == kLayoutObjectMedia || LayoutImage::IsOfType(type);
+    return true;
   }
 
  private:
@@ -105,9 +105,14 @@ class LayoutMedia : public LayoutImage {
     return false;
   }
 
-  LayoutUnit ComputePanelWidth(const LayoutRect& media_width) const;
+  RecalcScrollableOverflowResult RecalcScrollableOverflow() override;
 
   LayoutObjectChildList children_;
+};
+
+template <>
+struct DowncastTraits<LayoutMedia> {
+  static bool AllowFrom(const LayoutObject& object) { return object.IsMedia(); }
 };
 
 }  // namespace blink

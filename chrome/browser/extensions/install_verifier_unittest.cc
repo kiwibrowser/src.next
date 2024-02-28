@@ -15,7 +15,6 @@
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/manifest.h"
-#include "extensions/common/value_builder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using extensions::mojom::ManifestLocation;
@@ -39,11 +38,11 @@ class InstallVerifierTest : public ExtensionServiceTestBase {
 
   // Adds an extension as being allowed by policy.
   void AddExtensionAsPolicyInstalled(const ExtensionId& id) {
-    std::unique_ptr<base::DictionaryValue> extension_entry =
-        DictionaryBuilder().Set("installation_mode", "allowed").Build();
+    base::Value::Dict extension_entry =
+        base::Value::Dict().Set("installation_mode", "allowed");
     testing_profile()->GetTestingPrefService()->SetManagedPref(
         pref_names::kExtensionManagement,
-        DictionaryBuilder().Set(id, std::move(extension_entry)).Build());
+        base::Value::Dict().Set(id, std::move(extension_entry)));
     EXPECT_TRUE(ExtensionManagementFactory::GetForBrowserContext(profile())
                     ->IsInstallationExplicitlyAllowed(id));
   }
@@ -72,7 +71,7 @@ TEST_F(InstallVerifierTest, TestIsFromStoreAndMustRemainDisabled) {
   struct {
     const char* test_name;
     ManifestLocation location;
-    absl::optional<GURL> update_url;
+    std::optional<GURL> update_url;
     FromStoreStatus expected_from_store_status;
     MustRemainDisabledStatus expected_must_remain_disabled_status;
   } test_cases[] = {
@@ -80,13 +79,13 @@ TEST_F(InstallVerifierTest, TestIsFromStoreAndMustRemainDisabled) {
        FROM_STORE, CAN_BE_ENABLED},
       {"internal non-store update url", ManifestLocation::kInternal,
        non_store_update_url, NOT_FROM_STORE, MUST_REMAIN_DISABLED},
-      {"internal no update url", ManifestLocation::kInternal, absl::nullopt,
+      {"internal no update url", ManifestLocation::kInternal, std::nullopt,
        NOT_FROM_STORE, MUST_REMAIN_DISABLED},
       {"unpacked from store", ManifestLocation::kUnpacked, store_update_url,
        FROM_STORE, CAN_BE_ENABLED},
       {"unpacked non-store update url", ManifestLocation::kUnpacked,
        non_store_update_url, NOT_FROM_STORE, CAN_BE_ENABLED},
-      {"unpacked no update url", ManifestLocation::kUnpacked, absl::nullopt,
+      {"unpacked no update url", ManifestLocation::kUnpacked, std::nullopt,
        NOT_FROM_STORE, CAN_BE_ENABLED},
       {"external from store", ManifestLocation::kExternalPolicyDownload,
        store_update_url, FROM_STORE, CAN_BE_ENABLED},

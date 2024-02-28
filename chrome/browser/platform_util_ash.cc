@@ -4,15 +4,15 @@
 
 #include "chrome/browser/platform_util.h"
 
-#include "base/bind.h"
 #include "base/files/file_path.h"
+#include "base/functional/bind.h"
 #include "chrome/browser/ash/file_manager/open_util.h"
 #include "chrome/browser/ash/guest_os/guest_os_external_protocol_handler.h"
 #include "chrome/browser/platform_util_internal.h"
-#include "chrome/browser/ui/ash/window_pin_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/chromeos/window_pin_util.h"
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chromeos/strings/grit/chromeos_strings.h"
 #include "content/public/browser/browser_thread.h"
@@ -60,8 +60,7 @@ void ShowWarningOnOpenOperationResult(Profile* profile,
   Browser* browser = chrome::FindTabbedBrowser(profile, false);
   chrome::ShowWarningMessageBox(
       browser ? browser->window()->GetNativeWindow() : nullptr,
-      l10n_util::GetStringFUTF16(IDS_FILE_BROWSER_ERROR_VIEWING_FILE_TITLE,
-                                 path.BaseName().AsUTF16Unsafe()),
+      path.BaseName().AsUTF16Unsafe(),
       l10n_util::GetStringUTF16(message_id));
 }
 
@@ -104,7 +103,12 @@ void OpenExternal(Profile* profile, const GURL& url) {
   // previously been accepted with "Always allow ..." and this is called from
   // ChromeContentBrowserClient::HandleExternalProtocol.
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  guest_os::Launch(profile, url);
+
+  std::optional<guest_os::GuestOsUrlHandler> handler =
+      guest_os::GuestOsUrlHandler::GetForUrl(profile, url);
+  if (handler) {
+    handler->Handle(profile, url);
+  }
 }
 
 bool IsBrowserLockedFullscreen(const Browser* browser) {

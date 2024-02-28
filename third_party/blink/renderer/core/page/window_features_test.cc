@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include <gtest/gtest.h>
 
 #include "third_party/blink/public/web/web_window_features.h"
-#include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -30,10 +29,9 @@ TEST_F(WindowFeaturesTest, NoOpener) {
   };
 
   for (const auto& test : kCases) {
-    EXPECT_EQ(test.noopener,
-              GetWindowFeaturesFromString(test.feature_string,
-                                          /*dom_window=*/nullptr, KURL())
-                  .noopener)
+    EXPECT_EQ(test.noopener, GetWindowFeaturesFromString(test.feature_string,
+                                                         /*dom_window=*/nullptr)
+                                 .noopener)
         << "Testing '" << test.feature_string << "'";
   }
 }
@@ -64,7 +62,7 @@ TEST_F(WindowFeaturesTest, NoReferrer) {
   for (const auto& test : kCases) {
     EXPECT_EQ(test.noreferrer,
               GetWindowFeaturesFromString(test.feature_string,
-                                          /*dom_window=*/nullptr, KURL())
+                                          /*dom_window=*/nullptr)
                   .noreferrer)
         << "Testing '" << test.feature_string << "'";
   }

@@ -44,9 +44,9 @@
 #include "third_party/blink/renderer/core/layout/layout_video.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_content.h"
-#include "third_party/blink/renderer/core/paint/image_element_timing.h"
 #include "third_party/blink/renderer/core/paint/image_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
+#include "third_party/blink/renderer/core/paint/timing/image_element_timing.h"
 #include "third_party/blink/renderer/core/svg/graphics/svg_image.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
@@ -55,7 +55,7 @@
 namespace blink {
 
 LayoutImage::LayoutImage(Element* element)
-    : LayoutReplaced(element, LayoutSize()) {}
+    : LayoutReplaced(element, PhysicalSize()) {}
 
 LayoutImage* LayoutImage::CreateAnonymous(PseudoElement& pseudo) {
   LayoutImage* image = MakeGarbageCollected<LayoutImage>(nullptr);
@@ -83,11 +83,12 @@ void LayoutImage::StyleDidChange(StyleDifference diff,
   NOT_DESTROYED();
   LayoutReplaced::StyleDidChange(diff, old_style);
 
-  bool old_orientation =
-      old_style ? old_style->RespectImageOrientation()
-                : ComputedStyleInitialValues::InitialRespectImageOrientation();
-  if (Style() && StyleRef().RespectImageOrientation() != old_orientation)
+  RespectImageOrientationEnum old_orientation =
+      old_style ? old_style->ImageOrientation()
+                : ComputedStyleInitialValues::InitialImageOrientation();
+  if (StyleRef().ImageOrientation() != old_orientation) {
     IntrinsicSizeChanged();
+  }
 }
 
 void LayoutImage::SetImageResource(LayoutImageResource* image_resource) {
@@ -156,7 +157,7 @@ void LayoutImage::ImageChanged(WrappedImagePtr new_image,
   InvalidatePaintAndMarkForLayoutIfNeeded(defer);
 }
 
-void LayoutImage::UpdateIntrinsicSizeIfNeeded(const LayoutSize& new_size) {
+void LayoutImage::UpdateIntrinsicSizeIfNeeded(const PhysicalSize& new_size) {
   NOT_DESTROYED();
   if (image_resource_->ErrorOccurred())
     return;
@@ -181,9 +182,9 @@ bool LayoutImage::NeedsLayoutOnIntrinsicSizeChange() const {
 void LayoutImage::InvalidatePaintAndMarkForLayoutIfNeeded(
     CanDeferInvalidation defer) {
   NOT_DESTROYED();
-  LayoutSize old_intrinsic_size = IntrinsicSize();
+  PhysicalSize old_intrinsic_size = IntrinsicSize();
 
-  LayoutSize new_intrinsic_size = RoundedLayoutSize(
+  PhysicalSize new_intrinsic_size = PhysicalSize::FromSizeFRound(
       ImageSizeOverriddenByIntrinsicSize(StyleRef().EffectiveZoom()));
   UpdateIntrinsicSizeIfNeeded(new_intrinsic_size);
 
@@ -204,7 +205,7 @@ void LayoutImage::InvalidatePaintAndMarkForLayoutIfNeeded(
     }
   }
 
-  SetShouldDoFullPaintInvalidationWithoutGeometryChange(
+  SetShouldDoFullPaintInvalidationWithoutLayoutChange(
       PaintInvalidationReason::kImage);
 
   if (defer == CanDeferInvalidation::kYes && ImageResource() &&
@@ -282,12 +283,6 @@ bool LayoutImage::ComputeBackgroundIsKnownToBeObscured() const {
   return ForegroundIsKnownToBeOpaqueInRect(BackgroundPaintedExtent(), 0);
 }
 
-LayoutUnit LayoutImage::MinimumReplacedHeight() const {
-  NOT_DESTROYED();
-  return image_resource_->ErrorOccurred() ? IntrinsicSize().Height()
-                                          : LayoutUnit();
-}
-
 HTMLMapElement* LayoutImage::ImageMap() const {
   NOT_DESTROYED();
   auto* i = DynamicTo<HTMLImageElement>(GetNode());
@@ -347,20 +342,16 @@ bool LayoutImage::OverrideIntrinsicSizingInfo(
   gfx::SizeF overridden_intrinsic_size(kDefaultWidth, kDefaultHeight);
   intrinsic_sizing_info.size = overridden_intrinsic_size;
   intrinsic_sizing_info.aspect_ratio = intrinsic_sizing_info.size;
-  if (!IsHorizontalWritingMode())
-    intrinsic_sizing_info.Transpose();
-
   return true;
 }
 
 bool LayoutImage::CanApplyObjectViewBox() const {
-  auto* svg_image = EmbeddedSVGImage();
-  if (!svg_image)
+  if (!EmbeddedSVGImage()) {
     return true;
-
-  // Only apply object-view-box if the image has both intrinsic width/height.
-  IntrinsicSizingInfo info;
-  svg_image->GetIntrinsicSizingInfo(info);
+  }
+  // Only apply object-view-box if the image has both natural width/height.
+  const IntrinsicSizingInfo info =
+      image_resource_->GetNaturalDimensions(StyleRef().EffectiveZoom());
   return info.has_width && info.has_height;
 }
 
@@ -369,66 +360,26 @@ void LayoutImage::ComputeIntrinsicSizingInfo(
   NOT_DESTROYED();
   DCHECK(!ShouldApplySizeContainment());
   if (!OverrideIntrinsicSizingInfo(intrinsic_sizing_info)) {
-    if (SVGImage* svg_image = EmbeddedSVGImage()) {
-      svg_image->GetIntrinsicSizingInfo(intrinsic_sizing_info);
+    if (EmbeddedSVGImage()) {
+      intrinsic_sizing_info =
+          image_resource_->GetNaturalDimensions(StyleRef().EffectiveZoom());
 
-      // Scale for the element's effective zoom (which includes scaling for
-      // device scale) is already applied when computing the view box. If the
-      // element has no view box then it needs to be explicitly applied here.
       if (auto view_box_size = ComputeObjectViewBoxSizeForIntrinsicSizing()) {
         DCHECK(intrinsic_sizing_info.has_width);
         DCHECK(intrinsic_sizing_info.has_height);
         intrinsic_sizing_info.size = *view_box_size;
-      } else {
-        intrinsic_sizing_info.size.Scale(StyleRef().EffectiveZoom());
       }
 
-      // Handle zoom & vertical writing modes here, as the embedded SVG document
-      // doesn't know about them.
-      if (StyleRef().GetObjectFit() != EObjectFit::kScaleDown)
-        intrinsic_sizing_info.size.Scale(ImageDevicePixelRatio());
-
-      // Handle an overridden aspect ratio
-      const StyleAspectRatio& aspect_ratio = StyleRef().AspectRatio();
-      if (aspect_ratio.GetType() == EAspectRatioType::kRatio ||
-          (aspect_ratio.GetType() == EAspectRatioType::kAutoAndRatio &&
-           intrinsic_sizing_info.aspect_ratio.IsEmpty())) {
-        intrinsic_sizing_info.aspect_ratio.set_width(
-            aspect_ratio.GetRatio().width());
-        intrinsic_sizing_info.aspect_ratio.set_height(
-            aspect_ratio.GetRatio().height());
+      // The value returned by LayoutImageResource will be in zoomed CSS
+      // pixels, but for the 'scale-down' object-fit value we want "zoomed
+      // device pixels", so undo the DPR part here.
+      if (StyleRef().GetObjectFit() == EObjectFit::kScaleDown) {
+        intrinsic_sizing_info.size.InvScale(ImageDevicePixelRatio());
       }
-
-      if (!IsHorizontalWritingMode())
-        intrinsic_sizing_info.Transpose();
       return;
     }
 
     LayoutReplaced::ComputeIntrinsicSizingInfo(intrinsic_sizing_info);
-
-    // Our intrinsicSize is empty if we're laying out generated images with
-    // relative width/height. Figure out the right intrinsic size to use.
-    if (intrinsic_sizing_info.size.IsEmpty() &&
-        !image_resource_->HasIntrinsicSize() && !IsListMarkerImage()) {
-      if (HasOverrideContainingBlockContentLogicalWidth() &&
-          HasOverrideContainingBlockContentLogicalHeight()) {
-        intrinsic_sizing_info.size.set_width(
-            OverrideContainingBlockContentLogicalWidth().ToFloat());
-        intrinsic_sizing_info.size.set_height(
-            OverrideContainingBlockContentLogicalHeight().ToFloat());
-      } else {
-        LayoutObject* containing_block =
-            IsOutOfFlowPositioned() ? Container() : ContainingBlock();
-        if (containing_block->IsBox()) {
-          auto* box = To<LayoutBox>(containing_block);
-          intrinsic_sizing_info.size.set_width(
-              box->AvailableLogicalWidth().ToFloat());
-          intrinsic_sizing_info.size.set_height(
-              box->AvailableLogicalHeight(kIncludeMarginBorderPadding)
-                  .ToFloat());
-        }
-      }
-    }
   }
   // Don't compute an intrinsic ratio to preserve historical WebKit behavior if
   // we're painting alt text and/or a broken image.
@@ -439,14 +390,6 @@ void LayoutImage::ComputeIntrinsicSizingInfo(
     intrinsic_sizing_info.aspect_ratio = gfx::SizeF(1, 1);
     return;
   }
-}
-
-bool LayoutImage::NeedsPreferredWidthsRecalculation() const {
-  NOT_DESTROYED();
-  if (LayoutReplaced::NeedsPreferredWidthsRecalculation())
-    return true;
-  SVGImage* svg_image = EmbeddedSVGImage();
-  return svg_image && svg_image->HasIntrinsicSizingInfo();
 }
 
 SVGImage* LayoutImage::EmbeddedSVGImage() const {
@@ -468,21 +411,24 @@ void LayoutImage::UpdateAfterLayout() {
   if (auto* image_element = DynamicTo<HTMLImageElement>(node)) {
     media_element_parser_helpers::CheckUnsizedMediaViolation(
         this, image_element->IsDefaultIntrinsicSize());
-
-    // Scope to the outermost frame to avoid counting image ads that are
-    // (likely) already in ad iframes. Exclude image ads that are invisible or
-    // too small (e.g. tracking pixels).
-    if (!image_ad_use_counter_recorded_ && image_element->IsAdRelated() &&
-        GetDocument().IsInOutermostMainFrame() &&
-        image_element->LayoutBoxWidth() > 1 &&
-        image_element->LayoutBoxHeight() > 1) {
-      UseCounter::Count(GetDocument(), WebFeature::kImageAd);
-      image_ad_use_counter_recorded_ = true;
-    }
+    image_element->SetAutoSizesUsecounter();
   } else if (auto* video_element = DynamicTo<HTMLVideoElement>(node)) {
     media_element_parser_helpers::CheckUnsizedMediaViolation(
         this, video_element->IsDefaultIntrinsicSize());
   }
+}
+
+void LayoutImage::MutableForPainting::UpdatePaintedRect(
+    const PhysicalRect& paint_rect) {
+  // As an optimization for sprite sheets, an image may use the cull rect when
+  // generating the display item. We need to invalidate the display item if
+  // this rect changes.
+  auto& image = To<LayoutImage>(layout_object_);
+  if (image.last_paint_rect_ != paint_rect) {
+    static_cast<const DisplayItemClient&>(layout_object_).Invalidate();
+  }
+
+  image.last_paint_rect_ = paint_rect;
 }
 
 }  // namespace blink

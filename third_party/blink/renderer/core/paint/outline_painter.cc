@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -121,11 +121,11 @@ void IterateRightAnglePath(const SkPath& path, const Action& contour_action) {
        verb = iter.next(points)) {
     switch (verb) {
       case SkPath::kMove_Verb:
-        DCHECK(lines.IsEmpty());
+        DCHECK(lines.empty());
         break;
       case SkPath::kLine_Verb: {
         Line new_line{points[0], points[1]};
-        if (lines.IsEmpty() || !MergeLineIfPossible(lines.back(), new_line)) {
+        if (lines.empty() || !MergeLineIfPossible(lines.back(), new_line)) {
           lines.push_back(new_line);
           DCHECK(lines.size() == 1 ||
                  lines.back().start == lines[lines.size() - 2].end);
@@ -199,8 +199,7 @@ FloatRoundedRect::Radii ComputeCornerRadii(
     const PhysicalRect& reference_border_rect,
     float offset) {
   return RoundedBorderGeometry::PixelSnappedRoundedBorderWithOutsets(
-             style, reference_border_rect,
-             LayoutRectOutsets(offset, offset, offset, offset))
+             style, reference_border_rect, PhysicalBoxStrut(LayoutUnit(offset)))
       .GetRadii();
 }
 
@@ -444,9 +443,9 @@ class ComplexOutlinePainter {
                                outline_style_ == EBorderStyle::kGroove)) {
       outline_style_ = EBorderStyle::kSolid;
       Color dark = color_.Dark();
-      color_ = Color((color_.Red() + dark.Red()) / 2,
-                     (color_.Green() + dark.Green()) / 2,
-                     (color_.Blue() + dark.Blue()) / 2, color_.Alpha());
+      color_ = Color(
+          (color_.Red() + dark.Red()) / 2, (color_.Green() + dark.Green()) / 2,
+          (color_.Blue() + dark.Blue()) / 2, color_.AlphaAsInteger());
     }
   }
 
@@ -456,11 +455,11 @@ class ComplexOutlinePainter {
       return;
     }
 
-    bool use_alpha_layer = color_.HasAlpha() &&
+    bool use_alpha_layer = !color_.IsOpaque() &&
                            outline_style_ != EBorderStyle::kSolid &&
                            outline_style_ != EBorderStyle::kDouble;
     if (use_alpha_layer) {
-      context_.BeginLayer(color_.Alpha() / 255.0);
+      context_.BeginLayer(color_.Alpha());
       color_ = Color::FromRGB(color_.Red(), color_.Green(), color_.Blue());
     }
 
@@ -791,7 +790,7 @@ void PaintSingleFocusRing(GraphicsContext& context,
                           const FloatRoundedRect::Radii& corner_radii,
                           const Color& color,
                           const AutoDarkMode& auto_dark_mode) {
-  DCHECK(!rects.IsEmpty());
+  DCHECK(!rects.empty());
   SkPath path;
   if (!ComputeRightAnglePath(path, rects, offset, 0))
     return;
@@ -824,8 +823,9 @@ void PaintFocusRing(GraphicsContext& context,
                     const LayoutObject::OutlineInfo& info) {
   Color inner_color = style.VisitedDependentColor(GetCSSPropertyOutlineColor());
 #if !BUILDFLAG(IS_MAC)
-  if (style.DarkColorScheme())
+  if (style.DarkColorScheme()) {
     inner_color = Color::kWhite;
+  }
 #endif
 
   const float outer_ring_width = FocusRingOuterStrokeWidth(style);
@@ -834,17 +834,15 @@ void PaintFocusRing(GraphicsContext& context,
 
   Color outer_color =
       style.DarkColorScheme() ? Color(0x10, 0x10, 0x10) : Color::kWhite;
-  AutoDarkMode auto_dark_mode(
-      PaintAutoDarkMode(style, DarkModeFilter::ElementRole::kBackground));
   PaintSingleFocusRing(context, rects, outer_ring_width,
                        offset + std::ceil(inner_ring_width), corner_radii,
-                       outer_color, auto_dark_mode);
+                       outer_color, AutoDarkMode::Disabled());
   // Draw the inner ring using |outer_ring_width| (which should be wider than
   // the additional offset of the outer ring) over the outer ring to ensure no
   // gaps or AA artifacts.
   DCHECK_GE(outer_ring_width, std::ceil(inner_ring_width));
   PaintSingleFocusRing(context, rects, outer_ring_width, offset, corner_radii,
-                       inner_color, auto_dark_mode);
+                       inner_color, AutoDarkMode::Disabled());
 }
 
 }  // anonymous namespace
@@ -857,7 +855,7 @@ void OutlinePainter::PaintOutlineRects(
     const ComputedStyle& style,
     const Document& document) {
   DCHECK(style.HasOutline());
-  DCHECK(!outline_rects.IsEmpty());
+  DCHECK(!outline_rects.empty());
 
   if (DrawingRecorder::UseCachedDrawingIfPossible(paint_info.context, client,
                                                   paint_info.phase))
@@ -876,7 +874,7 @@ void OutlinePainter::PaintOutlineRects(
         united_outline_rect->UnionEvenIfEmpty(pixel_snapped_rect);
     }
   }
-  if (pixel_snapped_outline_rects.IsEmpty())
+  if (pixel_snapped_outline_rects.empty())
     return;
 
   gfx::Rect visual_rect = *united_outline_rect;
@@ -892,10 +890,12 @@ void OutlinePainter::PaintOutlineRects(
   }
 
   if (*united_outline_rect == pixel_snapped_outline_rects[0]) {
+    gfx::Outsets offset =
+        AdjustedOutlineOffset(*united_outline_rect, info.offset);
     BoxBorderPainter::PaintSingleRectOutline(
         paint_info.context, style, outline_rects[0], info.width,
-        LayoutRectOutsets(
-            AdjustedOutlineOffset(*united_outline_rect, info.offset)));
+        PhysicalBoxStrut(offset.top(), offset.right(), offset.bottom(),
+                         offset.left()));
     return;
   }
 

@@ -6,19 +6,16 @@
 
 #include "base/notreached.h"
 #include "build/build_config.h"
-#include "chrome/browser/lifetime/application_lifetime.h"
+
+#if !BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/lifetime/application_lifetime_desktop.h"
+#endif
 
 BrowserProcessPlatformPartBase::BrowserProcessPlatformPartBase() {
 }
 
 BrowserProcessPlatformPartBase::~BrowserProcessPlatformPartBase() {
 }
-
-void BrowserProcessPlatformPartBase::PlatformSpecificCommandLineProcessing(
-    const base::CommandLine& /* command_line */) {
-}
-
-void BrowserProcessPlatformPartBase::BeginStartTearDown() {}
 
 void BrowserProcessPlatformPartBase::StartTearDown() {
 }

@@ -55,9 +55,6 @@ LayoutEmbeddedContent::LayoutEmbeddedContent(HTMLFrameOwnerElement* element)
 
 void LayoutEmbeddedContent::WillBeDestroyed() {
   NOT_DESTROYED();
-  if (AXObjectCache* cache = GetDocument().ExistingAXObjectCache())
-    cache->Remove(this);
-
   if (auto* frame_owner = GetFrameOwnerElement())
     frame_owner->SetEmbeddedContentView(nullptr);
 
@@ -106,7 +103,7 @@ const absl::optional<PhysicalSize> LayoutEmbeddedContent::FrozenFrameSize()
 
 AffineTransform LayoutEmbeddedContent::EmbeddedContentTransform() const {
   auto frozen_size = FrozenFrameSize();
-  if (!frozen_size) {
+  if (!frozen_size || frozen_size->IsEmpty()) {
     const PhysicalOffset content_box_offset = PhysicalContentBoxOffset();
     return AffineTransform().Translate(content_box_offset.left,
                                        content_box_offset.top);
@@ -152,6 +149,23 @@ PaintLayerType LayoutEmbeddedContent::LayerTypeRequired() const {
   return kForcedPaintLayer;
 }
 
+bool LayoutEmbeddedContent::PointOverResizer(
+    const HitTestResult& result,
+    const HitTestLocation& location,
+    const PhysicalOffset& accumulated_offset) const {
+  NOT_DESTROYED();
+  if (const auto* scrollable_area = GetScrollableArea()) {
+    const HitTestRequest::HitTestRequestType hit_type =
+        result.GetHitTestRequest().GetType();
+    const blink::ResizerHitTestType resizer_type =
+        hit_type & HitTestRequest::kTouchEvent ? kResizerForTouch
+                                               : kResizerForPointer;
+    return scrollable_area->IsAbsolutePointInResizeControl(
+        ToRoundedPoint(location.Point() - accumulated_offset), resizer_type);
+  }
+  return false;
+}
+
 bool LayoutEmbeddedContent::NodeAtPointOverEmbeddedContentView(
     HitTestResult& result,
     const HitTestLocation& hit_test_location,
@@ -167,14 +181,8 @@ bool LayoutEmbeddedContent::NodeAtPointOverEmbeddedContentView(
   if ((inside || hit_test_location.IsRectBasedTest()) && !had_result &&
       result.InnerNode() == GetNode()) {
     bool is_over_content_view =
-        PhysicalContentBoxRect().Contains(result.LocalPoint());
-    if (is_over_content_view) {
-      if (const auto* scrollable_area = GetScrollableArea()) {
-        if (scrollable_area->IsLocalPointInResizeControl(
-                ToRoundedPoint(result.LocalPoint()), kResizerForPointer))
-          is_over_content_view = false;
-      }
-    }
+        PhysicalContentBoxRect().Contains(result.LocalPoint()) &&
+        !result.IsOverResizer();
     result.SetIsOverEmbeddedContentView(is_over_content_view);
   }
   return inside;
@@ -187,8 +195,11 @@ bool LayoutEmbeddedContent::NodeAtPoint(
     HitTestPhase phase) {
   NOT_DESTROYED();
   auto* local_frame_view = DynamicTo<LocalFrameView>(ChildFrameView());
-  bool skip_contents = (result.GetHitTestRequest().GetStopNode() == this ||
-                        !result.GetHitTestRequest().AllowsChildFrameContent());
+  bool skip_contents =
+      (result.GetHitTestRequest().GetStopNode() == this ||
+       !result.GetHitTestRequest().AllowsChildFrameContent() ||
+       PointOverResizer(result, hit_test_location, accumulated_offset));
+
   if (!local_frame_view || skip_contents) {
     return NodeAtPointOverEmbeddedContentView(result, hit_test_location,
                                               accumulated_offset, phase);
@@ -302,7 +313,6 @@ void LayoutEmbeddedContent::StyleDidChange(StyleDifference diff,
 void LayoutEmbeddedContent::UpdateLayout() {
   NOT_DESTROYED();
   DCHECK(NeedsLayout());
-  UpdateAfterLayout();
   ClearNeedsLayout();
 }
 
@@ -326,9 +336,10 @@ CursorDirective LayoutEmbeddedContent::GetCursor(const PhysicalOffset& point,
   return LayoutReplaced::GetCursor(point, cursor);
 }
 
-PhysicalRect LayoutEmbeddedContent::ReplacedContentRect() const {
+PhysicalRect LayoutEmbeddedContent::ReplacedContentRectFrom(
+    const PhysicalRect& base_content_rect) const {
   NOT_DESTROYED();
-  PhysicalRect content_rect = PhysicalContentBoxRect();
+  PhysicalRect content_rect = base_content_rect;
 
   // IFrames set as the root scroller should get their size from their parent.
   // When scrolling starts so as to hide the URL bar, IFRAME wouldn't resize to
@@ -346,8 +357,9 @@ PhysicalRect LayoutEmbeddedContent::ReplacedContentRect() const {
     // system forwards mouse events to the child frame even when the mouse is
     // outside of the child frame. Revisit this when the input system supports
     // different |ReplacedContentRect| from |PhysicalContentBoxRect|.
-    LayoutSize frozen_layout_size = frozen_size->ToLayoutSize();
-    content_rect = ComputeReplacedContentRect(&frozen_layout_size);
+    PhysicalSize frozen_layout_size = *frozen_size;
+    content_rect =
+        ComputeReplacedContentRect(base_content_rect, &frozen_layout_size);
   }
 
   // We don't propagate sub-pixel into sub-frame layout, in other words, the

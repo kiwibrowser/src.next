@@ -13,8 +13,8 @@ import android.os.ParcelFileDescriptor;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
-import org.chromium.base.annotations.JNINamespace;
-import org.chromium.base.annotations.NativeMethods;
+import org.jni_zero.JNINamespace;
+import org.jni_zero.NativeMethods;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -25,10 +25,9 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Function;
 
-/**
- * Helper methods for dealing with Files.
- */
+/** Helper methods for dealing with Files. */
 @JNINamespace("base::android")
 public class FileUtils {
     private static final String TAG = "FileUtils";
@@ -113,9 +112,7 @@ public class FileUtils {
         }
     }
 
-    /**
-     * Performs a simple copy of inputStream to outputStream.
-     */
+    /** Performs a simple copy of inputStream to outputStream. */
     public static void copyStream(InputStream inputStream, OutputStream outputStream)
             throws IOException {
         byte[] buffer = new byte[8192];
@@ -142,9 +139,7 @@ public class FileUtils {
         }
     }
 
-    /**
-     * Reads inputStream into a byte array.
-     */
+    /** Reads inputStream into a byte array. */
     @NonNull
     public static byte[] readStream(InputStream inputStream) throws IOException {
         ByteArrayOutputStream data = new ByteArrayOutputStream();
@@ -191,7 +186,7 @@ public class FileUtils {
     @Nullable
     public static Bitmap queryBitmapFromContentProvider(Context context, Uri uri) {
         try (ParcelFileDescriptor parcelFileDescriptor =
-                        context.getContentResolver().openFileDescriptor(uri, "r")) {
+                context.getContentResolver().openFileDescriptor(uri, "r")) {
             if (parcelFileDescriptor == null) {
                 Log.w(TAG, "Null ParcelFileDescriptor from uri " + uri);
                 return null;
@@ -225,9 +220,7 @@ public class FileUtils {
 
     @NativeMethods
     public interface Natives {
-        /**
-         * Returns the canonicalised absolute pathname for |filePath|.
-         */
+        /** Returns the canonicalised absolute pathname for |filePath|. */
         String getAbsoluteFilePath(String filePath);
     }
 }

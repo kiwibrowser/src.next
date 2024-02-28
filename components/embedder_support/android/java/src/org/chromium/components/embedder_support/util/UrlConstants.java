@@ -4,8 +4,13 @@
 
 package org.chromium.components.embedder_support.util;
 
+import org.chromium.url.GURL;
+
 /**
  * Java side version of chrome/common/url_constants.cc
+ *
+ * Do not add any more NTP related constants.
+ * TODO(crbug.com/1481277) Move NTP related constants to ChromeUrlConstants.java
  */
 public class UrlConstants {
     public static final String APP_INTENT_SCHEME = "android-app";
@@ -80,8 +85,14 @@ public class UrlConstants {
     public static final String GOOGLE_ACCOUNT_ACTIVITY_CONTROLS_URL =
             "https://myaccount.google.com/activitycontrols/search";
 
+    public static final String GOOGLE_ACCOUNT_ACTIVITY_CONTROLS_FROM_PG_URL =
+            "https://myaccount.google.com/activitycontrols/search"
+                    + "&utm_source=chrome&utm_medium=privacy-guide";
+
     public static final String GOOGLE_ACCOUNT_DEVICE_ACTIVITY_URL =
             "https://myaccount.google.com/device-activity?utm_source=chrome";
+
+    public static final String MY_ACTIVITY_HOME_URL = "https://myactivity.google.com/";
 
     public static final String GOOGLE_SEARCH_HISTORY_URL_IN_CBD =
             "https://myactivity.google.com/product/search?utm_source=chrome_cbd";
@@ -95,10 +106,36 @@ public class UrlConstants {
     public static final String MY_ACTIVITY_URL_IN_HISTORY =
             "https://myactivity.google.com/myactivity/?utm_source=chrome_h";
 
+    public static final String GOOGLE_SEARCH_HISTORY_URL_IN_QD =
+            "https://myactivity.google.com/product/search?utm_source=chrome_qd";
+
+    public static final String MY_ACTIVITY_URL_IN_QD =
+            "https://myactivity.google.com/myactivity?utm_source=chrome_qd";
+
+    public static final String GOOGLE_URL = "https://www.google.com/";
+
     public static final String EXPLORE_HOST = "explore";
     public static final String EXPLORE_URL = "chrome-native://explore/";
-    public static final String CHROME_DINO_URL = "chrome://dino";
+    public static final String CHROME_DINO_URL = "chrome://dino/";
+
+    public static final String LOCALHOST = "localhost";
 
     public static final String MANAGEMENT_HOST = "management";
     public static final String MANAGEMENT_URL = "chrome://management/";
+
+    private static class Holder {
+        private static final String SERIALIZED_NTP_URL =
+                "73,1,true,0,6,0,-1,0,-1,9,6,0,-1,15,1,0,-1,0,-1,false,false,chrome://newtab/";
+        private static GURL sNtpGurl =
+                GURL.deserializeLatestVersionOnly(SERIALIZED_NTP_URL.replace(',', '\0'));
+    }
+
+    /**
+     * Returns a cached GURL representation of {@link UrlConstants.NTP_NON_NATIVE_URL}. It is safe
+     * to call this method before native is loaded and doing so will not block on native loading
+     * completion since a hardcoded, serialized string is used.
+     */
+    public static GURL ntpGurl() {
+        return Holder.sNtpGurl;
+    }
 }

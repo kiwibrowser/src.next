@@ -81,6 +81,11 @@ std::unique_ptr<cc::ScopedPauseRendering> EmptyChromeClient::PauseRendering(
   return nullptr;
 }
 
+absl::optional<int> EmptyChromeClient::GetMaxRenderBufferBounds(
+    LocalFrame& frame) const {
+  return absl::nullopt;
+}
+
 void EmptyChromeClient::OpenTextDataListChooser(HTMLInputElement&) {}
 
 void EmptyChromeClient::OpenFileChooser(LocalFrame*,
@@ -101,12 +106,14 @@ bool EmptyChromeClient::StartDeferringCommits(LocalFrame& main_frame,
 
 void EmptyLocalFrameClient::BeginNavigation(
     const ResourceRequest&,
+    const KURL& requestor_base_url,
     mojom::RequestContextFrameType,
     LocalDOMWindow*,
     DocumentLoader*,
     WebNavigationType,
     NavigationPolicy,
     WebFrameLoadType,
+    mojom::blink::ForceHistoryPush,
     bool,
     // TODO(crbug.com/1315802): Refactor _unfencedTop handling.
     bool,
@@ -119,7 +126,9 @@ void EmptyLocalFrameClient::BeginNavigation(
     const absl::optional<Impression>&,
     const LocalFrameToken* initiator_frame_token,
     std::unique_ptr<SourceLocation>,
-    mojo::PendingRemote<mojom::blink::PolicyContainerHostKeepAliveHandle>) {}
+    mojo::PendingRemote<mojom::blink::PolicyContainerHostKeepAliveHandle>,
+    bool is_container_initiated,
+    bool is_fullscreen_requested) {}
 
 void EmptyLocalFrameClient::DispatchWillSendSubmitEvent(HTMLFormElement*) {}
 
@@ -128,21 +137,9 @@ LocalFrame* EmptyLocalFrameClient::CreateFrame(const AtomicString&,
   return nullptr;
 }
 
-std::pair<RemoteFrame*, PortalToken> EmptyLocalFrameClient::CreatePortal(
-    HTMLPortalElement*,
-    mojo::PendingAssociatedReceiver<mojom::blink::Portal>,
-    mojo::PendingAssociatedRemote<mojom::blink::PortalClient>) {
-  return std::pair<RemoteFrame*, PortalToken>(nullptr, PortalToken());
-}
-
-RemoteFrame* EmptyLocalFrameClient::AdoptPortal(HTMLPortalElement*) {
-  return nullptr;
-}
-
 RemoteFrame* EmptyLocalFrameClient::CreateFencedFrame(
     HTMLFencedFrameElement*,
-    mojo::PendingAssociatedReceiver<mojom::blink::FencedFrameOwnerHost>,
-    mojom::blink::FencedFrameMode) {
+    mojo::PendingAssociatedReceiver<mojom::blink::FencedFrameOwnerHost>) {
   return nullptr;
 }
 

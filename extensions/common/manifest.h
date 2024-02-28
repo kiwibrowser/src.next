@@ -9,26 +9,24 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "base/values.h"
 #include "extensions/common/extension_id.h"
 #include "extensions/common/hashed_extension_id.h"
 #include "extensions/common/mojom/manifest.mojom-shared.h"
 
-namespace base {
-class DictionaryValue;
-class Value;
-}  // namespace base
-
 namespace extensions {
 struct InstallWarning;
 
-// Wraps the DictionaryValue form of extension's manifest. Enforces access to
+// Wraps the base::Value::Dict form of extension's manifest. Enforces access to
 // properties of the manifest using ManifestFeatureProvider.
 class Manifest final {
  public:
   // Do not change the order of entries or remove entries in this list as this
-  // is used in ExtensionType enum in tools/metrics/histograms/enums.xml.
+  // is used in ExtensionType enum in
+  // tools/metrics/histograms/metadata/extensions/enums.xml.
   enum Type {
     TYPE_UNKNOWN = 0,
     TYPE_EXTENSION = 1,
@@ -105,7 +103,7 @@ class Manifest final {
   }
 
   // Returns the Manifest::Type for the given |value|.
-  static Type GetTypeFromManifestValue(const base::DictionaryValue& value,
+  static Type GetTypeFromManifestValue(const base::Value::Dict& value,
                                        bool for_login_screen = false);
 
   // Returns true if an item with the given |location| should always be loaded,
@@ -118,11 +116,11 @@ class Manifest final {
   // (like platform apps) may be installed in the same login screen profile.
   static std::unique_ptr<Manifest> CreateManifestForLoginScreen(
       mojom::ManifestLocation location,
-      std::unique_ptr<base::DictionaryValue> value,
+      base::Value::Dict value,
       ExtensionId extension_id);
 
   Manifest(mojom::ManifestLocation location,
-           std::unique_ptr<base::DictionaryValue> value,
+           base::Value::Dict value,
            ExtensionId extension_id);
 
   Manifest(const Manifest&) = delete;
@@ -135,11 +133,9 @@ class Manifest final {
 
   mojom::ManifestLocation location() const { return location_; }
 
-  // Returns false and |error| will be non-empty if the manifest is malformed.
-  // |warnings| will be populated if there are keys in the manifest that cannot
-  // be specified by the extension type.
-  bool ValidateManifest(std::string* error,
-                        std::vector<InstallWarning>* warnings) const;
+  // Populates |warnings| if manifest contains keys not permitted for the
+  // chosen extension type.
+  void ValidateManifest(std::vector<InstallWarning>* warnings) const;
 
   // The version of this extension's manifest. We increase the manifest
   // version when making breaking changes to the extension system. If the
@@ -170,35 +166,33 @@ class Manifest final {
 
   // These access the wrapped manifest value, returning nullptr/nullopt when the
   // property does not exist or if the manifest type can't access it.
-  const base::Value* FindKey(base::StringPiece path) const;
-  const base::Value* FindPath(base::StringPiece path) const;
-  absl::optional<bool> FindBoolPath(base::StringPiece path) const;
-  absl::optional<int> FindIntPath(base::StringPiece path) const;
-  const std::string* FindStringPath(base::StringPiece path) const;
-  // Deprecated: Use the GetDictionary() overload that accepts a base::Value
-  // output parameter instead.
-  bool GetDictionary(const std::string& path,
-                     const base::DictionaryValue** out_value) const;
-  bool GetDictionary(const std::string& path,
-                     const base::Value** out_value) const;
+  const base::Value* FindKey(std::string_view path) const;
+  const base::Value* FindPath(std::string_view path) const;
+  std::optional<bool> FindBoolPath(std::string_view path) const;
+  std::optional<int> FindIntPath(std::string_view path) const;
+  const std::string* FindStringPath(std::string_view path) const;
+
+  const base::Value::Dict* FindDictPath(std::string_view path) const;
+
+  // Deprecated: Use the FindDictPath(asValue) functions instead.
   bool GetList(const std::string& path, const base::Value** out_value) const;
 
   // Returns true if this equals the |other| manifest.
   bool EqualsForTesting(const Manifest& other) const;
 
-  // Gets the underlying DictionaryValue representing the manifest.
+  // Gets the underlying base::Value::Dict representing the manifest.
   // Note: only use this when you KNOW you don't need the validation.
-  const base::DictionaryValue* value() const { return value_.get(); }
+  const base::Value::Dict* value() const { return &value_; }
 
-  // Gets the underlying DictionaryValue representing the manifest with all
+  // Gets the underlying `base::Value::Dict` representing the manifest with all
   // unavailable manifest keys removed.
-  const base::DictionaryValue& available_values() const {
-    return *available_values_;
+  const base::Value::Dict& available_values() const {
+    return available_values_;
   }
 
  private:
   Manifest(mojom::ManifestLocation location,
-           std::unique_ptr<base::DictionaryValue> value,
+           base::Value::Dict value,
            ExtensionId extension_id,
            bool for_login_screen);
 
@@ -206,7 +200,7 @@ class Manifest final {
   // like directory structures and URLs, and is expected to not change across
   // versions. It is generated as a SHA-256 hash of the extension's public
   // key, or as a hash of the path in the case of unpacked extensions.
-  const std::string extension_id_;
+  const ExtensionId extension_id_;
 
   // The hex-encoding of the SHA1 of the extension id; used to determine feature
   // availability.
@@ -216,10 +210,10 @@ class Manifest final {
   const mojom::ManifestLocation location_;
 
   // The underlying dictionary representation of the manifest.
-  const std::unique_ptr<const base::DictionaryValue> value_;
+  const base::Value::Dict value_;
 
   // Same as |value_| but comprises only of keys available to this manifest.
-  std::unique_ptr<const base::DictionaryValue> available_values_;
+  base::Value::Dict available_values_;
 
   const Type type_;
 

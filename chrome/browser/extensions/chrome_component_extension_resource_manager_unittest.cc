@@ -2,9 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <optional>
+
 #include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/common/chrome_paths.h"
@@ -47,9 +50,9 @@ TEST_F(ChromeComponentExtensionResourceManagerTest,
 
   // Load the manifest data.
   std::string error;
-  std::unique_ptr<base::DictionaryValue> manifest(file_util::LoadManifest(
+  std::optional<base::Value::Dict> manifest(file_util::LoadManifest(
       test_path, FILE_PATH_LITERAL("app.json"), &error));
-  ASSERT_TRUE(manifest.get()) << error;
+  ASSERT_TRUE(manifest) << error;
 
   // Build a path inside Chrome's resources directory where a component
   // extension might be installed.

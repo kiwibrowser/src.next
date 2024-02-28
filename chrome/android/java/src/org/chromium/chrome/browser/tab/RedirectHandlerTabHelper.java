@@ -7,20 +7,18 @@ package org.chromium.chrome.browser.tab;
 import android.content.Intent;
 
 import androidx.annotation.Nullable;
+import androidx.browser.customtabs.CustomTabsIntent;
 
 import org.chromium.base.IntentUtils;
 import org.chromium.base.UserData;
 import org.chromium.base.UserDataHost;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.LaunchIntentDispatcher;
-import org.chromium.chrome.browser.customtabs.CustomTabIntentDataProvider;
 import org.chromium.components.external_intents.RedirectHandler;
 import org.chromium.content_public.browser.NavigationHandle;
 import org.chromium.ui.base.WindowAndroid;
 
-/**
- * This class glues RedirectHandler instances to Tabs.
- */
+/** This class glues RedirectHandler instances to Tabs. */
 public class RedirectHandlerTabHelper extends EmptyTabObserver implements UserData {
     private static final Class<RedirectHandlerTabHelper> USER_DATA_KEY =
             RedirectHandlerTabHelper.class;
@@ -50,8 +48,7 @@ public class RedirectHandlerTabHelper extends EmptyTabObserver implements UserDa
      * @return {@link RedirectHandler} hanging to the given {@link Tab},
      *     or {@code null} if there is no instance available.
      */
-    @Nullable
-    public static RedirectHandler getHandlerFor(Tab tab) {
+    public static @Nullable RedirectHandler getHandlerFor(Tab tab) {
         RedirectHandlerTabHelper helper = tab.getUserDataHost().getUserData(USER_DATA_KEY);
         if (helper == null) return null;
         return helper.mRedirectHandler;
@@ -95,7 +92,7 @@ public class RedirectHandlerTabHelper extends EmptyTabObserver implements UserDa
     }
 
     @Override
-    public void onDidFinishNavigation(Tab tab, NavigationHandle navigation) {
+    public void onDidFinishNavigationInPrimaryMainFrame(Tab tab, NavigationHandle navigation) {
         if (navigation.isPageActivation()) {
             // Page Activations (e.g. for back/forward cache or Prerender) don't trigger
             // NavigationThrottles, so the RedirectHandler doesn't have insight into these
@@ -110,15 +107,19 @@ public class RedirectHandlerTabHelper extends EmptyTabObserver implements UserDa
         // Intentionally do nothing to prevent automatic observer removal on detachment.
     }
 
-    /**
-     * Wrapper around RedirectHandler#updateIntent() that supplies //chrome-level params.
-     */
-    public static void updateIntentInTab(Tab tab, Intent intent) {
-        RedirectHandlerTabHelper.getOrCreateHandlerFor(tab).updateIntent(intent,
-                LaunchIntentDispatcher.isCustomTabIntent(intent),
-                IntentUtils.safeGetBooleanExtra(intent,
-                        CustomTabIntentDataProvider.EXTRA_SEND_TO_EXTERNAL_DEFAULT_HANDLER, false),
-                IntentUtils.safeGetBooleanExtra(
-                        intent, IntentHandler.EXTRA_STARTED_TABBED_CHROME_TASK, false));
+    /** Wrapper around RedirectHandler#updateIntent() that supplies //chrome-level params. */
+    public static void updateIntentInTab(Tab tab, @Nullable Intent intent) {
+        boolean isCustomTab = false;
+        boolean sendToExternalHandler = false;
+        boolean startedTabbedChromeTask = false;
+        if (intent != null) {
+            isCustomTab = LaunchIntentDispatcher.isCustomTabIntent(intent);
+            sendToExternalHandler = CustomTabsIntent.isSendToExternalDefaultHandlerEnabled(intent);
+            startedTabbedChromeTask =
+                    IntentUtils.safeGetBooleanExtra(
+                            intent, IntentHandler.EXTRA_STARTED_TABBED_CHROME_TASK, false);
+        }
+        RedirectHandlerTabHelper.getOrCreateHandlerFor(tab)
+                .updateIntent(intent, isCustomTab, sendToExternalHandler, startedTabbedChromeTask);
     }
 }

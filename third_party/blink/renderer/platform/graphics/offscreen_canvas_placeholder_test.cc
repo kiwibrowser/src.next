@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,10 @@
 
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_dispatcher.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_provider.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 
 using testing::_;
@@ -25,13 +27,15 @@ constexpr size_t kHeight = 10;
 
 class MockCanvasResourceDispatcher : public CanvasResourceDispatcher {
  public:
-  MockCanvasResourceDispatcher(unsigned placeholder_id)
-      : CanvasResourceDispatcher(/*client=*/nullptr,
-                                 base::ThreadTaskRunnerHandle::Get(),
-                                 kClientId,
-                                 kSinkId,
-                                 placeholder_id,
-                                 /*canvas_size=*/{kWidth, kHeight}) {}
+  explicit MockCanvasResourceDispatcher(unsigned placeholder_id)
+      : CanvasResourceDispatcher(
+            /*client=*/nullptr,
+            scheduler::GetSingleThreadTaskRunnerForTesting(),
+            scheduler::GetSingleThreadTaskRunnerForTesting(),
+            kClientId,
+            kSinkId,
+            placeholder_id,
+            /*canvas_size=*/{kWidth, kHeight}) {}
 
   MOCK_METHOD2(ReclaimResource,
                void(viz::ResourceId, scoped_refptr<CanvasResource>&&));
@@ -59,6 +63,7 @@ class OffscreenCanvasPlaceholderTest : public Test {
   void TearDown() override;
 
  private:
+  test::TaskEnvironment task_environment_;
   OffscreenCanvasPlaceholder placeholder_;
   std::unique_ptr<MockCanvasResourceDispatcher> dispatcher_;
   std::unique_ptr<CanvasResourceProvider> resource_provider_;
@@ -92,7 +97,7 @@ void OffscreenCanvasPlaceholderTest::DrawSomething() {
 
 CanvasResource* OffscreenCanvasPlaceholderTest::DispatchOneFrame() {
   scoped_refptr<CanvasResource> resource =
-      resource_provider_->ProduceCanvasResource();
+      resource_provider_->ProduceCanvasResource(FlushReason::kTesting);
   CanvasResource* resource_raw_ptr = resource.get();
   dispatcher_->DispatchFrame(
       std::move(resource), base::TimeTicks(), SkIRect::MakeEmpty(),

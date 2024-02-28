@@ -4,7 +4,7 @@
 
 #include "extensions/browser/requirements_checker.h"
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -23,18 +23,13 @@ RequirementsChecker::RequirementsChecker(
     scoped_refptr<const Extension> extension)
     : PreloadCheck(extension) {}
 
-RequirementsChecker::~RequirementsChecker() {}
+RequirementsChecker::~RequirementsChecker() = default;
 
 void RequirementsChecker::Start(ResultCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   const RequirementsInfo& requirements =
       RequirementsInfo::GetRequirements(extension());
-
-#if !defined(USE_AURA)
-  if (requirements.window_shape)
-    errors_.insert(Error::kWindowShapeNotSupported);
-#endif
 
   callback_ = std::move(callback);
   if (requirements.webgl) {
@@ -56,12 +51,6 @@ std::u16string RequirementsChecker::GetErrorMessage() const {
     messages.push_back(
         l10n_util::GetStringUTF8(IDS_EXTENSION_WEBGL_NOT_SUPPORTED));
   }
-#if !defined(USE_AURA)
-  if (errors_.count(Error::kWindowShapeNotSupported)) {
-    messages.push_back(
-        l10n_util::GetStringUTF8(IDS_EXTENSION_WINDOW_SHAPE_NOT_SUPPORTED));
-  }
-#endif
 
   return base::UTF8ToUTF16(base::JoinString(messages, " "));
 }

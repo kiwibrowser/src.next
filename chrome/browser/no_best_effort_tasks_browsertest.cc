@@ -9,6 +9,7 @@
 #include "base/run_loop.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/sequenced_task_runner.h"
 #include "build/build_config.h"
 #include "build/buildflag.h"
 #include "chrome/browser/chrome_content_browser_client.h"
@@ -108,7 +109,8 @@ constexpr base::TimeDelta kSendMessageRetryPeriod = base::Milliseconds(250);
 
 // Verify that it is possible to load and paint the initial about:blank page
 // without running BEST_EFFORT tasks.
-IN_PROC_BROWSER_TEST_F(NoBestEffortTasksTest, LoadAndPaintAboutBlank) {
+// TODO(https://crbug.com/1484434): Disabled due to excessive flakiness.
+IN_PROC_BROWSER_TEST_F(NoBestEffortTasksTest, DISABLED_LoadAndPaintAboutBlank) {
   content::WebContents* const web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   EXPECT_TRUE(web_contents->GetLastCommittedURL().IsAboutBlank());
@@ -122,7 +124,9 @@ IN_PROC_BROWSER_TEST_F(NoBestEffortTasksTest, LoadAndPaintAboutBlank) {
 //
 // This test has more dependencies than LoadAndPaintAboutBlank, including
 // loading cookies.
-IN_PROC_BROWSER_TEST_F(NoBestEffortTasksTest, LoadAndPaintFromNetwork) {
+// TODO(https://crbug.com/1484434): Disabled due to excessive flakiness.
+IN_PROC_BROWSER_TEST_F(NoBestEffortTasksTest,
+                       DISABLED_LoadAndPaintFromNetwork) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
   content::OpenURLParams open(
@@ -138,7 +142,8 @@ IN_PROC_BROWSER_TEST_F(NoBestEffortTasksTest, LoadAndPaintFromNetwork) {
 
 // Verify that it is possible to load and paint a file:// URL without running
 // BEST_EFFORT tasks. Regression test for https://crbug.com/973244.
-IN_PROC_BROWSER_TEST_F(NoBestEffortTasksTest, LoadAndPaintFileScheme) {
+// TODO(https://crbug.com/1484434): Disabled due to excessive flakiness.
+IN_PROC_BROWSER_TEST_F(NoBestEffortTasksTest, DISABLED_LoadAndPaintFileScheme) {
   constexpr base::FilePath::CharType kFile[] = FILE_PATH_LITERAL("links.html");
   GURL file_url(ui_test_utils::GetTestUrl(
       base::FilePath(base::FilePath::kCurrentDirectory),
@@ -172,14 +177,14 @@ IN_PROC_BROWSER_TEST_F(NoBestEffortTasksTest, LoadExtensionAndSendMessages) {
   ASSERT_TRUE(have_test_data_dir);
   extension_dir = extension_dir.AppendASCII("extensions")
                       .AppendASCII("no_best_effort_tasks_test_extension");
+  extensions::TestExtensionRegistryObserver observer(
+      extensions::ExtensionRegistry::Get(browser()->profile()));
   extensions::UnpackedInstaller::Create(
       extensions::ExtensionSystem::Get(browser()->profile())
           ->extension_service())
       ->Load(extension_dir);
   scoped_refptr<const extensions::Extension> extension =
-      extensions::TestExtensionRegistryObserver(
-          extensions::ExtensionRegistry::Get(browser()->profile()))
-          .WaitForExtensionReady();
+      observer.WaitForExtensionReady();
   ASSERT_TRUE(extension);
   ASSERT_EQ(kExtensionId, extension->id());
 
@@ -215,14 +220,14 @@ IN_PROC_BROWSER_TEST_F(NoBestEffortTasksTest, LoadExtensionAndSendMessages) {
                         request_reply_javascript);
     if (result.error.empty()) {
       LOG(INFO) << "Got a response from the extension.";
-      EXPECT_TRUE(result.value.FindBoolKey("pong").value_or(false));
+      EXPECT_TRUE(result.value.GetDict().FindBool("pong").value_or(false));
       break;
     }
     // An error indicates the extension's message listener isn't up yet. Wait a
     // little before trying again.
     LOG(INFO) << "Waiting for the extension's message listener...";
     base::RunLoop run_loop;
-    base::SequencedTaskRunnerHandle::Get()->PostDelayedTask(
+    base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE, run_loop.QuitClosure(), kSendMessageRetryPeriod);
     run_loop.Run();
   }

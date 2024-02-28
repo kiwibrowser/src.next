@@ -8,8 +8,8 @@
 #include "components/ntp_tiles/country_code_ios.h"
 
 std::string ntp_tiles::GetDeviceCountryCode() {
-  NSLocale *current_locale = [NSLocale currentLocale];
-  NSString *country_code = [current_locale objectForKey:NSLocaleCountryCode];
+  NSString* country_code =
+      [NSLocale.currentLocale objectForKey:NSLocaleCountryCode];
 
   return base::SysNSStringToUTF8(country_code);
 }

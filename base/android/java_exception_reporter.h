@@ -9,10 +9,12 @@
 
 #include "base/android/scoped_java_ref.h"
 #include "base/base_export.h"
-#include "base/callback_forward.h"
+#include "base/functional/callback_forward.h"
 
 namespace base {
 namespace android {
+
+using JavaExceptionCallback = void (*)(const char* exception);
 
 // Install the exception handler. This should only be called once per process.
 BASE_EXPORT void InitJavaExceptionReporter();
@@ -24,7 +26,11 @@ BASE_EXPORT void InitJavaExceptionReporterForChildProcess();
 
 // Sets a callback to be called with the contents of a Java exception, which may
 // be nullptr.
-BASE_EXPORT void SetJavaExceptionCallback(void (*)(const char* exception));
+BASE_EXPORT void SetJavaExceptionCallback(JavaExceptionCallback callback);
+
+// Returns the value last passed to SetJavaException(), or nullptr if it has
+// not been called.
+BASE_EXPORT JavaExceptionCallback GetJavaExceptionCallback();
 
 // Calls the Java exception callback, if any, with exception.
 void SetJavaException(const char* exception);

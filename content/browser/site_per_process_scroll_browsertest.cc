@@ -4,13 +4,14 @@
 
 #include "content/browser/site_per_process_browsertest.h"
 
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/bind.h"
 #include "base/test/test_timeouts.h"
 #include "build/build_config.h"
 #include "content/browser/renderer_host/cross_process_frame_connector.h"
 #include "content/browser/renderer_host/frame_tree.h"
-#include "content/browser/renderer_host/input/synthetic_smooth_scroll_gesture.h"
 #include "content/browser/renderer_host/render_frame_proxy_host.h"
+#include "content/common/input/synthetic_smooth_scroll_gesture.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -103,7 +104,7 @@ IN_PROC_BROWSER_TEST_P(ScrollingIntegrationTest,
     // We wait a timeout but that's really a hack. Fixing is tracked in
     // https://crbug.com/897520
     base::RunLoop run_loop;
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE, run_loop.QuitClosure(), base::Milliseconds(3000));
     run_loop.Run();
   }
@@ -230,8 +231,7 @@ class SitePerProcessProgrammaticScrollTest : public SitePerProcessBrowserTest {
   void RunCommandAndWaitForResponse(FrameTreeNode* node,
                                     const std::string& command,
                                     const std::string& response) {
-    ASSERT_EQ(response,
-              EvalJs(node, command, content::EXECUTE_SCRIPT_USE_MANUAL_REPLY));
+    ASSERT_EQ(response, EvalJs(node, command));
   }
 
   gfx::Rect GetRectFromString(const std::string& str) {
@@ -271,7 +271,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessProgrammaticScrollTest,
   while (blink::mojom::FrameVisibility::kRenderedOutOfViewport !=
          connector->visibility()) {
     base::RunLoop run_loop;
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE, run_loop.QuitClosure(), TestTimeouts::tiny_timeout());
     run_loop.Run();
   }
@@ -356,17 +356,9 @@ class ScrollObserver : public RenderWidgetHost::InputEventObserver {
   bool scroll_end_received_;
 };
 
-// Android: crbug.com/825629
-// NDEBUG: crbug.com/1063045
-#if BUILDFLAG(IS_ANDROID) || defined(NDEBUG)
-#define MAYBE_ScrollBubblingFromNestedOOPIFTest \
-  DISABLED_ScrollBubblingFromNestedOOPIFTest
-#else
-#define MAYBE_ScrollBubblingFromNestedOOPIFTest \
-  ScrollBubblingFromNestedOOPIFTest
-#endif
+// Disabled for high flakiness on multiple platforms. See crbug.com/1063045
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
-                       MAYBE_ScrollBubblingFromNestedOOPIFTest) {
+                       DISABLED_ScrollBubblingFromNestedOOPIFTest) {
   ui::GestureConfiguration::GetInstance()->set_scroll_debounce_interval_in_ms(
       0);
   GURL main_url(embedded_test_server()->GetURL(
@@ -475,9 +467,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   ScrollObserver scroll_observer(0, -5);
   base::ScopedObservation<RenderWidgetHostImpl,
-                          RenderWidgetHost::InputEventObserver,
-                          &RenderWidgetHostImpl::AddInputEventObserver,
-                          &RenderWidgetHostImpl::RemoveInputEventObserver>
+                          RenderWidgetHost::InputEventObserver>
       scroll_observation_(&scroll_observer);
   scroll_observation_.Observe(
       root->current_frame_host()->GetRenderWidgetHost());
@@ -678,7 +668,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   update_rect = interceptor->last_rect();
   while (update_rect.y() > initial_y) {
     base::RunLoop run_loop;
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE, run_loop.QuitClosure(), TestTimeouts::tiny_timeout());
     run_loop.Run();
     update_rect = interceptor->last_rect();
@@ -761,7 +751,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // with scroll bubbling.
   while (update_rect.y() > initial_y) {
     base::RunLoop run_loop;
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE, run_loop.QuitClosure(), TestTimeouts::tiny_timeout());
     run_loop.Run();
     update_rect = interceptor->last_rect();
@@ -780,7 +770,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // so flakiness implies this test is failing.
   {
     base::RunLoop run_loop;
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE, run_loop.QuitClosure(), TestTimeouts::action_timeout());
     run_loop.Run();
   }
@@ -848,13 +838,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   key_event.SetType(blink::WebKeyboardEvent::Type::kKeyUp);
   rwhv_child->GetRenderWidgetHost()->ForwardKeyboardEvent(key_event);
 
-  double scrolled_y =
-      EvalJs(root,
-             "waitForScrollDownPromise.then((scrolled_y) => {"
-             "  window.domAutomationController.send(scrolled_y);"
-             "});",
-             content::EXECUTE_SCRIPT_USE_MANUAL_REPLY)
-          .ExtractDouble();
+  double scrolled_y = EvalJs(root, "waitForScrollDownPromise").ExtractDouble();
   EXPECT_GT(scrolled_y, 0.0);
 }
 

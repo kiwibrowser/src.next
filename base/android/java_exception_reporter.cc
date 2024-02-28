@@ -7,11 +7,12 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
-#include "base/base_jni_headers/JavaExceptionReporter_jni.h"
-#include "base/bind.h"
-#include "base/callback.h"
+#include "base/base_jni/JavaExceptionReporter_jni.h"
 #include "base/debug/dump_without_crashing.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/lazy_instance.h"
+#include "base/logging.h"
 
 using base::android::JavaParamRef;
 using base::android::JavaRef;
@@ -21,7 +22,7 @@ namespace android {
 
 namespace {
 
-void (*g_java_exception_callback)(const char*);
+JavaExceptionCallback g_java_exception_callback;
 
 using JavaExceptionFilter =
     base::RepeatingCallback<bool(const JavaRef<jthrowable>&)>;
@@ -56,9 +57,13 @@ void SetJavaExceptionFilter(JavaExceptionFilter java_exception_filter) {
   g_java_exception_filter.Get() = std::move(java_exception_filter);
 }
 
-void SetJavaExceptionCallback(void (*callback)(const char*)) {
-  DCHECK(!g_java_exception_callback);
+void SetJavaExceptionCallback(JavaExceptionCallback callback) {
+  DCHECK(!g_java_exception_callback || !callback);
   g_java_exception_callback = callback;
+}
+
+JavaExceptionCallback GetJavaExceptionCallback() {
+  return g_java_exception_callback;
 }
 
 void SetJavaException(const char* exception) {

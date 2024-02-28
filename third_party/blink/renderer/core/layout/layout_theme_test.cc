@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <memory>
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/core/css/properties/longhands.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
@@ -66,7 +67,6 @@ TEST_F(LayoutThemeTest, ChangeFocusRingColor) {
 
   // Change focus ring color.
   LayoutTheme::GetTheme().SetCustomFocusRingColor(custom_color);
-  Page::PlatformColorsChanged();
   UpdateAllLifecyclePhasesForTest();
 
   // Check that the focus ring color is updated.
@@ -88,7 +88,7 @@ TEST_F(LayoutThemeTest, SystemColorWithColorScheme) {
     <div id="dark"></div>
   )HTML");
 
-  Element* dark_element = GetDocument().getElementById("dark");
+  Element* dark_element = GetDocument().getElementById(AtomicString("dark"));
   ASSERT_TRUE(dark_element);
 
   const ComputedStyle* style = dark_element->GetComputedStyle();

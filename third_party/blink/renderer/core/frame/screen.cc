@@ -51,27 +51,48 @@ Screen::Screen(LocalDOMWindow* window, int64_t display_id)
 bool Screen::AreWebExposedScreenPropertiesEqual(
     const display::ScreenInfo& prev,
     const display::ScreenInfo& current) {
-  // height() / width() use rect / device_scale_factor
-  if (prev.rect.size() != current.rect.size())
+  // height() and width() use rect.size()
+  if (prev.rect.size() != current.rect.size()) {
     return false;
+  }
 
+  // height() and width() use device_scale_factor
   // Note: comparing device_scale_factor is a bit of a lie as Screen only uses
   // this with the PhysicalPixelsQuirk (see width() / height() below).  However,
   // this value likely changes rarely and should not throw many false positives.
-  if (prev.device_scale_factor != current.device_scale_factor)
+  if (prev.device_scale_factor != current.device_scale_factor) {
     return false;
+  }
 
-  // availLeft() / availTop() / availHeight() / availWidth() use available_rect
-  if (prev.available_rect != current.available_rect)
+  // avail[Left|Top|Width|Height]() use available_rect
+  if (prev.available_rect != current.available_rect) {
     return false;
+  }
 
-  // colorDepth() / pixelDepth() use depth
-  if (prev.depth != current.depth)
+  // colorDepth() and pixelDepth() use depth
+  if (prev.depth != current.depth) {
     return false;
+  }
 
   // isExtended()
-  if (prev.is_extended != current.is_extended)
+  if (prev.is_extended != current.is_extended) {
     return false;
+  }
+
+  if (RuntimeEnabledFeatures::CanvasHDREnabled()) {
+    // (red|green|blue)Primary(X|Y) and whitePoint(X|Y).
+    const auto& prev_dcs = prev.display_color_spaces;
+    const auto& current_dcs = current.display_color_spaces;
+    if (prev_dcs.GetPrimaries() != current_dcs.GetPrimaries()) {
+      return false;
+    }
+
+    // highDynamicRangeHeadroom.
+    if (prev_dcs.GetHDRMaxLuminanceRelative() !=
+        current_dcs.GetHDRMaxLuminanceRelative()) {
+      return false;
+    }
+  }
 
   return true;
 }
@@ -79,25 +100,13 @@ bool Screen::AreWebExposedScreenPropertiesEqual(
 int Screen::height() const {
   if (!DomWindow())
     return 0;
-  LocalFrame* frame = DomWindow()->GetFrame();
-  const display::ScreenInfo& screen_info = GetScreenInfo();
-  if (frame->GetSettings()->GetReportScreenSizeInPhysicalPixelsQuirk()) {
-    return base::ClampRound(screen_info.rect.height() *
-                            screen_info.device_scale_factor);
-  }
-  return screen_info.rect.height();
+  return GetRect(/*available=*/false).height();
 }
 
 int Screen::width() const {
   if (!DomWindow())
     return 0;
-  LocalFrame* frame = DomWindow()->GetFrame();
-  const display::ScreenInfo& screen_info = GetScreenInfo();
-  if (frame->GetSettings()->GetReportScreenSizeInPhysicalPixelsQuirk()) {
-    return base::ClampRound(screen_info.rect.width() *
-                            screen_info.device_scale_factor);
-  }
-  return screen_info.rect.width();
+  return GetRect(/*available=*/false).width();
 }
 
 unsigned Screen::colorDepth() const {
@@ -113,53 +122,29 @@ unsigned Screen::pixelDepth() const {
 int Screen::availLeft() const {
   if (!DomWindow())
     return 0;
-  LocalFrame* frame = DomWindow()->GetFrame();
-  const display::ScreenInfo& screen_info = GetScreenInfo();
-  if (frame->GetSettings()->GetReportScreenSizeInPhysicalPixelsQuirk()) {
-    return base::ClampRound(screen_info.available_rect.x() *
-                            screen_info.device_scale_factor);
-  }
-  return screen_info.available_rect.x();
+  return GetRect(/*available=*/true).x();
 }
 
 int Screen::availTop() const {
   if (!DomWindow())
     return 0;
-  LocalFrame* frame = DomWindow()->GetFrame();
-  const display::ScreenInfo& screen_info = GetScreenInfo();
-  if (frame->GetSettings()->GetReportScreenSizeInPhysicalPixelsQuirk()) {
-    return base::ClampRound(screen_info.available_rect.y() *
-                            screen_info.device_scale_factor);
-  }
-  return screen_info.available_rect.y();
+  return GetRect(/*available=*/true).y();
 }
 
 int Screen::availHeight() const {
   if (!DomWindow())
     return 0;
-  LocalFrame* frame = DomWindow()->GetFrame();
-  const display::ScreenInfo& screen_info = GetScreenInfo();
-  if (frame->GetSettings()->GetReportScreenSizeInPhysicalPixelsQuirk()) {
-    return base::ClampRound(screen_info.available_rect.height() *
-                            screen_info.device_scale_factor);
-  }
-  return screen_info.available_rect.height();
+  return GetRect(/*available=*/true).height();
 }
 
 int Screen::availWidth() const {
   if (!DomWindow())
     return 0;
-  LocalFrame* frame = DomWindow()->GetFrame();
-  const display::ScreenInfo& screen_info = GetScreenInfo();
-  if (frame->GetSettings()->GetReportScreenSizeInPhysicalPixelsQuirk()) {
-    return base::ClampRound(screen_info.available_rect.width() *
-                            screen_info.device_scale_factor);
-  }
-  return screen_info.available_rect.width();
+  return GetRect(/*available=*/true).width();
 }
 
 void Screen::Trace(Visitor* visitor) const {
-  EventTargetWithInlineData::Trace(visitor);
+  EventTarget::Trace(visitor);
   ExecutionContextClient::Trace(visitor);
   Supplementable<Screen>::Trace(visitor);
 }
@@ -177,11 +162,22 @@ bool Screen::isExtended() const {
     return false;
   auto* context = GetExecutionContext();
   if (!context->IsFeatureEnabled(
-          mojom::blink::PermissionsPolicyFeature::kWindowPlacement)) {
+          mojom::blink::PermissionsPolicyFeature::kWindowManagement)) {
     return false;
   }
 
   return GetScreenInfo().is_extended;
+}
+
+gfx::Rect Screen::GetRect(bool available) const {
+  if (!DomWindow())
+    return gfx::Rect();
+  LocalFrame* frame = DomWindow()->GetFrame();
+  const display::ScreenInfo& screen_info = GetScreenInfo();
+  gfx::Rect rect = available ? screen_info.available_rect : screen_info.rect;
+  if (frame->GetSettings()->GetReportScreenSizeInPhysicalPixelsQuirk())
+    return gfx::ScaleToRoundedRect(rect, screen_info.device_scale_factor);
+  return rect;
 }
 
 const display::ScreenInfo& Screen::GetScreenInfo() const {

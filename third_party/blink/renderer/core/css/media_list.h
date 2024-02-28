@@ -64,7 +64,6 @@ class CORE_EXPORT MediaQuerySet : public GarbageCollected<MediaQuerySet> {
   }
 
   String MediaText() const;
-  bool HasUnknown() const;
 
  private:
   HeapVector<Member<const MediaQuery>> queries_;
@@ -95,8 +94,8 @@ class CORE_EXPORT MediaList final : public ScriptWrappable {
   String MediaTextInternal() const { return Queries()->MediaText(); }
 
   // Not part of CSSOM.
-  CSSRule* ParentRule() const { return parent_rule_; }
-  CSSStyleSheet* ParentStyleSheet() const { return parent_style_sheet_; }
+  CSSRule* ParentRule() const { return parent_rule_.Get(); }
+  CSSStyleSheet* ParentStyleSheet() const { return parent_style_sheet_.Get(); }
 
   const MediaQuerySet* Queries() const;
 
@@ -104,6 +103,7 @@ class CORE_EXPORT MediaList final : public ScriptWrappable {
 
  private:
   MediaQuerySetOwner* Owner() const;
+  void NotifyMutation();
 
   Member<CSSStyleSheet> parent_style_sheet_;
   Member<CSSRule> parent_rule_;

@@ -6,6 +6,7 @@ import './manager.js';
 
 export {CrCheckboxElement} from 'chrome://resources/cr_elements/cr_checkbox/cr_checkbox.js';
 export {getToastManager} from 'chrome://resources/cr_elements/cr_toast/cr_toast_manager.js';
+export {PluralStringProxyImpl} from 'chrome://resources/js/plural_string_proxy.js';
 export {IronIconElement} from 'chrome://resources/polymer/v3_0/iron-icon/iron-icon.js';
 export {ActivityLogExtensionPlaceholder, ExtensionsActivityLogElement} from './activity_log/activity_log.js';
 export {ActivityLogHistoryElement, ActivityLogPageState} from './activity_log/activity_log_history.js';
@@ -15,6 +16,7 @@ export {ActivityLogStreamItemElement, ARG_URL_PLACEHOLDER, StreamItem} from './a
 export {ExtensionsCodeSectionElement} from './code_section.js';
 export {ExtensionsDetailViewElement} from './detail_view.js';
 export {ErrorPageDelegate, ExtensionsErrorPageElement} from './error_page.js';
+export {ExtensionsHatsBrowserProxy, ExtensionsHatsBrowserProxyImpl} from './extension_hats_browser_proxy.js';
 export {ExtensionsHostPermissionsToggleListElement} from './host_permissions_toggle_list.js';
 export {ExtensionsItemElement, ItemDelegate} from './item.js';
 export {ExtensionsItemListElement} from './item_list.js';
@@ -31,6 +33,7 @@ export {ExtensionsOptionsDialogElement, OptionsDialogMaxHeight, OptionsDialogMin
 export {ExtensionsPackDialogElement, PackDialogDelegate} from './pack_dialog.js';
 export {ExtensionsPackDialogAlertElement} from './pack_dialog_alert.js';
 export {ExtensionsRestrictedSitesDialogElement} from './restricted_sites_dialog.js';
+export {ExtensionsReviewPanelElement} from './review_panel.js';
 export {ExtensionsRuntimeHostPermissionsElement} from './runtime_host_permissions.js';
 export {ExtensionsRuntimeHostsDialogElement, getMatchingUserSpecifiedSites, getPatternFromSite} from './runtime_hosts_dialog.js';
 export {Service, ServiceInterface} from './service.js';

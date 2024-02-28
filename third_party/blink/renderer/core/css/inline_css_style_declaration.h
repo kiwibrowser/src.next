@@ -29,11 +29,13 @@
 #include "third_party/blink/renderer/core/css/abstract_property_set_css_style_declaration.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/dom/element_rare_data_field.h"
 
 namespace blink {
 
 class InlineCSSStyleDeclaration final
-    : public AbstractPropertySetCSSStyleDeclaration {
+    : public AbstractPropertySetCSSStyleDeclaration,
+      public ElementRareDataField {
  public:
   explicit InlineCSSStyleDeclaration(Element* parent_element)
       : AbstractPropertySetCSSStyleDeclaration(
@@ -45,7 +47,7 @@ class InlineCSSStyleDeclaration final
  private:
   MutableCSSPropertyValueSet& PropertySet() const override;
   CSSStyleSheet* ParentStyleSheet() const override;
-  Element* ParentElement() const override { return parent_element_; }
+  Element* ParentElement() const override { return parent_element_.Get(); }
 
   void DidMutate(MutationType) override;
 

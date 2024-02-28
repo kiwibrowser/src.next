@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -87,23 +87,27 @@ inline SelectorFilterParentScope::SelectorFilterParentScope(
 
 inline SelectorFilterParentScope::~SelectorFilterParentScope() {
   current_scope_ = previous_;
-  if (!pushed_)
+  if (!pushed_) {
     return;
+  }
   DCHECK(resolver_);
   DCHECK(parent_);
   resolver_->GetSelectorFilter().PopParent(*parent_);
-  if (scope_type_ == ScopeType::kRoot)
+  if (scope_type_ == ScopeType::kRoot) {
     PopAncestors(*parent_);
+  }
 }
 
 inline void SelectorFilterParentScope::EnsureParentStackIsPushed() {
-  if (current_scope_)
+  if (current_scope_) {
     current_scope_->PushParentIfNeeded();
+  }
 }
 
 inline void SelectorFilterParentScope::PushParentIfNeeded() {
-  if (pushed_)
+  if (pushed_) {
     return;
+  }
   if (!parent_) {
     DCHECK(scope_type_ == ScopeType::kRoot);
     return;

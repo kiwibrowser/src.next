@@ -1,18 +1,21 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <memory>
+
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 
 namespace blink {
 
 TEST(DragUpdateTest, AffectedByDragUpdate) {
+  test::TaskEnvironment task_environment;
   // Check that when dragging the div in the document below, you only get a
   // single element style recalc.
 
@@ -33,7 +36,7 @@ TEST(DragUpdateTest, AffectedByDragUpdate) {
   document.View()->UpdateAllLifecyclePhasesForTest();
   unsigned start_count = document.GetStyleEngine().StyleForElementCount();
 
-  document.getElementById("div")->SetDragged(true);
+  document.getElementById(AtomicString("div"))->SetDragged(true);
   document.View()->UpdateAllLifecyclePhasesForTest();
 
   unsigned element_count =
@@ -43,6 +46,7 @@ TEST(DragUpdateTest, AffectedByDragUpdate) {
 }
 
 TEST(DragUpdateTest, ChildAffectedByDragUpdate) {
+  test::TaskEnvironment task_environment;
   // Check that when dragging the div in the document below, you get a
   // single element style recalc.
 
@@ -63,7 +67,7 @@ TEST(DragUpdateTest, ChildAffectedByDragUpdate) {
   document.UpdateStyleAndLayout(DocumentUpdateReason::kTest);
   unsigned start_count = document.GetStyleEngine().StyleForElementCount();
 
-  document.getElementById("div")->SetDragged(true);
+  document.getElementById(AtomicString("div"))->SetDragged(true);
   document.UpdateStyleAndLayout(DocumentUpdateReason::kTest);
 
   unsigned element_count =
@@ -73,6 +77,7 @@ TEST(DragUpdateTest, ChildAffectedByDragUpdate) {
 }
 
 TEST(DragUpdateTest, SiblingAffectedByDragUpdate) {
+  test::TaskEnvironment task_environment;
   // Check that when dragging the div in the document below, you get a
   // single element style recalc.
 
@@ -94,7 +99,7 @@ TEST(DragUpdateTest, SiblingAffectedByDragUpdate) {
   document.UpdateStyleAndLayout(DocumentUpdateReason::kTest);
   unsigned start_count = document.GetStyleEngine().StyleForElementCount();
 
-  document.getElementById("div")->SetDragged(true);
+  document.getElementById(AtomicString("div"))->SetDragged(true);
   document.UpdateStyleAndLayout(DocumentUpdateReason::kTest);
 
   unsigned element_count =

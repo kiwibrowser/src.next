@@ -1,9 +1,10 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/dom/scripted_idle_task_controller.h"
 
+#include "base/task/single_thread_task_runner.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/frame/lifecycle.mojom-blink.h"
@@ -11,9 +12,14 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_idle_request_callback.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_idle_request_options.h"
 #include "third_party/blink/renderer/core/testing/null_execution_context.h"
+#include "third_party/blink/renderer/platform/scheduler/public/dummy_schedulers.h"
+#include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
+#include "third_party/blink/renderer/platform/scheduler/public/page_scheduler.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
+#include "third_party/blink/renderer/platform/scheduler/public/web_scheduling_task_queue.h"
 #include "third_party/blink/renderer/platform/scheduler/test/fake_task_runner.h"
 #include "third_party/blink/renderer/platform/testing/scoped_scheduler_overrider.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 
 namespace blink {
 namespace {
@@ -32,6 +38,9 @@ class MockScriptedIdleTaskControllerScheduler final : public ThreadScheduler {
 
   // ThreadScheduler implementation:
   scoped_refptr<base::SingleThreadTaskRunner> V8TaskRunner() override {
+    return nullptr;
+  }
+  scoped_refptr<base::SingleThreadTaskRunner> CleanupTaskRunner() override {
     return nullptr;
   }
   void Shutdown() override {}
@@ -55,7 +64,7 @@ class MockScriptedIdleTaskControllerScheduler final : public ThreadScheduler {
 
   void RemoveTaskObserver(Thread::TaskObserver* task_observer) override {}
 
-  void SetV8Isolate(v8::Isolate* isolate) override {}
+  void SetV8Isolate(v8::Isolate* isolate) override { isolate_ = isolate; }
 
   void RunIdleTask() { std::move(idle_task_).Run(base::TimeTicks()); }
   bool HasIdleTask() const { return !!idle_task_; }
@@ -67,11 +76,110 @@ class MockScriptedIdleTaskControllerScheduler final : public ThreadScheduler {
     task_runner_->AdvanceTimeAndRun(delta);
   }
 
+  v8::Isolate* GetIsolate() { return isolate_; }
+
  private:
+  v8::Isolate* isolate_;
   bool should_yield_;
   Thread::IdleTask idle_task_;
   scoped_refptr<scheduler::FakeTaskRunner> task_runner_ =
       base::MakeRefCounted<scheduler::FakeTaskRunner>();
+};
+
+class IdleTaskControllerFrameScheduler : public FrameScheduler {
+ public:
+  explicit IdleTaskControllerFrameScheduler(
+      MockScriptedIdleTaskControllerScheduler* scripted_idle_scheduler)
+      : scripted_idle_scheduler_(scripted_idle_scheduler),
+        page_scheduler_(scheduler::CreateDummyPageScheduler(
+            scripted_idle_scheduler->GetIsolate())) {}
+  ~IdleTaskControllerFrameScheduler() override = default;
+
+  scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner(TaskType) override {
+    DCHECK(WTF::IsMainThread());
+    return scripted_idle_scheduler_->TaskRunner();
+  }
+
+  PageScheduler* GetPageScheduler() const override {
+    return page_scheduler_.get();
+  }
+  AgentGroupScheduler* GetAgentGroupScheduler() override {
+    return &page_scheduler_->GetAgentGroupScheduler();
+  }
+
+  void SetPreemptedForCooperativeScheduling(Preempted) override {}
+  void SetFrameVisible(bool) override {}
+  bool IsFrameVisible() const override { return true; }
+  void SetVisibleAreaLarge(bool) override {}
+  bool IsVisibleAreaLarge() const override { return false; }
+  void SetHadUserActivation(bool) override {}
+  bool HadUserActivation() const override { return false; }
+  bool IsPageVisible() const override { return true; }
+  void SetPaused(bool) override {}
+  void SetShouldReportPostedTasksWhenDisabled(bool) override {}
+  void SetCrossOriginToNearestMainFrame(bool) override {}
+  bool IsCrossOriginToNearestMainFrame() const override { return false; }
+  void SetIsAdFrame(bool is_ad_frame) override {}
+  bool IsAdFrame() const override { return false; }
+  bool IsInEmbeddedFrameTree() const override { return false; }
+  void TraceUrlChange(const String&) override {}
+  void AddTaskTime(base::TimeDelta) override {}
+  FrameType GetFrameType() const override { return FrameType::kMainFrame; }
+  WebScopedVirtualTimePauser CreateWebScopedVirtualTimePauser(
+      const String& name,
+      WebScopedVirtualTimePauser::VirtualTaskDuration) override {
+    return WebScopedVirtualTimePauser();
+  }
+  void DidStartProvisionalLoad() override {}
+  void DidCommitProvisionalLoad(bool,
+                                FrameScheduler::NavigationType,
+                                DidCommitProvisionalLoadParams) override {}
+  void OnFirstContentfulPaintInMainFrame() override {}
+  void OnMainFrameInteractive() override {}
+  void OnFirstMeaningfulPaint(base::TimeTicks timestamp) override {}
+  void OnDispatchLoadEvent() override {}
+  bool IsExemptFromBudgetBasedThrottling() const override { return false; }
+  std::unique_ptr<blink::mojom::blink::PauseSubresourceLoadingHandle>
+  GetPauseSubresourceLoadingHandle() override {
+    return nullptr;
+  }
+  std::unique_ptr<WebSchedulingTaskQueue> CreateWebSchedulingTaskQueue(
+      WebSchedulingQueueType,
+      WebSchedulingPriority) override {
+    return nullptr;
+  }
+  ukm::SourceId GetUkmSourceId() override { return ukm::kInvalidSourceId; }
+  void OnStartedUsingNonStickyFeature(
+      SchedulingPolicy::Feature feature,
+      const SchedulingPolicy& policy,
+      std::unique_ptr<SourceLocation> source_location,
+      SchedulingAffectingFeatureHandle* handle) override {}
+  void OnStartedUsingStickyFeature(
+      SchedulingPolicy::Feature feature,
+      const SchedulingPolicy& policy,
+      std::unique_ptr<SourceLocation> source_location) override {}
+  void OnStoppedUsingNonStickyFeature(
+      SchedulingAffectingFeatureHandle* handle) override {}
+  base::WeakPtr<FrameOrWorkerScheduler> GetFrameOrWorkerSchedulerWeakPtr()
+      override {
+    return weak_ptr_factory_.GetWeakPtr();
+  }
+  WTF::HashSet<SchedulingPolicy::Feature>
+  GetActiveFeaturesTrackedForBackForwardCacheMetrics() override {
+    return WTF::HashSet<SchedulingPolicy::Feature>();
+  }
+  base::WeakPtr<FrameScheduler> GetWeakPtr() override {
+    return weak_ptr_factory_.GetWeakPtr();
+  }
+  void ReportActiveSchedulerTrackedFeatures() override {}
+  scoped_refptr<base::SingleThreadTaskRunner> CompositorTaskRunner() override {
+    return scripted_idle_scheduler_->TaskRunner();
+  }
+
+ private:
+  MockScriptedIdleTaskControllerScheduler* scripted_idle_scheduler_;
+  std::unique_ptr<PageScheduler> page_scheduler_;
+  base::WeakPtrFactory<FrameScheduler> weak_ptr_factory_{this};
 };
 
 class MockIdleTask : public IdleTask {
@@ -80,27 +188,15 @@ class MockIdleTask : public IdleTask {
 };
 }  // namespace
 
-class ScriptedIdleTaskControllerTest : public testing::Test {
- public:
-  ~ScriptedIdleTaskControllerTest() override {
-    execution_context_->NotifyContextDestroyed();
-  }
-
-  void SetUp() override {
-    execution_context_ = MakeGarbageCollected<NullExecutionContext>();
-  }
-
- protected:
-  Persistent<ExecutionContext> execution_context_;
-};
-
-TEST_F(ScriptedIdleTaskControllerTest, RunCallback) {
+TEST(ScriptedIdleTaskControllerTest, RunCallback) {
+  test::TaskEnvironment task_environment;
   MockScriptedIdleTaskControllerScheduler scheduler(ShouldYield(false));
   ScopedSchedulerOverrider scheduler_overrider(&scheduler,
                                                scheduler.TaskRunner());
-
-  ScriptedIdleTaskController* controller =
-      ScriptedIdleTaskController::Create(execution_context_);
+  ScopedNullExecutionContext execution_context(
+      std::make_unique<IdleTaskControllerFrameScheduler>(&scheduler));
+  ScriptedIdleTaskController* controller = ScriptedIdleTaskController::Create(
+      &execution_context.GetExecutionContext());
 
   Persistent<MockIdleTask> idle_task(MakeGarbageCollected<MockIdleTask>());
   IdleRequestOptions* options = IdleRequestOptions::Create();
@@ -115,13 +211,15 @@ TEST_F(ScriptedIdleTaskControllerTest, RunCallback) {
   EXPECT_FALSE(scheduler.HasIdleTask());
 }
 
-TEST_F(ScriptedIdleTaskControllerTest, DontRunCallbackWhenAskedToYield) {
+TEST(ScriptedIdleTaskControllerTest, DontRunCallbackWhenAskedToYield) {
+  test::TaskEnvironment task_environment;
   MockScriptedIdleTaskControllerScheduler scheduler(ShouldYield(true));
   ScopedSchedulerOverrider scheduler_overrider(&scheduler,
                                                scheduler.TaskRunner());
-
-  ScriptedIdleTaskController* controller =
-      ScriptedIdleTaskController::Create(execution_context_);
+  ScopedNullExecutionContext execution_context(
+      std::make_unique<IdleTaskControllerFrameScheduler>(&scheduler));
+  ScriptedIdleTaskController* controller = ScriptedIdleTaskController::Create(
+      &execution_context.GetExecutionContext());
 
   Persistent<MockIdleTask> idle_task(MakeGarbageCollected<MockIdleTask>());
   IdleRequestOptions* options = IdleRequestOptions::Create();
@@ -136,12 +234,15 @@ TEST_F(ScriptedIdleTaskControllerTest, DontRunCallbackWhenAskedToYield) {
   EXPECT_TRUE(scheduler.HasIdleTask());
 }
 
-TEST_F(ScriptedIdleTaskControllerTest, RunCallbacksAsyncWhenUnpaused) {
+TEST(ScriptedIdleTaskControllerTest, RunCallbacksAsyncWhenUnpaused) {
+  test::TaskEnvironment task_environment;
   MockScriptedIdleTaskControllerScheduler scheduler(ShouldYield(true));
   ScopedSchedulerOverrider scheduler_overrider(&scheduler,
                                                scheduler.TaskRunner());
-  ScriptedIdleTaskController* controller =
-      ScriptedIdleTaskController::Create(execution_context_);
+  ScopedNullExecutionContext execution_context(
+      std::make_unique<IdleTaskControllerFrameScheduler>(&scheduler));
+  ScriptedIdleTaskController* controller = ScriptedIdleTaskController::Create(
+      &execution_context.GetExecutionContext());
 
   // Register an idle task with a deadline.
   Persistent<MockIdleTask> idle_task(MakeGarbageCollected<MockIdleTask>());

@@ -44,7 +44,6 @@ class MockExtensionSystem : public ExtensionSystem {
   StateStore* rules_store() override;
   StateStore* dynamic_user_scripts_store() override;
   scoped_refptr<value_store::ValueStoreFactory> store_factory() override;
-  InfoMap* info_map() override;
   QuotaService* quota_service() override;
   AppSorting* app_sorting() override;
   const base::OneShotEvent& ready() const override;
@@ -59,7 +58,7 @@ class MockExtensionSystem : public ExtensionSystem {
                      InstallUpdateCallback install_update_callback) override;
   void PerformActionBasedOnOmahaAttributes(
       const std::string& extension_id,
-      const base::Value& attributes) override;
+      const base::Value::Dict& attributes) override;
   bool FinishDelayedInstallationIfReady(const std::string& extension_id,
                                         bool install_immediately) override;
 
@@ -86,12 +85,12 @@ class MockExtensionSystemFactory : public ExtensionSystemProvider {
   MockExtensionSystemFactory& operator=(const MockExtensionSystemFactory&) =
       delete;
 
-  ~MockExtensionSystemFactory() override {}
+  ~MockExtensionSystemFactory() override = default;
 
   // BrowserContextKeyedServiceFactory overrides:
-  KeyedService* BuildServiceInstanceFor(
+  std::unique_ptr<KeyedService> BuildServiceInstanceForBrowserContext(
       content::BrowserContext* context) const override {
-    return new T(context);
+    return std::make_unique<T>(context);
   }
   content::BrowserContext* GetBrowserContextToUse(
       content::BrowserContext* context) const override {

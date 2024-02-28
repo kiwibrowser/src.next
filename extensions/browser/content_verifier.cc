@@ -8,19 +8,18 @@
 #include <utility>
 #include <vector>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/containers/contains.h"
 #include "base/files/file_path.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/timer/elapsed_timer.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
 #include "extensions/browser/content_hash_fetcher.h"
 #include "extensions/browser/content_hash_reader.h"
@@ -119,7 +118,7 @@ std::unique_ptr<ContentVerifierIOData::ExtensionData> CreateIOData(
   }
   for (const std::unique_ptr<UserScript>& script :
        ContentScriptsInfo::GetContentScripts(extension)) {
-    for (const std::unique_ptr<UserScript::File>& js_file :
+    for (const std::unique_ptr<UserScript::Content>& js_file :
          script->js_scripts()) {
       background_or_content_paths->insert(
           canonicalize_path(js_file->relative_path()));
@@ -288,13 +287,10 @@ class ContentVerifier::HashHelper {
 
     void Cancel() { cancelled_checker->Cancel(); }
 
-    base::TimeDelta elapsed() const { return elapsed_timer.Elapsed(); }
-
     scoped_refptr<IsCancelledChecker> cancelled_checker;
     // TODO(lazyboy): Use std::list?
     std::vector<ContentHashCallback> callbacks;
     bool force_missing_computed_hashes_creation = false;
-    base::ElapsedTimer elapsed_timer;
   };
 
   using IsCancelledCallback = base::RepeatingCallback<bool(void)>;
@@ -387,8 +383,6 @@ class ContentVerifier::HashHelper {
     auto iter = callback_infos_.find(key);
     DCHECK(iter != callback_infos_.end());
     auto& callback_info = iter->second;
-    UMA_HISTOGRAM_TIMES("Extensions.ContentVerification.ReadContentHashTime",
-                        callback_info.elapsed());
 
     for (auto& callback : callback_info.callbacks)
       std::move(callback).Run(content_hash);
@@ -493,8 +487,7 @@ void ContentVerifier::GetContentHash(
     // pointer to fix this. Also add unit test to exercise this code path
     // explicitly.
     content::GetIOThreadTaskRunner({})->PostTask(
-        FROM_HERE,
-        base::BindOnce([](ContentHashCallback) {}, std::move(callback)));
+        FROM_HERE, base::DoNothingWithBoundArgs(std::move(callback)));
     return;
   }
 

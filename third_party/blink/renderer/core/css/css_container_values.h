@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,12 +11,14 @@
 
 namespace blink {
 
-class CSSContainerValues : public MediaValuesDynamic {
+class CORE_EXPORT CSSContainerValues : public MediaValuesDynamic {
  public:
   explicit CSSContainerValues(Document& document,
                               Element& container,
                               absl::optional<double> width,
-                              absl::optional<double> height);
+                              absl::optional<double> height,
+                              ContainerStuckPhysical stuck_horizontal,
+                              ContainerStuckPhysical stuck_vertical);
 
   // Returns absl::nullopt if queries on the relevant axis is not
   // supported.
@@ -26,17 +28,35 @@ class CSSContainerValues : public MediaValuesDynamic {
   void Trace(Visitor*) const override;
 
  protected:
-  float EmFontSize() const override;
-  float RemFontSize() const override;
-  float ExFontSize() const override;
-  float ChFontSize() const override;
-  float IcFontSize() const override;
+  float EmFontSize(float zoom) const override;
+  float RemFontSize(float zoom) const override;
+  float ExFontSize(float zoom) const override;
+  float RexFontSize(float zoom) const override;
+  float ChFontSize(float zoom) const override;
+  float RchFontSize(float zoom) const override;
+  float IcFontSize(float zoom) const override;
+  float RicFontSize(float zoom) const override;
+  float LineHeight(float zoom) const override;
+  float RootLineHeight(float zoom) const override;
+  float CapFontSize(float zoom) const override;
+  float RcapFontSize(float zoom) const override;
   // Note that ContainerWidth/ContainerHeight are used to resolve
   // container *units*. See `container_sizes_`.
-  Element* ContainerElement() const override { return element_; }
+  Element* ContainerElement() const override { return element_.Get(); }
   double ContainerWidth() const override;
   double ContainerHeight() const override;
-  WritingMode GetWritingMode() const override { return writing_mode_; }
+  WritingMode GetWritingMode() const override {
+    return writing_direction_.GetWritingMode();
+  }
+  ContainerStuckPhysical StuckHorizontal() const override {
+    return stuck_horizontal_;
+  }
+  ContainerStuckPhysical StuckVertical() const override {
+    return stuck_vertical_;
+  }
+  ContainerStuckLogical StuckInline() const override;
+  ContainerStuckLogical StuckBlock() const override;
+  ContainerSnappedFlags SnappedFlags() const override { return snapped_; }
 
  private:
   // The current computed style for the container.
@@ -46,9 +66,20 @@ class CSSContainerValues : public MediaValuesDynamic {
   // Container height in CSS pixels.
   absl::optional<double> height_;
   // The writing-mode of the container.
-  WritingMode writing_mode_;
+  WritingDirectionMode writing_direction_;
+  // Whether a sticky container is horizontally stuck and to which edge.
+  ContainerStuckPhysical stuck_horizontal_ = ContainerStuckPhysical::kNo;
+  // Whether a sticky container is vertically stuck and against which edge.
+  ContainerStuckPhysical stuck_vertical_ = ContainerStuckPhysical::kNo;
+  // Union of flags for whether a scroll-snapped container is snapped in block
+  // or inline directions.
+  // TODO(crbug.com/1475231): Need to update this from the scroll snapshot.
+  ContainerSnappedFlags snapped_ =
+      static_cast<ContainerSnappedFlags>(ContainerSnapped::kNone);
   // Container font sizes for resolving relative lengths.
   CSSToLengthConversionData::FontSizes font_sizes_;
+  // LineHeightSize of the container element.
+  CSSToLengthConversionData::LineHeightSize line_height_size_;
   // Used to resolve container-relative units found in the @container prelude.
   // Such units refer to container sizes of *ancestor* containers, and must
   // not be confused with the size of the *current* container (which is stored

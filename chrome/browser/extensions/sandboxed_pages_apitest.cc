@@ -8,9 +8,12 @@
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/test/browser_test.h"
+#include "content/public/test/browser_test_utils.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/file_util.h"
+#include "extensions/test/result_catcher.h"
 #include "extensions/test/test_extension_dir.h"
+#include "net/dns/mock_host_resolver.h"
 
 namespace extensions {
 
@@ -22,14 +25,15 @@ class SandboxedPagesTest
  public:
   SandboxedPagesTest() = default;
 
+  void SetUpOnMainThread() override {
+    ExtensionApiTest::SetUpOnMainThread();
+    host_resolver()->AddRule("*", "127.0.0.1");
+  }
+
   [[nodiscard]] bool RunTest(const char* extension_name,
                              const char* manifest,
                              const RunOptions& run_options,
                              const LoadOptions& load_options) {
-    const char* kCustomArg =
-        GetParam() == ManifestVersion::TWO ? "manifest_v2" : "manifest_v3";
-    SetCustomArg(kCustomArg);
-
     base::ScopedAllowBlockingForTesting scoped_allow_blocking;
 
     //  Load the extension with the given `manifest`.
@@ -66,6 +70,11 @@ class SandboxedPagesTest
   base::ScopedTempDir temp_dir_;
 };
 
+INSTANTIATE_TEST_SUITE_P(,
+                         SandboxedPagesTest,
+                         ::testing::Values(ManifestVersion::TWO,
+                                           ManifestVersion::THREE));
+
 IN_PROC_BROWSER_TEST_P(SandboxedPagesTest, SandboxedPages) {
   const char* kManifestV2 = R"(
     {
@@ -90,14 +99,16 @@ IN_PROC_BROWSER_TEST_P(SandboxedPagesTest, SandboxedPages) {
   const char* kManifest =
       GetParam() == ManifestVersion::TWO ? kManifestV2 : kManifestV3;
   EXPECT_TRUE(
-      RunTest("sandboxed_pages", kManifest, {.page_url = "main.html"}, {}))
+      RunTest("sandboxed_pages", kManifest, {.extension_url = "main.html"}, {}))
       << message_;
 }
 
-IN_PROC_BROWSER_TEST_P(SandboxedPagesTest, SandboxedPagesCSP) {
+// Verifies the behavior of sandboxed pages in Manifest V2. Remote frames
+// should be disallowed.
+IN_PROC_BROWSER_TEST_F(SandboxedPagesTest, ManifestV2DisallowsWebContent) {
   ASSERT_TRUE(StartEmbeddedTestServer());
 
-  const char* kManifestV2 = R"(
+  const char* kManifest = R"(
     {
       "name": "Tests that loading web content fails inside sandboxed pages",
       "manifest_version": 2,
@@ -110,46 +121,81 @@ IN_PROC_BROWSER_TEST_P(SandboxedPagesTest, SandboxedPagesCSP) {
     }
   )";
 
-  const char* kManifestV3 = R"(
-    {
-      "name": "Tests that loading web content fails inside sandboxed pages",
-      "manifest_version": 3,
-      "version": "0.1",
-      "web_accessible_resources": [{
-        "resources" : ["local_frame.html", "remote_frame.html"],
-        "matches": ["<all_urls>"]
-      }],
-      "sandbox": {
-        "pages": ["sandboxed.html"]
-      },
-      "content_security_policy": {
-        "sandbox": "sandbox allow-scripts; child-src *;"
-      }
-    }
-  )";
-  const char* kManifest =
-      GetParam() == ManifestVersion::TWO ? kManifestV2 : kManifestV3;
   // This extension attempts to load remote web content inside a sandboxed page.
   // Loading web content will fail because of CSP. In addition to that we will
   // show manifest warnings, hence ignore_manifest_warnings is set to true.
   ASSERT_TRUE(RunTest("sandboxed_pages_csp", kManifest,
-                      {.page_url = "main.html"},
+                      {.extension_url = "main.html"},
                       {.ignore_manifest_warnings = true}))
       << message_;
 }
 
-INSTANTIATE_TEST_SUITE_P(,
-                         SandboxedPagesTest,
-                         ::testing::Values(ManifestVersion::TWO,
-                                           ManifestVersion::THREE));
+// Verifies the behavior of sandboxed pages in Manifest V3. Remote frames
+// should be allowed.
+IN_PROC_BROWSER_TEST_F(SandboxedPagesTest, ManifestV3AllowsWebContent) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+
+  static constexpr char kManifest[] =
+      R"({
+           "name": "test extension",
+           "version": "0.1",
+           "manifest_version": 3,
+           "content_security_policy": {
+             "sandbox": "sandbox allow-scripts; child-src *;"
+           },
+           "sandbox": { "pages": ["sandboxed.html"] }
+         })";
+  static constexpr char kSandboxedHtml[] =
+      R"(<html>
+           <body>Sandboxed Page</body>
+           <script>
+             var iframe = document.createElement('iframe');
+             iframe.src = 'http://example.com:%d/extensions/echo_message.html';
+             // Check that we can post-message the frame.
+             addEventListener('message', (e) => {
+               // Note: We use domAutomationController here (and
+               // DOMMessageQueue below) because since this is a sandboxed page,
+               // it doesn't have access to any chrome.* APIs, including
+               // chrome.test.
+               domAutomationController.send(e.data);
+             });
+             iframe.onload = () => {
+               iframe.contentWindow.postMessage('hello', '*');
+             };
+             document.body.appendChild(iframe);
+           </script>
+         </html>)";
+
+  TestExtensionDir test_dir;
+  test_dir.WriteManifest(kManifest);
+  test_dir.WriteFile(
+      FILE_PATH_LITERAL("sandboxed.html"),
+      base::StringPrintf(kSandboxedHtml, embedded_test_server()->port()));
+
+  const Extension* extension = LoadExtension(test_dir.UnpackedPath());
+  ASSERT_TRUE(extension);
+
+  content::DOMMessageQueue message_queue;
+  content::RenderFrameHost* frame_host = ui_test_utils::NavigateToURL(
+      browser(), extension->GetResourceURL("sandboxed.html"));
+  ASSERT_TRUE(frame_host);
+
+  // The frame should be sandboxed, so the origin should be "null" (as opposed
+  // to `extension->origin()`).
+  EXPECT_EQ("null", frame_host->GetLastCommittedOrigin().Serialize());
+
+  std::string message;
+  ASSERT_TRUE(message_queue.WaitForMessage(&message));
+  EXPECT_EQ(R"("echo hello")", message);
+}
 
 // Verify sandbox behavior.
-IN_PROC_BROWSER_TEST_F(SandboxedPagesTest, WebAccessibleResourcesTest) {
+IN_PROC_BROWSER_TEST_P(SandboxedPagesTest, WebAccessibleResourcesTest) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
   // Install extension.
   TestExtensionDir extension_dir;
-  constexpr char kManifest[] = R"({
+  static constexpr char kManifestV2[] = R"({
     "name": "Extension sandbox text",
     "version": "1.0",
     "manifest_version": 2,
@@ -160,7 +206,25 @@ IN_PROC_BROWSER_TEST_F(SandboxedPagesTest, WebAccessibleResourcesTest) {
       "web_accessible_resource.html"
     ]
   })";
-  extension_dir.WriteManifest(kManifest);
+
+  static constexpr char kManifestV3[] =
+      R"({
+           "name": "Extension sandbox text",
+           "version": "1.0",
+           "manifest_version": 3,
+           "sandbox": {
+             "pages": ["sandboxed_page.html"]
+           },
+           "web_accessible_resources": [{
+             "resources": ["web_accessible_resource.html"],
+             "matches": ["<all_urls>"]
+           }]
+         })";
+
+  const char* manifest =
+      GetParam() == ManifestVersion::TWO ? kManifestV2 : kManifestV3;
+
+  extension_dir.WriteManifest(manifest);
   extension_dir.WriteFile(FILE_PATH_LITERAL("sandboxed_page.html"), "");
   extension_dir.WriteFile(FILE_PATH_LITERAL("page.html"), "");
   extension_dir.WriteFile(FILE_PATH_LITERAL("resource.html"), "resource.html");
@@ -183,22 +247,18 @@ IN_PROC_BROWSER_TEST_F(SandboxedPagesTest, WebAccessibleResourcesTest) {
         browser(), extension->GetResourceURL(frame_url)));
     content::WebContents* web_contents =
         browser()->tab_strip_model()->GetActiveWebContents();
-    std::string result;
     constexpr char kFetchScriptTemplate[] =
         R"(
         fetch($1).then(result => {
           return result.text();
-        }).then(text => {
-          domAutomationController.send(text);
         }).catch(err => {
-          domAutomationController.send(String(err));
+          return String(err);
         });)";
-    EXPECT_TRUE(content::ExecuteScriptAndExtractString(
-        web_contents,
-        content::JsReplace(kFetchScriptTemplate,
-                           extension->GetResourceURL(fetch_url)),
-        &result));
-    EXPECT_EQ(result, fetch_url);
+    EXPECT_EQ(content::EvalJs(
+                  web_contents,
+                  content::JsReplace(kFetchScriptTemplate,
+                                     extension->GetResourceURL(fetch_url))),
+              fetch_url);
     histograms.ExpectBucketCount(kHistogramName, is_web_accessible_resource,
                                  count);
     EXPECT_EQ(expected_frame_origin, web_contents->GetPrimaryMainFrame()

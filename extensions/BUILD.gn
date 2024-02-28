@@ -1,7 +1,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/chromecast_build.gni")
+import("//build/config/cast.gni")
 import("//build/config/chromeos/ui_mode.gni")
 import("//extensions/buildflags/buildflags.gni")
 import("//testing/test.gni")
@@ -10,10 +10,6 @@ import("//tools/grit/repack.gni")
 import("//ui/base/ui_features.gni")
 
 assert(enable_extensions)
-
-assert(
-    !(enable_autofill_assistant_api && is_official_build),
-    "The AutofillAssistant Extension API must be disabled in official builds.")
 
 if (is_component_build) {
   component("extensions") {
@@ -137,6 +133,7 @@ static_library("test_support") {
     "test/extension_test_message_listener.h",
     "test/extension_test_notification_observer.cc",
     "test/extension_test_notification_observer.h",
+    "test/flakiness_test_util.h",
     "test/logging_timer.cc",
     "test/logging_timer.h",
     "test/permissions_manager_waiter.cc",
@@ -145,6 +142,8 @@ static_library("test_support") {
     "test/result_catcher.h",
     "test/test_content_script_load_waiter.cc",
     "test/test_content_script_load_waiter.h",
+    "test/test_context_data.cc",
+    "test/test_context_data.h",
     "test/test_extension_dir.cc",
     "test/test_extension_dir.h",
     "test/test_extensions_client.cc",
@@ -189,7 +188,7 @@ static_library("test_support") {
   # of the APIs and the extensions shell already do. We should try to avoid
   # expanding these dependencies.
   if (is_chromeos_ash) {
-    deps += [ "//chromeos/login/login_state" ]
+    deps += [ "//chromeos/ash/components/login/login_state" ]
   }
 
   if (is_chromeos_lacros) {
@@ -205,7 +204,6 @@ repack("shell_and_test_pak") {
   sources = [
     "$root_gen_dir/content/browser/devtools/devtools_resources.pak",
     "$root_gen_dir/content/content_resources.pak",
-    "$root_gen_dir/content/dev_ui_content_resources.pak",
     "$root_gen_dir/content/shell/shell_resources.pak",
     "$root_gen_dir/device/bluetooth/strings/bluetooth_strings_en-US.pak",
     "$root_gen_dir/extensions/extensions_browser_resources_100_percent.pak",
@@ -228,7 +226,6 @@ repack("shell_and_test_pak") {
   deps = [
     ":extensions_resources",
     "//content:content_resources",
-    "//content:dev_ui_content_resources",
     "//content/browser/devtools:devtools_resources",
     "//content/shell:resources",
     "//device/bluetooth/strings",
@@ -248,13 +245,13 @@ test("extensions_unittests") {
 
   sources = [
     "test/extensions_unittests_main.cc",
+    "test/flakiness_test_util_test.cc",
     "test/logging_timer_unittest.cc",
   ]
 
   data = [
     "test/data/",
     "//chrome/test/data/extensions/",
-    "//components/test/data/cast_certificate/",
     "$root_out_dir/content_shell.pak",
     "$root_out_dir/extensions_shell_and_test.pak",
   ]
@@ -282,16 +279,18 @@ test("extensions_unittests") {
   ]
 
   if (is_fuchsia) {
-    use_cfv1 = false
-
-    # TODO(https://crbug.com/1185811): Investigate removing the requirement for
-    # job_policy_ambient_mark_vmo_exec for the sake of V8's allocator in tests.
-    test_runner_shard = "//build/config/fuchsia/test/elf_test_ambient_exec_runner.shard.test-cml"
-
     additional_manifest_fragments = [
+      # TODO(https://crbug.com/1185811): Investigate removing the requirement
+      # for VmexResource.
       "//build/config/fuchsia/test/mark_vmo_executable.shard.test-cml",
       "//build/config/fuchsia/test/network.shard.test-cml",
       "//third_party/fuchsia-sdk/sdk/pkg/vulkan/client.shard.cml",
+    ]
+  }
+
+  if (is_chromeos) {
+    deps += [
+      "//chrome/browser/chromeos/extensions/telemetry/api:extensions_unittests",
     ]
   }
 }
@@ -377,6 +376,7 @@ source_set("chrome_extensions_browsertests_sources") {
     "//third_party/widevine/cdm:headers",
     "//ui/accessibility:test_support",
     "//ui/base:test_support",
+    "//ui/base/idle:test_support",
     "//ui/compositor:test_support",
     "//ui/resources",
     "//ui/web_dialogs:test_support",

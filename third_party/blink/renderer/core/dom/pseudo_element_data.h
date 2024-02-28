@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,37 +7,39 @@
 
 #include "base/notreached.h"
 #include "build/build_config.h"
+#include "third_party/blink/renderer/core/dom/element_rare_data_field.h"
 #include "third_party/blink/renderer/core/dom/transition_pseudo_element_data.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
-class PseudoElementData final : public GarbageCollected<PseudoElementData> {
+class PseudoElementData final : public GarbageCollected<PseudoElementData>,
+                                public ElementRareDataField {
  public:
   PseudoElementData() = default;
   PseudoElementData(const PseudoElementData&) = delete;
   PseudoElementData& operator=(const PseudoElementData&) = delete;
 
-  void SetPseudoElement(
-      PseudoId,
-      PseudoElement*,
-      const AtomicString& document_transition_tag = g_null_atom);
+  void SetPseudoElement(PseudoId,
+                        PseudoElement*,
+                        const AtomicString& view_transition_name = g_null_atom);
   PseudoElement* GetPseudoElement(
       PseudoId,
-      const AtomicString& document_transition_tag = g_null_atom) const;
+      const AtomicString& view_transition_name = g_null_atom) const;
 
   using PseudoElementVector = HeapVector<Member<PseudoElement>, 2>;
   PseudoElementVector GetPseudoElements() const;
 
   bool HasPseudoElements() const;
   void ClearPseudoElements();
-  void Trace(Visitor* visitor) const {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(generated_before_);
     visitor->Trace(generated_after_);
     visitor->Trace(generated_marker_);
     visitor->Trace(generated_first_letter_);
     visitor->Trace(backdrop_);
     visitor->Trace(transition_data_);
+    ElementRareDataField::Trace(visitor);
   }
 
  private:
@@ -70,7 +72,7 @@ inline void PseudoElementData::ClearPseudoElements() {
 inline void PseudoElementData::SetPseudoElement(
     PseudoId pseudo_id,
     PseudoElement* element,
-    const AtomicString& document_transition_tag) {
+    const AtomicString& view_transition_name) {
   PseudoElement* previous_element = nullptr;
   switch (pseudo_id) {
     case kPseudoIdBefore:
@@ -93,16 +95,16 @@ inline void PseudoElementData::SetPseudoElement(
       previous_element = generated_first_letter_;
       generated_first_letter_ = element;
       break;
-    case kPseudoIdPageTransition:
-    case kPseudoIdPageTransitionContainer:
-    case kPseudoIdPageTransitionImageWrapper:
-    case kPseudoIdPageTransitionIncomingImage:
-    case kPseudoIdPageTransitionOutgoingImage:
+    case kPseudoIdViewTransition:
+    case kPseudoIdViewTransitionGroup:
+    case kPseudoIdViewTransitionImagePair:
+    case kPseudoIdViewTransitionNew:
+    case kPseudoIdViewTransitionOld:
       if (element && !transition_data_)
         transition_data_ = MakeGarbageCollected<TransitionPseudoElementData>();
       if (transition_data_) {
         transition_data_->SetPseudoElement(pseudo_id, element,
-                                           document_transition_tag);
+                                           view_transition_name);
         if (!transition_data_->HasPseudoElements())
           transition_data_ = nullptr;
       }
@@ -117,25 +119,25 @@ inline void PseudoElementData::SetPseudoElement(
 
 inline PseudoElement* PseudoElementData::GetPseudoElement(
     PseudoId pseudo_id,
-    const AtomicString& document_transition_tag) const {
+    const AtomicString& view_transition_name) const {
   if (kPseudoIdBefore == pseudo_id)
-    return generated_before_;
+    return generated_before_.Get();
   if (kPseudoIdAfter == pseudo_id)
-    return generated_after_;
+    return generated_after_.Get();
   if (kPseudoIdMarker == pseudo_id)
-    return generated_marker_;
+    return generated_marker_.Get();
 // Workaround for CPU bug. This avoids compiler optimizing
 // this group of if conditions into switch. See http://crbug.com/855390.
 #if defined(ARCH_CPU_ARMEL)
   __asm__ volatile("");
 #endif
   if (kPseudoIdBackdrop == pseudo_id)
-    return backdrop_;
+    return backdrop_.Get();
   if (kPseudoIdFirstLetter == pseudo_id)
-    return generated_first_letter_;
+    return generated_first_letter_.Get();
   if (IsTransitionPseudoElement(pseudo_id)) {
     return transition_data_ ? transition_data_->GetPseudoElement(
-                                  pseudo_id, document_transition_tag)
+                                  pseudo_id, view_transition_name)
                             : nullptr;
   }
   return nullptr;

@@ -88,6 +88,9 @@ ChromeComponentExtensionResourceManager::Data::Data() {
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
+    // These icons may be replaced with "IDR_DEBUG_CHROME_APP_ICON_{32,192}"
+    // in "chrome/browser/apps/app_service/app_icon/app_icon_reader.cc"
+    // or "chrome/browser/ui/views/frame/browser_view.cc"
     {"chrome_app/chrome_app_icon_32.png", IDR_CHROME_APP_ICON_32},
     {"chrome_app/chrome_app_icon_192.png", IDR_CHROME_APP_ICON_192},
 #if BUILDFLAG(ENABLE_INK)
@@ -149,7 +152,6 @@ ChromeComponentExtensionResourceManager::Data::Data() {
     base::Value::Dict dict;
     pdf_extension_util::AddStrings(
         pdf_extension_util::PdfViewerContext::kPdfViewer, &dict);
-    pdf_extension_util::AddAdditionalData(/*enable_annotations=*/true, &dict);
 
     ui::TemplateReplacements pdf_viewer_replacements;
     ui::TemplateReplacementsFromDictionaryValue(dict, &pdf_viewer_replacements);

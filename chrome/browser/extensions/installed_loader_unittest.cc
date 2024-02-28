@@ -7,11 +7,18 @@
 #include "base/test/metrics/histogram_tester.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
+#include "chrome/browser/extensions/extension_service_user_test_base.h"
 #include "chrome/browser/extensions/permissions_updater.h"
 #include "chrome/browser/extensions/scripting_permissions_modifier.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/extension_features.h"
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chrome/browser/ash/login/users/fake_chrome_user_manager.h"
+#include "chrome/browser/ash/profiles/profile_helper.h"
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace extensions {
 
@@ -59,7 +66,7 @@ struct HostPermissionsMetricsTestParams {
 
 }  // namespace
 
-class InstalledLoaderUnitTest : public ExtensionServiceTestBase {
+class InstalledLoaderUnitTest : public ExtensionServiceUserTestBase {
  public:
   InstalledLoaderUnitTest() {}
 
@@ -69,7 +76,7 @@ class InstalledLoaderUnitTest : public ExtensionServiceTestBase {
   ~InstalledLoaderUnitTest() override = default;
 
   void SetUp() override {
-    ExtensionServiceTestBase::SetUp();
+    ExtensionServiceUserTestBase::SetUp();
     InitializeEmptyExtensionService();
   }
 
@@ -77,6 +84,9 @@ class InstalledLoaderUnitTest : public ExtensionServiceTestBase {
                                 mojom::ManifestLocation location);
 
   void RunHostPermissionsMetricsTest(HostPermissionsMetricsTestParams params);
+
+  void RunEmitUserHistogramsTest(int nonuser_expected_total_count,
+                                 int user_expected_total_count);
 };
 
 const Extension* InstalledLoaderUnitTest::AddExtension(
@@ -136,6 +146,30 @@ void InstalledLoaderUnitTest::RunHostPermissionsMetricsTest(
                                     params.expected_access_level, 1);
       break;
   }
+}
+
+// Test that certain histograms are emitted for user and non-user profiles
+// (users for ChromeOS Ash).
+void InstalledLoaderUnitTest::RunEmitUserHistogramsTest(
+    int nonuser_expected_total_count,
+    int user_expected_total_count) {
+  base::HistogramTester histograms;
+  InstalledLoader loader(service());
+  loader.RecordExtensionsIncrementedMetricsForTesting(testing_profile());
+
+  histograms.ExpectTotalCount("Extensions.LoadAllTime2", 1);
+  histograms.ExpectTotalCount("Extensions.LoadAll", 1);
+  histograms.ExpectTotalCount("Extensions.Disabled", 1);
+  histograms.ExpectTotalCount("Extensions.ManifestVersion", 1);
+  histograms.ExpectTotalCount("Extensions.LoadAllTime2.NonUser",
+                              nonuser_expected_total_count);
+  histograms.ExpectTotalCount("Extensions.LoadAllTime2.User",
+                              user_expected_total_count);
+  histograms.ExpectTotalCount("Extensions.LoadAll2", user_expected_total_count);
+  histograms.ExpectTotalCount("Extensions.Disabled2",
+                              user_expected_total_count);
+  histograms.ExpectTotalCount("Extensions.ManifestVersion2",
+                              user_expected_total_count);
 }
 
 TEST_F(InstalledLoaderUnitTest,
@@ -387,6 +421,31 @@ TEST_F(InstalledLoaderUnitTest,
   params.request_scope = HostPermissionsMetricsTestParams::RequestScope::kNone;
 
   RunHostPermissionsMetricsTest(params);
+}
+
+// TODO(crbug.com/1383740): After deleting the deprecated unincremented
+// histograms, consider modifying these to becomes less of change detectors in
+// metrics being modified.
+// Tests that some histograms that only emit for profiles that can use
+// non-component extensions emit as expected.
+TEST_F(InstalledLoaderUnitTest, UserMetrics_UserMetricsEmitForRegularUser) {
+  ASSERT_TRUE(AddExtension({"<all_urls>"}, kManifestInternal));
+  ASSERT_NO_FATAL_FAILURE(MaybeSetUpTestUser(/*is_guest=*/false));
+
+  RunEmitUserHistogramsTest(
+      /*nonuser_expected_total_count=*/0,
+      /*user_expected_total_count=*/1);
+}
+
+// Tests that some histograms that only emit for profiles that can use
+// non-component extensions do not emit as expected.
+TEST_F(InstalledLoaderUnitTest, UserMetrics_UserMetricsDoNotEmitForGuestUser) {
+  ASSERT_TRUE(AddExtension({"<all_urls>"}, kManifestInternal));
+  ASSERT_NO_FATAL_FAILURE(MaybeSetUpTestUser(/*is_guest=*/true));
+
+  RunEmitUserHistogramsTest(
+      /*nonuser_expected_total_count=*/1,
+      /*user_expected_total_count=*/0);
 }
 
 }  // namespace extensions

@@ -5,7 +5,9 @@
 #include "extensions/browser/extension_navigation_throttle.h"
 
 #include <string>
+#include <string_view>
 
+#include "base/containers/contains.h"
 #include "components/guest_view/browser/guest_view_base.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_handle.h"
@@ -27,14 +29,14 @@
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
-#include "extensions/common/identifiability_metrics.h"
+#include "extensions/common/extension_urls.h"
 #include "extensions/common/manifest_handlers/icons_handler.h"
+#include "extensions/common/manifest_handlers/mime_types_handler.h"
 #include "extensions/common/manifest_handlers/web_accessible_resources_info.h"
 #include "extensions/common/manifest_handlers/webview_info.h"
 #include "extensions/common/mojom/view_type.mojom.h"
 #include "extensions/common/permissions/api_permission.h"
 #include "extensions/common/permissions/permissions_data.h"
-#include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/cpp/web_sandbox_flags.h"
 #include "ui/base/page_transition_types.h"
 
@@ -53,11 +55,6 @@ bool ShouldBlockNavigationToPlatformAppResource(
 
   // Navigation to platform app's background page.
   if (view_type == mojom::ViewType::kExtensionBackgroundPage)
-    return false;
-
-  // Navigation within an extension dialog, e.g. this is used by ChromeOS file
-  // manager.
-  if (view_type == mojom::ViewType::kExtensionDialog)
     return false;
 
   // Navigation within an app window. The app window must belong to the
@@ -106,7 +103,8 @@ bool ShouldBlockNavigationToPlatformAppResource(
          view_type == mojom::ViewType::kComponent ||
          view_type == mojom::ViewType::kExtensionPopup ||
          view_type == mojom::ViewType::kTabContents ||
-         view_type == mojom::ViewType::kOffscreenDocument)
+         view_type == mojom::ViewType::kOffscreenDocument ||
+         view_type == mojom::ViewType::kExtensionSidePanel)
       << "Unhandled view type: " << view_type;
 
   return true;
@@ -118,7 +116,7 @@ ExtensionNavigationThrottle::ExtensionNavigationThrottle(
     content::NavigationHandle* navigation_handle)
     : content::NavigationThrottle(navigation_handle) {}
 
-ExtensionNavigationThrottle::~ExtensionNavigationThrottle() {}
+ExtensionNavigationThrottle::~ExtensionNavigationThrottle() = default;
 
 content::NavigationThrottle::ThrottleCheckResult
 ExtensionNavigationThrottle::WillStartOrRedirectRequest() {
@@ -174,6 +172,12 @@ ExtensionNavigationThrottle::WillStartOrRedirectRequest() {
           registry->enabled_extensions().GetHostedAppByURL(url);
       if (hosted_app && hosted_app->id() == kWebStoreAppId)
         return content::NavigationThrottle::BLOCK_REQUEST;
+      // Also apply the same blocking if the URL maps to the new webstore
+      // domain. Note: We can't use the extension_urls::IsWebstoreDomain check
+      // here, as the webstore hosted app is associated with a specific path and
+      // we don't want to block navigations to other paths on that domain.
+      if (url.DomainIs(extension_urls::GetNewWebstoreLaunchURL().host()))
+        return content::NavigationThrottle::BLOCK_REQUEST;
     }
 
     // Otherwise, the navigation is not to a chrome-extension resource, and
@@ -182,13 +186,8 @@ ExtensionNavigationThrottle::WillStartOrRedirectRequest() {
     return content::NavigationThrottle::PROCEED;
   }
 
-  ukm::SourceIdObj source_id = ukm::SourceIdObj::FromInt64(
-      navigation_handle()->GetNextPageUkmSourceId());
-
   // If the navigation is to an unknown or disabled extension, block it.
   if (!target_extension) {
-    RecordExtensionResourceAccessResult(
-        source_id, url, ExtensionResourceAccessResult::kFailure);
     // TODO(nick): This yields an unsatisfying error page; use a different error
     // code once that's supported. https://crbug.com/649869
     return content::NavigationThrottle::BLOCK_REQUEST;
@@ -197,13 +196,11 @@ ExtensionNavigationThrottle::WillStartOrRedirectRequest() {
   // Hosted apps don't have any associated resources outside of icons, so
   // block any requests to URLs in their extension origin.
   if (target_extension->is_hosted_app()) {
-    base::StringPiece resource_root_relative_path =
-        url.path_piece().empty() ? base::StringPiece()
+    std::string_view resource_root_relative_path =
+        url.path_piece().empty() ? std::string_view()
                                  : url.path_piece().substr(1);
     if (!IconsInfo::GetIcons(target_extension)
              .ContainsPath(resource_root_relative_path)) {
-      RecordExtensionResourceAccessResult(
-          source_id, url, ExtensionResourceAccessResult::kFailure);
       return content::NavigationThrottle::BLOCK_REQUEST;
     }
   }
@@ -222,8 +219,6 @@ ExtensionNavigationThrottle::WillStartOrRedirectRequest() {
         target_extension->permissions_data()->HasAPIPermission(
             mojom::APIPermissionID::kWebView);
     if (!has_webview_permission) {
-      RecordExtensionResourceAccessResult(
-          source_id, url, ExtensionResourceAccessResult::kCancel);
       return content::NavigationThrottle::CANCEL;
     }
   }
@@ -256,8 +251,6 @@ ExtensionNavigationThrottle::WillStartOrRedirectRequest() {
         storage_partition_config.partition_name(), url.path(),
         navigation_handle()->GetPageTransition(), &allowed);
     if (!allowed) {
-      RecordExtensionResourceAccessResult(
-          source_id, url, ExtensionResourceAccessResult::kFailure);
       return content::NavigationThrottle::BLOCK_REQUEST;
     }
   }
@@ -265,24 +258,34 @@ ExtensionNavigationThrottle::WillStartOrRedirectRequest() {
   if (target_extension->is_platform_app() &&
       ShouldBlockNavigationToPlatformAppResource(target_extension,
                                                  *navigation_handle())) {
-    RecordExtensionResourceAccessResult(
-        source_id, url, ExtensionResourceAccessResult::kFailure);
     return content::NavigationThrottle::BLOCK_REQUEST;
   }
 
-  // A browser-initiated navigation is always considered trusted, and thus
-  // allowed.
-  if (!navigation_handle()->IsRendererInitiated())
-    return content::NavigationThrottle::PROCEED;
-
-  // A renderer-initiated request without an initiator origin is a history
-  // traversal to an entry that was originally loaded in a browser-initiated
-  // navigation. Those are trusted, too.
+  // Automatically trusted navigation:
+  // * Browser-initiated navigations without an initiator origin happen when a
+  //   user directly triggers a navigation (e.g. using the omnibox, or the
+  //   bookmark bar).
+  // * Renderer-initiated navigations without an initiator origin represent a
+  //   history traversal to an entry that was originally loaded in a
+  //   browser-initiated navigation.
   if (!navigation_handle()->GetInitiatorOrigin().has_value())
     return content::NavigationThrottle::PROCEED;
 
+  // Not automatically trusted navigation:
+  // * Some browser-initiated navigations with an initiator origin are not
+  //   automatically trusted and allowed. For example, see the scenario where
+  //   a frame-reload is triggered from the context menu in crbug.com/1343610.
+  // * An initiator origin matching an extension. There are some MIME type
+  //   handlers in an allow list. For example, there are a variety of mechanisms
+  //   that can initiate navigations from the PDF viewer. The extension isn't
+  //   navigated, but the page that contains the PDF can be.
   const url::Origin& initiator_origin =
       navigation_handle()->GetInitiatorOrigin().value();
+  if (initiator_origin.scheme() == kExtensionScheme &&
+      base::Contains(MimeTypesHandler::GetMIMETypeAllowlist(),
+                     initiator_origin.host())) {
+    return content::NavigationThrottle::PROCEED;
+  }
 
   // Navigations from chrome://, devtools:// or chrome-search:// pages need to
   // be allowed, even if the target |url| is not web-accessible.  See also:
@@ -301,17 +304,13 @@ ExtensionNavigationThrottle::WillStartOrRedirectRequest() {
 
   // Cancel cross-origin-initiator navigations to blob: or filesystem: URLs.
   if (!url_has_extension_scheme) {
-    RecordExtensionResourceAccessResult(source_id, url,
-                                        ExtensionResourceAccessResult::kCancel);
     return content::NavigationThrottle::CANCEL;
   }
 
   // Cross-origin-initiator navigations require that the |url| is in the
   // manifest's "web_accessible_resources" section.
   if (!WebAccessibleResourcesInfo::IsResourceWebAccessible(
-          target_extension, url.path(), initiator_origin)) {
-    RecordExtensionResourceAccessResult(
-        source_id, url, ExtensionResourceAccessResult::kFailure);
+          target_extension, url.path(), &initiator_origin)) {
     return content::NavigationThrottle::BLOCK_REQUEST;
   }
 
@@ -324,8 +323,6 @@ ExtensionNavigationThrottle::WillStartOrRedirectRequest() {
   // here.
   // TODO(karandeepb): Investigate if this check can be removed.
   if (target_extension->is_platform_app()) {
-    RecordExtensionResourceAccessResult(source_id, url,
-                                        ExtensionResourceAccessResult::kCancel);
     return content::NavigationThrottle::CANCEL;
   }
 
@@ -334,8 +331,6 @@ ExtensionNavigationThrottle::WillStartOrRedirectRequest() {
       registry->enabled_extensions().GetExtensionOrAppByURL(
           initiator_origin.GetURL());
   if (initiator_extension && initiator_extension->is_platform_app()) {
-    RecordExtensionResourceAccessResult(
-        source_id, url, ExtensionResourceAccessResult::kFailure);
     return content::NavigationThrottle::BLOCK_REQUEST;
   }
 

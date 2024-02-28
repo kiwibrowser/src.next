@@ -51,10 +51,11 @@ FrameConsole::FrameConsole(LocalFrame& frame) : frame_(&frame) {}
 
 void FrameConsole::AddMessage(ConsoleMessage* console_message,
                               bool discard_duplicates) {
-  if (AddMessageToStorage(console_message, discard_duplicates))
-    ReportMessageToClient(console_message->Source(), console_message->Level(),
-                          console_message->Message(),
-                          console_message->Location());
+  if (AddMessageToStorage(console_message, discard_duplicates)) {
+    ReportMessageToClient(
+        console_message->GetSource(), console_message->GetLevel(),
+        console_message->Message(), console_message->Location());
+  }
 }
 
 bool FrameConsole::AddMessageToStorage(ConsoleMessage* console_message,
@@ -130,9 +131,15 @@ void FrameConsole::DidFailLoading(DocumentLoader* loader,
     return;
   }
 
+  if (error.WasBlockedByORB()) {
+    // ORB loading errors are reported from the network service directly to
+    // DevTools (CorsURLLoader::ReportCorbErrorToDevTools).
+    return;
+  }
+
   StringBuilder message;
   message.Append("Failed to load resource");
-  if (!error.LocalizedDescription().IsEmpty()) {
+  if (!error.LocalizedDescription().empty()) {
     message.Append(": ");
     message.Append(error.LocalizedDescription());
   }

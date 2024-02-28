@@ -4,10 +4,12 @@
 
 import {getFaviconForPageURL} from 'chrome://resources/js/icon.js';
 
+export const SUBDOMAIN_SPECIFIER = '*.';
+
 /**
  * Returns a favicon url for a given site.
  */
-export function getFaviconUrl(site: string, size: number = 20): string {
+export function getFaviconUrl(site: string): string {
   // Use 'http' as the scheme if `site` has a wildcard scheme.
   let faviconUrl =
       site.startsWith('*://') ? site.replace('*://', 'http://') : site;
@@ -19,5 +21,16 @@ export function getFaviconUrl(site: string, size: number = 20): string {
 
   return getFaviconForPageURL(
       faviconUrl, /*isSyncedUrlForHistoryUi=*/ false,
-      /*remoteIconUrlForUma=*/ '', size);
+      /*remoteIconUrlForUma=*/ '', /*size=*/ 20);
+}
+
+/**
+ * Returns if the given site matches all of its subdomains.
+ */
+export function matchesSubdomains(site: string): boolean {
+  // Sites that match all subdomains for a given host will specify "*.<host>".
+  // Given how sites are specified as origins for user specified sites and how
+  // extension host permissions are specified, it should be safe to assume
+  // that "*." will only be used to match subdomains.
+  return site.includes(SUBDOMAIN_SPECIFIER);
 }

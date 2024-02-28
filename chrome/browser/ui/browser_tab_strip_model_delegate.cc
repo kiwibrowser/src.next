@@ -6,11 +6,12 @@
 
 #include <stddef.h>
 
-#include "base/bind.h"
 #include "base/command_line.h"
+#include "base/functional/bind.h"
 #include "build/build_config.h"
 #include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/reading_list/reading_list_model_factory.h"
 #include "chrome/browser/sessions/closed_tab_cache.h"
 #include "chrome/browser/sessions/closed_tab_cache_service_factory.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
@@ -21,7 +22,6 @@
 #include "chrome/browser/ui/browser_live_tab_context.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/read_later/reading_list_model_factory.h"
 #include "chrome/browser/ui/tab_helpers.h"
 #include "chrome/browser/ui/tabs/tab_group.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
@@ -59,12 +59,12 @@ void BrowserTabStripModelDelegate::AddTabAt(
     const GURL& url,
     int index,
     bool foreground,
-    absl::optional<tab_groups::TabGroupId> group) {
+    std::optional<tab_groups::TabGroupId> group) {
   chrome::AddTabAt(browser_, url, index, foreground, group);
 }
 
-Browser* BrowserTabStripModelDelegate::CreateNewStripWithContents(
-    std::vector<NewStripContents> contentses,
+Browser* BrowserTabStripModelDelegate::CreateNewStripWithTabs(
+    std::vector<NewStripContents> tabs,
     const gfx::Rect& window_bounds,
     bool maximize) {
   DCHECK(browser_->CanSupportWindowFeature(Browser::FEATURE_TABSTRIP));
@@ -77,17 +77,17 @@ Browser* BrowserTabStripModelDelegate::CreateNewStripWithContents(
   Browser* browser = Browser::Create(params);
   TabStripModel* new_model = browser->tab_strip_model();
 
-  for (size_t i = 0; i < contentses.size(); ++i) {
-    NewStripContents item = std::move(contentses[i]);
+  for (size_t i = 0; i < tabs.size(); ++i) {
+    NewStripContents item = std::move(tabs[i]);
 
     // Enforce that there is an active tab in the strip at all times by forcing
     // the first web contents to be marked as active.
     if (i == 0)
       item.add_types |= AddTabTypes::ADD_ACTIVE;
 
-    content::WebContents* raw_web_contents = item.web_contents.get();
-    new_model->InsertWebContentsAt(
-        static_cast<int>(i), std::move(item.web_contents), item.add_types);
+    content::WebContents* const raw_web_contents = item.tab.get()->contents();
+    new_model->InsertDetachedTabAt(static_cast<int>(i), std::move(item.tab),
+                                   item.add_types);
     // Make sure the loading state is updated correctly, otherwise the throbber
     // won't start if the page is loading.
     // TODO(beng): find a better way of doing this.
@@ -128,8 +128,9 @@ void BrowserTabStripModelDelegate::DuplicateContentsAt(int index) {
 void BrowserTabStripModelDelegate::MoveToExistingWindow(
     const std::vector<int>& indices,
     int browser_index) {
-  auto existing_browsers =
-      browser_->tab_menu_model_delegate()->GetExistingWindowsForMoveMenu();
+  std::vector<Browser*> existing_browsers =
+      browser_->tab_menu_model_delegate()->GetOtherBrowserWindows(
+          web_app::AppBrowserController::IsWebApp(browser_));
   size_t existing_browser_count = existing_browsers.size();
   if (static_cast<size_t>(browser_index) < existing_browser_count &&
       existing_browsers[browser_index]) {
@@ -167,10 +168,10 @@ void BrowserTabStripModelDelegate::MoveGroupToNewWindow(
   chrome::MoveTabsToNewWindow(browser_, indices, group);
 }
 
-absl::optional<SessionID> BrowserTabStripModelDelegate::CreateHistoricalTab(
+std::optional<SessionID> BrowserTabStripModelDelegate::CreateHistoricalTab(
     content::WebContents* contents) {
   if (!BrowserSupportsHistoricalEntries())
-    return absl::nullopt;
+    return std::nullopt;
 
   sessions::TabRestoreService* service =
       TabRestoreServiceFactory::GetForProfile(browser_->profile());
@@ -181,7 +182,7 @@ absl::optional<SessionID> BrowserTabStripModelDelegate::CreateHistoricalTab(
         sessions::ContentLiveTab::GetForWebContents(contents),
         browser_->tab_strip_model()->GetIndexOfWebContents(contents));
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 void BrowserTabStripModelDelegate::CreateHistoricalGroup(
@@ -248,8 +249,7 @@ bool BrowserTabStripModelDelegate::SupportsReadLater() {
 }
 
 void BrowserTabStripModelDelegate::CacheWebContents(
-    const std::vector<std::unique_ptr<TabStripModel::DetachedWebContents>>&
-        web_contents) {
+    const std::vector<std::unique_ptr<DetachedWebContents>>& web_contents) {
   if (browser_shutdown::HasShutdownStarted() ||
       browser_->profile()->IsOffTheRecord() ||
       !ClosedTabCache::IsFeatureEnabled()) {
@@ -269,8 +269,7 @@ void BrowserTabStripModelDelegate::CacheWebContents(
   if (!cache.CanCacheWebContents(dwc->id))
     return;
 
-  std::unique_ptr<content::WebContents> wc;
-  dwc->owned_contents.swap(wc);
+  std::unique_ptr<content::WebContents> wc = dwc->tab->ReplaceContents(nullptr);
   dwc->remove_reason = TabStripModelChange::RemoveReason::kCached;
   auto cached = std::make_pair(dwc->id, std::move(wc));
   cache.CacheWebContents(std::move(cached));
@@ -292,6 +291,15 @@ bool BrowserTabStripModelDelegate::IsForWebApp() {
 
 void BrowserTabStripModelDelegate::CopyURL(content::WebContents* web_contents) {
   chrome::CopyURL(web_contents);
+}
+
+void BrowserTabStripModelDelegate::GoBack(content::WebContents* web_contents) {
+  chrome::GoBack(web_contents);
+}
+
+bool BrowserTabStripModelDelegate::CanGoBack(
+    content::WebContents* web_contents) {
+  return chrome::CanGoBack(web_contents);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -1,11 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/platform/graphics/video_frame_resource_provider.h"
 
 #include <memory>
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/trace_event/trace_event.h"
 #include "components/viz/client/client_resource_provider.h"
@@ -48,10 +48,9 @@ void VideoFrameResourceProvider::Initialize(
   }
 
   resource_updater_ = std::make_unique<media::VideoResourceUpdater>(
-      nullptr, media_context_provider, shared_bitmap_reporter,
-      resource_provider_.get(), settings_.use_stream_video_draw_quad,
-      settings_.resource_settings.use_gpu_memory_buffer_resources,
-      settings_.resource_settings.use_r16_texture, max_texture_size);
+      media_context_provider, shared_bitmap_reporter, resource_provider_.get(),
+      settings_.use_stream_video_draw_quad,
+      settings_.use_gpu_memory_buffer_resources, max_texture_size);
 }
 
 void VideoFrameResourceProvider::OnContextLost() {

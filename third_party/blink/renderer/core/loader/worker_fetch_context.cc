@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/platform/web_content_settings_client.h"
-#include "third_party/blink/public/platform/web_url_loader_factory.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/platform/web_worker_fetch_context.h"
 #include "third_party/blink/renderer/core/frame/deprecation/deprecation.h"
@@ -22,10 +21,12 @@
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_client_settings_object.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher_properties.h"
-#include "third_party/blink/renderer/platform/loader/fetch/resource_timing_info.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_timing_utils.h"
+#include "third_party/blink/renderer/platform/loader/fetch/url_loader/url_loader_factory.h"
 #include "third_party/blink/renderer/platform/loader/fetch/worker_resource_timing_notifier.h"
 #include "third_party/blink/renderer/platform/network/network_state_notifier.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/scheduler/public/virtual_time_controller.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 
@@ -40,7 +41,9 @@ WorkerFetchContext::WorkerFetchContext(
     SubresourceFilter* subresource_filter,
     ContentSecurityPolicy& content_security_policy,
     WorkerResourceTimingNotifier& resource_timing_notifier)
-    : BaseFetchContext(properties),
+    : BaseFetchContext(
+          properties,
+          MakeGarbageCollected<DetachableConsoleLogger>(&global_scope)),
       global_scope_(global_scope),
       web_context_(std::move(web_context)),
       subresource_filter_(subresource_filter),
@@ -140,15 +143,15 @@ WorkerFetchContext::CreateWebSocketHandshakeThrottle() {
 bool WorkerFetchContext::ShouldBlockFetchByMixedContentCheck(
     mojom::blink::RequestContextType request_context,
     network::mojom::blink::IPAddressSpace target_address_space,
-    const absl::optional<ResourceRequest::RedirectInfo>& redirect_info,
+    base::optional_ref<const ResourceRequest::RedirectInfo> redirect_info,
     const KURL& url,
     ReportingDisposition reporting_disposition,
-    const absl::optional<String>& devtools_id) const {
-  RedirectStatus redirect_status = redirect_info
+    const String& devtools_id) const {
+  RedirectStatus redirect_status = redirect_info.has_value()
                                        ? RedirectStatus::kFollowedRedirect
                                        : RedirectStatus::kNoRedirect;
   const KURL& url_before_redirects =
-      redirect_info ? redirect_info->original_url : url;
+      redirect_info.has_value() ? redirect_info->original_url : url;
   return MixedContentChecker::ShouldBlockFetchOnWorker(
       *const_cast<WorkerFetchContext*>(this), request_context,
       url_before_redirects, redirect_status, url, reporting_disposition,
@@ -158,7 +161,7 @@ bool WorkerFetchContext::ShouldBlockFetchByMixedContentCheck(
 bool WorkerFetchContext::ShouldBlockFetchAsCredentialedSubresource(
     const ResourceRequest& resource_request,
     const KURL& url) const {
-  if ((!url.User().IsEmpty() || !url.Pass().IsEmpty()) &&
+  if ((!url.User().empty() || !url.Pass().empty()) &&
       resource_request.GetRequestContext() !=
           mojom::blink::RequestContextType::XML_HTTP_REQUEST) {
     if (Url().User() != url.User() || Url().Pass() != url.Pass()) {
@@ -178,26 +181,36 @@ const KURL& WorkerFetchContext::Url() const {
 }
 
 ContentSecurityPolicy* WorkerFetchContext::GetContentSecurityPolicy() const {
-  return content_security_policy_;
+  return content_security_policy_.Get();
 }
 
-void WorkerFetchContext::AddConsoleMessage(ConsoleMessage* message) const {
-  return global_scope_->AddConsoleMessage(message);
-}
-
-void WorkerFetchContext::PrepareRequest(ResourceRequest& request,
-                                        ResourceLoaderOptions& options,
-                                        WebScopedVirtualTimePauser&,
-                                        ResourceType resource_type) {
+void WorkerFetchContext::PrepareRequest(
+    ResourceRequest& request,
+    ResourceLoaderOptions& options,
+    WebScopedVirtualTimePauser& virtual_time_pauser,
+    ResourceType resource_type) {
   request.SetUkmSourceId(GetExecutionContext()->UkmSourceID());
 
   String user_agent = global_scope_->UserAgent();
   probe::ApplyUserAgentOverride(Probe(), &user_agent);
   DCHECK(!user_agent.IsNull());
   request.SetHTTPUserAgent(AtomicString(user_agent));
+  request.SetSharedDictionaryWriterEnabled(
+      RuntimeEnabledFeatures::CompressionDictionaryTransportEnabled(
+          GetExecutionContext()));
+
+  request.SetHasStorageAccess(GetExecutionContext()->HasStorageAccess());
 
   WrappedResourceRequest webreq(request);
   web_context_->WillSendRequest(webreq);
+  if (auto* worker_scope = DynamicTo<WorkerGlobalScope>(*global_scope_)) {
+    virtual_time_pauser =
+        worker_scope->GetScheduler()
+            ->GetVirtualTimeController()
+            ->CreateWebScopedVirtualTimePauser(
+                request.Url().GetString(),
+                WebScopedVirtualTimePauser::VirtualTaskDuration::kNonInstant);
+  }
 
   probe::PrepareRequest(Probe(), nullptr, request, options, resource_type);
 }
@@ -214,25 +227,18 @@ void WorkerFetchContext::AddAdditionalRequestHeaders(ResourceRequest& request) {
   // remove it for the time being. If you're reading this, consider building
   // permissions policies for workers and/or deprecating this inclusion.
   if (save_data_enabled_)
-    request.SetHttpHeaderField(http_names::kSaveData, "on");
-
-  AddBackForwardCacheExperimentHTTPHeaderIfNeeded(request);
+    request.SetHttpHeaderField(http_names::kSaveData, AtomicString("on"));
 }
 
-void WorkerFetchContext::AddResourceTiming(const ResourceTimingInfo& info) {
-  const SecurityOrigin* security_origin = GetResourceFetcherProperties()
-                                              .GetFetchClientSettingsObject()
-                                              .GetSecurityOrigin();
-  mojom::blink::ResourceTimingInfoPtr mojo_info =
-      Performance::GenerateResourceTiming(*security_origin, info,
-                                          *global_scope_);
-  resource_timing_notifier_->AddResourceTiming(std::move(mojo_info),
-                                               info.InitiatorType());
+void WorkerFetchContext::AddResourceTiming(
+    mojom::blink::ResourceTimingInfoPtr info,
+    const AtomicString& initiator_type) {
+  resource_timing_notifier_->AddResourceTiming(std::move(info), initiator_type);
 }
 
 void WorkerFetchContext::PopulateResourceRequest(
     ResourceType type,
-    const FetchParameters::ResourceWidth& resource_width,
+    const absl::optional<float> resource_width,
     ResourceRequest& out_request,
     const ResourceLoaderOptions& options) {
   if (!GetResourceFetcherProperties().IsDetached())
@@ -282,7 +288,7 @@ WorkerFetchContext::GetContentSecurityNotifier() {
 }
 
 ExecutionContext* WorkerFetchContext::GetExecutionContext() const {
-  return global_scope_;
+  return global_scope_.Get();
 }
 
 void WorkerFetchContext::Trace(Visitor* visitor) const {

@@ -27,19 +27,23 @@
 #include <string>
 #include <utility>
 
-#include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
+#include "base/test/test_future.h"
+#include "components/history/core/browser/features.h"
 #include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_database_params.h"
 #include "components/history/core/browser/history_db_task.h"
+#include "components/history/core/browser/history_types.h"
 #include "components/history/core/test/database_test_utils.h"
 #include "components/history/core/test/test_history_database.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -80,7 +84,7 @@ class HistoryServiceTest : public testing::Test {
     DCHECK(history_service_);
 
     base::RunLoop run_loop;
-    history_service_->ClearCachedDataForContextID(nullptr);
+    history_service_->ClearCachedDataForContextID(0);
     history_service_->SetOnBackendDestroyTask(run_loop.QuitClosure());
     history_service_->Cleanup();
     history_service_.reset();
@@ -136,7 +140,20 @@ class HistoryServiceTest : public testing::Test {
           run_loop.Quit();
         }),
         &tracker_);
-    run_loop.Run();  // Will be exited in *QueryComplete.
+    run_loop.Run();  // Will be exited in callback on query complete.
+  }
+
+  void QueryMostRepeatedQueriesForKeyword(KeywordID keyword_id,
+                                          size_t result_count) {
+    base::RunLoop run_loop;
+    history_service_->QueryMostRepeatedQueriesForKeyword(
+        keyword_id, result_count,
+        base::BindLambdaForTesting([&](KeywordSearchTermVisitList queries) {
+          most_repeated_queries_ = std::move(queries);
+          run_loop.Quit();
+        }),
+        &tracker_);
+    run_loop.Run();  // Will be exited in callback on query complete.
   }
 
   base::ScopedTempDir temp_dir_;
@@ -144,6 +161,8 @@ class HistoryServiceTest : public testing::Test {
   base::test::TaskEnvironment task_environment_;
 
   MostVisitedURLList most_visited_urls_;
+
+  KeywordSearchTermVisitList most_repeated_queries_;
 
   // When non-NULL, this will be deleted on tear down and we will block until
   // the backend thread has completed. This allows tests for the history
@@ -172,7 +191,7 @@ TEST_F(HistoryServiceTest, RemoveNotification) {
   // Add a URL.
   GURL url("http://www.google.com");
 
-  history_service_->AddPage(url, base::Time::Now(), nullptr, 1, GURL(),
+  history_service_->AddPage(url, base::Time::Now(), 0, 1, GURL(),
                             RedirectList(), ui::PAGE_TRANSITION_TYPED,
                             SOURCE_BROWSED, false);
 
@@ -186,7 +205,7 @@ TEST_F(HistoryServiceTest, AddPage) {
   // Add the page once from a child frame.
   const GURL test_url("http://www.google.com/");
   history_service_->AddPage(
-      test_url, base::Time::Now(), nullptr, 0, GURL(), history::RedirectList(),
+      test_url, base::Time::Now(), 0, 0, GURL(), history::RedirectList(),
       ui::PAGE_TRANSITION_MANUAL_SUBFRAME, history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(test_url));
   EXPECT_EQ(1, query_url_result_.row.visit_count());
@@ -195,7 +214,7 @@ TEST_F(HistoryServiceTest, AddPage) {
       query_url_result_.row.hidden());  // Hidden because of child frame.
 
   // Add the page once from the main frame (should unhide it).
-  history_service_->AddPage(test_url, base::Time::Now(), nullptr, 0, GURL(),
+  history_service_->AddPage(test_url, base::Time::Now(), 0, 0, GURL(),
                             history::RedirectList(), ui::PAGE_TRANSITION_LINK,
                             history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(test_url));
@@ -212,9 +231,8 @@ TEST_F(HistoryServiceTest, AddRedirect) {
 
   // Add the sequence of pages as a server with no referrer. Note that we need
   // to have a non-NULL page ID scope.
-  history_service_->AddPage(first_redirects.back(), base::Time::Now(),
-                            reinterpret_cast<ContextID>(1), 0, GURL(),
-                            first_redirects, ui::PAGE_TRANSITION_LINK,
+  history_service_->AddPage(first_redirects.back(), base::Time::Now(), 1, 0,
+                            GURL(), first_redirects, ui::PAGE_TRANSITION_LINK,
                             history::SOURCE_BROWSED, true);
 
   // The first page should be added once with a link visit type (because we set
@@ -253,8 +271,8 @@ TEST_F(HistoryServiceTest, AddRedirect) {
   history::RedirectList second_redirects = {first_redirects[1],
                                             GURL("http://last.page.com/")};
   history_service_->AddPage(
-      second_redirects[1], base::Time::Now(), reinterpret_cast<ContextID>(1), 1,
-      second_redirects[0], second_redirects,
+      second_redirects[1], base::Time::Now(), 1, 1, second_redirects[0],
+      second_redirects,
       ui::PageTransitionFromInt(ui::PAGE_TRANSITION_LINK |
                                 ui::PAGE_TRANSITION_CLIENT_REDIRECT),
       history::SOURCE_BROWSED, true);
@@ -282,7 +300,7 @@ TEST_F(HistoryServiceTest, MakeIntranetURLsTyped) {
   // Add a non-typed visit to an intranet URL on an unvisited host.  This should
   // get promoted to a typed visit.
   const GURL test_url("http://intranet_host/path");
-  history_service_->AddPage(test_url, base::Time::Now(), nullptr, 0, GURL(),
+  history_service_->AddPage(test_url, base::Time::Now(), 0, 0, GURL(),
                             history::RedirectList(), ui::PAGE_TRANSITION_LINK,
                             history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(test_url));
@@ -297,7 +315,7 @@ TEST_F(HistoryServiceTest, MakeIntranetURLsTyped) {
 
   // Different path.
   const GURL test_url2("http://intranet_host/different_path");
-  history_service_->AddPage(test_url2, base::Time::Now(), nullptr, 0, GURL(),
+  history_service_->AddPage(test_url2, base::Time::Now(), 0, 0, GURL(),
                             history::RedirectList(), ui::PAGE_TRANSITION_LINK,
                             history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(test_url2));
@@ -309,7 +327,7 @@ TEST_F(HistoryServiceTest, MakeIntranetURLsTyped) {
 
   // No path.
   const GURL test_url3("http://intranet_host/");
-  history_service_->AddPage(test_url3, base::Time::Now(), nullptr, 0, GURL(),
+  history_service_->AddPage(test_url3, base::Time::Now(), 0, 0, GURL(),
                             history::RedirectList(), ui::PAGE_TRANSITION_LINK,
                             history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(test_url3));
@@ -321,7 +339,7 @@ TEST_F(HistoryServiceTest, MakeIntranetURLsTyped) {
 
   // Different scheme.
   const GURL test_url4("https://intranet_host/");
-  history_service_->AddPage(test_url4, base::Time::Now(), nullptr, 0, GURL(),
+  history_service_->AddPage(test_url4, base::Time::Now(), 0, 0, GURL(),
                             history::RedirectList(), ui::PAGE_TRANSITION_LINK,
                             history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(test_url4));
@@ -334,7 +352,7 @@ TEST_F(HistoryServiceTest, MakeIntranetURLsTyped) {
   // Different transition.
   const GURL test_url5("http://intranet_host/another_path");
   history_service_->AddPage(
-      test_url5, base::Time::Now(), nullptr, 0, GURL(), history::RedirectList(),
+      test_url5, base::Time::Now(), 0, 0, GURL(), history::RedirectList(),
       ui::PAGE_TRANSITION_AUTO_BOOKMARK, history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(test_url5));
   EXPECT_EQ(1, query_url_result_.row.visit_count());
@@ -345,7 +363,7 @@ TEST_F(HistoryServiceTest, MakeIntranetURLsTyped) {
                                    ui::PAGE_TRANSITION_AUTO_BOOKMARK));
 
   // Original URL.
-  history_service_->AddPage(test_url, base::Time::Now(), nullptr, 0, GURL(),
+  history_service_->AddPage(test_url, base::Time::Now(), 0, 0, GURL(),
                             history::RedirectList(), ui::PAGE_TRANSITION_LINK,
                             history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(test_url));
@@ -359,8 +377,8 @@ TEST_F(HistoryServiceTest, MakeIntranetURLsTyped) {
   history::RedirectList redirects1 = {GURL("http://intranet1/path"),
                                       GURL("http://second1.com/"),
                                       GURL("http://third1.com/")};
-  history_service_->AddPage(redirects1.back(), base::Time::Now(), nullptr, 0,
-                            GURL(), redirects1, ui::PAGE_TRANSITION_LINK,
+  history_service_->AddPage(redirects1.back(), base::Time::Now(), 0, 0, GURL(),
+                            redirects1, ui::PAGE_TRANSITION_LINK,
                             history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(redirects1.front()));
   EXPECT_EQ(1, query_url_result_.row.visit_count());
@@ -373,8 +391,8 @@ TEST_F(HistoryServiceTest, MakeIntranetURLsTyped) {
   history::RedirectList redirects2 = {GURL("http://first2.com/"),
                                       GURL("http://second2.com/"),
                                       GURL("http://intranet2/path")};
-  history_service_->AddPage(redirects2.back(), base::Time::Now(), nullptr, 0,
-                            GURL(), redirects2, ui::PAGE_TRANSITION_LINK,
+  history_service_->AddPage(redirects2.back(), base::Time::Now(), 0, 0, GURL(),
+                            redirects2, ui::PAGE_TRANSITION_LINK,
                             history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(redirects2.back()));
   EXPECT_EQ(1, query_url_result_.row.visit_count());
@@ -387,8 +405,8 @@ TEST_F(HistoryServiceTest, MakeIntranetURLsTyped) {
   history::RedirectList redirects3 = {GURL("http://first3.com/"),
                                       GURL("http://intranet3/path"),
                                       GURL("http://third3.com/")};
-  history_service_->AddPage(redirects3.back(), base::Time::Now(), nullptr, 0,
-                            GURL(), redirects3, ui::PAGE_TRANSITION_LINK,
+  history_service_->AddPage(redirects3.back(), base::Time::Now(), 0, 0, GURL(),
+                            redirects3, ui::PAGE_TRANSITION_LINK,
                             history::SOURCE_BROWSED, false);
   EXPECT_TRUE(QueryURL(redirects3[1]));
   EXPECT_EQ(1, query_url_result_.row.visit_count());
@@ -399,7 +417,7 @@ TEST_F(HistoryServiceTest, MakeIntranetURLsTyped) {
 }
 
 TEST_F(HistoryServiceTest, Typed) {
-  const ContextID context_id = reinterpret_cast<ContextID>(1);
+  const ContextID context_id = 1;
 
   ASSERT_TRUE(history_service_.get());
 
@@ -484,7 +502,7 @@ TEST_F(HistoryServiceTest, MostVisitedURLs) {
   const GURL url3("http://www.google.com/url3/");
   const GURL url4("http://www.google.com/url4/");
 
-  const ContextID context_id = reinterpret_cast<ContextID>(1);
+  const ContextID context_id = 1;
 
   // Add two pages.
   history_service_->AddPage(url0, base::Time::Now(), context_id, 0, GURL(),
@@ -551,6 +569,129 @@ TEST_F(HistoryServiceTest, MostVisitedURLs) {
   EXPECT_EQ(url3, most_visited_urls_[3].url);
 }
 
+TEST_F(HistoryServiceTest, QueryMostRepeatedQueriesForKeyword) {
+  ASSERT_TRUE(history_service_.get());
+
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeatureWithParameters(
+      history::kOrganicRepeatableQueries,
+      {{history::kRepeatableQueriesMaxAgeDays.name, "4"},
+       {history::kRepeatableQueriesMinVisitCount.name, "1"},
+       {history::kRepeatableQueriesIgnoreDuplicateVisits.name, "true"}});
+
+  const KeywordID first_keyword_id = 1;
+  const KeywordID second_keyword_id = 2;
+
+  struct PageData {
+    const GURL url;
+    const std::u16string term;
+    base::Time time;
+    const KeywordID keyword_id;
+  };
+
+  PageData page_1 = {GURL("http://www.search.com/?q=First"), u"First",
+                     base::Time::Now() - base::Days(4), first_keyword_id};
+  PageData page_2 = {GURL("http://www.search.com/?q=Second"), u"Second",
+                     base::Time::Now() - base::Days(3), first_keyword_id};
+  PageData page_3 = {GURL("http://www.search.com/?q=Second&foo=bar"), u"Second",
+                     base::Time::Now() - base::Days(3), first_keyword_id};
+  PageData page_4 = {GURL("http://www.search.com/?q=Fourth"), u"Fourth",
+                     base::Time::Now() - base::Days(2), first_keyword_id};
+  PageData page_5 = {GURL("http://www.search.com/?q=Fifth"), u"Fifth",
+                     base::Time::Now() - base::Days(1), second_keyword_id};
+
+  // Add first page from them first keyword.
+  history_service_->AddPage(page_1.url, page_1.time, history::SOURCE_BROWSED);
+  history_service_->SetKeywordSearchTermsForURL(page_1.url, page_1.keyword_id,
+                                                page_1.term);
+
+  // Add second page from the first keyword.
+  history_service_->AddPage(page_2.url, page_2.time, history::SOURCE_BROWSED);
+  history_service_->SetKeywordSearchTermsForURL(page_2.url, page_2.keyword_id,
+                                                page_2.term);
+
+  {
+    base::HistogramTester histogram_tester;
+    QueryMostRepeatedQueriesForKeyword(first_keyword_id, 1);
+
+    ASSERT_EQ(1U, most_repeated_queries_.size());
+    EXPECT_EQ(u"second", most_repeated_queries_[0]->normalized_term);
+    EXPECT_EQ(1, most_repeated_queries_[0]->visit_count);
+
+    histogram_tester.ExpectTotalCount("History.QueryMostRepeatedQueriesTimeV2",
+                                      1);
+  }
+
+  // Add fourth page from the first keyword.
+  history_service_->AddPage(page_4.url, page_4.time, history::SOURCE_BROWSED);
+  history_service_->SetKeywordSearchTermsForURL(page_4.url, page_4.keyword_id,
+                                                page_4.term);
+
+  {
+    base::HistogramTester histogram_tester;
+    QueryMostRepeatedQueriesForKeyword(first_keyword_id, 1);
+
+    ASSERT_EQ(1U, most_repeated_queries_.size());
+    EXPECT_EQ(u"fourth", most_repeated_queries_[0]->normalized_term);
+    EXPECT_EQ(1, most_repeated_queries_[0]->visit_count);
+
+    histogram_tester.ExpectTotalCount("History.QueryMostRepeatedQueriesTimeV2",
+                                      1);
+  }
+
+  // Revisit second page from the first keyword, making it the top page.
+  history_service_->AddPage(page_2.url, page_2.time, history::SOURCE_BROWSED);
+  history_service_->SetKeywordSearchTermsForURL(page_2.url, page_2.keyword_id,
+                                                page_2.term);
+
+  {
+    base::HistogramTester histogram_tester;
+    QueryMostRepeatedQueriesForKeyword(first_keyword_id, 1);
+
+    ASSERT_EQ(1U, most_repeated_queries_.size());
+    EXPECT_EQ(u"second", most_repeated_queries_[0]->normalized_term);
+    EXPECT_EQ(2, most_repeated_queries_[0]->visit_count);
+
+    histogram_tester.ExpectTotalCount("History.QueryMostRepeatedQueriesTimeV2",
+                                      1);
+  }
+
+  // Add third page from the first keyword. This is considered a duplicative
+  // vist and will be ignored. This does not change the top page.
+  history_service_->AddPage(page_3.url, page_3.time, history::SOURCE_BROWSED);
+  history_service_->SetKeywordSearchTermsForURL(page_3.url, page_3.keyword_id,
+                                                page_3.term);
+
+  {
+    base::HistogramTester histogram_tester;
+    QueryMostRepeatedQueriesForKeyword(first_keyword_id, 1);
+
+    ASSERT_EQ(1U, most_repeated_queries_.size());
+    EXPECT_EQ(u"second", most_repeated_queries_[0]->normalized_term);
+    EXPECT_EQ(2, most_repeated_queries_[0]->visit_count);
+
+    histogram_tester.ExpectTotalCount("History.QueryMostRepeatedQueriesTimeV2",
+                                      1);
+  }
+
+  // Add fifth page from the second keyword. This does not change the top page.
+  history_service_->AddPage(page_5.url, page_5.time, history::SOURCE_BROWSED);
+  history_service_->SetKeywordSearchTermsForURL(page_5.url, page_5.keyword_id,
+                                                page_5.term);
+
+  {
+    base::HistogramTester histogram_tester;
+    QueryMostRepeatedQueriesForKeyword(first_keyword_id, 1);
+
+    ASSERT_EQ(1U, most_repeated_queries_.size());
+    EXPECT_EQ(u"second", most_repeated_queries_[0]->normalized_term);
+    EXPECT_EQ(2, most_repeated_queries_[0]->visit_count);
+
+    histogram_tester.ExpectTotalCount("History.QueryMostRepeatedQueriesTimeV2",
+                                      1);
+  }
+}
+
 namespace {
 
 // A HistoryDBTask implementation. Each time RunOnDBThread is invoked
@@ -562,8 +703,12 @@ class HistoryDBTaskImpl : public HistoryDBTask {
  public:
   static const int kWantInvokeCount;
 
-  HistoryDBTaskImpl(int* invoke_count, bool* done_invoked)
-      : invoke_count_(invoke_count), done_invoked_(done_invoked) {}
+  HistoryDBTaskImpl(int* invoke_count,
+                    bool* done_invoked,
+                    base::OnceClosure quit_closure)
+      : invoke_count_(invoke_count),
+        done_invoked_(done_invoked),
+        quit_closure_(std::move(quit_closure)) {}
 
   HistoryDBTaskImpl(const HistoryDBTaskImpl&) = delete;
   HistoryDBTaskImpl& operator=(const HistoryDBTaskImpl&) = delete;
@@ -574,7 +719,7 @@ class HistoryDBTaskImpl : public HistoryDBTask {
 
   void DoneRunOnMainThread() override {
     *done_invoked_ = true;
-    base::RunLoop::QuitCurrentWhenIdleDeprecated();
+    std::move(quit_closure_).Run();
   }
 
   raw_ptr<int> invoke_count_;
@@ -582,6 +727,7 @@ class HistoryDBTaskImpl : public HistoryDBTask {
 
  private:
   ~HistoryDBTaskImpl() override = default;
+  base::OnceClosure quit_closure_;
 };
 
 // static
@@ -594,15 +740,16 @@ TEST_F(HistoryServiceTest, HistoryDBTask) {
   base::CancelableTaskTracker task_tracker;
   int invoke_count = 0;
   bool done_invoked = false;
+  base::RunLoop loop;
   history_service_->ScheduleDBTask(
       FROM_HERE,
-      std::unique_ptr<history::HistoryDBTask>(
-          new HistoryDBTaskImpl(&invoke_count, &done_invoked)),
+      std::unique_ptr<history::HistoryDBTask>(new HistoryDBTaskImpl(
+          &invoke_count, &done_invoked, loop.QuitWhenIdleClosure())),
       &task_tracker);
   // Run the message loop. When HistoryDBTaskImpl::DoneRunOnMainThread runs,
   // it will stop the message loop. If the test hangs here, it means
   // DoneRunOnMainThread isn't being invoked correctly.
-  base::RunLoop().Run();
+  loop.Run();
   CleanupHistoryService();
   // WARNING: history has now been deleted.
   history_service_.reset();
@@ -617,8 +764,8 @@ TEST_F(HistoryServiceTest, HistoryDBTaskCanceled) {
   bool done_invoked = false;
   history_service_->ScheduleDBTask(
       FROM_HERE,
-      std::unique_ptr<history::HistoryDBTask>(
-          new HistoryDBTaskImpl(&invoke_count, &done_invoked)),
+      std::unique_ptr<history::HistoryDBTask>(new HistoryDBTaskImpl(
+          &invoke_count, &done_invoked, base::DoNothing())),
       &task_tracker);
   task_tracker.TryCancelAll();
   CleanupHistoryService();
@@ -632,9 +779,8 @@ void AddPageAtTime(HistoryService* history,
                    const std::string& url_spec,
                    base::Time time_in_the_past) {
   const GURL url(url_spec);
-  history->AddPage(url, time_in_the_past, nullptr, 0, GURL(),
-                   history::RedirectList(), ui::PAGE_TRANSITION_LINK,
-                   history::SOURCE_BROWSED, false);
+  history->AddPage(url, time_in_the_past, 0, 0, GURL(), history::RedirectList(),
+                   ui::PAGE_TRANSITION_LINK, history::SOURCE_BROWSED, false);
 }
 
 void AddPageInThePast(HistoryService* history,
@@ -642,6 +788,16 @@ void AddPageInThePast(HistoryService* history,
                       int days_back) {
   base::Time time_in_the_past = base::Time::Now() - base::Days(days_back);
   AddPageAtTime(history, url_spec, time_in_the_past);
+}
+
+// Helper to add a synced page at a specified day in the past.
+void AddSyncedPageInThePast(HistoryService* history,
+                            const std::string& url_spec,
+                            int days_back) {
+  base::Time time_in_the_past = base::Time::Now() - base::Days(days_back);
+  history->AddPage(GURL(url_spec), time_in_the_past, 0, 0, GURL(),
+                   history::RedirectList(), ui::PAGE_TRANSITION_LINK,
+                   history::SOURCE_SYNCED, false);
 }
 
 // Helper to add a page with specified days back in the past.
@@ -671,12 +827,12 @@ int GetMonthlyHostCountHelper(HistoryService* history,
   return count;
 }
 
-DomainDiversityResults GetDomainDiversityHelper(
-    HistoryService* history,
-    base::Time begin_time,
-    base::Time end_time,
-    DomainMetricBitmaskType metric_type_bitmask,
-    base::CancelableTaskTracker* tracker) {
+std::pair<DomainDiversityResults, DomainDiversityResults>
+GetDomainDiversityHelper(HistoryService* history,
+                         base::Time begin_time,
+                         base::Time end_time,
+                         DomainMetricBitmaskType metric_type_bitmask,
+                         base::CancelableTaskTracker* tracker) {
   base::RunLoop run_loop;
   base::TimeDelta dst_rounding_offset = base::Hours(4);
 
@@ -688,10 +844,11 @@ DomainDiversityResults GetDomainDiversityHelper(
                          .InDaysFloored();
   }
 
-  DomainDiversityResults results;
+  std::pair<DomainDiversityResults, DomainDiversityResults> results;
   history->GetDomainDiversity(
       end_time, number_of_days, metric_type_bitmask,
-      base::BindLambdaForTesting([&](DomainDiversityResults result) {
+      base::BindLambdaForTesting([&](std::pair<DomainDiversityResults,
+                                               DomainDiversityResults> result) {
         results = result;
         run_loop.Quit();
       }),
@@ -725,7 +882,6 @@ void TestDomainMetricSet(const DomainMetricSet& metric_set,
 
 // Counts hosts visited in the last month.
 TEST_F(HistoryServiceTest, CountMonthlyVisitedHosts) {
-  base::HistogramTester histogram_tester;
   HistoryService* history = history_service_.get();
   ASSERT_TRUE(history);
 
@@ -745,8 +901,6 @@ TEST_F(HistoryServiceTest, CountMonthlyVisitedHosts) {
   AddPageInThePast(history, "https://www.yahoo.com/foo", 29);
   EXPECT_EQ(3, GetMonthlyHostCountHelper(history, &tracker_));
 
-  // The time required to compute host count is reported on each computation.
-  histogram_tester.ExpectTotalCount("History.DatabaseMonthlyHostCountTime", 4);
 }
 
 TEST_F(HistoryServiceTest, GetDomainDiversityShortBasetimeRange) {
@@ -786,26 +940,33 @@ TEST_F(HistoryServiceTest, GetDomainDiversityShortBasetimeRange) {
   AddPageAtTime(history, "http://ak/", GetTimeInThePast(query_time, 1, 14));
 
   // Should return empty result if `begin_time` == `end_time`.
-  DomainDiversityResults res = GetDomainDiversityHelper(
+  auto [local_res, all_res] = GetDomainDiversityHelper(
       history, query_time, query_time,
       history::kEnableLast1DayMetric | history::kEnableLast7DayMetric |
           history::kEnableLast28DayMetric,
       &tracker_);
-  EXPECT_EQ(0u, res.size());
+  EXPECT_EQ(0u, local_res.size());
+  EXPECT_EQ(0u, all_res.size());
 
   // Metrics will be computed for each of the 4 continuous midnights.
-  res = GetDomainDiversityHelper(
+  std::tie(local_res, all_res) = GetDomainDiversityHelper(
       history, GetTimeInThePast(query_time, 4, 0), query_time,
       history::kEnableLast1DayMetric | history::kEnableLast7DayMetric |
           history::kEnableLast28DayMetric,
       &tracker_);
 
-  ASSERT_EQ(4u, res.size());
+  ASSERT_EQ(4u, local_res.size());
+  ASSERT_EQ(4u, all_res.size());
 
-  TestDomainMetricSet(res[0], 1, 2, 2);
-  TestDomainMetricSet(res[1], 2, 2, 2);
-  TestDomainMetricSet(res[2], 0, 0, 0);
-  TestDomainMetricSet(res[3], 0, 0, 0);
+  TestDomainMetricSet(local_res[0], 1, 2, 2);
+  TestDomainMetricSet(local_res[1], 2, 2, 2);
+  TestDomainMetricSet(local_res[2], 0, 0, 0);
+  TestDomainMetricSet(local_res[3], 0, 0, 0);
+
+  TestDomainMetricSet(all_res[0], 1, 2, 2);
+  TestDomainMetricSet(all_res[1], 2, 2, 2);
+  TestDomainMetricSet(all_res[2], 0, 0, 0);
+  TestDomainMetricSet(all_res[3], 0, 0, 0);
 }
 
 TEST_F(HistoryServiceTest, GetDomainDiversityLongBasetimeRange) {
@@ -836,21 +997,30 @@ TEST_F(HistoryServiceTest, GetDomainDiversityLongBasetimeRange) {
   AddPageAtTime(history, "https://www.google.com/",
                 GetTimeInThePast(query_time, 1, 13));
 
-  DomainDiversityResults res = GetDomainDiversityHelper(
+  auto [local_res, all_res] = GetDomainDiversityHelper(
       history, GetTimeInThePast(query_time, 10, 12), query_time,
       history::kEnableLast1DayMetric | history::kEnableLast7DayMetric |
           history::kEnableLast28DayMetric,
       &tracker_);
   // Only up to seven days will be considered.
-  ASSERT_EQ(7u, res.size());
+  ASSERT_EQ(7u, local_res.size());
+  ASSERT_EQ(7u, all_res.size());
 
-  TestDomainMetricSet(res[0], 2, 3, 5);
-  TestDomainMetricSet(res[1], 1, 2, 4);
-  TestDomainMetricSet(res[2], 0, 1, 3);
-  TestDomainMetricSet(res[3], 0, 2, 4);
-  TestDomainMetricSet(res[4], 0, 2, 4);
-  TestDomainMetricSet(res[5], 0, 2, 4);
-  TestDomainMetricSet(res[6], 1, 2, 4);
+  TestDomainMetricSet(local_res[0], 2, 3, 5);
+  TestDomainMetricSet(local_res[1], 1, 2, 4);
+  TestDomainMetricSet(local_res[2], 0, 1, 3);
+  TestDomainMetricSet(local_res[3], 0, 2, 4);
+  TestDomainMetricSet(local_res[4], 0, 2, 4);
+  TestDomainMetricSet(local_res[5], 0, 2, 4);
+  TestDomainMetricSet(local_res[6], 1, 2, 4);
+
+  TestDomainMetricSet(all_res[0], 2, 3, 5);
+  TestDomainMetricSet(all_res[1], 1, 2, 4);
+  TestDomainMetricSet(all_res[2], 0, 1, 3);
+  TestDomainMetricSet(all_res[3], 0, 2, 4);
+  TestDomainMetricSet(all_res[4], 0, 2, 4);
+  TestDomainMetricSet(all_res[5], 0, 2, 4);
+  TestDomainMetricSet(all_res[6], 1, 2, 4);
 }
 
 TEST_F(HistoryServiceTest, GetDomainDiversityBitmaskTest) {
@@ -867,31 +1037,233 @@ TEST_F(HistoryServiceTest, GetDomainDiversityBitmaskTest) {
   AddPageAtTime(history, "http://www.chromium.com/",
                 GetTimeInThePast(query_time, 1, 4));
 
-  DomainDiversityResults res = GetDomainDiversityHelper(
+  auto [local_res, all_res] = GetDomainDiversityHelper(
       history, GetTimeInThePast(query_time, 7, 12), query_time,
       history::kEnableLast1DayMetric | history::kEnableLast7DayMetric,
       &tracker_);
-  ASSERT_EQ(7u, res.size());
+  ASSERT_EQ(7u, local_res.size());
+  ASSERT_EQ(7u, all_res.size());
 
-  TestDomainMetricSet(res[0], 1, 2, -1);
-  TestDomainMetricSet(res[1], 0, 1, -1);
-  TestDomainMetricSet(res[2], 0, 1, -1);
-  TestDomainMetricSet(res[3], 0, 1, -1);
-  TestDomainMetricSet(res[4], 0, 1, -1);
-  TestDomainMetricSet(res[5], 0, 1, -1);
-  TestDomainMetricSet(res[6], 1, 1, -1);
+  TestDomainMetricSet(local_res[0], 1, 2, -1);
+  TestDomainMetricSet(local_res[1], 0, 1, -1);
+  TestDomainMetricSet(local_res[2], 0, 1, -1);
+  TestDomainMetricSet(local_res[3], 0, 1, -1);
+  TestDomainMetricSet(local_res[4], 0, 1, -1);
+  TestDomainMetricSet(local_res[5], 0, 1, -1);
+  TestDomainMetricSet(local_res[6], 1, 1, -1);
 
-  res = GetDomainDiversityHelper(
+  TestDomainMetricSet(all_res[0], 1, 2, -1);
+  TestDomainMetricSet(all_res[1], 0, 1, -1);
+  TestDomainMetricSet(all_res[2], 0, 1, -1);
+  TestDomainMetricSet(all_res[3], 0, 1, -1);
+  TestDomainMetricSet(all_res[4], 0, 1, -1);
+  TestDomainMetricSet(all_res[5], 0, 1, -1);
+  TestDomainMetricSet(all_res[6], 1, 1, -1);
+
+  std::tie(local_res, all_res) = GetDomainDiversityHelper(
       history, GetTimeInThePast(query_time, 6, 12), query_time,
       history::kEnableLast28DayMetric | history::kEnableLast7DayMetric,
       &tracker_);
 
-  ASSERT_EQ(6u, res.size());
-  TestDomainMetricSet(res[0], -1, 2, 3);
-  TestDomainMetricSet(res[1], -1, 1, 2);
-  TestDomainMetricSet(res[2], -1, 1, 2);
-  TestDomainMetricSet(res[3], -1, 1, 2);
-  TestDomainMetricSet(res[4], -1, 1, 2);
-  TestDomainMetricSet(res[5], -1, 1, 2);
+  ASSERT_EQ(6u, local_res.size());
+  ASSERT_EQ(6u, all_res.size());
+
+  TestDomainMetricSet(local_res[0], -1, 2, 3);
+  TestDomainMetricSet(local_res[1], -1, 1, 2);
+  TestDomainMetricSet(local_res[2], -1, 1, 2);
+  TestDomainMetricSet(local_res[3], -1, 1, 2);
+  TestDomainMetricSet(local_res[4], -1, 1, 2);
+  TestDomainMetricSet(local_res[5], -1, 1, 2);
+
+  TestDomainMetricSet(all_res[0], -1, 2, 3);
+  TestDomainMetricSet(all_res[1], -1, 1, 2);
+  TestDomainMetricSet(all_res[2], -1, 1, 2);
+  TestDomainMetricSet(all_res[3], -1, 1, 2);
+  TestDomainMetricSet(all_res[4], -1, 1, 2);
+  TestDomainMetricSet(all_res[5], -1, 1, 2);
 }
+
+// Gets unique local and synced domains visited and the last visited domain
+// within a time range.
+TEST_F(HistoryServiceTest, GetUniqueDomainsVisited) {
+  base::Time base_time = base::Time::Now();
+  HistoryService* history = history_service_.get();
+  ASSERT_TRUE(history);
+
+  // Add local visits to history database at specific days back.
+  AddPageInThePast(history, "http://www.test1.com/", 1);
+  AddPageInThePast(history, "http://www.test2.com/test", 2);
+  AddPageInThePast(history, "http://www.test2.com/", 3);
+  AddPageInThePast(history, "http://www.test3.com/", 4);
+
+  // Add synced visits to history database at specific days back.
+  AddSyncedPageInThePast(history, "http://www.test3.com/", 3);
+  AddSyncedPageInThePast(history, "http://www.test4.com/", 5);
+
+  {
+    // DomainsVisitedResult should be empty when no domains in range.
+    base::test::TestFuture<DomainsVisitedResult> future;
+
+    history->GetUniqueDomainsVisited(
+        /*begin_time=*/base_time - base::Days(10),
+        /*end_time=*/base_time - base::Days(5), future.GetCallback(),
+        &tracker_);
+
+    DomainsVisitedResult result = future.Take();
+
+    EXPECT_EQ(0u, result.locally_visited_domains.size());
+    EXPECT_EQ(0u, result.all_visited_domains.size());
+  }
+
+  {
+    // DomainsVisitedResult should include unique domains in range in
+    // reverse-chronological order.
+    base::test::TestFuture<DomainsVisitedResult> future;
+
+    history->GetUniqueDomainsVisited(
+        /*begin_time=*/base_time - base::Days(2), /*end_time=*/base_time,
+        future.GetCallback(), &tracker_);
+
+    std::vector<std::string> expectedLocalResult({"test1.com", "test2.com"});
+    std::vector<std::string> expectedSyncedResult({"test1.com", "test2.com"});
+
+    DomainsVisitedResult result = future.Take();
+
+    EXPECT_EQ(expectedLocalResult, result.locally_visited_domains);
+    EXPECT_EQ(expectedSyncedResult, result.all_visited_domains);
+  }
+
+  {
+    // DomainsVisitedResult should not include duplicate domains in range.
+    base::test::TestFuture<DomainsVisitedResult> future;
+
+    history->GetUniqueDomainsVisited(
+        /*begin_time=*/base_time - base::Days(4), /*end_time=*/base_time,
+        future.GetCallback(), &tracker_);
+
+    std::vector<std::string> expectedLocalResult(
+        {"test1.com", "test2.com", "test3.com"});
+    std::vector<std::string> expectedSyncedResult(
+        {"test1.com", "test2.com", "test3.com"});
+
+    DomainsVisitedResult result = future.Take();
+
+    EXPECT_EQ(expectedLocalResult, result.locally_visited_domains);
+    EXPECT_EQ(expectedSyncedResult, result.all_visited_domains);
+  }
+
+  {
+    // local domains should not include synced visits in range.
+    base::test::TestFuture<DomainsVisitedResult> future;
+
+    history->GetUniqueDomainsVisited(
+        /*begin_time=*/base_time - base::Days(5), /*end_time=*/base_time,
+        future.GetCallback(), &tracker_);
+
+    std::vector<std::string> expectedLocalResult(
+        {"test1.com", "test2.com", "test3.com"});
+    std::vector<std::string> expectedSyncedResult(
+        {"test1.com", "test2.com", "test3.com", "test4.com"});
+
+    DomainsVisitedResult result = future.Take();
+
+    EXPECT_EQ(expectedLocalResult, result.locally_visited_domains);
+    EXPECT_EQ(expectedSyncedResult, result.all_visited_domains);
+  }
+}
+
+namespace {
+
+class AddSyncedVisitTask : public HistoryDBTask {
+ public:
+  AddSyncedVisitTask(base::RunLoop* run_loop,
+                     const GURL& url,
+                     const VisitRow& visit)
+      : run_loop_(run_loop), url_(url), visit_(visit) {}
+
+  AddSyncedVisitTask(const AddSyncedVisitTask&) = delete;
+  AddSyncedVisitTask& operator=(const AddSyncedVisitTask&) = delete;
+
+  ~AddSyncedVisitTask() override = default;
+
+  bool RunOnDBThread(HistoryBackend* backend, HistoryDatabase* db) override {
+    VisitID visit_id = backend->AddSyncedVisit(
+        url_, u"Title", /*hidden=*/false, visit_, absl::nullopt, absl::nullopt);
+    EXPECT_NE(visit_id, kInvalidVisitID);
+    LOG(ERROR) << "Added visit!";
+    return true;
+  }
+
+  void DoneRunOnMainThread() override { run_loop_->QuitWhenIdle(); }
+
+ private:
+  raw_ptr<base::RunLoop> run_loop_;
+
+  GURL url_;
+  VisitRow visit_;
+};
+
+}  // namespace
+
+TEST_F(HistoryServiceTest, GetDomainDiversityLocalVsSynced) {
+  HistoryService* history = history_service_.get();
+  ASSERT_TRUE(history);
+
+  base::Time query_time = base::Time::Now();
+
+  // Make sure `query_time` is at least some time past the midnight so that
+  // some domain visits can be inserted between `query_time` and midnight
+  // for testing.
+  query_time =
+      std::max(query_time.LocalMidnight() + base::Minutes(10), query_time);
+
+  // Add a regular local visit.
+  history->AddPage(GURL("https://www.local.com/"),
+                   GetTimeInThePast(query_time, /*days_back=*/1,
+                                    /*hours_since_midnight=*/12),
+                   0, 0, GURL(), history::RedirectList(),
+                   ui::PAGE_TRANSITION_LINK, history::SOURCE_BROWSED, false);
+
+  // Add a legacy-style synced visit, as it would be created by TYPED_URLS sync.
+  // This has SOURCE_SYNCED but otherwise looks mostly like a local visit.
+  history->AddPage(GURL("https://www.synced-legacy.com/"),
+                   GetTimeInThePast(query_time, /*days_back=*/1,
+                                    /*hours_since_midnight=*/13),
+                   0, 0, GURL(), history::RedirectList(),
+                   ui::PAGE_TRANSITION_LINK, history::SOURCE_SYNCED, false);
+
+  // Add a new-style synced visit, as it would be created by HISTORY sync. The
+  // API to do this isn't exposed in HistoryService (only HistoryBackend).
+  {
+    VisitRow visit;
+    visit.visit_time = GetTimeInThePast(query_time, /*days_back=*/1,
+                                        /*hours_since_midnight=*/14);
+    visit.originator_cache_guid = "some_originator";
+    visit.transition = ui::PageTransitionFromInt(
+        ui::PAGE_TRANSITION_LINK | ui::PAGE_TRANSITION_CHAIN_START |
+        ui::PAGE_TRANSITION_CHAIN_END);
+    visit.is_known_to_sync = true;
+
+    base::RunLoop run_loop;
+    history->ScheduleDBTask(
+        FROM_HERE,
+        std::make_unique<AddSyncedVisitTask>(
+            &run_loop, GURL("https://www.synced.com/"), visit),
+        &tracker_);
+    run_loop.Run();
+  }
+
+  auto [local_res, all_res] = GetDomainDiversityHelper(
+      history, GetTimeInThePast(query_time, 1, 0), query_time,
+      history::kEnableLast1DayMetric, &tracker_);
+
+  ASSERT_EQ(1u, local_res.size());
+  ASSERT_EQ(1u, all_res.size());
+
+  // The "local" result should only count the local visit.
+  TestDomainMetricSet(local_res[0], 1, -1, -1);
+  // The "all" result should also include synced visits.
+  TestDomainMetricSet(all_res[0], 3, -1, -1);
+}
+
 }  // namespace history

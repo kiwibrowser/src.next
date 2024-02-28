@@ -7,21 +7,21 @@
 
 #include <stddef.h>
 
-#include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
-#include "base/callback_forward.h"
 #include "base/files/file_path.h"
+#include "base/functional/callback_forward.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/values.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/common/buildflags.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 class Profile;
 
@@ -65,6 +65,11 @@ class ComponentLoader {
   std::string Add(int manifest_resource_id,
                   const base::FilePath& root_directory);
 
+  // Convenience method for registering a component extension by parsed
+  // manifest.
+  std::string Add(base::Value::Dict manifest,
+                  const base::FilePath& root_directory);
+
   // Loads a component extension from file system. Replaces previously added
   // extension with the same ID.
   std::string AddOrReplace(const base::FilePath& path);
@@ -80,6 +85,11 @@ class ComponentLoader {
   // Call this during test setup to load component extensions that have
   // background pages for testing, which could otherwise interfere with tests.
   static void EnableBackgroundExtensionsForTesting();
+
+#if BUILDFLAG(IS_CHROMEOS_ASH) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  // Call this during test setup to disabling loading the HelpApp.
+  static void DisableHelpAppForTesting();
+#endif
 
   // Adds the default component extensions. If |skip_session_components|
   // the loader will skip loading component extensions that weren't supposed to
@@ -130,14 +140,16 @@ class ComponentLoader {
     ignore_allowlist_for_testing_ = value;
   }
 
+  // Allows setting the profile used by the loader for testing purposes.
+  void set_profile_for_testing(Profile* profile) { profile_ = profile; }
+
  private:
   FRIEND_TEST_ALL_PREFIXES(ComponentLoaderTest, ParseManifest);
 
   // Information about a registered component extension.
   struct ComponentExtensionInfo {
-    ComponentExtensionInfo(
-        std::unique_ptr<base::DictionaryValue> manifest_param,
-        const base::FilePath& root_directory);
+    ComponentExtensionInfo(base::Value::Dict manifest_param,
+                           const base::FilePath& root_directory);
 
     ComponentExtensionInfo(const ComponentExtensionInfo&) = delete;
     ComponentExtensionInfo& operator=(const ComponentExtensionInfo&) = delete;
@@ -148,7 +160,7 @@ class ComponentLoader {
     ComponentExtensionInfo& operator=(ComponentExtensionInfo&& other);
 
     // The parsed contents of the extensions's manifest file.
-    std::unique_ptr<base::DictionaryValue> manifest;
+    base::Value::Dict manifest;
 
     // Directory where the extension is stored.
     base::FilePath root_directory;
@@ -157,15 +169,15 @@ class ComponentLoader {
     std::string extension_id;
   };
 
-  // Parses the given JSON manifest. Returns nullptr if it cannot be parsed or
-  // if the result is not a DictionaryValue.
-  std::unique_ptr<base::DictionaryValue> ParseManifest(
+  // Parses the given JSON manifest. Returns `std::nullopt` if it cannot be
+  // parsed or if the result is not a base::Value::Dict.
+  std::optional<base::Value::Dict> ParseManifest(
       base::StringPiece manifest_contents) const;
 
   std::string Add(const base::StringPiece& manifest_contents,
                   const base::FilePath& root_directory,
                   bool skip_allowlist);
-  std::string Add(std::unique_ptr<base::DictionaryValue> parsed_manifest,
+  std::string Add(base::Value::Dict parsed_manifest,
                   const base::FilePath& root_directory,
                   bool skip_allowlist);
 
@@ -210,10 +222,10 @@ class ComponentLoader {
   void FinishAddComponentFromDir(
       const base::FilePath& root_directory,
       const char* extension_id,
-      const absl::optional<std::string>& name_string,
-      const absl::optional<std::string>& description_string,
+      const std::optional<std::string>& name_string,
+      const std::optional<std::string>& description_string,
       base::OnceClosure done_cb,
-      std::unique_ptr<base::DictionaryValue> manifest);
+      std::optional<base::Value::Dict> manifest);
 
   // Finishes loading an extension tts engine.
   void FinishLoadSpeechSynthesisExtension(const char* extension_id);
@@ -221,7 +233,7 @@ class ComponentLoader {
 
   raw_ptr<Profile> profile_;
 
-  raw_ptr<ExtensionSystem> extension_system_;
+  raw_ptr<ExtensionSystem, AcrossTasksDanglingUntriaged> extension_system_;
 
   // List of registered component extensions (see mojom::ManifestLocation).
   typedef std::vector<ComponentExtensionInfo> RegisteredComponentExtensions;

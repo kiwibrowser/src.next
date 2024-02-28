@@ -31,31 +31,47 @@
 #include "third_party/blink/renderer/core/layout/layout_ruby.h"
 
 #include "third_party/blink/renderer/core/frame/web_feature.h"
-#include "third_party/blink/renderer/core/layout/layout_ruby_run.h"
+#include "third_party/blink/renderer/core/layout/layout_ruby_base.h"
+#include "third_party/blink/renderer/core/layout/layout_ruby_column.h"
+#include "third_party/blink/renderer/core/layout/ruby_container.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
 // === generic helper functions to avoid excessive code duplication ===
 
-static LayoutRubyRun* LastRubyRun(const LayoutObject* ruby) {
-  return To<LayoutRubyRun>(ruby->SlowLastChild());
+// static
+LayoutRubyColumn* LayoutRubyAsInline::LastRubyColumn(const LayoutObject& ruby) {
+  return To<LayoutRubyColumn>(ruby.SlowLastChild());
 }
 
-static inline LayoutRubyRun* FindRubyRunParent(LayoutObject* child) {
-  while (child && !child->IsRubyRun())
+// static
+LayoutRubyColumn* LayoutRubyAsInline::FindRubyColumnParent(
+    LayoutObject* child) {
+  while (child && !child->IsRubyColumn()) {
     child = child->Parent();
-  return To<LayoutRubyRun>(child);
+  }
+  return To<LayoutRubyColumn>(child);
 }
 
 // === ruby as inline object ===
 
 LayoutRubyAsInline::LayoutRubyAsInline(Element* element)
-    : LayoutInline(element) {
-  UseCounter::Count(GetDocument(), WebFeature::kRenderRuby);
+    : LayoutInline(element),
+      ruby_container_(RuntimeEnabledFeatures::RubySimplePairingEnabled()
+                          ? MakeGarbageCollected<RubyContainer>(*this)
+                          : nullptr) {
+  if (element) {
+    UseCounter::Count(GetDocument(), WebFeature::kRenderRuby);
+  }
 }
 
 LayoutRubyAsInline::~LayoutRubyAsInline() = default;
+
+void LayoutRubyAsInline::Trace(Visitor* visitor) const {
+  visitor->Trace(ruby_container_);
+  LayoutInline::Trace(visitor);
+}
 
 void LayoutRubyAsInline::StyleDidChange(StyleDifference diff,
                                         const ComputedStyle* old_style) {
@@ -67,123 +83,70 @@ void LayoutRubyAsInline::StyleDidChange(StyleDifference diff,
 void LayoutRubyAsInline::AddChild(LayoutObject* child,
                                   LayoutObject* before_child) {
   NOT_DESTROYED();
-  // If the child is a ruby run, just add it normally.
-  if (child->IsRubyRun()) {
+  // If the child is a ruby column, just add it normally.
+  if (child->IsRubyColumn()) {
     LayoutInline::AddChild(child, before_child);
     return;
   }
 
+  if (RuntimeEnabledFeatures::RubySimplePairingEnabled()) {
+    ruby_container_->AddChild(child, before_child);
+    return;
+  }
+
   if (before_child) {
-    // insert child into run
-    LayoutObject* run = before_child;
-    while (run && !run->IsRubyRun())
-      run = run->Parent();
-    if (run) {
-      if (before_child == run)
-        before_child = To<LayoutRubyRun>(before_child)->FirstChild();
-      DCHECK(!before_child || before_child->IsDescendantOf(run));
-      run->AddChild(child, before_child);
+    // Insert the child into a column.
+    LayoutObject* column = before_child;
+    while (column && !column->IsRubyColumn()) {
+      column = column->Parent();
+    }
+    if (column) {
+      if (before_child == column) {
+        before_child = To<LayoutRubyColumn>(before_child)->FirstChild();
+      }
+      DCHECK(!before_child || before_child->IsDescendantOf(column));
+      column->AddChild(child, before_child);
       return;
     }
-    NOTREACHED();  // before_child should always have a run as parent!
+    NOTREACHED();  // before_child should always have a column as parent!
                    // Emergency fallback: fall through and just append.
   }
 
   // If the new child would be appended, try to add the child to the previous
-  // run if possible, or create a new run otherwise.
-  // (The LayoutRubyRun object will handle the details)
-  LayoutRubyRun* last_run = LastRubyRun(this);
-  if (!last_run || last_run->HasRubyText()) {
-    last_run = &LayoutRubyRun::Create(this, *ContainingBlock());
-    LayoutInline::AddChild(last_run, before_child);
-    last_run->EnsureRubyBase();
+  // column if possible, or create a new column otherwise.
+  // (The LayoutRubyColumn object will handle the details)
+  auto* last_column = LastRubyColumn(*this);
+  if (!last_column || last_column->HasRubyText()) {
+    last_column = &LayoutRubyColumn::Create(this, *ContainingBlock());
+    LayoutInline::AddChild(last_column, before_child);
+    last_column->EnsureRubyBase();
   }
-  last_run->AddChild(child);
+  last_column->AddChild(child);
 }
 
 void LayoutRubyAsInline::RemoveChild(LayoutObject* child) {
   NOT_DESTROYED();
-  // If the child's parent is *this (must be a ruby run), just use the normal
+  // If the child's parent is *this (must be a ruby column), just use the normal
   // remove method.
   if (child->Parent() == this) {
-    DCHECK(child->IsRubyRun());
+    DCHECK(child->IsRubyColumn());
     LayoutInline::RemoveChild(child);
     return;
   }
 
-  // Otherwise find the containing run and remove it from there.
-  LayoutRubyRun* run = FindRubyRunParent(child);
-  DCHECK(run);
-  run->RemoveChild(child);
-}
-
-// === ruby as block object ===
-
-LayoutRubyAsBlock::LayoutRubyAsBlock(ContainerNode* node)
-    : LayoutBlockFlow(node) {
-  UseCounter::Count(GetDocument(), WebFeature::kRenderRuby);
-}
-
-LayoutRubyAsBlock::~LayoutRubyAsBlock() = default;
-
-void LayoutRubyAsBlock::StyleDidChange(StyleDifference diff,
-                                       const ComputedStyle* old_style) {
-  NOT_DESTROYED();
-  LayoutBlockFlow::StyleDidChange(diff, old_style);
-  PropagateStyleToAnonymousChildren();
-}
-
-void LayoutRubyAsBlock::AddChild(LayoutObject* child,
-                                 LayoutObject* before_child) {
-  NOT_DESTROYED();
-  // If the child is a ruby run, just add it normally.
-  if (child->IsRubyRun()) {
-    LayoutBlockFlow::AddChild(child, before_child);
+  if (RuntimeEnabledFeatures::RubySimplePairingEnabled()) {
+    NOTREACHED();
     return;
   }
 
-  if (before_child) {
-    // insert child into run
-    LayoutObject* run = before_child;
-    while (run && !run->IsRubyRun())
-      run = run->Parent();
-    if (run) {
-      if (before_child == run)
-        before_child = To<LayoutRubyRun>(before_child)->FirstChild();
-      DCHECK(!before_child || before_child->IsDescendantOf(run));
-      run->AddChild(child, before_child);
-      return;
-    }
-    NOTREACHED();  // before_child should always have a run as parent!
-                   // Emergency fallback: fall through and just append.
-  }
-
-  // If the new child would be appended, try to add the child to the previous
-  // run if possible, or create a new run otherwise.
-  // (The LayoutRubyRun object will handle the details)
-  LayoutRubyRun* last_run = LastRubyRun(this);
-  if (!last_run || last_run->HasRubyText()) {
-    last_run = &LayoutRubyRun::Create(this, *this);
-    LayoutBlockFlow::AddChild(last_run, before_child);
-    last_run->EnsureRubyBase();
-  }
-  last_run->AddChild(child);
+  // Otherwise find the containing column and remove it from there.
+  auto* column = FindRubyColumnParent(child);
+  DCHECK(column);
+  column->RemoveChild(child);
 }
 
-void LayoutRubyAsBlock::RemoveChild(LayoutObject* child) {
-  NOT_DESTROYED();
-  // If the child's parent is *this (must be a ruby run), just use the normal
-  // remove method.
-  if (child->Parent() == this) {
-    DCHECK(child->IsRubyRun());
-    LayoutBlockFlow::RemoveChild(child);
-    return;
-  }
-
-  // Otherwise find the containing run and remove it from there.
-  LayoutRubyRun* run = FindRubyRunParent(child);
-  DCHECK(run);
-  run->RemoveChild(child);
+void LayoutRubyAsInline::DidRemoveChildFromColumn(LayoutObject& child) {
+  ruby_container_->DidRemoveChildFromColumn(child);
 }
 
 }  // namespace blink

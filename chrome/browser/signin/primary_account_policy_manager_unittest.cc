@@ -7,6 +7,7 @@
 #include "base/memory/raw_ptr.h"
 #include "build/buildflag.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/signin/chrome_signin_client_factory.h"
 #include "chrome/browser/signin/identity_test_environment_profile_adaptor.h"
 #include "chrome/browser/signin/primary_account_policy_manager_factory.h"
 #include "chrome/browser/signin/signin_util.h"
@@ -65,10 +66,14 @@ class PrimaryAccountPolicyManagerTest : public testing::Test {
     return identity_test_env_adaptor_->identity_test_env();
   }
 
+  SigninClient* GetSigninSlient(Profile* profile) {
+    return ChromeSigninClientFactory::GetForProfile(profile);
+  }
+
  private:
   content::BrowserTaskEnvironment task_environment_;
   TestingProfileManager profile_manager_;
-  raw_ptr<TestingProfile> profile_ = nullptr;
+  raw_ptr<TestingProfile, DanglingUntriaged> profile_ = nullptr;
   std::unique_ptr<IdentityTestEnvironmentProfileAdaptor>
       identity_test_env_adaptor_;
 };
@@ -127,7 +132,34 @@ TEST_F(PrimaryAccountPolicyManagerTest,
 
   // Disable sign out and sign in. This should result in the initial profile
   // being deleted.
-  signin_util::SetUserSignoutAllowedForProfile(GetProfile(), false);
+  GetSigninSlient(GetProfile())
+      ->set_is_clear_primary_account_allowed_for_testing(
+          SigninClient::SignoutDecision::CLEAR_PRIMARY_ACCOUNT_DISALLOWED);
+  GetProfile()->GetPrefs()->SetBoolean(prefs::kSigninAllowed, false);
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(1u, GetProfileManager()->profile_manager()->GetNumberOfProfiles());
+}
+
+TEST_F(PrimaryAccountPolicyManagerTest,
+       ClearProfileWhenSigninAndRevokeSyncNotAllowed) {
+  CreateTestingProfile();
+
+  GetIdentityTestEnv()->MakePrimaryAccountAvailable(
+      "test@foo.com", signin::ConsentLevel::kSync);
+
+  // Create a second profile.
+  GetProfileManager()->CreateTestingProfile(
+      "primary_account_policy_manager_test_profile_path_1",
+      IdentityTestEnvironmentProfileAdaptor::
+          GetIdentityTestEnvironmentFactories());
+  ASSERT_EQ(2u, GetProfileManager()->profile_manager()->GetNumberOfProfiles());
+
+  // Disable sign out and sign in. This should result in the initial profile
+  // being deleted.
+  GetSigninSlient(GetProfile())
+      ->set_is_clear_primary_account_allowed_for_testing(
+          SigninClient::SignoutDecision::REVOKE_SYNC_DISALLOWED);
   GetProfile()->GetPrefs()->SetBoolean(prefs::kSigninAllowed, false);
   base::RunLoop().RunUntilIdle();
 

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
@@ -14,9 +15,8 @@
 #include "cc/metrics/frame_sequence_tracker_collection.h"
 #include "cc/metrics/frame_sorter.h"
 #include "cc/metrics/video_playback_roughness_reporter.h"
-#include "components/power_scheduler/power_mode_voter.h"
 #include "components/viz/client/shared_bitmap_reporter.h"
-#include "components/viz/common/gpu/context_provider.h"
+#include "components/viz/common/gpu/raster_context_provider.h"
 #include "components/viz/common/resources/shared_bitmap.h"
 #include "components/viz/common/surfaces/child_local_surface_id_allocator.h"
 #include "mojo/public/cpp/bindings/receiver.h"
@@ -74,13 +74,15 @@ class PLATFORM_EXPORT VideoFrameSubmitter
   // cc::mojom::CompositorFrameSinkClient implementation.
   void DidReceiveCompositorFrameAck(
       WTF::Vector<viz::ReturnedResource> resources) override;
-  void OnBeginFrame(
-      const viz::BeginFrameArgs&,
-      const WTF::HashMap<uint32_t, viz::FrameTimingDetails>&) override;
+  void OnBeginFrame(const viz::BeginFrameArgs&,
+                    const WTF::HashMap<uint32_t, viz::FrameTimingDetails>&,
+                    bool frame_ack,
+                    WTF::Vector<viz::ReturnedResource> resources) override;
   void OnBeginFramePausedChanged(bool paused) override {}
   void ReclaimResources(WTF::Vector<viz::ReturnedResource> resources) override;
   void OnCompositorFrameTransitionDirectiveProcessed(
       uint32_t sequence_id) override {}
+  void OnSurfaceEvicted(const viz::LocalSurfaceId& local_surface_id) override {}
 
   // viz::SharedBitmapReporter implementation.
   void DidAllocateSharedBitmap(base::ReadOnlySharedMemoryRegion,
@@ -143,7 +145,8 @@ class PLATFORM_EXPORT VideoFrameSubmitter
       scoped_refptr<media::VideoFrame> video_frame,
       media::VideoTransformation transform);
 
-  cc::VideoFrameProvider* video_frame_provider_ = nullptr;
+  raw_ptr<cc::VideoFrameProvider, ExperimentalRenderer> video_frame_provider_ =
+      nullptr;
   bool is_media_stream_ = false;
   scoped_refptr<viz::RasterContextProvider> context_provider_;
   mojo::Remote<viz::mojom::blink::CompositorFrameSink> remote_frame_sink_;
@@ -161,7 +164,8 @@ class PLATFORM_EXPORT VideoFrameSubmitter
 
   // Points to either `remote_frame_sink_` or `bundle_proxy_` depending
   // on whether UseVideoFrameSinkBundle is enabled.
-  viz::mojom::blink::CompositorFrameSink* compositor_frame_sink_ = nullptr;
+  raw_ptr<viz::mojom::blink::CompositorFrameSink, ExperimentalRenderer>
+      compositor_frame_sink_ = nullptr;
 
   // Current rendering state. Set by StartRendering() and StopRendering().
   bool is_rendering_ = false;
@@ -204,7 +208,7 @@ class PLATFORM_EXPORT VideoFrameSubmitter
 
   base::OneShotTimer empty_frame_timer_;
 
-  absl::optional<int> last_frame_id_;
+  absl::optional<media::VideoFrame::ID> last_frame_id_;
 
   // We use cc::FrameSorter directly, rather than via
   // cc::CompositorFrameReportingController because video frames do not progress
@@ -224,8 +228,6 @@ class PLATFORM_EXPORT VideoFrameSubmitter
   // frames should be ignored by the video tracker even if they are reported as
   // presented.
   base::flat_set<uint32_t> ignorable_submitted_frames_;
-
-  std::unique_ptr<power_scheduler::PowerModeVoter> power_mode_voter_;
 
   THREAD_CHECKER(thread_checker_);
 

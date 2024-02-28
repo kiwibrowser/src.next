@@ -36,6 +36,7 @@
 #include "third_party/blink/public/mojom/frame/policy_container.mojom-blink.h"
 #include "third_party/blink/public/mojom/frame/triggering_event_info.mojom-blink.h"
 #include "third_party/blink/public/mojom/loader/request_context_frame_type.mojom-blink.h"
+#include "third_party/blink/public/mojom/navigation/navigation_params.mojom-blink.h"
 #include "third_party/blink/public/web/web_picture_in_picture_window_options.h"
 #include "third_party/blink/public/web/web_window_features.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -50,6 +51,7 @@
 
 namespace blink {
 
+class Element;
 class HTMLFormElement;
 class LocalDOMWindow;
 class KURL;
@@ -83,6 +85,10 @@ struct CORE_EXPORT FrameLoadRequest {
     return client_navigation_reason_;
   }
 
+  void SetIsContainerInitiated(bool value) { is_container_initiated_ = value; }
+
+  bool IsContainerInitiated() const { return is_container_initiated_; }
+
   NavigationPolicy GetNavigationPolicy() const { return navigation_policy_; }
   void SetNavigationPolicy(NavigationPolicy navigation_policy) {
     navigation_policy_ = navigation_policy;
@@ -113,8 +119,9 @@ struct CORE_EXPORT FrameLoadRequest {
     source_location_ = std::move(source_location);
   }
 
-  HTMLFormElement* Form() const { return form_; }
-  void SetForm(HTMLFormElement* form) { form_ = form; }
+  HTMLFormElement* Form() const;
+  Element* GetSourceElement() const { return source_element_; }
+  void SetSourceElement(Element* element) { source_element_ = element; }
 
   ShouldSendReferrer GetShouldSendReferrer() const {
     return should_send_referrer_;
@@ -195,6 +202,26 @@ struct CORE_EXPORT FrameLoadRequest {
     is_unfenced_top_navigation_ = is_unfenced_top_navigation;
   }
 
+  const KURL& GetRequestorBaseURL() const { return requestor_base_url_; }
+
+  void SetForceHistoryPush() {
+    force_history_push_ = mojom::blink::ForceHistoryPush::kYes;
+  }
+  mojom::blink::ForceHistoryPush ForceHistoryPush() const {
+    return force_history_push_;
+  }
+
+  bool IsFullscreenRequested() const {
+    // If the window was requested as fullscreen and a popup, then the loaded
+    // frame should enter fullscreen.
+    // See: https://chromestatus.com/feature/6002307972464640
+    return GetWindowFeatures().is_fullscreen && GetWindowFeatures().is_popup;
+  }
+
+  // This function is meant to be used in HTML/SVG attributes where dangling
+  // markup injection occurs. See https://github.com/whatwg/html/pull/9309.
+  const AtomicString& CleanNavigationTarget(const AtomicString& target) const;
+
  private:
   LocalDOMWindow* origin_window_;
   ResourceRequest resource_request_;
@@ -204,7 +231,7 @@ struct CORE_EXPORT FrameLoadRequest {
   NavigationPolicy navigation_policy_ = kNavigationPolicyCurrentTab;
   mojom::blink::TriggeringEventInfo triggering_event_info_ =
       mojom::blink::TriggeringEventInfo::kNotFromEvent;
-  HTMLFormElement* form_ = nullptr;
+  Element* source_element_ = nullptr;
   ShouldSendReferrer should_send_referrer_;
   scoped_refptr<const DOMWrapperWorld> world_;
   scoped_refptr<base::RefCountedData<mojo::Remote<mojom::blink::BlobURLToken>>>
@@ -220,12 +247,20 @@ struct CORE_EXPORT FrameLoadRequest {
   mojo::PendingRemote<mojom::blink::PolicyContainerHostKeepAliveHandle>
       initiator_policy_container_keep_alive_handle_;
   std::unique_ptr<SourceLocation> source_location_;
+  KURL requestor_base_url_;
 
   // This is only used for navigations originating in MPArch fenced frames
   // targeting the outermost frame, which is not visible to the renderer
   // process as a remote frame.
   // TODO(crbug.com/1315802): Refactor _unfencedTop handling.
   bool is_unfenced_top_navigation_ = false;
+
+  mojom::blink::ForceHistoryPush force_history_push_ =
+      mojom::blink::ForceHistoryPush::kNo;
+
+  // Only container-initiated navigations (e.g. iframe change src) report a
+  // resource timing entry to the parent.
+  bool is_container_initiated_ = false;
 };
 
 }  // namespace blink

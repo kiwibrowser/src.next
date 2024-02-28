@@ -25,9 +25,9 @@
 #include "build/branding_buildflags.h"
 #include "chrome/browser/web_applications/os_integration/web_app_shortcut.h"
 #include "chrome/browser/web_applications/web_app_helpers.h"
-#include "chrome/browser/web_applications/web_app_id.h"
 #include "chrome/common/chrome_constants.h"
 #include "components/services/app_service/public/cpp/file_handler.h"
+#include "components/webapps/common/web_app_id.h"
 #include "content/public/test/browser_task_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -76,107 +76,7 @@ class MockEnvironment : public base::Environment {
   std::map<std::string, std::string> variables_;
 };
 
-// This helps EXPECT_THAT(..., ElementsAre(...)) print out more meaningful
-// failure messages.
-std::vector<std::string> FilePathsToStrings(
-    const std::vector<base::FilePath>& paths) {
-  std::vector<std::string> values;
-  for (const auto& path : paths)
-    values.push_back(path.value());
-  return values;
-}
-
 }  // namespace
-
-TEST(ShellIntegrationTest, GetDataWriteLocation) {
-  content::BrowserTaskEnvironment task_environment;
-
-  // Test that it returns $XDG_DATA_HOME.
-  {
-    MockEnvironment env;
-    base::ScopedPathOverride home_override(base::DIR_HOME,
-                                           base::FilePath("/home/user"),
-                                           true /* absolute? */,
-                                           false /* create? */);
-    env.Set("XDG_DATA_HOME", "/user/path");
-    base::FilePath path = GetDataWriteLocation(&env);
-    EXPECT_EQ("/user/path", path.value());
-  }
-
-  // Test that $XDG_DATA_HOME falls back to $HOME/.local/share.
-  {
-    MockEnvironment env;
-    base::ScopedPathOverride home_override(base::DIR_HOME,
-                                           base::FilePath("/home/user"),
-                                           true /* absolute? */,
-                                           false /* create? */);
-    base::FilePath path = GetDataWriteLocation(&env);
-    EXPECT_EQ("/home/user/.local/share", path.value());
-  }
-}
-
-TEST(ShellIntegrationTest, GetDataSearchLocations) {
-  content::BrowserTaskEnvironment task_environment;
-
-  // Test that it returns $XDG_DATA_HOME + $XDG_DATA_DIRS.
-  {
-    MockEnvironment env;
-    base::ScopedPathOverride home_override(base::DIR_HOME,
-                                           base::FilePath("/home/user"),
-                                           true /* absolute? */,
-                                           false /* create? */);
-    env.Set("XDG_DATA_HOME", "/user/path");
-    env.Set("XDG_DATA_DIRS", "/system/path/1:/system/path/2");
-    EXPECT_THAT(
-        FilePathsToStrings(GetDataSearchLocations(&env)),
-        ElementsAre("/user/path",
-                    "/system/path/1",
-                    "/system/path/2"));
-  }
-
-  // Test that $XDG_DATA_HOME falls back to $HOME/.local/share.
-  {
-    MockEnvironment env;
-    base::ScopedPathOverride home_override(base::DIR_HOME,
-                                           base::FilePath("/home/user"),
-                                           true /* absolute? */,
-                                           false /* create? */);
-    env.Set("XDG_DATA_DIRS", "/system/path/1:/system/path/2");
-    EXPECT_THAT(
-        FilePathsToStrings(GetDataSearchLocations(&env)),
-        ElementsAre("/home/user/.local/share",
-                    "/system/path/1",
-                    "/system/path/2"));
-  }
-
-  // Test that if neither $XDG_DATA_HOME nor $HOME are specified, it still
-  // succeeds.
-  {
-    MockEnvironment env;
-    env.Set("XDG_DATA_DIRS", "/system/path/1:/system/path/2");
-    std::vector<std::string> results =
-        FilePathsToStrings(GetDataSearchLocations(&env));
-    ASSERT_EQ(3U, results.size());
-    EXPECT_FALSE(results[0].empty());
-    EXPECT_EQ("/system/path/1", results[1]);
-    EXPECT_EQ("/system/path/2", results[2]);
-  }
-
-  // Test that $XDG_DATA_DIRS falls back to the two default paths.
-  {
-    MockEnvironment env;
-    base::ScopedPathOverride home_override(base::DIR_HOME,
-                                           base::FilePath("/home/user"),
-                                           true /* absolute? */,
-                                           false /* create? */);
-    env.Set("XDG_DATA_HOME", "/user/path");
-    EXPECT_THAT(
-        FilePathsToStrings(GetDataSearchLocations(&env)),
-        ElementsAre("/user/path",
-                    "/usr/local/share",
-                    "/usr/share"));
-  }
-}
 
 TEST(ShellIntegrationTest, GetExistingShortcutContents) {
   const char kTemplateFilename[] = "shortcut-test.desktop";
@@ -599,7 +499,7 @@ TEST(ShellIntegrationTest, GetMimeTypesRegistrationFilename) {
   for (const auto& test_case : test_cases) {
     const base::FilePath filename =
         GetMimeTypesRegistrationFilename(base::FilePath(test_case.profile_path),
-                                         web_app::AppId(test_case.app_id));
+                                         webapps::AppId(test_case.app_id));
     EXPECT_EQ(browser_name + test_case.expected_filename, filename.value());
   }
 }
@@ -690,6 +590,51 @@ TEST(ShellIntegrationTest, WmClass) {
             internal::GetProgramClassName(command_line, "foo.desktop"));
   CheckProgramClassClass(
       internal::GetProgramClassClass(command_line, "foo.desktop"));
+}
+
+TEST(ShellIntegrationTest, GetDesktopEntryStringValueFromFromDesktopFile) {
+  const char* const kDesktopFileContents =
+      "#!/usr/bin/env xdg-open\n"
+      "[Desktop Entry]\n"
+      "Version=1.0\n"
+      "Terminal=false\n"
+      "Type=Application\n"
+      "Name=Lawful example\n"
+      "Exec=/opt/google/chrome/google-chrome --app-id=TestAppId\n"
+      "Icon=IconName\n"
+      "StartupWMClass=example.app\n"
+      "Actions=action1\n\n"
+      "[Desktop Action action1]\n"
+      "Name=Action 1\n"
+      "Exec=/opt/google/chrome/google-chrome --app-id=TestAppId --Test"
+      "Action1=Value";
+
+  // Verify basic strings return the right value.
+  EXPECT_EQ("Lawful example",
+            shell_integration_linux::internal::
+                GetDesktopEntryStringValueFromFromDesktopFileForTest(
+                    "Name", kDesktopFileContents));
+  EXPECT_EQ("example.app",
+            shell_integration_linux::internal::
+                GetDesktopEntryStringValueFromFromDesktopFileForTest(
+                    "StartupWMClass", kDesktopFileContents));
+  // Verify that booleans are returned correctly.
+  EXPECT_EQ("false", shell_integration_linux::internal::
+                         GetDesktopEntryStringValueFromFromDesktopFileForTest(
+                             "Terminal", kDesktopFileContents));
+  // Verify that numbers are returned correctly.
+  EXPECT_EQ("1.0", shell_integration_linux::internal::
+                       GetDesktopEntryStringValueFromFromDesktopFileForTest(
+                           "Version", kDesktopFileContents));
+  // Verify that a non-existent key returns an empty string.
+  EXPECT_EQ("", shell_integration_linux::internal::
+                    GetDesktopEntryStringValueFromFromDesktopFileForTest(
+                        "DoesNotExistKey", kDesktopFileContents));
+  // Verify that a non-existent key in [Desktop Entry] section returns an empty
+  // string.
+  EXPECT_EQ("", shell_integration_linux::internal::
+                    GetDesktopEntryStringValueFromFromDesktopFileForTest(
+                        "Action1", kDesktopFileContents));
 }
 
 }  // namespace shell_integration_linux

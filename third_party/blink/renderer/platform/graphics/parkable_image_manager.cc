@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,9 +15,6 @@
 
 namespace blink {
 
-const base::Feature kParkableImagesToDisk{"ParkableImagesToDisk",
-                                          base::FEATURE_DISABLED_BY_DEFAULT};
-
 struct ParkableImageManager::Statistics {
   size_t unparked_size = 0;
   size_t on_disk_size = 0;
@@ -32,6 +29,16 @@ constexpr base::TimeDelta ParkableImageManager::kDelayedParkingInterval;
 ParkableImageManager& ParkableImageManager::Instance() {
   static base::NoDestructor<ParkableImageManager> instance;
   return *instance;
+}
+
+ParkableImageManager::ParkableImageManager()
+    : task_runner_(Thread::MainThread()->GetTaskRunner(
+          MainThreadTaskRunnerRestricted())) {}
+
+void ParkableImageManager::SetTaskRunnerForTesting(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
+  DCHECK(task_runner);
+  task_runner_ = std::move(task_runner);
 }
 
 bool ParkableImageManager::OnMemoryDump(
@@ -103,11 +110,9 @@ void ParkableImageManager::Add(ParkableImageImpl* impl) {
   ScheduleDelayedParkingTaskIfNeeded();
 
   if (!has_posted_accounting_task_) {
-    auto task_runner = Thread::Current()->GetDeprecatedTaskRunner();
-    DCHECK(task_runner);
     // |base::Unretained(this)| is fine because |this| is a NoDestructor
     // singleton.
-    task_runner->PostDelayedTask(
+    task_runner_->PostDelayedTask(
         FROM_HERE,
         base::BindOnce(&ParkableImageManager::RecordStatisticsAfter5Minutes,
                        base::Unretained(this)),
@@ -135,16 +140,11 @@ void ParkableImageManager::RecordStatisticsAfter5Minutes() const {
 
   // Metrics related to parking only should be recorded if the feature is
   // enabled.
-  if (IsParkableImagesToDiskEnabled()) {
-    base::UmaHistogramBoolean("Memory.ParkableImage.DiskIsUsable.5min",
-                              data_allocator().may_write());
-    // These metrics only make sense if the disk allocator is used.
-    if (data_allocator().may_write()) {
-      base::UmaHistogramTimes("Memory.ParkableImage.TotalWriteTime.5min",
-                              total_disk_write_time_);
-      base::UmaHistogramTimes("Memory.ParkableImage.TotalReadTime.5min",
-                              total_disk_read_time_);
-    }
+  if (IsParkableImagesToDiskEnabled() && data_allocator().may_write()) {
+    base::UmaHistogramTimes("Memory.ParkableImage.TotalWriteTime.5min",
+                            total_disk_write_time_);
+    base::UmaHistogramTimes("Memory.ParkableImage.TotalReadTime.5min",
+                            total_disk_read_time_);
   }
 }
 
@@ -165,11 +165,7 @@ void ParkableImageManager::DestroyParkableImage(
   if (IsMainThread()) {
     DestroyParkableImageOnMainThread(std::move(image));
   } else {
-    auto* thread = Thread::MainThread();
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner =
-        thread->GetDeprecatedTaskRunner();
-    DCHECK(task_runner);
-    task_runner->PostTask(
+    task_runner_->PostTask(
         FROM_HERE,
         base::BindOnce(&ParkableImageManager::DestroyParkableImageOnMainThread,
                        base::Unretained(this), std::move(image)));
@@ -223,10 +219,7 @@ void ParkableImageManager::ScheduleDelayedParkingTaskIfNeeded() {
   if (has_pending_parking_task_)
     return;
 
-  auto* thread = Thread::MainThread();
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner =
-      thread->GetDeprecatedTaskRunner();
-  task_runner->PostDelayedTask(
+  task_runner_->PostDelayedTask(
       FROM_HERE,
       base::BindOnce(&ParkableImageManager::MaybeParkImages,
                      base::Unretained(this)),
@@ -249,8 +242,7 @@ void ParkableImageManager::MaybeParkImages() {
   // directly, to avoid deadlock when we need to park synchronously (i.e. if we
   // have already written to disk and don't need to post a background task), as
   // synchronous parking calls |ParkableImageManager::OnWrittenToDisk()|;
-  WTF::Vector<ParkableImageImpl*> unparked_images;
-  CopyToVector(unparked_images_, unparked_images);
+  WTF::Vector<ParkableImageImpl*> unparked_images(unparked_images_);
 
   // We unlock here so that we can avoid a deadlock, since if the data for the
   // image is already written to disk, we can discard our copy of the data
@@ -261,7 +253,7 @@ void ParkableImageManager::MaybeParkImages() {
   for (auto* image : unparked_images) {
     if (image->ShouldReschedule())
       should_reschedule = true;
-    image->MaybePark();
+    image->MaybePark(task_runner_);
   }
 
   lock_.Acquire();

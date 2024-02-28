@@ -10,7 +10,8 @@ import './shared_style.css.js';
 import './shared_vars.css.js';
 import './site_permissions_list.js';
 
-import {CrLinkRowElement} from 'chrome://resources/cr_elements/cr_link_row/cr_link_row.js';
+import type {CrLinkRowElement} from 'chrome://resources/cr_elements/cr_link_row/cr_link_row.js';
+import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {navigation, Page} from './navigation_helper.js';
@@ -37,12 +38,22 @@ export class ExtensionsSitePermissionsElement extends
 
   static get properties() {
     return {
+      extensions: Array,
+
+      showPermittedSites_: {
+        type: Boolean,
+        value: () => loadTimeData.getBoolean('enableUserPermittedSites'),
+      },
+
       siteSetEnum_: {
         type: Object,
         value: chrome.developerPrivate.SiteSet,
       },
     };
   }
+
+  extensions: chrome.developerPrivate.ExtensionInfo[];
+  private showPermittedSites_: boolean;
 
   private onAllSitesLinkClick_() {
     navigation.navigateTo({page: Page.SITE_PERMISSIONS_ALL_SITES});

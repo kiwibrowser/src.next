@@ -10,9 +10,9 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/raw_ref.h"
 #include "base/metrics/field_trial.h"
 #include "base/run_loop.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/search/instant_service.h"
 #include "chrome/browser/search/instant_unittest_base.h"
 #include "chrome/browser/search/search.h"
@@ -71,12 +71,12 @@ class FakeWebContentsObserver : public content::WebContentsObserver {
   void DidStartNavigation(content::NavigationHandle* navigation) override {
     if (navigation->GetReloadType() == content::ReloadType::NONE)
       return;
-    if (url_ == navigation->GetURL())
+    if (*url_ == navigation->GetURL())
       num_reloads_++;
     current_url_ = navigation->GetURL();
   }
 
-  const GURL& url() const { return url_; }
+  const GURL& url() const { return *url_; }
 
   const GURL& current_url() const { return contents_->GetURL(); }
 
@@ -95,7 +95,7 @@ class FakeWebContentsObserver : public content::WebContentsObserver {
  private:
   raw_ptr<content::WebContents> contents_;
   content::DidStartNavigationObserver did_start_observer_;
-  const GURL& url_;
+  const raw_ref<const GURL> url_;
   GURL current_url_;
   int num_reloads_;
 };

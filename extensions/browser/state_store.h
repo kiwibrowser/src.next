@@ -8,7 +8,7 @@
 #include <set>
 #include <string>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/scoped_observation.h"
@@ -28,10 +28,9 @@ class ValueStoreFactory;
 namespace extensions {
 
 // A storage area for per-extension state that needs to be persisted to disk.
-class StateStore : public base::SupportsWeakPtr<StateStore>,
-                   public ExtensionRegistryObserver {
+class StateStore : public ExtensionRegistryObserver {
  public:
-  typedef value_store::ValueStoreFrontend::ReadCallback ReadCallback;
+  using ReadCallback = value_store::ValueStoreFrontend::ReadCallback;
 
   // The kind of extensions data stored in a backend.
   enum class BackendType { RULES, STATE, SCRIPTS };
@@ -51,7 +50,7 @@ class StateStore : public base::SupportsWeakPtr<StateStore>,
              bool deferred_load);
   // This variant is useful for testing (using a mock ValueStore).
   StateStore(content::BrowserContext* context,
-             absl::optional<base::Value> store);
+             std::optional<base::Value> store);
 
   StateStore(const StateStore&) = delete;
   StateStore& operator=(const StateStore&) = delete;
@@ -118,6 +117,8 @@ class StateStore : public base::SupportsWeakPtr<StateStore>,
 
   base::ScopedObservation<ExtensionRegistry, ExtensionRegistryObserver>
       extension_registry_observation_{this};
+
+  base::WeakPtrFactory<StateStore> weak_ptr_factory_{this};
 };
 
 }  // namespace extensions

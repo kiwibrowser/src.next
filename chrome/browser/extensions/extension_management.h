@@ -7,12 +7,11 @@
 
 #include <memory>
 #include <string>
-#include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
+#include "base/containers/flat_map.h"
+#include "base/containers/flat_set.h"
 #include "base/memory/raw_ptr.h"
-#include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
 #include "base/observer_list.h"
 #include "base/values.h"
@@ -42,6 +41,7 @@ struct GlobalSettings;
 }  // namespace internal
 
 class APIPermissionSet;
+class CWSInfoServiceInterface;
 class Extension;
 class PermissionSet;
 
@@ -121,10 +121,10 @@ class ExtensionManagement : public KeyedService {
 
   // Returns the force install list, in format specified by
   // ExternalPolicyLoader::AddExtension().
-  std::unique_ptr<base::DictionaryValue> GetForceInstallList() const;
+  base::Value::Dict GetForceInstallList() const;
 
   // Like GetForceInstallList(), but returns recommended install list instead.
-  std::unique_ptr<base::DictionaryValue> GetRecommendedInstallList() const;
+  base::Value::Dict GetRecommendedInstallList() const;
 
   // Returns |true| if there is at least one extension with
   // |INSTALLATION_ALLOWED| as installation mode. This excludes force installed
@@ -158,6 +158,13 @@ class ExtensionManagement : public KeyedService {
   // id |extension_id| is allowed to be installed.
   bool IsAllowedManifestType(Manifest::Type manifest_type,
                              const std::string& extension_id) const;
+
+  bool IsAllowedManifestVersion(int manifest_version,
+                                const std::string& extension_id,
+                                Manifest::Type manifest_type);
+  bool IsAllowedManifestVersion(const Extension* extension);
+
+  bool IsAllowedByUnpublishedAvailabilityPolicy(const Extension* extension);
 
   // Returns the list of blocked API permissions for |extension|.
   APIPermissionSet GetBlockedAPIPermissions(const Extension* extension);
@@ -226,27 +233,27 @@ class ExtensionManagement : public KeyedService {
   // aren't deferred).
   ExtensionIdSet GetForcePinnedList() const;
 
-  // Returns whether the profile associated with this instance is supervised.
-  bool is_child() const { return is_child_; }
+  // Returns if an extension with |id| can navigate to file URLs.
+  bool IsFileUrlNavigationAllowed(const ExtensionId& id);
 
  private:
   using SettingsIdMap =
-      std::unordered_map<ExtensionId,
-                         std::unique_ptr<internal::IndividualSettings>>;
+      base::flat_map<ExtensionId,
+                     std::unique_ptr<internal::IndividualSettings>>;
   using SettingsUpdateUrlMap =
-      std::unordered_map<std::string,
-                         std::unique_ptr<internal::IndividualSettings>>;
+      base::flat_map<std::string,
+                     std::unique_ptr<internal::IndividualSettings>>;
   friend class ExtensionManagementServiceTest;
 
   // Load all extension management preferences from |pref_service|, and
   // refresh the settings.
   void Refresh();
 
-  // Tries to parse the individual setting in |settings_by_id_| for
-  // |extension_id|. Returns true if it succeeds, otherwise returns false and
-  // removes the entry from |settings_by_id_|.
+  // Tries to parse the individual setting in `settings_by_id_` for
+  // `extension_id`. Returns true if it succeeds, otherwise returns false and
+  // removes the entry from `settings_by_id_`.
   bool ParseById(const std::string& extension_id,
-                 const base::DictionaryValue* subdict);
+                 const base::Value::Dict& subdict);
 
   // Returns the individual settings for |extension_id| if it exists, otherwise
   // returns nullptr. This method will also lazy load the settings if they're
@@ -257,13 +264,23 @@ class ExtensionManagement : public KeyedService {
   // Loads the deferred settings information for |extension_id|.
   void LoadDeferredExtensionSetting(const std::string& extension_id);
 
-  // Load preference with name |pref_name| and expected type |expected_type|.
+  // Loads preference with name |pref_name| and expected type |expected_type|.
   // If |force_managed| is true, only loading from the managed preference store
   // is allowed. Returns NULL if the preference is not present, not allowed to
   // be loaded from or has the wrong type.
   const base::Value* LoadPreference(const char* pref_name,
                                     bool force_managed,
                                     base::Value::Type expected_type) const;
+
+  // Loads the dictionary preference with name `pref_name` - see
+  // `LoadPreference` for more details.
+  const base::Value::Dict* LoadDictPreference(const char* pref_name,
+                                              bool force_managed) const;
+
+  // Loads the list preference with name `pref_name` - see `LoadPreference` for
+  // more details.
+  const base::Value::List* LoadListPreference(const char* pref_name,
+                                              bool force_managed) const;
 
   void OnExtensionPrefChanged();
   void NotifyExtensionManagementPrefChanged();
@@ -278,11 +295,11 @@ class ExtensionManagement : public KeyedService {
 
   // Helper to return an extension install list, in format specified by
   // ExternalPolicyLoader::AddExtension().
-  std::unique_ptr<base::DictionaryValue> GetInstallListByMode(
+  base::Value::Dict GetInstallListByMode(
       InstallationMode installation_mode) const;
 
-  // Helper to update |extension_dict| for forced installs.
-  void UpdateForcedExtensions(const base::DictionaryValue* extension_dict);
+  // Helper to update `extension_dict` for forced installs.
+  void UpdateForcedExtensions(const base::Value::Dict* extension_dict);
 
   // Helper function to access |settings_by_id_| with |id| as key.
   // Adds a new IndividualSettings entry to |settings_by_id_| if none exists for
@@ -301,7 +318,7 @@ class ExtensionManagement : public KeyedService {
   // A set of extension IDs whose parsing of settings and insertion into
   // |settings_by_id_| has been deferred until needed. We keep track of this to
   // avoid scanning the prefs repeatedly for entries that don't have a setting.
-  std::unordered_set<std::string> deferred_ids_;
+  base::flat_set<std::string> deferred_ids_;
 
   // Similar to |settings_by_id_|, but contains the settings for a group of
   // extensions with same update URL. The update url itself is used as index
@@ -322,11 +339,15 @@ class ExtensionManagement : public KeyedService {
   const raw_ptr<Profile> profile_ = nullptr;
   raw_ptr<PrefService> pref_service_ = nullptr;
   bool is_signin_profile_ = false;
-  bool is_child_ = false;
 
   base::ObserverList<Observer, true>::Unchecked observer_list_;
   PrefChangeRegistrar pref_change_registrar_;
   std::vector<std::unique_ptr<ManagementPolicy::Provider>> providers_;
+
+  // Unowned pointer to the CWSInfoService keyed-service instance for this
+  // profile. The service provides information about CWS publish status for
+  // extensions.
+  raw_ptr<CWSInfoServiceInterface> cws_info_service_ = nullptr;
 };
 
 class ExtensionManagementFactory : public ProfileKeyedServiceFactory {
@@ -346,7 +367,7 @@ class ExtensionManagementFactory : public ProfileKeyedServiceFactory {
   ~ExtensionManagementFactory() override;
 
   // BrowserContextKeyedServiceExtensionManagementFactory:
-  KeyedService* BuildServiceInstanceFor(
+  std::unique_ptr<KeyedService> BuildServiceInstanceForBrowserContext(
       content::BrowserContext* context) const override;
   void RegisterProfilePrefs(
       user_prefs::PrefRegistrySyncable* registry) override;

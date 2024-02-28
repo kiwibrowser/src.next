@@ -1,12 +1,16 @@
 include_rules = [
   "+components/app_constants/constants.h",
   "+components/crash/content/browser/error_reporting",
+  "+components/guest_view/common",
   "+components/live_caption",
   "+extensions/strings/grit/extensions_strings.h",
   "+services/network/public",
 
   # For access to testing command line switches.
   "+ppapi/shared_impl",
+
+  # Fuzzer tests require ICU initialization.
+  "+third_party/icu/fuzzers/fuzzer_utils.h",
 
   # The extensions system should not depend on Chrome Platform Apps (or any
   # other component of the apps system).
@@ -21,9 +25,6 @@ specific_include_rules = {
     "+chrome/browser/apps/platform_apps/app_browsertest_util.h",
   ],
 
-  "content_script_apitest.cc": [
-    "+components/web_package",
-  ],
   "extension_protocols_unittest\.cc": [
     "+services/network/test",
   ],

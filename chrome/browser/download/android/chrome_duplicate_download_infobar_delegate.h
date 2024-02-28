@@ -5,8 +5,8 @@
 #ifndef CHROME_BROWSER_DOWNLOAD_ANDROID_CHROME_DUPLICATE_DOWNLOAD_INFOBAR_DELEGATE_H_
 #define CHROME_BROWSER_DOWNLOAD_ANDROID_CHROME_DUPLICATE_DOWNLOAD_INFOBAR_DELEGATE_H_
 
-#include "base/callback.h"
 #include "base/files/file_path.h"
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "chrome/browser/download/android/duplicate_download_infobar_delegate.h"
 #include "chrome/browser/download/download_target_determiner_delegate.h"
@@ -52,7 +52,7 @@ class ChromeDuplicateDownloadInfoBarDelegate
   bool Cancel() override;
   std::string GetFilePath() const override;
   void InfoBarDismissed() override;
-  absl::optional<Profile::OTRProfileID> GetOTRProfileID() const override;
+  std::optional<Profile::OTRProfileID> GetOTRProfileID() const override;
 
   // The download item that is requesting the infobar. Could get deleted while
   // the infobar is showing.

@@ -23,10 +23,12 @@
 #include "third_party/blink/renderer/core/dom/character_data.h"
 
 #include "base/numerics/checked_math.h"
+#include "third_party/blink/renderer/core/dom/child_node_part.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/mutation_observer_interest_group.h"
 #include "third_party/blink/renderer/core/dom/mutation_record.h"
+#include "third_party/blink/renderer/core/dom/node_cloning_data.h"
 #include "third_party/blink/renderer/core/dom/processing_instruction.h"
 #include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
@@ -39,11 +41,13 @@
 namespace blink {
 
 void CharacterData::MakeParkable() {
-  if (is_parkable_)
+  if (is_parkable_) {
     return;
+  }
 
-  parkable_data_ = ParkableString(data_.ReleaseImpl());
-  data_ = String();
+  auto released = data_.ReleaseImpl();
+  data_.~String();
+  new (&parkable_data_) ParkableString(std::move(released));
   is_parkable_ = true;
 }
 
@@ -196,11 +200,7 @@ void CharacterData::SetDataAndUpdate(const String& new_data,
                                      unsigned new_length,
                                      UpdateSource source) {
   String old_data = this->data();
-  if (is_parkable_) {
-    is_parkable_ = false;
-    parkable_data_ = ParkableString();
-  }
-  data_ = new_data;
+  SetDataWithoutUpdate(new_data);
 
   DCHECK(!GetLayoutObject() || IsTextNode());
   if (auto* text_node = DynamicTo<Text>(this))
@@ -227,22 +227,23 @@ void CharacterData::DidModifyData(const String& old_data, UpdateSource source) {
 
   if (parentNode()) {
     ContainerNode::ChildrenChange change = {
-        ContainerNode::ChildrenChangeType::kTextChanged,
-        source == kUpdateFromParser
-            ? ContainerNode::ChildrenChangeSource::kParser
-            : ContainerNode::ChildrenChangeSource::kAPI,
-        this,
-        previousSibling(),
-        nextSibling(),
-        {},
-        old_data};
+        .type = ContainerNode::ChildrenChangeType::kTextChanged,
+        .by_parser = source == kUpdateFromParser
+                         ? ContainerNode::ChildrenChangeSource::kParser
+                         : ContainerNode::ChildrenChangeSource::kAPI,
+        .affects_elements = ContainerNode::ChildrenChangeAffectsElements::kNo,
+        .sibling_changed = this,
+        .sibling_before_change = previousSibling(),
+        .sibling_after_change = nextSibling(),
+        .old_text = &old_data};
     parentNode()->ChildrenChanged(change);
   }
 
   // Skip DOM mutation events if the modification is from parser.
   // Note that mutation observer events will still fire.
   // Spec: https://html.spec.whatwg.org/C/#insert-a-character
-  if (source != kUpdateFromParser && !IsInShadowTree()) {
+  if (source != kUpdateFromParser && !IsInShadowTree() &&
+      !GetDocument().ShouldSuppressMutationEvents()) {
     if (GetDocument().HasListenerType(
             Document::kDOMCharacterDataModifiedListener)) {
       DispatchScopedEvent(*MutationEvent::Create(
@@ -252,6 +253,18 @@ void CharacterData::DidModifyData(const String& old_data, UpdateSource source) {
     DispatchSubtreeModifiedEvent();
   }
   probe::CharacterDataModified(this);
+}
+
+Node* CharacterData::Clone(Document& factory,
+                           NodeCloningData& cloning_data,
+                           ContainerNode* append_to,
+                           ExceptionState& append_exception_state) const {
+  CharacterData* clone = CloneWithData(factory, data());
+  PartRoot::CloneParts(*this, *clone, cloning_data);
+  if (append_to) {
+    append_to->AppendChild(clone, append_exception_state);
+  }
+  return clone;
 }
 
 }  // namespace blink

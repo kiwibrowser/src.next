@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,10 +28,12 @@ bool StyleRuleUsageTracker::InsertToUsedRulesMap(
 
 void StyleRuleUsageTracker::Track(const CSSStyleSheet* parent_sheet,
                                   const StyleRule* rule) {
-  if (!parent_sheet)
+  if (!parent_sheet) {
     return;
-  if (!InsertToUsedRulesMap(parent_sheet, rule))
+  }
+  if (!InsertToUsedRulesMap(parent_sheet, rule)) {
     return;
+  }
   auto it = used_rules_delta_.find(parent_sheet);
   if (it != used_rules_delta_.end()) {
     it->value->push_back(rule);

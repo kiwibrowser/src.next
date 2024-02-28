@@ -6,7 +6,7 @@
 
 #include <memory>
 
-#include "base/memory/singleton.h"
+#include "base/no_destructor.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/extension_garbage_collector.h"
@@ -31,16 +31,24 @@ ExtensionGarbageCollectorFactory::GetForBrowserContext(
 // static
 ExtensionGarbageCollectorFactory*
 ExtensionGarbageCollectorFactory::GetInstance() {
-  return base::Singleton<ExtensionGarbageCollectorFactory>::get();
+  static base::NoDestructor<ExtensionGarbageCollectorFactory> instance;
+  return instance.get();
 }
 
 ExtensionGarbageCollectorFactory::ExtensionGarbageCollectorFactory()
-    : ProfileKeyedServiceFactory("ExtensionGarbageCollector") {
+    : ProfileKeyedServiceFactory(
+          "ExtensionGarbageCollector",
+          ProfileSelections::Builder()
+              .WithRegular(ProfileSelection::kOriginalOnly)
+              // TODO(crbug.com/1418376): Check if this service is needed in
+              // Guest mode.
+              .WithGuest(ProfileSelection::kOriginalOnly)
+              .Build()) {
   DependsOn(ExtensionsBrowserClient::Get()->GetExtensionSystemFactory());
   DependsOn(InstallTrackerFactory::GetInstance());
 }
 
-ExtensionGarbageCollectorFactory::~ExtensionGarbageCollectorFactory() {}
+ExtensionGarbageCollectorFactory::~ExtensionGarbageCollectorFactory() = default;
 
 // static
 std::unique_ptr<KeyedService>
@@ -53,9 +61,10 @@ ExtensionGarbageCollectorFactory::BuildInstanceFor(
 #endif
 }
 
-KeyedService* ExtensionGarbageCollectorFactory::BuildServiceInstanceFor(
+std::unique_ptr<KeyedService>
+ExtensionGarbageCollectorFactory::BuildServiceInstanceForBrowserContext(
     content::BrowserContext* context) const {
-  return BuildInstanceFor(context).release();
+  return BuildInstanceFor(context);
 }
 
 bool ExtensionGarbageCollectorFactory::ServiceIsCreatedWithBrowserContext()

@@ -44,4 +44,16 @@ public interface ControlContainer {
      * @return The {@link View} associated with this container.
      */
     View getView();
+
+    /**
+     * Triggered when the current tab or model has changed.
+     * @param incognito Whether or not the current tab model is incognito.
+     */
+    void onTabOrModelChanged(boolean incognito);
+
+    /**
+     * Destroys the control container, causing it to release any owned native resources and cancel
+     * pending tasks.
+     */
+    void destroy();
 }

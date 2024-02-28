@@ -127,6 +127,8 @@ const struct DOMExceptionEntry {
     {DOMExceptionCode::kNotAllowedError, "NotAllowedError",
      "The request is not allowed by the user agent or the platform in the "
      "current context."},
+    {DOMExceptionCode::kOptOutError, "OptOutError",
+     "The user opted out of the process."},
 
     // DOMError (obsolete, not DOMException) defined in File system (obsolete).
     // https://www.w3.org/TR/2012/WD-file-system-api-20120417/
@@ -153,6 +155,27 @@ const struct DOMExceptionEntry {
      "A parity error has been detected."},
     {DOMExceptionCode::kWebTransportError, "WebTransportError",
      "The WebTransport operation failed."},
+
+    // Smart Card API
+    // https://wicg.github.io/web-smart-card/#smartcarderror-interface
+    {DOMExceptionCode::kSmartCardError, "SmartCardError",
+     "A Smart Card operation failed."},
+
+    // WebGPU https://www.w3.org/TR/webgpu/
+    {DOMExceptionCode::kGPUPipelineError, "GPUPipelineError",
+     "A WebGPU pipeline creation failed."},
+
+    // Media Capture and Streams API
+    // https://w3c.github.io/mediacapture-main/#overconstrainederror-interface
+    {DOMExceptionCode::kOverconstrainedError, "OverconstrainedError",
+     "The desired set of constraints/capabilities cannot be met."},
+
+    // FedCM API
+    // https://fedidcg.github.io/FedCM/#browser-api-identity-credential-error-interface
+    {DOMExceptionCode::kIdentityCredentialError, "IdentityCredentialError",
+     "An attempt to retrieve an IdentityCredential has failed."}
+
+    // Extra comment to keep the end of the initializer list on its own line.
 };
 
 uint16_t ToLegacyErrorCode(DOMExceptionCode exception_code) {

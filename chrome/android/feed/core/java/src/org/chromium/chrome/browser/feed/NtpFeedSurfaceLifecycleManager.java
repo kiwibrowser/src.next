@@ -7,9 +7,8 @@ package org.chromium.chrome.browser.feed;
 import android.app.Activity;
 
 import androidx.annotation.Nullable;
-import androidx.annotation.VisibleForTesting;
 
-import org.chromium.base.TraceEvent;
+import org.chromium.base.ResettersForTesting;
 import org.chromium.chrome.browser.preferences.Pref;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
@@ -57,32 +56,30 @@ public class NtpFeedSurfaceLifecycleManager extends FeedSurfaceLifecycleManager 
 
         // We don't need to handle EmptyTabObserver#onDestroy here since this class will be
         // destroyed when the associated NewTabPage is destroyed.
-        mTabObserver = new EmptyTabObserver() {
-            @Override
-            public void onInteractabilityChanged(Tab tab, boolean isInteractable) {
-                if (isInteractable) {
-                    show();
-                }
-            }
+        mTabObserver =
+                new EmptyTabObserver() {
+                    @Override
+                    public void onInteractabilityChanged(Tab tab, boolean isInteractable) {
+                        if (isInteractable) {
+                            show();
+                        }
+                    }
 
-            @Override
-            public void onShown(Tab tab, @TabSelectionType int type) {
-                show();
-            }
+                    @Override
+                    public void onShown(Tab tab, @TabSelectionType int type) {
+                        show();
+                    }
 
-            @Override
-            public void onHidden(Tab tab, @TabHidingType int type) {
-                hide();
-            }
+                    @Override
+                    public void onHidden(Tab tab, @TabHidingType int type) {
+                        hide();
+                    }
 
-            @Override
-            public void onPageLoadStarted(Tab tab, GURL url) {
-                try (TraceEvent e = TraceEvent.scoped(
-                             "NtpFeedSurfaceLifecycleManager.saveInstanceState")) {
-                    saveInstanceState();
-                }
-            }
-        };
+                    @Override
+                    public void onPageLoadStarted(Tab tab, GURL url) {
+                        saveInstanceState();
+                    }
+                };
         mTab.addObserver(mTabObserver);
     }
 
@@ -91,7 +88,8 @@ public class NtpFeedSurfaceLifecycleManager extends FeedSurfaceLifecycleManager 
     protected boolean canShow() {
         // We don't call FeedSurfaceCoordinator#onShow to prevent feed services from being warmed up
         // if the user has opted out from article suggestions during the previous session.
-        return super.canShow() && getPrefService().getBoolean(Pref.ARTICLES_LIST_VISIBLE)
+        return super.canShow()
+                && getPrefService().getBoolean(Pref.ARTICLES_LIST_VISIBLE)
                 && !mTab.isHidden();
     }
 
@@ -121,12 +119,10 @@ public class NtpFeedSurfaceLifecycleManager extends FeedSurfaceLifecycleManager 
         // NTP itself, at which point the last committed entry is not for the NTP yet. This method
         // will then be called a second time when the user navigates away, at which point the last
         // committed entry is for the NTP. The extra data must only be set in the latter case.
-        if (!UrlUtilities.isNTPUrl(entry.getUrl())) return;
+        if (!UrlUtilities.isNtpUrl(entry.getUrl())) return;
 
-        try (TraceEvent e = TraceEvent.scoped("setEntryExtraData")) {
-            controller.setEntryExtraData(index, FEED_SAVED_INSTANCE_STATE_KEY,
-                    mCoordinator.getSavedInstanceStateString());
-        }
+        controller.setEntryExtraData(
+                index, FEED_SAVED_INSTANCE_STATE_KEY, mCoordinator.getSavedInstanceStateString());
     }
 
     /**
@@ -134,8 +130,7 @@ public class NtpFeedSurfaceLifecycleManager extends FeedSurfaceLifecycleManager 
      *         saved.
      */
     @Override
-    @Nullable
-    protected String restoreInstanceState() {
+    protected @Nullable String restoreInstanceState() {
         if (mTab.getWebContents() == null) return null;
 
         NavigationController controller = mTab.getWebContents().getNavigationController();
@@ -143,7 +138,6 @@ public class NtpFeedSurfaceLifecycleManager extends FeedSurfaceLifecycleManager 
         return controller.getEntryExtraData(index, FEED_SAVED_INSTANCE_STATE_KEY);
     }
 
-    @VisibleForTesting
     TabObserver getTabObserverForTesting() {
         return mTabObserver;
     }
@@ -153,8 +147,8 @@ public class NtpFeedSurfaceLifecycleManager extends FeedSurfaceLifecycleManager 
         return UserPrefs.get(Profile.getLastUsedRegularProfile());
     }
 
-    @VisibleForTesting
     static void setPrefServiceForTesting(PrefService prefServiceForTesting) {
         sPrefServiceForTesting = prefServiceForTesting;
+        ResettersForTesting.register(() -> sPrefServiceForTesting = null);
     }
 }

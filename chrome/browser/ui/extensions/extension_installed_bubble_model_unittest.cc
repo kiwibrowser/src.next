@@ -43,27 +43,25 @@ class ExtensionInstalledBubbleModelTest : public BrowserWithTestWindowTest {
   void AddOmniboxKeyword(extensions::ExtensionBuilder* builder,
                          const std::string& keyword) {
     using ManifestKeys = extensions::api::omnibox::ManifestKeys;
-    auto info = std::make_unique<base::DictionaryValue>();
-    info->SetStringKey(ManifestKeys::Omnibox::kKeyword, keyword);
+    base::Value::Dict info;
+    info.Set(ManifestKeys::Omnibox::kKeyword, keyword);
     builder->SetManifestKey(ManifestKeys::kOmnibox, std::move(info));
   }
 
   void AddRegularAction(extensions::ExtensionBuilder* builder) {
     builder->SetManifestKey(extensions::manifest_keys::kAction,
-                            std::make_unique<base::DictionaryValue>());
+                            base::Value::Dict());
   }
 
   void AddBrowserActionKeyBinding(extensions::ExtensionBuilder* builder,
                                   const std::string& key) {
-    base::Value command(base::Value::Type::DICTIONARY);
-    command.SetStringKey("suggested_key", key);
-    command.SetStringKey("description", "Invoke the page action");
-    auto commands =
-        std::make_unique<base::Value>(base::Value::Type::DICTIONARY);
-    commands->SetKey(extensions::manifest_values::kBrowserActionCommandEvent,
-                     std::move(command));
-    builder->SetManifestKey(extensions::manifest_keys::kCommands,
-                            std::move(commands));
+    builder->SetManifestKey(
+        extensions::manifest_keys::kCommands,
+        base::Value::Dict().Set(
+            extensions::manifest_values::kBrowserActionCommandEvent,
+            base::Value::Dict()
+                .Set("suggested_key", key)
+                .Set("description", "Invoke the page action")));
   }
 
   extensions::ExtensionService* extension_service() {
@@ -73,7 +71,8 @@ class ExtensionInstalledBubbleModelTest : public BrowserWithTestWindowTest {
   const SkBitmap empty_icon_;
 
  private:
-  raw_ptr<extensions::ExtensionService> extension_service_ = nullptr;
+  raw_ptr<extensions::ExtensionService, DanglingUntriaged> extension_service_ =
+      nullptr;
 };
 
 TEST_F(ExtensionInstalledBubbleModelTest, SyntheticPageActionExtension) {

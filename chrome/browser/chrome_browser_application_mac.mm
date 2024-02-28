@@ -6,9 +6,9 @@
 
 #include <Carbon/Carbon.h>  // for <HIToolbox/Events.h>
 
+#include "base/apple/call_with_eh_frame.h"
 #include "base/check.h"
 #include "base/command_line.h"
-#include "base/mac/call_with_eh_frame.h"
 #include "base/observer_list.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
@@ -33,6 +33,12 @@ void RegisterBrowserCrApp() {
   // will not be a BrowserCrApplication, but will instead be an NSApplication.
   // This is undesirable and we must enforce that this doesn't happen.
   CHECK([NSApp isKindOfClass:[BrowserCrApplication class]]);
+}
+
+void InitializeHeadlessMode() {
+  // In headless mode the browser window exists but is always hidden, so there
+  // is no point in showing dock icon and menu bar.
+  NSApp.activationPolicy = NSApplicationActivationPolicyAccessory;
 }
 
 void Terminate() {
@@ -111,13 +117,14 @@ std::string DescriptionForNSEvent(NSEvent* event) {
 
 }  // namespace
 
-@interface BrowserCrApplication ()<NativeEventProcessor> {
-  base::ObserverList<content::NativeEventProcessorObserver>::Unchecked
-      _observers;
-}
+@interface BrowserCrApplication () <NativeEventProcessor>
 @end
 
-@implementation BrowserCrApplication
+@implementation BrowserCrApplication {
+  base::ObserverList<content::NativeEventProcessorObserver>::Unchecked
+      _observers;
+  BOOL _handlingSendEvent;
+}
 
 + (void)initialize {
   // Turn all deallocated Objective-C objects into zombies, keeping
@@ -146,8 +153,8 @@ std::string DescriptionForNSEvent(NSEvent* event) {
   // If the message loop was initialized before NSApp is setup, the
   // message pump will be setup incorrectly.  Failing this implies
   // that RegisterBrowserCrApp() should be called earlier.
-  CHECK(base::MessagePumpMac::UsingCrApp())
-      << "MessagePumpMac::Create() is using the wrong pump implementation"
+  CHECK(base::message_pump_apple::UsingCrApp())
+      << "message_pump_apple::Create() is using the wrong pump implementation"
       << " for " << [[self className] UTF8String];
 
   return app;
@@ -220,14 +227,12 @@ std::string DescriptionForNSEvent(NSEvent* event) {
 // NSApplication event loop, so final post- MessageLoop::Run() work is done
 // before exiting.
 - (void)terminate:(id)sender {
-  AppController* appController = static_cast<AppController*>([NSApp delegate]);
-  [appController tryToTerminateApplication:self];
+  [AppController.sharedController tryToTerminateApplication:self];
   // Return, don't exit. The application is responsible for exiting on its own.
 }
 
 - (void)cancelTerminate:(id)sender {
-  AppController* appController = static_cast<AppController*>([NSApp delegate]);
-  [appController stopTryingToTerminateApplication:self];
+  [AppController.sharedController stopTryingToTerminateApplication:self];
 }
 
 - (NSEvent*)nextEventMatchingMask:(NSEventMask)mask
@@ -235,11 +240,11 @@ std::string DescriptionForNSEvent(NSEvent* event) {
                            inMode:(NSString*)mode
                           dequeue:(BOOL)dequeue {
   __block NSEvent* event = nil;
-  base::mac::CallWithEHFrame(^{
-      event = [super nextEventMatchingMask:mask
-                                 untilDate:expiration
-                                    inMode:mode
-                                   dequeue:dequeue];
+  base::apple::CallWithEHFrame(^{
+    event = [super nextEventMatchingMask:mask
+                               untilDate:expiration
+                                  inMode:mode
+                                 dequeue:dequeue];
   });
   return event;
 }
@@ -293,7 +298,7 @@ std::string DescriptionForNSEvent(NSEvent* event) {
   crash_reporter::ScopedCrashKeyString scopedKey(&sendActionKey, value);
 
   __block BOOL rv;
-  base::mac::CallWithEHFrame(^{
+  base::apple::CallWithEHFrame(^{
     rv = [super sendAction:anAction to:aTarget from:sender];
   });
   return rv;
@@ -318,7 +323,7 @@ std::string DescriptionForNSEvent(NSEvent* event) {
   crash_reporter::ScopedCrashKeyString scopedKey(&nseventKey,
                                                  DescriptionForNSEvent(event));
 
-  base::mac::CallWithEHFrame(^{
+  base::apple::CallWithEHFrame(^{
     static const bool kKioskMode =
         base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kKioskMode);
     if (kKioskMode) {
@@ -334,13 +339,13 @@ std::string DescriptionForNSEvent(NSEvent* event) {
     }
     base::mac::ScopedSendingEvent sendingEventScoper;
     content::ScopedNotifyNativeEventProcessorObserver scopedObserverNotifier(
-        &_observers, event);
+        &self->_observers, event);
     // Mac Eisu and Kana keydown events are by default swallowed by sendEvent
     // and sent directly to IME, which prevents ui keydown events from firing.
     // These events need to be sent to [NSApp keyWindow] for handling.
-    if ([event type] == NSEventTypeKeyDown &&
-        ([event keyCode] == kVK_JIS_Eisu || [event keyCode] == kVK_JIS_Kana)) {
-      [[NSApp keyWindow] sendEvent:event];
+    if (event.type == NSEventTypeKeyDown &&
+        (event.keyCode == kVK_JIS_Eisu || event.keyCode == kVK_JIS_Kana)) {
+      [NSApp.keyWindow sendEvent:event];
     } else {
       [super sendEvent:event];
     }
@@ -348,14 +353,15 @@ std::string DescriptionForNSEvent(NSEvent* event) {
 }
 
 - (void)accessibilitySetValue:(id)value forAttribute:(NSString*)attribute {
-  // This is an undocument attribute that's set when VoiceOver is turned on/off.
+  // This is an undocumented attribute that's set when VoiceOver is turned
+  // on/off.
   if ([attribute isEqualToString:@"AXEnhancedUserInterface"]) {
     content::BrowserAccessibilityState* accessibility_state =
         content::BrowserAccessibilityState::GetInstance();
     if ([value intValue] == 1)
       accessibility_state->OnScreenReaderDetected();
     else
-      accessibility_state->DisableAccessibility();
+      accessibility_state->OnScreenReaderStopped();
   }
   return [super accessibilitySetValue:value forAttribute:attribute];
 }
@@ -374,7 +380,7 @@ std::string DescriptionForNSEvent(NSEvent* event) {
   content::BrowserAccessibilityState* accessibility_state =
       content::BrowserAccessibilityState::GetInstance();
   if (!accessibility_state->GetAccessibilityMode().has_mode(
-          ui::kAXModeBasic.mode())) {
+          ui::kAXModeBasic.flags())) {
     accessibility_state->AddAccessibilityModeFlags(ui::kAXModeBasic);
   }
   return [super accessibilityRole];

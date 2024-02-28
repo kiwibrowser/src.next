@@ -4,9 +4,9 @@
 
 #include "chrome/browser/file_select_helper_contacts_android.h"
 
-#include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
 #include "base/task/thread_pool.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -17,7 +17,7 @@ FileSelectHelperContactsAndroid::FileSelectHelperContactsAndroid(
     Profile* profile)
     : FileSelectHelper(profile) {}
 
-void FileSelectHelperContactsAndroid::FileSelectedWithExtraInfo(
+void FileSelectHelperContactsAndroid::FileSelected(
     const ui::SelectedFileInfo& file,
     int index,
     void* params) {
@@ -28,6 +28,8 @@ void FileSelectHelperContactsAndroid::FileSelectedWithExtraInfo(
           &FileSelectHelperContactsAndroid::ProcessContactsForAndroid, this,
           (char*)params));
 }
+
+void FileSelectHelperContactsAndroid::FileSelectionCanceled(void* params) {}
 
 void FileSelectHelperContactsAndroid::ProcessContactsForAndroid(
     const std::string& contacts) {

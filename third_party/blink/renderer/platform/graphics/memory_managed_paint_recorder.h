@@ -26,23 +26,54 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_MEMORY_MANAGED_PAINT_RECORDER_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_MEMORY_MANAGED_PAINT_RECORDER_H_
 
-#include "cc/paint/paint_recorder.h"
+#include "base/memory/raw_ptr.h"
 #include "third_party/blink/renderer/platform/graphics/memory_managed_paint_canvas.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 
 namespace blink {
 
-class PLATFORM_EXPORT MemoryManagedPaintRecorder : public cc::PaintRecorder {
+class PLATFORM_EXPORT MemoryManagedPaintRecorder {
  public:
-  MemoryManagedPaintRecorder(MemoryManagedPaintCanvas::Client* client);
+  class Client {
+   public:
+    virtual void InitializeForRecording(cc::PaintCanvas* canvas) const = 0;
+    virtual void RecordingCleared() = 0;
+  };
 
- protected:
-  std::unique_ptr<cc::RecordPaintCanvas> CreateCanvas(
-      cc::DisplayItemList* list,
-      const SkRect& bounds) override;
+  // If specified, `client` is notified for events from this object. `client`
+  // must outlive this `MemoryManagedPaintRecorder`.
+  explicit MemoryManagedPaintRecorder(gfx::Size size, Client* client);
+  ~MemoryManagedPaintRecorder();
+
+  void SetClient(Client* client);
+
+  cc::PaintRecord finishRecordingAsPicture();
+
+  // Drops all draw ops from the recording while preserving the layer and matrix
+  // clip stack. This is done by discarding the whole recording and rebuilding
+  // the layer and matrix clip stack. If the recording contains no draw calls,
+  // the flush and stack rebuild is optimized out.
+  void SkipQueuedDrawCommands();
+
+  // Restarts the whole recording. This will rebuild the layer and matrix clip
+  // stack, but since this function is meant to be called after resetting the
+  // canvas state stack, the matrix clip stack should be rebuilt to it's default
+  // initial state.
+  void RestartRecording();
+
+  bool HasRecordedDrawOps() const { return canvas_.HasRecordedDrawOps(); }
+  size_t TotalOpCount() const { return canvas_.TotalOpCount(); }
+  size_t OpBytesUsed() const { return canvas_.OpBytesUsed(); }
+  size_t ImageBytesUsed() const { return canvas_.ImageBytesUsed(); }
+
+  cc::PaintCanvas* getRecordingCanvas() { return &canvas_; }
 
  private:
-  MemoryManagedPaintCanvas::Client* client_;
+  // Pointer to the client interested in events from this
+  // `MemoryManagedPaintRecorder`. If `nullptr`, notifications are disabled.
+  raw_ptr<Client, ExperimentalRenderer> client_ = nullptr;
+
+  MemoryManagedPaintCanvas canvas_;
 };
 
 }  // namespace blink

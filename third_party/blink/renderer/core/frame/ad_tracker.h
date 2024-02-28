@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_info.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "v8/include/v8.h"
 
@@ -33,7 +34,7 @@ class ExecuteScript;
 }  // namespace probe
 
 namespace features {
-CORE_EXPORT extern const base::Feature kAsyncStackAdTagging;
+CORE_EXPORT BASE_DECLARE_FEATURE(kAsyncStackAdTagging);
 }  // namespace features
 
 // Tracker for tagging resources as ads based on the call stack scripts.

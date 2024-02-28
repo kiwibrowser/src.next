@@ -1,80 +1,36 @@
-/*
- * Copyright (C) 2009 Google Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+// Copyright 2020 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/layout/layout_ruby_base.h"
 
-#include "third_party/blink/renderer/core/layout/layout_ruby_run.h"
-#include "third_party/blink/renderer/core/layout/ng/layout_ng_ruby_base.h"
-
 namespace blink {
 
-LayoutRubyBase::LayoutRubyBase(ContainerNode* node) : LayoutBlockFlow(nullptr) {
-  DCHECK(!node);
+LayoutRubyBase::LayoutRubyBase() : LayoutNGBlockFlow(nullptr) {
   SetInline(false);
 }
 
 LayoutRubyBase::~LayoutRubyBase() = default;
 
-LayoutRubyBase* LayoutRubyBase::CreateAnonymous(Document* document,
-                                                const LayoutRubyRun& ruby_run) {
-  LayoutRubyBase* layout_object;
-  if (ruby_run.IsLayoutNGObject()) {
-    layout_object = MakeGarbageCollected<LayoutNGRubyBase>();
-  } else {
-    layout_object = MakeGarbageCollected<LayoutRubyBase>(nullptr);
-  }
-  layout_object->SetDocumentForAnonymous(document);
-  return layout_object;
-}
-
-bool LayoutRubyBase::IsChildAllowed(LayoutObject* child,
-                                    const ComputedStyle&) const {
+bool LayoutRubyBase::IsChildAllowed(LayoutObject*, const ComputedStyle&) const {
   NOT_DESTROYED();
-  return child->IsInline();
+  NOTREACHED();  // Because LayoutRubyColumn manages child types.
+  return true;
 }
 
-// This function removes all children that are before (!) before_child
-// and appends them to to_base.
 void LayoutRubyBase::MoveChildren(LayoutRubyBase& to_base,
                                   LayoutObject* before_child) {
   NOT_DESTROYED();
-  // Callers should have handled the percent height descendant map.
-  DCHECK(!HasPercentHeightDescendants());
 
-  if (before_child && before_child->Parent() != this)
+  if (before_child && before_child->Parent() != this) {
     before_child = SplitAnonymousBoxesAroundChild(before_child);
+  }
 
-  if (ChildrenInline())
-    MoveInlineChildren(to_base, before_child);
-  else
-    MoveBlockChildren(to_base, before_child);
+  if (ChildrenInline()) {
+    MoveInlineChildrenTo(to_base, before_child);
+  } else {
+    MoveBlockChildrenTo(to_base, before_child);
+  }
 
   SetNeedsLayoutAndIntrinsicWidthsRecalcAndFullPaintInvalidation(
       layout_invalidation_reason::kUnknown);
@@ -82,13 +38,14 @@ void LayoutRubyBase::MoveChildren(LayoutRubyBase& to_base,
       layout_invalidation_reason::kUnknown);
 }
 
-void LayoutRubyBase::MoveInlineChildren(LayoutRubyBase& to_base,
-                                        LayoutObject* before_child) {
+void LayoutRubyBase::MoveInlineChildrenTo(LayoutRubyBase& to_base,
+                                          LayoutObject* before_child) {
   NOT_DESTROYED();
   DCHECK(ChildrenInline());
 
-  if (!FirstChild())
+  if (!FirstChild()) {
     return;
+  }
 
   LayoutBlock* to_block;
   if (to_base.ChildrenInline()) {
@@ -107,19 +64,22 @@ void LayoutRubyBase::MoveInlineChildren(LayoutRubyBase& to_base,
     }
   }
   // Move our inline children into the target block we determined above.
-  MoveChildrenTo(to_block, FirstChild(), before_child);
+  MoveChildrenTo(to_block, FirstChild(), before_child,
+                 RuntimeEnabledFeatures::RubySimplePairingEnabled());
 }
 
-void LayoutRubyBase::MoveBlockChildren(LayoutRubyBase& to_base,
-                                       LayoutObject* before_child) {
+void LayoutRubyBase::MoveBlockChildrenTo(LayoutRubyBase& to_base,
+                                         LayoutObject* before_child) {
   NOT_DESTROYED();
   DCHECK(!ChildrenInline());
 
-  if (!FirstChild())
+  if (!FirstChild()) {
     return;
+  }
 
-  if (to_base.ChildrenInline())
+  if (to_base.ChildrenInline()) {
     to_base.MakeChildrenNonInline();
+  }
 
   // If an anonymous block would be put next to another such block, then merge
   // those.
@@ -133,7 +93,6 @@ void LayoutRubyBase::MoveBlockChildren(LayoutRubyBase& to_base,
     auto* anon_block_there = To<LayoutBlockFlow>(last_child_there);
     anon_block_here->MoveAllChildrenTo(anon_block_there,
                                        anon_block_there->Children());
-    anon_block_here->DeleteLineBoxTree();
     anon_block_here->Destroy();
   }
   // Move all remaining children normally. If moving all children, include our
@@ -147,37 +106,21 @@ void LayoutRubyBase::MoveBlockChildren(LayoutRubyBase& to_base,
     // using |full_remove_insert| can prevent inconsistent LayoutObject tree
     // that leads to CHECK failures.
     full_remove_insert |= ChildrenInline();
+    full_remove_insert |= RuntimeEnabledFeatures::RubySimplePairingEnabled();
     MoveAllChildrenIncludingFloatsTo(&to_base, full_remove_insert);
   } else {
-    MoveChildrenTo(&to_base, FirstChild(), before_child);
-    RemoveFloatingObjectsFromDescendants();
+    MoveChildrenTo(&to_base, FirstChild(), before_child,
+                   RuntimeEnabledFeatures::RubySimplePairingEnabled());
   }
 }
 
-ETextAlign LayoutRubyBase::TextAlignmentForLine(
-    bool /* endsWithSoftBreak */) const {
-  return ETextAlign::kJustify;
-}
-
-void LayoutRubyBase::AdjustInlineDirectionLineBounds(
-    unsigned expansion_opportunity_count,
-    LayoutUnit& logical_left,
-    LayoutUnit& logical_width) const {
+bool LayoutRubyBase::IsPlaceholder() const {
   NOT_DESTROYED();
-  int max_preferred_logical_width = PreferredLogicalWidths().max_size.ToInt();
-  if (max_preferred_logical_width >= logical_width)
-    return;
-
-  unsigned max_count = static_cast<unsigned>(LayoutUnit::Max().Floor());
-  if (expansion_opportunity_count > max_count)
-    expansion_opportunity_count = max_count;
-
-  // Inset the ruby base by half the inter-ideograph expansion amount.
-  LayoutUnit inset = (logical_width - max_preferred_logical_width) /
-                     (expansion_opportunity_count + 1);
-
-  logical_left += inset / 2;
-  logical_width -= inset;
+  return is_placeholder_;
+}
+void LayoutRubyBase::SetPlaceholder() {
+  NOT_DESTROYED();
+  is_placeholder_ = true;
 }
 
 }  // namespace blink
