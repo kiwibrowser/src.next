@@ -86,7 +86,7 @@ void EventPath::Initialize() {
 
 void EventPath::CalculatePath() {
   DCHECK(node_);
-  DCHECK(node_event_contexts_.IsEmpty());
+  DCHECK(node_event_contexts_.empty());
 
   // For performance and memory usage reasons we want to store the
   // path using as few bytes as possible and with as few allocations
@@ -118,7 +118,7 @@ void EventPath::CalculatePath() {
     }
   }
 
-  node_event_contexts_.ReserveCapacity(nodes_in_path.size());
+  node_event_contexts_.reserve(nodes_in_path.size());
   for (Node* node_in_path : nodes_in_path) {
     DCHECK(node_in_path);
     node_event_contexts_.push_back(NodeEventContext(
@@ -368,6 +368,15 @@ void EventPath::AdjustTouchList(
     // hot path.
     // TODO(bikineev): Revisit after young generation is there.
     related_node_map.clear();
+  }
+}
+
+void EventPath::AdjustForDisabledFormControl() {
+  for (unsigned i = 0; i < node_event_contexts_.size(); i++) {
+    if (IsDisabledFormControl(&node_event_contexts_[i].GetNode())) {
+      Shrink(i);
+      return;
+    }
   }
 }
 

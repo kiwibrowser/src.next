@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,17 +16,19 @@ class ExceptionState;
 class ExecutionContext;
 
 // Implementation of the PendingPostBeacon API.
-// https://github.com/WICG/unload-beacon/blob/main/README.md
+// https://github.com/WICG/pending-beacon/blob/main/README.md
 class CORE_EXPORT PendingPostBeacon : public PendingBeacon {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   static PendingPostBeacon* Create(ExecutionContext* context,
-                                   const String& target_url);
+                                   const String& target_url,
+                                   ExceptionState& exception_state);
 
   static PendingPostBeacon* Create(ExecutionContext* context,
                                    const String& target_url,
-                                   PendingBeaconOptions* options);
+                                   PendingBeaconOptions* options,
+                                   ExceptionState& exception_state);
 
   explicit PendingPostBeacon(ExecutionContext* context,
                              const String& url,

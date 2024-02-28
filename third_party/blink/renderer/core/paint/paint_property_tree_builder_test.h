@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 namespace blink {
 
 class ClipPaintPropertyNode;
+class GeometryMapperTransformCache;
 class ScrollPaintPropertyNode;
 class TransformPaintPropertyNode;
 struct PhysicalOffset;
@@ -41,24 +42,16 @@ class PaintPropertyTreeBuilderTest : public PaintControllerPaintTest {
 
   const ObjectPaintProperties* PaintPropertiesForElement(const char* name);
 
+  const GeometryMapperTransformCache& GetTransformCache(
+      const TransformPaintPropertyNode&);
+
   static unsigned NumFragments(const LayoutObject* obj) {
-    unsigned count = 0;
-    auto* fragment = &obj->FirstFragment();
-    while (fragment) {
-      count++;
-      fragment = fragment->NextFragment();
-    }
-    return count;
+    return obj->FragmentList().size();
   }
 
   static const FragmentData& FragmentAt(const LayoutObject* obj,
-                                        unsigned count) {
-    auto* fragment = &obj->FirstFragment();
-    while (count > 0) {
-      count--;
-      fragment = fragment->NextFragment();
-    }
-    return *fragment;
+                                        unsigned index) {
+    return obj->FragmentList().at(index);
   }
 
  private:

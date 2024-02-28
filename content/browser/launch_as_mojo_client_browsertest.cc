@@ -26,7 +26,7 @@
 #include "mojo/public/cpp/system/invitation.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(USE_OZONE)
+#if BUILDFLAG(IS_OZONE)
 #include "ui/ozone/public/ozone_switches.h"
 #endif
 
@@ -68,14 +68,13 @@ class LaunchAsMojoClientBrowserTest : public ContentBrowserTest {
         GetFilePathNextToCurrentExecutable(kShellExecutableName));
     command_line.AppendSwitchPath(switches::kContentShellDataPath,
                                   temp_dir_.GetPath());
-#if defined(USE_OZONE)
+#if BUILDFLAG(IS_OZONE)
     const base::CommandLine& cmdline = *base::CommandLine::ForCurrentProcess();
-    const char* kSwitchesToCopy[] = {
+    static const char* const kSwitchesToCopy[] = {
         // Keep the kOzonePlatform switch that the Ozone must use.
         switches::kOzonePlatform,
     };
-    command_line.CopySwitchesFrom(cmdline, kSwitchesToCopy,
-                                  std::size(kSwitchesToCopy));
+    command_line.CopySwitchesFrom(cmdline, kSwitchesToCopy);
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -172,7 +171,7 @@ IN_PROC_BROWSER_TEST_F(LaunchAsMojoClientBrowserTest, LaunchAndBindInterface) {
   base::RunLoop loop;
   shell_controller->GetSwitchValue(
       kExtraSwitchName,
-      base::BindLambdaForTesting([&](const absl::optional<std::string>& value) {
+      base::BindLambdaForTesting([&](const std::optional<std::string>& value) {
         ASSERT_TRUE(value);
         EXPECT_EQ(kExtraSwitchValue, *value);
         loop.Quit();

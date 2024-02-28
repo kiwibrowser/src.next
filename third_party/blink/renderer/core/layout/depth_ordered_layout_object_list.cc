@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
-#include "third_party/blink/renderer/core/layout/ng/legacy_layout_tree_walking.h"
+#include "third_party/blink/renderer/core/layout/legacy_layout_tree_walking.h"
 
 namespace blink {
 
@@ -46,7 +46,7 @@ int DepthOrderedLayoutObjectList::size() const {
 }
 
 bool DepthOrderedLayoutObjectList::IsEmpty() const {
-  return data_->objects().IsEmpty();
+  return data_->objects().empty();
 }
 
 namespace {
@@ -57,8 +57,7 @@ bool ListModificationAllowedFor(const LayoutObject& object) {
   // We are allowed to insert/remove orthogonal writing mode roots during
   // layout for interleaved style recalcs, but only when these roots are fully
   // managed by LayoutNG.
-  return object.GetDocument().GetStyleEngine().InContainerQueryStyleRecalc() &&
-         IsManagedByLayoutNG(object);
+  return object.GetDocument().GetStyleEngine().InContainerQueryStyleRecalc();
 }
 
 }  // namespace
@@ -102,10 +101,10 @@ DepthOrderedLayoutObjectList::Unordered() const {
 
 const HeapVector<LayoutObjectWithDepth>&
 DepthOrderedLayoutObjectList::Ordered() {
-  if (data_->objects_.IsEmpty() || !data_->ordered_objects_.IsEmpty())
+  if (data_->objects_.empty() || !data_->ordered_objects_.empty())
     return data_->ordered_objects_;
 
-  CopyToVector(data_->objects_, data_->ordered_objects_);
+  data_->ordered_objects_.assign(data_->objects_);
   std::sort(data_->ordered_objects_.begin(), data_->ordered_objects_.end());
   return data_->ordered_objects_;
 }

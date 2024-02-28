@@ -6,17 +6,18 @@
 #define CHROME_BROWSER_EXTENSIONS_INSTALL_TRACKER_H_
 
 #include <map>
+#include <optional>
 
 #include "base/observer_list.h"
 #include "base/scoped_observation.h"
 #include "chrome/browser/extensions/active_install_data.h"
+#include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/install_observer.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/common/extension_id.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace content {
 class BrowserContext;
@@ -62,8 +63,11 @@ class InstallTracker : public KeyedService, public ExtensionRegistryObserver {
   void OnBeginExtensionDownload(const std::string& extension_id);
   void OnDownloadProgress(const std::string& extension_id,
                           int percent_downloaded);
-  void OnBeginCrxInstall(const std::string& extension_id);
-  void OnFinishCrxInstall(const std::string& extension_id, bool success);
+  void OnBeginCrxInstall(const CrxInstaller& installer,
+                         const std::string& extension_id);
+  void OnFinishCrxInstall(const CrxInstaller& installer,
+                          const std::string& extension_id,
+                          bool success);
   void OnInstallFailure(const std::string& extension_id);
 
   // NOTE(limasdf): For extension [un]load and [un]installed, use
@@ -74,7 +78,7 @@ class InstallTracker : public KeyedService, public ExtensionRegistryObserver {
 
   // Called directly by AppSorting logic when apps are re-ordered on the new tab
   // page.
-  void OnAppsReordered(const absl::optional<ExtensionId>& extension_id);
+  void OnAppsReordered(const std::optional<ExtensionId>& extension_id);
 
  private:
   void OnExtensionPrefChanged();
@@ -88,8 +92,12 @@ class InstallTracker : public KeyedService, public ExtensionRegistryObserver {
   typedef std::map<std::string, ActiveInstallData> ActiveInstallsMap;
   ActiveInstallsMap active_installs_;
 
+  // Safe: |this| belongs to |browser_context_| via KeyedService, and this
+  // pointer is nulled in Shutdown().
+  raw_ptr<content::BrowserContext> browser_context_;
+
   base::ObserverList<InstallObserver>::Unchecked observers_;
-  PrefChangeRegistrar pref_change_registrar_;
+  std::unique_ptr<PrefChangeRegistrar> pref_change_registrar_;
   base::ScopedObservation<ExtensionRegistry, ExtensionRegistryObserver>
       extension_registry_observation_{this};
 };

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,14 +29,17 @@ CSSMathFunctionValue::CSSMathFunctionValue(
     CSSPrimitiveValue::ValueRange range)
     : CSSPrimitiveValue(kMathFunctionClass),
       expression_(expression),
-      value_range_in_target_context_(range) {}
+      value_range_in_target_context_(range) {
+  needs_tree_scope_population_ = !expression->IsScopedValue();
+}
 
 // static
 CSSMathFunctionValue* CSSMathFunctionValue::Create(
     const CSSMathExpressionNode* expression,
     CSSPrimitiveValue::ValueRange range) {
-  if (!expression)
+  if (!expression) {
     return nullptr;
+  }
   return MakeGarbageCollected<CSSMathFunctionValue>(expression, range);
 }
 
@@ -80,7 +83,34 @@ double CSSMathFunctionValue::ComputeLengthPx(
   // |CSSToLengthConversionData| only resolves relative length units, but not
   // percentages.
   DCHECK_EQ(kCalcLength, expression_->Category());
+  DCHECK(!expression_->HasPercentage());
   return ClampToPermittedRange(expression_->ComputeLengthPx(length_resolver));
+}
+
+int CSSMathFunctionValue::ComputeInteger(
+    const CSSLengthResolver& length_resolver) const {
+  // |CSSToLengthConversionData| only resolves relative length units, but not
+  // percentages.
+  DCHECK_EQ(kCalcNumber, expression_->Category());
+  DCHECK(!expression_->HasPercentage());
+  return ClampTo<int>(
+      ClampToPermittedRange(expression_->ComputeNumber(length_resolver)));
+}
+
+double CSSMathFunctionValue::ComputeNumber(
+    const CSSLengthResolver& length_resolver) const {
+  // |CSSToLengthConversionData| only resolves relative length units, but not
+  // percentages.
+  DCHECK_EQ(kCalcNumber, expression_->Category());
+  DCHECK(!expression_->HasPercentage());
+  double value =
+      ClampToPermittedRange(expression_->ComputeNumber(length_resolver));
+  return std::isnan(value) ? 0.0 : value;
+}
+
+double CSSMathFunctionValue::ComputeDotsPerPixel() const {
+  DCHECK_EQ(kCalcResolution, expression_->Category());
+  return ClampToPermittedRange(*expression_->ComputeValueInCanonicalUnit());
 }
 
 bool CSSMathFunctionValue::AccumulateLengthArray(CSSLengthArray& length_array,
@@ -90,8 +120,9 @@ bool CSSMathFunctionValue::AccumulateLengthArray(CSSLengthArray& length_array,
 
 Length CSSMathFunctionValue::ConvertToLength(
     const CSSLengthResolver& length_resolver) const {
-  if (IsLength())
+  if (IsResolvableLength()) {
     return Length::Fixed(ComputeLengthPx(length_resolver));
+  }
   return Length(ToCalcValue(length_resolver));
 }
 
@@ -134,8 +165,9 @@ double CSSMathFunctionValue::ClampToPermittedRange(double value) const {
 }
 
 bool CSSMathFunctionValue::IsZero() const {
-  if (expression_->ResolvedUnitType() == UnitType::kUnknown)
+  if (expression_->ResolvedUnitType() == UnitType::kUnknown) {
     return false;
+  }
   return expression_->IsZero();
 }
 
@@ -161,6 +193,13 @@ scoped_refptr<const CalculationValue> CSSMathFunctionValue::ToCalcValue(
       length_resolver,
       CSSPrimitiveValue::ConversionToLengthValueRange(PermittedValueRange()),
       AllowsNegativePercentageReference());
+}
+
+const CSSValue& CSSMathFunctionValue::PopulateWithTreeScope(
+    const TreeScope* tree_scope) const {
+  return *MakeGarbageCollected<CSSMathFunctionValue>(
+      &expression_->PopulateWithTreeScope(tree_scope),
+      value_range_in_target_context_);
 }
 
 }  // namespace blink

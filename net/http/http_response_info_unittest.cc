@@ -102,14 +102,14 @@ TEST_F(HttpResponseInfoTest, StaleRevalidationTimeoutDefault) {
 }
 
 TEST_F(HttpResponseInfoTest, StaleRevalidationTimeoutCopy) {
-  base::Time test_time = base::Time::FromDoubleT(1000);
+  base::Time test_time = base::Time::FromSecondsSinceUnixEpoch(1000);
   response_info_.stale_revalidate_timeout = test_time;
   HttpResponseInfo response_info_clone(response_info_);
   EXPECT_EQ(test_time, response_info_clone.stale_revalidate_timeout);
 }
 
 TEST_F(HttpResponseInfoTest, StaleRevalidationTimeoutRestoreValue) {
-  base::Time test_time = base::Time::FromDoubleT(1000);
+  base::Time test_time = base::Time::FromSecondsSinceUnixEpoch(1000);
   response_info_.stale_revalidate_timeout = test_time;
   HttpResponseInfo restored_response_info;
   PickleAndRestore(response_info_, &restored_response_info);
@@ -259,6 +259,30 @@ TEST_F(HttpResponseInfoTest, EmptyDnsAliases) {
   net::HttpResponseInfo restored_response_info;
   PickleAndRestore(response_info_, &restored_response_info);
   EXPECT_TRUE(restored_response_info.dns_aliases.empty());
+}
+
+// Test that `browser_run_id` is preserved.
+TEST_F(HttpResponseInfoTest, BrowserRunId) {
+  response_info_.browser_run_id = 1;
+  net::HttpResponseInfo restored_response_info;
+  PickleAndRestore(response_info_, &restored_response_info);
+  EXPECT_EQ(1, restored_response_info.browser_run_id);
+}
+
+// Test that an empty `browser_run_id` is preserved and doesn't throw an error.
+TEST_F(HttpResponseInfoTest, EmptyBrowserRunId) {
+  response_info_.browser_run_id = absl::nullopt;
+  net::HttpResponseInfo restored_response_info;
+  PickleAndRestore(response_info_, &restored_response_info);
+  EXPECT_FALSE(restored_response_info.browser_run_id.has_value());
+}
+
+// Test that did_use_shared_dictionary is preserved .
+TEST_F(HttpResponseInfoTest, DidUseSharedDictionary) {
+  response_info_.did_use_shared_dictionary = true;
+  net::HttpResponseInfo restored_response_info;
+  PickleAndRestore(response_info_, &restored_response_info);
+  EXPECT_TRUE(restored_response_info.did_use_shared_dictionary);
 }
 
 }  // namespace

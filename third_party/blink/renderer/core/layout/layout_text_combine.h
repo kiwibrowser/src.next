@@ -1,95 +1,157 @@
-/*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
- *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Library General Public
- * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Library General Public License for more details.
- *
- * You should have received a copy of the GNU Library General Public License
- * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
- *
- */
+// Copyright 2021 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_TEXT_COMBINE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_TEXT_COMBINE_H_
 
-#include "third_party/blink/renderer/core/layout/layout_text.h"
-#include "third_party/blink/renderer/platform/fonts/font.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/layout/layout_ng_block_flow.h"
+#include "third_party/blink/renderer/core/paint/line_relative_rect.h"
 
 namespace blink {
 
-class GraphicsContext;
+class AffineTransform;
+class FragmentItem;
+class InlineCursor;
+class LayoutText;
 
-// LayoutTextCombine uses different coordinate systems for layout and
-// inlineTextBox, because it is treated as 1em-box character in vertical flow
-// for the layout, while its inline box is in horizontal flow.
-class LayoutTextCombine final : public LayoutText {
+// The layout object for the element having "text-combine-upright:all" in
+// vertical writing mode, e.g. <i style="text-upright:all"><b>12</b>34<i>.
+// Note: When the element is in horizontal writing mode, we don't use this.
+// Note: Children of this class must be |LayoutText| associated to |Text| node.
+class CORE_EXPORT LayoutTextCombine final : public LayoutNGBlockFlow {
  public:
-  LayoutTextCombine(Node*, scoped_refptr<StringImpl>);
+  // Note: Mark constructor public for |MakeGarbageCollected|. We should not
+  // call this directly.
+  LayoutTextCombine();
+  ~LayoutTextCombine() override;
 
-  bool IsCombined() const {
-    NOT_DESTROYED();
-    return is_combined_;
+  void Trace(Visitor* visitor) const override {
+    visitor->Trace(compressed_font_);
+    LayoutNGBlockFlow::Trace(visitor);
   }
-  float CombinedTextWidth(const Font& font) const {
-    NOT_DESTROYED();
-    return font.GetFontDescription().ComputedSize();
-  }
-  const Font& OriginalFont() const {
-    NOT_DESTROYED();
-    return Parent()->StyleRef().GetFont();
-  }
-  void TransformToInlineCoordinates(GraphicsContext&,
-                                    const PhysicalRect& box_rect,
-                                    bool clip = false) const;
-  LayoutUnit InlineWidthForLayout() const;
 
+  float DesiredWidth() const;
+  String GetTextContent() const;
+
+  // Compressed font
+  const Font* CompressedFont() const {
+    NOT_DESTROYED();
+    return has_compressed_font_ ? &compressed_font_ : nullptr;
+  }
+  void SetCompressedFont(const Font& font);
+
+  // Scaling
+
+  // Map scaled |offset_in_container| to non-scaled offset if |this| uses
+  // scale x, otherwise return |offset_in_container|.
+  PhysicalOffset AdjustOffsetForHitTest(
+      const PhysicalOffset& offset_in_container) const;
+
+  // Map non-scaled |offset_in_container| to scaled offset if |this| uses
+  // scale x, otherwise return |offset_in_container|.
+  PhysicalOffset AdjustOffsetForLocalCaretRect(
+      const PhysicalOffset& offset_in_container) const;
+
+  // Maps non-scaled |rect| to scaled rect for
+  //  * |LayoutText::PhysicalLinesBoundingBox()| used by
+  //    |LayoutObject::DebugRect()|, intersection observer, and scroll anchor.
+  //  * |FragmentItem::RecalcInkOverflow()| for line box
+  //  * |ScrollableOverflowCalculator::AddItemsInternal()| for line box.
+  //  * |PhysicalFragment::AddOutlineRectsForCursor()|
+  //  * |PhysicalFragment::AddScrollableOverflowForInlineChild()|
+  PhysicalRect AdjustRectForBoundingBox(const PhysicalRect& rect) const;
+
+  PhysicalRect ComputeTextBoundsRectForHitTest(
+      const FragmentItem& text_item,
+      const PhysicalOffset& inline_root_offset) const;
+
+  // Returns ink overflow for text decorations and emphasis mark.
+  PhysicalRect RecalcContentsInkOverflow(const InlineCursor&) const;
+
+  void ResetLayout();
+  void SetScaleX(float new_scale_x);
+  bool UsesScaleX() const {
+    NOT_DESTROYED();
+    return scale_x_.has_value();
+  }
+
+  // Painting
+  // |AdjustText{Left,Top}()| are called within affine transformed
+  // |GraphicsContext|, e.g. |NGTextFragmentPainter::Paint()|.
+  LayoutUnit AdjustTextLeftForPaint(LayoutUnit text_left) const;
+  LayoutUnit AdjustTextTopForPaint(LayoutUnit text_top) const;
+
+  AffineTransform ComputeAffineTransformForPaint(
+      const PhysicalOffset& paint_offset) const;
+  bool NeedsAffineTransformInPaint() const;
+
+  // Returns text frame rect, in logical direction, used with text painters.
+  LineRelativeRect ComputeTextFrameRect(
+      const PhysicalOffset paint_offset) const;
+
+  // Returns visual rect for painting emphasis mark and text decoration for
+  // |BoxFragmentPainter|.
+  gfx::Rect VisualRectForPaint(const PhysicalOffset& paint_offset) const;
+
+  static void AssertStyleIsValid(const ComputedStyle& style);
+
+  // Create anonymous wrapper having |text_child|.
+  static LayoutTextCombine* CreateAnonymous(LayoutText* text_child);
+
+  // Returns true if |layout_object| is a child of |LayoutTextCombine|.
+  static bool ShouldBeParentOf(const LayoutObject& layout_object);
+
+ private:
+  bool IsLayoutTextCombine() const final {
+    NOT_DESTROYED();
+    return true;
+  }
   const char* GetName() const override {
     NOT_DESTROYED();
     return "LayoutTextCombine";
   }
 
- private:
-  bool IsCombineText() const override {
-    NOT_DESTROYED();
-    return true;
-  }
-  float Width(unsigned from,
-              unsigned length,
-              const Font&,
-              LayoutUnit x_position,
-              TextDirection,
-              HashSet<const SimpleFontData*>* fallback_fonts = nullptr,
-              gfx::RectF* glyph_bounds = nullptr,
-              float expansion = 0) const override;
-  void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
-  void TextDidChange() override;
-  void UpdateIsCombined();
-  void UpdateFontStyleForCombinedText();
+  // Helper functions for scaling.
+  PhysicalOffset ApplyScaleX(const PhysicalOffset& offset) const;
+  PhysicalRect ApplyScaleX(const PhysicalRect& rect) const;
+  PhysicalSize ApplyScaleX(const PhysicalSize& offset) const;
+  PhysicalOffset UnapplyScaleX(const PhysicalOffset& offset) const;
 
-  float combined_text_width_;
-  float scale_x_;
-  bool is_combined_ : 1;
+  float ComputeInlineSpacing() const;
+  bool UsingSyntheticOblique() const;
+
+  // |scale_x_| holds scale factor to width of text content to 1em. When we
+  // use |scale_x_|, we use |StyleRef().GetFont()| instead of compressed font.
+  absl::optional<float> scale_x_;
+
+  // |compressed_font_| hold width variant of |StyleRef().GetFont()|.
+  //
+  // NOTE: This doesn't use a std::optional to avoid a potentially racy branch
+  // within the Trace method.
+  Font compressed_font_;
+  bool has_compressed_font_ = false;
 };
+
+// static
+inline bool LayoutTextCombine::ShouldBeParentOf(
+    const LayoutObject& layout_object) {
+  if (LIKELY(layout_object.IsHorizontalWritingMode()) ||
+      !layout_object.IsText() || layout_object.IsSVGInlineText()) {
+    return false;
+  }
+  return UNLIKELY(layout_object.StyleRef().HasTextCombine()) &&
+         layout_object.IsLayoutNGObject();
+}
 
 template <>
 struct DowncastTraits<LayoutTextCombine> {
   static bool AllowFrom(const LayoutObject& object) {
-    return object.IsCombineText();
+    return object.IsLayoutTextCombine();
   }
 };
-
-inline LayoutUnit LayoutTextCombine::InlineWidthForLayout() const {
-  return LayoutUnit::FromFloatCeil(combined_text_width_);
-}
 
 }  // namespace blink
 

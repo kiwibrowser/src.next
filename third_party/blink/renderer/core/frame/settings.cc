@@ -51,7 +51,7 @@ struct FromString<String> {
 
 template <>
 struct FromString<bool> {
-  bool operator()(const String& s) { return s.IsEmpty() || s == "true"; }
+  bool operator()(const String& s) { return s.empty() || s == "true"; }
 };
 
 template <>
@@ -116,6 +116,11 @@ void Settings::SetDelegate(SettingsDelegate* delegate) {
 void Settings::Invalidate(SettingsDelegate::ChangeType change_type) {
   if (delegate_)
     delegate_->SettingsChanged(change_type);
+}
+
+void Settings::SetPreferCompositingToLCDTextForTesting(bool enabled) {
+  SetLCDTextPreference(enabled ? LCDTextPreference::kIgnored
+                               : LCDTextPreference::kStronglyPreferred);
 }
 
 }  // namespace blink

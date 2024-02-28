@@ -1,10 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/platform/graphics/accelerated_static_bitmap_image.h"
 
-#include "base/callback_helpers.h"
+#include "base/functional/callback_helpers.h"
 #include "base/test/null_task_runner.h"
 #include "base/test/task_environment.h"
 #include "components/viz/common/resources/release_callback.h"
@@ -65,7 +65,7 @@ class AcceleratedStaticBitmapImageTest : public Test {
     auto gl = std::make_unique<MockGLES2InterfaceWithSyncTokenSupport>();
     gl_ = gl.get();
     context_provider_ = viz::TestContextProvider::Create(std::move(gl));
-    InitializeSharedGpuContext(context_provider_.get());
+    InitializeSharedGpuContextGLES2(context_provider_.get());
   }
   void TearDown() override {
     gl_ = nullptr;
@@ -83,7 +83,7 @@ TEST_F(AcceleratedStaticBitmapImageTest, SkImageCached) {
 
   cc::PaintImage stored_image = bitmap->PaintImageForCurrentFrame();
   auto stored_image2 = bitmap->PaintImageForCurrentFrame();
-  EXPECT_EQ(stored_image, stored_image2);
+  EXPECT_TRUE(stored_image.IsSameForTesting(stored_image2));
 }
 
 TEST_F(AcceleratedStaticBitmapImageTest, CopyToTextureSynchronization) {

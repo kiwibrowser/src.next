@@ -90,7 +90,7 @@ class CORE_EXPORT FontFaceCache final : public GarbageCollected<FontFaceCache> {
     wtf_size_t size() const { return map_.size(); }
 
     void AddFontFace(FontFace* font_face, bool css_connected);
-    bool IsEmpty() const { return map_.IsEmpty(); }
+    bool IsEmpty() const { return map_.empty(); }
 
     // Returns true if associated |CSSSegmentedFontFace| is empty.
     bool RemoveFontFace(FontFace* font_face);
@@ -105,10 +105,7 @@ class CORE_EXPORT FontFaceCache final : public GarbageCollected<FontFaceCache> {
   class FontSelectionQueryResult final
       : public GarbageCollected<FontSelectionQueryResult> {
     using Map =
-        HeapHashMap<FontSelectionRequestKey,
-                    Member<CSSSegmentedFontFace>,
-                    FontSelectionRequestKeyHash,
-                    WTF::SimpleClassHashTraits<FontSelectionRequestKey>>;
+        HeapHashMap<FontSelectionRequestKey, Member<CSSSegmentedFontFace>>;
 
    public:
     CSSSegmentedFontFace* GetOrCreate(const FontSelectionRequest& request,
@@ -124,8 +121,9 @@ class CORE_EXPORT FontFaceCache final : public GarbageCollected<FontFaceCache> {
   class FontSelectionQueryCache final {
     DISALLOW_NEW();
 
-    using Map =
-        HeapHashMap<String, Member<FontSelectionQueryResult>, CaseFoldingHash>;
+    using Map = HeapHashMap<String,
+                            Member<FontSelectionQueryResult>,
+                            CaseFoldingHashTraits<String>>;
 
    public:
     void Clear();
@@ -148,7 +146,7 @@ class CORE_EXPORT FontFaceCache final : public GarbageCollected<FontFaceCache> {
     void AddFontFace(FontFace* font_face, bool css_connected);
     void Clear() { map_.clear(); }
     CapabilitiesSet* Find(const AtomicString& family) const;
-    bool IsEmpty() const { return map_.IsEmpty(); }
+    bool IsEmpty() const { return map_.empty(); }
     // Returns true if |font_face| is removed from |map_|.
     bool RemoveFontFace(FontFace* font_face);
 
@@ -157,7 +155,9 @@ class CORE_EXPORT FontFaceCache final : public GarbageCollected<FontFaceCache> {
     void Trace(Visitor*) const;
 
    private:
-    using Map = HeapHashMap<String, Member<CapabilitiesSet>, CaseFoldingHash>;
+    using Map = HeapHashMap<String,
+                            Member<CapabilitiesSet>,
+                            CaseFoldingHashTraits<String>>;
 
     Map map_;
   };

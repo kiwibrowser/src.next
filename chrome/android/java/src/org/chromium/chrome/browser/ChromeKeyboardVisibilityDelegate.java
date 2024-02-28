@@ -30,7 +30,8 @@ public class ChromeKeyboardVisibilityDelegate extends SingleWindowKeyboardVisibi
      * Creates a new visibility delegate.
      * @param activity A {@link WeakReference} to an {@link Activity}.
      */
-    public ChromeKeyboardVisibilityDelegate(WeakReference<Activity> activity,
+    public ChromeKeyboardVisibilityDelegate(
+            WeakReference<Activity> activity,
             @NonNull Supplier<ManualFillingComponent> manualFillingComponentSupplier) {
         super(activity);
         mManualFillingComponentSupplier = manualFillingComponentSupplier;
@@ -88,5 +89,14 @@ public class ChromeKeyboardVisibilityDelegate extends SingleWindowKeyboardVisibi
     @Override
     public @Px int calculateSoftKeyboardHeight(View rootView) {
         return calculateKeyboardHeight(rootView);
+    }
+
+    @Override
+    public int calculateTotalKeyboardHeight(View rootView) {
+        int accessoryHeight = 0;
+        if (mManualFillingComponentSupplier.hasValue()) {
+            accessoryHeight = mManualFillingComponentSupplier.get().getKeyboardExtensionHeight();
+        }
+        return calculateKeyboardHeight(rootView) + accessoryHeight;
     }
 }

@@ -4,13 +4,13 @@
 
 #include <memory>
 
-#include "base/bind.h"
-#include "base/callback.h"
-#include "base/callback_helpers.h"
 #include "base/containers/contains.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/weak_ptr.h"
 #include "base/path_service.h"
 #include "base/version.h"
@@ -147,8 +147,11 @@ class ContentHashFetcherTest : public ExtensionsTest {
     EXPECT_TRUE(zip::Unzip(extension_zip, destination));
 
     std::string error;
+    static constexpr char kTestExtensionId[] =
+        "jmllhlobpjcnnomjlipadejplhmheiif";
     scoped_refptr<Extension> extension = file_util::LoadExtension(
-        destination, mojom::ManifestLocation::kInternal, 0 /* flags */, &error);
+        destination, kTestExtensionId, mojom::ManifestLocation::kInternal,
+        0 /* flags */, &error);
     EXPECT_NE(nullptr, extension.get()) << " error:'" << error << "'";
     return extension;
   }

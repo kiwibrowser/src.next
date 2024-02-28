@@ -64,10 +64,9 @@ void DrawLooperBuilder::AddShadow(const gfx::Vector2dF& offset,
   DCHECK_GE(blur, 0);
 
   // Detect when there's no effective shadow.
-  if (!color.Alpha())
+  if (color.IsFullyTransparent()) {
     return;
-
-  SkColor sk_color = color.Rgb();
+  }
 
   SkLayerDrawLooper::LayerInfo info;
 
@@ -97,7 +96,8 @@ void DrawLooperBuilder::AddShadow(const gfx::Vector2dF& offset,
         SkMaskFilter::MakeBlur(kNormal_SkBlurStyle, sigma, respectCTM));
   }
 
-  paint->setColorFilter(SkColorFilters::Blend(sk_color, SkBlendMode::kSrcIn));
+  paint->setColorFilter(SkColorFilters::Blend(
+      color.toSkColor4f(), SkColorSpace::MakeSRGB(), SkBlendMode::kSrcIn));
 }
 
 }  // namespace blink

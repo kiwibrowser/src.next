@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@ void CSSVariableReferenceValue::TraceAfterDispatch(
 
 String CSSVariableReferenceValue::CustomCSSText() const {
   // We may want to consider caching this value.
-  return data_->TokenRange().Serialize();
+  return data_->Serialize();
 }
 
 }  // namespace blink

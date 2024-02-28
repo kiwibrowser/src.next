@@ -7,10 +7,10 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "base/files/file_path.h"
-#include "base/strings/string_piece.h"
 #include "extensions/common/mojom/execution_world.mojom-shared.h"
 #include "extensions/common/mojom/host_id.mojom.h"
 #include "extensions/common/mojom/run_location.mojom-shared.h"
@@ -30,14 +30,47 @@ namespace extensions {
 // extension.
 class UserScript {
  public:
-  // The file extension for standalone user scripts.
-  static const char kFileExtension[];
+  // Denotes the type/origin of this script.
+  enum class Source {
+    // The script was parsed from an extension's manifest entry.
+    kStaticContentScript,
 
-  // The prefix for all generated user script IDs (i.e. the ID is not provided
-  // by the extension).
-  static const char kGeneratedIDPrefix;
+    // The script was created through the scripting API.
+    kDynamicContentScript,
+
+    // The script was created through the userScripts API.
+    kDynamicUserScript,
+
+    // The script was created for a webUI.
+    kWebUIScript,
+  };
+
+  // The file extension for standalone user scripts.
+  static constexpr const char kFileExtension[] = "user.js";
+
+  // The first character for all user script IDs. IDs provided by an extension
+  // should never start with this character.
+  static constexpr const char kReservedScriptIDPrefix = '_';
+
+  // The prefix for all manifest content script IDs and IDs generated through
+  // `GenerateUserScriptID`.
+  static constexpr const char kManifestContentScriptPrefix[] = "_mc_";
+
+  // The prefix for all dynamic content scripts registered through the scripting
+  // API.
+  static constexpr const char kDynamicContentScriptPrefix[] = "_dc_";
+
+  // The prefix for all user scripts registered through the userScripts API.
+  static constexpr const char kDynamicUserScriptPrefix[] = "_du_";
 
   static std::string GenerateUserScriptID();
+
+  // Removes any appended prefix from the given `script_id`.
+  static std::string TrimPrefixFromScriptID(const std::string& script_id);
+
+  // Returns the source of `script_id`. This can only be called if `script_id`
+  // already has its source prefix appended.
+  static Source GetSourceForScriptID(const std::string& script_id);
 
   // Check if a URL should be treated as a user script and converted to an
   // extension.
@@ -47,18 +80,28 @@ class UserScript {
   // `can_execute_script_everywhere` is true, this will return ALL_SCHEMES.
   static int ValidUserScriptSchemes(bool can_execute_script_everywhere = false);
 
-  // Returns if a user script's ID is generated.
-  static bool IsIDGenerated(const std::string& id);
-
-  // Holds script file info.
-  class File {
+  // Holds the script content.
+  class Content {
    public:
-    File(const base::FilePath& extension_root,
-         const base::FilePath& relative_path,
-         const GURL& url);
-    File();
-    File(const File& other);
-    ~File();
+    // Source of the script content.
+    enum class Source { kFile, kInlineCode };
+
+    Content();
+    Content(const Content& other);
+    ~Content();
+
+    // Creates a content object with kFile source. It store the URL where the
+    // file will be fetched from.
+    static std::unique_ptr<Content> CreateFile(
+        const base::FilePath& extension_root,
+        const base::FilePath& relative_path,
+        const GURL& url);
+    // Creates a content object with kInlineCode source. `url` must be unique,
+    // since it's used to inject a js script. This means that a unique url has
+    // to be generated, since inline code scripts don't have a url.
+    static std::unique_ptr<Content> CreateInlineCode(const GURL& url);
+
+    Source source() { return source_; }
 
     const base::FilePath& extension_root() const { return extension_root_; }
     const base::FilePath& relative_path() const { return relative_path_; }
@@ -68,18 +111,16 @@ class UserScript {
 
     // If external_content_ is set returns it as content otherwise it returns
     // content_
-    const base::StringPiece GetContent() const {
+    const std::string_view GetContent() const {
       if (external_content_.data())
         return external_content_;
       else
         return content_;
     }
-    void set_external_content(const base::StringPiece& content) {
+    void set_external_content(std::string_view content) {
       external_content_ = content;
     }
-    void set_content(const base::StringPiece& content) {
-      content_.assign(content.begin(), content.end());
-    }
+    void set_content(std::string content) { content_ = std::move(content); }
 
     // Serialization support. The content and FilePath members will not be
     // serialized!
@@ -87,6 +128,14 @@ class UserScript {
     void Unpickle(const base::Pickle& pickle, base::PickleIterator* iter);
 
    private:
+    Content(Source source,
+            const base::FilePath& extension_root,
+            const base::FilePath& relative_path,
+            const GURL& url);
+
+    // The source of the script.
+    Source source_;
+
     // Where the script file lives on the disk. We keep the path split so that
     // it can be localized at will.
     base::FilePath extension_root_;
@@ -97,13 +146,13 @@ class UserScript {
 
     // The script content. It can be set to either loaded_content_ or
     // externally allocated string.
-    base::StringPiece external_content_;
+    std::string_view external_content_;
 
     // Set when the content is loaded by LoadContent
     std::string content_;
   };
 
-  using FileList = std::vector<std::unique_ptr<File>>;
+  using ContentList = std::vector<std::unique_ptr<Content>>;
 
   // Type of a API consumer instance that user scripts will be injected on.
   enum ConsumerInstanceType { TAB, WEBVIEW };
@@ -184,12 +233,12 @@ class UserScript {
   void add_exclude_url_pattern(const URLPattern& pattern);
 
   // List of js scripts for this user script
-  FileList& js_scripts() { return js_scripts_; }
-  const FileList& js_scripts() const { return js_scripts_; }
+  ContentList& js_scripts() { return js_scripts_; }
+  const ContentList& js_scripts() const { return js_scripts_; }
 
   // List of css scripts for this user script
-  FileList& css_scripts() { return css_scripts_; }
-  const FileList& css_scripts() const { return css_scripts_; }
+  ContentList& css_scripts() { return css_scripts_; }
+  const ContentList& css_scripts() const { return css_scripts_; }
 
   const std::string& extension_id() const { return host_id_.id; }
 
@@ -218,6 +267,13 @@ class UserScript {
     execution_world_ = world;
   }
 
+  // Returns the script's ID without the appended prefix.
+  std::string GetIDWithoutPrefix() const;
+
+  // Returns the type of this script, which is derived from examining the
+  // HostID and the prefix of the ID.
+  Source GetSource() const;
+
   // Returns true if the script should be applied to the specified URL, false
   // otherwise.
   bool MatchesURL(const GURL& url) const;
@@ -229,16 +285,13 @@ class UserScript {
                        bool is_subframe) const;
 
   // Serializes the UserScript into a pickle. The content of the scripts and
-  // paths to UserScript::Files will not be serialized!
+  // paths to UserScript::Content will not be serialized!
   void Pickle(base::Pickle* pickle) const;
 
   // Deserializes the script from a pickle. Note that this always succeeds
   // because presumably we were the one that pickled it, and we did it
   // correctly.
   void Unpickle(const base::Pickle& pickle, base::PickleIterator* iter);
-
-  // Returns if this script's ID is generated.
-  bool IsIDGenerated() const;
 
  private:
   // base::Pickle helper functions used to pickle the individual types of
@@ -248,7 +301,7 @@ class UserScript {
   void PickleHostID(base::Pickle* pickle, const mojom::HostID& host_id) const;
   void PickleURLPatternSet(base::Pickle* pickle,
                            const URLPatternSet& pattern_list) const;
-  void PickleScripts(base::Pickle* pickle, const FileList& scripts) const;
+  void PickleScripts(base::Pickle* pickle, const ContentList& scripts) const;
 
   // Unpickle helper functions used to unpickle individual types of components.
   void UnpickleGlobs(const base::Pickle& pickle,
@@ -262,7 +315,7 @@ class UserScript {
                              URLPatternSet* pattern_list);
   void UnpickleScripts(const base::Pickle& pickle,
                        base::PickleIterator* iter,
-                       FileList* scripts);
+                       ContentList* scripts);
 
   // The location to run the script inside the document.
   mojom::RunLocation run_location_ = mojom::RunLocation::kDocumentIdle;
@@ -292,10 +345,10 @@ class UserScript {
   URLPatternSet exclude_url_set_;
 
   // List of js scripts defined in content_scripts
-  FileList js_scripts_;
+  ContentList js_scripts_;
 
   // List of css scripts defined in content_scripts
-  FileList css_scripts_;
+  ContentList css_scripts_;
 
   // The ID of the host this script is a part of. The |ID| of the
   // |host_id| can be empty if the script is a "standlone" user script.

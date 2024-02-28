@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,7 +41,7 @@ class CORE_EXPORT OffscreenFontSelector : public CSSFontSelectorBase {
 
   void UpdateGenericFontFamilySettings(const GenericFontFamilySettings&);
 
-  FontFaceCache* GetFontFaceCache() override { return font_face_cache_; }
+  FontFaceCache* GetFontFaceCache() override { return font_face_cache_.Get(); }
 
   ExecutionContext* GetExecutionContext() const override {
     return worker_ ? worker_->GetExecutionContext() : nullptr;

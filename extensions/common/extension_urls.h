@@ -6,8 +6,8 @@
 #define EXTENSIONS_COMMON_EXTENSION_URLS_H_
 
 #include <string>
+#include <string_view>
 
-#include "base/strings/string_piece.h"
 #include "url/gurl.h"
 
 namespace url {
@@ -33,14 +33,26 @@ extern const char kChromeWebstoreBaseURL[];
 extern const char kChromeWebstoreUpdateURL[];
 extern const char kNewChromeWebstoreBaseURL[];
 
+// Various utm attribution sources for web store URLs.
+// From the sub-menu item in the extension menu inside the 3-dot menu.
+extern const char kAppMenuUtmSource[];
+// From the button in the puzzle-piece extensions menu in the toolbar.
+extern const char kExtensionsMenuUtmSource[];
+// From the link in the sidebar in the chrome://extensions page.
+extern const char kExtensionsSidebarUtmSource[];
+
 // Returns the URL prefix for the extension/apps gallery. Can be set via the
 // --apps-gallery-url switch. The URL returned will not contain a trailing
 // slash. Do not use this as a prefix/extent for the store.
 GURL GetWebstoreLaunchURL();
 GURL GetNewWebstoreLaunchURL();
 
-// Returns the URL to the extensions category on the Web Store. This is
-// derived from GetWebstoreLaunchURL().
+// Returns a url with a utm_source query param value of `utm_source_value`
+// appended.
+GURL AppendUtmSource(const GURL& url, std::string_view utm_source_value);
+
+// Returns the URL to the extensions category on the old and new Web Store
+// depending on extensions_features::kNewWebstoreURL feature flag.
 std::string GetWebstoreExtensionsCategoryURL();
 
 // Returns the URL prefix for an item in the extension/app gallery. This URL
@@ -83,7 +95,7 @@ bool IsBlocklistUpdateUrl(const GURL& url);
 
 // Returns true if the origin points to an URL used for safebrowsing.
 // TODO(devlin): Update other methods to also take an url::Origin?
-bool IsSafeBrowsingUrl(const url::Origin& origin, base::StringPiece path);
+bool IsSafeBrowsingUrl(const url::Origin& origin, std::string_view path);
 
 }  // namespace extension_urls
 

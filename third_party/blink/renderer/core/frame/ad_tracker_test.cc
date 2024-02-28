@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,6 +21,7 @@
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
 namespace blink {
@@ -137,7 +138,7 @@ class TestAdTracker : public AdTracker {
     if (!execution_context_)
       return AdTracker::GetCurrentExecutionContext();
 
-    return execution_context_;
+    return execution_context_.Get();
   }
 
   bool CalculateIfAdSubresource(ExecutionContext* execution_context,
@@ -145,7 +146,7 @@ class TestAdTracker : public AdTracker {
                                 ResourceType resource_type,
                                 const FetchInitiatorInfo& initiator_info,
                                 bool ad_request) override {
-    if (!ad_suffix_.IsEmpty() && request_url.GetString().EndsWith(ad_suffix_)) {
+    if (!ad_suffix_.empty() && request_url.GetString().EndsWith(ad_suffix_)) {
       ad_request = true;
     }
 
@@ -202,8 +203,9 @@ class AdTrackerTest : public testing::Test {
 
   void WillExecuteScript(const String& script_url,
                          int script_id = v8::Message::kNoScriptIdInfo) {
+    auto* execution_context = GetExecutionContext();
     ad_tracker_->WillExecuteScript(
-        GetExecutionContext(), v8::Isolate::GetCurrent()->GetCurrentContext(),
+        execution_context, execution_context->GetIsolate()->GetCurrentContext(),
         String(script_url), script_id);
   }
 
@@ -239,6 +241,7 @@ class AdTrackerTest : public testing::Test {
     AppendToKnownAdScripts(String::Format("{ id %d }", script_id));
   }
 
+  test::TaskEnvironment task_environment_;
   Persistent<TestAdTracker> ad_tracker_;
   std::unique_ptr<DummyPageHolder> page_holder_;
 };
@@ -722,9 +725,9 @@ TEST_F(AdTrackerSimTest, InlineAdScriptRunningInNonAdContext) {
     )HTML");
 
   // The new sibling frame should also be identified as created by ad script.
-  EXPECT_TRUE(
-      To<LocalFrame>(GetDocument().GetFrame()->Tree().ScopedChild("ad_sibling"))
-          ->IsFrameCreatedByAdScript());
+  EXPECT_TRUE(To<LocalFrame>(GetDocument().GetFrame()->Tree().ScopedChild(
+                                 AtomicString("ad_sibling")))
+                  ->IsFrameCreatedByAdScript());
 }
 
 // Image loaded by ad script is tagged as ad.

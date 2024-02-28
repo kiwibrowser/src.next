@@ -41,7 +41,9 @@
 // Annotate a function indicating it should not be inlined.
 // Use like:
 //   NOINLINE void DoStuff() { ... }
-#if defined(COMPILER_GCC) || defined(__clang__)
+#if defined(__clang__) && HAS_ATTRIBUTE(noinline)
+#define NOINLINE [[clang::noinline]]
+#elif defined(COMPILER_GCC) && HAS_ATTRIBUTE(noinline)
 #define NOINLINE __attribute__((noinline))
 #elif defined(COMPILER_MSVC)
 #define NOINLINE __declspec(noinline)
@@ -49,7 +51,18 @@
 #define NOINLINE
 #endif
 
-#if defined(COMPILER_GCC) && defined(NDEBUG)
+// Annotate a function indicating it should not be optimized.
+#if defined(__clang__) && HAS_ATTRIBUTE(optnone)
+#define NOOPT [[clang::optnone]]
+#elif defined(COMPILER_GCC) && HAS_ATTRIBUTE(optimize)
+#define NOOPT __attribute__((optimize(0)))
+#else
+#define NOOPT
+#endif
+
+#if defined(__clang__) && defined(NDEBUG) && HAS_ATTRIBUTE(always_inline)
+#define ALWAYS_INLINE [[clang::always_inline]] inline
+#elif defined(COMPILER_GCC) && defined(NDEBUG) && HAS_ATTRIBUTE(always_inline)
 #define ALWAYS_INLINE inline __attribute__((__always_inline__))
 #elif defined(COMPILER_MSVC) && defined(NDEBUG)
 #define ALWAYS_INLINE __forceinline
@@ -64,9 +77,9 @@
 // folding of multiple identical caller functions into a single signature. To
 // prevent code folding, see NO_CODE_FOLDING() in base/debug/alias.h.
 // Use like:
-//   void NOT_TAIL_CALLED FooBar();
+//   NOT_TAIL_CALLED void FooBar();
 #if defined(__clang__) && HAS_ATTRIBUTE(not_tail_called)
-#define NOT_TAIL_CALLED __attribute__((not_tail_called))
+#define NOT_TAIL_CALLED [[clang::not_tail_called]]
 #else
 #define NOT_TAIL_CALLED
 #endif
@@ -78,23 +91,14 @@
 //
 // In most places you can use the C++11 keyword "alignas", which is preferred.
 //
-// But compilers have trouble mixing __attribute__((...)) syntax with
-// alignas(...) syntax.
-//
-// Doesn't work in clang or gcc:
-//   struct alignas(16) __attribute__((packed)) S { char c; };
-// Works in clang but not gcc:
-//   struct __attribute__((packed)) alignas(16) S2 { char c; };
-// Works in clang and gcc:
-//   struct alignas(16) S3 { char c; } __attribute__((packed));
-//
-// There are also some attributes that must be specified *before* a class
-// definition: visibility (used for exporting functions/classes) is one of
-// these attributes. This means that it is not possible to use alignas() with a
-// class that is marked as exported.
-#if defined(COMPILER_MSVC)
+// Historically, compilers had trouble mixing __attribute__((...)) syntax with
+// alignas(...) syntax. However, at least Clang is very accepting nowadays. It
+// may be that this macro can be removed entirely.
+#if defined(__clang__)
+#define ALIGNAS(byte_alignment) alignas(byte_alignment)
+#elif defined(COMPILER_MSVC)
 #define ALIGNAS(byte_alignment) __declspec(align(byte_alignment))
-#elif defined(COMPILER_GCC)
+#elif defined(COMPILER_GCC) && HAS_ATTRIBUTE(aligned)
 #define ALIGNAS(byte_alignment) __attribute__((aligned(byte_alignment)))
 #endif
 
@@ -106,19 +110,25 @@
 // References:
 // * https://en.cppreference.com/w/cpp/language/attributes/no_unique_address
 // * https://wg21.link/dcl.attr.nouniqueaddr
-#if HAS_CPP_ATTRIBUTE(no_unique_address)
+#if defined(COMPILER_MSVC) && HAS_CPP_ATTRIBUTE(msvc::no_unique_address)
+// Unfortunately MSVC ignores [[no_unique_address]] (see
+// https://devblogs.microsoft.com/cppblog/msvc-cpp20-and-the-std-cpp20-switch/#msvc-extensions-and-abi),
+// and clang-cl matches it for ABI compatibility reasons. We need to prefer
+// [[msvc::no_unique_address]] when available if we actually want any effect.
+#define NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
+#elif HAS_CPP_ATTRIBUTE(no_unique_address)
 #define NO_UNIQUE_ADDRESS [[no_unique_address]]
 #else
 #define NO_UNIQUE_ADDRESS
 #endif
 
-// Tell the compiler a function is using a printf-style format string.
+// Tells the compiler a function is using a printf-style format string.
 // |format_param| is the one-based index of the format string parameter;
 // |dots_param| is the one-based index of the "..." parameter.
 // For v*printf functions (which take a va_list), pass 0 for dots_param.
 // (This is undocumented but matches what the system C headers do.)
 // For member functions, the implicit this parameter counts as index 1.
-#if defined(COMPILER_GCC) || defined(__clang__)
+#if (defined(COMPILER_GCC) || defined(__clang__)) && HAS_ATTRIBUTE(format)
 #define PRINTF_FORMAT(format_param, dots_param) \
   __attribute__((format(printf, format_param, dots_param)))
 #else
@@ -163,7 +173,7 @@
 // DISABLE_CFI_PERF -- Disable Control Flow Integrity for perf reasons.
 #if !defined(DISABLE_CFI_PERF)
 #if defined(__clang__) && defined(OFFICIAL_BUILD)
-#define DISABLE_CFI_PERF __attribute__((no_sanitize("cfi")))
+#define DISABLE_CFI_PERF NO_SANITIZE("cfi")
 #else
 #define DISABLE_CFI_PERF
 #endif
@@ -290,7 +300,7 @@
 // please document the problem for someone who is going to cleanup it later.
 // E.g. platform, bot, benchmark or test name in patch description or next to
 // the attribute.
-#define STACK_UNINITIALIZED __attribute__((uninitialized))
+#define STACK_UNINITIALIZED [[clang::uninitialized]]
 #else
 #define STACK_UNINITIALIZED
 #endif
@@ -379,6 +389,20 @@ inline constexpr bool AnalyzerAssumeTrue(bool arg) {
 #define TRIVIAL_ABI
 #endif
 
+// Detect whether a type is trivially relocatable, ie. a move-and-destroy
+// sequence can replaced with memmove(). This can be used to optimise the
+// implementation of containers. This is automatically true for types that were
+// defined with TRIVIAL_ABI such as scoped_refptr.
+//
+// See also:
+//   https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2023/p1144r8.html
+//   https://clang.llvm.org/docs/LanguageExtensions.html#:~:text=__is_trivially_relocatable
+#if defined(__clang__) && HAS_BUILTIN(__is_trivially_relocatable)
+#define IS_TRIVIALLY_RELOCATABLE(t) __is_trivially_relocatable(t)
+#else
+#define IS_TRIVIALLY_RELOCATABLE(t) false
+#endif
+
 // Marks a member function as reinitializing a moved-from variable.
 // See also
 // https://clang.llvm.org/extra/clang-tidy/checks/bugprone-use-after-move.html#reinitialization
@@ -386,16 +410,6 @@ inline constexpr bool AnalyzerAssumeTrue(bool arg) {
 #define REINITIALIZES_AFTER_MOVE [[clang::reinitializes]]
 #else
 #define REINITIALIZES_AFTER_MOVE
-#endif
-
-// Requires constant initialization. See constinit in C++20. Allows to rely on a
-// variable being initialized before execution, and not requiring a global
-// constructor.
-#if HAS_ATTRIBUTE(require_constant_initialization)
-#define CONSTINIT __attribute__((require_constant_initialization))
-#endif
-#if !defined(CONSTINIT)
-#define CONSTINIT
 #endif
 
 #if defined(__clang__)
@@ -406,13 +420,38 @@ inline constexpr bool AnalyzerAssumeTrue(bool arg) {
 #define GSL_POINTER
 #endif
 
-// Adds the "logically_const" tag to a symbol's mangled name, which can be
-// recognized by the "Mutable Constants" check
-// (https://chromium.googlesource.com/chromium/src/+/main/docs/speed/binary_size/android_binary_size_trybot.md#Mutable-Constants).
+// Adds the "logically_const" tag to a symbol's mangled name. The "Mutable
+// Constants" check [1] detects instances of constants that aren't in .rodata,
+// e.g. due to a missing `const`. Using this tag suppresses the check for this
+// symbol, allowing it to live outside .rodata without a warning.
+//
+// [1]:
+// https://crsrc.org/c/docs/speed/binary_size/android_binary_size_trybot.md#Mutable-Constants
 #if defined(COMPILER_GCC) || defined(__clang__)
 #define LOGICALLY_CONST [[gnu::abi_tag("logically_const")]]
 #else
 #define LOGICALLY_CONST
+#endif
+
+// preserve_most clang's calling convention. Reduces register pressure for the
+// caller and as such can be used for cold calls. Support for the
+// "preserve_most" attribute is limited:
+// - 32-bit platforms do not implement it,
+// - component builds fail because _dl_runtime_resolve() clobbers registers,
+// - there are crashes on arm64 on Windows (https://crbug.com/v8/14065), which
+//   can hopefully be fixed in the future.
+// Additionally, the initial implementation in clang <= 16 overwrote the return
+// register(s) in the epilogue of a preserve_most function, so we only use
+// preserve_most in clang >= 17 (see https://reviews.llvm.org/D143425).
+// See https://clang.llvm.org/docs/AttributeReference.html#preserve-most for
+// more details.
+#if defined(ARCH_CPU_64_BITS) &&                       \
+    !(BUILDFLAG(IS_WIN) && defined(ARCH_CPU_ARM64)) && \
+    !defined(COMPONENT_BUILD) && defined(__clang__) && \
+    __clang_major__ >= 17 && HAS_ATTRIBUTE(preserve_most)
+#define PRESERVE_MOST __attribute__((preserve_most))
+#else
+#define PRESERVE_MOST
 #endif
 
 #endif  // BASE_COMPILER_SPECIFIC_H_

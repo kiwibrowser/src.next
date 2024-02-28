@@ -12,12 +12,14 @@ include_rules = [
   "+components/download/public/common",
   "+components/file_access",
   "+components/filename_generation",
-  "+components/permissions/features.h",
+  "+components/grit",
+  "+components/power_monitor",
   "+components/services/font",
   "+components/services/filesystem",
   "+components/services/quarantine/test_support.h",
   "+components/services/quarantine/quarantine.h",
   "+components/services/screen_ai/buildflags",
+  "+components/services/screen_ai/public/cpp",
   "+components/services/storage",
   "+components/services/storage/public",
   "+components/session_manager/core",
@@ -25,6 +27,7 @@ include_rules = [
   "+components/link_header_util",
   "+components/metrics",
   "+components/metrics:single_sample_metrics",
+  "+components/miracle_parameter",
   "+components/network_session_configurator/common",
   "+components/offline_pages/buildflags/buildflags.h",
   "+components/offline_pages/core/request_header",
@@ -38,8 +41,9 @@ include_rules = [
   "+components/url_formatter",
   "+components/viz",
   "+components/web_package",
+  "+components/webauthn/json",
   "+components/cbor",
-  "+components/os_crypt/os_crypt_switches.h",
+  "+components/os_crypt/sync/os_crypt_switches.h",
   # *********************************** NOTE ***********************************
   # If adding a new component dependency, email
   # content-owners@chromium.org first.
@@ -49,7 +53,6 @@ include_rules = [
   "+content/public/browser",
   "+device/base/synchronization",
   "+device/bluetooth",
-  "+device/fido/hid",
   "+device/gamepad", # For gamepad API
   "+device/nfc",
   "+device/vr/public", # For WebXR API
@@ -96,7 +99,6 @@ include_rules = [
   "+third_party/zlib",
 
   # Allow non-browser Chrome OS code to be used.
-  "+ash/constants",
   "+chromeos",
   "+third_party/cros_system_api",
 
@@ -122,6 +124,8 @@ include_rules = [
   "+third_party/blink/public/web/web_serialized_script_value_version.h",
   "+third_party/blink/public/mojom/frame/tree_scope_type.mojom.h",
 
+  "+tools/v8_context_snapshot/buildflags.h",
+
   # DO NOT ADD ANY CHROME OR COMPONENTS INCLUDES HERE!!!
   # See https://sites.google.com/a/chromium.org/dev/developers/content-module
   # for more information.
@@ -129,17 +133,19 @@ include_rules = [
 
 specific_include_rules = {
   ".*test\.cc": [
+    "+components/os_crypt/async/browser/test_utils.h",
     "+services/network/test",
   ],
   ".*test_utils\.(h|cc)": [
     "+services/network/test",
   ],
+  "browser_interface_binders\.cc": [
+    "+components/ml/webnn/features.mojom-features.h",
+  ],
   "browser_main_loop\.cc": [
     # TODO(crbug.com/1049894): Remove.
     "+services/network/transitional_url_loader_factory_owner.h",
-  ],
-  "browser_main_loop\.h": [
-    "+ui/ozone/buildflags.h",
+    "+device/fido/hid/fido_hid_discovery.h",
   ],
   "browsing_data_(filter_builder|remover)_impl_unittest\.cc": [
     "+services/network/cookie_manager.h",
@@ -184,4 +190,8 @@ specific_include_rules = {
   "site_per_process_mac_browsertest\.mm": [
     "+content/app_shim_remote_cocoa",
   ],
+  "utility_sandbox_delegate_win\.cc": [
+    "+content/utility/sandbox_delegate_data.mojom.h"
+  ]
+
 }

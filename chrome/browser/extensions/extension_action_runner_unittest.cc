@@ -7,7 +7,7 @@
 #include <map>
 #include <utility>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/active_tab_permission_granter.h"
@@ -22,6 +22,7 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test_utils.h"
 #include "content/public/test/navigation_simulator.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
@@ -31,7 +32,6 @@
 #include "extensions/common/mojom/injection_type.mojom-shared.h"
 #include "extensions/common/mojom/run_location.mojom-shared.h"
 #include "extensions/common/user_script.h"
-#include "extensions/common/value_builder.h"
 
 namespace extensions {
 
@@ -66,7 +66,7 @@ class ExtensionActionRunnerUnitTest : public ChromeRenderViewHostTestHarness {
   // a script.
   bool RequiresUserConsent(const Extension* extension) const;
 
-  // Request an injection for the given |extension|.
+  // Request an injection for the given `extension` at idle.
   void RequestInjection(const Extension* extension);
   void RequestInjection(const Extension* extension,
                         mojom::RunLocation run_location);
@@ -87,7 +87,8 @@ class ExtensionActionRunnerUnitTest : public ChromeRenderViewHostTestHarness {
   void SetUp() override;
 
   // The associated ExtensionActionRunner.
-  raw_ptr<ExtensionActionRunner> extension_action_runner_ = nullptr;
+  raw_ptr<ExtensionActionRunner, DanglingUntriaged> extension_action_runner_ =
+      nullptr;
 
   // The map of observed executions, keyed by extension id.
   std::map<std::string, int> extension_executions_;
@@ -102,15 +103,13 @@ const Extension* ExtensionActionRunnerUnitTest::AddExtension() {
   const std::string kId = crx_file::id_util::GenerateId("all_hosts_extension");
   extension_ =
       ExtensionBuilder()
-          .SetManifest(
-              DictionaryBuilder()
-                  .Set("name", "all_hosts_extension")
-                  .Set("description", "an extension")
-                  .Set("manifest_version", 2)
-                  .Set("version", "1.0.0")
-                  .Set("permissions",
-                       ListBuilder().Append(kAllHostsPermission).Build())
-                  .Build())
+          .SetManifest(base::Value::Dict()
+                           .Set("name", "all_hosts_extension")
+                           .Set("description", "an extension")
+                           .Set("manifest_version", 2)
+                           .Set("version", "1.0.0")
+                           .Set("permissions", base::Value::List().Append(
+                                                   kAllHostsPermission)))
           .SetLocation(mojom::ManifestLocation::kInternal)
           .SetID(kId)
           .Build();
@@ -185,6 +184,32 @@ void ExtensionActionRunnerUnitTest::SetUp() {
   DCHECK(tab_helper);
   extension_action_runner_ = tab_helper->extension_action_runner();
   DCHECK(extension_action_runner_);
+}
+
+// TODO(crbug.com/1400812): Split the test by need for refresh or not to confirm
+// the blocked actions are running as expected.
+// Tests that when an extension is granted permissions (independent of page
+// reload) the extension is allowed to run.
+TEST_F(ExtensionActionRunnerUnitTest, GrantTabPermissions) {
+  ActiveTabPermissionGranter* active_tab_permission_granter =
+      TabHelper::FromWebContents(web_contents())
+          ->active_tab_permission_granter();
+  ASSERT_TRUE(active_tab_permission_granter);
+
+  const Extension* extension = AddExtension();
+  EXPECT_EQ(0u, GetExecutionCountForExtension(extension->id()));
+  NavigateAndCommit(GURL("https://www.google.com"));
+  RequestInjection(extension);
+  EXPECT_TRUE(RequiresUserConsent(extension));
+  EXPECT_TRUE(runner()->WantsToRun(extension));
+
+  runner()->GrantTabPermissions({extension});
+  EXPECT_TRUE(content::WaitForLoadStop(web_contents()));
+  task_environment()->RunUntilIdle();
+
+  EXPECT_EQ(1u, GetExecutionCountForExtension(extension->id()));
+  EXPECT_FALSE(RequiresUserConsent(extension));
+  EXPECT_FALSE(runner()->WantsToRun(extension));
 }
 
 // Test that extensions with all_hosts require permission to execute, and, once

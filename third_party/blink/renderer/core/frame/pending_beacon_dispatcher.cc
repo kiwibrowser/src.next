@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include "base/numerics/safe_conversions.h"
 #include "base/ranges/algorithm.h"
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
@@ -21,7 +22,7 @@ namespace {
 // triggered. A bundle has beacons fall within the same 100x milliseconds.
 // Spec says: The beacon is not guaranteed to be sent at exactly this many
 // milliseconds after hidden; bundling/batching of beacons is possible.
-// https://github.com/WICG/unload-beacon/blob/main/README.md#properties
+// https://github.com/WICG/pending-beacon/blob/main/README.md#properties
 constexpr base::TimeDelta kBeaconTimeoutInterval = base::Milliseconds(100);
 
 struct ReverseBeaconTimeoutSorter {
@@ -108,7 +109,7 @@ void PendingBeaconDispatcher::PageVisibilityChanged() {
   DCHECK(GetPage());
 
   // Handles a PendingBeacon's `backgroundTimeout` properties.
-  // https://github.com/WICG/unload-beacon/blob/main/README.md#properties
+  // https://github.com/WICG/pending-beacon/blob/main/README.md#properties
   if (GetPage()->IsPageVisible()) {
     // The timer should be reset if the page enters `visible` visibility state
     // before the `backgroundTimeout` expires.
@@ -120,7 +121,7 @@ void PendingBeaconDispatcher::PageVisibilityChanged() {
 }
 
 void PendingBeaconDispatcher::ScheduleDispatchBeacons() {
-  if (pending_beacons_.IsEmpty()) {
+  if (pending_beacons_.empty()) {
     return;
   }
 
@@ -142,7 +143,7 @@ void PendingBeaconDispatcher::ScheduleDispatchBeacons() {
   // | 500ms | 201ms | 101ms | 100ms | 99ms | 1ms | 0ms |
   // |---------------------------------------------------
   //
-  CopyToVector(pending_beacons_, background_timeout_descending_beacons_);
+  background_timeout_descending_beacons_.assign(pending_beacons_);
   std::sort(background_timeout_descending_beacons_.begin(),
             background_timeout_descending_beacons_.end(),
             ReverseBeaconTimeoutSorter());
@@ -152,7 +153,7 @@ void PendingBeaconDispatcher::ScheduleDispatchBeacons() {
 }
 
 void PendingBeaconDispatcher::ScheduleDispatchNextBundledBeacons() {
-  if (background_timeout_descending_beacons_.IsEmpty()) {
+  if (background_timeout_descending_beacons_.empty()) {
     return;
   }
 
@@ -191,8 +192,8 @@ void PendingBeaconDispatcher::ScheduleDispatchNextBundledBeacons() {
   // this class and members should not outlive the Document (ExecutionContext).
   task_handle_ = PostNonNestableDelayedCancellableTask(
       *task_runner, FROM_HERE,
-      WTF::Bind(&PendingBeaconDispatcher::OnDispatchBeaconsAndRepeat,
-                WrapWeakPersistent(this), start_index),
+      WTF::BindOnce(&PendingBeaconDispatcher::OnDispatchBeaconsAndRepeat,
+                    WrapWeakPersistent(this), start_index),
       delayed);
 }
 
@@ -304,7 +305,7 @@ void PendingBeaconDispatcher::OnDispatchPagehide() {
   // after users think they have left a page, beacons queued in that page
   // still exist and get sent through the new network, which leaks navigation
   // history to the new network.
-  // See https://github.com/WICG/unload-beacon/issues/30.
+  // See https://github.com/WICG/pending-beacon/issues/30.
   //
   // Note that the pagehide event might be dispatched a bit earlier than when
   // beacons get sents by browser in same-site navigation.

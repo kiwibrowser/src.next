@@ -10,9 +10,9 @@
 #include <memory>
 #include <string>
 
-#include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
@@ -23,7 +23,6 @@
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -53,21 +52,22 @@ class RedirectTest : public InProcessBrowserTest {
     // asynchronously from the callback the history system uses to notify us
     // that it's done: OnRedirectQueryComplete.
     std::vector<GURL> rv;
+    base::RunLoop loop(base::RunLoop::Type::kNestableTasksAllowed);
     history_service->QueryRedirectsFrom(
         url,
         base::BindOnce(&RedirectTest::OnRedirectQueryComplete,
-                       base::Unretained(this), &rv),
+                       base::Unretained(this), &rv, loop.QuitWhenIdleClosure()),
         &tracker_);
-    content::RunMessageLoop();
+    loop.Run();
     return rv;
   }
 
  protected:
   void OnRedirectQueryComplete(std::vector<GURL>* rv,
+                               base::OnceClosure quit_closure,
                                history::RedirectList redirects) {
     rv->insert(rv->end(), redirects.begin(), redirects.end());
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::RunLoop::QuitCurrentWhenIdleClosureDeprecated());
+    std::move(quit_closure).Run();
   }
 
   // Tracker for asynchronous history queries.
@@ -286,14 +286,14 @@ IN_PROC_BROWSER_TEST_F(RedirectTest,
 
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), first_url, WindowOpenDisposition::CURRENT_TAB,
-      ui_test_utils::BROWSER_TEST_NONE);
+      ui_test_utils::BROWSER_TEST_NO_WAIT);
   // We don't sleep here - the first navigation won't have been committed yet
   // because we told the server to wait a minute. This means the browser has
   // started it's provisional load for the client redirect destination page but
   // hasn't completed. Our time is now!
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), final_url, WindowOpenDisposition::CURRENT_TAB,
-      ui_test_utils::BROWSER_TEST_NONE);
+      ui_test_utils::BROWSER_TEST_NO_WAIT);
   observer.Wait();
 
   // Check to make sure the navigation did in fact take place and we are

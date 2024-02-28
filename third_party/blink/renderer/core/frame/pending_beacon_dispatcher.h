@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_PENDING_BEACON_DISPATCHER_H_
 
 #include "base/gtest_prod_util.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "base/types/pass_key.h"
 #include "third_party/blink/public/mojom/frame/pending_beacon.mojom-blink.h"
@@ -253,7 +254,7 @@ class CORE_EXPORT PendingBeaconDispatcher
                            DispatchDuplicatedBeacons);
   FRIEND_TEST_ALL_PREFIXES(PendingBeaconDispatcherOnPagehideTest,
                            OnPagehideUpdateAndUnregisterAllBeacons);
-  FRIEND_TEST_ALL_PREFIXES(PendingBeaconCreateTest, Create);
+  FRIEND_TEST_ALL_PREFIXES(PendingBeaconCreateTest, CreateFromSecureContext);
   FRIEND_TEST_ALL_PREFIXES(PendingBeaconSendTest, Send);
   FRIEND_TEST_ALL_PREFIXES(PendingBeaconSendTest, SendNow);
   FRIEND_TEST_ALL_PREFIXES(PendingBeaconSendTest,

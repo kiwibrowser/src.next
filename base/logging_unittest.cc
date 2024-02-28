@@ -5,11 +5,11 @@
 #include <sstream>
 #include <string>
 
-#include "base/bind.h"
-#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"
 #include "base/process/process.h"
@@ -38,6 +38,7 @@
 
 #if BUILDFLAG(IS_WIN)
 #include <windows.h>
+
 #include <excpt.h>
 #endif  // BUILDFLAG(IS_WIN)
 
@@ -90,7 +91,7 @@ TEST_F(LoggingTest, BasicLogging) {
   // 4 base logs: LOG, LOG_IF, PLOG, and PLOG_IF
   int expected_logs = 4;
 
-  // 4 verbose logs: VLOG, VLOG_IF, PVLOG, PVLOG_IF.
+  // 4 verbose logs: VLOG, VLOG_IF, VPLOG, VPLOG_IF.
   if (VLOG_IS_ON(0))
     expected_logs += 4;
 
@@ -111,12 +112,7 @@ TEST_F(LoggingTest, BasicLogging) {
   EXPECT_TRUE(LOG_IS_ON(INFO));
   EXPECT_EQ(DCHECK_IS_ON(), DLOG_IS_ON(INFO));
 
-#if BUILDFLAG(USE_RUNTIME_VLOG)
   EXPECT_TRUE(VLOG_IS_ON(0));
-#else
-  // VLOG defaults to off when not USE_RUNTIME_VLOG.
-  EXPECT_FALSE(VLOG_IS_ON(0));
-#endif  // BUILDFLAG(USE_RUNTIME_VLOG)
 
   LOG(INFO) << mock_log_source.Log();
   LOG_IF(INFO, true) << mock_log_source.Log();
@@ -426,14 +422,14 @@ TEST_F(LoggingTest, CheckCausesDistinctBreakpoints) {
 // is lower. Furthermore, since the Fuchsia implementation uses threads, it is
 // not possible to rely on an implementation of CHECK that calls abort(), which
 // takes down the whole process, preventing the thread exception handler from
-// handling the exception. DO_CHECK here falls back on IMMEDIATE_CRASH() in
+// handling the exception. DO_CHECK here falls back on base::ImmediateCrash() in
 // non-official builds, to catch regressions earlier in the CQ.
 #if !CHECK_WILL_STREAM()
 #define DO_CHECK CHECK
 #else
-#define DO_CHECK(cond) \
-  if (!(cond)) {       \
-    IMMEDIATE_CRASH(); \
+#define DO_CHECK(cond)      \
+  if (!(cond)) {            \
+    base::ImmediateCrash(); \
   }
 #endif
 
@@ -599,9 +595,10 @@ void CheckCrashTestSighandler(int, siginfo_t* info, void* context_ptr) {
 #if !CHECK_WILL_STREAM()
 #define DO_CHECK CHECK
 #else
-#define DO_CHECK(cond) \
-  if (!(cond))         \
-  IMMEDIATE_CRASH()
+#define DO_CHECK(cond)      \
+  if (!(cond)) {            \
+    base::ImmediateCrash(); \
+  }
 #endif
 
 void CrashChildMain(int death_location) {
@@ -672,6 +669,11 @@ TEST_F(LoggingTest, DebugLoggingReleaseBehavior) {
 }
 
 TEST_F(LoggingTest, NestedLogAssertHandlers) {
+  if (LOGGING_DFATAL != LOGGING_FATAL) {
+    GTEST_SKIP() << "Test relies on DFATAL being FATAL for "
+                    "NestedLogAssertHandlers to fire.";
+  }
+
   ::testing::InSequence dummy;
   ::testing::StrictMock<MockLogAssertHandler> handler_a, handler_b;
 
@@ -695,17 +697,16 @@ TEST_F(LoggingTest, NestedLogAssertHandlers) {
   logging::ScopedLogAssertHandler scoped_handler_a(base::BindRepeating(
       &MockLogAssertHandler::HandleLogAssert, base::Unretained(&handler_a)));
 
-  // Using LOG(FATAL) rather than CHECK(false) here since log messages aren't
-  // preserved for CHECKs in official builds.
-  LOG(FATAL) << "First assert must be caught by handler_a";
+  // Using LOG(DFATAL) rather than LOG(FATAL) as the latter is not cancellable.
+  LOG(DFATAL) << "First assert must be caught by handler_a";
 
   {
     logging::ScopedLogAssertHandler scoped_handler_b(base::BindRepeating(
         &MockLogAssertHandler::HandleLogAssert, base::Unretained(&handler_b)));
-    LOG(FATAL) << "Second assert must be caught by handler_b";
+    LOG(DFATAL) << "Second assert must be caught by handler_b";
   }
 
-  LOG(FATAL) << "Last assert must be caught by handler_a again";
+  LOG(DFATAL) << "Last assert must be caught by handler_a again";
 }
 
 // Test that defining an operator<< for a type in a namespace doesn't prevent
@@ -865,12 +866,7 @@ TEST_F(LoggingTest, String16) {
 // Tests that we don't VLOG from logging_unittest except when in the scope
 // of the ScopedVmoduleSwitches.
 TEST_F(LoggingTest, ScopedVmoduleSwitches) {
-#if BUILDFLAG(USE_RUNTIME_VLOG)
   EXPECT_TRUE(VLOG_IS_ON(0));
-#else
-  // VLOG defaults to off when not USE_RUNTIME_VLOG.
-  EXPECT_FALSE(VLOG_IS_ON(0));
-#endif  // BUILDFLAG(USE_RUNTIME_VLOG)
 
   // To avoid unreachable-code warnings when VLOG is disabled at compile-time.
   int expected_logs = 0;
@@ -921,7 +917,6 @@ TEST_F(LoggingTest, BuildCrashString) {
   EXPECT_EQ("file.cc:42: Hello", msg.BuildCrashString());
 }
 
-#if !BUILDFLAG(USE_RUNTIME_VLOG)
 TEST_F(LoggingTest, BuildTimeVLOG) {
   // Use a static because only captureless lambdas can be converted to a
   // function pointer for SetLogMessageHandler().
@@ -933,7 +928,7 @@ TEST_F(LoggingTest, BuildTimeVLOG) {
   });
 
   // No VLOG by default.
-  EXPECT_FALSE(VLOG_IS_ON(0));
+  EXPECT_FALSE(VLOG_IS_ON(1));
   VLOG(1) << "Expect not logged";
   EXPECT_TRUE(log_string->empty());
 
@@ -953,7 +948,6 @@ TEST_F(LoggingTest, BuildTimeVLOG) {
   VLOG(2) << "Expect not logged";
   EXPECT_TRUE(log_string->empty());
 }
-#endif  // !BUILDFLAG(USE_RUNTIME_VLOG)
 
 // NO NEW TESTS HERE
 // The test above redefines ENABLED_VLOG_LEVEL, so new tests should be added

@@ -45,10 +45,10 @@ using CounterMap = HeapHashMap<AtomicString, Member<CounterNode>>;
 // style. It then just queries CounterNodes for their values.
 //
 // CounterNodes are rare so they are stored in a map instead of growing
-// LayoutObject. counterMaps() (in LayoutCounter.cpp) keeps the association
+// LayoutObject. GetCounterMaps() (in layout_counter.cc) keeps the association
 // between LayoutObject and CounterNodes. To avoid unneeded hash-lookups in the
 // common case where there is no CounterNode, LayoutObject also keeps track of
-// whether it has at least one CounterNode in the hasCounterNodeMap bit.
+// whether it has at least one CounterNode in the HasCounterNodeMap bit.
 //
 // Keeping the map up to date is the reason why LayoutObjects need to call into
 // LayoutCounter during their lifetime (see the static functions below).
@@ -57,6 +57,19 @@ class LayoutCounter : public LayoutText {
   LayoutCounter(PseudoElement&, const CounterContentData&);
   ~LayoutCounter() override;
   void Trace(Visitor*) const override;
+
+  const AtomicString& Identifier() const {
+    NOT_DESTROYED();
+    return counter_->Identifier();
+  }
+  void SetCounterNode(CounterNode* counter_node) {
+    NOT_DESTROYED();
+    counter_node_ = counter_node;
+  }
+  CounterNode* GetCounterNode() const {
+    NOT_DESTROYED();
+    return counter_node_.Get();
+  }
 
   // These functions are static so that any LayoutObject can call them.
   // The reason is that any LayoutObject in the tree can have a CounterNode
@@ -74,6 +87,18 @@ class LayoutCounter : public LayoutText {
 
   void UpdateCounter();
 
+  // Returns true if <counter-style> is "disclosure-open" or
+  // "disclosure-closed".
+  bool IsDirectionalSymbolMarker() const;
+  // Returns <string> in counters().
+  const AtomicString& Separator() const;
+
+  // Returns LayoutCounter::counter_->ListStyle() if `object` is a
+  // LayoutCounter.
+  // Returns style.ListStyleType()->GetCounterStyleName() otherwise.
+  static const AtomicString& ListStyle(const LayoutObject* object,
+                                       const ComputedStyle& style);
+
   const char* GetName() const override {
     NOT_DESTROYED();
     return "LayoutCounter";
@@ -83,16 +108,18 @@ class LayoutCounter : public LayoutText {
   void WillBeDestroyed() override;
 
  private:
-  bool IsOfType(LayoutObjectType type) const override {
+  bool IsCounter() const final {
     NOT_DESTROYED();
-    return type == kLayoutObjectCounter || LayoutText::IsOfType(type);
+    return true;
   }
-  scoped_refptr<StringImpl> OriginalText() const override;
+  String OriginalText() const override;
 
   // Removes the reference to the CounterNode associated with this layoutObject.
   // This is used to cause a counter display update when the CounterNode tree
   // changes.
   void Invalidate();
+
+  const CounterStyle* NullableCounterStyle() const;
 
   Member<const CounterContentData> counter_;
   Member<CounterNode> counter_node_;

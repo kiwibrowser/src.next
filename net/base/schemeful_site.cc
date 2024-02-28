@@ -6,6 +6,7 @@
 
 #include "base/check.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/trace_event/memory_usage_estimator.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/base/url_util.h"
 #include "url/gurl.h"
@@ -96,11 +97,11 @@ bool SchemefulSite::FromWire(const url::Origin& site_as_origin,
   return true;
 }
 
-absl::optional<SchemefulSite> SchemefulSite::CreateIfHasRegisterableDomain(
+std::optional<SchemefulSite> SchemefulSite::CreateIfHasRegisterableDomain(
     const url::Origin& origin) {
   ObtainASiteResult result = ObtainASite(origin);
   if (!result.used_registerable_domain)
-    return absl::nullopt;
+    return std::nullopt;
   return SchemefulSite(std::move(result));
 }
 
@@ -138,6 +139,10 @@ const url::Origin& SchemefulSite::GetInternalOriginForTesting() const {
   return site_as_origin_;
 }
 
+size_t SchemefulSite::EstimateMemoryUsage() const {
+  return base::trace_event::EstimateMemoryUsage(site_as_origin_);
+}
+
 bool SchemefulSite::operator==(const SchemefulSite& other) const {
   return site_as_origin_ == other.site_as_origin_;
 }
@@ -153,15 +158,27 @@ bool SchemefulSite::operator<(const SchemefulSite& other) const {
 }
 
 // static
-absl::optional<SchemefulSite> SchemefulSite::DeserializeWithNonce(
+std::optional<SchemefulSite> SchemefulSite::DeserializeWithNonce(
+    base::PassKey<NetworkAnonymizationKey>,
     const std::string& value) {
-  absl::optional<url::Origin> result = url::Origin::Deserialize(value);
+  return DeserializeWithNonce(value);
+}
+
+// static
+std::optional<SchemefulSite> SchemefulSite::DeserializeWithNonce(
+    const std::string& value) {
+  std::optional<url::Origin> result = url::Origin::Deserialize(value);
   if (!result)
-    return absl::nullopt;
+    return std::nullopt;
   return SchemefulSite(result.value());
 }
 
-absl::optional<std::string> SchemefulSite::SerializeWithNonce() {
+std::optional<std::string> SchemefulSite::SerializeWithNonce(
+    base::PassKey<NetworkAnonymizationKey>) {
+  return SerializeWithNonce();
+}
+
+std::optional<std::string> SchemefulSite::SerializeWithNonce() {
   return site_as_origin_.SerializeWithNonceAndInitIfNeeded();
 }
 

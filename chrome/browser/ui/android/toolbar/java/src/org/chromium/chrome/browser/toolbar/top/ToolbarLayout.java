@@ -9,7 +9,8 @@ import android.content.res.ColorStateList;
 import android.graphics.Canvas;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
-import android.os.SystemClock;
+import android.os.Build;
+import android.os.Build.VERSION;
 import android.util.AttributeSet;
 import android.view.InputDevice;
 import android.view.MotionEvent;
@@ -22,15 +23,18 @@ import android.widget.ProgressBar;
 import androidx.annotation.CallSuper;
 import androidx.annotation.ColorInt;
 import androidx.annotation.DrawableRes;
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
+import androidx.appcompat.widget.TooltipCompat;
 
-import org.chromium.base.Callback;
 import org.chromium.base.ObserverList;
 import org.chromium.base.TraceEvent;
-import org.chromium.base.supplier.BooleanSupplier;
+import org.chromium.base.lifetime.DestroyChecker;
+import org.chromium.base.lifetime.Destroyable;
 import org.chromium.base.supplier.ObservableSupplier;
 import org.chromium.chrome.browser.browser_controls.BrowserStateBrowserControlsVisibilityDelegate;
+import org.chromium.chrome.browser.layouts.LayoutStateProvider;
 import org.chromium.chrome.browser.omnibox.LocationBar;
 import org.chromium.chrome.browser.omnibox.LocationBarCoordinator;
 import org.chromium.chrome.browser.omnibox.NewTabPageDelegate;
@@ -38,35 +42,41 @@ import org.chromium.chrome.browser.omnibox.OmniboxFocusReason;
 import org.chromium.chrome.browser.omnibox.UrlBarData;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.theme.ThemeColorProvider;
 import org.chromium.chrome.browser.theme.ThemeColorProvider.ThemeColorObserver;
 import org.chromium.chrome.browser.theme.ThemeColorProvider.TintObserver;
 import org.chromium.chrome.browser.theme.ThemeUtils;
 import org.chromium.chrome.browser.toolbar.ButtonData;
-import org.chromium.chrome.browser.toolbar.HomeButton;
 import org.chromium.chrome.browser.toolbar.R;
-import org.chromium.chrome.browser.toolbar.TabCountProvider;
 import org.chromium.chrome.browser.toolbar.ToolbarDataProvider;
 import org.chromium.chrome.browser.toolbar.ToolbarProgressBar;
 import org.chromium.chrome.browser.toolbar.ToolbarTabController;
 import org.chromium.chrome.browser.toolbar.menu_button.MenuButtonCoordinator;
 import org.chromium.chrome.browser.toolbar.top.NavigationPopup.HistoryDelegate;
 import org.chromium.chrome.browser.toolbar.top.ToolbarTablet.OfflineDownloader;
+import org.chromium.chrome.browser.toolbar.top.TopToolbarCoordinator.ToolbarColorObserver;
 import org.chromium.chrome.browser.toolbar.top.TopToolbarCoordinator.UrlExpansionObserver;
 import org.chromium.chrome.browser.ui.appmenu.AppMenuButtonHelper;
 import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
+import org.chromium.chrome.browser.util.BrowserUiUtils;
+import org.chromium.chrome.browser.util.BrowserUiUtils.HostSurface;
+import org.chromium.chrome.browser.util.BrowserUiUtils.ModuleTypeOnStartAndNtp;
 import org.chromium.ui.UiUtils;
 import org.chromium.ui.base.ViewUtils;
+import org.chromium.ui.dragdrop.DragDropGlobalState;
+import org.chromium.ui.util.TokenHolder;
+import org.chromium.url.GURL;
+
+import java.util.function.BooleanSupplier;
 
 /**
  * Layout class that contains the base shared logic for manipulating the toolbar component. For
  * interaction that are not from Views inside Toolbar hierarchy all interactions should be done
  * through {@link Toolbar} rather than using this class directly.
  */
-public abstract class ToolbarLayout
-        extends FrameLayout implements TintObserver, ThemeColorObserver {
-    private Callback<Runnable> mInvalidator;
+public abstract class ToolbarLayout extends FrameLayout
+        implements Destroyable, TintObserver, ThemeColorObserver {
+    private @Nullable ToolbarColorObserver mToolbarColorObserver;
 
     protected final ObserverList<UrlExpansionObserver> mUrlExpansionObservers =
             new ObserverList<>();
@@ -77,16 +87,11 @@ public abstract class ToolbarLayout
     private ToolbarDataProvider mToolbarDataProvider;
     private ToolbarTabController mToolbarTabController;
 
-    @Nullable
-    protected ToolbarProgressBar mProgressBar;
-    @Nullable
-    protected BooleanSupplier mPartnerHomepageEnabledSupplier;
+    @Nullable protected ToolbarProgressBar mProgressBar;
+    @Nullable protected BooleanSupplier mPartnerHomepageEnabledSupplier;
 
     private boolean mNativeLibraryReady;
     private boolean mUrlHasFocus;
-
-    private long mFirstDrawTimeMs;
-
     private boolean mFindInPageToolbarShowing;
 
     private ThemeColorProvider mThemeColorProvider;
@@ -95,25 +100,41 @@ public abstract class ToolbarLayout
 
     private TopToolbarOverlayCoordinator mOverlayCoordinator;
 
-    /**
-     * Basic constructor for {@link ToolbarLayout}.
-     */
+    private BrowserStateBrowserControlsVisibilityDelegate mBrowserControlsVisibilityDelegate;
+    private int mShowBrowserControlsToken = TokenHolder.INVALID_TOKEN;
+
+    private TabStripTransitionCoordinator mTabStripTransitionCoordinator;
+    private int mTabStripTransitionToken = TokenHolder.INVALID_TOKEN;
+
+    protected final DestroyChecker mDestroyChecker;
+
+    /** Basic constructor for {@link ToolbarLayout}. */
     public ToolbarLayout(Context context, AttributeSet attrs) {
         super(context, attrs);
         mDefaultTint = ThemeUtils.getThemedToolbarIconTint(getContext(), false);
+        mDestroyChecker = new DestroyChecker();
 
-        addOnLayoutChangeListener(new OnLayoutChangeListener() {
-            @Override
-            public void onLayoutChange(View view, int left, int top, int right, int bottom,
-                    int oldLeft, int oldTop, int oldRight, int oldBottom) {
-                if (isNativeLibraryReady() && mProgressBar.getParent() != null) {
-                    mProgressBar.initializeAnimation();
-                }
+        addOnLayoutChangeListener(
+                new OnLayoutChangeListener() {
+                    @Override
+                    public void onLayoutChange(
+                            View view,
+                            int left,
+                            int top,
+                            int right,
+                            int bottom,
+                            int oldLeft,
+                            int oldTop,
+                            int oldRight,
+                            int oldBottom) {
+                        if (isNativeLibraryReady() && mProgressBar.getParent() != null) {
+                            mProgressBar.initializeAnimation();
+                        }
 
-                // Since this only needs to happen once, remove this listener from the view.
-                removeOnLayoutChangeListener(this);
-            }
-        });
+                        // Since this only needs to happen once, remove this listener from the view.
+                        removeOnLayoutChangeListener(this);
+                    }
+                });
     }
 
     /**
@@ -121,23 +142,24 @@ public abstract class ToolbarLayout
      * @param toolbarDataProvider The provider for toolbar data.
      * @param tabController       The controller that handles interactions with the tab.
      * @param menuButtonCoordinator Coordinator for interacting with the MenuButton.
-     * @param isProgressBarVisibleSupplier A supplier of whether the progress bar should be visible.
      * @param historyDelegate Delegate used to display navigation history.
      * @param partnerHomepageEnabledSupplier A supplier of a boolean indicating that partner
      *        homepage is enabled.
      * @param offlineDownloader Triggers downloading an offline page.
      */
     @CallSuper
-    protected void initialize(ToolbarDataProvider toolbarDataProvider,
-            ToolbarTabController tabController, MenuButtonCoordinator menuButtonCoordinator,
-            ObservableSupplier<Boolean> isProgressBarVisibleSupplier,
-            HistoryDelegate historyDelegate, BooleanSupplier partnerHomepageEnabledSupplier,
+    public void initialize(
+            ToolbarDataProvider toolbarDataProvider,
+            ToolbarTabController tabController,
+            MenuButtonCoordinator menuButtonCoordinator,
+            HistoryDelegate historyDelegate,
+            BooleanSupplier partnerHomepageEnabledSupplier,
             OfflineDownloader offlineDownloader) {
         mToolbarDataProvider = toolbarDataProvider;
         mToolbarTabController = tabController;
         mMenuButtonCoordinator = menuButtonCoordinator;
         mPartnerHomepageEnabledSupplier = partnerHomepageEnabledSupplier;
-        mProgressBar = createProgressBar(isProgressBarVisibleSupplier);
+        mProgressBar = createProgressBar();
     }
 
     /** @param overlay The coordinator for the texture version of the top toolbar. */
@@ -165,14 +187,19 @@ public abstract class ToolbarLayout
     // BrowsingModeToolbarCoordinator.
     public void setLocationBarCoordinator(LocationBarCoordinator locationBarCoordinator) {}
 
-    /**
-     * Cleans up any code as necessary.
-     */
-    void destroy() {
+    /** Cleans up any code as necessary. */
+    @Override
+    public void destroy() {
+        mDestroyChecker.destroy();
+
         if (mThemeColorProvider != null) {
             mThemeColorProvider.removeTintObserver(this);
             mThemeColorProvider.removeThemeColorObserver(this);
             mThemeColorProvider = null;
+        }
+
+        if (mToolbarColorObserver != null) {
+            mToolbarColorObserver = null;
         }
     }
 
@@ -188,6 +215,13 @@ public abstract class ToolbarLayout
      */
     void removeUrlExpansionObserver(UrlExpansionObserver urlExpansionObserver) {
         mUrlExpansionObservers.removeObserver(urlExpansionObserver);
+    }
+
+    /**
+     * @param toolbarColorObserver The observer that observes toolbar color change.
+     */
+    public void setToolbarColorObserver(@NonNull ToolbarColorObserver toolbarColorObserver) {
+        mToolbarColorObserver = toolbarColorObserver;
     }
 
     /**
@@ -211,7 +245,7 @@ public abstract class ToolbarLayout
     public void onTintChanged(ColorStateList tint, @BrandedColorScheme int brandedColorScheme) {}
 
     @Override
-    public void onThemeColorChanged(int color, boolean shouldAnimate) {}
+    public void onThemeColorChanged(@ColorInt int color, boolean shouldAnimate) {}
 
     /**
      * Set the height that the progress bar should be.
@@ -224,84 +258,115 @@ public abstract class ToolbarLayout
     /**
      * @return A progress bar for Chrome to use.
      */
-    private ToolbarProgressBar createProgressBar(
-            ObservableSupplier<Boolean> isProgressBarVisibleSupplier) {
-        return new ToolbarProgressBar(
-                getContext(), getProgressBarHeight(), this, false, isProgressBarVisibleSupplier);
+    private ToolbarProgressBar createProgressBar() {
+        return new ToolbarProgressBar(getContext(), getProgressBarHeight(), this, false);
+    }
+
+    /** TODO comment */
+    @CallSuper
+    protected void onMenuButtonDisabled() {}
+
+    // Set hover tooltip text for buttons shared between phones and tablets.
+    public void setTooltipTextForToolbarButtons() {
+        // Set hover tooltip text for home and tab switcher buttons.
+        setTooltipText(
+                ((View) getHomeButton()),
+                getContext().getString(R.string.accessibility_toolbar_btn_home));
+        setTooltipText(
+                ((View) getTabSwitcherButton()),
+                getContext()
+                        .getString(R.string.accessibility_toolbar_btn_tabswitcher_toggle_default));
     }
 
     /**
-     * TODO comment
+     * Set hover tooltip text for buttons shared between phones and tablets.
+     * @TODO: Remove and use the method in UiUtils.java instead once JaCoCo issue is resolved.
      */
-    @CallSuper
-    protected void onMenuButtonDisabled() {}
+    protected void setTooltipText(View button, String text) {
+        if (button != null && VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            TooltipCompat.setTooltipText(button, text);
+        }
+    }
+
+    @Override
+    public boolean onInterceptTouchEvent(MotionEvent ev) {
+        // Disable touch event while tab drag is in progress.
+        // TODO(crbug.com/1519687): Move onTouchEventObserver to CoordinatorLayoutForPointer.
+        return DragDropGlobalState.hasValue();
+    }
 
     @Override
     protected void onFinishInflate() {
         super.onFinishInflate();
 
         // Initialize the provider to an empty version to avoid null checking everywhere.
-        mToolbarDataProvider = new ToolbarDataProvider() {
-            @Override
-            public boolean isIncognito() {
-                return false;
-            }
+        mToolbarDataProvider =
+                new ToolbarDataProvider() {
+                    @Override
+                    public boolean isIncognito() {
+                        return false;
+                    }
 
-            @Override
-            public boolean isInOverviewAndShowingOmnibox() {
-                return false;
-            }
+                    @Override
+                    public boolean isInOverviewAndShowingOmnibox() {
+                        return false;
+                    }
 
-            @Override
-            public boolean shouldShowLocationBarInOverviewMode() {
-                return false;
-            }
+                    @Override
+                    public boolean shouldShowLocationBarInOverviewMode() {
+                        return false;
+                    }
 
-            @Override
-            public Profile getProfile() {
-                return null;
-            }
+                    @Override
+                    public Profile getProfile() {
+                        return null;
+                    }
 
-            @Override
-            public Tab getTab() {
-                return null;
-            }
+                    @Override
+                    public Tab getTab() {
+                        return null;
+                    }
 
-            @Override
-            public String getCurrentUrl() {
-                return "";
-            }
+                    @Override
+                    public String getCurrentUrl() {
+                        return "";
+                    }
 
-            @Override
-            public UrlBarData getUrlBarData() {
-                return UrlBarData.EMPTY;
-            }
+                    @Override
+                    public GURL getCurrentGurl() {
+                        return GURL.emptyGURL();
+                    }
 
-            @Override
-            public NewTabPageDelegate getNewTabPageDelegate() {
-                return NewTabPageDelegate.EMPTY;
-            }
+                    @Override
+                    public UrlBarData getUrlBarData() {
+                        return UrlBarData.EMPTY;
+                    }
 
-            @Override
-            public int getPrimaryColor() {
-                return 0;
-            }
+                    @Override
+                    public NewTabPageDelegate getNewTabPageDelegate() {
+                        return NewTabPageDelegate.EMPTY;
+                    }
 
-            @Override
-            public boolean isUsingBrandColor() {
-                return false;
-            }
+                    @Override
+                    public @ColorInt int getPrimaryColor() {
+                        return 0;
+                    }
 
-            @Override
-            public @DrawableRes int getSecurityIconResource(boolean isTablet) {
-                return 0;
-            }
+                    @Override
+                    public boolean isUsingBrandColor() {
+                        return false;
+                    }
 
-            @Override
-            public boolean isPaintPreview() {
-                return false;
-            }
-        };
+                    @Override
+                    public @DrawableRes int getSecurityIconResource(boolean isTablet) {
+                        return 0;
+                    }
+
+                    @Override
+                    public boolean isPaintPreview() {
+                        return false;
+                    }
+                };
     }
 
     @Override
@@ -334,9 +399,7 @@ public abstract class ToolbarLayout
         return ((FrameLayout.LayoutParams) view.getLayoutParams());
     }
 
-    /**
-     *  This function handles native dependent initialization for this class.
-     */
+    /** This function handles native dependent initialization for this class. */
     protected void onNativeLibraryReady() {
         mNativeLibraryReady = true;
         if (mProgressBar.getParent() != null) mProgressBar.initializeAnimation();
@@ -358,7 +421,6 @@ public abstract class ToolbarLayout
         return mMenuButtonCoordinator;
     }
 
-    @VisibleForTesting
     void setMenuButtonCoordinatorForTesting(MenuButtonCoordinator menuButtonCoordinator) {
         mMenuButtonCoordinator = menuButtonCoordinator;
     }
@@ -366,20 +428,12 @@ public abstract class ToolbarLayout
     /**
      * @return The {@link ProgressBar} this layout uses.
      */
-    @Nullable
-    protected ToolbarProgressBar getProgressBar() {
+    protected @Nullable ToolbarProgressBar getProgressBar() {
         return mProgressBar;
     }
 
     void getPositionRelativeToContainer(View containerView, int[] position) {
         ViewUtils.getRelativeDrawPosition(containerView, this, position);
-    }
-
-    /**
-     * @return The helper for menu button UI interactions.
-     */
-    AppMenuButtonHelper getMenuButtonHelper() {
-        return mAppMenuButtonHelper;
     }
 
     /**
@@ -389,15 +443,7 @@ public abstract class ToolbarLayout
         return mNativeLibraryReady;
     }
 
-    @Override
-    protected void onDraw(Canvas canvas) {
-        super.onDraw(canvas);
-        recordFirstDrawTime();
-    }
-
-    /**
-     * Add the toolbar's progress bar to the view hierarchy.
-     */
+    /** Add the toolbar's progress bar to the view hierarchy. */
     void addProgressBarToHierarchy() {
         ViewGroup controlContainer = (ViewGroup) getRootView().findViewById(R.id.control_container);
         int progressBarPosition =
@@ -411,25 +457,6 @@ public abstract class ToolbarLayout
      */
     public ToolbarDataProvider getToolbarDataProvider() {
         return mToolbarDataProvider;
-    }
-
-    /**
-     * Sets the {@link Invalidator} that will be called when the toolbar attempts to invalidate the
-     * drawing surface.  This will give the object that registers as the host for the
-     * {@link Invalidator} a chance to defer the actual invalidate to sync drawing.
-     * @param invalidator An {@link Invalidator} instance.
-     */
-    void setInvalidatorCallback(Callback<Runnable> invalidator) {
-        mInvalidator = invalidator;
-    }
-
-    /**
-     * Triggers a paint but allows the {@link Invalidator} set by
-     * {@link #setPaintInvalidator(Invalidator)} to decide when to actually invalidate.
-     * @param client A {@link Invalidator.Client} instance that wants to be invalidated.
-     */
-    protected void triggerPaintInvalidate(Runnable clientInvalidator) {
-        mInvalidator.onResult(clientInvalidator);
     }
 
     /**
@@ -467,14 +494,10 @@ public abstract class ToolbarLayout
      */
     protected void setCustomTabCloseClickHandler(OnClickListener listener) {}
 
-    /**
-     * Sets whether the urlbar should be hidden on first page load.
-     */
+    /** Sets whether the urlbar should be hidden on first page load. */
     protected void setUrlBarHidden(boolean hide) {}
 
-    /**
-     * Tells the Toolbar to update what buttons it is currently displaying.
-     */
+    /** Tells the Toolbar to update what buttons it is currently displaying. */
     void updateButtonVisibility() {}
 
     /**
@@ -507,12 +530,6 @@ public abstract class ToolbarLayout
     void updateBookmarkButton(boolean isBookmarked, boolean editingAllowed) {}
 
     /**
-     * Gives inheriting classes the chance to respond to accessibility state changes.
-     * @param enabled Whether or not accessibility is enabled.
-     */
-    void onAccessibilityStatusChanged(boolean enabled) {}
-
-    /**
      * Gives inheriting classes the chance to do the necessary UI operations after Chrome is
      * restored to a previously saved state.
      */
@@ -538,7 +555,7 @@ public abstract class ToolbarLayout
      * For extending classes to override and carry out the changes related with the primary color
      * for the current tab changing.
      */
-    protected void onPrimaryColorChanged(boolean shouldAnimate) {}
+    public void onPrimaryColorChanged(boolean shouldAnimate) {}
 
     /**
      * Sets the icon drawable that the close button in the toolbar (if any) should show, or hides
@@ -571,20 +588,17 @@ public abstract class ToolbarLayout
     }
 
     /**
-     * @return The height of the tab strip. Return 0 for toolbars that do not have a tabstrip.
+     * Return the height of the tab strip from the layout resource. Return 0 for toolbars that do
+     * not have a tab strip.
      */
-    protected int getTabStripHeight() {
+    protected int getTabStripHeightFromResource() {
         return getResources().getDimensionPixelSize(R.dimen.tab_strip_height);
     }
 
-    /**
-     * Triggered when the content view for the specified tab has changed.
-     */
+    /** Triggered when the content view for the specified tab has changed. */
     void onTabContentViewChanged() {}
 
-    CaptureReadinessResult isReadyForTextureCapture() {
-        return CaptureReadinessResult.unknown(/*isReady=*/true);
-    }
+    protected abstract CaptureReadinessResult isReadyForTextureCapture();
 
     boolean setForceTextureCapture(boolean forceTextureCapture) {
         return false;
@@ -605,8 +619,7 @@ public abstract class ToolbarLayout
      *                       finished (which can be detected by a call to
      *                       {@link #onTabSwitcherTransitionFinished()}).
      */
-    void setTabSwitcherMode(boolean inTabSwitcherMode, boolean showToolbar, boolean delayAnimation,
-            MenuButtonCoordinator menuButtonCoordinator) {}
+    void setTabSwitcherMode(boolean inTabSwitcherMode) {}
 
     /**
      * Gives inheriting classes the chance to update their state when the TabSwitcher transition has
@@ -616,22 +629,23 @@ public abstract class ToolbarLayout
 
     /**
      * Called when start surface state is changed.
+     *
      * @param shouldBeVisible Whether toolbar layout should be visible.
-     * @param isShowingStartSurface Whether start surface homepage is showing.
+     * @param isShowingStartSurfaceHomepage Whether start surface homepage is showing.
+     * @param isShowingStartSurfaceTabSwitcher Whether the StartSurface-controlled TabSwitcher is
+     *     showing.
      */
-    void onStartSurfaceStateChanged(boolean shouldBeVisible, boolean isShowingStartSurface) {}
-
-    /**
-     * Force to hide toolbar shadow.
-     * @param forceHideShadow Whether toolbar shadow should be hidden.
-     */
-    void setForceHideShadow(boolean forceHideShadow) {}
+    void onStartSurfaceStateChanged(
+            boolean shouldBeVisible,
+            boolean isShowingStartSurfaceHomepage,
+            boolean isShowingStartSurfaceTabSwitcher) {}
 
     /**
      * Gives inheriting classes the chance to observe tab count changes.
-     * @param tabCountProvider The {@link TabCountProvider} subclasses can observe.
+     *
+     * @param tabCountSupplier The observable supplier subclasses can observe.
      */
-    void setTabCountProvider(TabCountProvider tabCountProvider) {}
+    void setTabCountSupplier(ObservableSupplier<Integer> tabCountSupplier) {}
 
     /**
      * Gives inheriting classes the chance to update themselves based on default search engine
@@ -656,14 +670,16 @@ public abstract class ToolbarLayout
 
     void getLocationBarContentRect(Rect outRect) {
         View container = getLocationBar().getContainerView();
-        outRect.set(container.getPaddingLeft(), container.getPaddingTop(),
+        outRect.set(
+                container.getPaddingLeft(),
+                container.getPaddingTop(),
                 container.getWidth() - container.getPaddingRight(),
                 container.getHeight() - container.getPaddingBottom());
         ViewUtils.getRelativeDrawPosition(this, getLocationBar().getContainerView(), mTempPosition);
         outRect.offset(mTempPosition[0], mTempPosition[1]);
     }
 
-    void setTextureCaptureMode(boolean textureMode) {}
+    protected void setTextureCaptureMode(boolean textureMode) {}
 
     boolean shouldIgnoreSwipeGesture() {
         if (mUrlHasFocus || mFindInPageToolbarShowing) return true;
@@ -685,59 +701,10 @@ public abstract class ToolbarLayout
         mUrlHasFocus = hasFocus;
     }
 
-    /**
-     * Keeps track of the first time the toolbar is drawn.
-     */
-    private void recordFirstDrawTime() {
-        if (mFirstDrawTimeMs == 0) mFirstDrawTimeMs = SystemClock.elapsedRealtime();
-    }
-
-    /**
-     * Returns the elapsed realtime in ms of the time at which first draw for the toolbar occurred.
-     */
-    long getFirstDrawTime() {
-        return mFirstDrawTimeMs;
-    }
-
-    /**
-     * Notified when a navigation to a different page has occurred.
-     */
+    /** Notified when a navigation to a different page has occurred. */
     protected void onNavigatedToDifferentPage() {}
 
-    /**
-     * Starts load progress.
-     */
-    void startLoadProgress() {
-        mProgressBar.start();
-    }
-
-    /**
-     * Sets load progress.
-     * @param progress The load progress between 0 and 1.
-     */
-    void setLoadProgress(float progress) {
-        mProgressBar.setProgress(progress);
-    }
-
-    /**
-     * Finishes load progress.
-     * @param delayed Whether hiding progress bar should be delayed to give enough time for user to
-     *                        recognize the last state.
-     */
-    void finishLoadProgress(boolean delayed) {
-        mProgressBar.finish(delayed);
-    }
-
-    /**
-     * @return True if the progress bar is started.
-     */
-    boolean isProgressStarted() {
-        return mProgressBar.isStarted();
-    }
-
-    /**
-     * Finish any toolbar animations.
-     */
+    /** Finish any toolbar animations. */
     void finishAnimations() {}
 
     /**
@@ -793,9 +760,7 @@ public abstract class ToolbarLayout
         if (mToolbarTabController != null) mToolbarTabController.stopOrReloadCurrentTab();
     }
 
-    /**
-     * Opens hompage in the current tab.
-     */
+    /** Opens hompage in the current tab. */
     void openHomepage() {
         maybeUnfocusUrlBar();
         if (mToolbarTabController != null) mToolbarTabController.openHomepage();
@@ -803,8 +768,9 @@ public abstract class ToolbarLayout
 
     private void maybeUnfocusUrlBar() {
         if (getLocationBar() != null && getLocationBar().getOmniboxStub() != null) {
-            getLocationBar().getOmniboxStub().setUrlBarFocus(
-                    false, null, OmniboxFocusReason.UNFOCUS);
+            getLocationBar()
+                    .getOmniboxStub()
+                    .setUrlBarFocus(false, null, OmniboxFocusReason.UNFOCUS);
         }
     }
 
@@ -814,36 +780,31 @@ public abstract class ToolbarLayout
      */
     void updateOptionalButton(ButtonData buttonData) {}
 
-    /**
-     * Hide the optional toolbar button.
-     */
+    /** Hide the optional toolbar button. */
     void hideOptionalButton() {}
 
     /**
      * @return Optional button view.
      */
-    @VisibleForTesting
     public View getOptionalButtonViewForTesting() {
         return null;
     }
 
     /**
-     * Sets the current TabModelSelector so the toolbar can pass it into buttons that need access to
-     * it.
+     * @return Home button this {@link ToolbarLayout} contains, if any.
      */
-    void setTabModelSelector(TabModelSelector selector) {}
-
-    /**
-     * @return {@link HomeButton} this {@link ToolbarLayout} contains.
-     */
-    public HomeButton getHomeButton() {
+    public ImageView getHomeButton() {
         return null;
     }
 
     /**
-     * Returns whether there are any ongoing animations.
+     * @return {@link ToggleTabStackButton} this {@link ToolbarLayout} contains.
      */
-    @VisibleForTesting
+    public ToggleTabStackButton getTabSwitcherButton() {
+        return null;
+    }
+
+    /** Returns whether there are any ongoing animations. */
     public boolean isAnimationRunningForTesting() {
         return false;
     }
@@ -854,7 +815,10 @@ public abstract class ToolbarLayout
      */
     protected void setToolbarHairlineColor(@ColorInt int toolbarColor) {
         final ImageView shadow = getRootView().findViewById(R.id.toolbar_hairline);
-        shadow.setImageTintList(ColorStateList.valueOf(getToolbarHairlineColor(toolbarColor)));
+        // Tests don't always set this up. TODO(https://crbug.com/1365954): Refactor this dep.
+        if (shadow != null) {
+            shadow.setImageTintList(ColorStateList.valueOf(getToolbarHairlineColor(toolbarColor)));
+        }
     }
 
     /**
@@ -871,5 +835,87 @@ public abstract class ToolbarLayout
      * the toolbar itself.
      */
     public void setBrowserControlsVisibilityDelegate(
-            BrowserStateBrowserControlsVisibilityDelegate controlsVisibilityDelegate) {}
+            BrowserStateBrowserControlsVisibilityDelegate controlsVisibilityDelegate) {
+        mBrowserControlsVisibilityDelegate = controlsVisibilityDelegate;
+    }
+
+    // TODO(crbug.com/1512232): Rework the API if this method is called by multiple clients.
+    protected void keepControlsShownForAnimation() {
+        // isShown() being false implies that the toolbar isn't visible. We don't want to force it
+        // back into visibility just so that we can show an animation.
+        if (!isShown()) return;
+
+        if (mBrowserControlsVisibilityDelegate != null) {
+            mShowBrowserControlsToken =
+                    mBrowserControlsVisibilityDelegate.showControlsPersistentAndClearOldToken(
+                            mShowBrowserControlsToken);
+        }
+        if (mTabStripTransitionCoordinator != null
+                && mTabStripTransitionToken == TokenHolder.INVALID_TOKEN) {
+            mTabStripTransitionToken =
+                    mTabStripTransitionCoordinator.requestDeferTabStripTransitionToken();
+        }
+    }
+
+    protected void allowBrowserControlsHide() {
+        if (mBrowserControlsVisibilityDelegate != null) {
+            mBrowserControlsVisibilityDelegate.releasePersistentShowingToken(
+                    mShowBrowserControlsToken);
+            mShowBrowserControlsToken = TokenHolder.INVALID_TOKEN;
+        }
+        if (mTabStripTransitionCoordinator != null) {
+            mTabStripTransitionCoordinator.releaseTabStripToken(mTabStripTransitionToken);
+            mTabStripTransitionToken = TokenHolder.INVALID_TOKEN;
+        }
+    }
+
+    /** Set the {@link TabStripTransitionCoordinator} that manages interactions around tab strip. */
+    public void setTabStripTransitionCoordinator(TabStripTransitionCoordinator coordinator) {
+        mTabStripTransitionCoordinator = coordinator;
+    }
+
+    /**
+     * Notify the observer that the toolbar color is changed and pass the toolbar color to the
+     * observer.
+     */
+    protected void notifyToolbarColorChanged(@ColorInt int color) {
+        if (mToolbarColorObserver != null) {
+            mToolbarColorObserver.onToolbarColorChanged(color);
+        }
+    }
+
+    /**
+     * This method sets the toolbar hairline visibility.
+     * @param isHairlineVisible whether the toolbar hairline should be visible.
+     */
+    public void setHairlineVisibility(boolean isHairlineVisible) {
+        ImageView shadow = getRootView().findViewById(R.id.toolbar_hairline);
+        if (shadow != null) {
+            shadow.setVisibility(isHairlineVisible ? VISIBLE : GONE);
+        }
+    }
+
+    /**
+     * To be called indirectly by
+     * {@link LayoutStateProvider.LayoutStateObserver#onStartedHiding(int, boolean, boolean)}.
+     */
+    public void onTransitionStart() {}
+
+    /**
+     * To be called indirectly by
+     * {@link LayoutStateProvider.LayoutStateObserver#onFinishedShowing(int)}.
+     */
+    public void onTransitionEnd() {}
+
+    /**
+     * Called when the home button is pressed. Will record the home button action if the NTP is
+     * visible. Used on both phones and tablets.
+     */
+    protected void recordHomeModuleClickedIfNTPVisible() {
+        if (getToolbarDataProvider().getNewTabPageDelegate().isCurrentlyVisible()) {
+            // Record the clicking action on the home button.
+            BrowserUiUtils.recordModuleClickHistogram(
+                    HostSurface.NEW_TAB_PAGE, ModuleTypeOnStartAndNtp.HOME_BUTTON);
+        }
+    }
 }

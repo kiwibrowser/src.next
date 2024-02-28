@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,7 +39,7 @@ namespace css_test_helpers {
 TestStyleSheet::~TestStyleSheet() = default;
 
 TestStyleSheet::TestStyleSheet() {
-  document_ = Document::CreateForTest();
+  document_ = Document::CreateForTest(execution_context_.GetExecutionContext());
   style_sheet_ = CreateStyleSheet(*document_);
 }
 
@@ -52,7 +52,7 @@ CSSRuleList* TestStyleSheet::CssRules() {
 
 RuleSet& TestStyleSheet::GetRuleSet() {
   RuleSet& rule_set = style_sheet_->Contents()->EnsureRuleSet(
-      MediaQueryEvaluator(document_->GetFrame()), kRuleHasNoSpecialState);
+      MediaQueryEvaluator(document_->GetFrame()));
   rule_set.CompactRulesIfNeeded();
   return rule_set;
 }
@@ -60,10 +60,11 @@ RuleSet& TestStyleSheet::GetRuleSet() {
 void TestStyleSheet::AddCSSRules(const String& css_text, bool is_empty_sheet) {
   unsigned sheet_length = style_sheet_->length();
   style_sheet_->Contents()->ParseString(css_text);
-  if (!is_empty_sheet)
+  if (!is_empty_sheet) {
     ASSERT_GT(style_sheet_->length(), sheet_length);
-  else
+  } else {
     ASSERT_EQ(style_sheet_->length(), sheet_length);
+  }
 }
 
 CSSStyleSheet* CreateStyleSheet(Document& document) {
@@ -111,8 +112,9 @@ void RegisterProperty(Document& document,
   property_definition->setName(name);
   property_definition->setSyntax(syntax);
   property_definition->setInherits(is_inherited);
-  if (initial_value)
+  if (initial_value) {
     property_definition->setInitialValue(initial_value.value());
+  }
   PropertyRegistration::registerProperty(document.GetExecutionContext(),
                                          property_definition, exception_state);
 }
@@ -148,38 +150,37 @@ void DeclareProperty(Document& document,
 
   auto* rule =
       DynamicTo<StyleRuleProperty>(ParseRule(document, builder.ToString()));
-  if (!rule)
+  if (!rule) {
     return;
+  }
   auto* registration = PropertyRegistration::MaybeCreateForDeclaredProperty(
       document, AtomicString(name), *rule);
-  if (!registration)
+  if (!registration) {
     return;
+  }
   document.EnsurePropertyRegistry().DeclareProperty(AtomicString(name),
                                                     *registration);
   document.GetStyleEngine().PropertyRegistryChanged();
 }
 
 scoped_refptr<CSSVariableData> CreateVariableData(String s) {
-  CSSTokenizer tokenizer(s);
-  auto tokens = tokenizer.TokenizeToEOF();
-  CSSParserTokenRange range(tokens);
   bool is_animation_tainted = false;
   bool needs_variable_resolution = false;
-  return CSSVariableData::Create({range, StringView(s)}, is_animation_tainted,
-                                 needs_variable_resolution, KURL(),
-                                 WTF::TextEncoding());
+  return CSSVariableData::Create(s, is_animation_tainted,
+                                 needs_variable_resolution);
 }
 
-const CSSValue* CreateCustomIdent(AtomicString s) {
-  return MakeGarbageCollected<CSSCustomIdentValue>(s);
+const CSSValue* CreateCustomIdent(const char* s) {
+  return MakeGarbageCollected<CSSCustomIdentValue>(AtomicString(s));
 }
 
 const CSSValue* ParseLonghand(Document& document,
                               const CSSProperty& property,
                               const String& value) {
   const auto* longhand = DynamicTo<Longhand>(property);
-  if (!longhand)
+  if (!longhand) {
     return nullptr;
+  }
 
   const auto* context = MakeGarbageCollected<CSSParserContext>(document);
   CSSParserLocalContext local_context;
@@ -201,32 +202,44 @@ StyleRuleBase* ParseRule(Document& document, String text) {
   auto* sheet = CSSStyleSheet::CreateInline(
       document, NullURL(), TextPosition::MinimumPosition(), UTF8Encoding());
   const auto* context = MakeGarbageCollected<CSSParserContext>(document);
-  return CSSParser::ParseRule(context, sheet->Contents(), text);
+  return CSSParser::ParseRule(context, sheet->Contents(), CSSNestingType::kNone,
+                              /*parent_rule_for_nesting=*/nullptr, text);
 }
 
 const CSSValue* ParseValue(Document& document, String syntax, String value) {
   auto syntax_definition = CSSSyntaxStringParser(syntax).Parse();
-  if (!syntax_definition.has_value())
+  if (!syntax_definition.has_value()) {
     return nullptr;
+  }
   const auto* context = MakeGarbageCollected<CSSParserContext>(document);
   CSSTokenizer tokenizer(value);
   auto tokens = tokenizer.TokenizeToEOF();
   CSSParserTokenRange range(tokens);
-  return syntax_definition->Parse(range, *context,
+  return syntax_definition->Parse(CSSTokenizedValue{range, value}, *context,
                                   /* is_animation_tainted */ false);
 }
 
-CSSSelectorList ParseSelectorList(const String& string) {
+CSSSelectorList* ParseSelectorList(const String& string) {
+  return ParseSelectorList(string, CSSNestingType::kNone,
+                           /*parent_rule_for_nesting=*/nullptr,
+                           /*is_within_scope=*/false);
+}
+
+CSSSelectorList* ParseSelectorList(const String& string,
+                                   CSSNestingType nesting_type,
+                                   const StyleRule* parent_rule_for_nesting,
+                                   bool is_within_scope) {
   auto* context = MakeGarbageCollected<CSSParserContext>(
       kHTMLStandardMode, SecureContextMode::kInsecureContext);
   auto* sheet = MakeGarbageCollected<StyleSheetContents>(context);
   CSSTokenizer tokenizer(string);
   const auto tokens = tokenizer.TokenizeToEOF();
   CSSParserTokenRange range(tokens);
-  Arena arena;
-  CSSSelectorVector<> vector =
-      CSSSelectorParser<>::ParseSelector(range, context, sheet, arena);
-  return CSSSelectorList::AdoptSelectorVector</*UseArena=*/true>(vector);
+  HeapVector<CSSSelector> arena;
+  base::span<CSSSelector> vector = CSSSelectorParser::ParseSelector(
+      range, context, nesting_type, parent_rule_for_nesting, is_within_scope,
+      /* semicolon_aborts_nested_selector */ false, sheet, arena);
+  return CSSSelectorList::AdoptSelectorVector(vector);
 }
 
 }  // namespace css_test_helpers

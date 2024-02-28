@@ -5,11 +5,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "base/callback_helpers.h"
+#include "base/functional/callback_helpers.h"
 #include "net/base/address_tracker_linux.h"
 
-namespace net {
-namespace internal {
+using net::internal::AddressTrackerLinux;
+
+namespace net::test {
+
 class AddressTrackerLinuxTest {
  public:
   static void TestHandleMessage(const char* buffer, size_t length) {
@@ -31,5 +33,4 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   return 0;
 }
 
-}  // namespace internal
-}  // namespace net
+}  // namespace net::test

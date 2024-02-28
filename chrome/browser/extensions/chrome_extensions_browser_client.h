@@ -11,11 +11,16 @@
 
 #include "base/lazy_instance.h"
 #include "base/memory/ref_counted.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
+#include "chrome/browser/extensions/activity_log/activity_actions.h"
 #include "chrome/browser/extensions/user_script_listener.h"
+#include "chrome/browser/safe_browsing/chrome_password_reuse_detection_manager_client.h"
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/browser/kiosk/kiosk_delegate.h"
+#include "extensions/common/api/declarative_net_request.h"
+#include "extensions/common/extension_id.h"
 #include "extensions/common/mojom/view_type.mojom.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
@@ -52,11 +57,19 @@ class ChromeExtensionsBrowserClient : public ExtensionsBrowserClient {
 
   ~ChromeExtensionsBrowserClient() override;
 
+  // Called by the BrowserProcess to indicate that we should perform any
+  // teardown necessary before being destroyed (e.g. unsubscribing observers, or
+  // any other pre-emptive freeing of resources. Note that we may still receive
+  // calls from other shutting down objects after this call, so this should
+  // primarily be used for things that may need to be cleaned up before other
+  // parts of the browser).
+  void StartTearDown();
+
   // ExtensionsBrowserClient overrides:
   bool IsShuttingDown() override;
   bool AreExtensionsDisabled(const base::CommandLine& command_line,
                              content::BrowserContext* context) override;
-  bool IsValidContext(content::BrowserContext* context) override;
+  bool IsValidContext(void* context) override;
   bool IsSameContext(content::BrowserContext* first,
                      content::BrowserContext* second) override;
   bool HasOffTheRecordContext(content::BrowserContext* context) override;
@@ -65,18 +78,17 @@ class ChromeExtensionsBrowserClient : public ExtensionsBrowserClient {
   content::BrowserContext* GetOriginalContext(
       content::BrowserContext* context) override;
 
-  content::BrowserContext* GetRedirectedContextInIncognito(
+  content::BrowserContext* GetContextRedirectedToOriginal(
       content::BrowserContext* context,
-      bool force_guest_profile,
-      bool force_system_profile) override;
-  content::BrowserContext* GetContextForRegularAndIncognito(
+      bool force_guest_profile) override;
+  content::BrowserContext* GetContextOwnInstance(
       content::BrowserContext* context,
-      bool force_guest_profile,
-      bool force_system_profile) override;
-  content::BrowserContext* GetRegularProfile(
+      bool force_guest_profile) override;
+  content::BrowserContext* GetContextForOriginalOnly(
       content::BrowserContext* context,
-      bool force_guest_profile,
-      bool force_system_profile) override;
+      bool force_guest_profile) override;
+  bool AreExtensionsDisabledForContext(
+      content::BrowserContext* context) override;
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   std::string GetUserIdHashFromContext(
@@ -118,6 +130,10 @@ class ChromeExtensionsBrowserClient : public ExtensionsBrowserClient {
       content::BrowserContext* context,
       std::vector<EarlyExtensionPrefsObserver*>* observers) const override;
   ProcessManagerDelegate* GetProcessManagerDelegate() const override;
+  mojo::PendingRemote<network::mojom::URLLoaderFactory>
+  GetControlledFrameEmbedderURLLoader(
+      int frame_tree_node_id,
+      content::BrowserContext* browser_context) override;
   std::unique_ptr<ExtensionHostDelegate> CreateExtensionHostDelegate() override;
   bool DidVersionUpdate(content::BrowserContext* context) override;
   void PermitExternalProtocolHandler() override;
@@ -184,11 +200,15 @@ class ChromeExtensionsBrowserClient : public ExtensionsBrowserClient {
                     int tab_id) const override;
   bool IsExtensionTelemetryServiceEnabled(
       content::BrowserContext* context) const override;
-  bool IsExtensionTelemetryRemoteHostContactedSignalEnabled() const override;
   void NotifyExtensionApiTabExecuteScript(
       content::BrowserContext* context,
       const ExtensionId& extension_id,
       const std::string& code) const override;
+  void NotifyExtensionApiDeclarativeNetRequest(
+      content::BrowserContext* context,
+      const ExtensionId& extension_id,
+      const std::vector<api::declarative_net_request::Rule>& rules)
+      const override;
   void NotifyExtensionRemoteHostContacted(content::BrowserContext* context,
                                           const ExtensionId& extension_id,
                                           const GURL& url) const override;
@@ -210,9 +230,45 @@ class ChromeExtensionsBrowserClient : public ExtensionsBrowserClient {
   void AddAdditionalAllowedHosts(
       const PermissionSet& desired_permissions,
       PermissionSet* granted_permissions) const override;
+  void AddAPIActionToActivityLog(content::BrowserContext* browser_context,
+                                 const ExtensionId& extension_id,
+                                 const std::string& call_name,
+                                 base::Value::List args,
+                                 const std::string& extra) override;
+  void AddEventToActivityLog(content::BrowserContext* browser_context,
+                             const ExtensionId& extension_id,
+                             const std::string& call_name,
+                             base::Value::List args,
+                             const std::string& extra) override;
+  void AddDOMActionToActivityLog(content::BrowserContext* browser_context,
+                                 const ExtensionId& extension_id,
+                                 const std::string& call_name,
+                                 base::Value::List args,
+                                 const GURL& url,
+                                 const std::u16string& url_title,
+                                 int call_type) override;
+  void GetWebViewStoragePartitionConfig(
+      content::BrowserContext* browser_context,
+      content::SiteInstance* owner_site_instance,
+      const std::string& partition_name,
+      bool in_memory,
+      base::OnceCallback<void(std::optional<content::StoragePartitionConfig>)>
+          callback) override;
+  void CreatePasswordReuseDetectionManager(
+      content::WebContents* web_contents) const override;
+  media_device_salt::MediaDeviceSaltService* GetMediaDeviceSaltService(
+      content::BrowserContext* context) override;
 
  private:
   friend struct base::LazyInstanceTraitsBase<ChromeExtensionsBrowserClient>;
+
+  void AddAPIActionOrEventToActivityLog(
+      content::BrowserContext* browser_context,
+      const ExtensionId& extension_id,
+      Action::ActionType action_type,
+      const std::string& call_name,
+      base::Value::List args,
+      const std::string& extra);
 
   // Support for ProcessManager.
   std::unique_ptr<ChromeProcessManagerDelegate> process_manager_delegate_;

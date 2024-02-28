@@ -6,14 +6,15 @@
 #define EXTENSIONS_BROWSER_SANDBOXED_UNPACKER_H_
 
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted_delete_on_sequence.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/strings/string_piece.h"
 #include "base/values.h"
 #include "extensions/browser/api/declarative_net_request/install_index_helper.h"
 #include "extensions/browser/api/declarative_net_request/ruleset_install_pref.h"
@@ -22,12 +23,12 @@
 #include "extensions/browser/image_sanitizer.h"
 #include "extensions/browser/install/crx_install_error.h"
 #include "extensions/browser/json_file_sanitizer.h"
+#include "extensions/common/extension_id.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/mojom/manifest.mojom-shared.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/data_decoder/public/cpp/data_decoder.h"
 #include "services/data_decoder/public/mojom/json_parser.mojom.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 class SkBitmap;
 
@@ -90,7 +91,7 @@ class SandboxedUnpackerClient
   virtual void OnUnpackSuccess(
       const base::FilePath& temp_dir,
       const base::FilePath& extension_root,
-      std::unique_ptr<base::DictionaryValue> original_manifest,
+      std::unique_ptr<base::Value::Dict> original_manifest,
       const Extension* extension,
       const SkBitmap& install_icon,
       declarative_net_request::RulesetInstallPrefs ruleset_install_prefs) = 0;
@@ -199,12 +200,12 @@ class SandboxedUnpacker : public ImageSanitizer::Client {
 
   // Unpacks the extension in directory and returns the manifest.
   void Unpack(const base::FilePath& directory);
-  void ReadManifestDone(absl::optional<base::Value> manifest,
-                        const absl::optional<std::string>& error);
-  void UnpackExtensionSucceeded(base::Value manifest);
+  void ReadManifestDone(std::optional<base::Value> manifest,
+                        const std::optional<std::string>& error);
+  void UnpackExtensionSucceeded(base::Value::Dict manifest);
 
   // Helper which calls ReportFailure.
-  void ReportUnpackExtensionFailed(base::StringPiece error);
+  void ReportUnpackExtensionFailed(std::string_view error);
 
   // Implementation of ImageSanitizer::Client:
   data_decoder::DataDecoder* GetDataDecoder() override;
@@ -230,7 +231,8 @@ class SandboxedUnpacker : public ImageSanitizer::Client {
 
   // Overwrites original manifest with safe result from utility process.
   // Returns nullopt on error.
-  absl::optional<base::Value> RewriteManifestFile(const base::Value& manifest);
+  std::optional<base::Value::Dict> RewriteManifestFile(
+      const base::Value::Dict& manifest);
 
   // Cleans up temp directory artifacts.
   void Cleanup();
@@ -279,7 +281,7 @@ class SandboxedUnpacker : public ImageSanitizer::Client {
   // Parsed original manifest of the extension. Set after unpacking the
   // extension and working with its manifest, so after UnpackExtensionSucceeded
   // is called.
-  absl::optional<base::Value> manifest_;
+  std::optional<base::Value::Dict> manifest_;
 
   // Install prefs needed for the Declarative Net Request API.
   declarative_net_request::RulesetInstallPrefs ruleset_install_prefs_;
@@ -295,7 +297,7 @@ class SandboxedUnpacker : public ImageSanitizer::Client {
 
   // The extension's ID. This will be calculated from the public key
   // in the CRX header.
-  std::string extension_id_;
+  ExtensionId extension_id_;
 
   // Location to use for the unpacked extension.
   mojom::ManifestLocation location_;
@@ -305,7 +307,7 @@ class SandboxedUnpacker : public ImageSanitizer::Client {
   int creation_flags_;
 
   // Overridden value of VerifierFormat that is used from StartWithCrx().
-  absl::optional<crx_file::VerifierFormat> format_verifier_override_;
+  std::optional<crx_file::VerifierFormat> format_verifier_override_;
 
   // Sequenced task runner where file I/O operations will be performed.
   scoped_refptr<base::SequencedTaskRunner> unpacker_io_task_runner_;

@@ -66,7 +66,7 @@ class BrowserCommandController : public CommandUpdater,
   void LoadingStateChanged(bool is_loading, bool force);
   void FindBarVisibilityChanged();
   void ExtensionStateChanged();
-  void TabKeyboardFocusChangedTo(absl::optional<int> index);
+  void TabKeyboardFocusChangedTo(std::optional<int> index);
   void WebContentsFocusChanged();
 
   // Overriden from CommandUpdater:
@@ -160,6 +160,9 @@ class BrowserCommandController : public CommandUpdater,
   // app windows.
   void UpdateCommandsForHostedAppAvailability();
 
+  // Update commands that are used in the Extensions menu in the app menu.
+  void UpdateCommandsForExtensionsMenu();
+
 #if BUILDFLAG(IS_CHROMEOS)
   // Update commands whose state depends on whether the window is in locked
   // fullscreen mode or not.
@@ -174,9 +177,6 @@ class BrowserCommandController : public CommandUpdater,
 
   // Updates the save-page-as command state.
   void UpdateSaveAsState();
-
-  // Updates the show-sync command state.
-  void UpdateShowSyncState(bool show_main_ui);
 
   // Ask the Reload/Stop button to change its icon, and update the Stop command
   // state.  |is_loading| is true if the current WebContents is loading.
@@ -197,10 +197,13 @@ class BrowserCommandController : public CommandUpdater,
   // Updates commands for tab keyboard focus state. If |target_index| is
   // populated, it is the index of the tab with focus; if it is not populated,
   // no tab has keyboard focus.
-  void UpdateCommandsForTabKeyboardFocus(absl::optional<int> target_index);
+  void UpdateCommandsForTabKeyboardFocus(std::optional<int> target_index);
 
   // Updates commands that depend on whether web contents is focused or not.
   void UpdateCommandsForWebContentsFocus();
+
+  // Updates commands that depend on the state of the tab strip model.
+  void UpdateCommandsForTabStripStateChanged();
 
   inline BrowserWindow* window();
   inline Profile* profile();
@@ -212,7 +215,6 @@ class BrowserCommandController : public CommandUpdater,
 
   PrefChangeRegistrar profile_pref_registrar_;
   PrefChangeRegistrar local_pref_registrar_;
-  BooleanPrefMember pref_signin_allowed_;
 
   // In locked fullscreen mode disallow enabling/disabling commands.
   bool is_locked_fullscreen_ = false;

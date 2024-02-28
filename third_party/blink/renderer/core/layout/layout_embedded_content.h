@@ -65,7 +65,8 @@ class CORE_EXPORT LayoutEmbeddedContent : public LayoutReplaced {
   PhysicalOffset BorderBoxFromEmbeddedContent(const PhysicalOffset&) const;
   gfx::Rect BorderBoxFromEmbeddedContent(const gfx::Rect&) const;
 
-  PhysicalRect ReplacedContentRect() const final;
+  PhysicalRect ReplacedContentRectFrom(
+      const PhysicalRect& base_content_rect) const final;
 
   void UpdateOnEmbeddedContentViewChange();
   void UpdateGeometry(EmbeddedContentView&);
@@ -112,6 +113,10 @@ class CORE_EXPORT LayoutEmbeddedContent : public LayoutReplaced {
       const HitTestLocation&,
       const PhysicalOffset& accumulated_offset,
       HitTestPhase);
+
+  bool PointOverResizer(const HitTestResult&,
+                        const HitTestLocation&,
+                        const PhysicalOffset& accumulated_offset) const;
 };
 
 template <>

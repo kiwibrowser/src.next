@@ -10,9 +10,7 @@
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/metrics/public/mojom/ukm_interface.mojom.h"
 
-namespace ukm {
-
-namespace internal {
+namespace ukm::internal {
 
 // A base class for generated UkmEntry builder objects.
 // This class should not be used directly.
@@ -28,8 +26,11 @@ class METRICS_EXPORT UkmEntryBuilderBase {
   // further calls to this or TakeEntry() will do nothing.
   void Record(UkmRecorder* recorder);
 
-  // Extracts the created UkmEntryPtr. Record() cannot be called after this.
-  mojom::UkmEntryPtr TakeEntry();
+  // Return a copy of created UkmEntryPtr for testing.
+  mojom::UkmEntryPtr GetEntryForTesting();
+
+  // Transfers ownership of |entry_| externally.
+  mojom::UkmEntryPtr TakeEntry() { return std::move(entry_); }
 
  protected:
   UkmEntryBuilderBase(ukm::SourceIdObj source_id, uint64_t event_hash);
@@ -43,8 +44,6 @@ class METRICS_EXPORT UkmEntryBuilderBase {
   mojom::UkmEntryPtr entry_;
 };
 
-}  // namespace internal
-
-}  // namespace ukm
+}  // namespace ukm::internal
 
 #endif  // SERVICES_METRICS_PUBLIC_CPP_UKM_ENTRY_BUILDER_BASE_H_

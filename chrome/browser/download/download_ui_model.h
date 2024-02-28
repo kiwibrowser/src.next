@@ -7,15 +7,16 @@
 
 #include <stdint.h>
 
+#include <optional>
 #include <string>
 
 #include "base/files/file_path.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/time/default_clock.h"
 #include "build/build_config.h"
-#include "chrome/browser/profiles/profile_manager.h"
 #include "components/download/public/common/download_item.h"
 #include "components/offline_items_collection/core/offline_item.h"
 #include "components/safe_browsing/buildflags.h"
@@ -30,14 +31,34 @@
 
 using offline_items_collection::ContentId;
 
+class Profile;
+
 namespace content {
 class WebContents;
 }  // namespace content
+
+namespace gfx {
+class FontList;
+}  // namespace gfx
 
 // This class is an abstraction for common UI tasks and properties associated
 // with a download.
 class DownloadUIModel {
  public:
+  // The type of tailored warning that is shown.
+  // These values are persisted to logs. Entries should not be renumbered and
+  // numeric values should never be reused.
+  enum class TailoredWarningType {
+    kNoTailoredWarning = 0,
+    // Base cookie theft warning.
+    kCookieTheft = 1,
+    // Cookie theft warning with account info.
+    kCookieTheftWithAccountInfo = 2,
+    // Suspicious archive warning.
+    kSuspiciousArchive = 3,
+    kMaxValue = kSuspiciousArchive
+  };
+
   // Abstract base class for building StatusText
   class StatusTextBuilderBase {
    public:
@@ -71,7 +92,7 @@ class DownloadUIModel {
         offline_items_collection::FailState fail_state) const;
 
     // Unknowned model to create statuses.
-    DownloadUIModel* model_ = nullptr;
+    raw_ptr<DownloadUIModel> model_ = nullptr;
   };
 
   // Used in Download shelf and page, default option.
@@ -103,15 +124,22 @@ class DownloadUIModel {
   };
 
 #if !BUILDFLAG(IS_ANDROID)
+  // Keep UI logic in this class in sync with DownloadBubbleRowViewInfo.
+  // TODO(crbug.com/1482901): Unify the logic.
   struct BubbleUIInfo {
     struct SubpageButton {
       DownloadCommands::Command command;
       std::u16string label;
       bool is_prominent = false;
 
+      // Controls the text color of the button. Only applied for some secondary
+      // buttons.
+      std::optional<ui::ColorId> color;
+
       SubpageButton(DownloadCommands::Command command,
                     std::u16string label,
-                    bool is_prominent);
+                    bool is_prominent,
+                    std::optional<ui::ColorId> color = std::nullopt);
     };
 
     struct QuickAction {
@@ -123,26 +151,50 @@ class DownloadUIModel {
                   const gfx::VectorIcon* icon);
     };
 
+    struct LabelWithLink {
+      struct LinkedRange {
+        // The offset where the link text (i.e. "Chrome blocks some downloads")
+        // starts, with respect to the label string containing it.
+        size_t start_offset = 0;
+        // Link text length.
+        size_t length = 0;
+        // Action to perform when the link is clicked.
+        DownloadCommands::Command command;
+      };
+
+      // The entire label string with link, i.e. "Learn why Chrome blocks some
+      // downloads".
+      std::u16string label_and_link_text;
+      // The link info. Note this assumes that the text contains exactly one
+      // link.
+      LinkedRange linked_range;
+    };
+
     // has a progress bar and a cancel button.
     bool has_progress_bar = false;
     bool is_progress_bar_looping = false;
-    // kColorAlertHighSeverity, kColorAlertMediumSeverity, or
+    // kColorAlertHighSeverity, kColorAlertMediumSeverityIcon, or
     // kColorSecondaryForeground
     ui::ColorId secondary_color = ui::kColorSecondaryForeground;
+    // Color used for alert text, which may be different from |secondary_color|,
+    // used for icons. If this is nullopt, |secondary_color| will be used for
+    // text.
+    std::optional<ui::ColorId> secondary_text_color = std::nullopt;
 
     // Override icon
     raw_ptr<const gfx::VectorIcon> icon_model_override = nullptr;
 
     // Subpage summary of the download warning
-    bool has_subpage = false;
     std::u16string warning_summary;
 
-    // Label for the checkbox, empty if no checkbox is needed
-    bool has_checkbox = false;
-    std::u16string checkbox_label;
+    // Secondary label for the subpage summary
+    std::u16string warning_secondary_text;
+
+    // Icon for the secondary text in the subpage
+    raw_ptr<const gfx::VectorIcon> warning_secondary_icon = nullptr;
 
     // The command for the primary button
-    absl::optional<DownloadCommands::Command> primary_button_command;
+    std::optional<DownloadCommands::Command> primary_button_command;
 
     // List of quick actions
     std::vector<QuickAction> quick_actions;
@@ -150,27 +202,62 @@ class DownloadUIModel {
     // Subpage buttons
     std::vector<SubpageButton> subpage_buttons;
 
-    // The subpage exists if the summary exists.
-    explicit BubbleUIInfo(const std::u16string& summary);
-    // If no subpage, the progress bar may exist.
-    explicit BubbleUIInfo(bool has_progress_bar);
+    // Text with link to go at the bottom of the subpage summary, such as "Learn
+    // why Chrome blocks some downloads".
+    std::optional<LabelWithLink> learn_more_link;
+
+    // Whether the main button should be enabled. When true, the main button
+    // will either:
+    // - Open the subpage, if it exists
+    // - Open the download, if no subpage exists
+    bool main_button_enabled = true;
+
     BubbleUIInfo();
     ~BubbleUIInfo();
     BubbleUIInfo(const BubbleUIInfo&);
+    BubbleUIInfo& AddSubpageSummary(const std::u16string& summary);
+    BubbleUIInfo& AddSubpageSecondaryIconAndText(
+        const gfx::VectorIcon& icon,
+        const std::u16string& secondary_text);
+    BubbleUIInfo& AddProgressBar();
     BubbleUIInfo& AddIconAndColor(const gfx::VectorIcon& vector_icon,
                                   ui::ColorId color_id);
+    BubbleUIInfo& AddSecondaryTextColor(ui::ColorId color_id);
     BubbleUIInfo& AddPrimaryButton(DownloadCommands::Command command);
-    BubbleUIInfo& AddCheckbox(const std::u16string& label);
     // Add button to the subpage. Only two buttons are supported.
     // The first one added is the primary, and the second one the secondary.
-    // The checkbox, if present, controls the secondary.
-    BubbleUIInfo& AddSubpageButton(const std::u16string& label,
-                                   DownloadCommands::Command command,
-                                   bool is_prominent);
+    BubbleUIInfo& AddPrimarySubpageButton(const std::u16string& label,
+                                          DownloadCommands::Command command);
+    BubbleUIInfo& AddSecondarySubpageButton(
+        const std::u16string& label,
+        DownloadCommands::Command command,
+        std::optional<ui::ColorId> color = std::nullopt);
     BubbleUIInfo& SetProgressBarLooping();
     BubbleUIInfo& AddQuickAction(DownloadCommands::Command command,
                                  const std::u16string& label,
                                  const gfx::VectorIcon* icon);
+    // Add a learn_more_link with the specified message ids and command when
+    // clicked. Assumes that the message given by label_text_id has a
+    // placeholder where the message specified by link_text_id should go.
+    BubbleUIInfo& AddLearnMoreLink(int label_text_id,
+                                   int link_text_id,
+                                   DownloadCommands::Command command);
+    // Same as above but takes the link text string itself, and assumes that
+    // the whole string should be linked, rather than a substring.
+    BubbleUIInfo& AddLearnMoreLink(const std::u16string& link_text,
+                                   DownloadCommands::Command command);
+
+    BubbleUIInfo& DisableMainButton();
+
+    // Set common characteristics for dangerous or suspicious downloads.
+    static BubbleUIInfo DangerousUiPattern(
+        const std::u16string& subpage_summary);
+    static BubbleUIInfo SuspiciousUiPattern(
+        const std::u16string& subpage_summary,
+        const std::u16string& secondary_subpage_button_label);
+
+    ui::ColorId GetColorForSecondaryText() const;
+    bool HasSubpage() const;
   };
 #endif
 
@@ -220,6 +307,10 @@ class DownloadUIModel {
 
   // Returns a short one-line status string for the download.
   std::u16string GetStatusText() const;
+#if !BUILDFLAG(IS_ANDROID)
+  std::u16string GetStatusTextForLabel(const gfx::FontList& font_list,
+                                       float available_pixel_width) const;
+#endif
 
   // Returns a string suitable for use as a tooltip. For a regular download, the
   // tooltip is the filename. For an interrupted download, the string states the
@@ -273,12 +364,9 @@ class DownloadUIModel {
   // Implies IsDangerous() and MightBeMalicious().
   virtual bool IsMalicious() const;
 
-  // Is this download a mixed content download, but not something more severe?
+  // Is this download an insecure download, but not something more severe?
   // Implies IsDangerous() and !IsMalicious().
-  virtual bool IsMixedContent() const;
-
-  // Is safe browsing download feedback feature available for this download?
-  virtual bool ShouldAllowDownloadFeedback() const;
+  virtual bool IsInsecure() const;
 
   // Returns |true| if this download is expected to complete successfully and
   // thereafter be removed from the shelf.  Downloads that are opened
@@ -327,9 +415,10 @@ class DownloadUIModel {
   // Change what's returned by WasActionedOn().
   virtual void SetActionedOn(bool actioned_on);
 
-  // Returns |true| if the Download Bubble UI has shown this download warning.
-  // By default, this value is |false| and should be changed explicitly using
-  // SetWasUIWarningShown().
+  // Returns |true| if the UI (download bubble, downloads page, notification)
+  // has shown this download warning. By default, this value is |false| and
+  // should be changed explicitly using SetWasUIWarningShown(). Used to prevent
+  // double-logging of download warnings.
   virtual bool WasUIWarningShown() const;
 
   // Change what's returned by WasUIWarningShown().
@@ -338,9 +427,9 @@ class DownloadUIModel {
   // If this is an ephemeral warning, returns when the bubble first displayed
   // the warning. If the warning has not yet shown (or this isn't an ephemeral
   // warning), it returns no value. This does not persist across restarts.
-  virtual absl::optional<base::Time> GetEphemeralWarningUiShownTime() const;
+  virtual std::optional<base::Time> GetEphemeralWarningUiShownTime() const;
 
-  virtual void SetEphemeralWarningUiShownTime(absl::optional<base::Time> time);
+  virtual void SetEphemeralWarningUiShownTime(std::optional<base::Time> time);
 
   // Returns |true| if opening in the browser is preferred for this download. If
   // |false|, the download should be opened with the system default application.
@@ -360,8 +449,8 @@ class DownloadUIModel {
 
   // Return the mixed content status determined during download target
   // determination.
-  virtual download::DownloadItem::MixedContentStatus GetMixedContentStatus()
-      const;
+  virtual download::DownloadItem::InsecureDownloadStatus
+  GetInsecureDownloadStatus() const;
 
   // Open the download using the platform handler for the download. The behavior
   // of this method will be different from DownloadItem::OpenDownload() if
@@ -378,9 +467,6 @@ class DownloadUIModel {
   // otherwise.
   virtual const download::DownloadItem* GetDownloadItem() const;
   download::DownloadItem* GetDownloadItem();
-
-  // Returns the display name for the web drive where the file is rerouted to.
-  virtual std::u16string GetWebDriveName() const;
 
   // Returns the file-name that should be reported to the user.
   virtual base::FilePath GetFileNameToReportUser() const;
@@ -500,18 +586,22 @@ class DownloadUIModel {
                               DownloadCommands::Command command);
 
   // Gets the information about the download bubbles subpage.
-  BubbleUIInfo GetBubbleUIInfo(bool is_download_bubble_v2) const;
+  BubbleUIInfo GetBubbleUIInfo() const;
   BubbleUIInfo GetBubbleUIInfoForInterrupted(
       offline_items_collection::FailState fail_state) const;
-  BubbleUIInfo GetBubbleUIInfoForInProgressOrComplete(
-      bool is_download_bubble_v2) const;
-  virtual BubbleUIInfo GetBubbleUIInfoForTailoredWarning() const;
+  BubbleUIInfo GetBubbleUIInfoForInProgressOrComplete() const;
+  virtual BubbleUIInfo GetBubbleUIInfoForTailoredWarning(
+      TailoredWarningType tailored_warning_type) const;
+  BubbleUIInfo GetBubbleUIInfoForFileTypeWarningNoSafeBrowsing() const;
 
   // Returns |true| if this download should be displayed in the download bubble.
+  // Note that this may return true even if the download bubble is not enabled
+  // on the platform.
   virtual bool ShouldShowInBubble() const;
 
-  // Should this download trigger a tailored warning?
-  virtual bool ShouldShowTailoredWarning() const;
+  // Returns the type of tailored warning. Returns kNoTailoredWarning if this
+  // download shouldn't trigger a tailored warning.
+  virtual TailoredWarningType GetTailoredWarningType() const;
 
   // Ephemeral warnings are ones that are quickly removed from the bubble if the
   // user has not acted on them, and later deleted altogether. Is this that kind
@@ -539,22 +629,22 @@ class DownloadUIModel {
       const base::FilePath& target_path,
       bool is_filetype_handled_safely);
 
- protected:
-  // Returns the MIME type of the download.
-  virtual std::string GetMimeType() const;
+  // Returns the accessible alert text that should be announced when the
+  // download is in progress.
+  virtual std::u16string GetInProgressAccessibleAlertText() const;
+
+  // Determines whether the file is an encrypted archive. This is used to
+  // specialize certain strings.
+  virtual bool IsEncryptedArchive() const;
 
   // Returns whether the download is triggered by an extension.
   virtual bool IsExtensionDownload() const;
 
-  // Returns the message, if any, to be displayed for file rerouted.
-  virtual std::u16string GetWebDriveMessage(bool verbose) const;
+ protected:
+  // Returns the MIME type of the download.
+  virtual std::string GetMimeType() const;
 
   raw_ptr<Delegate> delegate_ = nullptr;
-
-#if !BUILDFLAG(IS_ANDROID)
-  // Returns whether the DownloadBubbleV2 functionality is enabled.
-  bool IsBubbleV2Enabled() const;
-#endif
 
  private:
   friend class DownloadItemModelTest;
@@ -563,19 +653,8 @@ class DownloadUIModel {
 
   void set_status_text_builder_for_testing(bool for_bubble);
 
-#if !BUILDFLAG(IS_ANDROID)
-  // The following two methods exist for simpler unit testing.
-  // Setting an override for whether the DownloadBubbleV2 functionality is
-  // enabled.
-  void set_is_bubble_v2_enabled_for_testing(bool is_enabled);
-#endif
-
   // Unowned Clock to override the time of "Now".
   raw_ptr<base::Clock> clock_ = base::DefaultClock::GetInstance();
-
-#if !BUILDFLAG(IS_ANDROID)
-  absl::optional<bool> is_bubble_V2_enabled_for_testing_;
-#endif
 
   std::unique_ptr<StatusTextBuilderBase> status_text_builder_;
 

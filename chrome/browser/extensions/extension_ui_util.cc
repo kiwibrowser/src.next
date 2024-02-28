@@ -8,13 +8,14 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/pref_names.h"
+#include "components/policy/core/common/policy_pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_util.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/image_util.h"
+#include "extensions/common/manifest_handlers/app_display_info.h"
 
 namespace extensions {
 
@@ -25,7 +26,8 @@ bool IsBlockedByPolicy(const Extension* app, content::BrowserContext* context) {
   DCHECK(profile);
 
   return app->id() == extensions::kWebStoreAppId &&
-         profile->GetPrefs()->GetBoolean(prefs::kHideWebStoreIcon);
+         profile->GetPrefs()->GetBoolean(
+             policy::policy_prefs::kHideWebStoreIcon);
 }
 
 }  // namespace
@@ -39,14 +41,14 @@ bool ShouldDisplayInAppLauncher(const Extension* extension,
 
 bool CanDisplayInAppLauncher(const Extension* extension,
                              content::BrowserContext* context) {
-  return extension->ShouldDisplayInAppLauncher() &&
+  return AppDisplayInfo::ShouldDisplayInAppLauncher(*extension) &&
          !IsBlockedByPolicy(extension, context);
 }
 
 bool ShouldDisplayInNewTabPage(const Extension* extension,
                                content::BrowserContext* context) {
-  return extension->ShouldDisplayInNewTabPage() &&
-      !IsBlockedByPolicy(extension, context);
+  return AppDisplayInfo::ShouldDisplayInNewTabPage(*extension) &&
+         !IsBlockedByPolicy(extension, context);
 }
 
 std::u16string GetEnabledExtensionNameForUrl(const GURL& url,

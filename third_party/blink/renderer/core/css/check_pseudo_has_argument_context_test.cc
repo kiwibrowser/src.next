@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/html/html_document.h"
+#include "third_party/blink/renderer/core/testing/null_execution_context.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 
 namespace blink {
@@ -26,10 +27,10 @@ class CheckPseudoHasArgumentContextTest : public PageTestBase {
       int expected_adjacent_distance_limit,
       int expected_depth_limit,
       CheckPseudoHasArgumentTraversalScope expected_traversal_scope) const {
-    CSSSelectorList selector_list =
+    CSSSelectorList* selector_list =
         css_test_helpers::ParseSelectorList(selector_text);
     CheckPseudoHasArgumentContext context(
-        selector_list.First()->SelectorList()->First());
+        selector_list->First()->SelectorList()->First());
 
     EXPECT_EQ(expected_leftmost_relation, context.LeftmostRelation())
         << "Failed : " << selector_text;
@@ -50,7 +51,7 @@ class CheckPseudoHasArgumentContextTest : public PageTestBase {
                                           const char* has_anchor_element_id,
                                           const char* selector_text) const {
     Element* has_anchor_element =
-        document->getElementById(has_anchor_element_id);
+        document->getElementById(AtomicString(has_anchor_element_id));
     if (!has_anchor_element) {
       ADD_FAILURE() << "Failed : test iterator on #" << has_anchor_element_id
                     << " (Cannot find element)";
@@ -58,17 +59,17 @@ class CheckPseudoHasArgumentContextTest : public PageTestBase {
     }
 
     unsigned i = 0;
-    CSSSelectorList selector_list =
+    CSSSelectorList* selector_list =
         css_test_helpers::ParseSelectorList(selector_text);
     CheckPseudoHasArgumentContext argument_context(
-        selector_list.First()->SelectorList()->First());
+        selector_list->First()->SelectorList()->First());
     for (CheckPseudoHasArgumentTraversalIterator iterator(*has_anchor_element,
                                                           argument_context);
          !iterator.AtEnd(); ++iterator, ++i) {
       AtomicString current_element_id =
           iterator.CurrentElement()
               ? iterator.CurrentElement()->GetIdAttribute()
-              : "nullptr";
+              : g_null_atom;
       int current_depth = iterator.CurrentDepth();
       ADD_FAILURE() << "Iteration failed : exceeded expected iteration"
                     << " (selector: " << selector_text
@@ -81,13 +82,13 @@ class CheckPseudoHasArgumentContextTest : public PageTestBase {
 
   CheckPseudoHasArgumentTraversalType GetTraversalType(
       const char* selector_text) const {
-    CSSSelectorList selector_list =
+    CSSSelectorList* selector_list =
         css_test_helpers::ParseSelectorList(selector_text);
 
-    EXPECT_EQ(selector_list.First()->GetPseudoType(), CSSSelector::kPseudoHas);
+    EXPECT_EQ(selector_list->First()->GetPseudoType(), CSSSelector::kPseudoHas);
 
     CheckPseudoHasArgumentContext context(
-        selector_list.First()->SelectorList()->First());
+        selector_list->First()->SelectorList()->First());
     return context.TraversalType();
   }
 
@@ -98,7 +99,7 @@ class CheckPseudoHasArgumentContextTest : public PageTestBase {
       const char* selector_text,
       const ExpectedTraversalStep (&expected_traversal_steps)[length]) const {
     Element* has_anchor_element =
-        document->getElementById(has_anchor_element_id);
+        document->getElementById(AtomicString(has_anchor_element_id));
     if (!has_anchor_element) {
       ADD_FAILURE() << "Failed : test iterator on #" << has_anchor_element_id
                     << " (Cannot find element)";
@@ -107,17 +108,17 @@ class CheckPseudoHasArgumentContextTest : public PageTestBase {
     EXPECT_EQ(has_anchor_element->GetIdAttribute(), has_anchor_element_id);
 
     unsigned i = 0;
-    CSSSelectorList selector_list =
+    CSSSelectorList* selector_list =
         css_test_helpers::ParseSelectorList(selector_text);
     CheckPseudoHasArgumentContext argument_context(
-        selector_list.First()->SelectorList()->First());
+        selector_list->First()->SelectorList()->First());
     for (CheckPseudoHasArgumentTraversalIterator iterator(*has_anchor_element,
                                                           argument_context);
          !iterator.AtEnd(); ++iterator, ++i) {
       AtomicString current_element_id =
           iterator.CurrentElement()
               ? iterator.CurrentElement()->GetIdAttribute()
-              : "nullptr";
+              : g_null_atom;
       int current_depth = iterator.CurrentDepth();
       if (i >= length) {
         ADD_FAILURE() << "Iteration failed : exceeded expected iteration"
@@ -146,9 +147,9 @@ class CheckPseudoHasArgumentContextTest : public PageTestBase {
                     << ", has_anchor_element: #" << has_anchor_element_id
                     << ", index: " << i << ", expected_element: "
                     << expected_traversal_steps[i].element_id << ")";
-      EXPECT_NE(
-          document->getElementById(expected_traversal_steps[i].element_id),
-          nullptr);
+      EXPECT_NE(document->getElementById(
+                    AtomicString(expected_traversal_steps[i].element_id)),
+                nullptr);
     }
   }
 };
@@ -416,7 +417,9 @@ TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalType) {
 TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase1) {
   // CheckPseudoHasArgumentTraversalScope::kSubtree
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -472,7 +475,9 @@ TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase1) {
 TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase2) {
   // CheckPseudoHasArgumentTraversalScope::kAllNextSiblings
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -505,7 +510,9 @@ TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase2) {
 TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase3) {
   // CheckPseudoHasArgumentTraversalScope::kOneNextSiblingSubtree
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -571,7 +578,9 @@ TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase3) {
 TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase4) {
   // CheckPseudoHasArgumentTraversalScope::kAllNextSiblingSubtrees
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -625,7 +634,9 @@ TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase4) {
 TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase5) {
   // CheckPseudoHasArgumentTraversalScope::kOneNextSibling
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -661,7 +672,9 @@ TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase5) {
 TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase6) {
   // CheckPseudoHasArgumentTraversalScope::kFixedDepthDescendants
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -714,7 +727,9 @@ TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase6) {
 TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase7) {
   // CheckPseudoHasArgumentTraversalScope::kOneNextSiblingFixedDepthDescendants
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -780,7 +795,9 @@ TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase7) {
 TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase8) {
   // CheckPseudoHasArgumentTraversalScope::kAllNextSiblingsFixedDepthDescendants
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>

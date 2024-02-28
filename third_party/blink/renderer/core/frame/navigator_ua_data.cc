@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/task/single_thread_task_runner.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/privacy_budget/identifiability_metric_builder.h"
 #include "third_party/blink/public/common/privacy_budget/identifiability_study_settings.h"
 #include "third_party/blink/public/common/privacy_budget/identifiable_surface.h"
@@ -27,16 +28,40 @@ namespace {
 // getHighEntropyValues() call if the user is in the study.
 void MaybeRecordMetric(bool record_identifiability,
                        const String& hint,
-                       const String& value,
+                       const IdentifiableToken token,
                        ExecutionContext* execution_context) {
-  if (LIKELY(!record_identifiability))
+  if (LIKELY(!record_identifiability)) {
     return;
+  }
   auto identifiable_surface = IdentifiableSurface::FromTypeAndToken(
       IdentifiableSurface::Type::kNavigatorUAData_GetHighEntropyValues,
       IdentifiableToken(hint.Utf8()));
   IdentifiabilityMetricBuilder(execution_context->UkmSourceID())
-      .Add(identifiable_surface, IdentifiableToken(value.Utf8()))
+      .Add(identifiable_surface, token)
       .Record(execution_context->UkmRecorder());
+}
+
+void MaybeRecordMetric(bool record_identifiability,
+                       const String& hint,
+                       const String& value,
+                       ExecutionContext* execution_context) {
+  MaybeRecordMetric(record_identifiability, hint,
+                    IdentifiableToken(value.Utf8()), execution_context);
+}
+
+void MaybeRecordMetric(bool record_identifiability,
+                       const String& hint,
+                       const Vector<String>& strings,
+                       ExecutionContext* execution_context) {
+  if (LIKELY(!record_identifiability)) {
+    return;
+  }
+  IdentifiableTokenBuilder token_builder;
+  for (const auto& s : strings) {
+    token_builder.AddAtomic(s.Utf8());
+  }
+  MaybeRecordMetric(record_identifiability, hint, token_builder.GetToken(),
+                    execution_context);
 }
 
 }  // namespace
@@ -108,6 +133,10 @@ void NavigatorUAData::SetBitness(const String& bitness) {
 
 void NavigatorUAData::SetWoW64(bool wow64) {
   is_wow64_ = wow64;
+}
+
+void NavigatorUAData::SetFormFactor(Vector<String> form_factor) {
+  form_factor_ = std::move(form_factor);
 }
 
 bool NavigatorUAData::mobile() const {
@@ -216,24 +245,31 @@ ScriptPromise NavigatorUAData::getHighEntropyValues(
       values->setWow64(is_wow64_);
       MaybeRecordMetric(record_identifiability, hint, is_wow64_ ? "?1" : "?0",
                         execution_context);
+    } else if (hint == "formFactor") {
+      if (base::FeatureList::IsEnabled(
+              blink::features::kClientHintsFormFactor)) {
+        values->setFormFactor(form_factor_);
+        MaybeRecordMetric(record_identifiability, hint, form_factor_,
+                          execution_context);
+      }
     }
   }
 
   execution_context->GetTaskRunner(TaskType::kPermission)
       ->PostTask(
           FROM_HERE,
-          WTF::Bind([](ScriptPromiseResolver* resolver,
-                       UADataValues* values) { resolver->Resolve(values); },
-                    WrapPersistent(resolver), WrapPersistent(values)));
+          WTF::BindOnce([](ScriptPromiseResolver* resolver,
+                           UADataValues* values) { resolver->Resolve(values); },
+                        WrapPersistent(resolver), WrapPersistent(values)));
 
   return promise;
 }
 
 ScriptValue NavigatorUAData::toJSON(ScriptState* script_state) const {
   V8ObjectBuilder builder(script_state);
-  builder.Add("brands", brands());
-  builder.Add("mobile", mobile());
-  builder.Add("platform", platform());
+  builder.AddVector<NavigatorUABrandVersion>("brands", brands());
+  builder.AddBoolean("mobile", mobile());
+  builder.AddString("platform", platform());
 
   // Record IdentifiabilityStudy metrics for `mobile()` and `platform()`
   // (the `brands()` part is already recorded inside that function).

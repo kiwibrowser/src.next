@@ -6,11 +6,12 @@
 #define EXTENSIONS_COMMON_FILE_UTIL_H_
 
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
-
 #include "base/files/file_path.h"
-#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/values.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/message_bundle.h"
 #include "extensions/common/mojom/manifest.mojom-shared.h"
@@ -43,9 +44,18 @@ base::FilePath InstallExtension(const base::FilePath& unpacked_source_dir,
                                 const std::string& version,
                                 const base::FilePath& extensions_dir);
 
-// Removes all versions of the extension with |id| from |extensions_dir|.
-void UninstallExtension(const base::FilePath& extensions_dir,
-                        const std::string& id);
+// Removes all versions of the extension from `extension_dir_to_delete` by
+// deleting the folder. `profile_dir` is the path to the current Chrome profile
+// directory. Requirements:
+//   *)  all paths cannot be empty
+//   *) all paths must be absolute must be absolute
+//   *) `extensions_dir` must be a direct subdir of `profile_dir`
+//   *  `extension_dir_to_delete` must be a direct subdir of `extensions_dir`
+// Otherwise the deletion will not be performed to avoid the risk of dangerous
+// paths like ".", "..", etc.
+void UninstallExtension(const base::FilePath& profile_dir,
+                        const base::FilePath& extensions_install_dir,
+                        const base::FilePath& extension_dir_to_delete);
 
 // Loads and validates an extension from the specified directory. Uses
 // the default manifest filename. Returns nullptr on failure, with a
@@ -73,14 +83,14 @@ scoped_refptr<Extension> LoadExtension(
     int flags,
     std::string* error);
 
-// Loads an extension manifest from the specified directory. Returns NULL
-// on failure, with a description of the error in |error|.
-std::unique_ptr<base::DictionaryValue> LoadManifest(
+// Loads an extension manifest from the specified directory. Returns
+// `std::nullopt` on failure, with a description of the error in |error|.
+std::optional<base::Value::Dict> LoadManifest(
     const base::FilePath& extension_root,
     std::string* error);
 
 // Convenience overload for specifying a manifest filename.
-std::unique_ptr<base::DictionaryValue> LoadManifest(
+std::optional<base::Value::Dict> LoadManifest(
     const base::FilePath& extension_root,
     const base::FilePath::CharType* manifest_filename,
     std::string* error);
@@ -134,7 +144,6 @@ void SetReportErrorForInvisibleIconForTesting(bool value);
 bool ValidateExtensionIconSet(const ExtensionIconSet& icon_set,
                               const Extension* extension,
                               const char* manifest_key,
-                              SkColor background_color,
                               std::string* error);
 
 // Loads extension message catalogs and returns message bundle. Passes

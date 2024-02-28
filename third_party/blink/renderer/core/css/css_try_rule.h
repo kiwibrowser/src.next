@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,14 +10,20 @@
 
 namespace blink {
 
-class CSSPositionFallbackRule;
+class StyleRuleCSSStyleDeclaration;
 
 class StyleRuleTry final : public StyleRuleBase {
  public:
   explicit StyleRuleTry(CSSPropertyValueSet*);
+  StyleRuleTry(const StyleRuleTry&) = default;
   ~StyleRuleTry();
 
+  StyleRuleTry* Copy() const {
+    return MakeGarbageCollected<StyleRuleTry>(*this);
+  }
+
   const CSSPropertyValueSet& Properties() const { return *properties_; }
+  MutableCSSPropertyValueSet& MutableProperties();
 
   void TraceAfterDispatch(Visitor*) const;
 
@@ -34,9 +40,10 @@ class CSSTryRule final : public CSSRule {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  CSSTryRule(StyleRuleTry*, CSSPositionFallbackRule* parent);
+  explicit CSSTryRule(StyleRuleTry*);
   ~CSSTryRule() final;
 
+  CSSStyleDeclaration* style() const;
   Type GetType() const final { return kTryRule; }
 
   String cssText() const final;
@@ -46,6 +53,14 @@ class CSSTryRule final : public CSSRule {
 
  private:
   Member<StyleRuleTry> try_rule_;
+  mutable Member<StyleRuleCSSStyleDeclaration> properties_cssom_wrapper_;
+};
+
+template <>
+struct DowncastTraits<CSSTryRule> {
+  static bool AllowFrom(const CSSRule& rule) {
+    return rule.GetType() == CSSRule::kTryRule;
+  }
 };
 
 }  // namespace blink

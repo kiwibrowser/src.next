@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -209,7 +209,7 @@ void ReportingContext::SendToReportingAPI(Report* report,
     const PermissionsPolicyViolationReportBody* body =
         static_cast<PermissionsPolicyViolationReportBody*>(report->body());
     GetReportingService()->QueuePermissionsPolicyViolationReport(
-        url, body->featureId(), body->disposition(), body->message(),
+        url, endpoint, body->featureId(), body->disposition(), body->message(),
         body->sourceFile(), line_number, column_number);
   } else if (type == ReportType::kIntervention) {
     // Send the intervention report.

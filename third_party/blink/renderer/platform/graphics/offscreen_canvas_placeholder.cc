@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -143,9 +143,7 @@ void OffscreenCanvasPlaceholder::UpdateOffscreenCanvasFilterQuality(
     return;
 
   filter_quality_ = filter_quality;
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner =
-      Thread::Current()->GetDeprecatedTaskRunner();
-  if (task_runner == frame_dispatcher_task_runner_) {
+  if (frame_dispatcher_task_runner_->BelongsToCurrentThread()) {
     UpdateDispatcherFilterQuality(frame_dispatcher_, filter_quality);
   } else {
     PostCrossThreadTask(*frame_dispatcher_task_runner_, FROM_HERE,

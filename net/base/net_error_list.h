@@ -97,10 +97,7 @@ NET_ERROR(BLOCKED_BY_ADMINISTRATOR, -22)
 // The socket is already connected.
 NET_ERROR(SOCKET_IS_CONNECTED, -23)
 
-// The request was blocked because the forced reenrollment check is still
-// pending. This error can only occur on ChromeOS.
-// The error can be emitted by code in chrome/browser/policy/policy_helpers.cc.
-NET_ERROR(BLOCKED_ENROLLMENT_CHECK_PENDING, -24)
+// Error -24 was removed (BLOCKED_ENROLLMENT_CHECK_PENDING)
 
 // The upload failed because the upload stream needed to be re-read, due to a
 // retry or a redirect, but the upload stream doesn't support that operation.
@@ -112,7 +109,7 @@ NET_ERROR(CONTEXT_SHUT_DOWN, -26)
 
 // The request failed because the response was delivered along with requirements
 // which are not met ('X-Frame-Options' and 'Content-Security-Policy' ancestor
-// checks and 'Cross-Origin-Resource-Policy', for instance).
+// checks and 'Cross-Origin-Resource-Policy' for instance).
 NET_ERROR(BLOCKED_BY_RESPONSE, -27)
 
 // Error -28 was removed (BLOCKED_BY_XSS_AUDITOR).
@@ -126,6 +123,9 @@ NET_ERROR(BLOCKED_BY_CSP, -30)
 
 // The request was blocked because of no H/2 or QUIC session.
 NET_ERROR(H2_OR_QUIC_REQUIRED, -31)
+
+// The request was blocked by CORB or ORB.
+NET_ERROR(BLOCKED_BY_ORB, -32)
 
 // A connection was closed (corresponding to a TCP FIN).
 NET_ERROR(CONNECTION_CLOSED, -100)
@@ -767,12 +767,11 @@ NET_ERROR(CONTENT_DECODING_INIT_FAILED, -371)
 // SpdyStream layer.
 NET_ERROR(HTTP2_RST_STREAM_NO_ERROR_RECEIVED, -372)
 
-// The pushed stream claimed by the request is no longer available.
-NET_ERROR(HTTP2_PUSHED_STREAM_NOT_AVAILABLE, -373)
+// Obsolete. HTTP/2 push is removed.
+// NET_ERROR(HTTP2_PUSHED_STREAM_NOT_AVAILABLE, -373)
 
-// A pushed stream was claimed and later reset by the server. When this happens,
-// the request should be retried.
-NET_ERROR(HTTP2_CLAIMED_PUSHED_STREAM_RESET_BY_SERVER, -374)
+// Obsolete. HTTP/2 push is removed.
+// NET_ERROR(HTTP2_CLAIMED_PUSHED_STREAM_RESET_BY_SERVER, -374)
 
 // An HTTP transaction was retried too many times due for authentication or
 // invalid certificates. This may be due to a bug in the net stack that would
@@ -783,16 +782,15 @@ NET_ERROR(TOO_MANY_RETRIES, -375)
 // Received an HTTP/2 frame on a closed stream.
 NET_ERROR(HTTP2_STREAM_CLOSED, -376)
 
-// Client is refusing an HTTP/2 stream.
-NET_ERROR(HTTP2_CLIENT_REFUSED_STREAM, -377)
+// Obsolete. HTTP/2 push is removed.
+// NET_ERROR(HTTP2_CLIENT_REFUSED_STREAM, -377)
 
-// A pushed HTTP/2 stream was claimed by a request based on matching URL and
-// request headers, but the pushed response headers do not match the request.
-NET_ERROR(HTTP2_PUSHED_RESPONSE_DOES_NOT_MATCH, -378)
+// Obsolete. HTTP/2 push is removed.
+// NET_ERROR(HTTP2_PUSHED_RESPONSE_DOES_NOT_MATCH, -378)
 
 // The server returned a non-2xx HTTP response code.
 //
-// Not that this error is only used by certain APIs that interpret the HTTP
+// Note that this error is only used by certain APIs that interpret the HTTP
 // response itself. URLRequest for instance just passes most non-2xx
 // response back as success.
 NET_ERROR(HTTP_RESPONSE_CODE_FAILURE, -379)
@@ -818,6 +816,9 @@ NET_ERROR(INCONSISTENT_IP_ADDRESS_SPACE, -383)
 // network access check.
 NET_ERROR(CACHED_IP_ADDRESS_SPACE_BLOCKED_BY_PRIVATE_NETWORK_ACCESS_POLICY,
           -384)
+
+// The connection is blocked by private network access checks.
+NET_ERROR(BLOCKED_BY_PRIVATE_NETWORK_ACCESS_CHECKS, -385)
 
 // The cache does not have the requested entry.
 NET_ERROR(CACHE_MISS, -400)
@@ -977,6 +978,9 @@ NET_ERROR(CERT_DATABASE_CHANGED, -714)
 
 // Error -715 was removed (CHANNEL_ID_IMPORT_FAILED)
 
+// The certificate verifier configuration changed in some way.
+NET_ERROR(CERT_VERIFIER_CHANGED, -716)
+
 // DNS error codes.
 
 // DNS resolver received a malformed response.
@@ -1026,4 +1030,9 @@ NET_ERROR(DNS_REQUEST_CANCELLED, -810)
 
 // The hostname resolution of HTTPS record was expected to be resolved with
 // alpn values of supported protocols, but did not.
-NET_ERROR(DNS_NO_MACHING_SUPPORTED_ALPN, -811)
+NET_ERROR(DNS_NO_MATCHING_SUPPORTED_ALPN, -811)
+
+// The compression dictionary cannot be loaded.
+NET_ERROR(DICTIONARY_LOAD_FAILED, -812)
+
+// Error -813 was removed (DICTIONARY_ORIGIN_CHECK_FAILED)

@@ -28,6 +28,7 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/css/css_color.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
 #include "third_party/blink/renderer/core/css/css_image_generator_value.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
@@ -49,7 +50,8 @@ enum CSSGradientType {
   kCSSPrefixedRadialGradient,
   kCSSLinearGradient,
   kCSSRadialGradient,
-  kCSSConicGradient
+  kCSSConicGradient,
+  kCSSConstantGradient,  // Internal.
 };
 enum CSSGradientRepeat { kNonRepeating, kRepeating };
 
@@ -98,7 +100,7 @@ class CSSGradientValue : public CSSImageGeneratorValue {
 
   scoped_refptr<Image> GetImage(const ImageResourceObserver&,
                                 const Document&,
-                                const ComputedStyle&,
+                                const ComputedStyle& style,
                                 const ContainerSizes&,
                                 const gfx::SizeF&) const;
 
@@ -122,7 +124,7 @@ class CSSGradientValue : public CSSImageGeneratorValue {
   void TraceAfterDispatch(blink::Visitor*) const;
 
   void SetColorInterpolationSpace(
-      Color::ColorInterpolationSpace color_interpolation_space,
+      Color::ColorSpace color_interpolation_space,
       Color::HueInterpolationMethod hue_interpolation_method) {
     color_interpolation_space_ = color_interpolation_space;
     hue_interpolation_method_ = hue_interpolation_method;
@@ -155,13 +157,14 @@ class CSSGradientValue : public CSSImageGeneratorValue {
                                   bool requires_separator) const;
   void AppendCSSTextForDeprecatedColorStops(StringBuilder&) const;
 
+  bool Equals(const CSSGradientValue&) const;
+
   // Stops
   HeapVector<CSSGradientColorStop, 2> stops_;
   CSSGradientType gradient_type_;
   bool repeating_ : 1;
   bool is_cacheable_ : 1;
-  Color::ColorInterpolationSpace color_interpolation_space_ =
-      Color::ColorInterpolationSpace::kNone;
+  Color::ColorSpace color_interpolation_space_ = Color::ColorSpace::kNone;
   Color::HueInterpolationMethod hue_interpolation_method_ =
       Color::HueInterpolationMethod::kShorter;
 };
@@ -357,6 +360,38 @@ class CSSConicGradientValue final : public CSSGradientValue {
   Member<const CSSPrimitiveValue> from_angle_;
 };
 
+// cross-fade() supports interpolating between not only images,
+// but also colors. This is a proxy class that takes in a ColorValue
+// and behaves otherwise like a one-color gradient, since gradients
+// have all the machinery needed to resolve colors and convert them
+// into images.
+class CSSConstantGradientValue final : public CSSGradientValue {
+ public:
+  explicit CSSConstantGradientValue(const CSSValue* color)
+      : CSSGradientValue(kConstantGradientClass,
+                         kNonRepeating,
+                         kCSSConstantGradient),
+        color_(color) {}
+
+  String CustomCSSText() const { return color_->CssText(); }
+
+  // Create the gradient for a given size.
+  scoped_refptr<Gradient> CreateGradient(const CSSToLengthConversionData&,
+                                         const gfx::SizeF&,
+                                         const Document&,
+                                         const ComputedStyle&) const;
+
+  bool KnownToBeOpaque(const Document&, const ComputedStyle&) const;
+  bool Equals(const CSSConstantGradientValue&) const;
+  CSSConstantGradientValue* ComputedCSSValue(const ComputedStyle&,
+                                             bool allow_visited_style) const;
+
+  void TraceAfterDispatch(blink::Visitor*) const;
+
+ protected:
+  Member<const CSSValue> color_;
+};
+
 }  // namespace cssvalue
 
 template <>
@@ -384,6 +419,13 @@ template <>
 struct DowncastTraits<cssvalue::CSSConicGradientValue> {
   static bool AllowFrom(const CSSValue& value) {
     return value.IsConicGradientValue();
+  }
+};
+
+template <>
+struct DowncastTraits<cssvalue::CSSConstantGradientValue> {
+  static bool AllowFrom(const CSSValue& value) {
+    return value.IsConstantGradientValue();
   }
 };
 

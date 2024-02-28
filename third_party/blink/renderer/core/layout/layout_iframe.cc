@@ -32,27 +32,11 @@ namespace blink {
 LayoutIFrame::LayoutIFrame(HTMLFrameOwnerElement* element)
     : LayoutEmbeddedContent(element) {}
 
-bool LayoutIFrame::ShouldComputeSizeAsReplaced() const {
-  NOT_DESTROYED();
-  return true;
-}
-
-bool LayoutIFrame::IsInlineBlockOrInlineTable() const {
-  NOT_DESTROYED();
-  return IsInline();
-}
-
 void LayoutIFrame::UpdateLayout() {
   NOT_DESTROYED();
   DCHECK(NeedsLayout());
 
-  UpdateLogicalWidth();
-  // No kids to layout as a replaced element.
-  UpdateLogicalHeight();
-
-  ClearLayoutOverflow();
-  UpdateAfterLayout();
-
+  ClearScrollableOverflow();
   ClearNeedsLayout();
 }
 

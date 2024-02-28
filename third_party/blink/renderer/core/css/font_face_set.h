@@ -1,5 +1,4 @@
-
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +9,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/iterable.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_sync_iterator_font_face_set.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/font_face.h"
 #include "third_party/blink/renderer/core/dom/events/event_listener.h"
@@ -26,9 +26,9 @@ namespace blink {
 class Font;
 class FontFaceCache;
 
-using FontFaceSetIterable = SetlikeIterable<Member<FontFace>, FontFace>;
+using FontFaceSetIterable = ValueSyncIterable<FontFaceSet>;
 
-class CORE_EXPORT FontFaceSet : public EventTargetWithInlineData,
+class CORE_EXPORT FontFaceSet : public EventTarget,
                                 public ExecutionContextClient,
                                 public FontFaceSetIterable,
                                 public FontFace::LoadFontCallback {
@@ -72,7 +72,7 @@ class CORE_EXPORT FontFaceSet : public EventTargetWithInlineData,
 
  protected:
   static const int kDefaultFontSize;
-  static const char kDefaultFontFamily[];
+  static const AtomicString& DefaultFontFamily();
 
   virtual bool ResolveFontStyle(const String&, Font&) = 0;
   virtual bool InActiveContext() const = 0;
@@ -91,8 +91,8 @@ class CORE_EXPORT FontFaceSet : public EventTargetWithInlineData,
   bool ShouldSignalReady() const;
   void FireDoneEvent();
 
-  using ReadyProperty = ScriptPromiseProperty<Member<FontFaceSet>,
-                                              Member<DOMException>>;
+  using ReadyProperty =
+      ScriptPromiseProperty<Member<FontFaceSet>, Member<DOMException>>;
 
   bool is_loading_ = false;
   bool should_fire_loading_event_ = false;
@@ -105,12 +105,11 @@ class CORE_EXPORT FontFaceSet : public EventTargetWithInlineData,
 
   class IterationSource final : public FontFaceSetIterable::IterationSource {
    public:
-    explicit IterationSource(const HeapVector<Member<FontFace>>& font_faces)
-        : index_(0), font_faces_(font_faces) {}
-    bool Next(ScriptState*,
-              Member<FontFace>&,
-              Member<FontFace>&,
-              ExceptionState&) override;
+    explicit IterationSource(HeapVector<Member<FontFace>>&& font_faces)
+        : index_(0), font_faces_(std::move(font_faces)) {}
+    bool FetchNextItem(ScriptState* script_state,
+                       FontFace*& value,
+                       ExceptionState& exception_state) override;
 
     void Trace(Visitor* visitor) const override {
       visitor->Trace(font_faces_);
@@ -149,7 +148,7 @@ class CORE_EXPORT FontFaceSet : public EventTargetWithInlineData,
   };
 
  private:
-  FontFaceSetIterable::IterationSource* StartIteration(
+  FontFaceSetIterable::IterationSource* CreateIterationSource(
       ScriptState*,
       ExceptionState&) override;
 

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,8 +51,7 @@ class ResourceLoadObserverForWorker final : public ResourceLoadObserver {
   void DidFinishLoading(uint64_t identifier,
                         base::TimeTicks finish_time,
                         int64_t encoded_data_length,
-                        int64_t decoded_body_length,
-                        bool should_report_corb_blocking) override;
+                        int64_t decoded_body_length) override;
   void DidFailLoading(const KURL&,
                       uint64_t identifier,
                       const ResourceError&,

@@ -29,10 +29,12 @@
 
 #include <memory>
 
+#include "base/task/single_thread_task_runner.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
-#include "third_party/blink/public/common/frame/fullscreen_request_token.h"
-#include "third_party/blink/public/common/frame/payment_request_token.h"
+#include "services/network/public/mojom/content_security_policy.mojom-blink.h"
+#include "third_party/blink/public/common/frame/delegated_capability_request_token.h"
+#include "third_party/blink/public/common/frame/history_user_activation_state.h"
 #include "third_party/blink/public/common/metrics/post_message_counter.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
@@ -45,6 +47,8 @@
 #include "third_party/blink/renderer/core/frame/dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/use_counter_impl.h"
+#include "third_party/blink/renderer/core/frame/window_event_handlers.h"
+#include "third_party/blink/renderer/core/frame/window_or_worker_global_scope.h"
 #include "third_party/blink/renderer/core/html/closewatcher/close_watcher.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
@@ -55,6 +59,7 @@
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
+#include "third_party/blink/renderer/platform/wtf/uuid.h"
 
 namespace blink {
 
@@ -71,12 +76,12 @@ class External;
 class Fence;
 class FrameConsole;
 class History;
-class IdleRequestOptions;
 class InputMethodController;
 class LocalFrame;
 class MediaQueryList;
 class MessageEvent;
 class Modulator;
+class NavigationApi;
 class Navigator;
 class Screen;
 class ScriptController;
@@ -89,10 +94,13 @@ class SourceLocation;
 class StyleMedia;
 class TrustedTypePolicyFactory;
 class V8FrameRequestCallback;
-class V8IdleRequestCallback;
 class V8VoidFunction;
 struct WebPictureInPictureWindowOptions;
 class WindowAgent;
+
+namespace scheduler {
+class TaskAttributionInfo;
+}
 
 enum PageTransitionEventPersistence {
   kPageTransitionEventNotPersisted = 0,
@@ -103,6 +111,8 @@ enum PageTransitionEventPersistence {
 // please ping dcheng@chromium.org first. You probably don't want to do that.
 class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
                                          public ExecutionContext,
+                                         public WindowOrWorkerGlobalScope,
+                                         public WindowEventHandlers,
                                          public Supplementable<LocalDOMWindow> {
   USING_PRE_FINALIZER(LocalDOMWindow, Dispose);
 
@@ -130,7 +140,11 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
     return token_;
   }
 
-  LocalFrame* GetFrame() const { return To<LocalFrame>(DOMWindow::GetFrame()); }
+  LocalFrame* GetFrame() const {
+    // UnsafeTo<> is safe here because DOMWindow's frame can only change to
+    // nullptr, and it was constructed with a LocalFrame in the constructor.
+    return UnsafeTo<LocalFrame>(DOMWindow::GetFrame());
+  }
 
   ScriptController& GetScriptController() const { return *script_controller_; }
 
@@ -165,7 +179,6 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   ResourceFetcher* Fetcher() final;
   bool CanExecuteScripts(ReasonForCallingCanExecuteScripts) final;
   void ExceptionThrown(ErrorEvent*) final;
-  void AddInspectorIssue(mojom::blink::InspectorIssueInfoPtr) final;
   void AddInspectorIssue(AuditsIssue) final;
   EventTarget* ErrorEventTarget() final { return this; }
   String OutgoingReferrer() const final;
@@ -180,6 +193,7 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   void ReportPermissionsPolicyViolation(
       mojom::blink::PermissionsPolicyFeature,
       mojom::blink::PolicyDisposition,
+      const absl::optional<String>& reporting_endpoint,
       const String& message = g_empty_string) const final;
   void ReportDocumentPolicyViolation(
       mojom::blink::DocumentPolicyFeature,
@@ -189,6 +203,7 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
       // current JS file would be used as source_file instead.
       const String& source_file = g_empty_string) const final;
   void SetIsInBackForwardCache(bool) final;
+  bool HasStorageAccess() const final;
 
   void AddConsoleMessageImpl(ConsoleMessage*, bool discard_duplicates) final;
 
@@ -214,6 +229,16 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   void CountPermissionsPolicyUsage(
       mojom::blink::PermissionsPolicyFeature feature,
       UseCounterImpl::PermissionsPolicyUsageType type);
+
+  // Checks if navigation to Javascript URL is allowed. This check should run
+  // before any action is taken (e.g. creating new window) for all
+  // same-origin navigations.
+  String CheckAndGetJavascriptUrl(
+      const DOMWrapperWorld* world,
+      const KURL& url,
+      Element* element,
+      network::mojom::CSPDisposition csp_disposition =
+          network::mojom::CSPDisposition::CHECK);
 
   Document* InstallNewDocument(const DocumentInit&);
 
@@ -306,8 +331,8 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   void moveBy(int x, int y) const;
   void moveTo(int x, int y) const;
 
-  void resizeBy(int x, int y) const;
-  void resizeTo(int width, int height) const;
+  void resizeBy(int x, int y, ExceptionState&) const;
+  void resizeTo(int width, int height, ExceptionState&) const;
 
   MediaQueryList* matchMedia(const String&);
 
@@ -330,10 +355,6 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   // https://html.spec.whatwg.org/C/#dom-originagentcluster
   bool originAgentCluster() const;
 
-  // Idle callback extensions
-  int requestIdleCallback(V8IdleRequestCallback*, const IdleRequestOptions*);
-  void cancelIdleCallback(int id);
-
   // Custom elements
   CustomElementRegistry* customElements(ScriptState*) const;
   CustomElementRegistry* customElements() const;
@@ -346,11 +367,13 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   void releaseEvents() {}
   External* external();
 
-  bool isSecureContext() const;
+  bool isSecureContext() const;  // NOLINT(bugprone-virtual-near-miss)
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(search, kSearch)
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(orientationchange, kOrientationchange)
+
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(pagereveal, kPagereveal)
 
   void RegisterEventListenerObserver(EventListenerObserver*);
 
@@ -402,7 +425,8 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   void EnqueueDocumentEvent(Event&, TaskType);
   void EnqueueNonPersistedPageshowEvent();
   void EnqueueHashchangeEvent(const String& old_url, const String& new_url);
-  void DispatchPopstateEvent(scoped_refptr<SerializedScriptValue>);
+  void DispatchPopstateEvent(scoped_refptr<SerializedScriptValue>,
+                             scheduler::TaskAttributionInfo* parent_task);
   void DispatchWindowLoadEvent();
   void DocumentWasClosed();
 
@@ -441,7 +465,7 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   void ClearIsolatedWorldCSPForTesting(int32_t world_id);
 
   bool CrossOriginIsolatedCapability() const override;
-  bool IsolatedApplicationCapability() const override;
+  bool IsIsolatedContext() const override;
 
   // These delegate to the document_.
   ukm::UkmRecorder* UkmRecorder() override;
@@ -450,34 +474,68 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   const BlinkStorageKey& GetStorageKey() const { return storage_key_; }
   void SetStorageKey(const BlinkStorageKey& storage_key);
 
+  // This storage key must only be used when binding session storage.
+  //
+  // TODO(crbug.com/1407150): Remove this when deprecation trial is complete.
+  const BlinkStorageKey& GetSessionStorageKey() const {
+    return session_storage_key_;
+  }
+  void SetSessionStorageKey(const BlinkStorageKey& session_storage_key);
+
   void DidReceiveUserActivation();
 
-  // Returns the state of the |PaymentRequestToken| in this document.
+  // Returns the state of the |payment_request_token_| in this document.
   bool IsPaymentRequestTokenActive() const;
 
-  // Consumes the |PaymentRequestToken| if it was active in this document.
+  // Consumes the |payment_request_token_| if it was active in this document.
   bool ConsumePaymentRequestToken();
 
-  // Returns the state of the |FullscreenRequestToken| in this document.
+  // Returns the state of the |fullscreen_request_token_| in this document.
   bool IsFullscreenRequestTokenActive() const;
 
-  // Consumes the |FullscreenRequestToken| if it was active in this document.
+  // Consumes the |fullscreen_request_token_| if it was active in this document.
   bool ConsumeFullscreenRequestToken();
+
+  // Returns the state of the |display_capture_request_token_| in this document.
+  bool IsDisplayCaptureRequestTokenActive() const;
+
+  // Consumes the |display_capture_request_token_| if it was active in this
+  // document.
+  bool ConsumeDisplayCaptureRequestToken();
 
   // Called when a network request buffered an additional `num_bytes` while this
   // frame is in back-forward cache.
-  void DidBufferLoadWhileInBackForwardCache(size_t num_bytes);
+  void DidBufferLoadWhileInBackForwardCache(bool update_process_wide_count,
+                                            size_t num_bytes);
 
-  // Whether the window is anonymous or not.
-  bool anonymouslyFramed() const;
+  // Whether the window is credentialless or not.
+  bool credentialless() const;
 
   bool IsInFencedFrame() const override;
 
   Fence* fence();
 
   CloseWatcher::WatcherStack* closewatcher_stack() {
-    return closewatcher_stack_;
+    return closewatcher_stack_.Get();
   }
+
+  void GenerateNewNavigationId();
+
+  String GetNavigationId() const { return navigation_id_; }
+
+  NavigationApi* navigation();
+
+  // Is this a Document Picture in Picture window?
+  bool IsPictureInPictureWindow() const;
+
+  void set_is_picture_in_picture_window_for_testing(
+      bool is_picture_in_picture) {
+    is_picture_in_picture_window_ = is_picture_in_picture;
+  }
+
+  // Sets the HasStorageAccess member. Note that it can only be granted for a
+  // given window, it cannot be taken away.
+  void SetHasStorageAccess();
 
  protected:
   // EventTarget overrides.
@@ -492,19 +550,19 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
  private:
   class NetworkStateObserver;
 
-  // Intentionally private to prevent redundant checks when the type is
-  // already LocalDOMWindow.
+  // Intentionally private to prevent redundant checks.
   bool IsLocalDOMWindow() const override { return true; }
-  bool IsRemoteDOMWindow() const override { return false; }
 
   bool HasInsecureContextInAncestors() const override;
+
+  Document& GetDocumentForWindowEventHandler() const override {
+    return *document();
+  }
 
   void Dispose();
 
   void DispatchLoadEvent();
 
-  // Is this a Document Picture in Picture window?
-  bool IsPictureInPictureWindow() const;
   void SetIsPictureInPictureWindow();
 
   // Return the viewport size including scrollbars.
@@ -528,22 +586,20 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   mutable Member<Navigator> navigator_;
   mutable Member<StyleMedia> media_;
   mutable Member<CustomElementRegistry> custom_elements_;
-  // We store reference to Modulator here to have it TraceWrapper-ed.
-  // This is wrong, as Modulator is per-context, where as LocalDOMWindow is
-  // shared among context. However, this *works* as Modulator is currently only
-  // enabled in the main world,
-  Member<Modulator> modulator_;
   Member<External> external_;
+
+  Member<NavigationApi> navigation_;
 
   String status_;
   String default_status_;
 
   HeapHashSet<WeakMember<EventListenerObserver>> event_listener_observers_;
 
-  // Trackers for delegated payment and fullscreen requests.  These are related
-  // to |Frame::user_activation_state_|.
-  PaymentRequestToken payment_request_token_;
-  FullscreenRequestToken fullscreen_request_token_;
+  // Trackers for delegated payment, fullscreen, and display-capture requests.
+  // These are related to |Frame::user_activation_state_|.
+  DelegatedCapabilityRequestToken payment_request_token_;
+  DelegatedCapabilityRequestToken fullscreen_request_token_;
+  DelegatedCapabilityRequestToken display_capture_request_token_;
 
   // https://dom.spec.whatwg.org/#window-current-event
   // We represent the "undefined" value as nullptr.
@@ -594,6 +650,13 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   // The storage key for this LocalDomWindow.
   BlinkStorageKey storage_key_;
 
+  // The storage key here is the one to use when binding session storage. This
+  // may differ from `storage_key_` as a deprecation trial can prevent the
+  // partitioning of session storage.
+  //
+  // TODO(crbug.com/1407150): Remove this when deprecation trial is complete.
+  BlinkStorageKey session_storage_key_;
+
   // Fire "online" and "offline" events.
   Member<NetworkStateObserver> network_state_observer_;
 
@@ -609,8 +672,23 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   Member<CloseWatcher::WatcherStack> closewatcher_stack_;
 
   // If set, this window is a Document Picture in Picture window.
-  // https://github.com/steimelchrome/document-pip-explainer/blob/main/explainer.md
+  // https://wicg.github.io/document-picture-in-picture/
   bool is_picture_in_picture_window_ = false;
+
+  // The navigation id of a document is to identify navigation of special types
+  // like bfcache navigation or soft navigation. It changes when navigations
+  // of these types occur.
+  String navigation_id_;
+
+  // Records whether this window has obtained storage access. It cannot be
+  // revoked once set to true.
+  bool has_storage_access_ = false;
+
+  // Tracks whether this window has shown a payment request without a user
+  // activation. It cannot be revoked once set to true.
+  // TODO(crbug.com/1439565): Move this bit to a new payments-specific
+  // per-LocalDOMWindow class in the payments module.
+  bool had_activationless_payment_request_ = false;
 };
 
 template <>
@@ -628,6 +706,7 @@ inline String LocalDOMWindow::status() const {
 }
 
 inline String LocalDOMWindow::defaultStatus() const {
+  DCHECK(RuntimeEnabledFeatures::WindowDefaultStatusEnabled());
   return default_status_;
 }
 

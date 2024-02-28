@@ -1,19 +1,25 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/paint/view_painter.h"
 
 #include <gtest/gtest.h>
+#include "cc/test/paint_op_matchers.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/paint/paint_controller_paint_test.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_display_item.h"
 #include "third_party/blink/renderer/platform/testing/paint_property_test_helpers.h"
 #include "ui/gfx/geometry/skia_conversions.h"
 
-using testing::ElementsAre;
-
 namespace blink {
+namespace {
+
+using ::cc::PaintOpIs;
+using ::testing::_;
+using ::testing::AllOf;
+using ::testing::ElementsAre;
+using ::testing::ResultOf;
 
 class ViewPainterFixedBackgroundTest : public PaintControllerPaintTest {
  protected:
@@ -24,10 +30,7 @@ INSTANTIATE_PAINT_TEST_SUITE_P(ViewPainterFixedBackgroundTest);
 
 void ViewPainterFixedBackgroundTest::RunFixedBackgroundTest(
     bool prefer_compositing_to_lcd_text) {
-  if (prefer_compositing_to_lcd_text) {
-    Settings* settings = GetDocument().GetFrame()->GetSettings();
-    settings->SetPreferCompositingToLCDTextEnabled(true);
-  }
+  SetPreferCompositingToLCDText(prefer_compositing_to_lcd_text);
   SetBodyInnerHTML(R"HTML(
     <style>
       ::-webkit-scrollbar { display: none; }
@@ -58,20 +61,22 @@ void ViewPainterFixedBackgroundTest::RunFixedBackgroundTest(
       *background_display_item,
       IsSameId(background_client.Id(), DisplayItem::kDocumentBackground));
 
-  sk_sp<const PaintRecord> record =
+  PaintRecord record =
       To<DrawingDisplayItem>(background_display_item)->GetPaintRecord();
-  ASSERT_EQ(record->size(), 2u);
-  cc::PaintOpBuffer::Iterator it(record.get());
-  ASSERT_EQ((++it)->GetType(), cc::PaintOpType::DrawRect);
 
-  // This is the dest_rect_ calculated by BackgroundImageGeometry. For a fixed
-  // background in scrolling contents layer, its location is the scroll offset.
-  auto rect = gfx::SkRectToRectF(static_cast<const cc::DrawRectOp&>(*it).rect);
-  if (prefer_compositing_to_lcd_text) {
-    EXPECT_EQ(gfx::RectF(0, 0, 800, 600), rect);
-  } else {
-    EXPECT_EQ(gfx::RectF(scroll_offset.x(), scroll_offset.y(), 800, 600), rect);
-  }
+  SkRect expected_rect =
+      prefer_compositing_to_lcd_text
+          ? SkRect::MakeXYWH(0, 0, 800, 600)
+          : SkRect::MakeXYWH(scroll_offset.x(), scroll_offset.y(), 800, 600);
+  EXPECT_THAT(
+      record,
+      ElementsAre(
+          _, AllOf(PaintOpIs<cc::DrawRectOp>(),
+                   ResultOf(
+                       [](const cc::PaintOp& op) {
+                         return static_cast<const cc::DrawRectOp&>(op).rect;
+                       },
+                       expected_rect))));
 }
 
 TEST_P(ViewPainterFixedBackgroundTest,
@@ -155,7 +160,7 @@ TEST_P(ViewPainterTest, FrameScrollHitTestProperties) {
   EXPECT_EQ(nullptr, scroll_hit_test_transform.ScrollNode());
   const auto& scroll_hit_test_clip =
       ToUnaliased(scroll_hit_test_chunk.properties.Clip());
-  EXPECT_EQ(gfx::RectF(LayoutRect::InfiniteIntRect()),
+  EXPECT_EQ(gfx::RectF(InfiniteIntRect()),
             scroll_hit_test_clip.PaintClipRect().Rect());
 
   // The scrolled contents should be scrolled and clipped.
@@ -173,81 +178,23 @@ TEST_P(ViewPainterTest, FrameScrollHitTestProperties) {
             scroll_hit_test_chunk.hit_test_data->scroll_translation);
 }
 
-class ViewPainterTouchActionRectTest : public ViewPainterTest {
- public:
-  void SetUp() override {
-    ViewPainterTest::SetUp();
-    Settings* settings = GetDocument().GetFrame()->GetSettings();
-    settings->SetPreferCompositingToLCDTextEnabled(true);
-  }
-};
-
-INSTANTIATE_PAINT_TEST_SUITE_P(ViewPainterTouchActionRectTest);
-
-TEST_P(ViewPainterTouchActionRectTest, TouchActionRectScrollingContents) {
+TEST_P(ViewPainterTest, TouchActionRect) {
+  SetPreferCompositingToLCDText(true);
   SetBodyInnerHTML(R"HTML(
     <style>
       ::-webkit-scrollbar { display: none; }
       html {
-        background: lightblue;
-        touch-action: none;
-      }
-      body {
-        margin: 0;
-      }
-    </style>
-    <div id='forcescroll' style='width: 0; height: 3000px;'></div>
-  )HTML");
-
-  GetFrame().DomWindow()->scrollBy(0, 100);
-  UpdateAllLifecyclePhasesForTest();
-
-  HitTestData view_hit_test_data;
-  view_hit_test_data.touch_action_rects = {{gfx::Rect(0, 0, 800, 3000)},
-                                           {gfx::Rect(0, 0, 800, 3000)},
-                                           {gfx::Rect(0, 0, 800, 3000)}};
-
-  HitTestData non_scrolling_hit_test_data;
-  non_scrolling_hit_test_data.touch_action_rects = {
-      {gfx::Rect(0, 0, 800, 600)}};
-  HitTestData scroll_hit_test_data;
-  scroll_hit_test_data.scroll_translation =
-      GetLayoutView().FirstFragment().PaintProperties()->ScrollTranslation();
-  scroll_hit_test_data.scroll_hit_test_rect = gfx::Rect(0, 0, 800, 600);
-  EXPECT_THAT(
-      RootPaintController().PaintChunks()[0],
-      IsPaintChunk(0, 0,
-                   PaintChunk::Id(GetLayoutView().Layer()->Id(),
-                                  DisplayItem::kLayerChunk),
-                   GetLayoutView().FirstFragment().LocalBorderBoxProperties(),
-                   &non_scrolling_hit_test_data, gfx::Rect(0, 0, 800, 600)));
-  EXPECT_THAT(
-      RootPaintController().PaintChunks()[1],
-      IsPaintChunk(
-          0, 0,
-          PaintChunk::Id(GetLayoutView().Id(), DisplayItem::kScrollHitTest),
-          GetLayoutView().FirstFragment().LocalBorderBoxProperties(),
-          &scroll_hit_test_data, gfx::Rect(0, 0, 800, 600)));
-
-  EXPECT_THAT(ContentPaintChunks(),
-              ElementsAre(VIEW_SCROLLING_BACKGROUND_CHUNK(
-                  1, &view_hit_test_data, gfx::Rect(0, 0, 800, 3000))));
-}
-
-TEST_P(ViewPainterTouchActionRectTest, TouchActionRectNonScrollingContents) {
-  SetBodyInnerHTML(R"HTML(
-    <style>
-      ::-webkit-scrollbar { display: none; }
-      html {
-         background: radial-gradient(
+        background: radial-gradient(
           circle at 100px 100px, blue, transparent 200px) fixed;
-        touch-action: none;
+        touch-action: pinch-zoom;
       }
       body {
         margin: 0;
       }
     </style>
-    <div id='forcescroll' style='width: 0; height: 3000px;'></div>
+    <div id='child' style='width: 10px; height: 100px; touch-action: none'>
+    </div>
+    <div id='forcescroll' style='width: 0; height: 2900px;'></div>
   )HTML");
 
   GetFrame().DomWindow()->scrollBy(0, 100);
@@ -257,12 +204,14 @@ TEST_P(ViewPainterTouchActionRectTest, TouchActionRectNonScrollingContents) {
   auto non_scrolling_properties =
       view->FirstFragment().LocalBorderBoxProperties();
   HitTestData view_hit_test_data;
-  view_hit_test_data.touch_action_rects = {{gfx::Rect(0, 0, 800, 600)}};
+  view_hit_test_data.touch_action_rects = {
+      {gfx::Rect(0, 0, 800, 600), TouchAction::kPinchZoom}};
   auto* html = GetDocument().documentElement()->GetLayoutBox();
   auto scrolling_properties = view->FirstFragment().ContentsProperties();
   HitTestData scrolling_hit_test_data;
-  scrolling_hit_test_data.touch_action_rects = {{gfx::Rect(0, 0, 800, 3000)},
-                                                {gfx::Rect(0, 0, 800, 3000)}};
+  scrolling_hit_test_data.touch_action_rects = {
+      {gfx::Rect(0, 0, 800, 3000), TouchAction::kPinchZoom},
+      {gfx::Rect(0, 0, 10, 100), TouchAction::kNone}};
 
   HitTestData scroll_hit_test_data;
   scroll_hit_test_data.scroll_translation =
@@ -287,4 +236,5 @@ TEST_P(ViewPainterTouchActionRectTest, TouchActionRectNonScrollingContents) {
           gfx::Rect(0, 0, 800, 3000))));
 }
 
+}  // namespace
 }  // namespace blink

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,7 @@ void RejectWithCode(ScriptPromiseResolver* resolver,
                     const String& message) {
   ScriptState::Scope scope(resolver->GetScriptState());
   ExceptionState exception_state(resolver->GetScriptState()->GetIsolate(),
-                                 ExceptionState::kExecutionContext,
+                                 ExceptionContextType::kOperationInvoke,
                                  "SelectorDirective",
                                  "createSelectorDirective");
   exception_state.ThrowDOMException(code, message);

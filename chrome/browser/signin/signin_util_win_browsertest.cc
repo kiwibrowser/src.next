@@ -4,9 +4,9 @@
 
 #include <stddef.h>
 
-#include "base/bind.h"
-#include "base/callback.h"
 #include "base/command_line.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/bind.h"
@@ -277,7 +277,7 @@ IN_PROC_BROWSER_TEST_P(SigninUtilWinBrowserTest, NoReauthAfterSignout) {
         IdentityManagerFactory::GetForProfile(profile)
             ->GetPrimaryAccountMutator();
     primary_account_mutator->RevokeSyncConsent(
-        signin_metrics::FORCE_SIGNOUT_ALWAYS_ALLOWED_FOR_TEST,
+        signin_metrics::ProfileSignout::kForceSignoutAlwaysAllowedForTest,
         signin_metrics::SignoutDelete::kDeleted);
 
     // Even with a refresh token available, no reauth happens if the profile

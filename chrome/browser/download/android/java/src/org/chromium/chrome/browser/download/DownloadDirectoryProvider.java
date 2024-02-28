@@ -22,11 +22,12 @@ import org.chromium.base.ContentUriUtils;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.PathUtils;
+import org.chromium.base.ResettersForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.task.AsyncTask;
 import org.chromium.base.task.PostTask;
+import org.chromium.base.task.TaskTraits;
 import org.chromium.chrome.browser.download.DirectoryOption.DownloadLocationDirectoryType;
-import org.chromium.content_public.browser.UiThreadTaskTraits;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -66,9 +67,7 @@ public class DownloadDirectoryProvider {
         SecondaryStorageInfo getSecondaryStorageDownloadDirectories();
     }
 
-    /**
-     * Class that calls Android API to get download directories.
-     */
+    /** Class that calls Android API to get download directories. */
     public static class DownloadDirectoryProviderDelegate implements Delegate {
         @Override
         public File getPrimaryDownloadDirectory() {
@@ -101,13 +100,16 @@ public class DownloadDirectoryProvider {
 
             // If no default directory, return an error option.
             if (defaultDirectory == null) {
-                dirs.add(new DirectoryOption(
-                        null, 0, 0, DirectoryOption.DownloadLocationDirectoryType.ERROR));
+                dirs.add(
+                        new DirectoryOption(
+                                null, 0, 0, DirectoryOption.DownloadLocationDirectoryType.ERROR));
                 return dirs;
             }
 
-            DirectoryOption defaultOption = toDirectoryOption(
-                    defaultDirectory, DirectoryOption.DownloadLocationDirectoryType.DEFAULT);
+            DirectoryOption defaultOption =
+                    toDirectoryOption(
+                            defaultDirectory,
+                            DirectoryOption.DownloadLocationDirectoryType.DEFAULT);
             dirs.add(defaultOption);
             recordDirectoryType(DirectoryOption.DownloadLocationDirectoryType.DEFAULT);
 
@@ -116,15 +118,17 @@ public class DownloadDirectoryProvider {
             mExternalStorageDirectory = Environment.getExternalStorageDirectory().getAbsolutePath();
             SecondaryStorageInfo secondaryStorageInfo =
                     mDelegate.getSecondaryStorageDownloadDirectories();
-            List<File> secondaryDirs = Build.VERSION.SDK_INT > Build.VERSION_CODES.Q
-                    ? secondaryStorageInfo.directories
-                    : secondaryStorageInfo.directoriesPreR;
+            List<File> secondaryDirs =
+                    Build.VERSION.SDK_INT > Build.VERSION_CODES.Q
+                            ? secondaryStorageInfo.directories
+                            : secondaryStorageInfo.directoriesPreR;
             if (secondaryDirs.isEmpty()) return dirs;
             boolean hasAddtionalDirectory = false;
             for (File file : secondaryDirs) {
                 if (file == null) continue;
-                dirs.add(toDirectoryOption(
-                        file, DirectoryOption.DownloadLocationDirectoryType.ADDITIONAL));
+                dirs.add(
+                        toDirectoryOption(
+                                file, DirectoryOption.DownloadLocationDirectoryType.ADDITIONAL));
                 hasAddtionalDirectory = true;
             }
 
@@ -175,12 +179,12 @@ public class DownloadDirectoryProvider {
      * @param provider The directory provider used in tests.
      */
     public void setDirectoryProviderForTesting(DownloadDirectoryProvider provider) {
+        var oldValue = LazyHolder.sInstance;
         LazyHolder.sInstance = provider;
+        ResettersForTesting.register(() -> LazyHolder.sInstance = oldValue);
     }
 
-    /**
-     * BroadcastReceiver to listen to external SD card insertion and removal events.
-     */
+    /** BroadcastReceiver to listen to external SD card insertion and removal events. */
     private final class ExternalSDCardReceiver extends BroadcastReceiver {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -214,7 +218,7 @@ public class DownloadDirectoryProvider {
     public void getAllDirectoriesOptions(Callback<ArrayList<DirectoryOption>> callback) {
         // Use cache value.
         if (!mNeedsUpdate && mDirectoriesReady) {
-            PostTask.postTask(UiThreadTaskTraits.DEFAULT, callback.bind(mDirectoryOptions));
+            PostTask.postTask(TaskTraits.UI_DEFAULT, callback.bind(mDirectoryOptions));
             return;
         }
 
@@ -259,16 +263,14 @@ public class DownloadDirectoryProvider {
         return downloadDir;
     }
 
-    /**
-     * Contains download directories on secondary storage(external SD card).
-     */
+    /** Contains download directories on secondary storage(external SD card). */
     public static class SecondaryStorageInfo {
         /**
          * The download directories on secondary storage from Android R. Will be null before Android
          * R.
          */
-        @Nullable
-        public final List<File> directories;
+        @Nullable public final List<File> directories;
+
         /**
          * The download directories on secondary storage pre R. Some downloads may exist in these
          * directories on Q+.
@@ -349,11 +351,14 @@ public class DownloadDirectoryProvider {
         filter.addAction(Intent.ACTION_MEDIA_EJECT);
         filter.addDataScheme("file");
         mExternalSDCardReceiver = new ExternalSDCardReceiver();
-        ContextUtils.getApplicationContext().registerReceiver(mExternalSDCardReceiver, filter);
+        ContextUtils.registerProtectedBroadcastReceiver(
+                ContextUtils.getApplicationContext(), mExternalSDCardReceiver, filter);
     }
 
     private void recordDirectoryType(@DirectoryOption.DownloadLocationDirectoryType int type) {
-        RecordHistogram.recordEnumeratedHistogram("MobileDownload.Location.DirectoryType", type,
+        RecordHistogram.recordEnumeratedHistogram(
+                "MobileDownload.Location.DirectoryType",
+                type,
                 DirectoryOption.DownloadLocationDirectoryType.NUM_ENTRIES);
     }
 }

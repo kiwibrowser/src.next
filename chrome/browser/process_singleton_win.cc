@@ -9,10 +9,9 @@
 #include <stddef.h>
 
 #include "base/base_paths.h"
-#include "base/bind.h"
 #include "base/command_line.h"
-#include "base/debug/activity_tracker.h"
 #include "base/files/file_path.h"
+#include "base/functional/bind.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
@@ -35,9 +34,10 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/branded_strings.h"
 #include "content/public/common/result_codes.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/scoped_startup_resource_bundle.h"
 #include "ui/gfx/win/hwnd_util.h"
 
 namespace {
@@ -164,6 +164,11 @@ bool ProcessLaunchNotification(
 
 bool DisplayShouldKillMessageBox() {
   TRACE_EVENT0("startup", "ProcessSingleton:DisplayShouldKillMessageBox");
+
+  // Ensure there is an instance of ResourceBundle that is initialized for
+  // localized string resource accesses.
+  ui::ScopedStartupResourceBundle startup_resource_bundle;
+
   return chrome::ShowQuestionMessageBoxSync(
              NULL, l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
              l10n_util::GetStringUTF16(IDS_BROWSER_HUNGBROWSER_MESSAGE)) !=
@@ -199,8 +204,6 @@ void TerminateProcessWithHistograms(const base::Process& process,
       internal::SendRemoteProcessInteractionResultHistogram(
           ProcessSingleton::TERMINATE_SUCCEEDED);
     }
-    base::debug::GlobalActivityTracker::RecordProcessExitIfEnabled(
-        process.Pid(), exit_code);
     UMA_HISTOGRAM_TIMES("Chrome.ProcessSingleton.TerminateProcessTime",
                         base::TimeTicks::Now() - start_time);
     base::UmaHistogramSparse(

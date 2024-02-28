@@ -8,8 +8,12 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/safe_ref.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/observer_list.h"
 #include "base/types/id_type.h"
+#include "base/unguessable_token.h"
+#include "content/browser/browsing_instance.h"
+#include "content/browser/coop_related_group.h"
 #include "content/browser/renderer_host/agent_scheduling_group_host.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/browsing_instance_id.h"
@@ -22,6 +26,7 @@ class SiteInstanceGroup;
 
 namespace content {
 
+class BrowserContext;
 class RenderProcessHost;
 class SiteInstance;
 class SiteInstanceImpl;
@@ -66,7 +71,7 @@ class CONTENT_EXPORT SiteInstanceGroup
     : public base::RefCounted<SiteInstanceGroup>,
       public RenderProcessHostObserver {
  public:
-  class CONTENT_EXPORT Observer {
+  class CONTENT_EXPORT Observer : public base::CheckedObserver {
    public:
     // Called when this SiteInstanceGroup transitions to having no active
     // frames, as measured by active_frame_count().
@@ -80,7 +85,7 @@ class CONTENT_EXPORT SiteInstanceGroup
                                    const ChildProcessTerminationInfo& info) {}
   };
 
-  SiteInstanceGroup(BrowsingInstanceId browsing_instance_id,
+  SiteInstanceGroup(BrowsingInstance* browsing_instance,
                     RenderProcessHost* process);
 
   SiteInstanceGroup(const SiteInstanceGroup&) = delete;
@@ -89,6 +94,8 @@ class CONTENT_EXPORT SiteInstanceGroup
   SiteInstanceGroupId GetId() const;
 
   base::SafeRef<SiteInstanceGroup> GetSafeRef();
+  // TODO(https://crbug.com/1420333): Remove this. Please don't use it.
+  base::WeakPtr<SiteInstanceGroup> GetWeakPtrToAllowDangling();
 
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
@@ -108,6 +115,17 @@ class CONTENT_EXPORT SiteInstanceGroup
   // observers, and may trigger deletion of proxies.
   void DecrementActiveFrameCount();
 
+  // Returns true if `group` is in the same BrowsingInstance as `this`. This
+  // behaves similarly to SiteInstance::IsRelatedSiteInstance, but can only be
+  // used when a SiteInstanceGroup is available.
+  bool IsRelatedSiteInstanceGroup(SiteInstanceGroup* group);
+
+  // Returns true if `group` is in the same CoopRelatedGroup as `this`. This can
+  // be true even though IsRelatedSiteInstanceGroup returns false, if the two
+  // SiteInstanceGroups are for different BrowsingInstances in the same
+  // CoopRelatedGroup.
+  bool IsCoopRelatedSiteInstanceGroup(SiteInstanceGroup* group);
+
   // Get the number of active frames which belong to this SiteInstanceGroup. If
   // there are no active frames left, all frames in this SiteInstanceGroup can
   // be safely discarded.
@@ -116,13 +134,39 @@ class CONTENT_EXPORT SiteInstanceGroup
   RenderProcessHost* process() const { return &*process_; }
 
   BrowsingInstanceId browsing_instance_id() const {
-    return browsing_instance_id_;
+    return browsing_instance_->isolation_context().browsing_instance_id();
+  }
+
+  // Returns the token uniquely identifying the BrowsingInstance this
+  // SiteInstanceGroup belongs to.
+  base::UnguessableToken browsing_instance_token() const {
+    return browsing_instance_->token();
+  }
+
+  // Returns the token uniquely identifying the CoopRelatedGroup this
+  // SiteInstanceGroup belongs to.
+  base::UnguessableToken coop_related_group_token() const {
+    return browsing_instance_->coop_related_group_token();
   }
 
   AgentSchedulingGroupHost& agent_scheduling_group() {
     DCHECK_EQ(agent_scheduling_group_->GetProcess(), &*process_);
     return *agent_scheduling_group_;
   }
+
+  const StoragePartitionConfig& GetStoragePartitionConfig() const;
+
+  const base::flat_set<raw_ptr<SiteInstanceImpl>>& site_instances_for_testing()
+      const {
+    return site_instances_;
+  }
+
+  // Creates a new SiteInstanceGroup in a new BrowsingInstance for testing.
+  static SiteInstanceGroup* CreateForTesting(BrowserContext* browser_context,
+                                             RenderProcessHost* process);
+  // Creates a new SiteInstanceGroup in the same BrowsingInstance as `group`.
+  static SiteInstanceGroup* CreateForTesting(SiteInstanceGroup* group,
+                                             RenderProcessHost* process);
 
   using TraceProto = perfetto::protos::pbzero::SiteInstanceGroup;
   // Write a representation of this object into a trace.
@@ -132,6 +176,10 @@ class CONTENT_EXPORT SiteInstanceGroup
   friend class RefCounted<SiteInstanceGroup>;
   ~SiteInstanceGroup() override;
 
+  BrowsingInstance* browsing_instance_for_testing() {
+    return browsing_instance_.get();
+  }
+
   // RenderProcessHostObserver implementation.
   void RenderProcessHostDestroyed(RenderProcessHost* host) override;
   void RenderProcessExited(RenderProcessHost* host,
@@ -140,8 +188,10 @@ class CONTENT_EXPORT SiteInstanceGroup
   // A unique ID for this SiteInstanceGroup.
   SiteInstanceGroupId id_;
 
-  // ID of the BrowsingInstance this SiteInstanceGroup belongs to.
-  const BrowsingInstanceId browsing_instance_id_;
+  // BrowsingInstance in which this SiteInstanceGroup exists. This is held as a
+  // scoped_refptr since the BrowsingInstance must outlive all
+  // SiteInstanceGroups in it.
+  scoped_refptr<BrowsingInstance> browsing_instance_;
 
   // The number of active frames in this SiteInstanceGroup.
   size_t active_frame_count_ = 0;
@@ -159,9 +209,10 @@ class CONTENT_EXPORT SiteInstanceGroup
   // List of SiteInstanceImpls that belong in this group. When any SiteInstance
   // in the set goes away, it must also be removed from `site_instances_` to
   // prevent UaF.
-  base::flat_set<SiteInstanceImpl*> site_instances_;
+  base::flat_set<raw_ptr<SiteInstanceImpl>> site_instances_;
 
-  base::ObserverList<Observer, true>::Unchecked observers_;
+  base::ObserverList<Observer> observers_;
+  bool is_notifying_observers_ = false;
 
   base::WeakPtrFactory<SiteInstanceGroup> weak_ptr_factory_{this};
 };

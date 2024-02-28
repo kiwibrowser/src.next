@@ -32,7 +32,10 @@ import java.util.Set;
  */
 public class TabStripSnapshotter {
     private static final Set<PropertyKey> SNAPSHOT_PROPERTY_KEY_SET =
-            CollectionUtil.newHashSet(TabProperties.FAVICON, TabProperties.IS_SELECTED);
+            CollectionUtil.newHashSet(
+                    TabProperties.FAVICON_FETCHER,
+                    TabProperties.FAVICON_FETCHED,
+                    TabProperties.IS_SELECTED);
 
     /**
      * A token that contains an ordered list of tuples for each tab in the tab strip. Should be
@@ -72,19 +75,19 @@ public class TabStripSnapshotter {
 
     /** Simple tuple to hold all relevant fields for a single tab item. */
     private static class TabStripItemSnapshot {
-        @NonNull
-        public final TabListFaviconProvider.TabFavicon mTabFavicon;
-        @NonNull
+        @Nullable public final TabListFaviconProvider.TabFaviconFetcher mTabFaviconFetcher;
+        public final boolean mFaviconFetched;
         public final boolean mIsSelected;
 
         public TabStripItemSnapshot(PropertyModel propertyModel) {
-            mTabFavicon = propertyModel.get(TabProperties.FAVICON);
+            mTabFaviconFetcher = propertyModel.get(TabProperties.FAVICON_FETCHER);
+            mFaviconFetched = propertyModel.get(TabProperties.FAVICON_FETCHED);
             mIsSelected = propertyModel.get(TabProperties.IS_SELECTED);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(mTabFavicon, mIsSelected);
+            return Objects.hash(mTabFaviconFetcher, mFaviconFetched, mIsSelected);
         }
 
         @Override
@@ -93,7 +96,8 @@ public class TabStripSnapshotter {
                 return false;
             }
             TabStripItemSnapshot other = (TabStripItemSnapshot) obj;
-            return Objects.equals(mTabFavicon, other.mTabFavicon)
+            return Objects.equals(mTabFaviconFetcher, other.mTabFaviconFetcher)
+                    && this.mFaviconFetched == other.mFaviconFetched
                     && this.mIsSelected == other.mIsSelected;
         }
     }
@@ -109,22 +113,26 @@ public class TabStripSnapshotter {
      * @param modelList The model to observe.
      * @param recyclerView The recycler view that can be scrolled.
      */
-    public TabStripSnapshotter(@NonNull Callback<Object> onModelTokenChange,
-            @NonNull ModelList modelList, @NonNull RecyclerView recyclerView) {
+    public TabStripSnapshotter(
+            @NonNull Callback<Object> onModelTokenChange,
+            @NonNull ModelList modelList,
+            @NonNull RecyclerView recyclerView) {
         mOnModelTokenChange = onModelTokenChange;
         mModelList = modelList;
         mRecyclerView = recyclerView;
-        mOnScrollListener = new OnScrollListener() {
-            @Override
-            public void onScrollStateChanged(RecyclerView recyclerView, int newState) {
-                if (newState == RecyclerView.SCROLL_STATE_IDLE) {
-                    doSnapshot();
-                }
-            }
-        };
+        mOnScrollListener =
+                new OnScrollListener() {
+                    @Override
+                    public void onScrollStateChanged(RecyclerView recyclerView, int newState) {
+                        if (newState == RecyclerView.SCROLL_STATE_IDLE) {
+                            doSnapshot();
+                        }
+                    }
+                };
         mRecyclerView.addOnScrollListener(mOnScrollListener);
-        mPropertyObserverFilter = new ModelListPropertyChangeFilter(
-                this::doSnapshot, modelList, SNAPSHOT_PROPERTY_KEY_SET);
+        mPropertyObserverFilter =
+                new ModelListPropertyChangeFilter(
+                        this::doSnapshot, modelList, SNAPSHOT_PROPERTY_KEY_SET);
     }
 
     private void doSnapshot() {

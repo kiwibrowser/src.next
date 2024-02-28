@@ -35,13 +35,19 @@ ExtensionSystemSharedFactory::GetForBrowserContext(
 
 // static
 ExtensionSystemSharedFactory* ExtensionSystemSharedFactory::GetInstance() {
-  return base::Singleton<ExtensionSystemSharedFactory>::get();
+  static base::NoDestructor<ExtensionSystemSharedFactory> instance;
+  return instance.get();
 }
 
 ExtensionSystemSharedFactory::ExtensionSystemSharedFactory()
     : ProfileKeyedServiceFactory(
           "ExtensionSystemShared",
-          ProfileSelections::BuildRedirectedInIncognito()) {
+          ProfileSelections::Builder()
+              .WithRegular(ProfileSelection::kRedirectedToOriginal)
+              // TODO(crbug.com/1418376): Check if this service is needed in
+              // Guest mode.
+              .WithGuest(ProfileSelection::kRedirectedToOriginal)
+              .Build()) {
   DependsOn(ExtensionPrefsFactory::GetInstance());
   DependsOn(ExtensionManagementFactory::GetInstance());
   // This depends on ExtensionService, which depends on ExtensionRegistry.
@@ -61,12 +67,13 @@ ExtensionSystemSharedFactory::ExtensionSystemSharedFactory()
   DependsOn(ExtensionHostRegistry::GetFactory());
 }
 
-ExtensionSystemSharedFactory::~ExtensionSystemSharedFactory() {
-}
+ExtensionSystemSharedFactory::~ExtensionSystemSharedFactory() = default;
 
-KeyedService* ExtensionSystemSharedFactory::BuildServiceInstanceFor(
+std::unique_ptr<KeyedService>
+ExtensionSystemSharedFactory::BuildServiceInstanceForBrowserContext(
     content::BrowserContext* context) const {
-  return new ExtensionSystemImpl::Shared(static_cast<Profile*>(context));
+  return std::make_unique<ExtensionSystemImpl::Shared>(
+      static_cast<Profile*>(context));
 }
 
 // ExtensionSystemFactory
@@ -80,7 +87,8 @@ ExtensionSystem* ExtensionSystemFactory::GetForBrowserContext(
 
 // static
 ExtensionSystemFactory* ExtensionSystemFactory::GetInstance() {
-  return base::Singleton<ExtensionSystemFactory>::get();
+  static base::NoDestructor<ExtensionSystemFactory> instance;
+  return instance.get();
 }
 
 ExtensionSystemFactory::ExtensionSystemFactory()
@@ -91,8 +99,7 @@ ExtensionSystemFactory::ExtensionSystemFactory()
   DependsOn(ExtensionSystemSharedFactory::GetInstance());
 }
 
-ExtensionSystemFactory::~ExtensionSystemFactory() {
-}
+ExtensionSystemFactory::~ExtensionSystemFactory() = default;
 
 KeyedService* ExtensionSystemFactory::BuildServiceInstanceFor(
     content::BrowserContext* context) const {
@@ -101,8 +108,13 @@ KeyedService* ExtensionSystemFactory::BuildServiceInstanceFor(
 
 content::BrowserContext* ExtensionSystemFactory::GetBrowserContextToUse(
     content::BrowserContext* context) const {
-  // Separate instance in incognito.
-  return context;
+  return ProfileSelections::Builder()
+      .WithRegular(ProfileSelection::kOwnInstance)
+      // TODO(crbug.com/1418376): Check if this service is needed in
+      // Guest mode.
+      .WithGuest(ProfileSelection::kOwnInstance)
+      .Build()
+      .ApplyProfileSelection(Profile::FromBrowserContext(context));
 }
 
 bool ExtensionSystemFactory::ServiceIsCreatedWithBrowserContext() const {

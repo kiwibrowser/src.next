@@ -67,11 +67,13 @@
     --cr-toolbar-center-basis: 680px;
     --cr-toolbar-field-max-width: var(--cr-toolbar-center-basis);
     --cr-toolbar-field-width: 100%;
+    --cr-toolbar-header-white-space: nowrap;
   }
 </style>
-<cr-toolbar page-name="$i18n{toolbarTitle}" search-prompt="$i18n{search}"
-    clear-label="$i18n{clearSearch}" menu-label="$i18n{mainMenu}" show-menu
-    autofocus narrow-threshold="1000">
+<cr-toolbar id="toolbar" page-name="$i18n{toolbarTitle}"
+    search-prompt="$i18n{search}" clear-label="$i18n{clearSearch}" autofocus
+    menu-label="$i18n{mainMenu}" narrow="{{narrow}}" narrow-threshold="1000"
+    show-menu="[[narrow]]">
   <div class="more-actions">
     <span id="devModeLabel">$i18n{toolbarDevMode}</span>
     <cr-tooltip-icon hidden="[[!shouldDisableDevMode_(
@@ -95,18 +97,18 @@
 <div id="devDrawer" expanded$="[[expanded_]]">
   <div id="buttonStrip">
     <cr-button hidden$="[[!canLoadUnpacked]]" id="loadUnpacked"
-        on-click="onLoadUnpackedTap_">
+        on-click="onLoadUnpackedClick_">
       $i18n{toolbarLoadUnpacked}
     </cr-button>
-    <cr-button id="packExtensions" on-click="onPackTap_">
+    <cr-button id="packExtensions" on-click="onPackClick_">
       $i18n{toolbarPack}
     </cr-button>
-    <cr-button id="updateNow" on-click="onUpdateNowTap_"
+    <cr-button id="updateNow" on-click="onUpdateNowClick_"
         title="$i18n{toolbarUpdateNowTooltip}">
       $i18n{toolbarUpdateNow}
     </cr-button>
 <if expr="chromeos_ash">
-    <cr-button id="kioskExtensions" on-click="onKioskTap_"
+    <cr-button id="kioskExtensions" on-click="onKioskClick_"
         hidden$="[[!kioskEnabled]]">
       $i18n{manageKioskApp}
     </cr-button>

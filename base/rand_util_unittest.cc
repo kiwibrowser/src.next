@@ -13,6 +13,7 @@
 #include <memory>
 #include <vector>
 
+#include "base/containers/span.h"
 #include "base/logging.h"
 #include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -45,6 +46,40 @@ TEST(RandUtilTest, RandDouble) {
   EXPECT_LE(0.0, number);
 }
 
+TEST(RandUtilTest, RandFloat) {
+  // Force 32-bit precision, making sure we're not in an 80-bit FPU register.
+  volatile float number = base::RandFloat();
+  EXPECT_GT(1.f, number);
+  EXPECT_LE(0.f, number);
+}
+
+TEST(RandUtilTest, RandTimeDelta) {
+  {
+    const auto delta =
+        base::RandTimeDelta(-base::Seconds(2), -base::Seconds(1));
+    EXPECT_GE(delta, -base::Seconds(2));
+    EXPECT_LT(delta, -base::Seconds(1));
+  }
+
+  {
+    const auto delta = base::RandTimeDelta(-base::Seconds(2), base::Seconds(2));
+    EXPECT_GE(delta, -base::Seconds(2));
+    EXPECT_LT(delta, base::Seconds(2));
+  }
+
+  {
+    const auto delta = base::RandTimeDelta(base::Seconds(1), base::Seconds(2));
+    EXPECT_GE(delta, base::Seconds(1));
+    EXPECT_LT(delta, base::Seconds(2));
+  }
+}
+
+TEST(RandUtilTest, RandTimeDeltaUpTo) {
+  const auto delta = base::RandTimeDeltaUpTo(base::Seconds(2));
+  EXPECT_FALSE(delta.is_negative());
+  EXPECT_LT(delta, base::Seconds(2));
+}
+
 TEST(RandUtilTest, BitsToOpenEndedUnitInterval) {
   // Force 64-bit precision, making sure we're not in an 80-bit FPU register.
   volatile double all_zeros = BitsToOpenEndedUnitInterval(0x0);
@@ -65,11 +100,31 @@ TEST(RandUtilTest, BitsToOpenEndedUnitInterval) {
   EXPECT_GT(1.0, all_ones);
 }
 
+TEST(RandUtilTest, BitsToOpenEndedUnitIntervalF) {
+  // Force 32-bit precision, making sure we're not in an 80-bit FPU register.
+  volatile float all_zeros = BitsToOpenEndedUnitIntervalF(0x0);
+  EXPECT_EQ(0.f, all_zeros);
+
+  // Force 32-bit precision, making sure we're not in an 80-bit FPU register.
+  volatile float smallest_nonzero = BitsToOpenEndedUnitIntervalF(0x1);
+  EXPECT_LT(0.f, smallest_nonzero);
+
+  for (uint64_t i = 0x2; i < 0x10; ++i) {
+    // Force 32-bit precision, making sure we're not in an 80-bit FPU register.
+    volatile float number = BitsToOpenEndedUnitIntervalF(i);
+    EXPECT_EQ(i * smallest_nonzero, number);
+  }
+
+  // Force 32-bit precision, making sure we're not in an 80-bit FPU register.
+  volatile float all_ones = BitsToOpenEndedUnitIntervalF(UINT64_MAX);
+  EXPECT_GT(1.f, all_ones);
+}
+
 TEST(RandUtilTest, RandBytes) {
   const size_t buffer_size = 50;
-  char buffer[buffer_size];
+  uint8_t buffer[buffer_size];
   memset(buffer, 0, buffer_size);
-  base::RandBytes(buffer, buffer_size);
+  base::RandBytes(buffer);
   std::sort(buffer, buffer + buffer_size);
   // Probability of occurrence of less than 25 unique bytes in 50 random bytes
   // is below 10^-25.
@@ -78,7 +133,24 @@ TEST(RandUtilTest, RandBytes) {
 
 // Verify that calling base::RandBytes with an empty buffer doesn't fail.
 TEST(RandUtilTest, RandBytes0) {
+  base::RandBytes(span<uint8_t>());
   base::RandBytes(nullptr, 0);
+}
+
+TEST(RandUtilTest, RandBytesAsVector) {
+  std::vector<uint8_t> random_vec = base::RandBytesAsVector(0);
+  EXPECT_TRUE(random_vec.empty());
+  random_vec = base::RandBytesAsVector(1);
+  EXPECT_EQ(1U, random_vec.size());
+  random_vec = base::RandBytesAsVector(145);
+  EXPECT_EQ(145U, random_vec.size());
+  char accumulator = 0;
+  for (auto i : random_vec) {
+    accumulator |= i;
+  }
+  // In theory this test can fail, but it won't before the universe dies of
+  // heat death.
+  EXPECT_NE(0, accumulator);
 }
 
 TEST(RandUtilTest, RandBytesAsString) {
@@ -186,7 +258,7 @@ TEST(RandUtilTest, DISABLED_RandBytesPerf) {
   std::unique_ptr<uint8_t[]> buffer(new uint8_t[kTestBufferSize]);
   const base::TimeTicks now = base::TimeTicks::Now();
   for (int i = 0; i < kTestIterations; ++i)
-    base::RandBytes(buffer.get(), kTestBufferSize);
+    base::RandBytes(make_span(buffer.get(), kTestBufferSize));
   const base::TimeTicks end = base::TimeTicks::Now();
 
   LOG(INFO) << "RandBytes(" << kTestBufferSize

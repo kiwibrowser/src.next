@@ -13,6 +13,7 @@
 #include "net/base/network_anonymization_key.h"
 #include "net/base/network_isolation_key.h"
 #include "net/base/privacy_mode.h"
+#include "net/base/request_priority.h"
 #include "net/dns/public/secure_dns_policy.h"
 #include "net/http/http_request_headers.h"
 #include "net/socket/socket_tag.h"
@@ -27,8 +28,15 @@ class UploadDataStream;
 
 struct NET_EXPORT HttpRequestInfo {
   HttpRequestInfo();
+
   HttpRequestInfo(const HttpRequestInfo& other);
+  HttpRequestInfo& operator=(const HttpRequestInfo& other);
+  HttpRequestInfo(HttpRequestInfo&& other);
+  HttpRequestInfo& operator=(HttpRequestInfo&& other);
+
   ~HttpRequestInfo();
+
+  bool IsConsistent() const;
 
   // The requested URL.
   GURL url;
@@ -42,10 +50,6 @@ struct NET_EXPORT HttpRequestInfo {
 
   // This key is used to isolate requests from different contexts in accessing
   // shared network resources.
-
-  // TODO @brgoldstein: populate this field from the
-  // NetworkContext::PreconnectSockets path. And the HTTPCacheLookupManager
-  // path.
   NetworkAnonymizationKey network_anonymization_key;
 
   // True if it is a subframe's document resource.
@@ -55,10 +59,16 @@ struct NET_EXPORT HttpRequestInfo {
   HttpRequestHeaders extra_headers;
 
   // Any upload data.
-  raw_ptr<UploadDataStream> upload_data_stream = nullptr;
+  raw_ptr<UploadDataStream, AcrossTasksDanglingUntriaged> upload_data_stream =
+      nullptr;
 
   // Any load flags (see load_flags.h).
   int load_flags = 0;
+
+  // Flag that indicates if the request should be loaded concurrently with
+  // other requests of the same priority when using a protocol that supports
+  // HTTP extensible priorities (RFC 9218). Currently only HTTP/3.
+  bool priority_incremental = kDefaultPriorityIncremental;
 
   // If enabled, then request must be sent over connection that cannot be
   // tracked by the server (e.g. without channel id).
@@ -89,6 +99,10 @@ struct NET_EXPORT HttpRequestInfo {
   /// behavior, and may still provide useful metrics.
   absl::optional<url::Origin> possibly_top_frame_origin;
 
+  // The frame origin associated with a request. This is used to isolate shared
+  // dictionaries between different frame origins.
+  absl::optional<url::Origin> frame_origin;
+
   // Idempotency of the request, which determines that if it is safe to enable
   // 0-RTT for the request. By default, 0-RTT is only enabled for safe
   // HTTP methods, i.e., GET, HEAD, OPTIONS, and TRACE. For other methods,
@@ -98,13 +112,14 @@ struct NET_EXPORT HttpRequestInfo {
   // that the request is idempotent.
   net::Idempotency idempotency = net::DEFAULT_IDEMPOTENCY;
 
-  // Index of the requested URL in Cache Transparency's pervasive payload list.
-  // Only used for logging purposes.
-  int pervasive_payloads_index_for_logging = -1;
+  // If not null, the value is used to evaluate whether the cache entry should
+  // be bypassed; if is null, that means the request site does not match the
+  // filter.
+  absl::optional<int64_t> fps_cache_filter;
 
-  // Checksum of the request body and selected headers, in upper-case
-  // hexadecimal. Only non-empty if the USE_SINGLE_KEYED_CACHE load flag is set.
-  std::string checksum;
+  // Use as ID to mark the cache entry when persisting. Should be a positive
+  // number once set.
+  absl::optional<int64_t> browser_run_id;
 };
 
 }  // namespace net

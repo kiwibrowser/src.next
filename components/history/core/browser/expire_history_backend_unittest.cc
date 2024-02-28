@@ -10,11 +10,11 @@
 #include <string>
 #include <utility>
 
-#include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/functional/bind.h"
 #include "base/ranges/algorithm.h"
 #include "base/run_loop.h"
 #include "base/scoped_observation.h"
@@ -31,7 +31,6 @@
 #include "components/history/core/browser/top_sites.h"
 #include "components/history/core/browser/top_sites_impl.h"
 #include "components/history/core/browser/top_sites_observer.h"
-#include "components/history/core/common/thumbnail_score.h"
 #include "components/history/core/test/history_client_fake_bookmarks.h"
 #include "components/history/core/test/test_history_database.h"
 #include "components/history/core/test/thumbnail.h"
@@ -47,19 +46,13 @@ namespace history {
 namespace {
 
 base::Time PretendNow() {
-  base::Time::Exploded exploded_reference_time;
-  exploded_reference_time.year = 2015;
-  exploded_reference_time.month = 1;
-  exploded_reference_time.day_of_month = 2;
-  exploded_reference_time.day_of_week = 5;
-  exploded_reference_time.hour = 11;
-  exploded_reference_time.minute = 0;
-  exploded_reference_time.second = 0;
-  exploded_reference_time.millisecond = 0;
-
+  static constexpr base::Time::Exploded kReferenceTime = {.year = 2015,
+                                                          .month = 1,
+                                                          .day_of_week = 5,
+                                                          .day_of_month = 2,
+                                                          .hour = 11};
   base::Time out_time;
-  EXPECT_TRUE(
-      base::Time::FromLocalExploded(exploded_reference_time, &out_time));
+  EXPECT_TRUE(base::Time::FromLocalExploded(kReferenceTime, &out_time));
   return out_time;
 }
 
@@ -200,7 +193,8 @@ class ExpireHistoryTest : public testing::Test, public HistoryBackendNotifier {
   void NotifyFaviconsChanged(const std::set<GURL>& page_urls,
                              const GURL& icon_url) override {}
   void NotifyURLVisited(const URLRow& url_row,
-                        const VisitRow& visit_row) override {}
+                        const VisitRow& visit_row,
+                        absl::optional<int64_t> local_navigation_id) override {}
   void NotifyURLsModified(const URLRows& rows,
                           bool is_from_expiration) override {
     urls_modified_notifications_.push_back(
@@ -209,7 +203,8 @@ class ExpireHistoryTest : public testing::Test, public HistoryBackendNotifier {
   void NotifyURLsDeleted(DeletionInfo deletion_info) override {
     urls_deleted_notifications_.push_back(std::move(deletion_info));
   }
-  void NotifyVisitUpdated(const VisitRow& visit) override {}
+  void NotifyVisitUpdated(const VisitRow& visit,
+                          VisitUpdateReason reason) override {}
   void NotifyVisitDeleted(const VisitRow& visit) override {}
 };
 
@@ -334,8 +329,8 @@ void ExpireHistoryTest::EnsureURLInfoGone(const URLRow& row, bool expired) {
   }
   for (const auto& pair : urls_modified_notifications_) {
     const auto& rows = pair.second;
-    EXPECT_TRUE(base::ranges::find_if(rows, history::URLRow::URLRowHasURL(
-                                                row.url())) == rows.end());
+    EXPECT_TRUE(
+        base::ranges::none_of(rows, history::URLRow::URLRowHasURL(row.url())));
   }
   EXPECT_TRUE(found_delete_notification);
 }
@@ -357,8 +352,7 @@ bool ExpireHistoryTest::ModifiedNotificationSent(
     const bool is_from_expiration = pair.first;
     const auto& rows = pair.second;
     if (is_from_expiration == should_be_from_expiration &&
-        base::ranges::find_if(rows, history::URLRow::URLRowHasURL(url)) !=
-            rows.end()) {
+        base::ranges::any_of(rows, history::URLRow::URLRowHasURL(url))) {
       return true;
     }
   }
@@ -648,6 +642,8 @@ TEST_F(ExpireHistoryTest, FlushRecentURLsUnstarred) {
                                 /*user_initiated*/ true);
   EXPECT_EQ(GetLastDeletionInfo()->time_range().begin(), visit_times[2]);
   EXPECT_EQ(GetLastDeletionInfo()->time_range().end(), base::Time());
+  EXPECT_EQ(DeletionInfo::Reason::kOther,
+            GetLastDeletionInfo()->deletion_reason());
 
   // Verify that the middle URL had its last visit deleted only.
   visits.clear();
@@ -832,6 +828,8 @@ TEST_F(ExpireHistoryTest, FlushURLsForTimes) {
   times.push_back(visit_times[2]);
   expirer_.ExpireHistoryForTimes(times);
   EXPECT_FALSE(GetLastDeletionInfo()->time_range().IsValid());
+  EXPECT_EQ(DeletionInfo::Reason::kOther,
+            GetLastDeletionInfo()->deletion_reason());
 
   // Verify that the middle URL had its last visit deleted only.
   visits.clear();
@@ -885,6 +883,8 @@ TEST_F(ExpireHistoryTest, FlushRecentURLsUnstarredRestricted) {
   EXPECT_EQ(GetLastDeletionInfo()->time_range().end(), base::Time());
   EXPECT_EQ(GetLastDeletionInfo()->deleted_rows().size(), 0U);
   EXPECT_EQ(GetLastDeletionInfo()->restrict_urls()->size(), 1U);
+  EXPECT_EQ(DeletionInfo::Reason::kOther,
+            GetLastDeletionInfo()->deletion_reason());
 
   // Verify that the middle URL had its last visit deleted only.
   visits.clear();
@@ -965,10 +965,14 @@ TEST_F(ExpireHistoryTest, ExpireHistoryBetweenPropagatesUserInitiated) {
   expirer_.ExpireHistoryBetween(restrict_urls, visit_times[3], base::Time(),
                                 /*user_initiated*/ true);
   EXPECT_FALSE(GetLastDeletionInfo()->is_from_expiration());
+  EXPECT_EQ(DeletionInfo::Reason::kOther,
+            GetLastDeletionInfo()->deletion_reason());
 
   expirer_.ExpireHistoryBetween(restrict_urls, visit_times[1], base::Time(),
                                 /*user_initiated*/ false);
   EXPECT_TRUE(GetLastDeletionInfo()->is_from_expiration());
+  EXPECT_EQ(DeletionInfo::Reason::kOther,
+            GetLastDeletionInfo()->deletion_reason());
 }
 
 TEST_F(ExpireHistoryTest, ExpireHistoryBeforeUnstarred) {
@@ -1063,6 +1067,8 @@ TEST_F(ExpireHistoryTest, ExpireSomeOldHistory) {
   EXPECT_FALSE(expirer_.ExpireSomeOldHistory(visit_times[0], reader, 2));
   EXPECT_EQ(1U, GetLastDeletionInfo()->deleted_rows().size());
   EXPECT_FALSE(GetLastDeletionInfo()->time_range().IsValid());
+  EXPECT_EQ(DeletionInfo::Reason::kOther,
+            GetLastDeletionInfo()->deletion_reason());
   ClearLastNotifications();
 
   // Deleting a time range with the max number of results should return true
@@ -1266,7 +1272,7 @@ TEST_F(ExpireHistoryTest, DeleteVisitAndRedirects) {
 
   // Expiring visit_row2 should also expire visit_row1 which is its redirect
   // parent.
-  expirer_.ExpireVisits({visit_row2});
+  expirer_.ExpireVisits({visit_row2}, DeletionInfo::Reason::kOther);
 
   VisitRow v;
   EXPECT_FALSE(main_db_->GetRowForVisit(visit_row1.visit_id, &v));
@@ -1311,7 +1317,7 @@ TEST_F(ExpireHistoryTest, DeleteVisitAndRedirectsWithLoop) {
 
   // Expiring visit_row2 should also expire visit_row1 which is its redirect
   // parent, without infinite looping.
-  expirer_.ExpireVisits({visit_row2});
+  expirer_.ExpireVisits({visit_row2}, DeletionInfo::Reason::kOther);
 
   VisitRow v;
   EXPECT_FALSE(main_db_->GetRowForVisit(visit_row1.visit_id, &v));
@@ -1355,7 +1361,7 @@ TEST_F(ExpireHistoryTest, DeleteVisitButNotActualReferers) {
 
   // Expiring visit_row2 should not expire visit_row1 which is its referer
   // parent.
-  expirer_.ExpireVisits({visit_row2});
+  expirer_.ExpireVisits({visit_row2}, DeletionInfo::Reason::kOther);
 
   VisitRow v;
   EXPECT_TRUE(main_db_->GetRowForVisit(visit_row1.visit_id, &v));

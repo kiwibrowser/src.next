@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,8 @@
 namespace blink {
 
 class StyleRuleProperty;
+class CSSStyleDeclaration;
+class StyleRuleCSSStyleDeclaration;
 
 class CSSPropertyRule final : public CSSRule {
   DEFINE_WRAPPERTYPEINFO();
@@ -23,11 +25,16 @@ class CSSPropertyRule final : public CSSRule {
 
   String cssText() const override;
   void Reattach(StyleRuleBase*) override;
+  StyleRuleProperty* Property() const;
+  bool SetNameText(const ExecutionContext* execution_context,
+                   const String& name_text);
 
   String name() const;
   String syntax() const;
   bool inherits() const;
   String initialValue() const;
+  // Useful for inspector purposes.
+  CSSStyleDeclaration* Style() const;
 
   void Trace(Visitor*) const override;
 
@@ -35,6 +42,7 @@ class CSSPropertyRule final : public CSSRule {
   CSSRule::Type GetType() const override { return kPropertyRule; }
 
   Member<StyleRuleProperty> property_rule_;
+  mutable Member<StyleRuleCSSStyleDeclaration> properties_cssom_wrapper_;
 };
 
 template <>

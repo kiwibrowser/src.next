@@ -72,11 +72,15 @@ class CORE_EXPORT EventPath final : public GarbageCollected<EventPath> {
   }
   void EnsureWindowEventContext();
 
-  bool IsEmpty() const { return node_event_contexts_.IsEmpty(); }
+  bool IsEmpty() const { return node_event_contexts_.empty(); }
   wtf_size_t size() const { return node_event_contexts_.size(); }
 
   void AdjustForRelatedTarget(Node&, EventTarget* related_target);
   void AdjustForTouchEvent(const TouchEvent&);
+  // AdjustForDisabledFormControl will shrink this event path if there is a
+  // disabled form control in it so that the disabled form control and its
+  // parents are not included.
+  void AdjustForDisabledFormControl();
 
   bool DisabledFormControlExistsInPath() const;
   bool HasEventListenersInPath(const AtomicString& event_type) const;

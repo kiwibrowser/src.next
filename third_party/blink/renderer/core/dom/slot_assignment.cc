@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -331,11 +331,23 @@ void SlotAssignment::RecalcAssignment() {
     }
   }
 
+  if (RuntimeEnabledFeatures::CSSPseudoDirEnabled()) {
+    // TODO(https://crbug.com/576815): Once incorrect use of
+    // FlatTreeTraversal is fixed, this can probably move into
+    // DidRecalcAssignedNodes above.
+    for (HTMLSlotElement* slot : Slots()) {
+      if (slot->HasDirectionAuto()) {
+        slot->AdjustDirectionAutoAfterRecalcAssignedNodes();
+      }
+    }
+  }
+
   // Update an dir=auto flag from a host of slots to its all descendants.
   // We should call below functions outside FlatTreeTraversalForbiddenScope
   // because we can go a tree walk to either their ancestors or descendants
   // if needed.
   if (owner_->NeedsDirAutoAttributeUpdate()) {
+    CHECK(!RuntimeEnabledFeatures::CSSPseudoDirEnabled());
     owner_->SetNeedsDirAutoAttributeUpdate(false);
     if (auto* element = DynamicTo<HTMLElement>(owner_->host())) {
       element->UpdateDescendantHasDirAutoAttribute(
@@ -379,7 +391,7 @@ void SlotAssignment::CollectSlots() {
   DCHECK(needs_collect_slots_);
   slots_.clear();
 
-  slots_.ReserveCapacity(slot_count_);
+  slots_.reserve(slot_count_);
   for (HTMLSlotElement& slot :
        Traversal<HTMLSlotElement>::DescendantsOf(*owner_)) {
     slots_.push_back(&slot);

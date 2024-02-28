@@ -27,6 +27,7 @@
 
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/css/css_value.h"
 #include "third_party/blink/renderer/core/css/style_recalc_change.h"
 #include "third_party/blink/renderer/core/dom/node.h"
 #include "third_party/blink/renderer/core/dom/static_node_list.h"
@@ -60,8 +61,9 @@ enum class DynamicRestyleFlags {
   kAffectedByLastChildRules = 1 << 11,
   kChildrenOrSiblingsAffectedByFocusWithin = 1 << 12,
   kChildrenOrSiblingsAffectedByFocusVisible = 1 << 13,
+  kChildrenOrSiblingsAffectedByActiveViewTransition = 1 << 14,
 
-  kNumberOfDynamicRestyleFlags = 14,
+  kNumberOfDynamicRestyleFlags = 15,
 
   kChildrenAffectedByStructuralRules =
       kChildrenAffectedByFirstChildRules | kChildrenAffectedByLastChildRules |
@@ -82,31 +84,44 @@ enum SubtreeModificationAction {
 const int kInitialNodeVectorSize = 11;
 using NodeVector = HeapVector<Member<Node>, kInitialNodeVectorSize>;
 
-// Note: while ContainerNode itself isn't web-exposed, a number of methods it
-// implements (such as firstChild, lastChild) use web-style naming to shadow
-// the corresponding methods on Node. This is a performance optimization, as it
-// avoids a virtual dispatch if the type is statically known to be
-// ContainerNode.
+// ContainerNode itself isn't web-exposed exactly, but it maps closely to the
+// ParentNode mixin interface. A number of methods it implements (such as
+// firstChild, lastChild) use web-style naming to shadow the corresponding
+// methods on Node. This is a performance optimization, as it avoids a virtual
+// dispatch if the type is statically known to be ContainerNode.
 class CORE_EXPORT ContainerNode : public Node {
  public:
   ~ContainerNode() override;
 
-  Node* firstChild() const { return first_child_; }
-  Node* lastChild() const { return last_child_; }
-  bool hasChildren() const { return first_child_; }
-  bool HasChildren() const { return first_child_; }
+  // ParentNode web-exposed:
+  // Note that some of the ParentNode interface is implemented in Node.
+  HTMLCollection* children();
+  Element* firstElementChild();
+  Element* lastElementChild();
+  unsigned childElementCount();
+  Element* querySelector(const AtomicString& selectors, ExceptionState&);
+  StaticElementList* querySelectorAll(const AtomicString& selectors,
+                                      ExceptionState&);
+
+  Node* firstChild() const { return first_child_.Get(); }
+  Node* lastChild() const { return last_child_.Get(); }
+  bool hasChildren() const { return static_cast<bool>(first_child_); }
+  bool HasChildren() const { return static_cast<bool>(first_child_); }
 
   bool HasOneChild() const {
-    return first_child_ && !first_child_->nextSibling();
+    return first_child_ && !first_child_->HasNextSibling();
   }
+
+  bool HasChildCount(unsigned) const;
+  unsigned CountChildren() const;
+
   bool HasOneTextChild() const {
     return HasOneChild() && first_child_->IsTextNode();
   }
-  bool HasChildCount(unsigned) const;
 
-  HTMLCollection* Children();
-
-  unsigned CountChildren() const;
+  // Returns true if all children are text nodes and at least one of them is not
+  // empty. Ignores comments.
+  bool HasOnlyText() const;
 
   Element* QuerySelector(const AtomicString& selectors, ExceptionState&);
   Element* QuerySelector(const AtomicString& selectors);
@@ -136,9 +151,21 @@ class CORE_EXPORT ContainerNode : public Node {
   RadioNodeList* GetRadioNodeList(const AtomicString&,
                                   bool only_match_img_elements = false);
 
+  // Returns the contents of the first descendant element, if any, that contains
+  // only text, a part of which is the given substring.
+  String FindTextInElementWith(const AtomicString& substring) const;
+
   // These methods are only used during parsing.
   // They don't send DOM mutation events or accept DocumentFragments.
   void ParserAppendChild(Node*);
+
+  // Called when the parser adds a child to a DocumentFragment as the result
+  // of parsing inner/outer html.
+  void ParserAppendChildInDocumentFragment(Node* new_child);
+  // Called when the parser has finished building a DocumentFragment. This is
+  // not called if the parser fails parsing (if parsing fails, the
+  // DocumentFragment is orphaned and will eventually be gc'd).
+  void ParserFinishedBuildingDocumentFragment();
   void ParserRemoveChild(Node&);
   void ParserInsertBefore(Node* new_child, Node& ref_child);
   void ParserTakeAllChildrenFrom(ContainerNode&);
@@ -146,17 +173,13 @@ class CORE_EXPORT ContainerNode : public Node {
   void RemoveChildren(
       SubtreeModificationAction = kDispatchSubtreeModifiedEvent);
 
-  void CloneChildNodesFrom(const ContainerNode&, CloneChildrenFlag);
+  void CloneChildNodesFrom(const ContainerNode&, NodeCloningData&);
 
+  using Node::DetachLayoutTree;
   void AttachLayoutTree(AttachContext&) override;
-  void DetachLayoutTree(bool performing_reattach = false) override;
+  void DetachLayoutTree(bool performing_reattach) override;
   PhysicalRect BoundingBox() const final;
-  void SetFocused(bool, mojom::blink::FocusType) override;
-  void SetHasFocusWithinUpToAncestor(bool, Node* ancestor);
-  void FocusStateChanged();
-  void FocusVisibleStateChanged();
-  void FocusWithinStateChanged();
-  void SetDragged(bool) override;
+
   void RemovedFrom(ContainerNode& insertion_point) override;
 
   bool ChildrenOrSiblingsAffectedByFocus() const {
@@ -199,6 +222,14 @@ class CORE_EXPORT ContainerNode : public Node {
   }
   void SetChildrenOrSiblingsAffectedByActive() {
     SetRestyleFlag(DynamicRestyleFlags::kChildrenOrSiblingsAffectedByActive);
+  }
+  bool ChildrenOrSiblingsAffectedByActiveViewTransition() const {
+    return HasRestyleFlag(
+        DynamicRestyleFlags::kChildrenOrSiblingsAffectedByActiveViewTransition);
+  }
+  void SetChildrenOrSiblingsAffectedByActiveViewTransition() {
+    SetRestyleFlag(
+        DynamicRestyleFlags::kChildrenOrSiblingsAffectedByActiveViewTransition);
   }
 
   bool ChildrenOrSiblingsAffectedByDrag() const {
@@ -290,8 +321,6 @@ class CORE_EXPORT ContainerNode : public Node {
                                    Node* node_after_change);
   void RecalcDescendantStyles(const StyleRecalcChange,
                               const StyleRecalcContext&);
-  void RecalcSubsequentSiblingStyles(const StyleRecalcChange,
-                                     const StyleRecalcContext&);
   void RebuildChildrenLayoutTrees(WhitespaceAttacher&);
   void RebuildLayoutTreeForChild(Node* child, WhitespaceAttacher&);
 
@@ -305,26 +334,40 @@ class CORE_EXPORT ContainerNode : public Node {
     kElementRemoved,
     kNonElementRemoved,
     kAllChildrenRemoved,
-    kTextChanged
+    kTextChanged,
+    // When the parser builds nodes (because of inner/outer-html or
+    // parseFromString) a single ChildrenChange event is sent at the end.
+    kFinishedBuildingDocumentFragmentTree,
   };
   enum class ChildrenChangeSource : uint8_t { kAPI, kParser };
+  enum class ChildrenChangeAffectsElements : uint8_t { kNo, kYes };
   struct ChildrenChange {
     STACK_ALLOCATED();
 
    public:
+    static ChildrenChange ForFinishingBuildingDocumentFragmentTree() {
+      return ChildrenChange{
+          .type = ChildrenChangeType::kFinishedBuildingDocumentFragmentTree,
+          .by_parser = ChildrenChangeSource::kParser,
+          .affects_elements = ChildrenChangeAffectsElements::kYes,
+      };
+    }
     static ChildrenChange ForInsertion(Node& node,
                                        Node* unchanged_previous,
                                        Node* unchanged_next,
                                        ChildrenChangeSource by_parser) {
-      ChildrenChange change = {node.IsElementNode()
-                                   ? ChildrenChangeType::kElementInserted
-                                   : ChildrenChangeType::kNonElementInserted,
-                               by_parser,
-                               &node,
-                               unchanged_previous,
-                               unchanged_next,
-                               {},
-                               String()};
+      ChildrenChange change = {
+          .type = node.IsElementNode()
+                      ? ChildrenChangeType::kElementInserted
+                      : ChildrenChangeType::kNonElementInserted,
+          .by_parser = by_parser,
+          .affects_elements = node.IsElementNode()
+                                  ? ChildrenChangeAffectsElements::kYes
+                                  : ChildrenChangeAffectsElements::kNo,
+          .sibling_changed = &node,
+          .sibling_before_change = unchanged_previous,
+          .sibling_after_change = unchanged_next,
+      };
       return change;
     }
 
@@ -332,21 +375,24 @@ class CORE_EXPORT ContainerNode : public Node {
                                      Node* previous_sibling,
                                      Node* next_sibling,
                                      ChildrenChangeSource by_parser) {
-      ChildrenChange change = {node.IsElementNode()
-                                   ? ChildrenChangeType::kElementRemoved
-                                   : ChildrenChangeType::kNonElementRemoved,
-                               by_parser,
-                               &node,
-                               previous_sibling,
-                               next_sibling,
-                               {},
-                               String()};
+      ChildrenChange change = {
+          .type = node.IsElementNode() ? ChildrenChangeType::kElementRemoved
+                                       : ChildrenChangeType::kNonElementRemoved,
+          .by_parser = by_parser,
+          .affects_elements = node.IsElementNode()
+                                  ? ChildrenChangeAffectsElements::kYes
+                                  : ChildrenChangeAffectsElements::kNo,
+          .sibling_changed = &node,
+          .sibling_before_change = previous_sibling,
+          .sibling_after_change = next_sibling,
+      };
       return change;
     }
 
     bool IsChildInsertion() const {
       return type == ChildrenChangeType::kElementInserted ||
-             type == ChildrenChangeType::kNonElementInserted;
+             type == ChildrenChangeType::kNonElementInserted ||
+             type == ChildrenChangeType::kFinishedBuildingDocumentFragmentTree;
     }
     bool IsChildRemoval() const {
       return type == ChildrenChangeType::kElementRemoved ||
@@ -354,31 +400,35 @@ class CORE_EXPORT ContainerNode : public Node {
     }
     bool IsChildElementChange() const {
       return type == ChildrenChangeType::kElementInserted ||
-             type == ChildrenChangeType::kElementRemoved;
+             type == ChildrenChangeType::kElementRemoved ||
+             type == ChildrenChangeType::kFinishedBuildingDocumentFragmentTree;
     }
 
     bool ByParser() const { return by_parser == ChildrenChangeSource::kParser; }
 
-    ChildrenChangeType type;
-    ChildrenChangeSource by_parser;
-    Node* sibling_changed = nullptr;
+    const ChildrenChangeType type;
+    const ChildrenChangeSource by_parser;
+    const ChildrenChangeAffectsElements affects_elements;
+    Node* const sibling_changed = nullptr;
     // |siblingBeforeChange| is
     //  - siblingChanged.previousSibling before node removal
     //  - siblingChanged.previousSibling after single node insertion
     //  - previousSibling of the first inserted node after multiple node
     //    insertion
-    Node* sibling_before_change = nullptr;
+    //  - null for kFinishedBuildingDocumentFragmentTree.
+    Node* const sibling_before_change = nullptr;
     // |siblingAfterChange| is
     //  - siblingChanged.nextSibling before node removal
     //  - siblingChanged.nextSibling after single node insertion
     //  - nextSibling of the last inserted node after multiple node insertion.
-    Node* sibling_after_change = nullptr;
+    //  - null for kFinishedBuildingDocumentFragmentTree.
+    Node* const sibling_after_change = nullptr;
     // List of removed nodes for ChildrenChangeType::kAllChildrenRemoved.
     // Only populated if ChildrenChangedAllChildrenRemovedNeedsList() returns
     // true.
-    HeapVector<Member<Node>> removed_nodes;
-    // |old_text| is mostly empty, only used for text node changes.
-    const String& old_text;
+    const HeapVector<Member<Node>> removed_nodes;
+    // Non-null if and only if |type| is ChildrenChangeType::kTextChanged.
+    const String* const old_text = nullptr;
   };
 
   // Notifies the node that it's list of children have changed (either by adding
@@ -399,10 +449,27 @@ class CORE_EXPORT ContainerNode : public Node {
   // a descendant LayoutBox.
   virtual LayoutBox* GetLayoutBoxForScrolling() const;
 
+  Element* GetAutofocusDelegate() const;
+
+  HTMLCollection* PopoverInvokers() {
+    DCHECK(IsTreeScope());
+    return EnsureCachedCollection<HTMLCollection>(kPopoverInvokers);
+  }
+
+  void ReplaceChildren(const VectorOf<Node>& nodes,
+                       ExceptionState& exception_state);
+
+  // DocumentOrElementEventHandlers:
+  // These event listeners are only actually web-exposed on interfaces that
+  // include the DocumentOrElementEventHandlers mixin in their idl.
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(copy, kCopy)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(cut, kCut)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(paste, kPaste)
+
   void Trace(Visitor*) const override;
 
  protected:
-  ContainerNode(TreeScope*, ConstructionType = kCreateContainer);
+  ContainerNode(TreeScope*, ConstructionType);
 
   // |attr_name| and |owner_element| are only used for element attribute
   // modifications. |ChildrenChange| is either nullptr or points to a
@@ -436,6 +503,12 @@ class CORE_EXPORT ContainerNode : public Node {
       delete;  // This will catch anyone doing an unnecessary check.
   bool IsTextNode() const =
       delete;  // This will catch anyone doing an unnecessary check.
+
+  // Called from ParserFinishedBuildingDocumentFragment() to notify `node` that
+  // it was inserted.
+  void NotifyNodeAtEndOfBuildingFragmentTree(Node& node,
+                                             const ChildrenChange& change,
+                                             bool may_contain_shadow_roots);
 
   NodeListsNodeData& EnsureNodeLists();
   void RemoveBetween(Node* previous_child, Node* next_child, Node& old_child);
@@ -487,6 +560,9 @@ class CORE_EXPORT ContainerNode : public Node {
                                                      ExceptionState&) const;
   inline bool IsChildTypeAllowed(const Node& child) const;
 
+  void CheckSoftNavigationHeuristicsTracking(const Document& document,
+                                             Node& inserted_node);
+
   Member<Node> first_child_;
   Member<Node> last_child_;
 };
@@ -497,7 +573,7 @@ struct DowncastTraits<ContainerNode> {
 };
 
 inline bool ContainerNode::HasChildCount(unsigned count) const {
-  Node* child = first_child_;
+  Node* child = first_child_.Get();
   while (count && child) {
     child = child->nextSibling();
     --count;
@@ -517,21 +593,21 @@ inline bool ContainerNode::NeedsAdjacentStyleRecalc() const {
 }
 
 inline unsigned Node::CountChildren() const {
-  auto* this_node = DynamicTo<ContainerNode>(this);
+  auto* this_node = DynamicTo<ContainerNode>(*this);
   if (!this_node)
     return 0;
   return this_node->CountChildren();
 }
 
 inline Node* Node::firstChild() const {
-  auto* this_node = DynamicTo<ContainerNode>(this);
+  auto* this_node = DynamicTo<ContainerNode>(*this);
   if (!this_node)
     return nullptr;
   return this_node->firstChild();
 }
 
 inline Node* Node::lastChild() const {
-  auto* this_node = DynamicTo<ContainerNode>(this);
+  auto* this_node = DynamicTo<ContainerNode>(*this);
   if (!this_node)
     return nullptr;
   return this_node->lastChild();

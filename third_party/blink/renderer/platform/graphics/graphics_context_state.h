@@ -34,11 +34,11 @@
 #include "base/check_op.h"
 #include "base/memory/ptr_util.h"
 #include "cc/paint/paint_flags.h"
-#include "third_party/blink/renderer/platform/graphics/draw_looper_builder.h"
+#include "third_party/blink/renderer/platform/graphics/color.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_types.h"
 #include "third_party/blink/renderer/platform/graphics/stroke_data.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
-#include "third_party/skia/include/core/SkColorFilter.h"
+#include "third_party/skia/include/core/SkDrawLooper.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 
 namespace blink {
@@ -106,17 +106,16 @@ class PLATFORM_EXPORT GraphicsContextState final {
     text_drawing_mode_ = mode;
   }
 
-  SkColorFilter* GetColorFilter() const {
-    DCHECK_EQ(fill_flags_.getColorFilter(), stroke_flags_.getColorFilter());
-    return fill_flags_.getColorFilter().get();
-  }
-  void SetColorFilter(sk_sp<SkColorFilter>);
-
   // Image interpolation control.
   InterpolationQuality GetInterpolationQuality() const {
     return interpolation_quality_;
   }
   void SetInterpolationQuality(InterpolationQuality);
+
+  DynamicRangeLimit GetDynamicRangeLimit() const {
+    return dynamic_range_limit_;
+  }
+  void SetDynamicRangeLimit(DynamicRangeLimit limit);
 
   bool ShouldAntialias() const { return should_antialias_; }
   void SetShouldAntialias(bool);
@@ -132,13 +131,15 @@ class PLATFORM_EXPORT GraphicsContextState final {
 
   StrokeData stroke_data_;
 
-  TextDrawingModeFlags text_drawing_mode_;
+  TextDrawingModeFlags text_drawing_mode_ = kTextModeFill;
 
-  InterpolationQuality interpolation_quality_;
+  InterpolationQuality interpolation_quality_ = kInterpolationDefault;
+  DynamicRangeLimit dynamic_range_limit_{
+      cc::PaintFlags::DynamicRangeLimit::kHigh};
 
-  uint16_t save_count_;
+  uint16_t save_count_ = 0;
 
-  bool should_antialias_ : 1;
+  bool should_antialias_ : 1 = true;
 };
 
 }  // namespace blink

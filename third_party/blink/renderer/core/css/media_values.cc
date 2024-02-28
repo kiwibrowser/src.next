@@ -1,9 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/css/media_values.h"
 
+#include "third_party/blink/public/common/css/scripting.h"
 #include "third_party/blink/public/platform/web_theme_engine.h"
 #include "third_party/blink/renderer/core/css/css_resolution_units.h"
 #include "third_party/blink/renderer/core/css/css_to_length_conversion_data.h"
@@ -16,11 +17,16 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
+#include "third_party/blink/renderer/core/layout/adjust_for_absolute_zoom.h"
+#include "third_party/blink/renderer/core/layout/layout_view.h"
+#include "third_party/blink/renderer/core/media_type_names.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/preferences/preference_overrides.h"
 #include "third_party/blink/renderer/platform/graphics/color_space_gamut.h"
 #include "third_party/blink/renderer/platform/network/network_state_notifier.h"
 #include "third_party/blink/renderer/platform/theme/web_theme_engine_helper.h"
@@ -71,20 +77,23 @@ mojom::blink::PreferredContrast CSSValueIDToPreferredContrast(CSSValueID id) {
 }
 
 absl::optional<double> MediaValues::InlineSize() const {
-  if (blink::IsHorizontalWritingMode(GetWritingMode()))
+  if (blink::IsHorizontalWritingMode(GetWritingMode())) {
     return Width();
+  }
   return Height();
 }
 
 absl::optional<double> MediaValues::BlockSize() const {
-  if (blink::IsHorizontalWritingMode(GetWritingMode()))
+  if (blink::IsHorizontalWritingMode(GetWritingMode())) {
     return Height();
+  }
   return Width();
 }
 
 MediaValues* MediaValues::CreateDynamicIfFrameExists(LocalFrame* frame) {
-  if (frame)
+  if (frame) {
     return MediaValuesDynamic::Create(frame);
+  }
   return MakeGarbageCollected<MediaValuesCached>();
 }
 
@@ -192,8 +201,9 @@ int MediaValues::CalculateColorBitsPerComponent(LocalFrame* frame) {
   DCHECK(frame->GetPage());
   const display::ScreenInfo& screen_info =
       frame->GetPage()->GetChromeClient().GetScreenInfo(*frame);
-  if (screen_info.is_monochrome)
+  if (screen_info.is_monochrome) {
     return 0;
+  }
   return screen_info.depth_per_component;
 }
 
@@ -202,55 +212,70 @@ int MediaValues::CalculateMonochromeBitsPerComponent(LocalFrame* frame) {
   DCHECK(frame->GetPage());
   const display::ScreenInfo& screen_info =
       frame->GetPage()->GetChromeClient().GetScreenInfo(*frame);
-  if (!screen_info.is_monochrome)
+  if (!screen_info.is_monochrome) {
     return 0;
+  }
   return screen_info.depth_per_component;
 }
 
-float MediaValues::CalculateEmSize(LocalFrame* frame) {
+bool MediaValues::CalculateInvertedColors(LocalFrame* frame) {
   DCHECK(frame);
-  DCHECK(frame->GetDocument());
-  const ComputedStyle* style = frame->GetDocument()->GetComputedStyle();
-  DCHECK(style);
-  // CSSToLengthConversionData::FontSizes returns pre-zoomed font sizes. Need to
-  // scale back to CSS pixels.
-  return CSSToLengthConversionData::FontSizes(style, style).Unzoomed().Em();
+  DCHECK(frame->GetSettings());
+  return frame->GetSettings()->GetInvertedColors();
+}
+
+float MediaValues::CalculateEmSize(LocalFrame* frame) {
+  CHECK(frame);
+  CHECK(frame->ContentLayoutObject());
+  const ComputedStyle& style = frame->ContentLayoutObject()->StyleRef();
+  return CSSToLengthConversionData::FontSizes(style.GetFontSizeStyle(), &style)
+      .Em(/* zoom */ 1.0f);
 }
 
 float MediaValues::CalculateExSize(LocalFrame* frame) {
-  DCHECK(frame);
-  DCHECK(frame->GetDocument());
-  const ComputedStyle* style = frame->GetDocument()->GetComputedStyle();
-  DCHECK(style);
-  // CSSToLengthConversionData::FontSizes returns pre-zoomed font sizes. Need to
-  // scale back to CSS pixels.
-  return CSSToLengthConversionData::FontSizes(style, style).Unzoomed().Ex();
+  CHECK(frame);
+  CHECK(frame->ContentLayoutObject());
+  const ComputedStyle& style = frame->ContentLayoutObject()->StyleRef();
+  return CSSToLengthConversionData::FontSizes(style.GetFontSizeStyle(), &style)
+      .Ex(/* zoom */ 1.0f);
 }
 
 float MediaValues::CalculateChSize(LocalFrame* frame) {
-  DCHECK(frame);
-  DCHECK(frame->GetDocument());
-  const ComputedStyle* style = frame->GetDocument()->GetComputedStyle();
-  DCHECK(style);
-  // CSSToLengthConversionData::FontSizes returns pre-zoomed font sizes. Need to
-  // scale back to CSS pixels.
-  return CSSToLengthConversionData::FontSizes(style, style).Unzoomed().Ch();
+  CHECK(frame);
+  CHECK(frame->ContentLayoutObject());
+  const ComputedStyle& style = frame->ContentLayoutObject()->StyleRef();
+  return CSSToLengthConversionData::FontSizes(style.GetFontSizeStyle(), &style)
+      .Ch(/* zoom */ 1.0f);
 }
 
 float MediaValues::CalculateIcSize(LocalFrame* frame) {
-  DCHECK(frame);
-  DCHECK(frame->GetDocument());
-  const ComputedStyle* style = frame->GetDocument()->GetComputedStyle();
-  DCHECK(style);
-  // CSSToLengthConversionData::FontSizes returns pre-zoomed font sizes. Need to
-  // scale back to CSS pixels.
-  return CSSToLengthConversionData::FontSizes(style, style).Unzoomed().Ic();
+  CHECK(frame);
+  CHECK(frame->ContentLayoutObject());
+  const ComputedStyle& style = frame->ContentLayoutObject()->StyleRef();
+  return CSSToLengthConversionData::FontSizes(style.GetFontSizeStyle(), &style)
+      .Ic(/* zoom */ 1.0f);
+}
+
+float MediaValues::CalculateCapSize(LocalFrame* frame) {
+  CHECK(frame);
+  CHECK(frame->ContentLayoutObject());
+  const ComputedStyle& style = frame->ContentLayoutObject()->StyleRef();
+  return CSSToLengthConversionData::FontSizes(style.GetFontSizeStyle(), &style)
+      .Cap(/* zoom */ 1.0f);
+}
+
+float MediaValues::CalculateLineHeight(LocalFrame* frame) {
+  CHECK(frame);
+  CHECK(frame->ContentLayoutObject());
+  const ComputedStyle& style = frame->ContentLayoutObject()->StyleRef();
+  return AdjustForAbsoluteZoom::AdjustFloat(style.ComputedLineHeight(), style);
 }
 
 const String MediaValues::CalculateMediaType(LocalFrame* frame) {
   DCHECK(frame);
-  if (!frame->View())
+  if (!frame->View()) {
     return g_empty_atom;
+  }
   return frame->View()->MediaType();
 }
 
@@ -259,24 +284,59 @@ mojom::blink::DisplayMode MediaValues::CalculateDisplayMode(LocalFrame* frame) {
 
   blink::mojom::DisplayMode mode =
       frame->GetPage()->GetSettings().GetDisplayModeOverride();
-  if (mode != mojom::blink::DisplayMode::kUndefined)
+  if (mode != mojom::blink::DisplayMode::kUndefined) {
     return mode;
+  }
 
   FrameWidget* widget = frame->GetWidgetForLocalRoot();
-  if (!widget)  // Is null in non-ordinary Pages.
+  if (!widget) {  // Is null in non-ordinary Pages.
     return mojom::blink::DisplayMode::kBrowser;
+  }
 
   return widget->DisplayMode();
 }
 
-bool MediaValues::CalculateThreeDEnabled(LocalFrame* frame) {
-  return frame->GetPage()->GetSettings().GetAcceleratedCompositingEnabled();
+ui::WindowShowState MediaValues::CalculateWindowShowState(LocalFrame* frame) {
+  DCHECK(frame);
+
+  ui::WindowShowState show_state =
+      frame->GetPage()->GetSettings().GetWindowShowState();
+  // Initial state set in /third_party/blink/renderer/core/frame/settings.json5
+  // should match with this.
+  if (show_state != ui::WindowShowState::SHOW_STATE_DEFAULT) {
+    return show_state;
+  }
+
+  FrameWidget* widget = frame->GetWidgetForLocalRoot();
+  if (!widget) {  // Is null in non-ordinary Pages.
+    return ui::SHOW_STATE_DEFAULT;
+  }
+
+  return widget->WindowShowState();
 }
 
-bool MediaValues::CalculateInImmersiveMode(LocalFrame* frame) {
+bool MediaValues::CalculateResizable(LocalFrame* frame) {
   DCHECK(frame);
-  DCHECK(frame->GetSettings());
-  return frame->GetSettings()->GetImmersiveModeEnabled();
+
+  bool resizable = frame->GetPage()->GetSettings().GetResizable();
+  // Initial state set in /third_party/blink/renderer/core/frame/settings.json5
+  // should match with this.
+  if (!resizable) {
+    // Only non-default value should be returned "early" from the settings
+    // without checking from widget. Settings are only used for testing.
+    return resizable;
+  }
+
+  FrameWidget* widget = frame->GetWidgetForLocalRoot();
+  if (!widget) {
+    return true;
+  }
+
+  return widget->Resizable();
+}
+
+bool MediaValues::CalculateThreeDEnabled(LocalFrame* frame) {
+  return frame->GetPage()->GetSettings().GetAcceleratedCompositingEnabled();
 }
 
 mojom::blink::PointerType MediaValues::CalculatePrimaryPointerType(
@@ -297,6 +357,13 @@ mojom::blink::HoverType MediaValues::CalculatePrimaryHoverType(
   DCHECK(frame);
   DCHECK(frame->GetSettings());
   return frame->GetSettings()->GetPrimaryHoverType();
+}
+
+mojom::blink::OutputDeviceUpdateAbilityType
+MediaValues::CalculateOutputDeviceUpdateAbilityType(LocalFrame* frame) {
+  DCHECK(frame);
+  DCHECK(frame->GetSettings());
+  return frame->GetSettings()->GetOutputDeviceUpdateAbilityType();
 }
 
 int MediaValues::CalculateAvailableHoverTypes(LocalFrame* frame) {
@@ -326,7 +393,16 @@ mojom::blink::PreferredColorScheme MediaValues::CalculatePreferredColorScheme(
       frame->GetPage()->GetMediaFeatureOverrides();
   absl::optional<mojom::blink::PreferredColorScheme> override_value =
       overrides ? overrides->GetPreferredColorScheme() : absl::nullopt;
-  return override_value.value_or(
+  if (override_value.has_value()) {
+    return override_value.value();
+  }
+
+  const PreferenceOverrides* preference_overrides =
+      frame->GetPage()->GetPreferenceOverrides();
+  absl::optional<mojom::blink::PreferredColorScheme> preference_override_value =
+      preference_overrides ? preference_overrides->GetPreferredColorScheme()
+                           : absl::nullopt;
+  return preference_override_value.value_or(
       frame->GetDocument()->GetStyleEngine().GetPreferredColorScheme());
 }
 
@@ -339,7 +415,17 @@ mojom::blink::PreferredContrast MediaValues::CalculatePreferredContrast(
       frame->GetPage()->GetMediaFeatureOverrides();
   absl::optional<mojom::blink::PreferredContrast> override_value =
       overrides ? overrides->GetPreferredContrast() : absl::nullopt;
-  return override_value.value_or(frame->GetSettings()->GetPreferredContrast());
+  if (override_value.has_value()) {
+    return override_value.value();
+  }
+
+  const PreferenceOverrides* preference_overrides =
+      frame->GetPage()->GetPreferenceOverrides();
+  absl::optional<mojom::blink::PreferredContrast> preference_override_value =
+      preference_overrides ? preference_overrides->GetPreferredContrast()
+                           : absl::nullopt;
+  return preference_override_value.value_or(
+      frame->GetSettings()->GetPreferredContrast());
 }
 
 bool MediaValues::CalculatePrefersReducedMotion(LocalFrame* frame) {
@@ -349,7 +435,16 @@ bool MediaValues::CalculatePrefersReducedMotion(LocalFrame* frame) {
       frame->GetPage()->GetMediaFeatureOverrides();
   absl::optional<bool> override_value =
       overrides ? overrides->GetPrefersReducedMotion() : absl::nullopt;
-  return override_value.value_or(
+  if (override_value.has_value()) {
+    return override_value.value();
+  }
+
+  const PreferenceOverrides* preference_overrides =
+      frame->GetPage()->GetPreferenceOverrides();
+  absl::optional<bool> preference_override_value =
+      preference_overrides ? preference_overrides->GetPrefersReducedMotion()
+                           : absl::nullopt;
+  return preference_override_value.value_or(
       frame->GetSettings()->GetPrefersReducedMotion());
 }
 
@@ -360,7 +455,38 @@ bool MediaValues::CalculatePrefersReducedData(LocalFrame* frame) {
       frame->GetPage()->GetMediaFeatureOverrides();
   absl::optional<bool> override_value =
       overrides ? overrides->GetPrefersReducedData() : absl::nullopt;
-  return override_value.value_or(GetNetworkStateNotifier().SaveDataEnabled());
+  if (override_value.has_value()) {
+    return override_value.value();
+  }
+
+  const PreferenceOverrides* preference_overrides =
+      frame->GetPage()->GetPreferenceOverrides();
+  absl::optional<bool> preference_override_value =
+      preference_overrides ? preference_overrides->GetPrefersReducedData()
+                           : absl::nullopt;
+  return preference_override_value.value_or(
+      GetNetworkStateNotifier().SaveDataEnabled());
+}
+
+bool MediaValues::CalculatePrefersReducedTransparency(LocalFrame* frame) {
+  DCHECK(frame);
+  DCHECK(frame->GetSettings());
+  const MediaFeatureOverrides* overrides =
+      frame->GetPage()->GetMediaFeatureOverrides();
+  absl::optional<bool> override_value =
+      overrides ? overrides->GetPrefersReducedTransparency() : absl::nullopt;
+  if (override_value.has_value()) {
+    return override_value.value();
+  }
+
+  const PreferenceOverrides* preference_overrides =
+      frame->GetPage()->GetPreferenceOverrides();
+  absl::optional<bool> preference_override_value =
+      preference_overrides
+          ? preference_overrides->GetPrefersReducedTransparency()
+          : absl::nullopt;
+  return preference_override_value.value_or(
+      frame->GetSettings()->GetPrefersReducedTransparency());
 }
 
 ForcedColors MediaValues::CalculateForcedColors(LocalFrame* frame) {
@@ -381,8 +507,9 @@ NavigationControls MediaValues::CalculateNavigationControls(LocalFrame* frame) {
 }
 
 int MediaValues::CalculateHorizontalViewportSegments(LocalFrame* frame) {
-  if (!frame->GetWidgetForLocalRoot())
+  if (!frame->GetWidgetForLocalRoot()) {
     return 1;
+  }
 
   WebVector<gfx::Rect> window_segments =
       frame->GetWidgetForLocalRoot()->WindowSegments();
@@ -396,8 +523,9 @@ int MediaValues::CalculateHorizontalViewportSegments(LocalFrame* frame) {
 }
 
 int MediaValues::CalculateVerticalViewportSegments(LocalFrame* frame) {
-  if (!frame->GetWidgetForLocalRoot())
+  if (!frame->GetWidgetForLocalRoot()) {
     return 1;
+  }
 
   WebVector<gfx::Rect> window_segments =
       frame->GetWidgetForLocalRoot()->WindowSegments();
@@ -415,11 +543,23 @@ device::mojom::blink::DevicePostureType MediaValues::CalculateDevicePosture(
   return frame->GetDevicePosture();
 }
 
+Scripting MediaValues::CalculateScripting(LocalFrame* frame) {
+  DCHECK(frame);
+  DCHECK(frame->GetDocument());
+  if (!frame->GetDocument()->GetExecutionContext()->CanExecuteScripts(
+          kNotAboutToExecuteScript)) {
+    return Scripting::kNone;
+  }
+
+  return Scripting::kEnabled;
+}
+
 bool MediaValues::ComputeLengthImpl(double value,
                                     CSSPrimitiveValue::UnitType type,
                                     double& result) const {
-  if (!CSSPrimitiveValue::IsLength(type))
+  if (!CSSPrimitiveValue::IsLength(type)) {
     return false;
+  }
   result = ZoomedComputedPixels(value, type);
   return true;
 }

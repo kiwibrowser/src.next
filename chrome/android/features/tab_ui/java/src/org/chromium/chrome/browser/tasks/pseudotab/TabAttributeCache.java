@@ -12,9 +12,10 @@ import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.ContextUtils;
+import org.chromium.base.ResettersForTesting;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tab.state.CriticalPersistedTabData;
 import org.chromium.chrome.browser.tabmodel.TabModelFilter;
 import org.chromium.chrome.browser.tabmodel.TabModelObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
@@ -26,9 +27,7 @@ import org.chromium.content_public.browser.NavigationHandle;
 import org.chromium.content_public.browser.NavigationHistory;
 import org.chromium.url.GURL;
 
-/**
- * Cache for attributes of {@link PseudoTab} to be available before native is ready.
- */
+/** Cache for attributes of {@link PseudoTab} to be available before native is ready. */
 public class TabAttributeCache {
     private static final String PREFERENCES_NAME = "tab_attribute_cache";
     private static SharedPreferences sPref;
@@ -41,12 +40,14 @@ public class TabAttributeCache {
         String getLastSearchTerm(Tab tab);
     }
 
-    private static LastSearchTermProvider sLastSearchTermProviderForTests;
+    private static LastSearchTermProvider sLastSearchTermProviderForTesting;
 
     private static SharedPreferences getSharedPreferences() {
         if (sPref == null) {
-            sPref = ContextUtils.getApplicationContext().getSharedPreferences(
-                    PREFERENCES_NAME, Context.MODE_PRIVATE);
+            sPref =
+                    ContextUtils.getApplicationContext()
+                            .getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE);
+            ResettersForTesting.register(() -> sPref = null);
         }
         return sPref;
     }
@@ -61,82 +62,90 @@ public class TabAttributeCache {
         // TODO(hanxi): makes TabAttributeCache a singleton. The TabAttributeCache should be
         //  instantiated and exactly once before it is used.
         mTabModelSelector = tabModelSelector;
-        mTabModelSelectorTabObserver = new TabModelSelectorTabObserver(mTabModelSelector) {
-            @Override
-            public void onUrlUpdated(Tab tab) {
-                if (tab.isIncognito()) return;
-                cacheUrl(tab.getId(), tab.getUrl());
-            }
+        mTabModelSelectorTabObserver =
+                new TabModelSelectorTabObserver(mTabModelSelector) {
+                    @Override
+                    public void onUrlUpdated(Tab tab) {
+                        if (tab.isIncognito()) return;
+                        cacheUrl(tab.getId(), tab.getUrl());
+                    }
 
-            @Override
-            public void onTitleUpdated(Tab tab) {
-                if (tab.isIncognito()) return;
-                String title = tab.getTitle();
-                cacheTitle(tab.getId(), title);
-            }
+                    @Override
+                    public void onTitleUpdated(Tab tab) {
+                        if (tab.isIncognito()) return;
+                        String title = tab.getTitle();
+                        cacheTitle(tab.getId(), title);
+                    }
 
-            @Override
-            public void onRootIdChanged(Tab tab, int newRootId) {
-                if (tab.isIncognito()) return;
-                assert newRootId == CriticalPersistedTabData.from(tab).getRootId();
-                cacheRootId(tab.getId(), newRootId);
-            }
+                    @Override
+                    public void onRootIdChanged(Tab tab, int newRootId) {
+                        if (tab.isIncognito()) return;
+                        assert newRootId == tab.getRootId();
+                        cacheRootId(tab.getId(), newRootId);
+                    }
 
-            @Override
-            public void onTimestampChanged(Tab tab, long timestampMillis) {
-                if (tab.isIncognito()) return;
-                assert timestampMillis == CriticalPersistedTabData.from(tab).getTimestampMillis();
-                cacheTimestampMillis(tab.getId(), timestampMillis);
-            }
+                    @Override
+                    public void onTimestampChanged(Tab tab, long timestampMillis) {
+                        if (tab.isIncognito()) return;
+                        assert timestampMillis == tab.getTimestampMillis();
+                        cacheTimestampMillis(tab.getId(), timestampMillis);
+                    }
 
-            @Override
-            public void onDidFinishNavigation(Tab tab, NavigationHandle navigationHandle) {
-                if (tab.isIncognito()) return;
-                if (!navigationHandle.isInPrimaryMainFrame()) return;
-                if (tab.getWebContents() == null) return;
-                // TODO(crbug.com/1048255): skip cacheLastSearchTerm() according to
-                //  isValidSearchFormUrl() and PageTransition.GENERATED for optimization.
-                cacheLastSearchTerm(tab);
-            }
-        };
+                    @Override
+                    public void onDidFinishNavigationInPrimaryMainFrame(
+                            Tab tab, NavigationHandle navigationHandle) {
+                        if (tab.isIncognito()) return;
+                        if (tab.getWebContents() == null) return;
+                        // TODO(crbug.com/1048255): skip cacheLastSearchTerm() according to
+                        //  isValidSearchFormUrl() and PageTransition.GENERATED for optimization.
+                        cacheLastSearchTerm(tab);
+                    }
+                };
 
-        mTabModelObserver = new TabModelObserver() {
-            @Override
-            public void tabClosureCommitted(Tab tab) {
-                int id = tab.getId();
-                getSharedPreferences()
-                        .edit()
-                        .remove(getDeprecatedUrlKey(id))
-                        .remove(getUrlKey(id))
-                        .remove(getTitleKey(id))
-                        .remove(getRootIdKey(id))
-                        .remove(getTimestampMillisKey(id))
-                        .remove(getLastSearchTermKey(id))
-                        .apply();
-            }
-        };
+        mTabModelObserver =
+                new TabModelObserver() {
+                    @Override
+                    public void tabClosureCommitted(Tab tab) {
+                        int id = tab.getId();
+                        getSharedPreferences()
+                                .edit()
+                                .remove(getDeprecatedUrlKey(id))
+                                .remove(getUrlKey(id))
+                                .remove(getTitleKey(id))
+                                .remove(getRootIdKey(id))
+                                .remove(getTimestampMillisKey(id))
+                                .remove(getLastSearchTermKey(id))
+                                .apply();
+                    }
+                };
 
-        mTabModelSelectorObserver = new TabModelSelectorObserver() {
-            @Override
-            public void onTabStateInitialized() {
-                // TODO(wychen): after this cache is enabled by default, we only need to populate it
-                //  once.
-                getSharedPreferences().edit().clear().apply();
-                TabModelFilter filter =
-                        mTabModelSelector.getTabModelFilterProvider().getTabModelFilter(false);
-                for (int i = 0; i < filter.getCount(); i++) {
-                    Tab tab = filter.getTabAt(i);
-                    cacheUrl(tab.getId(), tab.getUrl());
-                    cacheTitle(tab.getId(), tab.getTitle());
-                    cacheRootId(tab.getId(), CriticalPersistedTabData.from(tab).getRootId());
-                    cacheTimestampMillis(
-                            tab.getId(), CriticalPersistedTabData.from(tab).getTimestampMillis());
-                }
-                Tab currentTab = mTabModelSelector.getCurrentTab();
-                if (currentTab != null) cacheLastSearchTerm(currentTab);
-                filter.addObserver(mTabModelObserver);
-            }
-        };
+        mTabModelSelectorObserver =
+                new TabModelSelectorObserver() {
+                    @Override
+                    public void onTabStateInitialized() {
+                        // TODO(wychen): after this cache is enabled by default, we only need to
+                        // populate it
+                        //  once.
+                        SharedPreferences.Editor editor = getSharedPreferences().edit();
+                        editor.clear();
+                        TabModelFilter filter =
+                                mTabModelSelector
+                                        .getTabModelFilterProvider()
+                                        .getTabModelFilter(false);
+                        for (int i = 0; i < filter.getCount(); i++) {
+                            Tab tab = filter.getTabAt(i);
+                            int id = tab.getId();
+                            editor.putString(getUrlKey(id), tab.getUrl().serialize());
+                            editor.putString(getTitleKey(id), tab.getTitle());
+                            editor.putInt(getRootIdKey(id), tab.getRootId());
+                            editor.putLong(getTimestampMillisKey(id), tab.getTimestampMillis());
+                        }
+                        editor.apply();
+                        Tab currentTab = mTabModelSelector.getCurrentTab();
+                        if (currentTab != null) cacheLastSearchTerm(currentTab);
+                        filter.addObserver(mTabModelObserver);
+                    }
+                };
         mTabModelSelector.addObserver(mTabModelSelectorObserver);
     }
 
@@ -162,7 +171,6 @@ public class TabAttributeCache {
      * @param id The ID of the {@link PseudoTab}.
      * @param title The title
      */
-    @VisibleForTesting
     public static void setTitleForTesting(int id, String title) {
         cacheTitle(id, title);
     }
@@ -224,7 +232,6 @@ public class TabAttributeCache {
      * @param id The ID of the {@link PseudoTab}.
      * @param rootId The root ID
      */
-    @VisibleForTesting
     public static void setRootIdForTesting(int id, int rootId) {
         cacheRootId(id, rootId);
     }
@@ -239,8 +246,7 @@ public class TabAttributeCache {
      * @return The timestamp
      */
     public static long getTimestampMillis(int id) {
-        return getSharedPreferences().getLong(
-                getTimestampMillisKey(id), CriticalPersistedTabData.INVALID_TIMESTAMP);
+        return getSharedPreferences().getLong(getTimestampMillisKey(id), Tab.INVALID_TIMESTAMP);
     }
 
     private static void cacheTimestampMillis(int id, long timestampMillis) {
@@ -252,7 +258,6 @@ public class TabAttributeCache {
      * @param id The ID of the {@link PseudoTab}.
      * @param timestampMillis The timestamp
      */
-    @VisibleForTesting
     public static void setTimestampMillisForTesting(int id, long timestampMillis) {
         cacheTimestampMillis(id, timestampMillis);
     }
@@ -288,22 +293,23 @@ public class TabAttributeCache {
      */
     @VisibleForTesting
     static @Nullable String findLastSearchTerm(Tab tab) {
-        if (sLastSearchTermProviderForTests != null) {
-            return sLastSearchTermProviderForTests.getLastSearchTerm(tab);
+        if (sLastSearchTermProviderForTesting != null) {
+            return sLastSearchTermProviderForTesting.getLastSearchTerm(tab);
         }
         assert tab.getWebContents() != null;
         NavigationController controller = tab.getWebContents().getNavigationController();
         NavigationHistory history = controller.getNavigationHistory();
 
-        if (!TextUtils.isEmpty(
-                    TemplateUrlServiceFactory.get().getSearchQueryForUrl(tab.getUrl()))) {
+        Profile profile = tab.getProfile();
+        TemplateUrlService templateUrlService = TemplateUrlServiceFactory.getForProfile(profile);
+        if (!TextUtils.isEmpty(templateUrlService.getSearchQueryForUrl(tab.getUrl()))) {
             // If we are already at a search result page, do not show the last search term.
             return null;
         }
 
         for (int i = history.getCurrentEntryIndex() - 1; i >= 0; i--) {
             GURL url = history.getEntryAtIndex(i).getOriginalUrl();
-            String query = TemplateUrlServiceFactory.get().getSearchQueryForUrl(url);
+            String query = templateUrlService.getSearchQueryForUrl(url);
             if (!TextUtils.isEmpty(query)) {
                 return removeEscapedCodePoints(query);
             }
@@ -341,9 +347,9 @@ public class TabAttributeCache {
      * Set the LastSearchTermProvider for testing.
      * @param lastSearchTermProvider The mocking object.
      */
-    @VisibleForTesting
     static void setLastSearchTermMockForTesting(LastSearchTermProvider lastSearchTermProvider) {
-        sLastSearchTermProviderForTests = lastSearchTermProvider;
+        sLastSearchTermProviderForTesting = lastSearchTermProvider;
+        ResettersForTesting.register(() -> sLastSearchTermProviderForTesting = null);
     }
 
     /**
@@ -351,22 +357,11 @@ public class TabAttributeCache {
      * @param id The ID of the {@link PseudoTab}.
      * @param searchTerm The last search term
      */
-    @VisibleForTesting
     public static void setLastSearchTermForTesting(int id, String searchTerm) {
         cacheLastSearchTerm(id, searchTerm);
     }
 
-    /**
-     * Clear everything in the storage.
-     */
-    @VisibleForTesting
-    public static void clearAllForTesting() {
-        getSharedPreferences().edit().clear().apply();
-    }
-
-    /**
-     * Remove all the observers.
-     */
+    /** Remove all the observers. */
     public void destroy() {
         mTabModelSelectorTabObserver.destroy();
         TabModelFilter tabModelFilter =

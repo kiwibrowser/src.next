@@ -12,9 +12,7 @@ import androidx.annotation.Nullable;
 import org.chromium.chrome.browser.omnibox.voice.VoiceRecognitionHandler;
 import org.chromium.chrome.browser.tab.Tab;
 
-/**
- * Container that holds the {@link UrlBar} and SSL state related with the current {@link Tab}.
- */
+/** Container that holds the {@link UrlBar} and SSL state related with the current {@link Tab}. */
 public interface LocationBar {
     /** Handle all necessary tasks that can be delayed until initialization completes. */
     default void onDeferredStartup() {}
@@ -46,6 +44,22 @@ public interface LocationBar {
      */
     void showUrlBarCursorWithoutFocusAnimations();
 
+    /**
+     * Notifies the LocationBar to take necessary action after exiting from the NTP, while a
+     * hardware keyboard is connected. If the URL bar was previously focused on the NTP due to a
+     * connected keyboard, a navigation away from the NTP should clear this focus before filling the
+     * current tab's URL.
+     */
+    void clearUrlBarCursorWithoutFocusAnimations();
+
+    /**
+     * Request to unfocus url bar on back gesture or when OS back button is pressed.
+     *
+     * @return True if url bar is unfocused. False if url bar has already been unfocused when back
+     *     is pressed.
+     */
+    boolean unfocusUrlBarOnBackPressed();
+
     /** Selects all of the editable text in the {@link UrlBar}. */
     void selectAll();
 
@@ -60,18 +74,18 @@ public interface LocationBar {
 
     /**
      * TODO(twellington): Try to remove this method. It's only used to return an in-product help
-     *                    bubble anchor view... which should be moved out of tab and perhaps into
-     *                    the status bar icon component.
+     * bubble anchor view... which should be moved out of tab and perhaps into the status bar icon
+     * component.
+     *
      * @return The view containing the security icon.
      */
     View getSecurityIconView();
 
-
     /** Returns the {@link VoiceRecognitionHandler} associated with this LocationBar. */
-    @Nullable
-    default VoiceRecognitionHandler getVoiceRecognitionHandler() {
+    default @Nullable VoiceRecognitionHandler getVoiceRecognitionHandler() {
         return null;
     }
+
     /**
      * Returns a (@link OmniboxStub}.
      *
@@ -79,6 +93,9 @@ public interface LocationBar {
      */
     @Nullable
     OmniboxStub getOmniboxStub();
+
+    /** Returns the UrlBarData currently in use by the URL bar inside this location bar. */
+    UrlBarData getUrlBarData();
 
     /** Destroys the LocationBar. */
     void destroy();

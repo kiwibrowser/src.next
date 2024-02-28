@@ -5,8 +5,8 @@
 #include <tuple>
 
 #include "base/run_loop.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/test/bind.h"
-#include "base/threading/sequenced_task_runner_handle.h"
 #include "build/build_config.h"
 #include "components/services/storage/public/mojom/storage_service.mojom.h"
 #include "components/services/storage/public/mojom/storage_usage_info.mojom.h"
@@ -40,13 +40,13 @@ class StorageServiceRestartBrowserTest : public ContentBrowserTest {
   void WaitForAnyLocalStorageDataAsync(base::OnceClosure callback) {
     dom_storage()->GetLocalStorageControl()->GetUsage(base::BindOnce(
         [](StorageServiceRestartBrowserTest* test, base::OnceClosure callback,
-           std::vector<storage::mojom::StorageUsageInfoV2Ptr> usage) {
+           std::vector<storage::mojom::StorageUsageInfoPtr> usage) {
           if (!usage.empty()) {
             std::move(callback).Run();
             return;
           }
 
-          base::SequencedTaskRunnerHandle::Get()->PostDelayedTask(
+          base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
               FROM_HERE,
               base::BindOnce(&StorageServiceRestartBrowserTest::
                                  WaitForAnyLocalStorageDataAsync,

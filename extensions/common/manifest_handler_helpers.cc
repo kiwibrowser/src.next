@@ -6,6 +6,8 @@
 
 #include <stddef.h>
 
+#include <string_view>
+
 #include "base/check.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -23,7 +25,7 @@ namespace errors = manifest_errors;
 
 namespace manifest_handler_helpers {
 
-std::vector<base::StringPiece> TokenizeDictionaryPath(base::StringPiece path) {
+std::vector<std::string_view> TokenizeDictionaryPath(std::string_view path) {
   return base::SplitStringPiece(path, ".", base::TRIM_WHITESPACE,
                                 base::SPLIT_WANT_ALL);
 }
@@ -44,12 +46,12 @@ bool NormalizeAndValidatePath(const std::string& path,
   return true;
 }
 
-bool LoadIconsFromDictionary(const base::Value* icons_value,
+bool LoadIconsFromDictionary(const base::Value::Dict& icons_value,
                              ExtensionIconSet* icons,
                              std::u16string* error) {
   DCHECK(icons);
   DCHECK(error);
-  for (auto entry : icons_value->DictItems()) {
+  for (auto entry : icons_value) {
     int size = 0;
     if (!base::StringToInt(entry.first, &size) || size <= 0 ||
         size > extension_misc::EXTENSION_ICON_GIGANTOR * 4) {

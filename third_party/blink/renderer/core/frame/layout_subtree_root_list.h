@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,10 +31,6 @@ class LayoutSubtreeRootList : public DepthOrderedLayoutObjectList {
   LayoutSubtreeRootList() = default;
 
   void ClearAndMarkContainingBlocksForLayout();
-
-  // TODO(leviw): Remove this once we stop exposing to DevTools one root
-  // for a layout crbug.com/460596
-  LayoutObject* RandomRoot();
 
   void CountObjectsNeedingLayout(unsigned& needs_layout_objects,
                                  unsigned& total_objects);

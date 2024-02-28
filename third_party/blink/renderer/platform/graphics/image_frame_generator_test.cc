@@ -26,8 +26,10 @@
 #include "third_party/blink/renderer/platform/graphics/image_frame_generator.h"
 
 #include <memory>
+#include "base/features.h"
 #include "base/location.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/platform/graphics/image_decoding_store.h"
@@ -35,6 +37,7 @@
 #include "third_party/blink/renderer/platform/image-decoders/segment_reader.h"
 #include "third_party/blink/renderer/platform/scheduler/public/non_main_thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
@@ -62,7 +65,7 @@ class ImageFrameGeneratorTest : public testing::Test,
   void SetUp() override {
     ImageDecodingStore::Instance().SetCacheLimitInBytes(1024 * 1024);
     generator_ = ImageFrameGenerator::Create(FullSize(), false,
-                                             ColorBehavior::Ignore(), {});
+                                             ColorBehavior::kIgnore, {});
     data_ = SharedBuffer::Create();
     segment_reader_ = SegmentReader::CreateFromSharedBuffer(data_);
     UseMockImageDecoderFactory();
@@ -117,17 +120,18 @@ class ImageFrameGeneratorTest : public testing::Test,
     if (count > 1) {
       generator_ = nullptr;
       generator_ = ImageFrameGenerator::Create(FullSize(), true,
-                                               ColorBehavior::Ignore(), {});
+                                               ColorBehavior::kIgnore, {});
       UseMockImageDecoderFactory();
     }
   }
   void SetSupportedSizes(Vector<SkISize> sizes) {
     generator_ = nullptr;
     generator_ = ImageFrameGenerator::Create(
-        FullSize(), true, ColorBehavior::Ignore(), std::move(sizes));
+        FullSize(), true, ColorBehavior::kIgnore, std::move(sizes));
     UseMockImageDecoderFactory();
   }
 
+  test::TaskEnvironment task_environment_;
   scoped_refptr<SharedBuffer> data_;
   scoped_refptr<SegmentReader> segment_reader_;
   scoped_refptr<ImageFrameGenerator> generator_;
@@ -148,17 +152,16 @@ TEST_F(ImageFrameGeneratorTest, DecodeByMultipleClients) {
       "Blink.ImageDecoders.ImageHasMultipleGeneratorClientIds", 0);
 
   char buffer[100 * 100 * 4];
+  SkPixmap pixmap(ImageInfo(), buffer, 100 * 4);
   cc::PaintImage::GeneratorClientId client_id_0 =
       cc::PaintImage::GetNextGeneratorClientId();
-  generator_->DecodeAndScale(segment_reader_.get(), true, 0, ImageInfo(),
-                             buffer, 100 * 4, ImageDecoder::kAlphaPremultiplied,
+  generator_->DecodeAndScale(segment_reader_.get(), true, 0, pixmap,
                              client_id_0);
   histogram_tester.ExpectUniqueSample(
       "Blink.ImageDecoders.ImageHasMultipleGeneratorClientIds",
       0 /* kRequestByAtLeastOneClient */, 1);
 
-  generator_->DecodeAndScale(segment_reader_.get(), true, 0, ImageInfo(),
-                             buffer, 100 * 4, ImageDecoder::kAlphaPremultiplied,
+  generator_->DecodeAndScale(segment_reader_.get(), true, 0, pixmap,
                              cc::PaintImage::kDefaultGeneratorClientId);
   histogram_tester.ExpectUniqueSample(
       "Blink.ImageDecoders.ImageHasMultipleGeneratorClientIds",
@@ -166,8 +169,7 @@ TEST_F(ImageFrameGeneratorTest, DecodeByMultipleClients) {
 
   cc::PaintImage::GeneratorClientId client_id_1 =
       cc::PaintImage::GetNextGeneratorClientId();
-  generator_->DecodeAndScale(segment_reader_.get(), true, 0, ImageInfo(),
-                             buffer, 100 * 4, ImageDecoder::kAlphaPremultiplied,
+  generator_->DecodeAndScale(segment_reader_.get(), true, 0, pixmap,
                              client_id_1);
   histogram_tester.ExpectTotalCount(
       "Blink.ImageDecoders.ImageHasMultipleGeneratorClientIds", 2);
@@ -200,18 +202,25 @@ TEST_F(ImageFrameGeneratorTest, GetSupportedSizes) {
 }
 
 TEST_F(ImageFrameGeneratorTest, incompleteDecode) {
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS)
+  base::test::ScopedFeatureList feature_list;
+  // Since PartialLowEndModeOnMidRangeDevices is enabled, image decoders
+  // are destroyed because of the incomplete decode for saving memory.
+  feature_list.InitAndDisableFeature(
+      base::features::kPartialLowEndModeOnMidRangeDevices);
+#endif  // BUILDFLAG(IS_ANDROID)
+
   SetFrameStatus(ImageFrame::kFramePartial);
 
   char buffer[100 * 100 * 4];
-  generator_->DecodeAndScale(segment_reader_.get(), false, 0, ImageInfo(),
-                             buffer, 100 * 4, ImageDecoder::kAlphaPremultiplied,
+  SkPixmap pixmap(ImageInfo(), buffer, 100 * 4);
+  generator_->DecodeAndScale(segment_reader_.get(), false, 0, pixmap,
                              cc::PaintImage::kDefaultGeneratorClientId);
   EXPECT_EQ(1, decode_request_count_);
   EXPECT_EQ(0, memory_allocator_set_count_);
 
   AddNewData();
-  generator_->DecodeAndScale(segment_reader_.get(), false, 0, ImageInfo(),
-                             buffer, 100 * 4, ImageDecoder::kAlphaPremultiplied,
+  generator_->DecodeAndScale(segment_reader_.get(), false, 0, pixmap,
                              cc::PaintImage::kDefaultGeneratorClientId);
   EXPECT_EQ(2, decode_request_count_);
   EXPECT_EQ(0, decoders_destroyed_);
@@ -230,8 +239,8 @@ TEST_F(ImageFrameGeneratorTest, LowEndDeviceDestroysDecoderOnPartialDecode) {
   SetFrameStatus(ImageFrame::kFramePartial);
 
   char buffer[100 * 100 * 4];
-  generator_->DecodeAndScale(segment_reader_.get(), false, 0, ImageInfo(),
-                             buffer, 100 * 4, ImageDecoder::kAlphaPremultiplied,
+  SkPixmap pixmap(ImageInfo(), buffer, 100 * 4);
+  generator_->DecodeAndScale(segment_reader_.get(), false, 0, pixmap,
                              cc::PaintImage::kDefaultGeneratorClientId);
   EXPECT_EQ(1, decode_request_count_);
   EXPECT_EQ(1, decoders_destroyed_);
@@ -239,8 +248,7 @@ TEST_F(ImageFrameGeneratorTest, LowEndDeviceDestroysDecoderOnPartialDecode) {
   EXPECT_EQ(2, memory_allocator_set_count_);
 
   AddNewData();
-  generator_->DecodeAndScale(segment_reader_.get(), false, 0, ImageInfo(),
-                             buffer, 100 * 4, ImageDecoder::kAlphaPremultiplied,
+  generator_->DecodeAndScale(segment_reader_.get(), false, 0, pixmap,
                              cc::PaintImage::kDefaultGeneratorClientId);
   EXPECT_EQ(2, decode_request_count_);
   EXPECT_EQ(2, decoders_destroyed_);
@@ -249,11 +257,19 @@ TEST_F(ImageFrameGeneratorTest, LowEndDeviceDestroysDecoderOnPartialDecode) {
 }
 
 TEST_F(ImageFrameGeneratorTest, incompleteDecodeBecomesComplete) {
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS)
+  base::test::ScopedFeatureList feature_list;
+  // Since PartialLowEndModeOnMidRangeDevices is enabled, image decoders
+  // are destroyed because of the incomplete decode for saving memory.
+  feature_list.InitAndDisableFeature(
+      base::features::kPartialLowEndModeOnMidRangeDevices);
+#endif  // BUILDFLAG(IS_ANDROID)
+
   SetFrameStatus(ImageFrame::kFramePartial);
 
   char buffer[100 * 100 * 4];
-  generator_->DecodeAndScale(segment_reader_.get(), false, 0, ImageInfo(),
-                             buffer, 100 * 4, ImageDecoder::kAlphaPremultiplied,
+  SkPixmap pixmap(ImageInfo(), buffer, 100 * 4);
+  generator_->DecodeAndScale(segment_reader_.get(), false, 0, pixmap,
                              cc::PaintImage::kDefaultGeneratorClientId);
   EXPECT_EQ(1, decode_request_count_);
   EXPECT_EQ(0, decoders_destroyed_);
@@ -262,15 +278,13 @@ TEST_F(ImageFrameGeneratorTest, incompleteDecodeBecomesComplete) {
   SetFrameStatus(ImageFrame::kFrameComplete);
   AddNewData();
 
-  generator_->DecodeAndScale(segment_reader_.get(), false, 0, ImageInfo(),
-                             buffer, 100 * 4, ImageDecoder::kAlphaPremultiplied,
+  generator_->DecodeAndScale(segment_reader_.get(), false, 0, pixmap,
                              cc::PaintImage::kDefaultGeneratorClientId);
   EXPECT_EQ(2, decode_request_count_);
   EXPECT_EQ(1, decoders_destroyed_);
 
   // Decoder created again.
-  generator_->DecodeAndScale(segment_reader_.get(), false, 0, ImageInfo(),
-                             buffer, 100 * 4, ImageDecoder::kAlphaPremultiplied,
+  generator_->DecodeAndScale(segment_reader_.get(), false, 0, pixmap,
                              cc::PaintImage::kDefaultGeneratorClientId);
   EXPECT_EQ(3, decode_request_count_);
 }
@@ -278,8 +292,8 @@ TEST_F(ImageFrameGeneratorTest, incompleteDecodeBecomesComplete) {
 static void DecodeThreadMain(ImageFrameGenerator* generator,
                              SegmentReader* segment_reader) {
   char buffer[100 * 100 * 4];
-  generator->DecodeAndScale(segment_reader, false, 0, ImageInfo(), buffer,
-                            100 * 4, ImageDecoder::kAlphaPremultiplied,
+  SkPixmap pixmap(ImageInfo(), buffer, 100 * 4);
+  generator->DecodeAndScale(segment_reader, false, 0, pixmap,
                             cc::PaintImage::kDefaultGeneratorClientId);
 }
 
@@ -297,8 +311,8 @@ TEST_F(ImageFrameGeneratorTest,
   SetFrameStatus(ImageFrame::kFramePartial);
 
   char buffer[100 * 100 * 4];
-  generator_->DecodeAndScale(segment_reader_.get(), false, 0, ImageInfo(),
-                             buffer, 100 * 4, ImageDecoder::kAlphaPremultiplied,
+  SkPixmap pixmap(ImageInfo(), buffer, 100 * 4);
+  generator_->DecodeAndScale(segment_reader_.get(), false, 0, pixmap,
                              cc::PaintImage::kDefaultGeneratorClientId);
   EXPECT_EQ(1, decode_request_count_);
   EXPECT_EQ(0, decoders_destroyed_);
@@ -318,8 +332,7 @@ TEST_F(ImageFrameGeneratorTest,
   EXPECT_EQ(1, decoders_destroyed_);
 
   // Decoder created again.
-  generator_->DecodeAndScale(segment_reader_.get(), false, 0, ImageInfo(),
-                             buffer, 100 * 4, ImageDecoder::kAlphaPremultiplied,
+  generator_->DecodeAndScale(segment_reader_.get(), false, 0, pixmap,
                              cc::PaintImage::kDefaultGeneratorClientId);
   EXPECT_EQ(3, decode_request_count_);
 
@@ -330,11 +343,21 @@ TEST_F(ImageFrameGeneratorTest,
 }
 
 TEST_F(ImageFrameGeneratorTest, frameHasAlpha) {
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS)
+  base::test::ScopedFeatureList feature_list;
+  // Since PartialLowEndModeOnMidRangeDevices is enabled, image decoders
+  // are not cached because it makes ShouldDecodeToExternalMemory()
+  // return true. The value will be provided for ImageDecoderWrapper::
+  // ShouldRemoveDecoder() and ShouldRemoveDecoder() will return true.
+  feature_list.InitAndDisableFeature(
+      base::features::kPartialLowEndModeOnMidRangeDevices);
+#endif
+
   SetFrameStatus(ImageFrame::kFramePartial);
 
   char buffer[100 * 100 * 4];
-  generator_->DecodeAndScale(segment_reader_.get(), false, 0, ImageInfo(),
-                             buffer, 100 * 4, ImageDecoder::kAlphaPremultiplied,
+  SkPixmap pixmap(ImageInfo(), buffer, 100 * 4);
+  generator_->DecodeAndScale(segment_reader_.get(), false, 0, pixmap,
                              cc::PaintImage::kDefaultGeneratorClientId);
   EXPECT_TRUE(generator_->HasAlpha(0));
   EXPECT_EQ(1, decode_request_count_);
@@ -351,8 +374,7 @@ TEST_F(ImageFrameGeneratorTest, frameHasAlpha) {
   EXPECT_EQ(2, decode_request_count_);
 
   SetFrameStatus(ImageFrame::kFrameComplete);
-  generator_->DecodeAndScale(segment_reader_.get(), false, 0, ImageInfo(),
-                             buffer, 100 * 4, ImageDecoder::kAlphaPremultiplied,
+  generator_->DecodeAndScale(segment_reader_.get(), false, 0, pixmap,
                              cc::PaintImage::kDefaultGeneratorClientId);
   EXPECT_EQ(3, decode_request_count_);
   EXPECT_FALSE(generator_->HasAlpha(0));
@@ -363,8 +385,8 @@ TEST_F(ImageFrameGeneratorTest, clearMultiFrameDecoder) {
   SetFrameStatus(ImageFrame::kFrameComplete);
 
   char buffer[100 * 100 * 4];
-  generator_->DecodeAndScale(segment_reader_.get(), true, 0, ImageInfo(),
-                             buffer, 100 * 4, ImageDecoder::kAlphaPremultiplied,
+  SkPixmap pixmap(ImageInfo(), buffer, 100 * 4);
+  generator_->DecodeAndScale(segment_reader_.get(), true, 0, pixmap,
                              cc::PaintImage::kDefaultGeneratorClientId);
   EXPECT_EQ(1, decode_request_count_);
   EXPECT_EQ(0, decoders_destroyed_);
@@ -372,8 +394,7 @@ TEST_F(ImageFrameGeneratorTest, clearMultiFrameDecoder) {
 
   SetFrameStatus(ImageFrame::kFrameComplete);
 
-  generator_->DecodeAndScale(segment_reader_.get(), true, 1, ImageInfo(),
-                             buffer, 100 * 4, ImageDecoder::kAlphaPremultiplied,
+  generator_->DecodeAndScale(segment_reader_.get(), true, 1, pixmap,
                              cc::PaintImage::kDefaultGeneratorClientId);
   EXPECT_EQ(2, decode_request_count_);
   EXPECT_EQ(0, decoders_destroyed_);
@@ -384,8 +405,7 @@ TEST_F(ImageFrameGeneratorTest, clearMultiFrameDecoder) {
   // Decoding the last frame of a multi-frame images should trigger clearing
   // all the frame data, but not destroying the decoder.  See comments in
   // ImageFrameGenerator::tryToResumeDecode().
-  generator_->DecodeAndScale(segment_reader_.get(), true, 2, ImageInfo(),
-                             buffer, 100 * 4, ImageDecoder::kAlphaPremultiplied,
+  generator_->DecodeAndScale(segment_reader_.get(), true, 2, pixmap,
                              cc::PaintImage::kDefaultGeneratorClientId);
   EXPECT_EQ(3, decode_request_count_);
   EXPECT_EQ(0, decoders_destroyed_);

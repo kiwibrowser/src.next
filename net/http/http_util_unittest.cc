@@ -27,6 +27,7 @@ TEST(HttpUtilTest, IsSafeHeader) {
       "accept-encoding",
       "access-control-request-headers",
       "access-control-request-method",
+      "access-control-request-private-network",
       "connection",
       "content-length",
       "cookie",
@@ -47,8 +48,8 @@ TEST(HttpUtilTest, IsSafeHeader) {
       "via",
   };
   for (const auto* unsafe_header : unsafe_headers) {
-    EXPECT_FALSE(HttpUtil::IsSafeHeader(unsafe_header)) << unsafe_header;
-    EXPECT_FALSE(HttpUtil::IsSafeHeader(base::ToUpperASCII(unsafe_header)))
+    EXPECT_FALSE(HttpUtil::IsSafeHeader(unsafe_header, "")) << unsafe_header;
+    EXPECT_FALSE(HttpUtil::IsSafeHeader(base::ToUpperASCII(unsafe_header), ""))
         << unsafe_header;
   }
   static const char* const safe_headers[] = {
@@ -91,11 +92,44 @@ TEST(HttpUtilTest, IsSafeHeader) {
       "user-agenta",
       "user_agent",
       "viaa",
+      // Following 3 headers are safe if there is no forbidden method in values.
+      "x-http-method",
+      "x-http-method-override",
+      "x-method-override",
   };
   for (const auto* safe_header : safe_headers) {
-    EXPECT_TRUE(HttpUtil::IsSafeHeader(safe_header)) << safe_header;
-    EXPECT_TRUE(HttpUtil::IsSafeHeader(base::ToUpperASCII(safe_header)))
+    EXPECT_TRUE(HttpUtil::IsSafeHeader(safe_header, "")) << safe_header;
+    EXPECT_TRUE(HttpUtil::IsSafeHeader(base::ToUpperASCII(safe_header), ""))
         << safe_header;
+  }
+
+  static const char* const disallowed_with_forbidden_methods_headers[] = {
+      "x-http-method",
+      "x-http-method-override",
+      "x-method-override",
+  };
+  static const struct {
+    const char* value;
+    bool is_safe;
+  } disallowed_values[] = {{"connect", false},
+                           {"trace", false},
+                           {"track", false},
+                           {"CONNECT", false},
+                           {"cOnnEcT", false},
+                           {"get", true},
+                           {"get,post", true},
+                           {"get,connect", false},
+                           {"get, connect", false},
+                           {"get,connect ", false},
+                           {"get,connect ,post", false},
+                           {"get,,,,connect", false},
+                           {"trace,get,PUT", false}};
+  for (const auto* header : disallowed_with_forbidden_methods_headers) {
+    for (const auto& test_case : disallowed_values) {
+      EXPECT_EQ(test_case.is_safe,
+                HttpUtil::IsSafeHeader(header, test_case.value))
+          << header << ": " << test_case.value;
+    }
   }
 }
 
@@ -1149,6 +1183,19 @@ TEST(HttpUtilTest, ParseRetryAfterHeader) {
           << retry_after.InSeconds() << "s.";
     }
   }
+}
+
+TEST(HttpUtilTest, TimeFormatHTTP) {
+  constexpr base::Time::Exploded kTime = {.year = 2011,
+                                          .month = 4,
+                                          .day_of_week = 6,
+                                          .day_of_month = 30,
+                                          .hour = 22,
+                                          .minute = 42,
+                                          .second = 7};
+  base::Time time;
+  EXPECT_TRUE(base::Time::FromUTCExploded(kTime, &time));
+  EXPECT_EQ("Sat, 30 Apr 2011 22:42:07 GMT", HttpUtil::TimeFormatHTTP(time));
 }
 
 namespace {

@@ -24,31 +24,19 @@
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/editing/position_with_affinity.h"
+#include "third_party/blink/renderer/core/html/html_br_element.h"
 #include "third_party/blink/renderer/core/layout/layout_object_inlines.h"
 
 namespace blink {
 
-static scoped_refptr<StringImpl> NewlineString() {
+static String NewlineString() {
   DEFINE_STATIC_LOCAL(const String, string, ("\n"));
-  return string.Impl();
+  return string;
 }
 
-LayoutBR::LayoutBR(Node* node) : LayoutText(node, NewlineString()) {}
+LayoutBR::LayoutBR(HTMLBRElement& node) : LayoutText(&node, NewlineString()) {}
 
 LayoutBR::~LayoutBR() = default;
-
-int LayoutBR::LineHeight(bool first_line) const {
-  NOT_DESTROYED();
-  const ComputedStyle& style = StyleRef(
-      first_line && GetDocument().GetStyleEngine().UsesFirstLineRules());
-  return style.ComputedLineHeight();
-}
-
-void LayoutBR::StyleDidChange(StyleDifference diff,
-                              const ComputedStyle* old_style) {
-  NOT_DESTROYED();
-  LayoutText::StyleDidChange(diff, old_style);
-}
 
 int LayoutBR::CaretMinOffset() const {
   NOT_DESTROYED();
@@ -56,6 +44,11 @@ int LayoutBR::CaretMinOffset() const {
 }
 
 int LayoutBR::CaretMaxOffset() const {
+  NOT_DESTROYED();
+  return 1;
+}
+
+unsigned LayoutBR::NonCollapsedCaretMaxOffset() const {
   NOT_DESTROYED();
   return 1;
 }

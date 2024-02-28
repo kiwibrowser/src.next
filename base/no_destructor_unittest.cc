@@ -11,8 +11,8 @@
 
 #include "base/atomicops.h"
 #include "base/barrier_closure.h"
-#include "base/bind.h"
 #include "base/check.h"
+#include "base/functional/bind.h"
 #include "base/system/sys_info.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/simple_thread.h"
@@ -22,6 +22,10 @@
 namespace base {
 
 namespace {
+
+static_assert(!std::is_trivially_destructible_v<std::string>);
+static_assert(
+    std::is_trivially_destructible_v<base::NoDestructor<std::string>>);
 
 struct CheckOnDestroy {
   ~CheckOnDestroy() { CHECK(false); }
@@ -90,11 +94,6 @@ TEST(NoDestructorTest, Accessors) {
   EXPECT_EQ("awesome", *awesome);
   EXPECT_EQ(0, awesome->compare("awesome"));
   EXPECT_EQ(0, awesome.get()->compare("awesome"));
-}
-
-TEST(NoDestructorTest, AllowForTriviallyDestructibleType) {
-  static NoDestructor<bool, AllowForTriviallyDestructibleType>
-      trivially_destructible_type;
 }
 
 // Passing initializer list to a NoDestructor like in this test

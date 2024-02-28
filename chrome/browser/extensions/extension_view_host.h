@@ -8,14 +8,12 @@
 #include <memory>
 
 #include "base/memory/raw_ptr.h"
-#include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
 #include "build/build_config.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_host_registry.h"
-#include "extensions/common/mojom/view_type.mojom.h"
 
 class Browser;
 
@@ -50,12 +48,11 @@ class ExtensionViewHost
 
   ~ExtensionViewHost() override;
 
-  Browser* browser() { return browser_; }
-
   void set_view(ExtensionView* view) { view_ = view; }
   ExtensionView* view() { return view_; }
 
-  void SetAssociatedWebContents(content::WebContents* web_contents);
+  // Returns the browser associated with this ExtensionViewHost.
+  virtual Browser* GetBrowser();
 
   // Handles keyboard events that were not handled by HandleKeyboardEvent().
   // Platform specific implementation may override this method to handle the
@@ -109,7 +106,6 @@ class ExtensionViewHost
 
   // extensions::ExtensionFunctionDispatcher::Delegate
   WindowController* GetExtensionWindowController() const override;
-  content::WebContents* GetAssociatedWebContents() const override;
   content::WebContents* GetVisibleWebContents() const override;
 
   // ExtensionHostRegistry::Observer:
@@ -122,14 +118,14 @@ class ExtensionViewHost
   // mojom::ViewType::kExtensionPopup.
   bool IsEscapeInPopup(const content::NativeWebKeyboardEvent& event) const;
 
-  // The browser associated with the ExtensionView, if any.
+  // The browser associated with the ExtensionView, if any. Note: since this
+  // ExtensionViewHost could be associated with a browser even if `browser_` is
+  // null (see ExtensionSidePanelViewHost), this variable should not be used
+  // directly. Instead, use GetBrowser().
   raw_ptr<Browser> browser_;
 
   // View that shows the rendered content in the UI.
-  raw_ptr<ExtensionView> view_ = nullptr;
-
-  // The relevant WebContents associated with this ExtensionViewHost, if any.
-  base::WeakPtr<content::WebContents> associated_web_contents_;
+  raw_ptr<ExtensionView, DanglingUntriaged> view_ = nullptr;
 
   base::ScopedObservation<ExtensionHostRegistry,
                           ExtensionHostRegistry::Observer>

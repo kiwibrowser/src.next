@@ -2,29 +2,31 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "extensions/common/csp_validator.h"
+
 #include <stddef.h>
 
-#include "base/strings/string_piece.h"
+#include <string_view>
+
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "extensions/common/csp_validator.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/install_warning.h"
 #include "extensions/common/manifest_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using extensions::csp_validator::ContentSecurityPolicyIsLegal;
-using extensions::csp_validator::GetEffectiveSandoxedPageCSP;
-using extensions::csp_validator::SanitizeContentSecurityPolicy;
-using extensions::csp_validator::ContentSecurityPolicyIsSandboxed;
-using extensions::csp_validator::OPTIONS_NONE;
-using extensions::csp_validator::OPTIONS_ALLOW_UNSAFE_EVAL;
-using extensions::csp_validator::OPTIONS_ALLOW_INSECURE_OBJECT_SRC;
 using extensions::ErrorUtils;
 using extensions::InstallWarning;
 using extensions::Manifest;
+using extensions::csp_validator::ContentSecurityPolicyIsLegal;
+using extensions::csp_validator::ContentSecurityPolicyIsSandboxed;
+using extensions::csp_validator::GetSandboxedPageCSPDisallowingRemoteSources;
+using extensions::csp_validator::OPTIONS_ALLOW_INSECURE_OBJECT_SRC;
+using extensions::csp_validator::OPTIONS_ALLOW_UNSAFE_EVAL;
+using extensions::csp_validator::OPTIONS_NONE;
+using extensions::csp_validator::SanitizeContentSecurityPolicy;
 
 namespace {
 
@@ -70,7 +72,7 @@ SanitizedCSPResult SanitizeCSP(const std::string& policy, int options) {
 
 SanitizedCSPResult SanitizeSandboxPageCSP(const std::string& policy) {
   SanitizedCSPResult result;
-  result.csp = GetEffectiveSandoxedPageCSP(
+  result.csp = GetSandboxedPageCSPDisallowingRemoteSources(
       policy, extensions::manifest_keys::kSandboxedPagesCSP, &result.warnings);
   return result;
 }
@@ -575,14 +577,14 @@ TEST(ExtensionCSPValidator, ParseCSP) {
   )";
   DirectiveList expected_directives;
   expected_directives.emplace_back("deFAULt-src   'self'", "default-src",
-                                   std::vector<base::StringPiece>({"'self'"}));
+                                   std::vector<std::string_view>({"'self'"}));
   expected_directives.emplace_back("img-src *", "img-src",
-                                   std::vector<base::StringPiece>({"*"}));
+                                   std::vector<std::string_view>({"*"}));
   expected_directives.emplace_back(
       "media-src media1.com MEDIA2.com", "media-src",
-      std::vector<base::StringPiece>({"media1.com", "MEDIA2.com"}));
+      std::vector<std::string_view>({"media1.com", "MEDIA2.com"}));
   expected_directives.emplace_back("img-src 'self'", "img-src",
-                                   std::vector<base::StringPiece>({"'self'"}));
+                                   std::vector<std::string_view>({"'self'"}));
   cases.emplace_back(policy, std::move(expected_directives));
 
   for (const auto& test_case : cases) {
@@ -616,17 +618,16 @@ TEST(ExtensionCSPValidator, DoesCSPDisallowRemoteCode) {
       {"frame-src google.com; default-src yahoo.com; script-src 'self'; "
        "worker-src; object-src http://localhost:80 'none'",
        ""},
+      {"script-src; worker-src 'self';", ""},
+      {"frame-src 'self'", missing_secure_src_error("script-src")},
       {"worker-src http://localhost google.com; script-src; object-src 'self'",
        insecure_value_error("worker-src", "google.com")},
-      {"script-src; worker-src 'self';",
-       missing_secure_src_error("object-src")},
+      {"script-src 'self'; object-src https://google.com",
+       insecure_value_error("object-src", "https://google.com")},
       // Duplicate directives are ignored.
       {"script-src; worker-src 'self'; default-src 'self'; script-src "
        "google.com",
        ""},
-      // "object-src" falls back to "default-src".
-      {"script-src; worker-src 'self'; default-src google.com",
-       insecure_value_error("object-src", "google.com")},
       // "worker-src" falls back to "script-src".
       {"script-src 'self'; object-src 'none'; default-src google.com", ""},
       {"script-src 'unsafe-eval'; worker-src; default-src;",

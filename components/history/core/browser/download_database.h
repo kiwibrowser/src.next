@@ -109,6 +109,10 @@ class DownloadDatabase {
   // Returns true if able to add the finished column to downloads slices table.
   bool MigrateDownloadSliceFinished();
 
+  // Returns true if able to rename the by_ext_id column to by_ext_or_web_app_id
+  // and add the is_by_web_app column.
+  bool MigrateDownloadByWebApp();
+
   // Creates the downloads table if needed.
   bool InitDownloadTable();
 
@@ -147,17 +151,6 @@ class DownloadDatabase {
   // Query the download slices for all the records in `download_row_map`.
   using DownloadRowMap = std::map<DownloadId, DownloadRow*>;
   void QueryDownloadSlices(DownloadRowMap* download_row_map);
-
-  // Creates a new reroute info if it doesn't exist, or updates an existing
-  // one. Returns true on success, or false otherwise.
-  bool CreateOrUpdateDownloadRerouteInfo(
-      DownloadId id,
-      const std::string& reroute_info_serialized);
-
-  // Delete the download reroute info associated with one DownloadRow.
-  void RemoveDownloadRerouteInfo(DownloadId id);
-  // Query the download reroute infos for all the records in `download_row_map`.
-  void QueryDownloadRerouteInfos(DownloadRowMap* download_row_map);
 
   bool owning_thread_set_;
   base::PlatformThreadId owning_thread_;

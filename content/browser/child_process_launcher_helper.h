@@ -7,7 +7,9 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/process/kill.h"
@@ -16,11 +18,12 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "content/public/browser/browser_child_process_host.h"
+#include "content/public/browser/child_process_launcher_utils.h"
 #include "content/public/common/result_codes.h"
 #include "content/public/common/zygote/zygote_buildflags.h"
 #include "mojo/public/cpp/platform/platform_channel.h"
 #include "mojo/public/cpp/system/invitation.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "ppapi/buildflags/buildflags.h"
 
 #if !BUILDFLAG(IS_FUCHSIA)
 #include "mojo/public/cpp/platform/named_platform_channel.h"
@@ -32,6 +35,7 @@
 
 #if BUILDFLAG(IS_WIN)
 #include "base/win/windows_types.h"
+#include "content/public/common/prefetch_type_win.h"
 #include "sandbox/win/src/sandbox_types.h"
 #else
 #include "content/public/browser/posix_file_descriptor_info.h"
@@ -39,13 +43,19 @@
 
 #if BUILDFLAG(IS_MAC)
 #include "sandbox/mac/seatbelt_exec.h"
-#endif
+
+#if BUILDFLAG(ENABLE_PPAPI)
+#include <vector>
+
+#include "content/public/common/webplugininfo.h"
+#endif  // BUILDFLAG(ENABLE_PPAPI)
+#endif  // BUILDFLAG(IS_MAC)
 
 #if BUILDFLAG(IS_FUCHSIA)
 #include "sandbox/policy/fuchsia/sandbox_policy_fuchsia.h"
 #endif
 
-#if BUILDFLAG(USE_ZYGOTE_HANDLE)
+#if BUILDFLAG(USE_ZYGOTE)
 #include "content/public/common/zygote/zygote_handle.h"  // nogncheck
 #endif
 
@@ -58,8 +68,8 @@ namespace content {
 class ChildProcessLauncher;
 class SandboxedProcessLauncherDelegate;
 struct ChildProcessLauncherFileData;
-struct ChildProcessLauncherPriority;
 struct ChildProcessTerminationInfo;
+struct RenderProcessPriority;
 
 #if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
 class PosixFileDescriptorInfo;
@@ -83,16 +93,22 @@ class ChildProcessLauncherHelper
   // Abstraction around a process required to deal in a platform independent way
   // between Linux (which can use zygotes) and the other platforms.
   struct Process {
-    Process() {}
+    Process();
     Process(Process&& other);
-    ~Process() {}
+    ~Process();
     Process& operator=(Process&& other);
 
     base::Process process;
 
-#if BUILDFLAG(USE_ZYGOTE_HANDLE)
-    ZygoteHandle zygote = nullptr;
-#endif  // BUILDFLAG(USE_ZYGOTE_HANDLE)
+#if BUILDFLAG(USE_ZYGOTE)
+    raw_ptr<ZygoteCommunication> zygote = nullptr;
+#endif  // BUILDFLAG(USE_ZYGOTE)
+
+#if BUILDFLAG(IS_FUCHSIA)
+    // Store `sandbox_policy` within `Process` to ensure that the sandbox policy
+    // isn't removed before the process is terminated.
+    std::unique_ptr<sandbox::policy::SandboxPolicyFuchsia> sandbox_policy;
+#endif
   };
 
   ChildProcessLauncherHelper(
@@ -118,15 +134,26 @@ class ChildProcessLauncherHelper
 
 #if !BUILDFLAG(IS_FUCHSIA)
   // Called to give implementors a chance at creating a server pipe. Platform-
-  // specific. Returns |absl::nullopt| if the helper should initialize
+  // specific. Returns |std::nullopt| if the helper should initialize
   // a regular PlatformChannel for communication instead.
-  absl::optional<mojo::NamedPlatformChannel>
-  CreateNamedPlatformChannelOnClientThread();
+  std::optional<mojo::NamedPlatformChannel>
+  CreateNamedPlatformChannelOnLauncherThread();
 #endif
 
   // Returns the list of files that should be mapped in the child process.
   // Platform specific.
   std::unique_ptr<FileMappedForLaunch> GetFilesToMap();
+
+#if BUILDFLAG(IS_WIN)
+  // Returns the Prefetch string for the process type on the OS in use.
+  static std::string_view GetPrefetchSwitch(
+      const AppLaunchPrefetchType prefetch_type);
+#endif
+
+  // Returns true if the process will be launched using base::LaunchOptions.
+  // If false, all of the base::LaunchOptions* below will be nullptr.
+  // Platform specific.
+  bool IsUsingLaunchOptions();
 
   // Platform specific, returns success or failure. If failure is returned,
   // LaunchOnLauncherThread will not call LaunchProcessOnLauncherThread and
@@ -136,13 +163,16 @@ class ChildProcessLauncherHelper
                                     base::LaunchOptions* options);
 
   // Does the actual starting of the process.
-  // |is_synchronous_launch| is set to false if the starting of the process is
-  // asynchonous (this is the case on Android), in which case the returned
-  // Process is not valid (and PostLaunchOnLauncherThread() will provide the
-  // process once it is available).
-  // Platform specific.
+  // If IsUsingLaunchOptions() returned false, |options| will be null. In this
+  // case base::LaunchProcess() will not be used, but another platform
+  // specific mechanism for process launching, like Linux's zygote or
+  // Android's app zygote. |is_synchronous_launch| is set to false if the
+  // starting of the process is asynchronous (this is the case on Android), in
+  // which case the returned Process is not valid (and
+  // PostLaunchOnLauncherThread() will provide the process once it is
+  // available). Platform specific.
   ChildProcessLauncherHelper::Process LaunchProcessOnLauncherThread(
-      const base::LaunchOptions& options,
+      const base::LaunchOptions* options,
       std::unique_ptr<FileMappedForLaunch> files_to_register,
 #if BUILDFLAG(IS_ANDROID)
       bool is_pre_warmup_required,
@@ -155,7 +185,7 @@ class ChildProcessLauncherHelper
   // not yet be created. Platform specific.
   void AfterLaunchOnLauncherThread(
       const ChildProcessLauncherHelper::Process& process,
-      const base::LaunchOptions& options);
+      const base::LaunchOptions* options);
 
   // Called once the process has been created, successfully or not.
   void PostLaunchOnLauncherThread(ChildProcessLauncherHelper::Process process,
@@ -186,10 +216,6 @@ class ChildProcessLauncherHelper
   static void ForceNormalProcessTerminationAsync(
       ChildProcessLauncherHelper::Process process);
 
-  void SetProcessPriorityOnLauncherThread(
-      base::Process process,
-      const ChildProcessLauncherPriority& priority);
-
 #if BUILDFLAG(IS_ANDROID)
   void OnChildProcessStarted(JNIEnv* env, jint handle);
 
@@ -197,7 +223,14 @@ class ChildProcessLauncherHelper
 
   // Dumps the stack of the child process without crashing it.
   void DumpProcessStack(const base::Process& process);
-#endif  // BUILDFLAG(IS_ANDROID)
+
+  void SetRenderProcessPriorityOnLauncherThread(
+      base::Process process,
+      const RenderProcessPriority& priority);
+#else   // !BUILDFLAG(IS_ANDROID)
+  void SetProcessPriorityOnLauncherThread(base::Process process,
+                                          base::Process::Priority priority);
+#endif  // !BUILDFLAG(IS_ANDROID)
 
   std::string GetProcessType();
 
@@ -208,7 +241,15 @@ class ChildProcessLauncherHelper
 
   void LaunchOnLauncherThread();
 
-  base::CommandLine* command_line() { return command_line_.get(); }
+#if BUILDFLAG(USE_ZYGOTE)
+  // Returns the zygote handle for this particular launch, if any.
+  ZygoteCommunication* GetZygoteForLaunch();
+#endif  // BUILDFLAG(USE_ZYGOTE)
+
+  base::CommandLine* command_line() {
+    DCHECK(CurrentlyOnProcessLauncherTaskRunner());
+    return command_line_.get();
+  }
   int child_process_id() const { return child_process_id_; }
 
   static void ForceNormalProcessTerminationSync(
@@ -223,21 +264,28 @@ class ChildProcessLauncherHelper
   const int child_process_id_;
   const scoped_refptr<base::SequencedTaskRunner> client_task_runner_;
   base::TimeTicks begin_launch_time_;
+  // Accessed on launcher thread.
   std::unique_ptr<base::CommandLine> command_line_;
   std::unique_ptr<SandboxedProcessLauncherDelegate> delegate_;
   base::WeakPtr<ChildProcessLauncher> child_process_launcher_;
 
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+  // The priority of the process. The state is stored to avoid changing the
+  // setting repeatedly.
+  std::optional<base::Process::Priority> priority_;
+#endif
+
   // The PlatformChannel that will be used to transmit an invitation to the
   // child process in most cases. Only used if the platform's helper
   // implementation doesn't return a server endpoint from
-  // |CreateNamedPlatformChannelOnClientThread()|.
-  absl::optional<mojo::PlatformChannel> mojo_channel_;
+  // |CreateNamedPlatformChannelOnLauncherThread()|.
+  std::optional<mojo::PlatformChannel> mojo_channel_;
 
 #if !BUILDFLAG(IS_FUCHSIA)
   // May be used in exclusion to the above if the platform helper implementation
   // returns a valid server endpoint from
-  // |CreateNamedPlatformChannelOnClientThread()|.
-  absl::optional<mojo::NamedPlatformChannel> mojo_named_channel_;
+  // |CreateNamedPlatformChannelOnLauncherThread()|.
+  std::optional<mojo::NamedPlatformChannel> mojo_named_channel_;
 #endif
 
   bool terminate_on_shutdown_;
@@ -247,6 +295,11 @@ class ChildProcessLauncherHelper
 
 #if BUILDFLAG(IS_MAC)
   std::unique_ptr<sandbox::SeatbeltExecClient> seatbelt_exec_client_;
+  sandbox::mac::SandboxPolicy policy_;
+
+#if BUILDFLAG(ENABLE_PPAPI)
+  std::vector<content::WebPluginInfo> plugins_;
+#endif  // BUILDFLAG(ENABLE_PPAPI)
 #endif  // BUILDFLAG(IS_MAC)
 
 #if BUILDFLAG(IS_ANDROID)

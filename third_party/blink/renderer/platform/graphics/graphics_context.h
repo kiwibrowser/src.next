@@ -31,13 +31,14 @@
 #include <memory>
 
 #include "base/dcheck_is_on.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/raw_ref.h"
 #include "cc/paint/paint_flags.h"
 #include "third_party/blink/renderer/platform/fonts/font.h"
 #include "third_party/blink/renderer/platform/graphics/dark_mode_filter.h"
 #include "third_party/blink/renderer/platform/graphics/dark_mode_settings.h"
 #include "third_party/blink/renderer/platform/graphics/dash_array.h"
 #include "third_party/blink/renderer/platform/graphics/dom_node_id.h"
-#include "third_party/blink/renderer/platform/graphics/draw_looper_builder.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context_state.h"
 #include "third_party/blink/renderer/platform/graphics/image_orientation.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_filter.h"
@@ -48,7 +49,6 @@
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/skia/include/core/SkClipOp.h"
-#include "third_party/skia/include/core/SkRefCnt.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/geometry/skia_conversions.h"
 #include "ui/gfx/geometry/vector2d_f.h"
@@ -56,6 +56,10 @@
 class SkPath;
 class SkRRect;
 struct SkRect;
+
+namespace cc {
+class ColorFilter;
+}
 
 namespace paint_preview {
 class PaintPreviewTracker;
@@ -172,8 +176,8 @@ class PLATFORM_EXPORT GraphicsContext {
   GraphicsContext& operator=(const GraphicsContext&) = delete;
   ~GraphicsContext();
 
-  // Copy configs such as printing, dark mode, device scale factor etc. from
-  // another GraphicsContext.
+  // Copy configs such as printing, dark mode, etc. from another
+  // GraphicsContext.
   void CopyConfigFrom(GraphicsContext&);
 
   void SetPrintingMetafile(printing::MetafileSkia* metafile) {
@@ -187,9 +191,9 @@ class PLATFORM_EXPORT GraphicsContext {
   cc::PaintCanvas* Canvas() { return canvas_; }
   const cc::PaintCanvas* Canvas() const { return canvas_; }
 
-  PaintController& GetPaintController() { return paint_controller_; }
+  PaintController& GetPaintController() { return *paint_controller_; }
   const PaintController& GetPaintController() const {
-    return paint_controller_;
+    return *paint_controller_;
   }
 
   DarkModeFilter* GetDarkModeFilter();
@@ -254,29 +258,25 @@ class PLATFORM_EXPORT GraphicsContext {
     return ImmutableState()->GetInterpolationQuality();
   }
 
+  void SetDynamicRangeLimit(DynamicRangeLimit limit) {
+    MutableState()->SetDynamicRangeLimit(limit);
+  }
+  blink::DynamicRangeLimit DynamicRangeLimit() const {
+    return ImmutableState()->GetDynamicRangeLimit();
+  }
+
   SkSamplingOptions ImageSamplingOptions() const {
     return cc::PaintFlags::FilterQualityToSkSamplingOptions(
         static_cast<cc::PaintFlags::FilterQuality>(
             ImageInterpolationQuality()));
   }
 
-  // Specify the device scale factor which may change the way document markers
-  // and fonts are rendered.
-  void SetDeviceScaleFactor(float factor) { device_scale_factor_ = factor; }
-  float DeviceScaleFactor() const { return device_scale_factor_; }
-
   // Set to true if context is for printing. Bitmaps won't be resampled when
   // printing to keep the best possible quality. When printing text will be
   // provided along with glyphs.
   void SetPrinting(bool printing) { printing_ = printing; }
 
-  SkColorFilter* GetColorFilter() const;
-  void SetColorFilter(ColorFilter);
   // ---------- End state management methods -----------------
-
-  // DrawRect() fills and always strokes using a 1-pixel stroke inset from
-  // the rect borders (of the pre-set stroke color).
-  void DrawRect(const gfx::Rect&, const AutoDarkMode& auto_dark_mode);
 
   // DrawLine() only operates on horizontal or vertical lines and uses the
   // current stroke settings. For dotted or dashed stroke, the line need to be
@@ -330,12 +330,12 @@ class PLATFORM_EXPORT GraphicsContext {
                   float line_width,
                   const AutoDarkMode& auto_dark_mode);
 
-  void DrawRecord(sk_sp<const PaintRecord>);
-  void CompositeRecord(sk_sp<PaintRecord>,
+  void DrawRecord(PaintRecord);
+  void CompositeRecord(PaintRecord,
                        const gfx::RectF& dest,
                        const gfx::RectF& src,
                        SkBlendMode);
-  void DrawImage(Image*,
+  void DrawImage(Image&,
                  Image::ImageDecodingMode,
                  const ImageAutoDarkMode& auto_dark_mode,
                  const ImagePaintTimingInfo& paint_timing_info,
@@ -345,7 +345,7 @@ class PLATFORM_EXPORT GraphicsContext {
                  RespectImageOrientationEnum = kRespectImageOrientation,
                  Image::ImageClampingMode clamping_mode =
                      Image::ImageClampingMode::kClampImageToSourceRect);
-  void DrawImageRRect(Image*,
+  void DrawImageRRect(Image&,
                       Image::ImageDecodingMode,
                       const ImageAutoDarkMode& auto_dark_mode,
                       const ImagePaintTimingInfo& paint_timing_info,
@@ -355,7 +355,7 @@ class PLATFORM_EXPORT GraphicsContext {
                       RespectImageOrientationEnum = kRespectImageOrientation,
                       Image::ImageClampingMode clamping_mode =
                           Image::ImageClampingMode::kClampImageToSourceRect);
-  void DrawImageTiled(Image* image,
+  void DrawImageTiled(Image& image,
                       const gfx::RectF& dest_rect,
                       const ImageTilingInfo& tiling_info,
                       const ImageAutoDarkMode& auto_dark_mode,
@@ -400,29 +400,12 @@ class PLATFORM_EXPORT GraphicsContext {
                 SkClipOp = SkClipOp::kIntersect);
 
   void DrawText(const Font&,
-                const TextRunPaintInfo&,
+                const TextFragmentPaintInfo&,
                 const gfx::PointF&,
                 DOMNodeId,
                 const AutoDarkMode& auto_dark_mode);
   void DrawText(const Font&,
-                const NGTextFragmentPaintInfo&,
-                const gfx::PointF&,
-                DOMNodeId,
-                const AutoDarkMode& auto_dark_mode);
-
-  // TODO(layout-dev): This method is only used by SVGInlineTextBoxPainter, see
-  // if we can change that to use the four parameter version above.
-  void DrawText(const Font&,
-                const TextRunPaintInfo&,
-                const gfx::PointF&,
-                const cc::PaintFlags&,
-                DOMNodeId,
-                const AutoDarkMode& auto_dark_mode);
-
-  // TODO(layout-dev): This method is only used by NGTextPainter, see if the
-  // four parameter overload can be removed or if it can wrap this method.
-  void DrawText(const Font&,
-                const NGTextFragmentPaintInfo&,
+                const TextFragmentPaintInfo&,
                 const gfx::PointF&,
                 const cc::PaintFlags&,
                 DOMNodeId,
@@ -434,7 +417,7 @@ class PLATFORM_EXPORT GraphicsContext {
                          const gfx::PointF&,
                          const AutoDarkMode& auto_dark_mode);
   void DrawEmphasisMarks(const Font&,
-                         const NGTextFragmentPaintInfo&,
+                         const TextFragmentPaintInfo&,
                          const AtomicString& mark,
                          const gfx::PointF&,
                          const AutoDarkMode& auto_dark_mode);
@@ -445,39 +428,30 @@ class PLATFORM_EXPORT GraphicsContext {
       const gfx::PointF&,
       const AutoDarkMode& auto_dark_mode,
       Font::CustomFontNotReadyAction = Font::kDoNotPaintIfFontNotReady);
-  void DrawHighlightForText(const Font&,
-                            const TextRun&,
-                            const gfx::PointF&,
-                            int h,
-                            const Color& background_color,
-                            const AutoDarkMode& auto_dark_mode,
-                            int from = 0,
-                            int to = -1);
 
   void DrawLineForText(const gfx::PointF&,
                        float width,
                        const AutoDarkMode& auto_dark_mode,
                        const cc::PaintFlags* flags = nullptr);
 
-  // beginLayer()/endLayer() behave like save()/restore() for CTM and clip
-  // states. Apply SkBlendMode when the layer is composited on the backdrop
-  // (i.e. endLayer()).
-  void BeginLayer(float opacity = 1.0f,
-                  SkBlendMode = SkBlendMode::kSrcOver,
-                  const gfx::RectF* = nullptr,
-                  ColorFilter = kColorFilterNone,
-                  sk_sp<PaintFilter> = nullptr);
+  // BeginLayer()/EndLayer() behave like Save()/Restore() for CTM and clip
+  // states. Apply opacity, blend mode, filter when the layer is composited on
+  // the backdrop (i.e. EndLayer()).
+  void BeginLayer(float opacity = 1.0f);
+  void BeginLayer(SkBlendMode);
+  void BeginLayer(sk_sp<cc::ColorFilter>, const SkBlendMode* = nullptr);
+  void BeginLayer(sk_sp<PaintFilter>);
   void EndLayer();
 
   // Instead of being dispatched to the active canvas, draw commands following
   // beginRecording() are stored in a display list that can be replayed at a
-  // later time. Pass in the bounding rectangle for the content in the list.
-  void BeginRecording(const gfx::RectF&);
+  // later time.
+  void BeginRecording();
 
   // Returns a record with any recorded draw commands since the prerequisite
   // call to beginRecording().  The record is guaranteed to be non-null (but
   // not necessarily non-empty), even when the context is disabled.
-  sk_sp<PaintRecord> EndRecording();
+  PaintRecord EndRecording();
 
   void SetDrawLooper(sk_sp<SkDrawLooper>);
 
@@ -512,11 +486,11 @@ class PLATFORM_EXPORT GraphicsContext {
   // ---------- End transformation methods -----------------
 
   cc::PaintFlags::FilterQuality ComputeFilterQuality(
-      Image*,
+      Image&,
       const gfx::RectF& dest,
       const gfx::RectF& src) const;
 
-  SkSamplingOptions ComputeSamplingOptions(Image* image,
+  SkSamplingOptions ComputeSamplingOptions(Image& image,
                                            const gfx::RectF& dest,
                                            const gfx::RectF& src) const {
     return cc::PaintFlags::FilterQualityToSkSamplingOptions(
@@ -555,8 +529,6 @@ class PLATFORM_EXPORT GraphicsContext {
   DOMNodeId GetDOMNodeId() const;
   bool NeedsDOMNodeId() const { return printing_; }
 
-  static sk_sp<SkColorFilter> WebCoreColorFilterToSkiaColorFilter(ColorFilter);
-
  private:
   const GraphicsContextState* ImmutableState() const { return paint_state_; }
 
@@ -566,13 +538,6 @@ class PLATFORM_EXPORT GraphicsContext {
   }
 
   template <typename TextPaintInfo>
-  void DrawTextInternal(const Font&,
-                        const TextPaintInfo&,
-                        const gfx::PointF&,
-                        DOMNodeId,
-                        const AutoDarkMode& auto_dark_mode);
-
-  template <typename TextPaintInfo>
   void DrawEmphasisMarksInternal(const Font&,
                                  const TextPaintInfo&,
                                  const AtomicString& mark,
@@ -580,16 +545,15 @@ class PLATFORM_EXPORT GraphicsContext {
                                  const AutoDarkMode& auto_dark_mode);
 
   template <typename DrawTextFunc>
-  void DrawTextPasses(const AutoDarkMode& auto_dark_mode, const DrawTextFunc&);
+  void DrawTextPasses(const DrawTextFunc&);
 
-  void SaveLayer(const SkRect* bounds, const cc::PaintFlags*);
-  void RestoreLayer();
+  void BeginLayer(const cc::PaintFlags&);
 
   // SkCanvas wrappers.
   void ClipRRect(const SkRRect&,
                  AntiAliasingMode = kNotAntiAliased,
                  SkClipOp = SkClipOp::kIntersect);
-  void Concat(const SkMatrix&);
+  void Concat(const SkM44&);
 
   // Apply deferred paint state saves
   void RealizePaintSave() {
@@ -613,12 +577,12 @@ class PLATFORM_EXPORT GraphicsContext {
   // This is owned by paint_recorder_. Never delete this object.
   // Drawing operations are allowed only after the first BeginRecording() which
   // initializes this to not null.
-  cc::PaintCanvas* canvas_ = nullptr;
+  raw_ptr<cc::PaintCanvas, ExperimentalRenderer> canvas_ = nullptr;
 
-  PaintController& paint_controller_;
+  const raw_ref<PaintController, DanglingUntriaged> paint_controller_;
 
   // Paint states stack. The state controls the appearance of drawn content, so
-  // this stack enables local drawing state changes with save()/restore() calls.
+  // this stack enables local drawing state changes with Save()/Restore() calls.
   // We do not delete from this stack to avoid memory churn.
   Vector<std::unique_ptr<GraphicsContextState>> paint_state_stack_;
 
@@ -626,19 +590,19 @@ class PLATFORM_EXPORT GraphicsContext {
   wtf_size_t paint_state_index_ = 0;
 
   // Raw pointer to the current state.
-  GraphicsContextState* paint_state_ = nullptr;
+  raw_ptr<GraphicsContextState, ExperimentalRenderer> paint_state_ = nullptr;
 
   PaintRecorder paint_recorder_;
 
-  printing::MetafileSkia* printing_metafile_ = nullptr;
-  paint_preview::PaintPreviewTracker* paint_preview_tracker_ = nullptr;
+  raw_ptr<printing::MetafileSkia, DanglingUntriaged> printing_metafile_ =
+      nullptr;
+  raw_ptr<paint_preview::PaintPreviewTracker, DanglingUntriaged>
+      paint_preview_tracker_ = nullptr;
 
 #if DCHECK_IS_ON()
   int layer_count_ = 0;
   bool disable_destruction_checks_ = false;
 #endif
-
-  float device_scale_factor_ = 1.0f;
 
   std::unique_ptr<DarkModeFilter> dark_mode_filter_;
 

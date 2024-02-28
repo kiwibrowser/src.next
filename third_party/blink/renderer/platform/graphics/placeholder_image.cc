@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -86,14 +86,17 @@ void DrawCenteredIcon(cc::PaintCanvas* canvas,
 
 FontDescription CreatePlaceholderFontDescription(float scale_factor) {
   FontDescription description;
-  description.FirstFamily().SetFamily("Roboto", FontFamily::Type::kFamilyName);
+  description.FirstFamily().SetFamily(font_family_names::kRoboto,
+                                      FontFamily::Type::kFamilyName);
 
   scoped_refptr<SharedFontFamily> helvetica_neue = SharedFontFamily::Create();
-  helvetica_neue->SetFamily("Helvetica Neue", FontFamily::Type::kFamilyName);
+  helvetica_neue->SetFamily(font_family_names::kHelveticaNeue,
+                            FontFamily::Type::kFamilyName);
   scoped_refptr<SharedFontFamily> helvetica = SharedFontFamily::Create();
-  helvetica->SetFamily("Helvetica", FontFamily::Type::kFamilyName);
+  helvetica->SetFamily(font_family_names::kHelvetica,
+                       FontFamily::Type::kFamilyName);
   scoped_refptr<SharedFontFamily> arial = SharedFontFamily::Create();
-  arial->SetFamily("Arial", FontFamily::Type::kFamilyName);
+  arial->SetFamily(font_family_names::kArial, FontFamily::Type::kFamilyName);
 
   helvetica->AppendFamily(std::move(arial));
   helvetica_neue->AppendFamily(std::move(helvetica));
@@ -157,36 +160,25 @@ String FormatOriginalResourceSizeBytes(int64_t bytes) {
                             locale.ConvertToLocalizedNumber(numeric_string));
 }
 
-}  // namespace
-
-// A simple RefCounted wrapper around a Font, so that multiple PlaceholderImages
-// can share the same Font.
-class PlaceholderImage::SharedFont : public RefCounted<SharedFont> {
+// A simple wrapper around a Font, so that multiple PlaceholderImages can share
+// the same Font.
+class SharedFont : public GarbageCollected<SharedFont> {
  public:
-  static scoped_refptr<SharedFont> GetOrCreateInstance(float scale_factor) {
-    if (g_instance_) {
-      scoped_refptr<SharedFont> shared_font(g_instance_);
-      shared_font->MaybeUpdateForScaleFactor(scale_factor);
-      return shared_font;
-    }
+  SharedFont()
+      : font_(CreatePlaceholderFontDescription(1.f)), scale_factor_(1.f) {}
 
-    scoped_refptr<SharedFont> shared_font =
-        base::MakeRefCounted<SharedFont>(scale_factor);
-    g_instance_ = shared_font.get();
-    return shared_font;
+  void Trace(Visitor* visitor) const { visitor->Trace(font_); }
+
+  static SharedFont* Get(float scale_factor) {
+    DEFINE_STATIC_LOCAL(Persistent<SharedFont>, shared_font,
+                        (MakeGarbageCollected<SharedFont>()));
+    shared_font->MaybeUpdateForScaleFactor(scale_factor);
+    return shared_font.Get();
   }
 
-  // This constructor is public so that base::MakeRefCounted() can call it.
-  explicit SharedFont(float scale_factor)
-      : font_(CreatePlaceholderFontDescription(scale_factor)),
-        scale_factor_(scale_factor) {
-  }
+  const Font& font() const { return font_; }
 
-  ~SharedFont() {
-    DCHECK_EQ(this, g_instance_);
-    g_instance_ = nullptr;
-  }
-
+ private:
   void MaybeUpdateForScaleFactor(float scale_factor) {
     if (scale_factor_ == scale_factor)
       return;
@@ -195,18 +187,11 @@ class PlaceholderImage::SharedFont : public RefCounted<SharedFont> {
     font_ = Font(CreatePlaceholderFontDescription(scale_factor_));
   }
 
-  const Font& font() const { return font_; }
-
- private:
-  static SharedFont* g_instance_;
-
   Font font_;
   float scale_factor_;
 };
 
-// static
-PlaceholderImage::SharedFont* PlaceholderImage::SharedFont::g_instance_ =
-    nullptr;
+}  // namespace
 
 PlaceholderImage::PlaceholderImage(ImageObserver* observer,
                                    const gfx::Size& size,
@@ -239,25 +224,24 @@ bool PlaceholderImage::CurrentFrameKnownToBeOpaque() {
 
 PaintImage PlaceholderImage::PaintImageForCurrentFrame() {
   auto builder = CreatePaintImageBuilder().set_completion_state(
-      PaintImage::CompletionState::DONE);
+      PaintImage::CompletionState::kDone);
 
   const gfx::Rect dest_rect(size_);
   if (paint_record_for_current_frame_) {
     return builder
-        .set_paint_record(paint_record_for_current_frame_, dest_rect,
+        .set_paint_record(*paint_record_for_current_frame_, dest_rect,
                           paint_record_content_id_)
         .TakePaintImage();
   }
 
   PaintRecorder paint_recorder;
-  Draw(paint_recorder.beginRecording(gfx::RectToSkRect(dest_rect)),
-       cc::PaintFlags(), gfx::RectF(dest_rect), gfx::RectF(dest_rect),
-       ImageDrawOptions());
+  Draw(paint_recorder.beginRecording(), cc::PaintFlags(), gfx::RectF(dest_rect),
+       gfx::RectF(dest_rect), ImageDrawOptions());
 
   paint_record_for_current_frame_ = paint_recorder.finishRecordingAsPicture();
   paint_record_content_id_ = PaintImage::GetNextContentId();
   return builder
-      .set_paint_record(paint_record_for_current_frame_, dest_rect,
+      .set_paint_record(*paint_record_for_current_frame_, dest_rect,
                         paint_record_content_id_)
       .TakePaintImage();
 }
@@ -268,7 +252,7 @@ void PlaceholderImage::SetIconAndTextScaleFactor(
     return;
   icon_and_text_scale_factor_ = icon_and_text_scale_factor;
   cached_text_width_.reset();
-  paint_record_for_current_frame_.reset();
+  paint_record_for_current_frame_ = absl::nullopt;
 }
 
 void PlaceholderImage::Draw(cc::PaintCanvas* canvas,
@@ -294,20 +278,17 @@ void PlaceholderImage::Draw(cc::PaintCanvas* canvas,
     return;
   }
 
-  if (text_.IsEmpty()) {
+  if (text_.empty()) {
     DrawCenteredIcon(canvas, base_flags, dest_rect,
                      draw_options.sampling_options,
                      icon_and_text_scale_factor_);
     return;
   }
 
-  if (!shared_font_)
-    shared_font_ = SharedFont::GetOrCreateInstance(icon_and_text_scale_factor_);
-  else
-    shared_font_->MaybeUpdateForScaleFactor(icon_and_text_scale_factor_);
+  SharedFont* shared_font = SharedFont::Get(icon_and_text_scale_factor_);
 
   if (!cached_text_width_.has_value())
-    cached_text_width_ = shared_font_->font().Width(TextRun(text_));
+    cached_text_width_ = shared_font->font().Width(TextRun(text_));
 
   const float icon_and_text_width =
       cached_text_width_.value() +
@@ -347,11 +328,11 @@ void PlaceholderImage::Draw(cc::PaintCanvas* canvas,
            draw_options.sampling_options, icon_and_text_scale_factor_);
 
   flags.setColor(SkColorSetARGB(0xAB, 0, 0, 0));
-  shared_font_->font().DrawBidiText(
+  shared_font->font().DrawBidiText(
       canvas, TextRunPaintInfo(TextRun(text_)),
       gfx::PointF(text_x, feature_y + icon_and_text_scale_factor_ *
                                           (kTextPaddingY + kFontSize)),
-      Font::kUseFallbackIfFontNotReady, 1.0f, flags);
+      Font::kUseFallbackIfFontNotReady, flags);
 }
 
 void PlaceholderImage::DrawPattern(GraphicsContext& context,
@@ -369,7 +350,6 @@ void PlaceholderImage::DrawPattern(GraphicsContext& context,
 
 void PlaceholderImage::DestroyDecodedData() {
   paint_record_for_current_frame_.reset();
-  shared_font_ = scoped_refptr<SharedFont>();
 }
 
 Image::SizeAvailability PlaceholderImage::SetData(scoped_refptr<SharedBuffer>,
@@ -377,8 +357,8 @@ Image::SizeAvailability PlaceholderImage::SetData(scoped_refptr<SharedBuffer>,
   return Image::kSizeAvailable;
 }
 
-const Font* PlaceholderImage::GetFontForTesting() const {
-  return shared_font_ ? &shared_font_->font() : nullptr;
+const Font& PlaceholderImage::GetFontForTesting() const {
+  return SharedFont::Get(icon_and_text_scale_factor_)->font();
 }
 
 }  // namespace blink

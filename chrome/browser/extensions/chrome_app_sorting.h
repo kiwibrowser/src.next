@@ -15,15 +15,17 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
-#include "chrome/browser/web_applications/app_registrar_observer.h"
-#include "chrome/browser/web_applications/web_app_id.h"
 #include "chrome/browser/web_applications/web_app_install_manager.h"
 #include "chrome/browser/web_applications/web_app_install_manager_observer.h"
 #include "chrome/browser/web_applications/web_app_registrar.h"
+#include "chrome/browser/web_applications/web_app_registrar_observer.h"
 #include "chrome/browser/web_applications/web_app_sync_bridge.h"
 #include "components/sync/model/string_ordinal.h"
+#include "components/webapps/common/web_app_id.h"
 #include "extensions/browser/app_sorting.h"
 #include "extensions/browser/extension_prefs.h"
+#include "extensions/browser/extension_registry.h"
+#include "extensions/browser/extension_registry_observer.h"
 #include "extensions/common/extension_id.h"
 
 namespace web_app {
@@ -34,7 +36,8 @@ class WebAppRegistrar;
 namespace extensions {
 
 class ChromeAppSorting : public AppSorting,
-                         public web_app::AppRegistrarObserver,
+                         public ExtensionRegistryObserver,
+                         public web_app::WebAppRegistrarObserver,
                          public web_app::WebAppInstallManagerObserver {
  public:
   explicit ChromeAppSorting(content::BrowserContext* browser_context);
@@ -79,10 +82,10 @@ class ChromeAppSorting : public AppSorting,
                            bool visible) override;
 
   // web_app::WebAppInstallManagerObserver:
-  void OnWebAppInstalled(const web_app::AppId& app_id) override;
+  void OnWebAppInstalled(const webapps::AppId& app_id) override;
   void OnWebAppInstallManagerDestroyed() override;
 
-  // web_app::AppRegistrarObserver:
+  // web_app::WebAppRegistrarObserver:
   void OnWebAppsWillBeUpdatedFromSync(
       const std::vector<const web_app::WebApp*>& updated_apps_state) override;
   void OnAppRegistrarDestroyed() override;
@@ -120,7 +123,7 @@ class ChromeAppSorting : public AppSorting,
     syncer::StringOrdinal page_ordinal;
     syncer::StringOrdinal app_launch_ordinal;
   };
-  typedef std::map<std::string, AppOrdinals> AppOrdinalsMap;
+  using AppOrdinalsMap = std::map<std::string, AppOrdinals>;
 
   // This function returns the lowest ordinal on |page_ordinal| if
   // |return_value| == AppLaunchOrdinalReturn::MIN_ORDINAL, otherwise it returns
@@ -137,8 +140,7 @@ class ChromeAppSorting : public AppSorting,
       const std::vector<std::string>& extension_or_app_ids);
 
   // Migrates the app launcher and page index values.
-  void MigrateAppIndex(
-      const extensions::ExtensionIdList& extension_ids);
+  void MigrateAppIndex(const ExtensionIdList& extension_ids);
 
   // Called to add a new mapping value for |extension_id| with a page ordinal
   // of |page_ordinal| and a app launch ordinal of |app_launch_ordinal|. This
@@ -175,11 +177,18 @@ class ChromeAppSorting : public AppSorting,
   // Returns the number of items in |m| visible on the new tab page.
   size_t CountItemsVisibleOnNtp(const AppLaunchOrdinalMap& m) const;
 
-  const raw_ptr<content::BrowserContext> browser_context_ = nullptr;
-  raw_ptr<const web_app::WebAppRegistrar> web_app_registrar_ = nullptr;
-  raw_ptr<web_app::WebAppSyncBridge> web_app_sync_bridge_ = nullptr;
+  // ExtensionRegistryObserver:
+  void OnExtensionLoaded(content::BrowserContext* browser_context,
+                         const Extension* extension) override;
+
+  const raw_ptr<content::BrowserContext, DanglingUntriaged> browser_context_ =
+      nullptr;
+  raw_ptr<const web_app::WebAppRegistrar, AcrossTasksDanglingUntriaged>
+      web_app_registrar_ = nullptr;
+  raw_ptr<web_app::WebAppSyncBridge, AcrossTasksDanglingUntriaged>
+      web_app_sync_bridge_ = nullptr;
   base::ScopedObservation<web_app::WebAppRegistrar,
-                          web_app::AppRegistrarObserver>
+                          web_app::WebAppRegistrarObserver>
       app_registrar_observation_{this};
   base::ScopedObservation<web_app::WebAppInstallManager,
                           web_app::WebAppInstallManagerObserver>
@@ -203,6 +212,12 @@ class ChromeAppSorting : public AppSorting,
 
   // The set of extensions that don't appear in the new tab page.
   std::set<std::string> ntp_hidden_extensions_;
+
+  // Observe the ExtensionRegistry. The registry is guaranteed to outlive this
+  // object, since this is owned by the ExtensionSystem, which depends on the
+  // ExtensionRegistry.
+  base::ScopedObservation<ExtensionRegistry, ExtensionRegistryObserver>
+      registry_observation_{this};
 
   base::WeakPtrFactory<ChromeAppSorting> weak_factory_{this};
 };

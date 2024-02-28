@@ -4,16 +4,17 @@
 
 #include "base/command_line.h"
 #include "base/feature_list.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_timeouts.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/devtools/protocol/devtools_protocol_test_support.h"
 #include "chrome/browser/extensions/chrome_test_extension_loader.h"
 #include "chrome/browser/login_detection/login_detection_util.h"
@@ -47,7 +48,6 @@
 #include "content/public/browser/download_manager_delegate.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/reload_type.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
@@ -139,7 +139,7 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest, TestViewFrameSource) {
       browser()->tab_strip_model()->GetActiveWebContents();
 
   content::TestNavigationObserver observer(web_contents);
-  ASSERT_TRUE(content::ExecuteScript(
+  ASSERT_TRUE(content::ExecJs(
       web_contents->GetPrimaryMainFrame(),
       base::StringPrintf("var iframe = document.getElementById('test');\n"
                          "iframe.setAttribute('src', '%s');\n",
@@ -188,16 +188,15 @@ class CtrlClickProcessTest : public ChromeNavigationBrowserTest {
     content::WebContents* new_contents = nullptr;
     {
       content::WebContentsAddedObserver new_tab_observer;
+      static constexpr char kNewTabClickScriptTemplate[] =
 #if BUILDFLAG(IS_MAC)
-      const char* new_tab_click_script_template =
           "simulateClick(\"%s\", { metaKey: true });";
 #else
-      const char* new_tab_click_script_template =
           "simulateClick(\"%s\", { ctrlKey: true });";
 #endif
-      std::string new_tab_click_script = base::StringPrintf(
-          new_tab_click_script_template, id_of_anchor_to_click);
-      EXPECT_TRUE(ExecuteScript(main_contents, new_tab_click_script));
+      std::string new_tab_click_script =
+          base::StringPrintf(kNewTabClickScriptTemplate, id_of_anchor_to_click);
+      EXPECT_TRUE(ExecJs(main_contents, new_tab_click_script));
 
       // Wait for a new tab to appear (the whole point of this test).
       new_contents = new_tab_observer.GetWebContents();
@@ -217,18 +216,10 @@ class CtrlClickProcessTest : public ChromeNavigationBrowserTest {
     {
       // Double-check that main_contents has expected window.name set.
       // This is a sanity check of test setup; this is not a product test.
-      std::string name_of_main_contents_window;
-      EXPECT_TRUE(ExecuteScriptAndExtractString(
-          main_contents, "window.domAutomationController.send(window.name)",
-          &name_of_main_contents_window));
-      EXPECT_EQ("main_contents", name_of_main_contents_window);
+      EXPECT_EQ("main_contents", EvalJs(main_contents, "window.name"));
 
       // Verify that the new contents doesn't have a window.opener set.
-      bool window_opener_cast_to_bool = true;
-      EXPECT_TRUE(ExecuteScriptAndExtractBool(
-          new_contents, "window.domAutomationController.send(!!window.opener)",
-          &window_opener_cast_to_bool));
-      EXPECT_FALSE(window_opener_cast_to_bool);
+      EXPECT_EQ(false, EvalJs(new_contents, "!!window.opener"));
 
       VerifyBrowsingInstanceExpectations(main_contents, new_contents);
     }
@@ -269,13 +260,10 @@ class CtrlClickProcessTest : public ChromeNavigationBrowserTest {
     // Verify that the new contents cannot find the old contents via
     // window.open. (i.e. window.open should open a new window, rather than
     // returning a reference to main_contents / old window).
-    std::string location_of_opened_window;
-    EXPECT_TRUE(ExecuteScriptAndExtractString(
-        new_contents,
-        "w = window.open('', 'main_contents');"
-        "window.domAutomationController.send(w.location.href);",
-        &location_of_opened_window));
-    EXPECT_EQ(url::kAboutBlankURL, location_of_opened_window);
+    EXPECT_EQ(url::kAboutBlankURL,
+              EvalJs(new_contents,
+                     "w = window.open('', 'main_contents');"
+                     "w.location.href;"));
   }
 };
 
@@ -286,10 +274,15 @@ class CtrlClickShouldEndUpInNewProcessTest : public CtrlClickProcessTest {
  protected:
   void VerifyProcessExpectations(content::WebContents* main_contents,
                                  content::WebContents* new_contents) override {
-    // Verify that the two WebContents are in a different process, SiteInstance
-    // and BrowsingInstance from the old contents.
-    EXPECT_NE(main_contents->GetPrimaryMainFrame()->GetProcess(),
-              new_contents->GetPrimaryMainFrame()->GetProcess());
+    // The two WebContents should not share the same process unless process
+    // sharing is explicitly allowed by a process-per-site feature.
+    if (!base::FeatureList::IsEnabled(
+            features::kProcessPerSiteUpToMainFrameThreshold)) {
+      EXPECT_NE(main_contents->GetPrimaryMainFrame()->GetProcess(),
+                new_contents->GetPrimaryMainFrame()->GetProcess());
+    }
+    // The new WebContents should always have a different SiteInstance and
+    // BrowsingInstance from the old contents.
     EXPECT_NE(main_contents->GetPrimaryMainFrame()->GetSiteInstance(),
               new_contents->GetPrimaryMainFrame()->GetSiteInstance());
     EXPECT_FALSE(main_contents->GetSiteInstance()->IsRelatedSiteInstance(
@@ -386,13 +379,8 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
   content::NavigationController& navigation_controller =
       new_web_contents->GetController();
   WaitForLoadStop(new_web_contents);
-  if (blink::features::IsInitialNavigationEntryEnabled()) {
-    EXPECT_TRUE(
-        navigation_controller.GetLastCommittedEntry()->IsInitialEntry());
-    EXPECT_EQ(1, navigation_controller.GetEntryCount());
-  } else {
-    EXPECT_EQ(0, navigation_controller.GetEntryCount());
-  }
+  EXPECT_TRUE(navigation_controller.GetLastCommittedEntry()->IsInitialEntry());
+  EXPECT_EQ(1, navigation_controller.GetEntryCount());
   EXPECT_NE(new_tab_url, new_web_contents->GetLastCommittedURL());
 
   // Verify that the pending entry is still present, even though the navigation
@@ -407,7 +395,7 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
   // WebContentsImpl::DidAccessInitialDocument detects that the initial, empty
   // document was accessed.
   EXPECT_EQ(pending_entry, navigation_controller.GetVisibleEntry());
-  EXPECT_TRUE(content::ExecuteScript(new_web_contents, "window.x=3"));
+  EXPECT_TRUE(content::ExecJs(new_web_contents, "window.x=3"));
   EXPECT_NE(pending_entry, navigation_controller.GetVisibleEntry());
 }
 
@@ -443,25 +431,21 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
         anchor.target = 'target_name: ' + url;
         anchor.href = url;
     )";
-    EXPECT_TRUE(ExecuteScript(
-        main_contents, content::JsReplace(kUrlSettingTemplate, kTestUrl)));
+    EXPECT_TRUE(ExecJs(main_contents,
+                       content::JsReplace(kUrlSettingTemplate, kTestUrl)));
 
     // Simulate a click on the link and wait for the new window.
     content::WebContentsAddedObserver new_tab_observer;
-    EXPECT_TRUE(ExecuteScript(main_contents, "simulateClick()"));
+    EXPECT_TRUE(ExecJs(main_contents, "simulateClick()"));
     content::WebContents* new_contents = new_tab_observer.GetWebContents();
 
     // Verify that the invalid URL was not committed.
     content::NavigationController& navigation_controller =
         new_contents->GetController();
     WaitForLoadStop(new_contents);
-    if (blink::features::IsInitialNavigationEntryEnabled()) {
-      EXPECT_TRUE(
-          navigation_controller.GetLastCommittedEntry()->IsInitialEntry());
-      EXPECT_EQ(1, navigation_controller.GetEntryCount());
-    } else {
-      EXPECT_EQ(0, navigation_controller.GetEntryCount());
-    }
+    EXPECT_TRUE(
+        navigation_controller.GetLastCommittedEntry()->IsInitialEntry());
+    EXPECT_EQ(1, navigation_controller.GetEntryCount());
     EXPECT_NE(test_url, new_contents->GetLastCommittedURL());
 
     // Ensure that the omnibox doesn't start with javascript: scheme.
@@ -506,7 +490,7 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
                                                               kPushStateURL);
   std::string push_state =
       "history.pushState({}, \"title 1\", \"" + kPushStateURL.spec() + "\");";
-  EXPECT_TRUE(ExecuteScript(web_contents, push_state));
+  EXPECT_TRUE(ExecJs(web_contents, push_state));
   content::NavigationEntry* last_committed =
       web_contents->GetController().GetLastCommittedEntry();
   EXPECT_TRUE(last_committed);
@@ -517,7 +501,7 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
   EXPECT_TRUE(push_state_observer.was_renderer_initiated());
 
   // Let the navigation finish. It should commit successfully.
-  manager.WaitForNavigationFinished();
+  ASSERT_TRUE(manager.WaitForNavigationFinished());
   last_committed = web_contents->GetController().GetLastCommittedEntry();
   EXPECT_TRUE(last_committed);
   EXPECT_EQ(kURL2, last_committed->GetURL());
@@ -548,22 +532,22 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
 
   // The error page should not inherit the CSP directive that blocks all
   // scripts from the parent frame, so this script should be allowed to
-  // execute.  Since ExecuteScript will execute the passed-in script regardless
+  // execute.  Since ExecJs will execute the passed-in script regardless
   // of CSP, use a javascript: URL which does go through the CSP checks.
   content::RenderFrameHost* error_host =
       ChildFrameAt(web_contents->GetPrimaryMainFrame(), 0);
-  std::string location;
-  EXPECT_TRUE(ExecuteScriptAndExtractString(
-      error_host,
-      "location='javascript:domAutomationController.send(location.href)';",
-      &location));
-  EXPECT_EQ(location, content::kUnreachableWebDataURL);
+  EXPECT_EQ(EvalJs(error_host,
+                   R"(
+                    var resolve;
+                    new Promise((res) => {
+                      resolve = res;
+                      location = 'javascript:resolve(location.href)';
+                    });
+        )"),
+            content::kUnreachableWebDataURL);
 
   // The error page should have a unique origin.
-  std::string origin;
-  EXPECT_TRUE(ExecuteScriptAndExtractString(
-      error_host, "domAutomationController.send(self.origin);", &origin));
-  EXPECT_EQ("null", origin);
+  EXPECT_EQ("null", EvalJs(error_host, "self.origin;"));
 }
 
 // Test that web pages can't navigate to an error page URL, either directly or
@@ -579,16 +563,18 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
   // Try navigating to the error page URL and make sure it is canceled and the
   // old URL remains the last committed one.
   GURL error_url(content::kUnreachableWebDataURL);
-  EXPECT_TRUE(ExecuteScript(web_contents,
-                            "location.href = '" + error_url.spec() + "';"));
+  EXPECT_TRUE(
+      ExecJs(web_contents, "location.href = '" + error_url.spec() + "';"));
   EXPECT_TRUE(content::WaitForLoadStop(web_contents));
   EXPECT_EQ(url, web_contents->GetLastCommittedURL());
 
   // Also ensure that a page can't embed an iframe for an error page URL.
-  EXPECT_TRUE(ExecuteScript(web_contents,
-                            "var frame = document.createElement('iframe');\n"
-                            "frame.src = '" + error_url.spec() + "';\n"
-                            "document.body.appendChild(frame);"));
+  EXPECT_TRUE(ExecJs(web_contents,
+                     "var frame = document.createElement('iframe');\n"
+                     "frame.src = '" +
+                         error_url.spec() +
+                         "';\n"
+                         "document.body.appendChild(frame);"));
   EXPECT_TRUE(content::WaitForLoadStop(web_contents));
   content::RenderFrameHost* subframe_host =
       ChildFrameAt(web_contents->GetPrimaryMainFrame(), 0);
@@ -601,7 +587,7 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
   GURL redirect_to_error_url(
       embedded_test_server()->GetURL("/server-redirect?" + error_url.spec()));
   content::TestNavigationObserver observer(web_contents);
-  EXPECT_TRUE(ExecuteScript(
+  EXPECT_TRUE(ExecJs(
       web_contents, "location.href = '" + redirect_to_error_url.spec() + "';"));
   observer.Wait();
   EXPECT_EQ(url, web_contents->GetLastCommittedURL());
@@ -625,8 +611,7 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
   // loading of the 404 error page, so check that the last committed entry was
   // indeed for the error page.
   content::TestNavigationObserver observer(web_contents);
-  EXPECT_TRUE(
-      ExecuteScript(web_contents, "location.href = '" + url.spec() + "';"));
+  EXPECT_TRUE(ExecJs(web_contents, "location.href = '" + url.spec() + "';"));
   observer.Wait();
   EXPECT_FALSE(observer.last_navigation_succeeded());
   EXPECT_EQ(url, web_contents->GetLastCommittedURL());
@@ -637,16 +622,13 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
   // the error page content to be populated asynchronously by scripts after
   // DidFinishLoad.
   while (true) {
-    std::string content;
-    EXPECT_TRUE(ExecuteScriptAndExtractString(
-        web_contents,
-        "domAutomationController.send("
-        "    document.body ? document.body.innerText : '');",
-        &content));
+    std::string content =
+        EvalJs(web_contents, "document.body ? document.body.innerText : '';")
+            .ExtractString();
     if (content.find("HTTP ERROR 404") != std::string::npos)
       break;
     base::RunLoop run_loop;
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE, run_loop.QuitClosure(), TestTimeouts::tiny_timeout());
     run_loop.Run();
   }
@@ -708,7 +690,7 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
   url_interceptor.reset();
   {
     content::TestNavigationObserver observer(web_contents);
-    EXPECT_TRUE(ExecuteScript(web_contents, "location.reload();"));
+    EXPECT_TRUE(ExecJs(web_contents, "location.reload();"));
     observer.Wait();
     EXPECT_TRUE(observer.last_navigation_succeeded());
     EXPECT_EQ(GURL(url::kAboutBlankURL), observer.last_navigation_url());
@@ -716,6 +698,27 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
         GURL(content::kUnreachableWebDataURL),
         web_contents->GetPrimaryMainFrame()->GetSiteInstance()->GetSiteURL());
   }
+
+  // In the above setup, the reload was carried out with the error page being
+  // the initiator of the navigation.  The error page's origin is opaque with
+  // a.com as the precursor, so this becomes the initiator origin for the
+  // reload to about:blank.  This means that about:blank ought to load in a
+  // SiteInstance and process corresponding to a.com.
+  //
+  // This covers an interesting and rare corner case, where an about:blank
+  // navigation can't use the source SiteInstance, which would normally keep
+  // it in the initiator's process and SiteInstance.  This is because the
+  // reload originates from an error page process, which is incompatible with a
+  // non-error navigation to about:blank.  In this case, the final SiteInstance
+  // and process selection should still honor the initiator, rather than end up
+  // in an unlocked process and an unassigned SiteInstance.  See
+  // https://crbug.com/1426928.
+  EXPECT_EQ(
+      "http://a.com/",
+      web_contents->GetPrimaryMainFrame()->GetSiteInstance()->GetSiteURL());
+  EXPECT_TRUE(web_contents->GetPrimaryMainFrame()
+                  ->GetProcess()
+                  ->IsProcessLockedToSiteForTesting());
 }
 
 // This test covers a navigation that:
@@ -1015,11 +1018,10 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
     popup = popup_observer.GetWebContents();
   }
   content::RenderFrameHost* popup_main_rfh = popup->GetPrimaryMainFrame();
-  // Popup should be on the initial entry, or no NavigationEntry if
-  // InitialNavigationEntry is disabled.
+  // Popup should be on the initial entry,
   content::NavigationEntry* last_entry =
       popup->GetController().GetLastCommittedEntry();
-  EXPECT_TRUE(!last_entry || last_entry->IsInitialEntry());
+  EXPECT_TRUE(last_entry->IsInitialEntry());
 
   // 2. Add blank iframe in popup.
   EXPECT_TRUE(content::ExecJs(popup_main_rfh,
@@ -1032,7 +1034,7 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
     content::TestNavigationManager navigation_manager(popup, kSameDocUrl);
     EXPECT_TRUE(content::ExecJs(
         popup_main_rfh, "document.querySelector('iframe').src = '#foo';"));
-    navigation_manager.WaitForNavigationFinished();
+    ASSERT_TRUE(navigation_manager.WaitForNavigationFinished());
   }
 
   // Check that same-document navigation doesn't commit a new navigation entry,
@@ -1060,11 +1062,10 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
     ASSERT_TRUE(content::ExecJs(opener, "var w = window.open('', 'my-popup')"));
     popup = popup_observer.GetWebContents();
   }
-  // Popup should be on the initial entry, or no NavigationEntry if
-  // InitialNavigationEntry is disabled.
+  // Popup should be on the initial entry.
   content::NavigationEntry* last_entry =
       popup->GetController().GetLastCommittedEntry();
-  EXPECT_TRUE(!last_entry || last_entry->IsInitialEntry());
+  EXPECT_TRUE(last_entry->IsInitialEntry());
 
   // 2. Same-document navigation in popup.
   {
@@ -1072,7 +1073,7 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
     content::TestNavigationManager navigation_manager(popup, kSameDocUrl);
     EXPECT_TRUE(
         content::ExecJs(opener, "w.history.replaceState({}, '', '#foo');"));
-    navigation_manager.WaitForNavigationFinished();
+    ASSERT_TRUE(navigation_manager.WaitForNavigationFinished());
   }
 
   // Check that same-document navigation doesn't commit a new navigation entry,
@@ -1141,9 +1142,8 @@ IN_PROC_BROWSER_TEST_F(SignInIsolationBrowserTest, NavigateToSignInPage) {
   // Make sure that a renderer-initiated navigation to the sign-in page swaps
   // processes.
   content::TestNavigationManager manager(web_contents, signin_url);
-  EXPECT_TRUE(
-      ExecuteScript(web_contents, "location = '" + signin_url.spec() + "';"));
-  manager.WaitForNavigationFinished();
+  EXPECT_TRUE(ExecJs(web_contents, "location = '" + signin_url.spec() + "';"));
+  ASSERT_TRUE(manager.WaitForNavigationFinished());
   EXPECT_NE(web_contents->GetPrimaryMainFrame()->GetSiteInstance(),
             first_instance);
 }
@@ -1192,6 +1192,17 @@ class WebstoreIsolationBrowserTest : public ChromeNavigationBrowserTest {
     ChromeNavigationBrowserTest::SetUpOnMainThread();
   }
 
+  void OpenPopup(content::WebContents* creating_contents, GURL destination) {
+    content::TestNavigationObserver popup_waiter(destination);
+    popup_waiter.StartWatchingNewWebContents();
+    EXPECT_TRUE(
+        content::EvalJs(creating_contents,
+                        content::JsReplace("!!window.open($1);", destination))
+            .ExtractBool());
+    popup_waiter.WaitForNavigationFinished();
+    EXPECT_TRUE(popup_waiter.last_navigation_succeeded());
+  }
+
  private:
   net::EmbeddedTestServer https_server_;
 };
@@ -1211,16 +1222,7 @@ IN_PROC_BROWSER_TEST_F(WebstoreIsolationBrowserTest, WebstorePopupIsIsolated) {
   // Open a popup for chrome.google.com and ensure that it's isolated in a
   // different SiteInstance and process from the previous google.com page.
   const GURL webstore_origin_url("https://chrome.google.com/title1.html");
-  {
-    content::TestNavigationObserver popup_waiter(webstore_origin_url);
-    popup_waiter.StartWatchingNewWebContents();
-    EXPECT_TRUE(content::EvalJs(initial_web_contents,
-                                content::JsReplace("!!window.open($1);",
-                                                   webstore_origin_url))
-                    .ExtractBool());
-    popup_waiter.WaitForNavigationFinished();
-    EXPECT_TRUE(popup_waiter.last_navigation_succeeded());
-  }
+  OpenPopup(initial_web_contents, webstore_origin_url);
   EXPECT_EQ(2, browser()->tab_strip_model()->count());
   content::WebContents* popup =
       browser()->tab_strip_model()->GetActiveWebContents();
@@ -1238,16 +1240,8 @@ IN_PROC_BROWSER_TEST_F(WebstoreIsolationBrowserTest, WebstorePopupIsIsolated) {
   // Now navigate the popup to the full web store URL. This will again cause it
   // to be isolated in a different SiteInstance and process from the previous
   // pages, but also now cause a BrowsingInstance swap.
-  {
-    const GURL webstore_url(
-        "https://chrome.google.com/webstore/mock_store.html");
-    content::TestNavigationObserver navigation_waiter(popup);
-    EXPECT_TRUE(
-        ExecuteScript(popup, "location = '" + webstore_url.spec() + "';"));
-    navigation_waiter.WaitForNavigationFinished();
-    EXPECT_TRUE(navigation_waiter.last_navigation_succeeded());
-    EXPECT_EQ(webstore_url, popup->GetLastCommittedURL());
-  }
+  const GURL webstore_url("https://chrome.google.com/webstore/mock_store.html");
+  EXPECT_TRUE(content::NavigateToURLFromRenderer(popup, webstore_url));
   scoped_refptr<content::SiteInstance> webstore_instance(
       popup->GetPrimaryMainFrame()->GetSiteInstance());
   EXPECT_NE(webstore_instance, popup_instance);
@@ -1257,10 +1251,19 @@ IN_PROC_BROWSER_TEST_F(WebstoreIsolationBrowserTest, WebstorePopupIsIsolated) {
   EXPECT_FALSE(webstore_instance->IsRelatedSiteInstance(popup_instance.get()));
   EXPECT_FALSE(
       webstore_instance->IsRelatedSiteInstance(initial_instance.get()));
+
+  // Finally navigate the popup back away from the web store URL. This will lead
+  // to another new process and BrowsingInstance swap.
+  EXPECT_TRUE(content::NavigateToURLFromRenderer(popup, first_url));
+  scoped_refptr<content::SiteInstance> final_instance(
+      popup->GetPrimaryMainFrame()->GetSiteInstance());
+  EXPECT_NE(final_instance->GetProcess(), webstore_instance->GetProcess());
+  EXPECT_FALSE(final_instance->IsRelatedSiteInstance(webstore_instance.get()));
 }
 
 // Make sure that the new Chrome Web Store URL used in production
-// (webstore.google.com) is isolated from the rest of the google.com domain.
+// (chromewebstore.google.com) is isolated from the rest of the google.com
+// domain.
 IN_PROC_BROWSER_TEST_F(WebstoreIsolationBrowserTest,
                        NewWebstorePopupIsIsolated) {
   const GURL first_url("https://google.com/title1.html");
@@ -1270,21 +1273,13 @@ IN_PROC_BROWSER_TEST_F(WebstoreIsolationBrowserTest,
   scoped_refptr<content::SiteInstance> initial_instance(
       initial_web_contents->GetPrimaryMainFrame()->GetSiteInstance());
 
-  // Open a popup for webstore.google.com and ensure that it's isolated in a
-  // different SiteInstance and process from the rest of google.com. Since the
+  // Open a popup for chromewebstore.google.com and ensure that it's isolated in
+  // a different SiteInstance and process from the rest of google.com. Since the
   // new Webstore encompasses the entire subdomain, there should have also been
   // a BrowsingInstance swap at this point.
-  const GURL webstore_origin_url("https://webstore.google.com/title1.html");
-  {
-    content::TestNavigationObserver popup_waiter(webstore_origin_url);
-    popup_waiter.StartWatchingNewWebContents();
-    EXPECT_TRUE(content::EvalJs(initial_web_contents,
-                                content::JsReplace("!!window.open($1);",
-                                                   webstore_origin_url))
-                    .ExtractBool());
-    popup_waiter.WaitForNavigationFinished();
-    EXPECT_TRUE(popup_waiter.last_navigation_succeeded());
-  }
+  const GURL webstore_origin_url(
+      "https://chromewebstore.google.com/title1.html");
+  OpenPopup(initial_web_contents, webstore_origin_url);
   EXPECT_EQ(2, browser()->tab_strip_model()->count());
   content::WebContents* popup =
       browser()->tab_strip_model()->GetActiveWebContents();
@@ -1296,6 +1291,14 @@ IN_PROC_BROWSER_TEST_F(WebstoreIsolationBrowserTest,
   EXPECT_NE(initial_instance, popup_instance);
   EXPECT_NE(initial_instance->GetProcess(), popup_instance->GetProcess());
   EXPECT_FALSE(initial_instance->IsRelatedSiteInstance(popup_instance.get()));
+
+  // Navigating the popup away from the webstore should cause another new
+  // process and BrowsingInstance swap.
+  EXPECT_TRUE(content::NavigateToURLFromRenderer(popup, first_url));
+  scoped_refptr<content::SiteInstance> final_instance(
+      popup->GetPrimaryMainFrame()->GetSiteInstance());
+  EXPECT_NE(final_instance->GetProcess(), popup_instance->GetProcess());
+  EXPECT_FALSE(final_instance->IsRelatedSiteInstance(popup_instance.get()));
 }
 
 class WebstoreOverrideIsolationBrowserTest
@@ -1325,16 +1328,7 @@ IN_PROC_BROWSER_TEST_F(WebstoreOverrideIsolationBrowserTest,
   // Open a popup for chrome.foo.com and ensure that it's isolated in a
   // different SiteInstance and process from the rest of foo.com.
   const GURL webstore_origin_url("https://chrome.foo.com/title1.html");
-  {
-    content::TestNavigationObserver popup_waiter(webstore_origin_url);
-    popup_waiter.StartWatchingNewWebContents();
-    EXPECT_TRUE(content::EvalJs(initial_web_contents,
-                                content::JsReplace("!!window.open($1);",
-                                                   webstore_origin_url))
-                    .ExtractBool());
-    popup_waiter.WaitForNavigationFinished();
-    EXPECT_TRUE(popup_waiter.last_navigation_succeeded());
-  }
+  OpenPopup(initial_web_contents, webstore_origin_url);
   EXPECT_EQ(2, browser()->tab_strip_model()->count());
   content::WebContents* popup =
       browser()->tab_strip_model()->GetActiveWebContents();
@@ -1352,15 +1346,8 @@ IN_PROC_BROWSER_TEST_F(WebstoreOverrideIsolationBrowserTest,
 
   // Now navigate the popup to the full web store URL and confirm that this
   // causes a BrowsingInstance swap.
-  {
-    const GURL webstore_url("https://chrome.foo.com/frame_tree/simple.htm");
-    content::TestNavigationObserver navigation_waiter(popup);
-    EXPECT_TRUE(
-        ExecuteScript(popup, "location = '" + webstore_url.spec() + "';"));
-    navigation_waiter.WaitForNavigationFinished();
-    EXPECT_TRUE(navigation_waiter.last_navigation_succeeded());
-    EXPECT_EQ(webstore_url, popup->GetLastCommittedURL());
-  }
+  const GURL webstore_url("https://chrome.foo.com/frame_tree/simple.htm");
+  EXPECT_TRUE(content::NavigateToURLFromRenderer(popup, webstore_url));
   scoped_refptr<content::SiteInstance> webstore_instance(
       popup->GetPrimaryMainFrame()->GetSiteInstance());
   EXPECT_NE(webstore_instance, popup_instance);
@@ -1368,6 +1355,14 @@ IN_PROC_BROWSER_TEST_F(WebstoreOverrideIsolationBrowserTest,
   EXPECT_FALSE(webstore_instance->IsRelatedSiteInstance(popup_instance.get()));
   EXPECT_FALSE(
       webstore_instance->IsRelatedSiteInstance(initial_instance.get()));
+
+  // Finally navigate the popup back away from the web store URL. This will lead
+  // to another new process and BrowsingInstance swap.
+  EXPECT_TRUE(content::NavigateToURLFromRenderer(popup, first_url));
+  scoped_refptr<content::SiteInstance> final_instance(
+      popup->GetPrimaryMainFrame()->GetSiteInstance());
+  EXPECT_NE(final_instance->GetProcess(), webstore_instance->GetProcess());
+  EXPECT_FALSE(final_instance->IsRelatedSiteInstance(webstore_instance.get()));
 }
 
 // Check that it's possible to navigate to a chrome scheme URL from a crashed
@@ -1440,9 +1435,8 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTestWithMobileEmulation,
 
 // Tests the behavior of cross origin redirection to a PDF with mobile emulation
 // is enabled.
-// TODO(crbug.com/1355793): Re-enable this test
 IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTestWithMobileEmulation,
-                       DISABLED_CrossSiteRedirectionToPDFWithMobileEmulation) {
+                       CrossSiteRedirectionToPDFWithMobileEmulation) {
   net::EmbeddedTestServer https_server(net::EmbeddedTestServer::TYPE_HTTPS);
   https_server.AddDefaultHandlers(GetChromeTestDataDir());
   ASSERT_TRUE(https_server.Start());
@@ -1466,11 +1460,6 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTestWithMobileEmulation,
       ui_test_utils::NavigateToURL(browser(), cross_site_redirecting_url));
 
   EXPECT_EQ(pdf_url, web_contents()->GetLastCommittedURL());
-  EXPECT_EQ(
-      "<head></head>"
-      "<body><!-- no enabled plugin supports this MIME type --></body>",
-      content::EvalJs(web_contents(), "document.documentElement.innerHTML")
-          .ExtractString());
 }
 
 // Check that clicking on a link doesn't carry the transient user activation
@@ -1485,16 +1474,13 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
   content::WebContents* main_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   content::TestNavigationObserver observer(main_contents);
-  ASSERT_TRUE(ExecuteScript(main_contents,
-                            "document.getElementById('title1').click();"));
+  ASSERT_TRUE(
+      ExecJs(main_contents, "document.getElementById('title1').click();"));
   observer.Wait();
 
   // Make sure popup attempt fails due to lack of transient user activation.
-  bool opened = false;
-  EXPECT_TRUE(content::ExecuteScriptWithoutUserGestureAndExtractBool(
-      main_contents, "window.domAutomationController.send(!!window.open());",
-      &opened));
-  EXPECT_FALSE(opened);
+  EXPECT_EQ(false, content::EvalJs(main_contents, "!!window.open();",
+                                   content::EXECUTE_SCRIPT_NO_USER_GESTURE));
 
   EXPECT_EQ(embedded_test_server()->GetURL("/title1.html"),
             main_contents->GetLastCommittedURL());
@@ -1509,18 +1495,15 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
       browser(), embedded_test_server()->GetURL("a.com", "/title1.html")));
 
   // Open a popup.
-  bool opened = false;
   content::WebContents* opener =
       browser()->tab_strip_model()->GetActiveWebContents();
-  const char* kScriptFormat =
-      "window.domAutomationController.send(!!window.open('%s'));";
+  static constexpr char kScriptFormat[] = "!!window.open('%s');";
   GURL popup_url = embedded_test_server()->GetURL("b.com", "/title1.html");
   content::TestNavigationObserver popup_waiter(nullptr, 1);
   popup_waiter.StartWatchingNewWebContents();
-  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-      opener, base::StringPrintf(kScriptFormat, popup_url.spec().c_str()),
-      &opened));
-  EXPECT_TRUE(opened);
+  EXPECT_EQ(true, content::EvalJs(
+                      opener, base::StringPrintf(kScriptFormat,
+                                                 popup_url.spec().c_str())));
   popup_waiter.Wait();
   EXPECT_EQ(2, browser()->tab_strip_model()->count());
 
@@ -1534,17 +1517,18 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
   content::WebContentsConsoleObserver console_observer(opener);
   console_observer.SetPattern(
       "Navigating a cross-origin opener to a download (*) is deprecated*");
-  EXPECT_TRUE(content::ExecuteScript(
+  EXPECT_TRUE(content::ExecJs(
       popup,
       "window.opener.location ='data:html/text;base64,'+btoa('payload');"));
 
-  console_observer.Wait();
+  ASSERT_TRUE(console_observer.Wait());
   histograms.ExpectBucketCount(
       "Blink.UseCounter.Features",
       blink::mojom::WebFeature::kOpenerNavigationDownloadCrossOrigin, 1);
 
   // Ensure that no download happened.
-  std::vector<download::DownloadItem*> download_items;
+  std::vector<raw_ptr<download::DownloadItem, VectorExperimental>>
+      download_items;
   content::DownloadManager* manager =
       browser()->profile()->GetDownloadManager();
   manager->GetAllDownloads(&download_items);
@@ -1560,18 +1544,15 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
       browser(), embedded_test_server()->GetURL("a.com", "/title1.html")));
 
   // Open a popup.
-  bool opened = false;
   content::WebContents* opener =
       browser()->tab_strip_model()->GetActiveWebContents();
-  const char* kScriptFormat =
-      "window.domAutomationController.send(!!window.open('%s'));";
+  static constexpr char kScriptFormat[] = "!!window.open('%s');";
   GURL popup_url = embedded_test_server()->GetURL("a.com", "/title1.html");
   content::TestNavigationObserver popup_waiter(nullptr, 1);
   popup_waiter.StartWatchingNewWebContents();
-  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-      opener, base::StringPrintf(kScriptFormat, popup_url.spec().c_str()),
-      &opened));
-  EXPECT_TRUE(opened);
+  EXPECT_EQ(true, content::EvalJs(
+                      opener, base::StringPrintf(kScriptFormat,
+                                                 popup_url.spec().c_str())));
   popup_waiter.Wait();
   EXPECT_EQ(2, browser()->tab_strip_model()->count());
 
@@ -1584,7 +1565,7 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
 
   content::DownloadTestObserverInProgress observer(
       browser()->profile()->GetDownloadManager(), 1 /* wait_count */);
-  EXPECT_TRUE(content::ExecuteScript(
+  EXPECT_TRUE(content::ExecJs(
       popup,
       "window.opener.location ='data:html/text;base64,'+btoa('payload');"));
   observer.WaitForFinished();
@@ -1594,11 +1575,12 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
       blink::mojom::WebFeature::kOpenerNavigationDownloadCrossOrigin, 0);
 
   // Delete any pending download.
-  std::vector<download::DownloadItem*> download_items;
+  std::vector<raw_ptr<download::DownloadItem, VectorExperimental>>
+      download_items;
   content::DownloadManager* manager =
       browser()->profile()->GetDownloadManager();
   manager->GetAllDownloads(&download_items);
-  for (auto* item : download_items) {
+  for (download::DownloadItem* item : download_items) {
     if (!item->IsDone())
       item->Cancel(true);
   }
@@ -1663,8 +1645,9 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
   content::WebContents* main_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   content::TestNavigationObserver observer(main_contents);
-  EXPECT_TRUE(ExecuteScriptWithoutUserGesture(
-      main_contents, "location = '" + redirected_url.spec() + "';"));
+  EXPECT_TRUE(ExecJs(main_contents,
+                     "location = '" + redirected_url.spec() + "';",
+                     content::EXECUTE_SCRIPT_NO_USER_GESTURE));
   observer.Wait();
   EXPECT_EQ(redirected_url, main_contents->GetLastCommittedURL());
 
@@ -1682,9 +1665,13 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
       std::make_unique<BackForwardMenuModel>(
           browser(), BackForwardMenuModel::ModelType::kBackward));
   back_model->set_test_web_contents(main_contents);
+  back_model->MenuWillShow();
+  back_model->MenuWillClose();
   back_model->ActivatedAt(0);
-  histogram.ExpectBucketCount(
-      "Navigation.BackForward.NavigatingToEntryMarkedToBeSkipped", true, 1);
+  histogram.ExpectTotalCount(
+      "Navigation.BackForward.TimeFromOpenBackNavigationMenuToActivateItem", 1);
+  histogram.ExpectTotalCount(
+      "Navigation.BackForward.TimeFromOpenBackNavigationMenuToCloseMenu", 1);
 }
 
 // Same as above except the navigation is cross-site.
@@ -1700,8 +1687,9 @@ IN_PROC_BROWSER_TEST_F(ChromeNavigationBrowserTest,
     content::WebContents* main_contents =
         browser()->tab_strip_model()->GetActiveWebContents();
     content::TestNavigationObserver observer(main_contents);
-    EXPECT_TRUE(ExecuteScriptWithoutUserGesture(
-        main_contents, "location = '" + redirected_url.spec() + "';"));
+    EXPECT_TRUE(ExecJs(main_contents,
+                       "location = '" + redirected_url.spec() + "';",
+                       content::EXECUTE_SCRIPT_NO_USER_GESTURE));
     observer.Wait();
     EXPECT_EQ(redirected_url, main_contents->GetLastCommittedURL());
   }
@@ -1852,14 +1840,13 @@ IN_PROC_BROWSER_TEST_F(NavigationConsumingTest,
       browser()->tab_strip_model()->GetActiveWebContents();
 
   // Normally, fullscreen should work, as long as there is a user gesture.
-  bool is_fullscreen = false;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-      contents, "document.body.webkitRequestFullscreen();", &is_fullscreen));
-  EXPECT_TRUE(is_fullscreen);
+  EXPECT_EQ(true, content::EvalJs(contents,
+                                  "document.body.webkitRequestFullscreen();"
+                                  "resultQueue.pop();"));
 
-  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-      contents, "document.webkitExitFullscreen();", &is_fullscreen));
-  EXPECT_FALSE(is_fullscreen);
+  EXPECT_EQ(false, content::EvalJs(contents,
+                                   "document.webkitExitFullscreen();"
+                                   "resultQueue.pop();"));
 
   // However, starting a navigation should consume the gesture. Fullscreen
   // should not work afterwards. Make sure the navigation is synchronously
@@ -1867,15 +1854,14 @@ IN_PROC_BROWSER_TEST_F(NavigationConsumingTest,
   std::string script = R"(
     document.getElementsByTagName('a')[0].click();
     document.body.webkitRequestFullscreen();
+    resultQueue.pop();
   )";
 
   // Use the TestNavigationManager to ensure the navigation is not finished
   // before fullscreen can occur.
   content::TestNavigationManager nav_manager(
       contents, embedded_test_server()->GetURL("/title1.html"));
-  EXPECT_TRUE(
-      content::ExecuteScriptAndExtractBool(contents, script, &is_fullscreen));
-  EXPECT_FALSE(is_fullscreen);
+  EXPECT_EQ(false, content::EvalJs(contents, script));
 }
 
 // Similar to the fullscreen test above, but checks that popups are successfully
@@ -1888,31 +1874,23 @@ IN_PROC_BROWSER_TEST_F(NavigationConsumingTest,
       browser()->tab_strip_model()->GetActiveWebContents();
 
   // Normally, a popup should open fine if it is associated with a user gesture.
-  bool did_open = false;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-      contents, "window.domAutomationController.send(!!window.open());",
-      &did_open));
-  EXPECT_TRUE(did_open);
+  EXPECT_EQ(true, content::EvalJs(contents, "!!window.open();"));
 
   // Starting a navigation should consume a gesture, but make sure that starting
   // a same-document navigation doesn't do the consuming.
   std::string same_document_script = R"(
     document.getElementById("ref").click();
-    window.domAutomationController.send(!!window.open());
+    !!window.open();
   )";
-  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-      contents, same_document_script, &did_open));
-  EXPECT_TRUE(did_open);
+  EXPECT_EQ(true, content::EvalJs(contents, same_document_script));
 
   // If the navigation is to a different document, the gesture should be
   // successfully consumed.
   std::string different_document_script = R"(
     document.getElementById("title1").click();
-    window.domAutomationController.send(!!window.open());
+    !!window.open();
   )";
-  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-      contents, different_document_script, &did_open));
-  EXPECT_FALSE(did_open);
+  EXPECT_EQ(false, content::EvalJs(contents, different_document_script));
 }
 
 // Regression test for https://crbug.com/856779, where a navigation to a
@@ -1926,8 +1904,8 @@ IN_PROC_BROWSER_TEST_F(NavigationConsumingTest, TargetNavigationFocus) {
   {
     content::TestNavigationObserver new_tab_observer(nullptr, 1);
     new_tab_observer.StartWatchingNewWebContents();
-    ASSERT_TRUE(ExecuteScript(
-        opener, "document.getElementsByTagName('a')[0].click();"));
+    ASSERT_TRUE(
+        ExecJs(opener, "document.getElementsByTagName('a')[0].click();"));
     new_tab_observer.Wait();
   }
 
@@ -1940,8 +1918,8 @@ IN_PROC_BROWSER_TEST_F(NavigationConsumingTest, TargetNavigationFocus) {
   EXPECT_EQ(opener, browser()->tab_strip_model()->GetActiveWebContents());
   {
     content::TestNavigationObserver new_tab_observer(new_contents, 1);
-    ASSERT_TRUE(ExecuteScript(
-        opener, "document.getElementsByTagName('a')[0].click();"));
+    ASSERT_TRUE(
+        ExecJs(opener, "document.getElementsByTagName('a')[0].click();"));
     new_tab_observer.Wait();
   }
   EXPECT_EQ(new_contents, browser()->tab_strip_model()->GetActiveWebContents());
@@ -1965,9 +1943,10 @@ IN_PROC_BROWSER_TEST_F(HistoryManipulationInterventionBrowserTest,
   // Navigate to a new document from the renderer without a user gesture.
   GURL redirected_url(embedded_test_server()->GetURL("/title2.html"));
   content::TestNavigationManager manager(main_contents, redirected_url);
-  EXPECT_TRUE(ExecuteScriptWithoutUserGesture(
-      main_contents, "location = '" + redirected_url.spec() + "';"));
-  manager.WaitForNavigationFinished();
+  EXPECT_TRUE(ExecJs(main_contents,
+                     "location = '" + redirected_url.spec() + "';",
+                     content::EXECUTE_SCRIPT_NO_USER_GESTURE));
+  ASSERT_TRUE(manager.WaitForNavigationFinished());
   ASSERT_EQ(redirected_url, main_contents->GetLastCommittedURL());
   ASSERT_EQ(2, main_contents->GetController().GetEntryCount());
 
@@ -1995,9 +1974,10 @@ IN_PROC_BROWSER_TEST_F(HistoryManipulationInterventionBrowserTest,
   // Navigate to a new document from the renderer without a user gesture.
   GURL redirected_url(embedded_test_server()->GetURL("/title2.html"));
   content::TestNavigationManager manager(main_contents, redirected_url);
-  EXPECT_TRUE(ExecuteScriptWithoutUserGesture(
-      main_contents, "location = '" + redirected_url.spec() + "';"));
-  manager.WaitForNavigationFinished();
+  EXPECT_TRUE(ExecJs(main_contents,
+                     "location = '" + redirected_url.spec() + "';",
+                     content::EXECUTE_SCRIPT_NO_USER_GESTURE));
+  ASSERT_TRUE(manager.WaitForNavigationFinished());
   ASSERT_EQ(redirected_url, main_contents->GetLastCommittedURL());
   ASSERT_EQ(3, main_contents->GetController().GetEntryCount());
 
@@ -2025,7 +2005,7 @@ IN_PROC_BROWSER_TEST_F(HistoryManipulationInterventionBrowserTest,
   content::WebContents* main_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   content::TestNavigationObserver observer(main_contents);
-  EXPECT_TRUE(ExecuteScript(main_contents, "location = '" + url.spec() + "';"));
+  EXPECT_TRUE(ExecJs(main_contents, "location = '" + url.spec() + "';"));
   observer.Wait();
   EXPECT_EQ(url, main_contents->GetLastCommittedURL());
 
@@ -2053,8 +2033,8 @@ IN_PROC_BROWSER_TEST_F(HistoryManipulationInterventionBrowserTest,
   content::WebContents* main_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   content::TestNavigationObserver observer(main_contents);
-  EXPECT_TRUE(ExecuteScriptWithoutUserGesture(
-      main_contents, "location = '" + url.spec() + "';"));
+  EXPECT_TRUE(ExecJs(main_contents, "location = '" + url.spec() + "';",
+                     content::EXECUTE_SCRIPT_NO_USER_GESTURE));
   observer.Wait();
   EXPECT_EQ(url, main_contents->GetLastCommittedURL());
 
@@ -2471,7 +2451,7 @@ IN_PROC_BROWSER_TEST_F(SiteIsolationForOAuthSitesBrowserTest, PopupFlow) {
   content::WebContentsAddedObserver web_contents_added_observer;
   content::TestNavigationObserver navigation_observer(nullptr, 1);
   navigation_observer.StartWatchingNewWebContents();
-  ASSERT_TRUE(content::ExecuteScript(
+  ASSERT_TRUE(content::ExecJs(
       browser()->tab_strip_model()->GetActiveWebContents(),
       content::JsReplace(
           "window.open($1, 'oauth_window', 'width=10,height=10');",
@@ -2606,13 +2586,12 @@ class SiteIsolationForCOOPBrowserTest : public ChromeNavigationBrowserTest {
   SiteIsolationForCOOPBrowserTest()
       : https_server_(net::EmbeddedTestServer::TYPE_HTTPS) {
     // Enable COOP isolation with a max of 3 stored sites.
-    const std::vector<base::test::ScopedFeatureList::FeatureAndParams>
-        kEnabledFeatures = {
-            {::features::kSiteIsolationForCrossOriginOpenerPolicy,
-             {{"stored_sites_max_size", base::NumberToString(3)},
-              {"should_persist_across_restarts", "true"}}}};
+    const std::vector<base::test::FeatureRefAndParams> kEnabledFeatures = {
+        {::features::kSiteIsolationForCrossOriginOpenerPolicy,
+         {{"stored_sites_max_size", base::NumberToString(3)},
+          {"should_persist_across_restarts", "true"}}}};
     // Disable full site isolation so we can observe effects of COOP isolation.
-    const std::vector<base::Feature> kDisabledFeatures = {
+    const std::vector<base::test::FeatureRef> kDisabledFeatures = {
         features::kSitePerProcess};
     feature_list_.InitWithFeaturesAndParameters(kEnabledFeatures,
                                                 kDisabledFeatures);

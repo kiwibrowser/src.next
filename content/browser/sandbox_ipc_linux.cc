@@ -50,7 +50,6 @@ void SandboxIPCHandler::Run() {
       PLOG(WARNING) << "poll";
       if (failed_polls++ == 3) {
         LOG(FATAL) << "poll(2) failing. SandboxIPCHandler aborting.";
-        return;
       }
       continue;
     }
@@ -160,7 +159,7 @@ void SandboxIPCHandler::SendRendererReply(
     int reply_fd) {
   struct msghdr msg;
   memset(&msg, 0, sizeof(msg));
-  struct iovec iov = {const_cast<void*>(reply.data()), reply.size()};
+  struct iovec iov = {const_cast<uint8_t*>(reply.data()), reply.size()};
   msg.msg_iov = &iov;
   msg.msg_iovlen = 1;
 

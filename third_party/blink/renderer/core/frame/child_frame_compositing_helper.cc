@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -80,11 +80,6 @@ void ChildFrameCompositingHelper::UpdateVisibility(bool visible) {
   }
 }
 
-gfx::Rect ChildFrameCompositingHelper::PaintableRegion() const {
-  DCHECK(crash_ui_layer_);
-  return gfx::Rect(crash_ui_layer_->bounds());
-}
-
 scoped_refptr<cc::DisplayItemList>
 ChildFrameCompositingHelper::PaintContentsToDisplayList() {
   DCHECK(crash_ui_layer_);
@@ -112,7 +107,7 @@ ChildFrameCompositingHelper::PaintContentsToDisplayList() {
 
       auto image = cc::PaintImageBuilder::WithDefault()
                        .set_id(cc::PaintImage::GetNextId())
-                       .set_image(SkImage::MakeFromBitmap(*sad_bitmap),
+                       .set_image(SkImages::RasterFromBitmap(*sad_bitmap),
                                   cc::PaintImage::GetNextContentId())
                        .TakePaintImage();
       display_list->push<cc::DrawImageOp>(image, x, y);

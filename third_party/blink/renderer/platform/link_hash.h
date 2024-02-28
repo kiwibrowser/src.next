@@ -39,21 +39,8 @@ class KURL;
 typedef uint64_t LinkHash;
 
 // Use the low 32-bits of the 64-bit LinkHash as the key for HashSets.
-struct LinkHashHash {
-  STATIC_ONLY(LinkHashHash);
+struct LinkHashHashTraits : GenericHashTraits<LinkHash> {
   static unsigned GetHash(LinkHash key) { return static_cast<unsigned>(key); }
-  static bool Equal(LinkHash a, LinkHash b) { return a == b; }
-  static const bool safe_to_compare_to_empty_or_deleted = true;
-
-  // See AlreadyHashed::avoidDeletedValue.
-  static unsigned AvoidDeletedValue(LinkHash hash64) {
-    DCHECK(hash64);
-    unsigned hash = static_cast<unsigned>(hash64);
-    unsigned new_hash = hash | (!(hash + 1) << 31);
-    DCHECK(new_hash);
-    DCHECK_NE(new_hash, 0xFFFFFFFF);
-    return new_hash;
-  }
 };
 
 // Resolves the potentially relative URL "attributeURL" relative to the given

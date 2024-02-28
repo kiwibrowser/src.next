@@ -39,7 +39,8 @@ scoped_refptr<ShortcutsBackend> ShortcutsBackendFactory::GetForProfileIfExists(
 
 // static
 ShortcutsBackendFactory* ShortcutsBackendFactory::GetInstance() {
-  return base::Singleton<ShortcutsBackendFactory>::get();
+  static base::NoDestructor<ShortcutsBackendFactory> instance;
+  return instance.get();
 }
 
 // static
@@ -57,12 +58,19 @@ ShortcutsBackendFactory::BuildProfileNoDatabaseForTesting(
 }
 
 ShortcutsBackendFactory::ShortcutsBackendFactory()
-    : RefcountedProfileKeyedServiceFactory("ShortcutsBackend") {
+    : RefcountedProfileKeyedServiceFactory(
+          "ShortcutsBackend",
+          ProfileSelections::Builder()
+              .WithRegular(ProfileSelection::kOriginalOnly)
+              // TODO(crbug.com/1418376): Check if this service is needed in
+              // Guest mode.
+              .WithGuest(ProfileSelection::kOriginalOnly)
+              .Build()) {
   DependsOn(HistoryServiceFactory::GetInstance());
   DependsOn(TemplateURLServiceFactory::GetInstance());
 }
 
-ShortcutsBackendFactory::~ShortcutsBackendFactory() {}
+ShortcutsBackendFactory::~ShortcutsBackendFactory() = default;
 
 scoped_refptr<RefcountedKeyedService>
 ShortcutsBackendFactory::BuildServiceInstanceFor(

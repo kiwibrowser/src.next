@@ -53,10 +53,12 @@ template <>
 inline float RoundForImpreciseConversion(double value) {
   double ceiled_value = ceil(value);
   double proximity_to_next_int = ceiled_value - value;
-  if (proximity_to_next_int <= 0.01 && value > 0)
+  if (proximity_to_next_int <= 0.01 && value > 0) {
     return static_cast<float>(ceiled_value);
-  if (proximity_to_next_int >= 0.99 && value < 0)
+  }
+  if (proximity_to_next_int >= 0.99 && value < 0) {
     return static_cast<float>(floor(value));
+  }
   return static_cast<float>(value);
 }
 
@@ -120,8 +122,15 @@ class CORE_EXPORT CSSPrimitiveValue : public CSSValue {
     kContainerMax,
 
     kRems,
+    kRexs,
+    kRchs,
+    kRics,
     kChs,
     kIcs,
+    kLhs,
+    kRlhs,
+    kCaps,
+    kRcaps,
     kUserUnits,  // The SVG term for unitless lengths
     // Angle units
     kDegrees,
@@ -135,11 +144,13 @@ class CORE_EXPORT CSSPrimitiveValue : public CSSValue {
     kKilohertz,
     // Resolution
     kDotsPerPixel,
+    kX,  // Short alias for kDotsPerPixel
     kDotsPerInch,
     kDotsPerCentimeter,
     // Other units
-    kFraction,
+    kFlex,
     kInteger,
+    kIdent,
 
     // This value is used to handle quirky margins in reflow roots (body, td,
     // and th) like WinIE. The basic idea is that a stylesheet can use the value
@@ -155,7 +166,11 @@ class CORE_EXPORT CSSPrimitiveValue : public CSSValue {
     kUnitTypePercentage,
     kUnitTypeFontSize,
     kUnitTypeFontXSize,
+    kUnitTypeFontCapitalHeight,
+    kUnitTypeRootFontCapitalHeight,
     kUnitTypeRootFontSize,
+    kUnitTypeRootFontXSize,
+    kUnitTypeRootFontZeroCharacterWidth,
     kUnitTypeZeroCharacterWidth,
     kUnitTypeViewportWidth,
     kUnitTypeViewportHeight,
@@ -190,6 +205,9 @@ class CORE_EXPORT CSSPrimitiveValue : public CSSValue {
     kUnitTypeContainerMin,
     kUnitTypeContainerMax,
     kUnitTypeIdeographicFullWidth,
+    kUnitTypeRootFontIdeographicFullWidth,
+    kUnitTypeLineHeight,
+    kUnitTypeRootLineHeight,
 
     // This value must come after the last length unit type to enable iteration
     // over the length unit types.
@@ -214,7 +232,13 @@ class CORE_EXPORT CSSPrimitiveValue : public CSSValue {
     static_assert(kUnitTypeFontSize < kSize, "em unit supported");
     static_assert(kUnitTypeFontXSize < kSize, "ex unit supported");
     static_assert(kUnitTypeRootFontSize < kSize, "rem unit supported");
+    static_assert(kUnitTypeRootFontXSize < kSize, "rex unit supported");
     static_assert(kUnitTypeZeroCharacterWidth < kSize, "ch unit supported");
+    static_assert(kUnitTypeRootFontZeroCharacterWidth < kSize,
+                  "rch unit supported");
+    static_assert(kUnitTypeFontCapitalHeight < kSize, "cap unit supported");
+    static_assert(kUnitTypeRootFontCapitalHeight < kSize,
+                  "rcap unit supported");
     static_assert(kUnitTypeViewportWidth < kSize, "vw unit supported");
     static_assert(kUnitTypeViewportHeight < kSize, "vh unit supported");
     static_assert(kUnitTypeViewportInlineSize < kSize, "vi unit supported");
@@ -285,13 +309,18 @@ class CORE_EXPORT CSSPrimitiveValue : public CSSValue {
     return type == UnitType::kPercentage || type == UnitType::kEms ||
            type == UnitType::kExs || type == UnitType::kRems ||
            type == UnitType::kChs || type == UnitType::kIcs ||
-           IsViewportPercentageLength(type) ||
+           type == UnitType::kLhs || type == UnitType::kRexs ||
+           type == UnitType::kRchs || type == UnitType::kRics ||
+           type == UnitType::kRlhs || type == UnitType::kCaps ||
+           type == UnitType::kRcaps || IsViewportPercentageLength(type) ||
            IsContainerPercentageLength(type);
   }
   bool IsLength() const;
   bool IsNumber() const;
   bool IsInteger() const;
   bool IsPercentage() const;
+  // Is this a percentage *or* a calc() with a percentage?
+  bool HasPercentage() const;
   bool IsPx() const;
   static bool IsTime(UnitType unit) {
     return unit == UnitType::kSeconds || unit == UnitType::kMilliseconds;
@@ -307,7 +336,7 @@ class CORE_EXPORT CSSPrimitiveValue : public CSSValue {
            type <= UnitType::kDotsPerCentimeter;
   }
   bool IsResolution() const;
-  static bool IsFlex(UnitType unit) { return unit == UnitType::kFraction; }
+  static bool IsFlex(UnitType unit) { return unit == UnitType::kFlex; }
   bool IsFlex() const;
 
   // https://drafts.css-houdini.org/css-properties-values-api-1/#computationally-independent
@@ -356,12 +385,17 @@ class CORE_EXPORT CSSPrimitiveValue : public CSSValue {
   }
 
   template <typename T>
-  inline T ConvertTo() const;  // Defined in CSSPrimitiveValueMappings.h
+  inline T ConvertTo(const CSSLengthResolver&)
+      const;  // Defined in CSSPrimitiveValueMappings.h
+
+  int ComputeInteger(const CSSLengthResolver&) const;
+  double ComputeNumber(const CSSLengthResolver&) const;
 
   static const char* UnitTypeToString(UnitType);
   static UnitType StringToUnitType(StringView string) {
-    if (string.Is8Bit())
+    if (string.Is8Bit()) {
       return StringToUnitType(string.Characters8(), string.length());
+    }
     return StringToUnitType(string.Characters16(), string.length());
   }
 
@@ -370,6 +404,7 @@ class CORE_EXPORT CSSPrimitiveValue : public CSSValue {
   void TraceAfterDispatch(blink::Visitor*) const;
 
   static UnitType CanonicalUnitTypeForCategory(UnitCategory);
+  static UnitType CanonicalUnit(UnitType unit_type);
   static double ConversionToCanonicalUnitsScaleFactor(UnitType);
 
   // Returns true and populates lengthUnitType, if unitType is a length unit.
@@ -378,13 +413,19 @@ class CORE_EXPORT CSSPrimitiveValue : public CSSValue {
   static UnitType LengthUnitTypeToUnitType(LengthUnitType);
 
  protected:
-  explicit CSSPrimitiveValue(ClassType class_type);
+  explicit CSSPrimitiveValue(ClassType class_type) : CSSValue(class_type) {}
 
   // Code generated by css_primitive_value_unit_trie.cc.tmpl
   static UnitType StringToUnitType(const LChar*, unsigned length);
   static UnitType StringToUnitType(const UChar*, unsigned length);
 
   double ComputeLengthDouble(const CSSLengthResolver&) const;
+
+ protected:
+  bool IsResolvableLength() const;
+
+ private:
+  bool InvolvesPercentage() const;
 };
 
 using CSSLengthArray = CSSPrimitiveValue::CSSLengthArray;

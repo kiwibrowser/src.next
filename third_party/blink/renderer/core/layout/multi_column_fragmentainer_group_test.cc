@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,10 +34,9 @@ class MultiColumnFragmentainerGroupTest : public RenderingTest {
 
 void MultiColumnFragmentainerGroupTest::SetUp() {
   RenderingTest::SetUp();
-  scoped_refptr<ComputedStyle> style =
-      GetDocument().GetStyleResolver().CreateComputedStyle();
-  flow_thread_ = LayoutMultiColumnFlowThread::CreateAnonymous(
-      GetDocument(), *style.get(), /* needs_paint_layer */ true);
+  const ComputedStyle& style = GetDocument().GetStyleResolver().InitialStyle();
+  flow_thread_ =
+      LayoutMultiColumnFlowThread::CreateAnonymous(GetDocument(), style);
   column_set_ = LayoutMultiColumnSet::CreateAnonymous(*flow_thread_,
                                                       *flow_thread_->Style());
 }
@@ -123,7 +122,7 @@ TEST_F(MultiColumnFragmentainerGroupTest, LotsOfContent) {
       To<LayoutMultiColumnSet>(column_set)->FirstFragmentainerGroup();
   EXPECT_EQ(fragmentainer_group.ActualColumnCount(), 100U);
   EXPECT_EQ(fragmentainer_group.GroupLogicalHeight(), LayoutUnit(60));
-  auto overflow = To<LayoutBox>(multicol)->LayoutOverflowRect();
+  auto overflow = To<LayoutBox>(multicol)->ScrollableOverflowRect();
   EXPECT_EQ(To<LayoutBox>(multicol)->LogicalWidth(), LayoutUnit(101));
   EXPECT_EQ(To<LayoutBox>(multicol)->LogicalHeight(), LayoutUnit(60));
   EXPECT_EQ(overflow.Width(), LayoutUnit(3399));
@@ -154,7 +153,7 @@ TEST_F(MultiColumnFragmentainerGroupTest, LotsOfNestedBlocksWithText) {
       To<LayoutMultiColumnSet>(column_set)->FirstFragmentainerGroup();
   EXPECT_EQ(fragmentainer_group.ActualColumnCount(), 250U);
   EXPECT_EQ(fragmentainer_group.GroupLogicalHeight(), LayoutUnit(200));
-  auto overflow = To<LayoutBox>(multicol)->LayoutOverflowRect();
+  auto overflow = To<LayoutBox>(multicol)->ScrollableOverflowRect();
   EXPECT_EQ(To<LayoutBox>(multicol)->LogicalWidth(), LayoutUnit(101));
   EXPECT_EQ(To<LayoutBox>(multicol)->LogicalHeight(), LayoutUnit(200));
   EXPECT_EQ(overflow.Width(), LayoutUnit(8499));
@@ -185,7 +184,7 @@ TEST_F(MultiColumnFragmentainerGroupTest, NestedBlocksWithLotsOfContent) {
       To<LayoutMultiColumnSet>(column_set)->FirstFragmentainerGroup();
   EXPECT_EQ(fragmentainer_group.ActualColumnCount(), 100U);
   EXPECT_EQ(fragmentainer_group.GroupLogicalHeight(), LayoutUnit(60));
-  auto overflow = To<LayoutBox>(multicol)->LayoutOverflowRect();
+  auto overflow = To<LayoutBox>(multicol)->ScrollableOverflowRect();
   EXPECT_EQ(To<LayoutBox>(multicol)->LogicalWidth(), LayoutUnit(101));
   EXPECT_EQ(To<LayoutBox>(multicol)->LogicalHeight(), LayoutUnit(60));
   EXPECT_EQ(overflow.Width(), LayoutUnit(3399));

@@ -11,7 +11,6 @@
 #include "base/memory/raw_ptr.h"
 #include "base/values.h"
 #include "build/chromeos_buildflags.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/active_tab_permission_granter.h"
 #include "chrome/browser/extensions/chrome_test_extension_loader.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -28,13 +27,12 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/navigation_simulator.h"
 #include "content/public/test/web_contents_tester.h"
 #include "extensions/browser/disable_reason.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/browser/extension_util.h"
 #include "extensions/browser/test_extension_registry_observer.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
@@ -43,12 +41,7 @@
 #include "extensions/common/features/feature.h"
 #include "extensions/common/features/feature_channel.h"
 #include "extensions/common/permissions/permissions_data.h"
-#include "extensions/common/value_builder.h"
 #include "extensions/test/test_extension_dir.h"
-
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "chrome/browser/ash/app_mode/kiosk_app_manager.h"
-#endif
 
 using extensions::mojom::APIPermissionID;
 
@@ -104,20 +97,13 @@ class ActiveTabTest : public ChromeRenderViewHostTestHarness {
     service->AddExtension(extension_with_tab_capture.get());
   }
 
-  void TearDown() override {
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-    ash::KioskAppManager::Shutdown();
-#endif
-    ChromeRenderViewHostTestHarness::TearDown();
-  }
-
   int tab_id() {
     return sessions::SessionTabHelper::IdForTab(web_contents()).id();
   }
 
   ActiveTabPermissionGranter* active_tab_permission_granter() {
-    return extensions::TabHelper::FromWebContents(web_contents())->
-        active_tab_permission_granter();
+    return TabHelper::FromWebContents(web_contents())
+        ->active_tab_permission_granter();
   }
 
   bool IsAllowed(const scoped_refptr<const Extension>& extension_refptr,
@@ -141,8 +127,7 @@ class ActiveTabTest : public ChromeRenderViewHostTestHarness {
         permissions_data->CanAccessPage(url, tab_id, nullptr) &&
         permissions_data->CanRunContentScriptOnPage(url, tab_id, nullptr);
     bool capture = permissions_data->CanCaptureVisiblePage(
-        url, tab_id, nullptr,
-        extensions::CaptureRequirement::kActiveTabOrAllUrls);
+        url, tab_id, nullptr, CaptureRequirement::kActiveTabOrAllUrls);
     switch (feature) {
       case PERMITTED_SCRIPT_ONLY:
         return script && !capture;
@@ -327,17 +312,17 @@ TEST_F(ActiveTabTest, CapturingPagesWithActiveTab) {
     // By default, there should be no access.
     EXPECT_FALSE(extension->permissions_data()->CanCaptureVisiblePage(
         url, tab_id(), nullptr /*error*/,
-        extensions::CaptureRequirement::kActiveTabOrAllUrls));
+        CaptureRequirement::kActiveTabOrAllUrls));
     // Granting permission should allow page capture.
     active_tab_permission_granter()->GrantIfRequested(extension.get());
     EXPECT_TRUE(extension->permissions_data()->CanCaptureVisiblePage(
         url, tab_id(), nullptr /*error*/,
-        extensions::CaptureRequirement::kActiveTabOrAllUrls));
+        CaptureRequirement::kActiveTabOrAllUrls));
     // Navigating away should revoke access.
     NavigateAndCommit(kAboutBlank);
     EXPECT_FALSE(extension->permissions_data()->CanCaptureVisiblePage(
         url, tab_id(), nullptr /*error*/,
-        extensions::CaptureRequirement::kActiveTabOrAllUrls));
+        CaptureRequirement::kActiveTabOrAllUrls));
   }
 }
 
@@ -439,6 +424,53 @@ TEST_F(ActiveTabTest, ChromeUrlGrants) {
       tab_id() + 1, APIPermissionID::kTabCaptureForTab));
 }
 
+// Tests that an extension can have it's active tab permission cleared.
+TEST_F(ActiveTabTest, ClearActiveExtensionAndNotify) {
+  GURL google("http://www.google.com");
+  NavigateAndCommit(google);
+
+  // Grant access to the extension.
+  active_tab_permission_granter()->GrantIfRequested(extension.get());
+  ASSERT_TRUE(IsAllowed(extension, google));
+  ASSERT_TRUE(HasTabsPermission(extension));
+
+  // Clear and confirm access was removed.
+  active_tab_permission_granter()->ClearActiveExtensionAndNotify(
+      extension->id());
+  EXPECT_TRUE(IsBlocked(extension, google));
+  EXPECT_FALSE(HasTabsPermission(extension));
+}
+
+// Tests that clearing all extensions active tab permissions removes it for only
+// those that had active tab and doesn't affect others.
+TEST_F(ActiveTabTest, ClearAllActiveExtensionsAndNotify) {
+  GURL google("http://www.google.com");
+  NavigateAndCommit(google);
+
+  // Grant access to two extensions.
+  active_tab_permission_granter()->GrantIfRequested(extension.get());
+  active_tab_permission_granter()->GrantIfRequested(another_extension.get());
+
+  // Only the two active extensionsnow have access.
+  ASSERT_TRUE(IsAllowed(extension, google));
+  ASSERT_TRUE(IsAllowed(another_extension, google));
+  ASSERT_TRUE(IsBlocked(extension_without_active_tab, google));
+  ASSERT_TRUE(HasTabsPermission(extension));
+  ASSERT_TRUE(HasTabsPermission(another_extension));
+  ASSERT_FALSE(HasTabsPermission(extension_without_active_tab));
+
+  // Revoke access for all granted extensions.
+  active_tab_permission_granter()->RevokeForTesting();
+
+  // None of the extensions have access anymore.
+  EXPECT_TRUE(IsBlocked(extension, google));
+  EXPECT_TRUE(IsBlocked(another_extension, google));
+  EXPECT_TRUE(IsBlocked(extension_without_active_tab, google));
+  EXPECT_FALSE(HasTabsPermission(extension));
+  EXPECT_FALSE(HasTabsPermission(another_extension));
+  EXPECT_FALSE(HasTabsPermission(extension_without_active_tab));
+}
+
 // An active tab test that includes an ExtensionService.
 class ActiveTabWithServiceTest : public ExtensionServiceTestBase {
  public:
@@ -501,12 +533,12 @@ TEST_F(ActiveTabWithServiceTest, FileURLs) {
 
   EXPECT_FALSE(extension->permissions_data()->CanCaptureVisiblePage(
       web_contents->GetLastCommittedURL(), tab_id, nullptr,
-      extensions::CaptureRequirement::kActiveTabOrAllUrls));
+      CaptureRequirement::kActiveTabOrAllUrls));
 
   permission_granter->GrantIfRequested(extension.get());
   EXPECT_FALSE(extension->permissions_data()->CanCaptureVisiblePage(
       web_contents->GetLastCommittedURL(), tab_id, nullptr,
-      extensions::CaptureRequirement::kActiveTabOrAllUrls));
+      CaptureRequirement::kActiveTabOrAllUrls));
 
   permission_granter->RevokeForTesting();
   TestExtensionRegistryObserver observer(registry(), id);
@@ -517,11 +549,11 @@ TEST_F(ActiveTabWithServiceTest, FileURLs) {
 
   EXPECT_FALSE(extension->permissions_data()->CanCaptureVisiblePage(
       web_contents->GetLastCommittedURL(), tab_id, nullptr,
-      extensions::CaptureRequirement::kActiveTabOrAllUrls));
+      CaptureRequirement::kActiveTabOrAllUrls));
   permission_granter->GrantIfRequested(extension.get());
   EXPECT_TRUE(extension->permissions_data()->CanCaptureVisiblePage(
       web_contents->GetLastCommittedURL(), tab_id, nullptr,
-      extensions::CaptureRequirement::kActiveTabOrAllUrls));
+      CaptureRequirement::kActiveTabOrAllUrls));
 }
 
 }  // namespace

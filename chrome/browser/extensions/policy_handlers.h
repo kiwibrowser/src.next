@@ -36,7 +36,7 @@ class ExtensionListPolicyHandler : public policy::ListPolicyHandler {
   bool CheckListEntry(const base::Value& value) override;
 
   // Sets |prefs| at pref_path() to |filtered_list|.
-  void ApplyList(base::Value filtered_list, PrefValueMap* prefs) override;
+  void ApplyList(base::Value::List filtered_list, PrefValueMap* prefs) override;
 
  private:
   const char* pref_path_;
@@ -67,7 +67,7 @@ class ExtensionInstallForceListPolicyHandler
  private:
   // Parses the data in |policy_value| and writes them to |extension_dict|.
   bool ParseList(const base::Value* policy_value,
-                 base::DictionaryValue* extension_dict,
+                 base::Value::Dict* extension_dict,
                  policy::PolicyErrorMap* errors);
 };
 

@@ -2,12 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {dedupingMixin, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
-
-import {assert, assertNotReached} from '../js/assert.m.js';
-import {isMac} from '../js/cr.m.js';
-import {KeyboardShortcutList} from '../js/cr/ui/keyboard_shortcut_list.js';
-import {isTextInputElement} from '../js/util.m.js';
+import {assert, assertNotReached} from '//resources/js/assert.js';
+import {KeyboardShortcutList} from '//resources/js/keyboard_shortcut_list.js';
+import {isMac} from '//resources/js/platform.js';
+import {dedupingMixin, PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 /**
  * @fileoverview Listens for a find keyboard shortcut (i.e. Ctrl/Cmd+f or /)
@@ -37,8 +35,9 @@ export const FindShortcutManager = (() => {
       return;
     }
 
+    const element = e.composedPath()[0] as Element;
     if (!shortcutCtrlF.matchesEvent(e) &&
-        (isTextInputElement(e.composedPath()[0] as Element) ||
+        (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' ||
          !shortcutSlash.matchesEvent(e))) {
       return;
     }
@@ -108,8 +107,12 @@ export const FindShortcutMixin = dedupingMixin(
           listeners.push(this);
         }
 
+        private handleFindShortcutInternal_() {
+          assertNotReached('Must override handleFindShortcut()');
+        }
+
         handleFindShortcut(_modalContextOpen: boolean) {
-          assertNotReached();
+          this.handleFindShortcutInternal_();
           return false;
         }
 
@@ -120,8 +123,12 @@ export const FindShortcutMixin = dedupingMixin(
           listeners.splice(index, 1);
         }
 
+        private searchInputHasFocusInternal_() {
+          assertNotReached('Must override searchInputHasFocus()');
+        }
+
         searchInputHasFocus() {
-          assertNotReached();
+          this.searchInputHasFocusInternal_();
           return false;
         }
       }

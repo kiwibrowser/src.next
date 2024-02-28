@@ -25,6 +25,7 @@ WebstoreInstallWithPrompt::WebstoreInstallWithPrompt(
       dummy_web_contents_(
           WebContents::Create(WebContents::CreateParams(profile))),
       parent_window_(nullptr) {
+  dummy_web_contents_->SetOwnerLocationForDebug(FROM_HERE);
   set_install_source(WebstoreInstaller::INSTALL_SOURCE_OTHER);
 }
 
@@ -41,7 +42,8 @@ WebstoreInstallWithPrompt::WebstoreInstallWithPrompt(
           WebContents::Create(WebContents::CreateParams(profile))),
       parent_window_(parent_window) {
   if (parent_window_)
-    parent_window_tracker_ = NativeWindowTracker::Create(parent_window);
+    parent_window_tracker_ = views::NativeWindowTracker::Create(parent_window);
+  dummy_web_contents_->SetOwnerLocationForDebug(FROM_HERE);
   set_install_source(WebstoreInstaller::INSTALL_SOURCE_OTHER);
 }
 
@@ -53,7 +55,7 @@ bool WebstoreInstallWithPrompt::CheckRequestorAlive() const {
     // Assume the requestor is always alive if |parent_window_| is null.
     return true;
   }
-  return !parent_window_tracker_->WasNativeWindowClosed();
+  return !parent_window_tracker_->WasNativeWindowDestroyed();
 }
 
 std::unique_ptr<ExtensionInstallPrompt::Prompt>
@@ -71,10 +73,6 @@ WebstoreInstallWithPrompt::CreateInstallUI() {
 
 bool WebstoreInstallWithPrompt::ShouldShowPostInstallUI() const {
   return show_post_install_ui_;
-}
-
-bool WebstoreInstallWithPrompt::ShouldShowAppInstalledBubble() const {
-  return false;
 }
 
 WebContents* WebstoreInstallWithPrompt::GetWebContents() const {

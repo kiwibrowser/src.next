@@ -33,77 +33,31 @@
 #include "third_party/blink/renderer/core/frame/window_or_worker_global_scope.h"
 
 #include "base/containers/span.h"
-#include "third_party/blink/renderer/bindings/core/v8/scheduled_action.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/post_message_helper.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/unpacked_serialized_script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_gc_for_context_dispose.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_script_runner.h"
-#include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
-#include "third_party/blink/renderer/core/frame/dom_timer.h"
-#include "third_party/blink/renderer/core/frame/local_dom_window.h"
-#include "third_party/blink/renderer/core/frame/page_dismissal_scope.h"
 #include "third_party/blink/renderer/core/frame/policy_container.h"
-#include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/messaging/message_port.h"
-#include "third_party/blink/renderer/core/trustedtypes/trusted_types_util.h"
-#include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
-#include "third_party/blink/renderer/platform/weborigin/reporting_disposition.h"
 #include "third_party/blink/renderer/platform/wtf/text/base64.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_utf8_adaptor.h"
 
 namespace blink {
 
-static bool IsAllowed(ExecutionContext* execution_context,
-                      bool is_eval,
-                      const String& source) {
-  if (auto* window = DynamicTo<LocalDOMWindow>(execution_context)) {
-    if (!window->GetFrame())
-      return false;
-    if (is_eval && !window->GetContentSecurityPolicy()->AllowEval(
-                       ReportingDisposition::kReport,
-                       ContentSecurityPolicy::kWillNotThrowException, source)) {
-      return false;
-    }
-    if (PageDismissalScope::IsActive()) {
-      UseCounter::Count(execution_context,
-                        window->document()->ProcessingBeforeUnload()
-                            ? WebFeature::kTimerInstallFromBeforeUnload
-                            : WebFeature::kTimerInstallFromUnload);
-    }
-    return true;
-  }
-  if (execution_context->IsWorkerGlobalScope()) {
-    WorkerGlobalScope* worker_global_scope =
-        static_cast<WorkerGlobalScope*>(execution_context);
-    if (!worker_global_scope->ScriptController())
-      return false;
-    ContentSecurityPolicy* policy =
-        worker_global_scope->GetContentSecurityPolicy();
-    if (is_eval && policy &&
-        !policy->AllowEval(ReportingDisposition::kReport,
-                           ContentSecurityPolicy::kWillNotThrowException,
-                           source)) {
-      return false;
-    }
-    return true;
-  }
-  NOTREACHED();
-  return false;
-}
-
 void WindowOrWorkerGlobalScope::reportError(ScriptState* script_state,
-                                            EventTarget& event_target,
                                             const ScriptValue& e) {
+  if (!script_state->ContextIsValid()) {
+    return;
+  }
   ScriptState::Scope scope(script_state);
   V8ScriptRunner::ReportException(script_state->GetIsolate(), e.V8Value());
 }
 
-String WindowOrWorkerGlobalScope::btoa(EventTarget&,
-                                       const String& string_to_encode,
+String WindowOrWorkerGlobalScope::btoa(const String& string_to_encode,
                                        ExceptionState& exception_state) {
   if (string_to_encode.IsNull())
     return String();
@@ -120,8 +74,7 @@ String WindowOrWorkerGlobalScope::btoa(EventTarget&,
       base::as_bytes(base::make_span(string_to_encode.Latin1())));
 }
 
-String WindowOrWorkerGlobalScope::atob(EventTarget&,
-                                       const String& encoded_string,
+String WindowOrWorkerGlobalScope::atob(const String& encoded_string,
                                        ExceptionState& exception_state) {
   if (encoded_string.IsNull())
     return String();
@@ -134,8 +87,7 @@ String WindowOrWorkerGlobalScope::atob(EventTarget&,
     return String();
   }
   Vector<char> out;
-  if (!Base64Decode(encoded_string, out, IsHTMLSpace<UChar>,
-                    kBase64ValidatePadding)) {
+  if (!Base64Decode(encoded_string, out, Base64DecodePolicy::kForgiving)) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidCharacterError,
         "The string to be decoded is not correctly encoded.");
@@ -145,97 +97,17 @@ String WindowOrWorkerGlobalScope::atob(EventTarget&,
   return String(out.data(), out.size());
 }
 
-int WindowOrWorkerGlobalScope::setTimeout(
-    ScriptState* script_state,
-    EventTarget& event_target,
-    V8Function* handler,
-    int timeout,
-    const HeapVector<ScriptValue>& arguments) {
-  ExecutionContext* execution_context = event_target.GetExecutionContext();
-  if (!IsAllowed(execution_context, false, g_empty_string))
-    return 0;
-  auto* action = MakeGarbageCollected<ScheduledAction>(
-      script_state, execution_context, handler, arguments);
-  return DOMTimer::Install(execution_context, action,
-                           base::Milliseconds(timeout), true);
-}
-
-int WindowOrWorkerGlobalScope::setTimeout(ScriptState* script_state,
-                                          EventTarget& event_target,
-                                          const String& handler,
-                                          int timeout,
-                                          const HeapVector<ScriptValue>&) {
-  ExecutionContext* execution_context = event_target.GetExecutionContext();
-  if (!IsAllowed(execution_context, true, handler))
-    return 0;
-  // Don't allow setting timeouts to run empty functions.  Was historically a
-  // performance issue.
-  if (handler.IsEmpty())
-    return 0;
-  auto* action = MakeGarbageCollected<ScheduledAction>(
-      script_state, execution_context, handler);
-  return DOMTimer::Install(execution_context, action,
-                           base::Milliseconds(timeout), true);
-}
-
-int WindowOrWorkerGlobalScope::setInterval(
-    ScriptState* script_state,
-    EventTarget& event_target,
-    V8Function* handler,
-    int timeout,
-    const HeapVector<ScriptValue>& arguments) {
-  ExecutionContext* execution_context = event_target.GetExecutionContext();
-  if (!IsAllowed(execution_context, false, g_empty_string))
-    return 0;
-  auto* action = MakeGarbageCollected<ScheduledAction>(
-      script_state, execution_context, handler, arguments);
-  return DOMTimer::Install(execution_context, action,
-                           base::Milliseconds(timeout), false);
-}
-
-int WindowOrWorkerGlobalScope::setInterval(ScriptState* script_state,
-                                           EventTarget& event_target,
-                                           const String& handler,
-                                           int timeout,
-                                           const HeapVector<ScriptValue>&) {
-  ExecutionContext* execution_context = event_target.GetExecutionContext();
-  if (!IsAllowed(execution_context, true, handler))
-    return 0;
-  // Don't allow setting timeouts to run empty functions.  Was historically a
-  // performance issue.
-  if (handler.IsEmpty())
-    return 0;
-  auto* action = MakeGarbageCollected<ScheduledAction>(
-      script_state, execution_context, handler);
-  return DOMTimer::Install(execution_context, action,
-                           base::Milliseconds(timeout), false);
-}
-
-void WindowOrWorkerGlobalScope::clearTimeout(EventTarget& event_target,
-                                             int timeout_id) {
-  if (ExecutionContext* context = event_target.GetExecutionContext())
-    DOMTimer::RemoveByID(context, timeout_id);
-}
-
-void WindowOrWorkerGlobalScope::clearInterval(EventTarget& event_target,
-                                              int timeout_id) {
-  if (ExecutionContext* context = event_target.GetExecutionContext())
-    DOMTimer::RemoveByID(context, timeout_id);
-}
-
-bool WindowOrWorkerGlobalScope::crossOriginIsolated(
-    const ExecutionContext& execution_context) {
-  return execution_context.CrossOriginIsolatedCapability();
+bool WindowOrWorkerGlobalScope::crossOriginIsolated() {
+  return GetExecutionContext()->CrossOriginIsolatedCapability();
 }
 
 // See https://github.com/whatwg/html/issues/7912
 // static
-String WindowOrWorkerGlobalScope::crossOriginEmbedderPolicy(
-    const ExecutionContext& execution_context) {
+String WindowOrWorkerGlobalScope::crossOriginEmbedderPolicy() {
   const PolicyContainer* policy_container =
-      execution_context.GetPolicyContainer();
+      GetExecutionContext()->GetPolicyContainer();
   CHECK(policy_container);
-  switch (policy_container->GetPolicies().cross_origin_embedder_policy) {
+  switch (policy_container->GetPolicies().cross_origin_embedder_policy.value) {
     case network::mojom::CrossOriginEmbedderPolicyValue::kNone:
       return "unsafe-none";
     case network::mojom::CrossOriginEmbedderPolicyValue::kCredentialless:
@@ -247,10 +119,12 @@ String WindowOrWorkerGlobalScope::crossOriginEmbedderPolicy(
 
 ScriptValue WindowOrWorkerGlobalScope::structuredClone(
     ScriptState* script_state,
-    EventTarget& event_target,
     const ScriptValue& message,
     const StructuredSerializeOptions* options,
     ExceptionState& exception_state) {
+  if (!script_state->ContextIsValid()) {
+    return ScriptValue();
+  }
   ScriptState::Scope scope(script_state);
   v8::Isolate* isolate = script_state->GetIsolate();
 

@@ -23,11 +23,11 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_COUNTER_NODE_H_
 
 #include "base/dcheck_is_on.h"
+#include "third_party/blink/renderer/core/css/counters_scope.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
-#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
-#include "third_party/blink/renderer/platform/wtf/ref_counted.h"
+#include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
 // This implements a counter tree that is used for finding parents in counters()
 // lookup, and for propagating count changes when nodes are added or removed.
@@ -43,6 +43,7 @@
 
 namespace blink {
 
+class Element;
 class LayoutObject;
 class LayoutCounter;
 
@@ -50,21 +51,62 @@ class CounterNode : public GarbageCollected<CounterNode> {
  public:
   enum Type { kIncrementType = 1 << 0, kResetType = 1 << 1, kSetType = 1 << 2 };
 
-  CounterNode(LayoutObject&, unsigned type_mask, int value);
+  CounterNode(LayoutObject& object,
+              unsigned type_mask,
+              int value,
+              bool is_reversed = false);
   void Destroy();
   void Trace(Visitor*) const;
 
   bool ActsAsReset() const { return HasResetType() || !parent_; }
+  bool HasUseType() const { return type_mask_ == 0u; }
+  bool HasIncrementType() const { return type_mask_ & kIncrementType; }
   bool HasResetType() const { return type_mask_ & kResetType; }
   bool HasSetType() const { return type_mask_ & kSetType; }
   int Value() const { return value_; }
   int CountInParent() const { return count_in_parent_; }
   LayoutObject& Owner() const { return *owner_; }
+  Element& OwnerElement() const;
+  Element& OwnerNonPseudoElement() const;
   void AddLayoutObject(LayoutCounter*);
   void RemoveLayoutObject(LayoutCounter*);
 
   // Invalidates the text in the layoutObjects of this counter, if any.
   void ResetLayoutObjects();
+
+  const AtomicString& Identifier() const { return identifier_; }
+
+  CounterNode* PreviousInParent() const { return previous_in_parent_.Get(); }
+  void SetPreviousInParent(CounterNode* previous_in_parent) {
+    previous_in_parent_ = previous_in_parent;
+  }
+  bool IsInScope() const { return !!scope_; }
+  CountersScope* Scope() const { return scope_.Get(); }
+  void SetScope(CountersScope* scope) { scope_ = scope; }
+  int ValueAfter() const { return value_after_; }
+  void CalculateValueAfter(bool should_reset_increment = false,
+                           int num_counters_in_scope = 0) {
+    if (IsReversed()) {
+      value_after_ = num_counters_in_scope;
+      return;
+    }
+    if (IsReset()) {
+      value_after_ = value_;
+      return;
+    }
+    int value_before =
+        should_reset_increment && HasIncrementType() ? 0 : value_before_;
+    value_after_ =
+        base::CheckAdd(value_before, value_).ValueOrDefault(value_before);
+  }
+  int ValueBefore() const { return value_before_; }
+  void SetValueBefore(int value) { value_before_ = value; }
+  bool IsReset() const { return HasSetType() || HasResetType(); }
+  bool IsReversed() const { return is_reversed_; }
+
+#if DCHECK_IS_ON()
+  AtomicString DebugName() const;
+#endif  // DCHECK_IS_ON()
 
   // This finds a closest ancestor style containment boundary, crosses it, and
   // then returns the closest ancestor CounterNode available (for the given
@@ -115,7 +157,10 @@ class CounterNode : public GarbageCollected<CounterNode> {
 
   unsigned type_mask_;
   int value_;
+  int value_before_;
   int count_in_parent_;
+  int value_after_;
+  bool is_reversed_;
   const Member<LayoutObject> owner_;
   Member<LayoutCounter> root_layout_object_;
 
@@ -124,6 +169,11 @@ class CounterNode : public GarbageCollected<CounterNode> {
   Member<CounterNode> next_sibling_;
   Member<CounterNode> first_child_;
   Member<CounterNode> last_child_;
+  AtomicString identifier_;
+
+  // The counters scope this counter belongs to.
+  Member<CountersScope> scope_;
+  Member<CounterNode> previous_in_parent_;
 };
 
 }  // namespace blink

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,9 +41,10 @@ bool RemoteFrameClientImpl::InShadowTree() const {
 void RemoteFrameClientImpl::Detached(FrameDetachType type) {
   // We only notify the browser process when the frame is being detached for
   // removal, not after a swap.
-  if (type == FrameDetachType::kRemove)
+  if (type == FrameDetachType::kRemove &&
+      web_frame_->GetFrame()->IsRemoteFrameHostRemoteBound()) {
     web_frame_->GetFrame()->GetRemoteFrameHostRemote().Detach();
-
+  }
   web_frame_->Close();
 
   if (web_frame_->Parent()) {
@@ -70,20 +71,50 @@ void RemoteFrameClientImpl::CreateRemoteChild(
     const absl::optional<FrameToken>& opener_frame_token,
     mojom::blink::TreeScopeType tree_scope_type,
     mojom::blink::FrameReplicationStatePtr replication_state,
+    mojom::blink::FrameOwnerPropertiesPtr owner_properties,
+    bool is_loading,
+    const base::UnguessableToken& devtools_frame_token,
+    mojom::blink::RemoteFrameInterfacesFromBrowserPtr remote_frame_interfaces) {
+  CreateRemoteChildImpl(
+      token, opener_frame_token, tree_scope_type, std::move(replication_state),
+      std::move(owner_properties), is_loading, devtools_frame_token,
+      std::move(remote_frame_interfaces));
+}
+
+unsigned RemoteFrameClientImpl::BackForwardLength() {
+  return To<WebViewImpl>(web_frame_->View())->HistoryListLength();
+}
+
+void RemoteFrameClientImpl::CreateRemoteChildren(
+    const Vector<mojom::blink::CreateRemoteChildParamsPtr>& params) {
+  for (const auto& child_param : params) {
+    WebRemoteFrameImpl* new_child = CreateRemoteChildImpl(
+        child_param->token, child_param->opener_frame_token,
+        child_param->tree_scope_type, std::move(child_param->replication_state),
+        std::move(child_param->owner_properties), child_param->is_loading,
+        child_param->devtools_frame_token,
+        std::move(child_param->frame_interfaces));
+    new_child->frame_client_->CreateRemoteChildren(child_param->child_params);
+  }
+}
+
+WebRemoteFrameImpl* RemoteFrameClientImpl::CreateRemoteChildImpl(
+    const RemoteFrameToken& token,
+    const absl::optional<FrameToken>& opener_frame_token,
+    mojom::blink::TreeScopeType tree_scope_type,
+    mojom::blink::FrameReplicationStatePtr replication_state,
+    mojom::blink::FrameOwnerPropertiesPtr owner_properties,
+    bool is_loading,
     const base::UnguessableToken& devtools_frame_token,
     mojom::blink::RemoteFrameInterfacesFromBrowserPtr remote_frame_interfaces) {
   WebFrame* opener = nullptr;
   if (opener_frame_token)
     opener = WebFrame::FromFrameToken(opener_frame_token.value());
-  web_frame_->CreateRemoteChild(
-      tree_scope_type, token, devtools_frame_token, opener,
+  return web_frame_->CreateRemoteChild(
+      tree_scope_type, token, is_loading, devtools_frame_token, opener,
       std::move(remote_frame_interfaces->frame_host),
       std::move(remote_frame_interfaces->frame_receiver),
-      std::move(replication_state));
-}
-
-unsigned RemoteFrameClientImpl::BackForwardLength() {
-  return To<WebViewImpl>(web_frame_->View())->HistoryListLength();
+      std::move(replication_state), std::move(owner_properties));
 }
 
 }  // namespace blink

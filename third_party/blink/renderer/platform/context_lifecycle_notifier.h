@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,10 +18,12 @@ class PLATFORM_EXPORT ContextLifecycleNotifier : public GarbageCollectedMixin {
  public:
   virtual ~ContextLifecycleNotifier();
 
-  virtual void AddContextLifecycleObserver(ContextLifecycleObserver*);
-  virtual void RemoveContextLifecycleObserver(ContextLifecycleObserver*);
+  void AddContextLifecycleObserver(ContextLifecycleObserver*);
+  void RemoveContextLifecycleObserver(ContextLifecycleObserver*);
 
   void Trace(Visitor* visitor) const override;
+
+  bool IsContextDestroyed() const;
 
  protected:
   // Should be called by implementers to notify observers when the context is
@@ -35,9 +37,7 @@ class PLATFORM_EXPORT ContextLifecycleNotifier : public GarbageCollectedMixin {
 
  private:
   HeapObserverSet<ContextLifecycleObserver> observers_;
-#if DCHECK_IS_ON()
-  bool did_notify_observers_ = false;
-#endif
+  bool context_destroyed_ = false;
 };
 
 }  // namespace blink

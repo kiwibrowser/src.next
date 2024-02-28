@@ -21,10 +21,9 @@
 #include "content/public/test/browser_task_environment.h"
 #include "extensions/common/extension.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/layout.h"
+#include "ui/base/resource/resource_scale_factor.h"
 #include "ui/display/display_list.h"
 #include "ui/display/display_switches.h"
-#include "ui/display/test/scoped_screen_override.h"
 #include "ui/display/test/test_screen.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/geometry/skia_conversions.h"
@@ -45,8 +44,7 @@ class ScopedSetDeviceScaleFactor {
         switches::kForceDeviceScaleFactor, base::StringPrintf("%3.2f", scale));
     // This has to be inited after fiddling with the command line.
     test_screen_ = std::make_unique<display::test::TestScreen>();
-    screen_override_ = std::make_unique<display::test::ScopedScreenOverride>(
-        test_screen_.get());
+    display::Screen::SetScreenInstance(test_screen_.get());
   }
 
   ScopedSetDeviceScaleFactor(const ScopedSetDeviceScaleFactor&) = delete;
@@ -54,12 +52,12 @@ class ScopedSetDeviceScaleFactor {
       delete;
 
   ~ScopedSetDeviceScaleFactor() {
+    display::Screen::SetScreenInstance(nullptr);
     display::Display::ResetForceDeviceScaleFactorForTesting();
   }
 
  private:
   std::unique_ptr<display::test::TestScreen> test_screen_;
-  std::unique_ptr<display::test::ScopedScreenOverride> screen_override_;
   base::test::ScopedCommandLine command_line_;
 };
 
@@ -78,14 +76,16 @@ class ExtensionIconManagerTest : public testing::Test,
   void OnImageLoaded(const std::string& extension_id) override {
     unwaited_image_loads_++;
     if (waiting_) {
-      base::RunLoop::QuitCurrentWhenIdleDeprecated();
+      std::move(quit_closure_).Run();
     }
   }
 
   void WaitForImageLoad() {
+    base::RunLoop loop;
+    quit_closure_ = loop.QuitWhenIdleClosure();
     if (unwaited_image_loads_ == 0) {
       waiting_ = true;
-      base::RunLoop().Run();
+      loop.Run();
       waiting_ = false;
     }
     ASSERT_GT(unwaited_image_loads_, 0);
@@ -100,6 +100,8 @@ class ExtensionIconManagerTest : public testing::Test,
 
   // Whether we are currently waiting for an image load.
   bool waiting_;
+
+  base::OnceClosure quit_closure_;
 };
 
 // Returns the default icon that ExtensionIconManager gives when an extension
@@ -121,14 +123,15 @@ TEST_F(ExtensionIconManagerTest, LoadRemoveLoad) {
       "extensions/image_loading_tracker/app.json");
 
   JSONFileValueDeserializer deserializer(manifest_path);
-  std::unique_ptr<base::DictionaryValue> manifest =
-      base::DictionaryValue::From(deserializer.Deserialize(nullptr, nullptr));
-  ASSERT_TRUE(manifest.get() != nullptr);
+  std::unique_ptr<base::Value> manifest =
+      deserializer.Deserialize(nullptr, nullptr);
+  ASSERT_TRUE(manifest.get());
+  ASSERT_TRUE(manifest->is_dict());
 
   std::string error;
   scoped_refptr<Extension> extension(Extension::Create(
       manifest_path.DirName(), mojom::ManifestLocation::kInvalidLocation,
-      *manifest, Extension::NO_FLAGS, &error));
+      manifest->GetDict(), Extension::NO_FLAGS, &error));
   ASSERT_TRUE(extension.get());
   ExtensionIconManager icon_manager;
   icon_manager.set_observer(this);
@@ -164,14 +167,14 @@ TEST_F(ExtensionIconManagerTest, LoadComponentExtensionResource) {
       "extensions/file_manager/app.json");
 
   JSONFileValueDeserializer deserializer(manifest_path);
-  std::unique_ptr<base::DictionaryValue> manifest =
-      base::DictionaryValue::From(deserializer.Deserialize(nullptr, nullptr));
-  ASSERT_TRUE(manifest.get() != nullptr);
-
+  std::unique_ptr<base::Value> manifest =
+      deserializer.Deserialize(nullptr, nullptr);
+  ASSERT_TRUE(manifest.get());
+  ASSERT_TRUE(manifest->is_dict());
   std::string error;
   scoped_refptr<Extension> extension(Extension::Create(
       manifest_path.DirName(), mojom::ManifestLocation::kComponent,
-      *manifest.get(), Extension::NO_FLAGS, &error));
+      manifest->GetDict(), Extension::NO_FLAGS, &error));
   ASSERT_TRUE(extension.get());
 
   ExtensionIconManager icon_manager;
@@ -201,6 +204,7 @@ TEST_F(ExtensionIconManagerTest, LoadComponentExtensionResource) {
 TEST_F(ExtensionIconManagerTest, ScaleFactors) {
   auto profile = std::make_unique<TestingProfile>();
   const gfx::Image default_icon = GetDefaultIcon();
+  base::RunLoop loop1;
 
   base::FilePath test_dir;
   ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &test_dir));
@@ -208,14 +212,15 @@ TEST_F(ExtensionIconManagerTest, ScaleFactors) {
       test_dir.AppendASCII("extensions/context_menus/icons/manifest.json");
 
   JSONFileValueDeserializer deserializer(manifest_path);
-  std::unique_ptr<base::DictionaryValue> manifest =
-      base::DictionaryValue::From(deserializer.Deserialize(nullptr, nullptr));
-  ASSERT_TRUE(manifest);
+  std::unique_ptr<base::Value> manifest =
+      deserializer.Deserialize(nullptr, nullptr);
+  ASSERT_TRUE(manifest.get());
+  ASSERT_TRUE(manifest->is_dict());
 
   std::string error;
   scoped_refptr<Extension> extension(Extension::Create(
       manifest_path.DirName(), mojom::ManifestLocation::kInvalidLocation,
-      *manifest, Extension::NO_FLAGS, &error));
+      manifest->GetDict(), Extension::NO_FLAGS, &error));
   ASSERT_TRUE(extension);
 
   constexpr int kMaxIconSizeInManifest = 32;
@@ -245,6 +250,7 @@ TEST_F(ExtensionIconManagerTest, ScaleFactors) {
 
     icon_manager.LoadIcon(profile.get(), extension.get());
     WaitForImageLoad();
+
     gfx::Image icon = icon_manager.GetIcon(extension->id());
     // Determine if the default icon fallback will be used. We'll use the
     // default when none of the supported scale factors can find an appropriate
@@ -275,20 +281,22 @@ TEST_F(ExtensionIconManagerTest, ScaleFactors) {
       const bool has_representation = image_skia.HasRepresentation(scale);
       // We shouldn't have a representation if the extension didn't provide a
       // big enough icon.
-      if (gfx::kFaviconSize * scale > kMaxIconSizeInManifest)
+      if (gfx::kFaviconSize * scale > kMaxIconSizeInManifest) {
         EXPECT_FALSE(has_representation);
-      else
-        EXPECT_EQ(ui::IsSupportedScale(scale), has_representation);
+      } else {
+        EXPECT_EQ(ui::IsScaleFactorSupported(scale_factor), has_representation);
+      }
     }
   }
 
-  // Now check that the scale factors for active displays are respected, even
-  // when it's not a supported scale.
+  // Now check that the scale factors for active displays are respected,
+  // even when it's not a supported scale.
   ScopedSetDeviceScaleFactor scoped_dsf(1.5f);
   ExtensionIconManager icon_manager;
   icon_manager.set_observer(this);
   icon_manager.LoadIcon(profile.get(), extension.get());
   WaitForImageLoad();
+
   gfx::ImageSkia icon = icon_manager.GetIcon(extension->id()).AsImageSkia();
   EXPECT_TRUE(icon.HasRepresentation(1.5f));
 }

@@ -4,10 +4,10 @@
 
 #include "chrome/browser/extensions/blocklist_state_fetcher.h"
 
-#include "base/bind.h"
 #include "base/containers/contains.h"
+#include "base/functional/bind.h"
 #include "base/strings/escape.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/task/single_thread_task_runner.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/common/safe_browsing/crx_info.pb.h"
@@ -43,7 +43,7 @@ void BlocklistStateFetcher::Request(const std::string& id,
       SetSafeBrowsingConfig(
           g_browser_process->safe_browsing_service()->GetV4ProtocolConfig());
     } else {
-      base::ThreadTaskRunnerHandle::Get()->PostTask(
+      base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
           FROM_HERE, base::BindOnce(std::move(callback), BLOCKLISTED_UNKNOWN));
       return;
     }
@@ -92,11 +92,18 @@ void BlocklistStateFetcher::SendRequest(const std::string& id) {
             "and your device from dangerous sites' in Chromium settings under "
             "Privacy. This feature is enabled by default."
           chrome_policy {
+            SafeBrowsingProtectionLevel {
+              policy_options {mode: MANDATORY}
+              SafeBrowsingProtectionLevel: 0
+            }
+          }
+          chrome_policy {
             SafeBrowsingEnabled {
               policy_options {mode: MANDATORY}
               SafeBrowsingEnabled: false
             }
           }
+          deprecated_policies: "SafeBrowsingEnabled"
         })");
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = request_url;

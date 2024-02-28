@@ -9,11 +9,13 @@
 #include <string>
 #include <vector>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/types/expected.h"
 #include "base/values.h"
 #include "chrome/common/extensions/api/tabs.h"
+#include "components/tab_groups/tab_group_id.h"
 #include "extensions/common/features/feature.h"
+#include "extensions/common/mojom/context_type.mojom-forward.h"
 #include "ui/base/window_open_disposition.h"
 
 class Browser;
@@ -27,8 +29,8 @@ class BrowserContext;
 class WebContents;
 }
 
-namespace gfx {
-class Rect;
+namespace blink::mojom {
+class WindowFeatures;
 }
 
 namespace extensions {
@@ -59,13 +61,13 @@ class ExtensionTabUtil {
     ~OpenTabParams();
 
     bool create_browser_if_needed = false;
-    absl::optional<int> window_id;
-    absl::optional<int> opener_tab_id;
-    absl::optional<std::string> url;
-    absl::optional<bool> active;
-    absl::optional<bool> pinned;
-    absl::optional<int> index;
-    absl::optional<int> bookmark_id;
+    std::optional<int> window_id;
+    std::optional<int> opener_tab_id;
+    std::optional<std::string> url;
+    std::optional<bool> active;
+    std::optional<bool> pinned;
+    std::optional<int> index;
+    std::optional<int> bookmark_id;
   };
 
   // Opens a new tab given an extension function |function| and creation
@@ -84,7 +86,7 @@ class ExtensionTabUtil {
   static int GetWindowIdOfTab(const content::WebContents* web_contents);
   static base::Value::List CreateTabList(const Browser* browser,
                                          const Extension* extension,
-                                         Feature::Context context);
+                                         mojom::ContextType context);
 
   static Browser* GetBrowserFromWindowID(
       const ChromeExtensionFunctionDetails& details,
@@ -132,7 +134,7 @@ class ExtensionTabUtil {
       const Browser& browser,
       const Extension* extension,
       PopulateTabBehavior populate_tab_behavior,
-      Feature::Context context);
+      mojom::ContextType context);
 
   // Creates a tab MutedInfo object (see chrome/common/extensions/api/tabs.json)
   // with information about the mute state of a browser tab.
@@ -142,12 +144,12 @@ class ExtensionTabUtil {
   // extension and web contents. This is the preferred way to get
   // ScrubTabBehavior.
   static ScrubTabBehavior GetScrubTabBehavior(const Extension* extension,
-                                              Feature::Context context,
+                                              mojom::ContextType context,
                                               content::WebContents* contents);
   // Only use this if there is no access to a specific WebContents, such as when
   // the tab has been closed and there is no active WebContents anymore.
   static ScrubTabBehavior GetScrubTabBehavior(const Extension* extension,
-                                              Feature::Context context,
+                                              mojom::ContextType context,
                                               const GURL& url);
 
   // Removes any privacy-sensitive fields from a Tab object if appropriate,
@@ -200,7 +202,7 @@ class ExtensionTabUtil {
   static GURL ResolvePossiblyRelativeURL(const std::string& url_string,
                                          const Extension* extension);
 
-  // Returns true if navigating to |url| would kill a page or the browser
+  // Returns true if navigating to |url| could kill a page or the browser
   // itself, whether by simulating a crash, browser quit, thread hang, or
   // equivalent. Extensions should be prevented from navigating to such URLs.
   //
@@ -209,18 +211,17 @@ class ExtensionTabUtil {
   static bool IsKillURL(const GURL& url);
 
   // Resolves the URL and ensures the extension is allowed to navigate to it.
-  // Returns true and sets |url| if successful. Returns false and sets |error|
-  // if an error occurs.
-  static bool PrepareURLForNavigation(const std::string& url_string,
-                                      const Extension* extension,
-                                      GURL* url,
-                                      std::string* error);
+  // Returns the url if successful, otherwise returns an error string.
+  static base::expected<GURL, std::string> PrepareURLForNavigation(
+      const std::string& url_string,
+      const Extension* extension,
+      content::BrowserContext* browser_context);
 
   // Opens a tab for the specified |web_contents|.
   static void CreateTab(std::unique_ptr<content::WebContents> web_contents,
                         const std::string& extension_id,
                         WindowOpenDisposition disposition,
-                        const gfx::Rect& initial_rect,
+                        const blink::mojom::WindowFeatures& window_features,
                         bool user_gesture);
 
   // Executes the specified callback for all tabs in all browser windows.
@@ -262,6 +263,9 @@ class ExtensionTabUtil {
 
   // Retrieve a TabStripModel only if every browser is editable.
   static TabStripModel* GetEditableTabStripModel(Browser* browser);
+
+  static bool TabIsInSavedTabGroup(content::WebContents* contents,
+                                   TabStripModel* tab_strip_model);
 };
 
 }  // namespace extensions

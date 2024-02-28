@@ -8,7 +8,7 @@
 #include <memory>
 #include <string>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -106,7 +106,7 @@ class NET_EXPORT_PRIVATE HttpServerPropertiesManager {
   // by the time this method is called, calling this will prevent it from ever
   // being invoked, as this method will overwrite any previous preferences.
   //
-  // Entries associated with NetworkIsolationKeys for opaque origins are not
+  // Entries associated with NetworkAnonymizationKeys for opaque origins are not
   // written to disk.
   void WriteToPrefs(
       const HttpServerProperties::ServerInfoMap& server_info_map,
@@ -134,7 +134,7 @@ class NET_EXPORT_PRIVATE HttpServerPropertiesManager {
 
   void AddServerData(const base::Value::Dict& server_dict,
                      HttpServerProperties::ServerInfoMap* server_info_map,
-                     bool use_network_isolation_key);
+                     bool use_network_anonymization_key);
 
   // Helper method used for parsing an alternative service from JSON.
   // |dict| is the JSON dictionary to be parsed. It should contain fields
@@ -172,11 +172,11 @@ class NET_EXPORT_PRIVATE HttpServerPropertiesManager {
                          HttpServerProperties::ServerInfo* server_info);
   void AddToQuicServerInfoMap(
       const base::Value::Dict& server_dict,
-      bool use_network_isolation_key,
+      bool use_network_anonymization_key,
       HttpServerProperties::QuicServerInfoMap* quic_server_info_map);
   void AddToBrokenAlternativeServices(
       const base::Value::Dict& broken_alt_svc_entry_dict,
-      bool use_network_isolation_key,
+      bool use_network_anonymization_key,
       BrokenAlternativeServiceList* broken_alternative_service_list,
       RecentlyBrokenAlternativeServices* recently_broken_alternative_services);
 

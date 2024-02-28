@@ -44,7 +44,8 @@ class ExpiringVisitsReader {
                     VisitVector* visits, int max_visits) const = 0;
 };
 
-typedef std::vector<const ExpiringVisitsReader*> ExpiringVisitsReaders;
+typedef std::vector<raw_ptr<const ExpiringVisitsReader, VectorExperimental>>
+    ExpiringVisitsReaders;
 
 namespace internal {
 // The minimum number of days since last use for an icon to be considered old.
@@ -99,7 +100,8 @@ class ExpireHistoryBackend {
 
   // Removes the given list of visits, updating the URLs accordingly (similar to
   // ExpireHistoryBetween(), but affecting a specific set of visits).
-  void ExpireVisits(const VisitVector& visits);
+  void ExpireVisits(const VisitVector& visits,
+                    DeletionInfo::Reason deletion_reason);
 
   // Expires all visits before and including the given time, updating the URLs
   // accordingly.
@@ -117,6 +119,7 @@ class ExpireHistoryBackend {
   }
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, ExpireSegmentData);
   FRIEND_TEST_ALL_PREFIXES(ExpireHistoryTest, DeleteFaviconsIfPossible);
   FRIEND_TEST_ALL_PREFIXES(ExpireHistoryTest, ExpireSomeOldHistory);
   FRIEND_TEST_ALL_PREFIXES(ExpireHistoryTest, ExpiringVisitsReader);
@@ -160,7 +163,8 @@ class ExpireHistoryBackend {
   // Returns a vector with all visits that eventually redirect to `visits`.
   VisitVector GetVisitsAndRedirectParents(const VisitVector& visits);
 
-  // Deletes the visit-related stuff for all the visits in the given list, and
+  // Deletes the visit-related stuff for all the visits in the given list,
+  // decreases the visit_count for corresponding VisitedLinks, and
   // adds the rows for unique URLs affected to the affected_urls list in
   // the dependencies structure.
   void DeleteVisitRelatedInfo(const VisitVector& visits,
@@ -221,7 +225,8 @@ class ExpireHistoryBackend {
   void ExpireVisitsInternal(const VisitVector& visits,
                             const DeletionTimeRange& time_range,
                             const std::set<GURL>& restrict_urls,
-                            DeletionType type);
+                            DeletionType type,
+                            DeletionInfo::Reason deletion_reason);
 
   // Deletes the favicons listed in `effects->affected_favicons` if they are
   // unused. Fails silently (we don't care about favicons so much, so don't want
@@ -234,7 +239,8 @@ class ExpireHistoryBackend {
   void BroadcastNotifications(DeleteEffects* effects,
                               DeletionType type,
                               const DeletionTimeRange& time_range,
-                              absl::optional<std::set<GURL>> restrict_urls);
+                              absl::optional<std::set<GURL>> restrict_urls,
+                              DeletionInfo::Reason deletion_reason);
 
   // Schedules a call to DoExpireIteration.
   void ScheduleExpire();
@@ -245,12 +251,15 @@ class ExpireHistoryBackend {
   void DoExpireIteration();
 
   // Tries to expire the oldest `max_visits` visits from history that are older
-  // than `time_threshold`. The return value indicates if we think there might
-  // be more history to expire with the current time threshold (it does not
-  // indicate success or failure).
+  // than `end_time`. The return value indicates if we think there might be more
+  // history to expire with the current time threshold (it does not indicate
+  // success or failure).
   bool ExpireSomeOldHistory(base::Time end_time,
                              const ExpiringVisitsReader* reader,
                              int max_visits);
+
+  // Expire segment data older than `end_time`.
+  void ExpireOldSegmentData(base::Time end_time);
 
   // Tries to detect possible bad history or inconsistencies in the database
   // and deletes items. For example, URLs with no visits.

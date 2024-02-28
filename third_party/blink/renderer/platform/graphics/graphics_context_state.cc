@@ -1,10 +1,10 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/platform/graphics/graphics_context_state.h"
 
-#include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
+#include "third_party/blink/renderer/platform/graphics/paint/paint_shader.h"
 
 namespace blink {
 
@@ -18,19 +18,17 @@ static inline cc::PaintFlags::FilterQuality FilterQualityForPaint(
                                        : cc::PaintFlags::FilterQuality::kNone;
 }
 
-GraphicsContextState::GraphicsContextState()
-    : text_drawing_mode_(kTextModeFill),
-      interpolation_quality_(kInterpolationDefault),
-      save_count_(0),
-      should_antialias_(true) {
+GraphicsContextState::GraphicsContextState() {
   stroke_flags_.setStyle(cc::PaintFlags::kStroke_Style);
   stroke_flags_.setStrokeWidth(SkFloatToScalar(stroke_data_.Thickness()));
   stroke_flags_.setStrokeCap(cc::PaintFlags::kDefault_Cap);
   stroke_flags_.setStrokeJoin(cc::PaintFlags::kDefault_Join);
   stroke_flags_.setStrokeMiter(SkFloatToScalar(stroke_data_.MiterLimit()));
   stroke_flags_.setFilterQuality(FilterQualityForPaint(interpolation_quality_));
+  stroke_flags_.setDynamicRangeLimit(dynamic_range_limit_);
   stroke_flags_.setAntiAlias(should_antialias_);
   fill_flags_.setFilterQuality(FilterQualityForPaint(interpolation_quality_));
+  fill_flags_.setDynamicRangeLimit(dynamic_range_limit_);
   fill_flags_.setAntiAlias(should_antialias_);
 }
 
@@ -40,6 +38,7 @@ GraphicsContextState::GraphicsContextState(const GraphicsContextState& other)
       stroke_data_(other.stroke_data_),
       text_drawing_mode_(other.text_drawing_mode_),
       interpolation_quality_(other.interpolation_quality_),
+      dynamic_range_limit_(other.dynamic_range_limit_),
       save_count_(0),
       should_antialias_(other.should_antialias_) {}
 
@@ -67,7 +66,7 @@ void GraphicsContextState::SetStrokeThickness(float thickness) {
 }
 
 void GraphicsContextState::SetStrokeColor(const Color& color) {
-  stroke_flags_.setColor(color.Rgb());
+  stroke_flags_.setColor(color.toSkColor4f());
   stroke_flags_.setShader(nullptr);
 }
 
@@ -87,7 +86,7 @@ void GraphicsContextState::SetMiterLimit(float miter_limit) {
 }
 
 void GraphicsContextState::SetFillColor(const Color& color) {
-  fill_flags_.setColor(color.Rgb());
+  fill_flags_.setColor(color.toSkColor4f());
   fill_flags_.setShader(nullptr);
 }
 
@@ -104,18 +103,17 @@ void GraphicsContextState::SetLineDash(const DashArray& dashes,
   stroke_data_.SetLineDash(dashes, dash_offset);
 }
 
-void GraphicsContextState::SetColorFilter(sk_sp<SkColorFilter> color_filter) {
-  // Grab a new ref for stroke.
-  stroke_flags_.setColorFilter(color_filter);
-  // Pass the existing ref to fill (to minimize refcount churn).
-  fill_flags_.setColorFilter(std::move(color_filter));
-}
-
 void GraphicsContextState::SetInterpolationQuality(
     InterpolationQuality quality) {
   interpolation_quality_ = quality;
   stroke_flags_.setFilterQuality(FilterQualityForPaint(quality));
   fill_flags_.setFilterQuality(FilterQualityForPaint(quality));
+}
+
+void GraphicsContextState::SetDynamicRangeLimit(DynamicRangeLimit limit) {
+  dynamic_range_limit_ = limit;
+  stroke_flags_.setDynamicRangeLimit(limit);
+  fill_flags_.setDynamicRangeLimit(limit);
 }
 
 void GraphicsContextState::SetShouldAntialias(bool should_antialias) {

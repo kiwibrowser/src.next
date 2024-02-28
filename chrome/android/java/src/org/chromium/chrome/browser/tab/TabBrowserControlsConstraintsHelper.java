@@ -5,11 +5,11 @@
 package org.chromium.chrome.browser.tab;
 
 import androidx.annotation.Nullable;
-import androidx.annotation.VisibleForTesting;
+
+import org.jni_zero.NativeMethods;
 
 import org.chromium.base.Callback;
 import org.chromium.base.UserData;
-import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.supplier.ObservableSupplier;
 import org.chromium.cc.input.BrowserControlsState;
 import org.chromium.components.browser_ui.util.BrowserControlsVisibilityDelegate;
@@ -17,9 +17,7 @@ import org.chromium.content_public.browser.NavigationHandle;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.WindowAndroid;
 
-/**
- * Manages the state of tab browser controls.
- */
+/** Manages the state of tab browser controls. */
 public class TabBrowserControlsConstraintsHelper implements UserData {
     private static final Class<TabBrowserControlsConstraintsHelper> USER_DATA_KEY =
             TabBrowserControlsConstraintsHelper.class;
@@ -31,8 +29,8 @@ public class TabBrowserControlsConstraintsHelper implements UserData {
     private BrowserControlsVisibilityDelegate mVisibilityDelegate;
 
     public static void createForTab(Tab tab) {
-        tab.getUserDataHost().setUserData(
-                USER_DATA_KEY, new TabBrowserControlsConstraintsHelper(tab));
+        tab.getUserDataHost()
+                .setUserData(USER_DATA_KEY, new TabBrowserControlsConstraintsHelper(tab));
     }
 
     public static TabBrowserControlsConstraintsHelper get(Tab tab) {
@@ -45,8 +43,7 @@ public class TabBrowserControlsConstraintsHelper implements UserData {
      * @param tab Tab whose browser controls state is looked into.
      * @return The current visibility constraints.
      */
-    @BrowserControlsState
-    public static int getConstraints(Tab tab) {
+    public static @BrowserControlsState int getConstraints(Tab tab) {
         if (tab == null || get(tab) == null) return BrowserControlsState.BOTH;
         return get(tab).getConstraints();
     }
@@ -97,58 +94,65 @@ public class TabBrowserControlsConstraintsHelper implements UserData {
     private TabBrowserControlsConstraintsHelper(Tab tab) {
         mTab = (TabImpl) tab;
         mConstraintsChangedCallback = (constraints) -> updateEnabledState();
-        mTab.addObserver(new EmptyTabObserver() {
-            @Override
-            public void onInitialized(Tab tab, String appId) {
-                updateVisibilityDelegate();
-            }
+        mTab.addObserver(
+                new EmptyTabObserver() {
+                    @Override
+                    public void onInitialized(Tab tab, String appId) {
+                        updateVisibilityDelegate();
+                    }
 
-            @Override
-            public void onActivityAttachmentChanged(Tab tab, @Nullable WindowAndroid window) {
-                if (window != null) updateVisibilityDelegate();
-            }
+                    @Override
+                    public void onActivityAttachmentChanged(
+                            Tab tab, @Nullable WindowAndroid window) {
+                        if (window != null) updateVisibilityDelegate();
+                    }
 
-            @Override
-            public void onDestroyed(Tab tab) {
-                tab.removeObserver(this);
-            }
+                    @Override
+                    public void onDestroyed(Tab tab) {
+                        tab.removeObserver(this);
+                    }
 
-            private void updateAfterRendererProcessSwitch(Tab tab, boolean hasCommitted) {
-                int constraints = getConstraints();
-                if (constraints == BrowserControlsState.SHOWN && hasCommitted
-                        && TabBrowserControlsOffsetHelper.get(tab).topControlsOffset() == 0) {
-                    // If the browser controls were already fully visible on the previous page, then
-                    // avoid an animation to keep the controls from jumping around.
-                    update(BrowserControlsState.SHOWN, false);
-                } else {
-                    updateEnabledState();
-                }
-            }
+                    private void updateAfterRendererProcessSwitch(Tab tab, boolean hasCommitted) {
+                        int constraints = getConstraints();
+                        if (constraints == BrowserControlsState.SHOWN
+                                && hasCommitted
+                                && TabBrowserControlsOffsetHelper.get(tab).topControlsOffset()
+                                        == 0) {
+                            // If the browser controls were already fully visible on the previous
+                            // page, then avoid an animation to keep the controls from jumping
+                            // around.
+                            update(BrowserControlsState.SHOWN, false);
+                        } else {
+                            updateEnabledState();
+                        }
+                    }
 
-            @Override
-            public void onDidFinishNavigation(Tab tab, NavigationHandle navigationHandle) {
-                if (!navigationHandle.isInPrimaryMainFrame()) return;
+                    @Override
+                    public void onDidFinishNavigationInPrimaryMainFrame(
+                            Tab tab, NavigationHandle navigationHandle) {
+                        // At this point, we might have switched renderer processes, so push the
+                        // existing constraints to the new renderer (has the potential to be
+                        // slightly spammy, but the renderer has logic to suppress duplicate
+                        // calls).
+                        updateAfterRendererProcessSwitch(tab, navigationHandle.hasCommitted());
+                    }
 
-                // At this point, we might have switched renderer processes, so push the existing
-                // constraints to the new renderer (has the potential to be slightly spammy, but
-                // the renderer has logic to suppress duplicate calls).
-                updateAfterRendererProcessSwitch(tab, navigationHandle.hasCommitted());
-            }
-
-            @Override
-            public void onWebContentsSwapped(Tab tab, boolean didStartLoad, boolean didFinishLoad) {
-                updateAfterRendererProcessSwitch(tab, true);
-            }
-        });
-        if (mTab.isInitialized() && !TabImpl.isDetached(mTab)) updateVisibilityDelegate();
+                    @Override
+                    public void onWebContentsSwapped(
+                            Tab tab, boolean didStartLoad, boolean didFinishLoad) {
+                        updateAfterRendererProcessSwitch(tab, true);
+                    }
+                });
+        if (mTab.isInitialized() && !mTab.isDetached()) updateVisibilityDelegate();
     }
 
     @Override
     public void destroy() {
         if (mNativeTabBrowserControlsConstraintsHelper != 0) {
-            TabBrowserControlsConstraintsHelperJni.get().onDestroyed(
-                    mNativeTabBrowserControlsConstraintsHelper,
-                    TabBrowserControlsConstraintsHelper.this);
+            TabBrowserControlsConstraintsHelperJni.get()
+                    .onDestroyed(
+                            mNativeTabBrowserControlsConstraintsHelper,
+                            TabBrowserControlsConstraintsHelper.this);
         }
     }
 
@@ -179,6 +183,8 @@ public class TabBrowserControlsConstraintsHelper implements UserData {
      *                should jump immediately.
      */
     public void update(int current, boolean animate) {
+        assert mTab.getWebContents() != null : "Shouldn't update a Tab with a null WebContents.";
+
         int constraints = getConstraints();
 
         // Do nothing if current and constraints conflict to avoid error in renderer.
@@ -189,21 +195,23 @@ public class TabBrowserControlsConstraintsHelper implements UserData {
         }
         if (mNativeTabBrowserControlsConstraintsHelper == 0) {
             mNativeTabBrowserControlsConstraintsHelper =
-                    TabBrowserControlsConstraintsHelperJni.get().init(
-                            TabBrowserControlsConstraintsHelper.this);
+                    TabBrowserControlsConstraintsHelperJni.get()
+                            .init(TabBrowserControlsConstraintsHelper.this);
         }
-        TabBrowserControlsConstraintsHelperJni.get().updateState(
-                mNativeTabBrowserControlsConstraintsHelper,
-                TabBrowserControlsConstraintsHelper.this, mTab.getWebContents(), constraints,
-                current, animate);
+        TabBrowserControlsConstraintsHelperJni.get()
+                .updateState(
+                        mNativeTabBrowserControlsConstraintsHelper,
+                        TabBrowserControlsConstraintsHelper.this,
+                        mTab.getWebContents(),
+                        constraints,
+                        current,
+                        animate);
     }
 
-    @BrowserControlsState
-    private int getConstraints() {
+    private @BrowserControlsState int getConstraints() {
         return mVisibilityDelegate == null ? BrowserControlsState.BOTH : mVisibilityDelegate.get();
     }
 
-    @VisibleForTesting
     public static void setForTesting(Tab tab, TabBrowserControlsConstraintsHelper helper) {
         tab.getUserDataHost().setUserData(USER_DATA_KEY, helper);
     }
@@ -211,10 +219,17 @@ public class TabBrowserControlsConstraintsHelper implements UserData {
     @NativeMethods
     interface Natives {
         long init(TabBrowserControlsConstraintsHelper caller);
-        void onDestroyed(long nativeTabBrowserControlsConstraintsHelper,
+
+        void onDestroyed(
+                long nativeTabBrowserControlsConstraintsHelper,
                 TabBrowserControlsConstraintsHelper caller);
-        void updateState(long nativeTabBrowserControlsConstraintsHelper,
-                TabBrowserControlsConstraintsHelper caller, WebContents webContents, int contraints,
-                int current, boolean animate);
+
+        void updateState(
+                long nativeTabBrowserControlsConstraintsHelper,
+                TabBrowserControlsConstraintsHelper caller,
+                WebContents webContents,
+                int contraints,
+                int current,
+                boolean animate);
     }
 }

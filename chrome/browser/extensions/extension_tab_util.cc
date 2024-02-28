@@ -8,19 +8,22 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include "base/containers/contains.h"
-#include "base/cxx17_backports.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/types/expected_macros.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/api/tab_groups/tab_groups_util.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
 #include "chrome/browser/extensions/browser_extension_window_controller.h"
 #include "chrome/browser/extensions/chrome_extension_function_details.h"
+#include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -35,9 +38,12 @@
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
+#include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_keyed_service.h"
+#include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_service_factory.h"
 #include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_utils.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/common/extensions/api/tabs.h"
 #include "chrome/common/url_constants.h"
 #include "components/sessions/content/session_tab_helper.h"
@@ -51,16 +57,19 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_function.h"
+#include "extensions/browser/extension_util.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_features.h"
 #include "extensions/common/feature_switch.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/incognito_info.h"
 #include "extensions/common/manifest_handlers/options_page_info.h"
+#include "extensions/common/mojom/context_type.mojom.h"
 #include "extensions/common/permissions/api_permission.h"
 #include "extensions/common/permissions/permissions_data.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/common/chrome_debug_urls.h"
 #include "url/gurl.h"
 
 using content::NavigationEntry;
@@ -70,6 +79,23 @@ using extensions::mojom::APIPermissionID;
 namespace extensions {
 
 namespace {
+
+// This enum is used for counting schemes used via a navigation triggered by
+// extensions.
+enum class NavigationScheme {
+  // http: or https: scheme.
+  kHttpOrHttps = 0,
+  // chrome: scheme.
+  kChrome = 1,
+  // file: scheme where extension has access to local files.
+  kFileWithPermission = 2,
+  // file: scheme where extension does NOT have access to local files.
+  kFileWithoutPermission = 3,
+  // Everything else.
+  kOther = 4,
+
+  kMaxValue = kOther,
+};
 
 Browser* CreateBrowser(Profile* profile, bool user_gesture) {
   if (Browser::GetCreationStatusForProfile(profile) !=
@@ -97,22 +123,27 @@ Browser* CreateAndShowBrowser(Profile* profile,
 // take care of setting the id to TAB_ID_NONE if necessary (for
 // example with devtools).
 int GetTabIdForExtensions(const WebContents* web_contents) {
-  Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
+  Browser* browser = chrome::FindBrowserWithTab(web_contents);
   if (browser && !ExtensionTabUtil::BrowserSupportsTabs(browser))
     return -1;
   return sessions::SessionTabHelper::IdForTab(web_contents).id();
 }
 
+bool IsFileUrl(const GURL& url) {
+  return url.SchemeIsFile() || (url.SchemeIs(content::kViewSourceScheme) &&
+                                GURL(url.GetContent()).SchemeIsFile());
+}
+
 ExtensionTabUtil::ScrubTabBehaviorType GetScrubTabBehaviorImpl(
     const Extension* extension,
-    Feature::Context context,
+    mojom::ContextType context,
     const GURL& url,
     int tab_id) {
-  if (context == Feature::Context::WEBUI_CONTEXT) {
+  if (context == mojom::ContextType::kWebUi) {
     return ExtensionTabUtil::kDontScrubTab;
   }
 
-  if (context == Feature::Context::WEBUI_UNTRUSTED_CONTEXT) {
+  if (context == mojom::ContextType::kUntrustedWebUi) {
     return ExtensionTabUtil::kScrubTabFully;
   }
 
@@ -145,6 +176,24 @@ bool HasValidMainFrameProcess(content::WebContents* contents) {
   content::RenderFrameHost* main_frame_host = contents->GetPrimaryMainFrame();
   content::RenderProcessHost* process_host = main_frame_host->GetProcess();
   return process_host->IsReady() && process_host->IsInitializedAndNotDead();
+}
+
+void RecordNavigationScheme(const GURL& url,
+                            const Extension& extension,
+                            content::BrowserContext* browser_context) {
+  NavigationScheme scheme = NavigationScheme::kOther;
+
+  if (url.SchemeIsHTTPOrHTTPS()) {
+    scheme = NavigationScheme::kHttpOrHttps;
+  } else if (url.SchemeIs(content::kChromeUIScheme)) {
+    scheme = NavigationScheme::kChrome;
+  } else if (url.SchemeIsFile()) {
+    scheme = (util::AllowFileAccess(extension.id(), browser_context))
+                 ? NavigationScheme::kFileWithPermission
+                 : NavigationScheme::kFileWithoutPermission;
+  }
+
+  base::UmaHistogramEnumeration("Extensions.Navigation.Scheme", scheme);
 }
 
 }  // namespace
@@ -202,14 +251,11 @@ base::expected<base::Value::Dict, std::string> ExtensionTabUtil::OpenTab(
   // -title
   // -favIconUrl
 
-  GURL url;
+  GURL url(chrome::kChromeUINewTabURL);
   if (params.url) {
-    if (!ExtensionTabUtil::PrepareURLForNavigation(
-            *params.url, function->extension(), &url, &error)) {
-      return base::unexpected(error);
-    }
-  } else {
-    url = GURL(chrome::kChromeUINewTabURL);
+    ASSIGN_OR_RETURN(url, ExtensionTabUtil::PrepareURLForNavigation(
+                              *params.url, function->extension(),
+                              function->browser_context()));
   }
 
   // Default to foreground for the new tab. The presence of 'active' property
@@ -246,7 +292,7 @@ base::expected<base::Value::Dict, std::string> ExtensionTabUtil::OpenTab(
   // If index is specified, honor the value, but keep it bound to
   // -1 <= index <= tab_strip->count() where -1 invokes the default behavior.
   int index = params.index.value_or(-1);
-  index = base::clamp(index, -1, browser->tab_strip_model()->count());
+  index = std::clamp(index, -1, browser->tab_strip_model()->count());
 
   int add_types = active ? AddTabTypes::ADD_ACTIVE : AddTabTypes::ADD_NONE;
   add_types |= AddTabTypes::ADD_FORCE_INDEX;
@@ -274,7 +320,7 @@ base::expected<base::Value::Dict, std::string> ExtensionTabUtil::OpenTab(
   // The tab may have been created in a different window, so make sure we look
   // at the right tab strip.
   TabStripModel* tab_strip = navigate_params.browser->tab_strip_model();
-  int new_index = tab_strip->GetIndexOfWebContents(
+  const int new_index = tab_strip->GetIndexOfWebContents(
       navigate_params.navigated_or_inserted_contents);
   if (opener) {
     // Only set the opener if the opener tab is in the same tab strip as the
@@ -290,6 +336,16 @@ base::expected<base::Value::Dict, std::string> ExtensionTabUtil::OpenTab(
       ExtensionTabUtil::GetScrubTabBehavior(
           function->extension(), function->source_context_type(),
           navigate_params.navigated_or_inserted_contents);
+
+  if (tab_strip) {
+    std::optional<tab_groups::TabGroupId> group =
+        tab_strip->GetTabGroupForTab(new_index);
+    if (group.has_value()) {
+      if (tab_groups_util::IsGroupSaved(group.value(), tab_strip)) {
+        return base::unexpected(tabs_constants::kSavedTabGroupNotEditableError);
+      }
+    }
+  }
 
   // Return data about the newly created tab.
   return ExtensionTabUtil::CreateTabObject(
@@ -326,7 +382,7 @@ Browser* ExtensionTabUtil::GetBrowserInProfileWithId(
       also_match_incognito_profile
           ? profile->GetPrimaryOTRProfile(/*create_if_needed=*/false)
           : nullptr;
-  for (auto* browser : *BrowserList::GetInstance()) {
+  for (Browser* browser : *BrowserList::GetInstance()) {
     if ((browser->profile() == profile ||
          browser->profile() == incognito_profile) &&
         ExtensionTabUtil::GetWindowId(browser) == window_id &&
@@ -349,7 +405,7 @@ int ExtensionTabUtil::GetWindowId(const Browser* browser) {
 
 int ExtensionTabUtil::GetWindowIdOfTabStripModel(
     const TabStripModel* tab_strip_model) {
-  for (auto* browser : *BrowserList::GetInstance()) {
+  for (Browser* browser : *BrowserList::GetInstance()) {
     if (browser->tab_strip_model() == tab_strip_model)
       return GetWindowId(browser);
   }
@@ -400,10 +456,18 @@ api::tabs::Tab ExtensionTabUtil::CreateTabObject(
 
   tab_object.group_id = -1;
   if (tab_strip) {
-    absl::optional<tab_groups::TabGroupId> group =
+    std::optional<tab_groups::TabGroupId> group =
         tab_strip->GetTabGroupForTab(tab_index);
-    if (group.has_value())
+    if (group.has_value()) {
       tab_object.group_id = tab_groups_util::GetGroupId(group.value());
+    }
+
+    std::optional<base::Time> last_accessed =
+        tab_strip->GetLastAccessed(tab_index);
+
+    if (last_accessed.has_value()) {
+      tab_object.last_accessed = last_accessed->InMillisecondsFSinceUnixEpoch();
+    }
   }
 
   auto* audible_helper = RecentlyAudibleHelper::FromWebContents(contents);
@@ -427,7 +491,7 @@ api::tabs::Tab ExtensionTabUtil::CreateTabObject(
   tab_object.discarded =
       tab_lifecycle_unit_external && tab_lifecycle_unit_external->IsDiscarded();
   DCHECK(!tab_object.discarded ||
-         tab_object.status == api::tabs::TAB_STATUS_UNLOADED);
+         tab_object.status == api::tabs::TabStatus::kUnloaded);
   tab_object.auto_discardable =
       !tab_lifecycle_unit_external ||
       tab_lifecycle_unit_external->IsAutoDiscardable();
@@ -463,7 +527,7 @@ api::tabs::Tab ExtensionTabUtil::CreateTabObject(
 
 base::Value::List ExtensionTabUtil::CreateTabList(const Browser* browser,
                                                   const Extension* extension,
-                                                  Feature::Context context) {
+                                                  mojom::ContextType context) {
   base::Value::List tab_list;
   TabStripModel* tab_strip = browser->tab_strip_model();
   for (int i = 0; i < tab_strip->count(); ++i) {
@@ -483,7 +547,7 @@ base::Value::Dict ExtensionTabUtil::CreateWindowValueForExtension(
     const Browser& browser,
     const Extension* extension,
     PopulateTabBehavior populate_tab_behavior,
-    Feature::Context context) {
+    mojom::ContextType context) {
   base::Value::Dict dict;
 
   dict.Set(tabs_constants::kIdKey, browser.session_id().id());
@@ -538,10 +602,10 @@ api::tabs::MutedInfo ExtensionTabUtil::CreateMutedInfo(
     case TabMutedReason::AUDIO_INDICATOR:
     case TabMutedReason::CONTENT_SETTING:
     case TabMutedReason::CONTENT_SETTING_CHROME:
-      info.reason = api::tabs::MUTED_INFO_REASON_USER;
+      info.reason = api::tabs::MutedInfoReason::kUser;
       break;
     case TabMutedReason::EXTENSION:
-      info.reason = api::tabs::MUTED_INFO_REASON_EXTENSION;
+      info.reason = api::tabs::MutedInfoReason::kExtension;
       info.extension_id =
           LastMuteMetadata::FromWebContents(contents)->extension_id;
       DCHECK(!info.extension_id->empty());
@@ -553,7 +617,7 @@ api::tabs::MutedInfo ExtensionTabUtil::CreateMutedInfo(
 // static
 ExtensionTabUtil::ScrubTabBehavior ExtensionTabUtil::GetScrubTabBehavior(
     const Extension* extension,
-    Feature::Context context,
+    mojom::ContextType context,
     content::WebContents* contents) {
   int tab_id = GetTabId(contents);
   ScrubTabBehavior behavior;
@@ -572,7 +636,7 @@ ExtensionTabUtil::ScrubTabBehavior ExtensionTabUtil::GetScrubTabBehavior(
 // static
 ExtensionTabUtil::ScrubTabBehavior ExtensionTabUtil::GetScrubTabBehavior(
     const Extension* extension,
-    Feature::Context context,
+    mojom::ContextType context,
     const GURL& url) {
   ScrubTabBehaviorType type =
       GetScrubTabBehaviorImpl(extension, context, url, api::tabs::TAB_ID_NONE);
@@ -623,7 +687,7 @@ bool ExtensionTabUtil::GetTabStripModel(const WebContents* web_contents,
   DCHECK(tab_strip_model);
   DCHECK(tab_index);
 
-  for (auto* browser : *BrowserList::GetInstance()) {
+  for (Browser* browser : *BrowserList::GetInstance()) {
     TabStripModel* tab_strip = browser->tab_strip_model();
     int index = tab_strip->GetIndexOfWebContents(web_contents);
     if (index != -1) {
@@ -662,12 +726,21 @@ bool ExtensionTabUtil::GetTabById(int tab_id,
                                   int* tab_index) {
   if (tab_id == api::tabs::TAB_ID_NONE)
     return false;
+  // If `browser_context` is null, then `Profile::FromBrowserContext` below
+  // will return nullptr, and the subsequent call to `GetPrimaryOTRProfile`
+  // will crash. Since this can happen during shutdown, early-out to avoid
+  // crashing.
+  if (!browser_context) {
+    return false;
+  }
+
   Profile* profile = Profile::FromBrowserContext(browser_context);
   Profile* incognito_profile =
       include_incognito
-          ? profile->GetPrimaryOTRProfile(/*create_if_needed=*/false)
+          ? (profile ? profile->GetPrimaryOTRProfile(/*create_if_needed=*/false)
+                     : nullptr)
           : nullptr;
-  for (auto* target_browser : *BrowserList::GetInstance()) {
+  for (Browser* target_browser : *BrowserList::GetInstance()) {
     if (target_browser->profile() == profile ||
         target_browser->profile() == incognito_profile) {
       TabStripModel* target_tab_strip = target_browser->tab_strip_model();
@@ -712,7 +785,7 @@ ExtensionTabUtil::GetAllActiveWebContentsForContext(
       include_incognito
           ? profile->GetPrimaryOTRProfile(/*create_if_needed=*/false)
           : nullptr;
-  for (auto* target_browser : *BrowserList::GetInstance()) {
+  for (Browser* target_browser : *BrowserList::GetInstance()) {
     if (target_browser->profile() == profile ||
         target_browser->profile() == incognito_profile) {
       TabStripModel* target_tab_strip = target_browser->tab_strip_model();
@@ -760,23 +833,31 @@ bool ExtensionTabUtil::IsKillURL(const GURL& url) {
     DCHECK(url.IsAboutBlank() || url.IsAboutSrcdoc());
 #endif
 
-  static const char* const kill_hosts[] = {
-      chrome::kChromeUICrashHost,         chrome::kChromeUIDelayedHangUIHost,
-      chrome::kChromeUIHangUIHost,        chrome::kChromeUIKillHost,
+  // Disallow common renderer debug URLs.
+  // Note: this would also disallow JavaScript URLs, but we already explicitly
+  // check for those before calling into here from PrepareURLForNavigation.
+  if (blink::IsRendererDebugURL(url)) {
+    return true;
+  }
+
+  if (!url.SchemeIs(content::kChromeUIScheme)) {
+    return false;
+  }
+
+  // Also disallow a few more hosts which are not covered by the check above.
+  static const char* const kKillHosts[] = {
+      chrome::kChromeUIDelayedHangUIHost, chrome::kChromeUIHangUIHost,
       chrome::kChromeUIQuitHost,          chrome::kChromeUIRestartHost,
       content::kChromeUIBrowserCrashHost, content::kChromeUIMemoryExhaustHost,
   };
 
-  if (!url.SchemeIs(content::kChromeUIScheme))
-    return false;
-
-  return base::Contains(kill_hosts, url.host_piece());
+  return base::Contains(kKillHosts, url.host_piece());
 }
 
-bool ExtensionTabUtil::PrepareURLForNavigation(const std::string& url_string,
-                                               const Extension* extension,
-                                               GURL* return_url,
-                                               std::string* error) {
+base::expected<GURL, std::string> ExtensionTabUtil::PrepareURLForNavigation(
+    const std::string& url_string,
+    const Extension* extension,
+    content::BrowserContext* browser_context) {
   GURL url =
       ExtensionTabUtil::ResolvePossiblyRelativeURL(url_string, extension);
 
@@ -788,15 +869,19 @@ bool ExtensionTabUtil::PrepareURLForNavigation(const std::string& url_string,
 
   // Reject invalid URLs.
   if (!url.is_valid()) {
-    *error = ErrorUtils::FormatErrorMessage(tabs_constants::kInvalidUrlError,
-                                            url_string);
-    return false;
+    return base::unexpected(ErrorUtils::FormatErrorMessage(
+        tabs_constants::kInvalidUrlError, url_string));
+  }
+
+  // Don't let the extension use JavaScript URLs in API triggered navigations.
+  if (url.SchemeIs(url::kJavaScriptScheme)) {
+    return base::unexpected(
+        tabs_constants::kJavaScriptUrlsNotAllowedInExtensionNavigations);
   }
 
   // Don't let the extension crash the browser or renderers.
   if (ExtensionTabUtil::IsKillURL(url)) {
-    *error = tabs_constants::kNoCrashBrowserError;
-    return false;
+    return base::unexpected(tabs_constants::kNoCrashBrowserError);
   }
 
   // Don't let the extension navigate directly to devtools scheme pages, unless
@@ -808,26 +893,46 @@ bool ExtensionTabUtil::PrepareURLForNavigation(const std::string& url_string,
                       extension->permissions_data()->HasAPIPermission(
                           APIPermissionID::kDebugger));
     if (!has_permission) {
-      *error = tabs_constants::kCannotNavigateToDevtools;
-      return false;
+      return base::unexpected(tabs_constants::kCannotNavigateToDevtools);
     }
   }
 
   // Don't let the extension navigate directly to chrome-untrusted scheme pages.
   if (url.SchemeIs(content::kChromeUIUntrustedScheme)) {
-    *error = tabs_constants::kCannotNavigateToChromeUntrusted;
-    return false;
+    return base::unexpected(tabs_constants::kCannotNavigateToChromeUntrusted);
   }
 
-  return_url->Swap(&url);
-  return true;
+  // Don't let the extension navigate directly to file scheme pages, unless
+  // they have file access. `extension` can be null if the call is made from
+  // non-extension contexts (e.g. WebUI pages). In that case, we allow the
+  // navigation as such contexts are trusted and do not have a concept of file
+  // access.
+  if (extension && IsFileUrl(url) &&
+      // PDF viewer extension can navigate to file URLs.
+      extension->id() != extension_misc::kPdfExtensionId &&
+      !util::AllowFileAccess(extension->id(), browser_context) &&
+      base::FeatureList::IsEnabled(
+          extensions_features::kRestrictFileURLNavigation) &&
+      !extensions::ExtensionManagementFactory::GetForBrowserContext(
+           browser_context)
+           ->IsFileUrlNavigationAllowed(extension->id())) {
+    return base::unexpected(
+        tabs_constants::kFileUrlsNotAllowedInExtensionNavigations);
+  }
+
+  if (extension && browser_context) {
+    RecordNavigationScheme(url, *extension, browser_context);
+  }
+
+  return url;
 }
 
-void ExtensionTabUtil::CreateTab(std::unique_ptr<WebContents> web_contents,
-                                 const std::string& extension_id,
-                                 WindowOpenDisposition disposition,
-                                 const gfx::Rect& initial_rect,
-                                 bool user_gesture) {
+void ExtensionTabUtil::CreateTab(
+    std::unique_ptr<WebContents> web_contents,
+    const std::string& extension_id,
+    WindowOpenDisposition disposition,
+    const blink::mojom::WindowFeatures& window_features,
+    bool user_gesture) {
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
   Browser* browser = chrome::FindTabbedBrowser(profile, false);
@@ -848,7 +953,7 @@ void ExtensionTabUtil::CreateTab(std::unique_ptr<WebContents> web_contents,
     params.app_id = extension_id;
 
   params.disposition = disposition;
-  params.window_bounds = initial_rect;
+  params.window_features = window_features;
   params.window_action = NavigateParams::SHOW_WINDOW;
   params.user_gesture = user_gesture;
   Navigate(&params);
@@ -868,7 +973,7 @@ void ExtensionTabUtil::ForEachTab(
 // static
 WindowController* ExtensionTabUtil::GetWindowControllerOfTab(
     const WebContents* web_contents) {
-  Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
+  Browser* browser = chrome::FindBrowserWithTab(web_contents);
   if (browser != nullptr)
     return browser->extension_window_controller();
 
@@ -927,17 +1032,15 @@ bool ExtensionTabUtil::OpenOptionsPage(const Extension* extension,
     url_to_navigate = url_to_navigate.ReplaceComponents(replacements);
   }
 
-  NavigateParams params(
-      GetSingletonTabNavigateParams(browser, url_to_navigate));
   // We need to respect path differences because we don't want opening the
   // options page to close a page that might be open to extension content.
   // However, if the options page opens inside the chrome://extensions page, we
   // can override an existing page.
   // Note: ref behavior is to ignore.
-  params.path_behavior = open_in_tab ? NavigateParams::RESPECT
-                                     : NavigateParams::IGNORE_AND_NAVIGATE;
-  params.url = url_to_navigate;
-  ShowSingletonTabOverwritingNTP(browser, &params);
+  ShowSingletonTabOverwritingNTP(browser, url_to_navigate,
+                                 open_in_tab
+                                     ? NavigateParams::RESPECT
+                                     : NavigateParams::IGNORE_AND_NAVIGATE);
   return true;
 }
 
@@ -949,14 +1052,14 @@ bool ExtensionTabUtil::BrowserSupportsTabs(Browser* browser) {
 // static
 api::tabs::TabStatus ExtensionTabUtil::GetLoadingStatus(WebContents* contents) {
   if (contents->IsLoading())
-    return api::tabs::TAB_STATUS_LOADING;
+    return api::tabs::TabStatus::kLoading;
 
   // Anything that isn't backed by a process is considered unloaded.
   if (!HasValidMainFrameProcess(contents))
-    return api::tabs::TAB_STATUS_UNLOADED;
+    return api::tabs::TabStatus::kUnloaded;
 
   // Otherwise its considered loaded.
-  return api::tabs::TAB_STATUS_COMPLETE;
+  return api::tabs::TabStatus::kComplete;
 }
 
 void ExtensionTabUtil::ClearBackForwardCache() {
@@ -967,9 +1070,10 @@ void ExtensionTabUtil::ClearBackForwardCache() {
 
 // static
 bool ExtensionTabUtil::IsTabStripEditable() {
-  for (auto* browser : *BrowserList::GetInstance())
+  for (Browser* browser : *BrowserList::GetInstance()) {
     if (browser && !browser->window()->IsTabStripEditable())
       return false;
+  }
   return true;
 }
 
@@ -978,6 +1082,45 @@ TabStripModel* ExtensionTabUtil::GetEditableTabStripModel(Browser* browser) {
   if (!IsTabStripEditable())
     return nullptr;
   return browser->tab_strip_model();
+}
+
+// static
+bool ExtensionTabUtil::TabIsInSavedTabGroup(content::WebContents* contents,
+                                            TabStripModel* tab_strip_model) {
+  // If the feature is turned off, then the tab is not in a saved group.
+  if (!base::FeatureList::IsEnabled(features::kTabGroupsSave)) {
+    return false;
+  }
+
+  // If the tab_strip_model is empty, find the contents in one of the browsers.
+  if (!tab_strip_model) {
+    CHECK(contents);
+    Browser* browser = chrome::FindBrowserWithTab(contents);
+
+    // if the webcontents isn't in any tabstrip, its not in a saved tab group.
+    if (!browser) {
+      return false;
+    }
+    tab_strip_model = browser->tab_strip_model();
+  }
+
+  SavedTabGroupKeyedService* saved_tab_group_service =
+      SavedTabGroupServiceFactory::GetForProfile(tab_strip_model->profile());
+
+  // If the service failed to start, then there are no saved tab groups.
+  if (!saved_tab_group_service) {
+    return false;
+  }
+
+  // If the tab is not in a group, then its not going to be in a saved group.
+  int index = tab_strip_model->GetIndexOfWebContents(contents);
+  std::optional<tab_groups::TabGroupId> tab_group_id =
+      tab_strip_model->GetTabGroupForTab(index);
+  if (!tab_group_id.has_value()) {
+    return false;
+  }
+
+  return saved_tab_group_service->model()->Contains(tab_group_id.value());
 }
 
 }  // namespace extensions

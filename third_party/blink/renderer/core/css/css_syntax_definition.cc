@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,24 +17,6 @@
 
 namespace blink {
 namespace {
-
-// The 'default' keyword is reserved despite not being a CSS-wide keyword.
-//
-// https://drafts.csswg.org/css-values-4/#identifier-value
-//
-// TODO(https://crbug.com/1344170): This code may be unneeded.
-bool IsReservedIdentToken(const CSSParserToken& token) {
-  if (token.GetType() != kIdentToken)
-    return false;
-  return css_parsing_utils::IsDefaultKeyword(token.Value());
-}
-
-bool CouldConsumeReservedKeyword(CSSParserTokenRange range) {
-  range.ConsumeWhitespace();
-  if (IsReservedIdentToken(range.ConsumeIncludingWhitespace()))
-    return range.AtEnd();
-  return false;
-}
 
 const CSSValue* ConsumeSingleType(const CSSSyntaxComponent& syntax,
                                   CSSParserTokenRange& range,
@@ -85,7 +67,7 @@ const CSSValue* ConsumeSingleType(const CSSSyntaxComponent& syntax,
       return css_parsing_utils::ConsumeTime(
           range, context, CSSPrimitiveValue::ValueRange::kAll);
     case CSSSyntaxType::kResolution:
-      return css_parsing_utils::ConsumeResolution(range);
+      return css_parsing_utils::ConsumeResolution(range, context);
     case CSSSyntaxType::kTransformFunction:
       return css_parsing_utils::ConsumeTransformValue(range, context);
     case CSSSyntaxType::kTransformList:
@@ -106,8 +88,9 @@ const CSSValue* ConsumeSyntaxComponent(const CSSSyntaxComponent& syntax,
     CSSValueList* list = CSSValueList::CreateSpaceSeparated();
     while (!range.AtEnd()) {
       const CSSValue* value = ConsumeSingleType(syntax, range, context);
-      if (!value)
+      if (!value) {
         return nullptr;
+      }
       list->Append(*value);
     }
     return list->length() ? list : nullptr;
@@ -116,53 +99,53 @@ const CSSValue* ConsumeSyntaxComponent(const CSSSyntaxComponent& syntax,
     CSSValueList* list = CSSValueList::CreateCommaSeparated();
     do {
       const CSSValue* value = ConsumeSingleType(syntax, range, context);
-      if (!value)
+      if (!value) {
         return nullptr;
+      }
       list->Append(*value);
     } while (css_parsing_utils::ConsumeCommaIncludingWhitespace(range));
-    return list->length() ? list : nullptr;
+    return list->length() && range.AtEnd() ? list : nullptr;
   }
   const CSSValue* result = ConsumeSingleType(syntax, range, context);
-  if (!range.AtEnd())
+  if (!range.AtEnd()) {
     return nullptr;
+  }
   return result;
 }
 
 }  // namespace
 
-const CSSValue* CSSSyntaxDefinition::Parse(CSSParserTokenRange range,
+const CSSValue* CSSSyntaxDefinition::Parse(CSSTokenizedValue value,
                                            const CSSParserContext& context,
                                            bool is_animation_tainted) const {
   if (IsUniversal()) {
-    // The 'default' keyword is reserved despite not being a CSS-wide keyword.
-    // TODO(https://crbug.com/1344170): This code may be unneeded.
-    if (CouldConsumeReservedKeyword(range))
-      return nullptr;
-    return CSSVariableParser::ParseVariableReferenceValue(range, context,
-                                                          is_animation_tainted);
+    return CSSVariableParser::ParseUniversalSyntaxValue(value, context,
+                                                        is_animation_tainted);
   }
-  range.ConsumeWhitespace();
+  value.range.ConsumeWhitespace();
   for (const CSSSyntaxComponent& component : syntax_components_) {
     if (const CSSValue* result =
-            ConsumeSyntaxComponent(component, range, context))
+            ConsumeSyntaxComponent(component, value.range, context)) {
       return result;
+    }
   }
   return nullptr;
 }
 
 CSSSyntaxDefinition CSSSyntaxDefinition::IsolatedCopy() const {
   Vector<CSSSyntaxComponent> syntax_components_copy;
-  syntax_components_copy.ReserveCapacity(syntax_components_.size());
+  syntax_components_copy.reserve(syntax_components_.size());
   for (const auto& syntax_component : syntax_components_) {
     syntax_components_copy.push_back(CSSSyntaxComponent(
         syntax_component.GetType(), syntax_component.GetString(),
         syntax_component.GetRepeat()));
   }
-  return CSSSyntaxDefinition(std::move(syntax_components_copy));
+  return CSSSyntaxDefinition(std::move(syntax_components_copy), original_text_);
 }
 
-CSSSyntaxDefinition::CSSSyntaxDefinition(Vector<CSSSyntaxComponent> components)
-    : syntax_components_(std::move(components)) {
+CSSSyntaxDefinition::CSSSyntaxDefinition(Vector<CSSSyntaxComponent> components,
+                                         const String& original_text)
+    : syntax_components_(std::move(components)), original_text_(original_text) {
   DCHECK(syntax_components_.size());
 }
 
@@ -170,7 +153,11 @@ CSSSyntaxDefinition CSSSyntaxDefinition::CreateUniversal() {
   Vector<CSSSyntaxComponent> components;
   components.push_back(CSSSyntaxComponent(
       CSSSyntaxType::kTokenStream, g_empty_string, CSSSyntaxRepeat::kNone));
-  return CSSSyntaxDefinition(std::move(components));
+  return CSSSyntaxDefinition(std::move(components), {});
+}
+
+String CSSSyntaxDefinition::ToString() const {
+  return IsUniversal() ? String("*") : original_text_;
 }
 
 }  // namespace blink

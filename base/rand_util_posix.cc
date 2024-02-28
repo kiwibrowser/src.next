@@ -14,6 +14,7 @@
 
 #include "base/check.h"
 #include "base/compiler_specific.h"
+#include "base/containers/span.h"
 #include "base/feature_list.h"
 #include "base/files/file_util.h"
 #include "base/metrics/histogram_macros.h"
@@ -96,7 +97,7 @@ bool KernelSupportsGetRandom() {
   int32_t minor = 0;
   int32_t bugfix = 0;
   KernelVersionNumbers(&major, &minor, &bugfix);
-  if (major >= 3 && minor >= 17)
+  if (major > 3 || (major == 3 && minor >= 17))
     return true;
   return false;
 }
@@ -124,8 +125,9 @@ std::atomic<bool> g_use_getrandom;
 
 // Note: the BoringSSL feature takes precedence over the getrandom() trial if
 // both are enabled.
-const Feature kUseGetrandomForRandBytes{"UseGetrandomForRandBytes",
-                                        FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kUseGetrandomForRandBytes,
+             "UseGetrandomForRandBytes",
+             FEATURE_ENABLED_BY_DEFAULT);
 
 bool UseGetrandom() {
   return g_use_getrandom.load(std::memory_order_relaxed);
@@ -154,8 +156,9 @@ namespace {
 // rand_util_win.cc.
 std::atomic<bool> g_use_boringssl;
 
-const Feature kUseBoringSSLForRandBytes{"UseBoringSSLForRandBytes",
-                                        FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kUseBoringSSLForRandBytes,
+             "UseBoringSSLForRandBytes",
+             FEATURE_DISABLED_BY_DEFAULT);
 
 }  // namespace
 
@@ -171,32 +174,35 @@ bool UseBoringSSLForRandBytes() {
 
 }  // namespace internal
 
-void RandBytes(void* output, size_t output_length) {
+namespace {
+
+void RandBytes(span<uint8_t> output, bool avoid_allocation) {
 #if !BUILDFLAG(IS_NACL)
   // The BoringSSL experiment takes priority over everything else.
-  if (internal::UseBoringSSLForRandBytes()) {
+  if (!avoid_allocation && internal::UseBoringSSLForRandBytes()) {
     // Ensure BoringSSL is initialized so it can use things like RDRAND.
     CRYPTO_library_init();
     // BoringSSL's RAND_bytes always returns 1. Any error aborts the program.
-    (void)RAND_bytes(static_cast<uint8_t*>(output), output_length);
+    (void)RAND_bytes(output.data(), output.size());
     return;
   }
 #endif
 #if (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || \
      BUILDFLAG(IS_ANDROID)) &&                        \
     !BUILDFLAG(IS_NACL)
-  if (UseGetrandom()) {
+  if (avoid_allocation || UseGetrandom()) {
     // On Android it is mandatory to check that the kernel _version_ has the
     // support for a syscall before calling. The same check is made on Linux and
     // ChromeOS to avoid making a syscall that predictably returns ENOSYS.
     static const bool kernel_has_support = KernelSupportsGetRandom();
-    if (kernel_has_support && GetRandomSyscall(output, output_length))
+    if (kernel_has_support && GetRandomSyscall(output.data(), output.size())) {
       return;
+    }
   }
 #elif BUILDFLAG(IS_MAC)
   // TODO(crbug.com/995996): Enable this on iOS too, when sys/random.h arrives
   // in its SDK.
-  if (getentropy(output, output_length) == 0) {
+  if (getentropy(output.data(), output.size()) == 0) {
     return;
   }
 #endif
@@ -207,9 +213,30 @@ void RandBytes(void* output, size_t output_length) {
   // TODO(crbug.com/995996): When we no longer need to support old Linux
   // kernels, we can get rid of this /dev/urandom branch altogether.
   const int urandom_fd = GetUrandomFD();
-  const bool success =
-      ReadFromFD(urandom_fd, static_cast<char*>(output), output_length);
+  const bool success = ReadFromFD(urandom_fd, as_writable_chars(output));
   CHECK(success);
+}
+
+}  // namespace
+
+namespace internal {
+
+double RandDoubleAvoidAllocation() {
+  uint64_t number;
+  RandBytes(as_writable_bytes(make_span(&number, 1u)),
+            /*avoid_allocation=*/true);
+  // This transformation is explained in rand_util.cc.
+  return (number >> 11) * 0x1.0p-53;
+}
+
+}  // namespace internal
+
+void RandBytes(span<uint8_t> output) {
+  RandBytes(output, /*avoid_allocation=*/false);
+}
+
+void RandBytes(void* output, size_t output_length) {
+  RandBytes(make_span(reinterpret_cast<uint8_t*>(output), output_length));
 }
 
 int GetUrandomFD() {

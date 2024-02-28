@@ -6,14 +6,13 @@
 #include <string>
 #include <utility>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/memory/weak_ptr.h"
 #include "base/no_destructor.h"
 #include "base/observer_list.h"
 #include "base/process/process.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
-#include "base/threading/sequenced_task_runner_handle.h"
 #include "build/chromecast_buildflags.h"
 #include "content/browser/utility_process_host.h"
 #include "content/common/child_process.mojom.h"
@@ -55,10 +54,12 @@ class ServiceProcessTracker {
   ~ServiceProcessTracker() = default;
 
   ServiceProcessInfo AddProcess(base::Process process,
+                                const std::optional<GURL>& site,
                                 const std::string& service_interface_name) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     auto id = GenerateNextId();
-    ServiceProcessInfo info(service_interface_name, id, std::move(process));
+    ServiceProcessInfo info(service_interface_name, site, id,
+                            std::move(process));
     auto info_dup = info.Duplicate();
     processes_.insert({id, std::move(info)});
     for (auto& observer : observers_)
@@ -131,8 +132,10 @@ class UtilityProcessClient : public UtilityProcessHost::Client {
  public:
   UtilityProcessClient(
       const std::string& service_interface_name,
+      const std::optional<GURL>& site,
       base::OnceCallback<void(const base::Process&)> process_callback)
       : service_interface_name_(service_interface_name),
+        site_(std::move(site)),
         process_callback_(std::move(process_callback)) {}
 
   UtilityProcessClient(const UtilityProcessClient&) = delete;
@@ -144,7 +147,7 @@ class UtilityProcessClient : public UtilityProcessHost::Client {
   void OnProcessLaunched(const base::Process& process) override {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     process_info_.emplace(GetServiceProcessTracker().AddProcess(
-        process.Duplicate(), service_interface_name_));
+        process.Duplicate(), site_, service_interface_name_));
     if (process_callback_) {
       std::move(process_callback_).Run(process);
     }
@@ -168,8 +171,12 @@ class UtilityProcessClient : public UtilityProcessHost::Client {
 
  private:
   const std::string service_interface_name_;
+
+  // Optional site GURL for per-site utility processes.
+  const std::optional<GURL> site_;
+
   base::OnceCallback<void(const base::Process&)> process_callback_;
-  absl::optional<ServiceProcessInfo> process_info_;
+  std::optional<ServiceProcessInfo> process_info_;
 };
 
 // TODO(crbug.com/977637): Once UtilityProcessHost is used only by service
@@ -179,17 +186,28 @@ void LaunchServiceProcess(mojo::GenericPendingReceiver receiver,
                           sandbox::mojom::Sandbox sandbox) {
   UtilityProcessHost* host =
       new UtilityProcessHost(std::make_unique<UtilityProcessClient>(
-          *receiver.interface_name(), std::move(options.process_callback)));
+          *receiver.interface_name(), options.site,
+          std::move(options.process_callback)));
   host->SetName(!options.display_name.empty()
                     ? options.display_name
                     : base::UTF8ToUTF16(*receiver.interface_name()));
   host->SetMetricsName(*receiver.interface_name());
-  if (!ShouldEnableSandbox(sandbox))
+  if (!ShouldEnableSandbox(sandbox)) {
     sandbox = sandbox::mojom::Sandbox::kNoSandbox;
+  }
   host->SetSandboxType(sandbox);
   host->SetExtraCommandLineSwitches(std::move(options.extra_switches));
-  if (options.child_flags)
+  if (options.child_flags) {
     host->set_child_flags(*options.child_flags);
+  }
+#if BUILDFLAG(IS_WIN)
+  if (!options.preload_libraries.empty()) {
+    host->SetPreloadLibraries(options.preload_libraries);
+  }
+  if (options.pin_user32) {
+    host->SetPinUser32();
+  }
+#endif  // BUILDFLAG(IS_WIN)
   host->Start();
   host->GetChildProcess()->BindServiceInterface(std::move(receiver));
 }
@@ -242,7 +260,7 @@ void LaunchUtilityProcessServiceDeprecated(
       service_name, std::move(service_pipe),
       base::BindOnce(
           [](base::OnceCallback<void(base::ProcessId)> callback,
-             const absl::optional<base::ProcessId> pid) {
+             const std::optional<base::ProcessId> pid) {
             std::move(callback).Run(pid.value_or(base::kNullProcessId));
           },
           std::move(callback)));

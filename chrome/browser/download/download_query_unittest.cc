@@ -10,10 +10,12 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <utility>
 
-#include "base/bind.h"
 #include "base/check.h"
 #include "base/files/file_path.h"
+#include "base/functional/bind.h"
+#include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "build/build_config.h"
@@ -22,24 +24,23 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using base::Time;
+using download::DownloadItem;
+using ::testing::_;
 using ::testing::Return;
 using ::testing::ReturnRef;
-using ::testing::_;
-using base::Time;
-using base::Value;
-using download::DownloadItem;
-typedef DownloadQuery::DownloadVector DownloadVector;
+using DownloadVector = DownloadQuery::DownloadVector;
 
 namespace {
 
-static const int kSomeKnownTime = 1355864160;
-static const char kSomeKnownTime8601[] = "2012-12-18T20:56:0";
-static const char k8601Suffix[] = ".000Z";
+constexpr int kSomeKnownTime = 1355864160;
+constexpr char kSomeKnownTime8601[] = "2012-12-18T20:56:0";
+constexpr char k8601Suffix[] = ".000Z";
 
-static const int64_t kEightGB = 1LL << 33;
-static const int64_t kSixteenGB = 1LL << 34;
-static const double kEightGBDouble = 8.0 * (1LL << 30);
-static const double kNineGBDouble = 9.0 * (1LL << 30);
+constexpr int64_t kEightGB = 1LL << 33;
+constexpr int64_t kSixteenGB = 1LL << 34;
+constexpr double kEightGBDouble = 8.0 * (1LL << 30);
+constexpr double kNineGBDouble = 9.0 * (1LL << 30);
 
 bool IdNotEqual(uint32_t not_id, const DownloadItem& item) {
   return item.GetId() != not_id;
@@ -49,7 +50,7 @@ bool AlwaysReturn(bool result, const DownloadItem& item) {
   return result;
 }
 
-}  // anonymous namespace
+}  // namespace
 
 class DownloadQueryTest : public testing::Test {
  public:
@@ -108,7 +109,7 @@ class DownloadQueryTest : public testing::Test {
   // These two vectors hold the MockDownloadItems. |mocks_| contains just the
   // pointers, but is necessary because DownloadQuery processes vectors of
   // unowned pointers. |owned_mocks_| holds the ownership of the mock objects.
-  std::vector<download::MockDownloadItem*> mocks_;
+  std::vector<raw_ptr<download::MockDownloadItem, VectorExperimental>> mocks_;
   std::vector<std::unique_ptr<download::MockDownloadItem>> owned_mocks_;
   DownloadQuery query_;
   DownloadVector results_;
@@ -116,15 +117,13 @@ class DownloadQueryTest : public testing::Test {
 
 template<> void DownloadQueryTest::AddFilter(
     DownloadQuery::FilterType name, bool cpp_value) {
-  std::unique_ptr<base::Value> value(new base::Value(cpp_value));
-  CHECK(query_.AddFilter(name, *value.get()));
+  CHECK(query_.AddFilter(name, base::Value(cpp_value)));
 }
 
 template <>
 void DownloadQueryTest::AddFilter(DownloadQuery::FilterType name,
                                   double cpp_value) {
-  std::unique_ptr<base::Value> value(new base::Value(cpp_value));
-  CHECK(query_.AddFilter(name, *value.get()));
+  CHECK(query_.AddFilter(name, base::Value(cpp_value)));
 }
 
 template<> void DownloadQueryTest::AddFilter(
@@ -146,22 +145,18 @@ void DownloadQueryTest::AddFilter(DownloadQuery::FilterType name,
 template <>
 void DownloadQueryTest::AddFilter(DownloadQuery::FilterType name,
                                   std::vector<std::u16string> cpp_value) {
-  std::unique_ptr<base::ListValue> list(new base::ListValue());
-  for (std::vector<std::u16string>::const_iterator it = cpp_value.begin();
-       it != cpp_value.end(); ++it) {
-    list->Append(*it);
-  }
-  CHECK(query_.AddFilter(name, *list.get()));
+  base::Value::List list;
+  for (const auto& value : cpp_value)
+    list.Append(value);
+  CHECK(query_.AddFilter(name, base::Value(std::move(list))));
 }
 
 template<> void DownloadQueryTest::AddFilter(
     DownloadQuery::FilterType name, std::vector<std::string> cpp_value) {
-  std::unique_ptr<base::ListValue> list(new base::ListValue());
-  for (std::vector<std::string>::const_iterator it = cpp_value.begin();
-       it != cpp_value.end(); ++it) {
-    list->Append(*it);
-  }
-  CHECK(query_.AddFilter(name, *list.get()));
+  base::Value::List list;
+  for (const auto& value : cpp_value)
+    list.Append(std::move(value));
+  CHECK(query_.AddFilter(name, base::Value(std::move(list))));
 }
 
 TEST_F(DownloadQueryTest, DownloadQueryTest_ZeroItems) {
@@ -170,10 +165,10 @@ TEST_F(DownloadQueryTest, DownloadQueryTest_ZeroItems) {
 }
 
 TEST_F(DownloadQueryTest, DownloadQueryTest_InvalidFilter) {
-  std::unique_ptr<base::Value> value(new base::Value(0));
+  base::Value value(0);
   EXPECT_FALSE(query()->AddFilter(static_cast<DownloadQuery::FilterType>(
                                       std::numeric_limits<int32_t>::max()),
-                                  *value.get()));
+                                  value));
 }
 
 TEST_F(DownloadQueryTest, DownloadQueryTest_EmptyQuery) {

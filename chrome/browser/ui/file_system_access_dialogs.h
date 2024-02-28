@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_UI_FILE_SYSTEM_ACCESS_DIALOGS_H_
 #define CHROME_BROWSER_UI_FILE_SYSTEM_ACCESS_DIALOGS_H_
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "chrome/browser/file_system_access/file_system_access_permission_request_manager.h"
 #include "content/public/browser/file_system_access_permission_context.h"
 
@@ -37,7 +37,6 @@ void ShowFileSystemAccessPermissionDialog(
 // user has dismissed the dialog.
 void ShowFileSystemAccessRestrictedDirectoryDialog(
     const url::Origin& origin,
-    const base::FilePath& path,
     content::FileSystemAccessPermissionContext::HandleType handle_type,
     base::OnceCallback<
         void(content::FileSystemAccessPermissionContext::SensitiveEntryResult)>
@@ -53,6 +52,13 @@ void ShowFileSystemAccessDangerousFileDialog(
     base::OnceCallback<
         void(content::FileSystemAccessPermissionContext::SensitiveEntryResult)>
         callback,
+    content::WebContents* web_contents);
+
+// Displays a dialog to restore permission for recently granted file or
+// directory handles.
+void ShowFileSystemAccessRestorePermissionDialog(
+    const FileSystemAccessPermissionRequestManager::RequestData& request,
+    base::OnceCallback<void(permissions::PermissionAction result)> callback,
     content::WebContents* web_contents);
 
 #endif  // CHROME_BROWSER_UI_FILE_SYSTEM_ACCESS_DIALOGS_H_

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,17 +75,6 @@ class IdleRequestCallbackWrapper
 
 }  // namespace internal
 
-V8IdleTask::V8IdleTask(V8IdleRequestCallback* callback) : callback_(callback) {}
-
-void V8IdleTask::Trace(Visitor* visitor) const {
-  visitor->Trace(callback_);
-  IdleTask::Trace(visitor);
-}
-
-void V8IdleTask::invoke(IdleDeadline* deadline) {
-  callback_->InvokeAndReportException(nullptr, deadline);
-}
-
 ScriptedIdleTaskController::ScriptedIdleTaskController(
     ExecutionContext* context)
     : ExecutionContextLifecycleStateObserver(context),
@@ -138,15 +127,16 @@ void ScriptedIdleTaskController::ScheduleCallback(
     scoped_refptr<internal::IdleRequestCallbackWrapper> callback_wrapper,
     uint32_t timeout_millis) {
   scheduler_->PostIdleTask(
-      FROM_HERE, WTF::Bind(&internal::IdleRequestCallbackWrapper::IdleTaskFired,
-                           callback_wrapper));
+      FROM_HERE,
+      WTF::BindOnce(&internal::IdleRequestCallbackWrapper::IdleTaskFired,
+                    callback_wrapper));
   if (timeout_millis > 0) {
     GetExecutionContext()
         ->GetTaskRunner(TaskType::kIdleTask)
         ->PostDelayedTask(
             FROM_HERE,
-            WTF::Bind(&internal::IdleRequestCallbackWrapper::TimeoutFired,
-                      callback_wrapper),
+            WTF::BindOnce(&internal::IdleRequestCallbackWrapper::TimeoutFired,
+                          callback_wrapper),
             base::Milliseconds(timeout_millis));
   }
 }
@@ -250,8 +240,8 @@ void ScriptedIdleTaskController::ContextUnpaused() {
         ->GetTaskRunner(TaskType::kIdleTask)
         ->PostTask(
             FROM_HERE,
-            WTF::Bind(&internal::IdleRequestCallbackWrapper::TimeoutFired,
-                      callback_wrapper));
+            WTF::BindOnce(&internal::IdleRequestCallbackWrapper::TimeoutFired,
+                          callback_wrapper));
   }
   pending_timeouts_.clear();
 
@@ -261,8 +251,8 @@ void ScriptedIdleTaskController::ContextUnpaused() {
         internal::IdleRequestCallbackWrapper::Create(idle_task.key, this);
     scheduler_->PostIdleTask(
         FROM_HERE,
-        WTF::Bind(&internal::IdleRequestCallbackWrapper::IdleTaskFired,
-                  callback_wrapper));
+        WTF::BindOnce(&internal::IdleRequestCallbackWrapper::IdleTaskFired,
+                      callback_wrapper));
   }
 }
 

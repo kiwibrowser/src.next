@@ -10,10 +10,10 @@
 #include <utility>
 #include <vector>
 
-#include "base/bind.h"
-#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/thread_pool.h"
 #include "content/public/browser/browser_thread.h"
@@ -23,8 +23,8 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_handlers/icons_handler.h"
 #include "skia/ext/image_operations.h"
-#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/resource/resource_scale_factor.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -212,7 +212,7 @@ std::vector<ImageLoader::LoadResult> LoadImagesBlocking(
 ////////////////////////////////////////////////////////////////////////////////
 // ImageLoader
 
-ImageLoader::ImageLoader() {}
+ImageLoader::ImageLoader() = default;
 
 ImageLoader::~ImageLoader() {
 }
@@ -239,8 +239,9 @@ void ImageLoader::LoadImageAtEveryScaleFactorAsync(
   std::vector<ImageRepresentation> info_list;
 
   std::set<float> scales;
-  for (auto scale : ui::GetSupportedResourceScaleFactors())
+  for (const auto scale : ui::GetSupportedResourceScaleFactors()) {
     scales.insert(ui::GetScaleForResourceScaleFactor(scale));
+  }
 
   // There may not be a screen in unit tests.
   auto* screen = display::Screen::GetScreen();
@@ -249,7 +250,7 @@ void ImageLoader::LoadImageAtEveryScaleFactorAsync(
       scales.insert(display.device_scale_factor());
   }
 
-  for (auto scale : scales) {
+  for (const auto scale : scales) {
     const gfx::Size px_size = gfx::ScaleToFlooredSize(dip_size, scale);
     ExtensionResource image = IconsInfo::GetIconResource(
         extension, px_size.width(), ExtensionIconSet::MATCH_BIGGER);

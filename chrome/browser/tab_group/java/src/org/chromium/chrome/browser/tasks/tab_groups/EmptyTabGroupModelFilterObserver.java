@@ -8,9 +8,7 @@ import org.chromium.chrome.browser.tab.Tab;
 
 import java.util.List;
 
-/**
- * An empty implementation of {@link TabGroupModelFilter.Observer}.
- */
+/** An empty implementation of {@link TabGroupModelFilter.Observer}. */
 public class EmptyTabGroupModelFilterObserver implements TabGroupModelFilter.Observer {
     @Override
     public void willMergeTabToGroup(Tab movedTab, int newRootId) {}
@@ -32,5 +30,11 @@ public class EmptyTabGroupModelFilterObserver implements TabGroupModelFilter.Obs
 
     @Override
     public void didCreateGroup(
-            List<Tab> tabs, List<Integer> tabOriginalIndex, List<Integer> tabOriginalRootId) {}
+            List<Tab> tabs,
+            List<Integer> tabOriginalIndex,
+            List<Integer> tabOriginalRootId,
+            String destinationGroupTitle) {}
+
+    @Override
+    public void didCreateNewGroup(int newRootId) {}
 }

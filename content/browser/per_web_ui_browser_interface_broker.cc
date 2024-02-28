@@ -15,7 +15,7 @@ namespace content {
 namespace {
 void ShutdownWebUIRenderer(WebUIController& controller) {
   auto* webui_impl = static_cast<WebUIImpl*>(controller.web_ui());
-  webui_impl->frame_host()->GetProcess()->ShutdownForBadMessage(
+  webui_impl->GetRenderFrameHost()->GetProcess()->ShutdownForBadMessage(
       RenderProcessHost::CrashReportMode::GENERATE_CRASH_DUMP);
 }
 }  // namespace
@@ -34,9 +34,9 @@ PerWebUIBrowserInterfaceBroker::~PerWebUIBrowserInterfaceBroker() = default;
 void PerWebUIBrowserInterfaceBroker::GetInterface(
     mojo::GenericPendingReceiver receiver) {
   auto name = receiver.interface_name().value();
-  if (!binder_map_.TryBind(&controller_, &receiver)) {
+  if (!binder_map_.TryBind(&*controller_, &receiver)) {
     // WebUI page requested an interface that's not registered
-    ShutdownWebUIRenderer(controller_);
+    ShutdownWebUIRenderer(*controller_);
   }
 }
 

@@ -38,7 +38,9 @@ class ClipboardApiTest : public ExtensionApiTest {
   bool ExecuteCommandInIframeInSelectedTab(const char* command);
 
  private:
-  bool ExecuteScriptInSelectedTab(const std::string& script);
+  bool ExecuteScriptInSelectedTab(
+      const std::string& script,
+      int options = content::EXECUTE_SCRIPT_DEFAULT_OPTIONS);
 };
 
 bool ClipboardApiTest::LoadHostedApp(const std::string& app_name,
@@ -69,14 +71,12 @@ bool ClipboardApiTest::LoadHostedApp(const std::string& app_name,
 }
 
 bool ClipboardApiTest::ExecuteCopyInSelectedTab() {
-  const char kScript[] =
-      "window.domAutomationController.send(document.execCommand('copy'))";
+  const char kScript[] = "document.execCommand('copy')";
   return ExecuteScriptInSelectedTab(kScript);
 }
 
 bool ClipboardApiTest::ExecutePasteInSelectedTab() {
-  const char kScript[] =
-      "window.domAutomationController.send(document.execCommand('paste'))";
+  const char kScript[] = "document.execCommand('paste')";
   return ExecuteScriptInSelectedTab(kScript);
 }
 
@@ -85,18 +85,19 @@ bool ClipboardApiTest::ExecuteCommandInIframeInSelectedTab(
   const char kScript[] =
       "var ifr = document.createElement('iframe');\n"
       "document.body.appendChild(ifr);\n"
-      "ifr.contentDocument.write('<script>parent.domAutomationController.send("
-          "document.execCommand(\"%s\"))</script>');";
+      "new Promise(res => {\n"
+      "  window.resolve = res;\n"
+      "  ifr.contentDocument.write('<script>parent.resolve("
+      "    document.execCommand(\"%s\"))</script>');\n"
+      "});";
   return ExecuteScriptInSelectedTab(base::StringPrintf(kScript, command));
 }
 
-bool ClipboardApiTest::ExecuteScriptInSelectedTab(const std::string& script) {
-  bool result;
-  CHECK(content::ExecuteScriptAndExtractBool(
-        browser()->tab_strip_model()->GetActiveWebContents(),
-        script,
-        &result));
-  return result;
+bool ClipboardApiTest::ExecuteScriptInSelectedTab(const std::string& script,
+                                                  int options) {
+  return content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
+                         script, options)
+      .ExtractBool();
 }
 
 }  // namespace
@@ -128,12 +129,12 @@ IN_PROC_BROWSER_TEST_F(ClipboardApiTest, MAYBE_ExtensionNoPermission) {
 IN_PROC_BROWSER_TEST_F(ClipboardApiTest, BrowserPermissionCheck) {
   ASSERT_TRUE(StartEmbeddedTestServer());
 
-  content::RenderFrameHost* rfh = ui_test_utils::NavigateToURL(
+  content::RenderFrameHost* render_frame_host = ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL("/english_page.html"));
   // No extensions are installed. Clipboard access should be disallowed.
   EXPECT_FALSE(
       content::GetContentClientForTesting()->browser()->IsClipboardPasteAllowed(
-          rfh));
+          render_frame_host));
 
   static constexpr char kManifest[] =
       R"({
@@ -155,7 +156,7 @@ IN_PROC_BROWSER_TEST_F(ClipboardApiTest, BrowserPermissionCheck) {
   // the page.
   EXPECT_FALSE(
       content::GetContentClientForTesting()->browser()->IsClipboardPasteAllowed(
-          rfh));
+          render_frame_host));
 
   // Inject a script on the page through the extension.
   static constexpr char kScript[] =
@@ -176,7 +177,7 @@ IN_PROC_BROWSER_TEST_F(ClipboardApiTest, BrowserPermissionCheck) {
   // Now the page should have access to the clipboard.
   EXPECT_TRUE(
       content::GetContentClientForTesting()->browser()->IsClipboardPasteAllowed(
-          rfh));
+          render_frame_host));
 }
 
 IN_PROC_BROWSER_TEST_F(ClipboardApiTest, HostedApp) {

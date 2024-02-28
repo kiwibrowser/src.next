@@ -4,14 +4,12 @@
 
 #include "extensions/browser/extension_host_queue.h"
 
-#include <algorithm>
-
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/no_destructor.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/single_thread_task_runner.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "extensions/browser/deferred_start_render_host.h"
 
 namespace extensions {
@@ -32,14 +30,14 @@ void ExtensionHostQueue::Add(DeferredStartRenderHost* host) {
 }
 
 void ExtensionHostQueue::Remove(DeferredStartRenderHost* host) {
-  auto it = std::find(queue_.begin(), queue_.end(), host);
+  auto it = base::ranges::find(queue_, host);
   if (it != queue_.end())
     queue_.erase(it);
 }
 
 void ExtensionHostQueue::PostTask() {
   if (!pending_create_) {
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE,
         base::BindOnce(&ExtensionHostQueue::ProcessOneHost,
                        ptr_factory_.GetWeakPtr()),

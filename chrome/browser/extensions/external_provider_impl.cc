@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/check.h"
 #include "base/command_line.h"
 #include "base/containers/contains.h"
 #include "base/files/file_path.h"
@@ -55,6 +56,8 @@
 
 #if BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/chromeos/app_mode/kiosk_app_external_loader.h"
+#include "chromeos/components/kiosk/kiosk_utils.h"
+#include "chromeos/components/mgs/managed_guest_session_utils.h"
 #endif  // BUIDLFLAG(IS_CHROMEOS)
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -62,6 +65,7 @@
 #include "ash/constants/ash_paths.h"
 #include "base/path_service.h"
 #include "chrome/browser/ash/customization/customization_document.h"
+#include "chrome/browser/ash/extensions/signin_screen_extensions_external_loader.h"
 #include "chrome/browser/ash/login/demo_mode/demo_extensions_external_loader.h"
 #include "chrome/browser/ash/login/demo_mode/demo_session.h"
 #include "chrome/browser/ash/policy/core/browser_policy_connector_ash.h"
@@ -69,8 +73,6 @@
 #include "chrome/browser/ash/policy/core/device_local_account_policy_service.h"
 #include "chrome/browser/ash/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/extensions/device_local_account_external_policy_loader.h"
-#include "chrome/browser/chromeos/extensions/signin_screen_extensions_external_loader.h"
-#include "extensions/common/constants.h"
 #else
 #include "chrome/browser/extensions/preinstalled_apps.h"
 #endif
@@ -159,8 +161,7 @@ void ExternalProviderImpl::VisitRegisteredExtension() {
   loader_->StartLoading();
 }
 
-void ExternalProviderImpl::SetPrefs(
-    std::unique_ptr<base::DictionaryValue> prefs) {
+void ExternalProviderImpl::SetPrefs(base::Value::Dict prefs) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // Check if the service is still alive. It is possible that it went
@@ -170,13 +171,13 @@ void ExternalProviderImpl::SetPrefs(
 
   InstallStageTracker* install_stage_tracker =
       InstallStageTracker::Get(profile_);
-  for (auto it : prefs->DictItems()) {
+  for (auto it : prefs) {
     install_stage_tracker->ReportInstallCreationStage(
         it.first,
         InstallStageTracker::InstallCreationStage::SEEN_BY_EXTERNAL_PROVIDER);
   }
 
-  prefs_ = std::make_unique<base::Value::Dict>(std::move(prefs->GetDict()));
+  prefs_ = std::move(prefs);
   ready_ = true;  // Queries for extensions are allowed from this point.
 
   NotifyServiceOnExternalExtensionsFound();
@@ -210,8 +211,7 @@ void ExternalProviderImpl::NotifyServiceOnExternalExtensionsFound() {
   service_->OnExternalProviderReady(this);
 }
 
-void ExternalProviderImpl::UpdatePrefs(
-    std::unique_ptr<base::DictionaryValue> prefs) {
+void ExternalProviderImpl::UpdatePrefs(base::Value::Dict prefs) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   CHECK(allow_updates_);
 
@@ -227,11 +227,11 @@ void ExternalProviderImpl::UpdatePrefs(
     // Don't bother about invalid ids.
     if (!crx_file::id_util::IdIsValid(extension_id))
       continue;
-    if (!prefs->FindKey(extension_id))
+    if (!prefs.Find(extension_id))
       removed_extensions.insert(extension_id);
   }
 
-  prefs_ = std::make_unique<base::Value::Dict>(std::move(prefs->GetDict()));
+  *prefs_ = std::move(prefs);
 
   std::vector<ExternalInstallInfoUpdateUrl> external_update_url_extensions;
   std::vector<ExternalInstallInfoFile> external_file_extensions;
@@ -378,15 +378,18 @@ void ExternalProviderImpl::RetrieveExtensionsFromPrefs(
     }
 
     int creation_flags = creation_flags_;
-    absl::optional<bool> is_bookmark_app =
-        extension_dict.FindBool(kIsBookmarkApp);
-    if (is_bookmark_app.value_or(false)) {
-      creation_flags |= Extension::FROM_BOOKMARK;
-    }
-    absl::optional<bool> is_from_webstore =
+    std::optional<bool> is_from_webstore =
         extension_dict.FindBool(kIsFromWebstore);
     if (is_from_webstore.value_or(false)) {
       creation_flags |= Extension::FROM_WEBSTORE;
+    }
+
+    std::optional<bool> is_bookmark_app =
+        extension_dict.FindBool(kIsBookmarkApp);
+    if (is_bookmark_app.value_or(false)) {
+      // Bookmark apps are obsolete, ignore any remaining dregs that haven't
+      // already been migrated.
+      continue;
     }
 
     // If the extension is in a web app migration treat it as "keep_if_present"
@@ -419,12 +422,12 @@ void ExternalProviderImpl::RetrieveExtensionsFromPrefs(
       }
     }
 
-    absl::optional<bool> was_installed_by_oem =
+    std::optional<bool> was_installed_by_oem =
         extension_dict.FindBool(kWasInstalledByOem);
     if (was_installed_by_oem.value_or(false)) {
       creation_flags |= Extension::WAS_INSTALLED_BY_OEM;
     }
-    absl::optional<bool> may_be_untrusted =
+    std::optional<bool> may_be_untrusted =
         extension_dict.FindBool(kMayBeUntrusted);
     if (may_be_untrusted.value_or(false)) {
       creation_flags |= Extension::MAY_BE_UNTRUSTED;
@@ -540,7 +543,7 @@ bool ExternalProviderImpl::IsReady() const {
 bool ExternalProviderImpl::HasExtension(
     const std::string& id) const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  CHECK(prefs_.get());
+  CHECK(prefs_);
   CHECK(ready_);
   return prefs_->contains(id);
 }
@@ -550,9 +553,9 @@ bool ExternalProviderImpl::GetExtensionDetails(
     ManifestLocation* location,
     std::unique_ptr<base::Version>* version) const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  CHECK(prefs_.get());
+  CHECK(prefs_);
   CHECK(ready_);
-  base::Value::Dict* dict = prefs_->FindDict(id);
+  const base::Value::Dict* dict = prefs_->FindDict(id);
   if (!dict)
     return false;
 
@@ -610,7 +613,7 @@ bool ExternalProviderImpl::HandleDoNotInstallForEnterprise(
     const base::Value::Dict& extension,
     const std::string& extension_id,
     std::set<std::string>* unsupported_extensions) {
-  absl::optional<bool> do_not_install_for_enterprise =
+  std::optional<bool> do_not_install_for_enterprise =
       extension.FindBool(kDoNotInstallForEnterprise);
   if (do_not_install_for_enterprise.value_or(false)) {
     const policy::ProfilePolicyConnector* const connector =
@@ -659,8 +662,9 @@ void ExternalProviderImpl::CreateExternalProviders(
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-  policy::BrowserPolicyConnectorAsh* connector =
+  policy::BrowserPolicyConnectorAsh* const connector =
       g_browser_process->platform_part()->browser_policy_connector_ash();
+  DCHECK(connector);
   bool is_chrome_os_public_session = false;
   const user_manager::User* user =
       ash::ProfileHelper::Get()->GetUserByProfile(profile);
@@ -681,7 +685,7 @@ void ExternalProviderImpl::CreateExternalProviders(
     }
   }
 #elif BUILDFLAG(IS_CHROMEOS_LACROS)
-  if (profiles::IsKioskSession() || profiles::IsPublicSession()) {
+  if (chromeos::IsKioskSession() || chromeos::IsManagedGuestSession()) {
     if (DeviceLocalAccountExtensionInstallerLacros::Get()) {
       external_loader =
           DeviceLocalAccountExtensionInstallerLacros::Get()->extension_loader();
@@ -716,16 +720,14 @@ void ExternalProviderImpl::CreateExternalProviders(
       ManifestLocation location = ManifestLocation::kExternalPolicy;
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-      policy::BrowserPolicyConnectorAsh* const connector =
-          g_browser_process->platform_part()->browser_policy_connector_ash();
-      if (!connector || !connector->IsDeviceEnterpriseManaged())
+      if (!connector->IsDeviceEnterpriseManaged())
         location = ManifestLocation::kExternalPref;
 #endif
 
       auto kiosk_app_provider = std::make_unique<ExternalProviderImpl>(
           service,
-          base::MakeRefCounted<ash::KioskAppExternalLoader>(
-              ash::KioskAppExternalLoader::AppClass::kPrimary),
+          base::MakeRefCounted<chromeos::KioskAppExternalLoader>(
+              chromeos::KioskAppExternalLoader::AppClass::kPrimary),
           profile, location, ManifestLocation::kInvalidLocation,
           Extension::NO_FLAGS);
       kiosk_app_provider->set_auto_acknowledge(true);
@@ -737,8 +739,8 @@ void ExternalProviderImpl::CreateExternalProviders(
       auto secondary_kiosk_app_provider =
           std::make_unique<ExternalProviderImpl>(
               service,
-              base::MakeRefCounted<ash::KioskAppExternalLoader>(
-                  ash::KioskAppExternalLoader::AppClass::kSecondary),
+              base::MakeRefCounted<chromeos::KioskAppExternalLoader>(
+                  chromeos::KioskAppExternalLoader::AppClass::kSecondary),
               profile, ManifestLocation::kExternalPref,
               ManifestLocation::kExternalPrefDownload, Extension::NO_FLAGS);
       secondary_kiosk_app_provider->set_auto_acknowledge(true);

@@ -10,7 +10,7 @@
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/memory/raw_ptr.h"
-#include "base/memory/singleton.h"
+#include "base/no_destructor.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/task/task_traits.h"
@@ -38,7 +38,6 @@
 #include "components/download/public/common/simple_download_manager_coordinator.h"
 #include "components/keyed_service/core/simple_dependency_manager.h"
 #include "components/leveldb_proto/public/proto_database_provider.h"
-#include "components/offline_pages/buildflags/buildflags.h"
 #include "components/optimization_guide/core/optimization_guide_features.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -53,10 +52,6 @@
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/ash/plugin_vm/plugin_vm_image_download_client.h"
-#endif
-
-#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
-#include "chrome/browser/offline_pages/prefetch/offline_prefetch_download_client.h"
 #endif
 
 namespace {
@@ -118,7 +113,8 @@ class DownloadBlobContextGetterFactory
 // static
 BackgroundDownloadServiceFactory*
 BackgroundDownloadServiceFactory::GetInstance() {
-  return base::Singleton<BackgroundDownloadServiceFactory>::get();
+  static base::NoDestructor<BackgroundDownloadServiceFactory> instance;
+  return instance.get();
 }
 
 // static
@@ -142,15 +138,6 @@ BackgroundDownloadServiceFactory::BuildServiceInstanceFor(
     SimpleFactoryKey* key) const {
   auto clients = std::make_unique<download::DownloadClientMap>();
   ProfileKey* profile_key = ProfileKey::FromSimpleFactoryKey(key);
-
-#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
-  // Offline prefetch doesn't support incognito.
-  if (!key->IsOffTheRecord()) {
-    clients->insert(std::make_pair(
-        download::DownloadClient::OFFLINE_PAGE_PREFETCH,
-        std::make_unique<offline_pages::OfflinePrefetchDownloadClient>(key)));
-  }
-#endif  // BUILDFLAG(ENABLE_OFFLINE_PAGES)
 
   clients->insert(std::make_pair(
       download::DownloadClient::BACKGROUND_FETCH,

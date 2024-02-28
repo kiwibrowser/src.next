@@ -8,13 +8,13 @@ import 'chrome://resources/cr_elements/cr_input/cr_input.js';
 import 'chrome://resources/cr_elements/cr_hidden_style.css.js';
 import 'chrome://resources/polymer/v3_0/paper-styles/color.js';
 
-import {CrInputElement} from 'chrome://resources/cr_elements/cr_input/cr_input.js';
-import {assert} from 'chrome://resources/js/assert_ts.js';
-import {I18nMixin} from 'chrome://resources/js/i18n_mixin.js';
+import type {CrInputElement} from 'chrome://resources/cr_elements/cr_input/cr_input.js';
+import {I18nMixin} from 'chrome://resources/cr_elements/i18n_mixin.js';
+import {assert} from 'chrome://resources/js/assert.js';
 import {IronA11yAnnouncer} from 'chrome://resources/polymer/v3_0/iron-a11y-announcer/iron-a11y-announcer.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {KeyboardShortcutDelegate} from './keyboard_shortcut_delegate.js';
+import type {KeyboardShortcutDelegate} from './keyboard_shortcut_delegate.js';
 import {getTemplate} from './shortcut_input.html.js';
 import {hasValidModifiers, isValidKeyCode, Key, keystrokeToString} from './shortcut_util.js';
 
@@ -49,16 +49,8 @@ export class ExtensionsShortcutInputElement extends
   static get properties() {
     return {
       delegate: Object,
-
-      item: {
-        type: String,
-        value: '',
-      },
-
-      commandName: {
-        type: String,
-        value: '',
-      },
+      item: Object,
+      command: Object,
 
       shortcut: {
         type: String,
@@ -75,7 +67,6 @@ export class ExtensionsShortcutInputElement extends
         value: ShortcutError.NO_ERROR,
       },
 
-
       readonly_: {
         type: Boolean,
         value: true,
@@ -90,8 +81,8 @@ export class ExtensionsShortcutInputElement extends
   }
 
   delegate: KeyboardShortcutDelegate;
-  item: string;
-  commandName: string;
+  item: chrome.developerPrivate.ExtensionInfo;
+  command: chrome.developerPrivate.Command;
   shortcut: string;
   private capturing_: boolean;
   private error_: ShortcutError;
@@ -249,7 +240,17 @@ export class ExtensionsShortcutInputElement extends
   private commitPending_() {
     this.shortcut = this.pendingShortcut_;
     this.delegate.updateExtensionCommandKeybinding(
-        this.item, this.commandName, this.shortcut);
+        this.item.id, this.command.name, this.shortcut);
+  }
+
+  private computeInputAriaLabel_(): string {
+    return this.i18n(
+        'editShortcutInputLabel', this.command.description, this.item.name);
+  }
+
+  private computeEditButtonAriaLabel_(): string {
+    return this.i18n(
+        'editShortcutButtonLabel', this.command.description, this.item.name);
   }
 
   private computePlaceholder_(): string {

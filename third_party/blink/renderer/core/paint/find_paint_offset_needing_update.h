@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,7 @@ namespace blink {
 // FindPaintOffsetNeedingUpdateScope catches cases where paint offset needed
 // an update but was not marked as such. If paint offset will change, the
 // object must be marked as such by
-// LayoutObject::SetShouldCheckGeometryForPaintInvalidation()
+// LayoutObject::SetShouldCheckLayoutForPaintInvalidation()
 // (which is a private function called by several public paint-invalidation-flag
 // setting functions).
 class FindPaintOffsetNeedingUpdateScope {
@@ -38,7 +38,7 @@ class FindPaintOffsetNeedingUpdateScope {
     if (const auto* properties = fragment_data.PaintProperties()) {
       if (const auto* translation = properties->PaintOffsetTranslation()) {
         old_parent_ = translation->Parent();
-        old_translation_ = translation->Translation2D();
+        old_translation_ = translation->Get2dTranslation();
       }
     }
   }
@@ -54,7 +54,7 @@ class FindPaintOffsetNeedingUpdateScope {
     if (const auto* properties = fragment_data_.PaintProperties()) {
       if (const auto* translation = properties->PaintOffsetTranslation()) {
         new_parent = translation->Parent();
-        new_translation = translation->Translation2D();
+        new_translation = translation->Get2dTranslation();
       }
     }
     DCHECK_EQ(!!old_translation_, !!new_translation) << object_;

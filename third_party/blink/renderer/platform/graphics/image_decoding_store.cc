@@ -27,7 +27,7 @@
 
 #include <memory>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/synchronization/lock.h"
 #include "third_party/blink/renderer/platform/graphics/image_frame_generator.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
@@ -318,8 +318,7 @@ void ImageDecodingStore::RemoveCacheIndexedByGeneratorInternal(
     return;
 
   // Get all cache identifiers associated with generator.
-  Vector<typename U::KeyType> cache_identifier_list;
-  CopyToVector(iter->value, cache_identifier_list);
+  Vector<typename U::KeyType> cache_identifier_list(iter->value);
 
   // For each cache identifier find the corresponding CacheEntry and remove it.
   for (wtf_size_t i = 0; i < cache_identifier_list.size(); ++i) {

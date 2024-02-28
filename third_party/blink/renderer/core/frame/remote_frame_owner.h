@@ -1,6 +1,6 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be found
-// in the LICENSE file.
+// Copyright 2015 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_REMOTE_FRAME_OWNER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_REMOTE_FRAME_OWNER_H_
@@ -34,7 +34,7 @@ class CORE_EXPORT RemoteFrameOwner final
   void SetContentFrame(Frame&) override;
   void ClearContentFrame() override;
   const FramePolicy& GetFramePolicy() const override { return frame_policy_; }
-  void AddResourceTiming(const ResourceTimingInfo&) override;
+  void AddResourceTiming(mojom::blink::ResourceTimingInfoPtr) override;
   void DispatchLoad() override;
   void IntrinsicSizingInfoChanged() override;
   void SetNeedsOcclusionTracking(bool) override;

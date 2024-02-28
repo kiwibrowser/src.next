@@ -1,6 +1,7 @@
 // Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
 package org.chromium.chrome.browser.omnibox;
 
 import static org.junit.Assert.assertEquals;
@@ -17,6 +18,7 @@ import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.view.KeyEvent;
 import android.view.accessibility.AccessibilityEvent;
+import android.view.accessibility.AccessibilityManager;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
@@ -39,17 +41,15 @@ import org.robolectric.shadows.ShadowLog;
 
 import org.chromium.base.Log;
 import org.chromium.base.test.BaseRobolectricTestRunner;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
-import org.chromium.chrome.test.util.browser.Features;
-import org.chromium.chrome.test.util.browser.Features.DisableFeatures;
-import org.chromium.chrome.test.util.browser.Features.EnableFeatures;
+import org.chromium.base.test.util.Features;
+import org.chromium.ui.accessibility.AccessibilityState;
 
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * A robolectric test for {@link AutocompleteEditText} class.
- * TODO(changwan): switch to ParameterizedRobolectricTest once crbug.com/733324 is fixed.
+ * A robolectric test for {@link AutocompleteEditText} class. TODO(changwan): switch to
+ * ParameterizedRobolectricTest once crbug.com/733324 is fixed.
  */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
@@ -58,12 +58,7 @@ public class AutocompleteEditTextTest {
 
     private static final boolean DEBUG = false;
 
-    // Robolectric's ShadowAccessibilityManager has a bug (crbug.com/756707). Turn this on once it's
-    // fixed, and you can turn this off temporarily when upgrading robolectric library.
-    private static final boolean TEST_ACCESSIBILITY = true;
-
-    @Rule
-    public TestRule mProcessor = new Features.JUnitProcessor();
+    @Rule public TestRule mProcessor = new Features.JUnitProcessor();
 
     private InOrder mInOrder;
     private TestAutocompleteEditText mAutocomplete;
@@ -72,7 +67,6 @@ public class AutocompleteEditTextTest {
     private Context mContext;
     private InputConnection mInputConnection;
     private Verifier mVerifier;
-    private ShadowAccessibilityManager mShadowAccessibilityManager;
     private boolean mIsShown;
 
     /**
@@ -82,18 +76,18 @@ public class AutocompleteEditTextTest {
      * has had <a href="https://issuetracker.google.com/issues/209958658">a bug</a> that it still
      * returns {@code true} from {@link InputConnection#endBatchEdit()} when its internal batch edit
      * count becomes {@code 0} as a result of invocation, which clearly conflicted with the spec.
-     * There are several tests in this file that are unfortunately affected by this bug.  In order
-     * to abstract out such an OS issue from the actual test expectations, we will dynamically test
-     * if the bug still exists or not in the test execution environment or not, and set {@code true}
-     * to this flag if it is still there.</p>
+     * There are several tests in this file that are unfortunately affected by this bug. In order to
+     * abstract out such an OS issue from the actual test expectations, we will dynamically test if
+     * the bug still exists or not in the test execution environment or not, and set {@code true} to
+     * this flag if it is still there.
      *
-     * <p>Until a new version of Android OS with
-     * <a href="https://android-review.googlesource.com/c/platform/frameworks/base/+/1923058">the
+     * <p>Until a new version of Android OS with <a
+     * href="https://android-review.googlesource.com/c/platform/frameworks/base/+/1923058">the
      * fix</a> and a corresponding version of Robolectric become available in Chromium, this flag is
      * expected to be always {@code true}. Once they become available, you can either remove this
      * flag with assuming it's always {@code false} or test two different OS behaviors at the same
      * time by <a href="http://robolectric.org/configuring/">specifying multiple SDK versions</a> to
-     * the test runner</a>.</p>
+     * the test runner</a>.
      *
      * @see #testEditableInputConnectionEndBatchEditBug(Context)
      * @see #assertLastBatchEdit(boolean)
@@ -105,7 +99,7 @@ public class AutocompleteEditTextTest {
      * {@link InputConnection#endBatchEdit()} when its internal batch edit count becomes {@code 0}
      * as a result of invocation.
      *
-     * <p>See https://issuetracker.google.com/issues/209958658 for details.</p>
+     * <p>See https://issuetracker.google.com/issues/209958658 for details.
      *
      * @param context The {@link Context} to be used to initialize {@link EditText}.
      * @return {@code true} if the bug still exists. {@code false} otherwise.
@@ -120,11 +114,10 @@ public class AutocompleteEditTextTest {
     }
 
     /**
-     * A convenient helper method to assert the return value of
-     * {@link InputConnection#endBatchEdit()} when its internal batch edit count becomes {@code 0}.
+     * A convenient helper method to assert the return value of {@link
+     * InputConnection#endBatchEdit()} when its internal batch edit count becomes {@code 0}.
      *
      * @param result The return value of {@link InputConnection#endBatchEdit()}.
-     *
      * @see #mHasEditableInputConnectionEndBatchEditBug
      * @see #testEditableInputConnectionEndBatchEditBug(Context)
      */
@@ -146,12 +139,27 @@ public class AutocompleteEditTextTest {
             if (DEBUG) Log.i(TAG, "onUpdateSelection(%d, %d)", selStart, selEnd);
         }
 
-        public void onPopulateAccessibilityEvent(int eventType, String text, String beforeText,
-                int itemCount, int fromIndex, int toIndex, int removedCount, int addedCount) {
+        public void onPopulateAccessibilityEvent(
+                int eventType,
+                String text,
+                String beforeText,
+                int itemCount,
+                int fromIndex,
+                int toIndex,
+                int removedCount,
+                int addedCount) {
             if (DEBUG) {
-                Log.i(TAG, "onPopulateAccessibilityEvent: TYP[%d] TXT[%s] BEF[%s] CNT[%d] "
-                        + "FROM[%d] TO[%d] REM[%d] ADD[%d]",
-                        eventType, text, beforeText, itemCount, fromIndex, toIndex, removedCount,
+                Log.i(
+                        TAG,
+                        "onPopulateAccessibilityEvent: TYP[%d] TXT[%s] BEF[%s] CNT[%d] "
+                                + "FROM[%d] TO[%d] REM[%d] ADD[%d]",
+                        eventType,
+                        text,
+                        beforeText,
+                        itemCount,
+                        fromIndex,
+                        toIndex,
+                        removedCount,
                         addedCount);
             }
         }
@@ -162,7 +170,8 @@ public class AutocompleteEditTextTest {
 
         private AtomicInteger mVerifierCallCount = new AtomicInteger();
         private AtomicInteger mAccessibilityVerifierCallCount = new AtomicInteger();
-        private AtomicReference<String> mKeyboardPackageName = new AtomicReference<>("dummy.ime");
+        private AtomicReference<String> mKeyboardPackageName =
+                new AtomicReference<>("placeholder.ime");
 
         public TestAutocompleteEditText(Context context, AttributeSet attrs) {
             super(context, attrs);
@@ -184,12 +193,16 @@ public class AutocompleteEditTextTest {
         @Override
         public void onPopulateAccessibilityEvent(AccessibilityEvent event) {
             super.onPopulateAccessibilityEvent(event);
-            if (TEST_ACCESSIBILITY) {
-                mVerifier.onPopulateAccessibilityEvent(event.getEventType(), getText(event),
-                        getBeforeText(event), event.getItemCount(), event.getFromIndex(),
-                        event.getToIndex(), event.getRemovedCount(), event.getAddedCount());
-                mAccessibilityVerifierCallCount.incrementAndGet();
-            }
+            mVerifier.onPopulateAccessibilityEvent(
+                    event.getEventType(),
+                    getText(event),
+                    getBeforeText(event),
+                    event.getItemCount(),
+                    event.getFromIndex(),
+                    event.getToIndex(),
+                    event.getRemovedCount(),
+                    event.getAddedCount());
+            mAccessibilityVerifierCallCount.incrementAndGet();
         }
 
         private String getText(AccessibilityEvent event) {
@@ -238,10 +251,6 @@ public class AutocompleteEditTextTest {
         if (DEBUG) ShadowLog.stream = System.out;
     }
 
-    private boolean isUsingSpannableModel() {
-        return ChromeFeatureList.isEnabled(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE);
-    }
-
     @Before
     public void setUp() {
         if (DEBUG) Log.i(TAG, "setUp started.");
@@ -267,12 +276,14 @@ public class AutocompleteEditTextTest {
         assertTrue(mAutocomplete.isShown());
 
         // Enable accessibility.
-        mShadowAccessibilityManager =
-                Shadows.shadowOf(mAutocomplete.getAccessibilityManagerForTesting());
-        mShadowAccessibilityManager.setEnabled(true);
-        mShadowAccessibilityManager.setTouchExplorationEnabled(true);
-        assertTrue(mAutocomplete.getAccessibilityManagerForTesting().isEnabled());
-        assertTrue(mAutocomplete.getAccessibilityManagerForTesting().isTouchExplorationEnabled());
+        ShadowAccessibilityManager manager =
+                Shadows.shadowOf(
+                        (AccessibilityManager)
+                                mContext.getSystemService(Context.ACCESSIBILITY_SERVICE));
+        manager.setEnabled(true);
+        manager.setTouchExplorationEnabled(true);
+        AccessibilityState.setIsPerformGesturesEnabledForTesting(true);
+        AccessibilityState.setIsTouchExplorationEnabledForTesting(true);
 
         mInOrder = inOrder(mVerifier);
         assertTrue(mAutocomplete.requestFocus());
@@ -300,99 +311,76 @@ public class AutocompleteEditTextTest {
     private void assertVerifierCallCounts(
             int nonAccessibilityCallCount, int accessibilityCallCount) {
         assertEquals(nonAccessibilityCallCount, mAutocomplete.getAndResetVerifierCallCount());
-        if (!TEST_ACCESSIBILITY) return;
         assertEquals(
                 accessibilityCallCount, mAutocomplete.getAndResetAccessibilityVerifierCallCount());
     }
 
-    private void verifyOnPopulateAccessibilityEvent(int eventType, String text, String beforeText,
-            int itemCount, int fromIndex, int toIndex, int removedCount, int addedCount) {
-        if (!TEST_ACCESSIBILITY) return;
-        mInOrder.verify(mVerifier).onPopulateAccessibilityEvent(eventType, text, beforeText,
-                itemCount, fromIndex, toIndex, removedCount, addedCount);
+    private void verifyOnPopulateAccessibilityEvent(
+            int eventType,
+            String text,
+            String beforeText,
+            int itemCount,
+            int fromIndex,
+            int toIndex,
+            int removedCount,
+            int addedCount) {
+        mInOrder.verify(mVerifier)
+                .onPopulateAccessibilityEvent(
+                        eventType,
+                        text,
+                        beforeText,
+                        itemCount,
+                        fromIndex,
+                        toIndex,
+                        removedCount,
+                        addedCount);
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testAppend_CommitTextWithSpannableModel() {
-        internalTestAppend_CommitText();
-    }
-
-    @Test
-    @DisableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testAppend_CommitTextWithoutSpannableModel() {
-        internalTestAppend_CommitText();
-    }
-
-    private void internalTestAppend_CommitText() {
+    public void testAppend_CommitText() {
         // User types "h".
         assertTrue(mInputConnection.commitText("h", 1));
-        if (isUsingSpannableModel()) {
-            mInOrder.verify(mVerifier).onUpdateSelection(1, 1);
-            verifyOnPopulateAccessibilityEvent(
-                    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "h", "", -1, 0, -1, 0, 1);
-            verifyOnPopulateAccessibilityEvent(
-                    AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED, "h", "", 1, 1, 1, -1, -1);
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
-            assertVerifierCallCounts(2, 2);
-        } else {
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(true);
-            verifyOnPopulateAccessibilityEvent(
-                    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "h", "", -1, 0, -1, 0, 1);
-            mInOrder.verify(mVerifier).onUpdateSelection(1, 1);
-            verifyOnPopulateAccessibilityEvent(
-                    AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED, "h", "", 1, 1, 1, -1, -1);
-            assertVerifierCallCounts(2, 2);
-        }
+        mInOrder.verify(mVerifier).onUpdateSelection(1, 1);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "h", "", -1, 0, -1, 0, 1);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED, "h", "", 1, 1, 1, -1, -1);
+        mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
+        assertVerifierCallCounts(2, 2);
+
         mInOrder.verifyNoMoreInteractions();
         assertTrue(mAutocomplete.shouldAutocomplete());
 
         // The controller kicks in.
         mAutocomplete.setAutocompleteText("h", "ello world");
-        if (isUsingSpannableModel()) {
-            assertFalse(mAutocomplete.isCursorVisible());
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                    "hello world", "h", -1, 1, -1, 0, 10);
-            assertVerifierCallCounts(0, 1);
-        } else {
-            // The non-spannable model changes selection in two steps.
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                    "hello world", "h", -1, 1, -1, 0, 10);
-            mInOrder.verify(mVerifier).onUpdateSelection(11, 11);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 11, 11, -1, -1);
-            mInOrder.verify(mVerifier).onUpdateSelection(1, 11);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 1, 11, -1, -1);
-            assertVerifierCallCounts(2, 3);
-        }
+        assertFalse(mAutocomplete.isCursorVisible());
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello world", "h", -1, 1, -1, 0, 10);
+        assertVerifierCallCounts(0, 1);
         mInOrder.verifyNoMoreInteractions();
         assertTrue(mAutocomplete.shouldAutocomplete());
 
         // User types "he".
         assertTrue(mInputConnection.commitText("e", 1));
-        if (isUsingSpannableModel()) {
-            mInOrder.verify(mVerifier).onUpdateSelection(2, 2);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 2, 2, -1, -1);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                    "hello world", "he", -1, 2, -1, 0, 9);
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
-            assertVerifierCallCounts(2, 2);
-        } else {
-            verifyOnPopulateAccessibilityEvent(
-                    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello world", "h", -1, 1, -1, 0, 1);
-            mInOrder.verify(mVerifier).onUpdateSelection(2, 11);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 2, 11, -1, -1);
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
-            assertVerifierCallCounts(2, 2);
-        }
+        mInOrder.verify(mVerifier).onUpdateSelection(2, 2);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
+                "hello world",
+                "",
+                11,
+                2,
+                2,
+                -1,
+                -1);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello world", "he", -1, 2, -1, 0, 9);
+        mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
+        assertVerifierCallCounts(2, 2);
         mInOrder.verifyNoMoreInteractions();
         assertTrue(mAutocomplete.shouldAutocomplete());
         // The controller kicks in.
         mAutocomplete.setAutocompleteText("he", "llo world");
-        if (isUsingSpannableModel()) assertFalse(mAutocomplete.isCursorVisible());
+        assertFalse(mAutocomplete.isCursorVisible());
 
         mInOrder.verifyNoMoreInteractions();
         assertTexts("he", "llo world");
@@ -400,47 +388,26 @@ public class AutocompleteEditTextTest {
 
         // User types "hello".
         assertTrue(mInputConnection.commitText("llo", 1));
-        if (isUsingSpannableModel()) {
-            mInOrder.verify(mVerifier).onUpdateSelection(5, 5);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 5, 5, -1, -1);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                    "hello world", "hello", -1, 5, -1, 0, 6);
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
-            assertVerifierCallCounts(2, 2);
-        } else {
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
-            mInOrder.verify(mVerifier).onUpdateSelection(11, 11);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 11, 11, -1, -1);
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(true);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello",
-                    "hello world", -1, 2, -1, 9, 3);
-            mInOrder.verify(mVerifier).onUpdateSelection(5, 5);
-            // The old model does not continue the existing autocompletion when two letters are
-            // typed together, which can cause a slight flicker.
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello", "", 5, 5, 5, -1, -1);
-            assertVerifierCallCounts(4, 3);
-        }
+        mInOrder.verify(mVerifier).onUpdateSelection(5, 5);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
+                "hello world",
+                "",
+                11,
+                5,
+                5,
+                -1,
+                -1);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello world", "hello", -1, 5, -1, 0, 6);
+        mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
+        assertVerifierCallCounts(2, 2);
         mInOrder.verifyNoMoreInteractions();
         assertTrue(mAutocomplete.shouldAutocomplete());
         // The controller kicks in.
         mAutocomplete.setAutocompleteText("hello", " world");
-        if (isUsingSpannableModel()) {
-            assertFalse(mAutocomplete.isCursorVisible());
-            assertVerifierCallCounts(0, 0);
-        } else {
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                    "hello world", "hello", -1, 5, -1, 0, 6);
-            mInOrder.verify(mVerifier).onUpdateSelection(11, 11);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 11, 11, -1, -1);
-            mInOrder.verify(mVerifier).onUpdateSelection(5, 11);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 5, 11, -1, -1);
-            assertVerifierCallCounts(2, 3);
-        }
+        assertFalse(mAutocomplete.isCursorVisible());
+        assertVerifierCallCounts(0, 0);
         mInOrder.verifyNoMoreInteractions();
         assertTexts("hello", " world");
         assertTrue(mAutocomplete.shouldAutocomplete());
@@ -455,306 +422,197 @@ public class AutocompleteEditTextTest {
         assertFalse(mAutocomplete.shouldAutocomplete());
         assertEquals("hello world", mAutocomplete.getText().toString());
 
-        if (!isUsingSpannableModel()) {
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                    "hello world", "hello", -1, 5, -1, 0, 1);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 6, 11, -1, -1);
-            assertVerifierCallCounts(0, 2);
-        }
         mInOrder.verifyNoMoreInteractions();
         assertLastBatchEdit(mInputConnection.endBatchEdit());
 
         // Autocomplete text gets redrawn.
         assertTexts("hello ", "world");
         assertTrue(mAutocomplete.shouldAutocomplete());
-        if (isUsingSpannableModel()) {
-            mInOrder.verify(mVerifier).onUpdateSelection(6, 6);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 6, 6, -1, -1);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                    "hello world", "hello ", -1, 6, -1, 0, 5);
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
-            assertVerifierCallCounts(2, 2);
-        } else {
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(true);
-            mInOrder.verify(mVerifier).onUpdateSelection(6, 11);
-            assertVerifierCallCounts(2, 0);
-        }
+        mInOrder.verify(mVerifier).onUpdateSelection(6, 6);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
+                "hello world",
+                "",
+                11,
+                6,
+                6,
+                -1,
+                -1);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
+                "hello world",
+                "hello ",
+                -1,
+                6,
+                -1,
+                0,
+                5);
+        mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
+        assertVerifierCallCounts(2, 2);
 
         mAutocomplete.setAutocompleteText("hello ", "world");
-        if (isUsingSpannableModel()) assertFalse(mAutocomplete.isCursorVisible());
+        assertFalse(mAutocomplete.isCursorVisible());
         assertTexts("hello ", "world");
         assertVerifierCallCounts(0, 0);
         mInOrder.verifyNoMoreInteractions();
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testAppend_SetComposingTextWithSpannableModel() {
-        internalTestAppend_SetComposingText();
-    }
-
-    @Test
-    @DisableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testAppend_SetComposingTextWithoutSpannableModel() {
-        internalTestAppend_SetComposingText();
-    }
-
-    private void internalTestAppend_SetComposingText() {
+    public void testAppend_SetComposingText() {
         // User types "h".
         assertTrue(mInputConnection.setComposingText("h", 1));
 
-        if (isUsingSpannableModel()) {
-            mInOrder.verify(mVerifier).onUpdateSelection(1, 1);
-            verifyOnPopulateAccessibilityEvent(
-                    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "h", "", -1, 0, -1, 0, 1);
-            verifyOnPopulateAccessibilityEvent(
-                    AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED, "h", "", 1, 1, 1, -1, -1);
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
-            assertVerifierCallCounts(2, 2);
-        } else {
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(true);
-            verifyOnPopulateAccessibilityEvent(
-                    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "h", "", -1, 0, -1, 0, 1);
-            mInOrder.verify(mVerifier).onUpdateSelection(1, 1);
-            verifyOnPopulateAccessibilityEvent(
-                    AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED, "h", "", 1, 1, 1, -1, -1);
-            assertVerifierCallCounts(2, 2);
-        }
+        mInOrder.verify(mVerifier).onUpdateSelection(1, 1);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "h", "", -1, 0, -1, 0, 1);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED, "h", "", 1, 1, 1, -1, -1);
+        mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
+        assertVerifierCallCounts(2, 2);
         mInOrder.verifyNoMoreInteractions();
 
         // The old model does not allow autocompletion here.
-        assertEquals(isUsingSpannableModel(), mAutocomplete.shouldAutocomplete());
-        if (isUsingSpannableModel()) {
-            // The controller kicks in.
-            mAutocomplete.setAutocompleteText("h", "ello world");
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                    "hello world", "h", -1, 1, -1, 0, 10);
-            assertFalse(mAutocomplete.isCursorVisible());
-            assertTexts("h", "ello world");
-            assertVerifierCallCounts(0, 1);
-        } else {
-            assertTexts("h", "");
-            assertVerifierCallCounts(0, 0);
-        }
+        assertTrue(mAutocomplete.shouldAutocomplete());
+        // The controller kicks in.
+        mAutocomplete.setAutocompleteText("h", "ello world");
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello world", "h", -1, 1, -1, 0, 10);
+        assertFalse(mAutocomplete.isCursorVisible());
+        assertTexts("h", "ello world");
+        assertVerifierCallCounts(0, 1);
         mInOrder.verifyNoMoreInteractions();
 
         // User types "hello".
         assertTrue(mInputConnection.setComposingText("hello", 1));
-        if (isUsingSpannableModel()) {
-            mInOrder.verify(mVerifier).onUpdateSelection(5, 5);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 5, 5, -1, -1);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                    "hello world", "hello", -1, 5, -1, 0, 6);
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
-            assertVerifierCallCounts(2, 2);
-        } else {
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(true);
-            verifyOnPopulateAccessibilityEvent(
-                    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello", "h", -1, 0, -1, 1, 5);
-            mInOrder.verify(mVerifier).onUpdateSelection(5, 5);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello", "", 5, 5, 5, -1, -1);
-            assertVerifierCallCounts(2, 2);
-        }
+        mInOrder.verify(mVerifier).onUpdateSelection(5, 5);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
+                "hello world",
+                "",
+                11,
+                5,
+                5,
+                -1,
+                -1);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello world", "hello", -1, 5, -1, 0, 6);
+        mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
+        assertVerifierCallCounts(2, 2);
         mInOrder.verifyNoMoreInteractions();
-        if (isUsingSpannableModel()) {
-            assertTexts("hello", " world");
-        } else {
-            // The old model does not work with composition.
-            assertTexts("hello", "");
-        }
+        assertTexts("hello", " world");
 
         // The old model does not allow autocompletion here.
-        assertEquals(isUsingSpannableModel(), mAutocomplete.shouldAutocomplete());
-        if (isUsingSpannableModel()) {
-            // The controller kicks in.
-            mAutocomplete.setAutocompleteText("hello", " world");
-            assertFalse(mAutocomplete.isCursorVisible());
-            assertTexts("hello", " world");
-        } else {
-            assertTexts("hello", "");
-        }
+        assertTrue(mAutocomplete.shouldAutocomplete());
+        // The controller kicks in.
+        mAutocomplete.setAutocompleteText("hello", " world");
+        assertFalse(mAutocomplete.isCursorVisible());
+        assertTexts("hello", " world");
         assertVerifierCallCounts(0, 0);
         mInOrder.verifyNoMoreInteractions();
 
         // User types a space.
         assertTrue(mInputConnection.beginBatchEdit());
-        // We should still show the intermediate autocomplete text to the user even in the middle of
-        // a batch edit. Otherwise, the user may see flickering of autocomplete text.
-        if (isUsingSpannableModel()) {
-            assertEquals("hello world", mAutocomplete.getText().toString());
-        }
+        // We should still show the intermediate autocomplete text to the user even in the
+        // middle of a batch edit. Otherwise, the user may see flickering of autocomplete text.
+        assertEquals("hello world", mAutocomplete.getText().toString());
 
         assertTrue(mInputConnection.finishComposingText());
 
-        if (isUsingSpannableModel()) {
-            assertEquals("hello world", mAutocomplete.getText().toString());
-        }
+        assertEquals("hello world", mAutocomplete.getText().toString());
 
         assertTrue(mInputConnection.commitText(" ", 1));
 
-        if (isUsingSpannableModel()) {
-            assertEquals("hello world", mAutocomplete.getText().toString());
-            assertVerifierCallCounts(0, 0);
-        } else {
-            verifyOnPopulateAccessibilityEvent(
-                    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello ", "hello", -1, 5, -1, 0, 1);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello ", "", 6, 6, 6, -1, -1);
-            assertVerifierCallCounts(0, 2);
-        }
+        assertEquals("hello world", mAutocomplete.getText().toString());
+        assertVerifierCallCounts(0, 0);
         mInOrder.verifyNoMoreInteractions();
 
         assertLastBatchEdit(mInputConnection.endBatchEdit());
 
-        if (isUsingSpannableModel()) {
-            mInOrder.verify(mVerifier).onUpdateSelection(6, 6);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 6, 6, -1, -1);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                    "hello world", "hello ", -1, 6, -1, 0, 5);
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
-            assertVerifierCallCounts(2, 2);
-        } else {
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(true);
-            mInOrder.verify(mVerifier).onUpdateSelection(6, 6);
-            assertVerifierCallCounts(2, 0);
-        }
+        mInOrder.verify(mVerifier).onUpdateSelection(6, 6);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
+                "hello world",
+                "",
+                11,
+                6,
+                6,
+                -1,
+                -1);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
+                "hello world",
+                "hello ",
+                -1,
+                6,
+                -1,
+                0,
+                5);
+        mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
+        assertVerifierCallCounts(2, 2);
         mInOrder.verifyNoMoreInteractions();
 
-        if (isUsingSpannableModel()) {
-            // Autocomplete text has been drawn at endBatchEdit().
-            assertTexts("hello ", "world");
-        } else {
-            assertTexts("hello ", "");
-        }
+        // Autocomplete text has been drawn at endBatchEdit().
+        assertTexts("hello ", "world");
 
         // The old model can also autocomplete now.
         assertTrue(mAutocomplete.shouldAutocomplete());
         mAutocomplete.setAutocompleteText("hello ", "world");
         assertTexts("hello ", "world");
-        if (isUsingSpannableModel()) {
-            assertFalse(mAutocomplete.isCursorVisible());
-            assertVerifierCallCounts(0, 0);
-        } else {
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                    "hello world", "hello ", -1, 6, -1, 0, 5);
-            mInOrder.verify(mVerifier).onUpdateSelection(11, 11);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 11, 11, -1, -1);
-            mInOrder.verify(mVerifier).onUpdateSelection(6, 11);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 6, 11, -1, -1);
-            assertVerifierCallCounts(2, 3);
-        }
+        assertFalse(mAutocomplete.isCursorVisible());
+        assertVerifierCallCounts(0, 0);
         mInOrder.verifyNoMoreInteractions();
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testAppend_DispatchKeyEventWithSpannableModel() {
-        internalTestAppend_DispatchKeyEvent();
-    }
-
-    @Test
-    @DisableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testAppend_DispatchKeyEventWithoutSpannableModel() {
-        internalTestAppend_DispatchKeyEvent();
-    }
-
-    private void internalTestAppend_DispatchKeyEvent() {
+    public void testAppend_DispatchKeyEvent() {
         // User types "h".
         mAutocomplete.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_H));
         mAutocomplete.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_H));
-        if (isUsingSpannableModel()) {
-            mInOrder.verify(mVerifier).onUpdateSelection(1, 1);
-            verifyOnPopulateAccessibilityEvent(
-                    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "h", "", -1, 0, -1, 0, 1);
-            verifyOnPopulateAccessibilityEvent(
-                    AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED, "h", "", 1, 1, 1, -1, -1);
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
-            assertVerifierCallCounts(2, 2);
-        } else {
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(true);
-            verifyOnPopulateAccessibilityEvent(
-                    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "h", "", -1, 0, -1, 0, 1);
-            mInOrder.verify(mVerifier).onUpdateSelection(1, 1);
-            verifyOnPopulateAccessibilityEvent(
-                    AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED, "h", "", 1, 1, 1, -1, -1);
-            assertVerifierCallCounts(2, 2);
-        }
+        mInOrder.verify(mVerifier).onUpdateSelection(1, 1);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "h", "", -1, 0, -1, 0, 1);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED, "h", "", 1, 1, 1, -1, -1);
+        mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
+        assertVerifierCallCounts(2, 2);
         mInOrder.verifyNoMoreInteractions();
         assertTrue(mAutocomplete.shouldAutocomplete());
 
         // The controller kicks in.
         mAutocomplete.setAutocompleteText("h", "ello world");
         // The non-spannable model changes selection in two steps.
-        if (isUsingSpannableModel()) {
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                    "hello world", "h", -1, 1, -1, 0, 10);
-            assertVerifierCallCounts(0, 1);
-            assertFalse(mAutocomplete.isCursorVisible());
-        } else {
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                    "hello world", "h", -1, 1, -1, 0, 10);
-            mInOrder.verify(mVerifier).onUpdateSelection(11, 11);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 11, 11, -1, -1);
-            mInOrder.verify(mVerifier).onUpdateSelection(1, 11);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 1, 11, -1, -1);
-            assertVerifierCallCounts(2, 3);
-        }
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello world", "h", -1, 1, -1, 0, 10);
+        assertVerifierCallCounts(0, 1);
+        assertFalse(mAutocomplete.isCursorVisible());
         mInOrder.verifyNoMoreInteractions();
         assertTrue(mAutocomplete.shouldAutocomplete());
 
         // User types "he".
         mAutocomplete.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_E));
         mAutocomplete.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_E));
-        if (isUsingSpannableModel()) {
-            mInOrder.verify(mVerifier).onUpdateSelection(2, 2);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 2, 2, -1, -1);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                    "hello world", "he", -1, 2, -1, 0, 9);
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
-            // The new model tries to reuse autocomplete text.
-            assertTexts("he", "llo world");
-            assertVerifierCallCounts(2, 2);
-        } else {
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
-            mInOrder.verify(mVerifier).onUpdateSelection(11, 11);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 11, 11, -1, -1);
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(true);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "he",
-                    "hello world", -1, 1, -1, 10, 1);
-            mInOrder.verify(mVerifier).onUpdateSelection(2, 2);
-            verifyOnPopulateAccessibilityEvent(
-                    AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED, "he", "", 2, 2, 2, -1, -1);
-            assertVerifierCallCounts(4, 3);
-        }
+        mInOrder.verify(mVerifier).onUpdateSelection(2, 2);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
+                "hello world",
+                "",
+                11,
+                2,
+                2,
+                -1,
+                -1);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello world", "he", -1, 2, -1, 0, 9);
+        mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
+        // The new model tries to reuse autocomplete text.
+        assertTexts("he", "llo world");
+        assertVerifierCallCounts(2, 2);
         mInOrder.verifyNoMoreInteractions();
         assertTrue(mAutocomplete.shouldAutocomplete());
         // The controller kicks in.
         mAutocomplete.setAutocompleteText("he", "llo world");
-        if (isUsingSpannableModel()) {
-            assertFalse(mAutocomplete.isCursorVisible());
-            assertVerifierCallCounts(0, 0);
-        } else {
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                    "hello world", "he", -1, 2, -1, 0, 9);
-            mInOrder.verify(mVerifier).onUpdateSelection(11, 11);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 11, 11, -1, -1);
-            mInOrder.verify(mVerifier).onUpdateSelection(2, 11);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 2, 11, -1, -1);
-            assertVerifierCallCounts(2, 3);
-        }
+        assertFalse(mAutocomplete.isCursorVisible());
+        assertVerifierCallCounts(0, 0);
         mInOrder.verifyNoMoreInteractions();
         assertTexts("he", "llo world");
         assertTrue(mAutocomplete.shouldAutocomplete());
@@ -762,91 +620,40 @@ public class AutocompleteEditTextTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testDelete_CommitTextWithSpannableModel() {
-        internalTestDelete_CommitText();
-    }
-
-    @Test
-    @DisableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testDelete_CommitTextWithoutSpannableModel() {
-        internalTestDelete_CommitText();
-    }
-
-    private void internalTestDelete_CommitText() {
+    public void testDelete_CommitText() {
         // User types "hello".
         assertTrue(mInputConnection.commitText("hello", 1));
-        if (isUsingSpannableModel()) {
-            mInOrder.verify(mVerifier).onUpdateSelection(5, 5);
-            verifyOnPopulateAccessibilityEvent(
-                    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello", "", -1, 0, -1, 0, 5);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello", "", 5, 5, 5, -1, -1);
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
-            assertVerifierCallCounts(2, 2);
-        } else {
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(true);
-            verifyOnPopulateAccessibilityEvent(
-                    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello", "", -1, 0, -1, 0, 5);
-            mInOrder.verify(mVerifier).onUpdateSelection(5, 5);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello", "", 5, 5, 5, -1, -1);
-            assertVerifierCallCounts(2, 2);
-        }
+        mInOrder.verify(mVerifier).onUpdateSelection(5, 5);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello", "", -1, 0, -1, 0, 5);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED, "hello", "", 5, 5, 5, -1, -1);
+        mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
+        assertVerifierCallCounts(2, 2);
         mInOrder.verifyNoMoreInteractions();
         assertTrue(mAutocomplete.shouldAutocomplete());
         // The controller kicks in.
         mAutocomplete.setAutocompleteText("hello", " world");
-        if (isUsingSpannableModel()) {
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                    "hello world", "hello", -1, 5, -1, 0, 6);
-            assertVerifierCallCounts(0, 1);
-            assertFalse(mAutocomplete.isCursorVisible());
-        } else {
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                    "hello world", "hello", -1, 5, -1, 0, 6);
-            mInOrder.verify(mVerifier).onUpdateSelection(11, 11);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 11, 11, -1, -1);
-            mInOrder.verify(mVerifier).onUpdateSelection(5, 11);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 5, 11, -1, -1);
-            assertVerifierCallCounts(2, 3);
-        }
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello world", "hello", -1, 5, -1, 0, 6);
+        assertVerifierCallCounts(0, 1);
+        assertFalse(mAutocomplete.isCursorVisible());
         assertTexts("hello", " world");
         mInOrder.verifyNoMoreInteractions();
 
         // User deletes autocomplete.
-        if (isUsingSpannableModel()) {
-            assertTrue(mInputConnection.deleteSurroundingText(1, 0)); // deletes one character
-        } else {
-            assertTrue(mInputConnection.commitText("", 1)); // deletes selection.
-        }
+        assertTrue(mInputConnection.deleteSurroundingText(1, 0)); // deletes one character
 
-        if (isUsingSpannableModel()) {
-            // Pretend that we have deleted 'o' first.
-            mInOrder.verify(mVerifier).onUpdateSelection(4, 4);
-            // We restore 'o', and clear autocomplete text instead.
-            mInOrder.verify(mVerifier).onUpdateSelection(5, 5);
-            assertTrue(mAutocomplete.isCursorVisible());
-            // Autocomplete removed.
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello",
-                    "hello world", -1, 5, -1, 6, 0);
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
-            assertVerifierCallCounts(3, 1);
-        } else {
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
-            mInOrder.verify(mVerifier).onUpdateSelection(11, 11);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 11, 11, -1, -1);
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(true);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello",
-                    "hello world", -1, 5, -1, 6, 0);
-            mInOrder.verify(mVerifier).onUpdateSelection(5, 5);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello", "", 5, 5, 5, -1, -1);
-            assertVerifierCallCounts(4, 3);
-        }
+        // Pretend that we have deleted 'o' first.
+        mInOrder.verify(mVerifier).onUpdateSelection(4, 4);
+        // We restore 'o', and clear autocomplete text instead.
+        mInOrder.verify(mVerifier).onUpdateSelection(5, 5);
+        assertTrue(mAutocomplete.isCursorVisible());
+        // Autocomplete removed.
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello", "hello world", -1, 5, -1, 6, 0);
+        mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
+        assertVerifierCallCounts(3, 1);
         mInOrder.verifyNoMoreInteractions();
         assertFalse(mAutocomplete.shouldAutocomplete());
         assertTexts("hello", "");
@@ -866,8 +673,7 @@ public class AutocompleteEditTextTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testDelete_SetComposingTextWithSpannableModel() {
+    public void testDelete_SetComposingText() {
         // User types "hello".
         assertTrue(mInputConnection.setComposingText("hello", 1));
         assertTrue(isComposing());
@@ -916,8 +722,7 @@ public class AutocompleteEditTextTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testDelete_SamsungKeyboardWithSpannableModel() {
+    public void testDelete_SamsungKeyboard() {
         mAutocomplete.setKeyboardPackageName("com.sec.android.inputmethod");
         // User types "hello".
         assertTrue(mInputConnection.setComposingText("hello", 1));
@@ -938,8 +743,7 @@ public class AutocompleteEditTextTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testDelete_SetComposingTextInBatchEditWithSpannableModel() {
+    public void testDelete_SetComposingTextInBatchEdit() {
         // User types "hello".
         assertTrue(mInputConnection.setComposingText("hello", 1));
 
@@ -993,72 +797,39 @@ public class AutocompleteEditTextTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testSelect_SelectAutocompleteWithSpannableModel() {
-        internalTestSelect_SelectAutocomplete();
-    }
-
-    @Test
-    @DisableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testSelect_SelectAutocompleteWithoutSpannableModel() {
-        internalTestSelect_SelectAutocomplete();
-    }
-
-    private void internalTestSelect_SelectAutocomplete() {
+    public void testSelect_SelectAutocomplete() {
         // User types "hello".
         assertTrue(mInputConnection.commitText("hello", 1));
-        if (isUsingSpannableModel()) {
-            mInOrder.verify(mVerifier).onUpdateSelection(5, 5);
-            verifyOnPopulateAccessibilityEvent(
-                    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello", "", -1, 0, -1, 0, 5);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello", "", 5, 5, 5, -1, -1);
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
-            assertVerifierCallCounts(2, 2);
-        } else {
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(true);
-            verifyOnPopulateAccessibilityEvent(
-                    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello", "", -1, 0, -1, 0, 5);
-            mInOrder.verify(mVerifier).onUpdateSelection(5, 5);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello", "", 5, 5, 5, -1, -1);
-            assertVerifierCallCounts(2, 2);
-        }
+        mInOrder.verify(mVerifier).onUpdateSelection(5, 5);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello", "", -1, 0, -1, 0, 5);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED, "hello", "", 5, 5, 5, -1, -1);
+        mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
+        assertVerifierCallCounts(2, 2);
         mInOrder.verifyNoMoreInteractions();
         assertTrue(mAutocomplete.shouldAutocomplete());
         // The controller kicks in.
         mAutocomplete.setAutocompleteText("hello", " world");
         assertTexts("hello", " world");
-        if (isUsingSpannableModel()) {
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                    "hello world", "hello", -1, 5, -1, 0, 6);
-            assertFalse(mAutocomplete.isCursorVisible());
-            assertVerifierCallCounts(0, 1);
-        } else {
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                    "hello world", "hello", -1, 5, -1, 0, 6);
-            mInOrder.verify(mVerifier).onUpdateSelection(11, 11);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 11, 11, -1, -1);
-            mInOrder.verify(mVerifier).onUpdateSelection(5, 11);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 5, 11, -1, -1);
-            assertVerifierCallCounts(2, 3);
-        }
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello world", "hello", -1, 5, -1, 0, 6);
+        assertFalse(mAutocomplete.isCursorVisible());
+        assertVerifierCallCounts(0, 1);
         mInOrder.verifyNoMoreInteractions();
         // User touches autocomplete text.
         mAutocomplete.setSelection(7);
-        if (isUsingSpannableModel()) {
-            mInOrder.verify(mVerifier).onUpdateSelection(7, 7);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 7, 7, -1, -1);
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
-        } else {
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
-            mInOrder.verify(mVerifier).onUpdateSelection(7, 7);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 7, 7, -1, -1);
-        }
+        mInOrder.verify(mVerifier).onUpdateSelection(7, 7);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
+                "hello world",
+                "",
+                11,
+                7,
+                7,
+                -1,
+                -1);
+        mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
         assertVerifierCallCounts(2, 1);
         mInOrder.verifyNoMoreInteractions();
         assertFalse(mAutocomplete.shouldAutocomplete());
@@ -1066,80 +837,36 @@ public class AutocompleteEditTextTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testSelect_SelectUserTextWithSpannableModel() {
-        internalTestSelect_SelectUserText();
-    }
-
-    @Test
-    @DisableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testSelect_SelectUserTextWithoutSpannableModel() {
-        internalTestSelect_SelectUserText();
-    }
-
-    private void internalTestSelect_SelectUserText() {
+    public void testSelect_SelectUserText() {
         // User types "hello".
         assertTrue(mInputConnection.commitText("hello", 1));
-        if (isUsingSpannableModel()) {
-            mInOrder.verify(mVerifier).onUpdateSelection(5, 5);
-            verifyOnPopulateAccessibilityEvent(
-                    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello", "", -1, 0, -1, 0, 5);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello", "", 5, 5, 5, -1, -1);
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
-            assertVerifierCallCounts(2, 2);
-        } else {
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(true);
-            verifyOnPopulateAccessibilityEvent(
-                    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello", "", -1, 0, -1, 0, 5);
-            mInOrder.verify(mVerifier).onUpdateSelection(5, 5);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello", "", 5, 5, 5, -1, -1);
-            assertVerifierCallCounts(2, 2);
-        }
+        mInOrder.verify(mVerifier).onUpdateSelection(5, 5);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello", "", -1, 0, -1, 0, 5);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED, "hello", "", 5, 5, 5, -1, -1);
+        mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
+        assertVerifierCallCounts(2, 2);
         mInOrder.verifyNoMoreInteractions();
         assertTrue(mAutocomplete.shouldAutocomplete());
         // The controller kicks in.
         mAutocomplete.setAutocompleteText("hello", " world");
         assertTexts("hello", " world");
-        if (isUsingSpannableModel()) {
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                    "hello world", "hello", -1, 5, -1, 0, 6);
-            assertFalse(mAutocomplete.isCursorVisible());
-            assertVerifierCallCounts(0, 1);
-        } else {
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
-                    "hello world", "hello", -1, 5, -1, 0, 6);
-            mInOrder.verify(mVerifier).onUpdateSelection(11, 11);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 11, 11, -1, -1);
-            mInOrder.verify(mVerifier).onUpdateSelection(5, 11);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello world", "", 11, 5, 11, -1, -1);
-            assertVerifierCallCounts(2, 3);
-        }
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello world", "hello", -1, 5, -1, 0, 6);
+        assertFalse(mAutocomplete.isCursorVisible());
+        assertVerifierCallCounts(0, 1);
         mInOrder.verifyNoMoreInteractions();
         // User touches the user text.
         mAutocomplete.setSelection(3);
-        if (isUsingSpannableModel()) {
-            assertTrue(mAutocomplete.isCursorVisible());
-            mInOrder.verify(mVerifier).onUpdateSelection(3, 3);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello",
-                    "hello world", -1, 5, -1, 6, 0);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello", "", 5, 3, 3, -1, -1);
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
-            assertVerifierCallCounts(2, 2);
-        } else {
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(true);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello",
-                    "hello world", -1, 5, -1, 6, 0);
-            mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
-            mInOrder.verify(mVerifier).onUpdateSelection(3, 3);
-            verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                    "hello", "", 5, 3, 3, -1, -1);
-            assertVerifierCallCounts(3, 2);
-        }
+        assertTrue(mAutocomplete.isCursorVisible());
+        mInOrder.verify(mVerifier).onUpdateSelection(3, 3);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "hello", "hello world", -1, 5, -1, 6, 0);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED, "hello", "", 5, 3, 3, -1, -1);
+        mInOrder.verify(mVerifier).onAutocompleteTextStateChanged(false);
+        assertVerifierCallCounts(2, 2);
         mInOrder.verifyNoMoreInteractions();
         assertFalse(mAutocomplete.shouldAutocomplete());
         // Autocomplete text is removed.
@@ -1147,18 +874,7 @@ public class AutocompleteEditTextTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testAppend_AfterSelectAllWithSpannableModel() {
-        internalTestAppend_AfterSelectAll();
-    }
-
-    @Test
-    @DisableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testAppend_AfterSelectAllWithoutSpannableModel() {
-        internalTestAppend_AfterSelectAll();
-    }
-
-    private void internalTestAppend_AfterSelectAll() {
+    public void testAppend_AfterSelectAll() {
         final String url = "https://www.google.com/";
         mAutocomplete.setText(url);
         mAutocomplete.setSelection(0, url.length());
@@ -1172,32 +888,18 @@ public class AutocompleteEditTextTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testIgnoreAndGetWithSpannableModel() {
-        internalTestIgnoreAndGet();
-    }
-
-    @Test
-    @DisableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testIgnoreAndGetWithoutSpannableModel() {
-        internalTestIgnoreAndGet();
-    }
-
-    private void internalTestIgnoreAndGet() {
+    public void testIgnoreAndGet() {
         final String url = "https://www.google.com/";
         mAutocomplete.setIgnoreTextChangesForAutocomplete(true);
         mAutocomplete.setText(url);
         mAutocomplete.setIgnoreTextChangesForAutocomplete(false);
         mInputConnection.getTextBeforeCursor(1, 1);
-        if (isUsingSpannableModel()) {
-            assertTrue(mAutocomplete.isCursorVisible());
-        }
+        assertTrue(mAutocomplete.isCursorVisible());
         mInOrder.verifyNoMoreInteractions();
     }
 
     // crbug.com/760013
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
     public void testOnSaveInstanceStateDoesNotCrash() {
         mInputConnection.setComposingText("h", 1);
         mAutocomplete.setAutocompleteText("h", "ello world");
@@ -1208,19 +910,7 @@ public class AutocompleteEditTextTest {
 
     // crbug.com/759876
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testFocusInAndSelectAllWithSpannableModel() {
-        internalTestFocusInAndSelectAll();
-    }
-
-    // crbug.com/759876
-    @Test
-    @DisableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testFocusInAndSelectAllWithoutSpannableModel() {
-        internalTestFocusInAndSelectAll();
-    }
-
-    private void internalTestFocusInAndSelectAll() {
+    public void testFocusInAndSelectAll() {
         final String url = "https://google.com";
         final int len = url.length();
         mAutocomplete.setIgnoreTextChangesForAutocomplete(true);
@@ -1253,20 +943,9 @@ public class AutocompleteEditTextTest {
         mInOrder.verifyNoMoreInteractions();
     }
 
-    @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testNonMatchingBatchEditWithSpannableModel() {
-        internalNonMatchingBatchEdit();
-    }
-
-    @Test
-    @DisableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testNonMatchingBatchEditWithoutSpannableModel() {
-        internalNonMatchingBatchEdit();
-    }
-
     // crbug.com/764749
-    private void internalNonMatchingBatchEdit() {
+    @Test
+    public void testNonMatchingBatchEdit() {
         // beginBatchEdit() was not matched by endBatchEdit(), for some reason.
         mInputConnection.beginBatchEdit();
 
@@ -1281,8 +960,7 @@ public class AutocompleteEditTextTest {
 
     // crbug.com/768323
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testFocusLossHidesCursorWithSpannableModel() {
+    public void testFocusLossHidesCursor() {
         assertTrue(mAutocomplete.isFocused());
         assertTrue(mAutocomplete.isCursorVisible());
 
@@ -1298,8 +976,7 @@ public class AutocompleteEditTextTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testUnsupportedKeyboardWithSpannableModel() {
+    public void testUnsupportedKeyboard() {
         mAutocomplete.setKeyboardPackageName("jp.co.sharp.android.iwnn");
         // User types "h".
         assertTrue(mInputConnection.commitText("h", 1));
@@ -1308,7 +985,6 @@ public class AutocompleteEditTextTest {
 
     // crbug.com/783165
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
     public void testSetTextAndSelect() {
         // User types "h".
         assertTrue(mInputConnection.commitText("h", 1));
@@ -1329,7 +1005,6 @@ public class AutocompleteEditTextTest {
 
     // crbug.com/810704
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
     public void testPerformEditorAction() {
         // User types "goo".
         assertTrue(mInputConnection.setComposingText("goo", 1));
@@ -1347,7 +1022,6 @@ public class AutocompleteEditTextTest {
 
     // crbug.com/810704
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
     public void testPerformEditorActionInBatchEdit() {
         // User types "goo".
         assertTrue(mInputConnection.setComposingText("goo", 1));
@@ -1371,18 +1045,7 @@ public class AutocompleteEditTextTest {
 
     // crbug.com/759876
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testTextSelectionGetsAnnouncedAgainOnFocusWithSpannableModel() {
-        internalTestTextSelectionGetsAnnouncedAgainOnFocus();
-    }
-
-    @Test
-    @DisableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
-    public void testTextSelectionGetsAnnouncedAgainOnFocusWithoutSpannableModel() {
-        internalTestTextSelectionGetsAnnouncedAgainOnFocus();
-    }
-
-    private void internalTestTextSelectionGetsAnnouncedAgainOnFocus() {
+    public void testTextSelectionGetsAnnouncedAgainOnFocus() {
         final String text = "hello";
         final int len = text.length();
 
@@ -1391,8 +1054,15 @@ public class AutocompleteEditTextTest {
 
         verifyOnPopulateAccessibilityEvent(
                 AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, text, "", -1, 0, -1, 0, len);
-        verifyOnPopulateAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-                text, "", len, len, len, -1, -1);
+        verifyOnPopulateAccessibilityEvent(
+                AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
+                text,
+                "",
+                len,
+                len,
+                len,
+                -1,
+                -1);
         verifyOnPopulateAccessibilityEvent(
                 AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED, text, "", len, 0, len, -1, -1);
         mInOrder.verifyNoMoreInteractions();
@@ -1418,7 +1088,6 @@ public class AutocompleteEditTextTest {
 
     // crbug.com/759876
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
     public void testEndBatchEditCanReturnFalse() {
         assertTrue(mInputConnection.beginBatchEdit());
         assertLastBatchEdit(mInputConnection.endBatchEdit());
@@ -1427,14 +1096,12 @@ public class AutocompleteEditTextTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
     public void testJavascriptSchemeShouldBeRemovedWhenPaste() {
         assertTrue(mInputConnection.commitText("javascript:alert(\"Test\")", 1));
         assertEquals("alert(\"Test\")", mAutocomplete.getText().toString());
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
     public void testJavascriptSchemeShouldNotBeRemovedWhenPatialPaste() {
         assertTrue(mInputConnection.commitText("j", 1));
         assertTrue(mInputConnection.commitText("avascript:alert(\"Test\")", 1));
@@ -1442,7 +1109,6 @@ public class AutocompleteEditTextTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)
     public void testJavascriptSchemeShouldNotBeRemovedWhenPatialPaste_LastInputIsOneLetter() {
         assertTrue(mInputConnection.commitText("javascript", 1));
         assertTrue(mInputConnection.commitText(":", 1));

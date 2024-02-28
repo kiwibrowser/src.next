@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/strings/strcat.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
@@ -14,6 +14,7 @@
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
+#include "third_party/blink/public/common/messaging/string_message_codec.h"
 
 namespace content {
 
@@ -70,7 +71,7 @@ IN_PROC_BROWSER_TEST_F(MessagePortProviderBrowserTest, PostArrayBufferMessage) {
   MessagePortProvider::PostMessageToFrame(
       shell()->web_contents()->GetPrimaryPage(),
       base::UTF8ToUTF16(source_origin), base::UTF8ToUTF16(target_origin),
-      message);
+      blink::WebMessageArrayBufferPayload::CreateForTesting(message));
 
   // Verify that the message was received (and had the expected payload).
   std::string expected_test_reply =

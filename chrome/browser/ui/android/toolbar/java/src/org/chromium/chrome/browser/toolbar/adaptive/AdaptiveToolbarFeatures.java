@@ -6,85 +6,70 @@ package org.chromium.chrome.browser.toolbar.adaptive;
 
 import android.text.TextUtils;
 
-import androidx.annotation.IntDef;
 import androidx.annotation.VisibleForTesting;
 
+import org.chromium.base.FeatureList;
+import org.chromium.base.ResettersForTesting;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.readaloud.ReadAloudFeatures;
 
-import java.lang.annotation.Retention;
-import java.lang.annotation.RetentionPolicy;
+import java.util.HashMap;
 
-/**
- * A utility class for handling feature flags used by {@link AdaptiveToolbarButtonController}.
- */
+/** A utility class for handling feature flags used by {@link AdaptiveToolbarButtonController}. */
 public class AdaptiveToolbarFeatures {
     /** Finch default group for new tab variation. */
     static final String NEW_TAB = "new-tab";
+
     /** Finch default group for share variation. */
     static final String SHARE = "share";
+
     /** Finch default group for voice search variation. */
     static final String VOICE = "voice";
 
     /** Field trial params. */
     private static final String VARIATION_PARAM_DEFAULT_SEGMENT = "default_segment";
+
     private static final String VARIATION_PARAM_DISABLE_UI = "disable_ui";
     private static final String VARIATION_PARAM_IGNORE_SEGMENTATION_RESULTS =
             "ignore_segmentation_results";
     private static final String VARIATION_PARAM_SHOW_UI_ONLY_AFTER_READY =
             "show_ui_only_after_ready";
-    @VisibleForTesting
-    static final String VARIATION_PARAM_MIN_VERSION = "min_version_adaptive";
+    @VisibleForTesting static final String VARIATION_PARAM_MIN_VERSION = "min_version_adaptive";
+
     /**
      * Version number in the scope of this feature. If {@link
      * AdaptiveToolbarFeatures#VARIATION_PARAM_MIN_VERSION} is set to a int value larger than this,
      * feature config must be ignored (disabled).
      */
-    @VisibleForTesting
-    static final int VERSION = 4;
+    @VisibleForTesting static final int VERSION = 4;
 
     /** Default value to use in case finch param isn't available for default segment. */
     private static final String DEFAULT_PARAM_VALUE_DEFAULT_SEGMENT = NEW_TAB;
 
-    /**
-     * Default minimum width to show the optional button.
-     */
+    /** Default minimum width to show the optional button. */
     public static final int DEFAULT_MIN_WIDTH_DP = 360;
 
-    /**
-     * Default delay between action chip expansion and collapse.
-     */
+    /** Default delay between action chip expansion and collapse. */
     public static final int DEFAULT_CONTEXTUAL_PAGE_ACTION_CHIP_DELAY_MS = 3000;
 
-    @AdaptiveToolbarButtonVariant
-    private static Integer sButtonVariant;
+    /** Default action chip delay for price tracking. */
+    public static final int DEFAULT_PRICE_TRACKING_ACTION_CHIP_DELAY_MS = 6000;
+
+    /** Default action chip delay for reader mode. */
+    public static final int DEFAULT_READER_MODE_ACTION_CHIP_DELAY_MS = 3000;
+
+    @AdaptiveToolbarButtonVariant private static Integer sButtonVariant;
 
     /** For testing only. */
     private static String sDefaultSegmentForTesting;
+
     private static Boolean sIgnoreSegmentationResultsForTesting;
     private static Boolean sDisableUiForTesting;
     private static Boolean sShowUiOnlyAfterReadyForTesting;
-
-    /**
-     * Unique identifiers for each of the possible button variants.
-     *
-     * <p>These values are persisted to logs. Entries should not be renumbered and numeric values
-     * should never be reused.
-     */
-    @IntDef({AdaptiveToolbarButtonVariant.UNKNOWN, AdaptiveToolbarButtonVariant.NONE,
-            AdaptiveToolbarButtonVariant.NEW_TAB, AdaptiveToolbarButtonVariant.SHARE,
-            AdaptiveToolbarButtonVariant.VOICE, AdaptiveToolbarButtonVariant.AUTO,
-            AdaptiveToolbarButtonVariant.PRICE_TRACKING})
-    @Retention(RetentionPolicy.SOURCE)
-    public @interface AdaptiveToolbarButtonVariant {
-        int UNKNOWN = 0;
-        int NONE = 1;
-        int NEW_TAB = 2;
-        int SHARE = 3;
-        int VOICE = 4;
-        int AUTO = 5;
-        int PRICE_TRACKING = 6;
-        int NUM_ENTRIES = 7;
-    }
+    private static HashMap<Integer, Boolean> sActionChipOverridesForTesting;
+    private static HashMap<Integer, Boolean> sAlternativeColorOverridesForTesting;
+    private static Profile sProfileForTesting;
 
     /** @return Whether the button variant is a dynamic action. */
     public static boolean isDynamicAction(@AdaptiveToolbarButtonVariant int variant) {
@@ -97,9 +82,23 @@ public class AdaptiveToolbarFeatures {
             case AdaptiveToolbarButtonVariant.AUTO:
                 return false;
             case AdaptiveToolbarButtonVariant.PRICE_TRACKING:
+            case AdaptiveToolbarButtonVariant.READER_MODE:
                 return true;
         }
         return false;
+    }
+
+    private static String getFeatureNameForButtonVariant(
+            @AdaptiveToolbarButtonVariant int variant) {
+        switch (variant) {
+            case AdaptiveToolbarButtonVariant.PRICE_TRACKING:
+                return ChromeFeatureList.CONTEXTUAL_PAGE_ACTION_PRICE_TRACKING;
+            case AdaptiveToolbarButtonVariant.READER_MODE:
+                return ChromeFeatureList.CONTEXTUAL_PAGE_ACTION_READER_MODE;
+            default:
+                throw new IllegalArgumentException(
+                        "Provided button variant not assigned to feature");
+        }
     }
 
     /**
@@ -109,38 +108,75 @@ public class AdaptiveToolbarFeatures {
      */
     public static boolean isCustomizationEnabled() {
         if (!ChromeFeatureList.isEnabled(
-                    ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_V2)) {
+                ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_V2)) {
             return false;
         }
-        final int minVersion = ChromeFeatureList.getFieldTrialParamByFeatureAsInt(
-                ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_V2,
-                VARIATION_PARAM_MIN_VERSION, 0);
+        final int minVersion =
+                ChromeFeatureList.getFieldTrialParamByFeatureAsInt(
+                        ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_V2,
+                        VARIATION_PARAM_MIN_VERSION,
+                        0);
         return minVersion <= VERSION;
     }
 
     /** @return Whether the contextual page actions should show the action chip version. */
-    public static boolean shouldShowActionChip() {
+    public static boolean shouldShowActionChip(@AdaptiveToolbarButtonVariant int buttonVariant) {
+        if (!isDynamicAction(buttonVariant)) return false;
+        if (sActionChipOverridesForTesting != null
+                && sActionChipOverridesForTesting.containsKey(buttonVariant)) {
+            return Boolean.TRUE.equals(sActionChipOverridesForTesting.get(buttonVariant));
+        }
+
+        if (buttonVariant == AdaptiveToolbarButtonVariant.PRICE_TRACKING
+                || buttonVariant == AdaptiveToolbarButtonVariant.READER_MODE) {
+            // Price tracking and reader mode launched with the action chip variant.
+            return true;
+        }
+
         return ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
-                ChromeFeatureList.CONTEXTUAL_PAGE_ACTION_PRICE_TRACKING, "action_chip", false);
+                getFeatureNameForButtonVariant(buttonVariant), "action_chip", false);
     }
 
     /**
      * @return The amount of time the action chip should remain expanded in milliseconds. Default is
      *         3 seconds.
      */
-    public static int getContextualPageActionDelayMs() {
+    public static int getContextualPageActionDelayMs(
+            @AdaptiveToolbarButtonVariant int buttonVariant) {
+        if (buttonVariant == AdaptiveToolbarButtonVariant.PRICE_TRACKING) {
+            // Price tracking launched with an action chip delay of 6 seconds.
+            return DEFAULT_PRICE_TRACKING_ACTION_CHIP_DELAY_MS;
+        } else if (buttonVariant == AdaptiveToolbarButtonVariant.READER_MODE) {
+            // Reader mode launched with an action chip delay of 3 seconds.
+            return DEFAULT_READER_MODE_ACTION_CHIP_DELAY_MS;
+        }
+
         return ChromeFeatureList.getFieldTrialParamByFeatureAsInt(
-                ChromeFeatureList.CONTEXTUAL_PAGE_ACTION_PRICE_TRACKING, "action_chip_time_ms",
+                getFeatureNameForButtonVariant(buttonVariant),
+                "action_chip_time_ms",
                 DEFAULT_CONTEXTUAL_PAGE_ACTION_CHIP_DELAY_MS);
     }
 
     /**
      * @return Whether the CPA action chip should use a different background color when expanded.
      */
-    public static boolean shouldUseAlternativeActionChipColor() {
+    public static boolean shouldUseAlternativeActionChipColor(
+            @AdaptiveToolbarButtonVariant int buttonVariant) {
+        if (sAlternativeColorOverridesForTesting != null
+                && sAlternativeColorOverridesForTesting.containsKey(buttonVariant)) {
+            return Boolean.TRUE.equals(sAlternativeColorOverridesForTesting.get(buttonVariant));
+        }
+
+        if (buttonVariant == AdaptiveToolbarButtonVariant.PRICE_TRACKING
+                || buttonVariant == AdaptiveToolbarButtonVariant.READER_MODE) {
+            // Price tracking and reader mode launched without using alternative color.
+            return false;
+        }
+
         return ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
-                ChromeFeatureList.CONTEXTUAL_PAGE_ACTION_PRICE_TRACKING,
-                "action_chip_with_different_color", false);
+                getFeatureNameForButtonVariant(buttonVariant),
+                "action_chip_with_different_color",
+                false);
     }
 
     /**
@@ -150,9 +186,50 @@ public class AdaptiveToolbarFeatures {
         // TODO(shaktisahu): These checks must match the ones when creating config. Maybe introduce
         // a something common for android clients.
         return ChromeFeatureList.isEnabled(ChromeFeatureList.CONTEXTUAL_PAGE_ACTIONS)
+                && isAnyContextualPageActionButtonEnabled();
+    }
+
+    public static boolean isAdaptiveToolbarTranslateEnabled() {
+        return ChromeFeatureList.isEnabled(
+                ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_TRANSLATE);
+    }
+
+    public static boolean isAdaptiveToolbarAddToBookmarksEnabled() {
+        return ChromeFeatureList.isEnabled(
+                ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_ADD_TO_BOOKMARKS);
+    }
+
+    private static boolean isAnyContextualPageActionButtonEnabled() {
+        return isPriceTrackingPageActionEnabled() || isReaderModePageActionEnabled();
+    }
+
+    public static boolean isPriceTrackingPageActionEnabled() {
+        return ChromeFeatureList.isEnabled(ChromeFeatureList.CONTEXTUAL_PAGE_ACTIONS)
                 && ChromeFeatureList.isEnabled(
-                        ChromeFeatureList.CONTEXTUAL_PAGE_ACTION_PRICE_TRACKING)
-                && ChromeFeatureList.isEnabled(ChromeFeatureList.SHOPPING_LIST);
+                        ChromeFeatureList.CONTEXTUAL_PAGE_ACTION_PRICE_TRACKING);
+    }
+
+    public static boolean isReaderModePageActionEnabled() {
+        return ChromeFeatureList.isEnabled(ChromeFeatureList.CONTEXTUAL_PAGE_ACTIONS)
+                && ChromeFeatureList.isEnabled(
+                        ChromeFeatureList.CONTEXTUAL_PAGE_ACTION_READER_MODE);
+    }
+
+    public static boolean isReaderModeRateLimited() {
+        return ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
+                ChromeFeatureList.CONTEXTUAL_PAGE_ACTION_READER_MODE,
+                "reader_mode_session_rate_limiting",
+                false);
+    }
+
+    // TODO: This should use a passed in reference to a Profile rather than
+    // getLastUsedRegularProfile, but for starters we use it, just like in
+    // AdaptiveStatePredictor#readFromSegmentationPlatform.
+    public static boolean isAdaptiveToolbarReadAloudEnabled() {
+        return ReadAloudFeatures.isAllowed(
+                sProfileForTesting != null
+                        ? sProfileForTesting
+                        : Profile.getLastUsedRegularProfile());
     }
 
     /**
@@ -168,8 +245,7 @@ public class AdaptiveToolbarFeatures {
      * Returns the default variant to be shown in segmentation experiment when the backend results
      * are unavailable or not configured.
      */
-    @AdaptiveToolbarButtonVariant
-    static int getSegmentationDefault() {
+    static @AdaptiveToolbarButtonVariant int getSegmentationDefault() {
         assert isCustomizationEnabled();
         if (sButtonVariant != null) return sButtonVariant;
         String defaultSegment = getDefaultSegment();
@@ -194,9 +270,10 @@ public class AdaptiveToolbarFeatures {
     static String getDefaultSegment() {
         if (sDefaultSegmentForTesting != null) return sDefaultSegmentForTesting;
 
-        String defaultSegment = ChromeFeatureList.getFieldTrialParamByFeature(
-                ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_V2,
-                VARIATION_PARAM_DEFAULT_SEGMENT);
+        String defaultSegment =
+                ChromeFeatureList.getFieldTrialParamByFeature(
+                        ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_V2,
+                        VARIATION_PARAM_DEFAULT_SEGMENT);
         if (TextUtils.isEmpty(defaultSegment)) return DEFAULT_PARAM_VALUE_DEFAULT_SEGMENT;
         return defaultSegment;
     }
@@ -209,7 +286,8 @@ public class AdaptiveToolbarFeatures {
 
         return ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
                 ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_V2,
-                VARIATION_PARAM_IGNORE_SEGMENTATION_RESULTS, false);
+                VARIATION_PARAM_IGNORE_SEGMENTATION_RESULTS,
+                false);
     }
 
     /**
@@ -221,7 +299,8 @@ public class AdaptiveToolbarFeatures {
 
         return ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
                 ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_V2,
-                VARIATION_PARAM_DISABLE_UI, false);
+                VARIATION_PARAM_DISABLE_UI,
+                false);
     }
 
     /**
@@ -233,30 +312,54 @@ public class AdaptiveToolbarFeatures {
 
         return ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
                 ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_V2,
-                VARIATION_PARAM_SHOW_UI_ONLY_AFTER_READY, true);
+                VARIATION_PARAM_SHOW_UI_ONLY_AFTER_READY,
+                true);
     }
 
-    @VisibleForTesting
     static void setDefaultSegmentForTesting(String defaultSegment) {
         sDefaultSegmentForTesting = defaultSegment;
+        ResettersForTesting.register(() -> sDefaultSegmentForTesting = null);
     }
 
-    @VisibleForTesting
     static void setIgnoreSegmentationResultsForTesting(boolean ignoreSegmentationResults) {
         sIgnoreSegmentationResultsForTesting = ignoreSegmentationResults;
+        ResettersForTesting.register(() -> sIgnoreSegmentationResultsForTesting = null);
     }
 
-    @VisibleForTesting
     static void setDisableUiForTesting(boolean disableUi) {
         sDisableUiForTesting = disableUi;
+        ResettersForTesting.register(() -> sDisableUiForTesting = null);
     }
 
-    @VisibleForTesting
     static void setShowUiOnlyAfterReadyForTesting(boolean showUiOnlyAfterReady) {
         sShowUiOnlyAfterReadyForTesting = showUiOnlyAfterReady;
+        ResettersForTesting.register(() -> sShowUiOnlyAfterReadyForTesting = null);
     }
 
-    @VisibleForTesting
+    public static void setActionChipOverrideForTesting(
+            @AdaptiveToolbarButtonVariant int buttonVariant, Boolean useActionChip) {
+        if (sActionChipOverridesForTesting == null) {
+            sActionChipOverridesForTesting = new HashMap<>();
+        }
+        sActionChipOverridesForTesting.put(buttonVariant, useActionChip);
+        ResettersForTesting.register(() -> sActionChipOverridesForTesting = null);
+    }
+
+    public static void setAlternativeColorOverrideForTesting(
+            @AdaptiveToolbarButtonVariant int buttonVariant, Boolean useAlternativeColor) {
+        if (sAlternativeColorOverridesForTesting == null) {
+            sAlternativeColorOverridesForTesting = new HashMap<>();
+        }
+        sAlternativeColorOverridesForTesting.put(buttonVariant, useAlternativeColor);
+        ResettersForTesting.register(() -> sAlternativeColorOverridesForTesting = null);
+    }
+
+    @VisibleForTesting(otherwise = VisibleForTesting.PACKAGE_PRIVATE)
+    public static void setProfile(Profile profile) {
+        sProfileForTesting = profile;
+        ResettersForTesting.register(() -> sProfileForTesting = null);
+    }
+
     public static void clearParsedParamsForTesting() {
         sButtonVariant = null;
         sDefaultSegmentForTesting = null;
@@ -271,6 +374,7 @@ public class AdaptiveToolbarFeatures {
     public static int getDeviceMinimumWidthForShowingButton() {
         return ChromeFeatureList.getFieldTrialParamByFeatureAsInt(
                 ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_V2,
-                "minimum_width_dp", DEFAULT_MIN_WIDTH_DP);
+                "minimum_width_dp",
+                DEFAULT_MIN_WIDTH_DP);
     }
 }

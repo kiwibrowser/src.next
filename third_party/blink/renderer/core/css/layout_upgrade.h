@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,8 @@
 
 namespace blink {
 
-class Node;
 class Document;
+class Element;
 class HTMLFrameOwnerElement;
 
 // Various APIs require that style information is updated immediately, e.g.
@@ -62,16 +62,16 @@ class ParentLayoutUpgrade : public LayoutUpgrade {
 
 // Upgrades whenever the (inclusive) ancestor chain contains an interleaving
 // root. Suitable when the style of a specific node will be accessed.
-class NodeLayoutUpgrade : public LayoutUpgrade {
+class ElementLayoutUpgrade : public LayoutUpgrade {
   STACK_ALLOCATED();
 
  public:
-  explicit NodeLayoutUpgrade(const Node& node) : node_(node) {}
+  explicit ElementLayoutUpgrade(const Element& element) : element_(element) {}
 
   bool ShouldUpgrade() override;
 
  private:
-  const Node& node_;
+  const Element& element_;
 };
 
 }  // namespace blink

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,7 @@ TEST_F(LayoutImageTest, HitTestUnderTransform) {
     </div>
   )HTML");
 
-  const auto& target = *GetDocument().getElementById("target");
+  const auto& target = *GetDocument().getElementById(AtomicString("target"));
   HitTestLocation location(PhysicalOffset(60, 10));
   HitTestResult result(
       HitTestRequest(HitTestRequest::kReadOnly | HitTestRequest::kActive |

@@ -90,9 +90,6 @@ class CONTENT_EXPORT ChildProcessSecurityPolicyImpl
     // created this object after the process has already been destructed.
     bool is_valid() const;
 
-    // Whether the process is allowed to commit a document from the given URL.
-    bool CanCommitURL(const GURL& url);
-
     // Before servicing a child process's request to upload a file to the web,
     // the browser should call this method to determine whether the process has
     // the capability to upload the requested file.
@@ -102,14 +99,8 @@ class CONTENT_EXPORT ChildProcessSecurityPolicyImpl
     bool CanReadFileSystemFile(const storage::FileSystemURL& url);
 
     // Returns true if the process is permitted to read and modify the data for
-    // the given `origin`. This is currently used to protect data such as
-    // cookies, passwords, and local storage. Does not affect cookies attached
-    // to or set by network requests.
-    //
-    // This can only return false for processes locked to a particular origin,
-    // which can happen for any origin when the --site-per-process flag is used,
-    // or for isolated origins that require a dedicated process (see
-    // AddFutureIsolatedOrigins and AddOriginIsolationStateForBrowsingInstance).
+    // the given `origin`. For more details, see
+    // ChildProcessSecurityPolicy::CanAccessDataForOrigin().
     bool CanAccessDataForOrigin(const url::Origin& origin);
 
     // Returns the original `child_id` used to create the handle.
@@ -183,6 +174,7 @@ class CONTENT_EXPORT ChildProcessSecurityPolicyImpl
   bool CanDeleteFromFileSystem(int child_id,
                                const std::string& filesystem_id) override;
   bool HasWebUIBindings(int child_id) override;
+  void GrantSendMidiMessage(int child_id) override;
   void GrantSendMidiSysExMessage(int child_id) override;
   bool CanAccessDataForOrigin(int child_id, const url::Origin& origin) override;
   void AddFutureIsolatedOrigins(
@@ -195,7 +187,7 @@ class CONTENT_EXPORT ChildProcessSecurityPolicyImpl
       BrowserContext* browser_context = nullptr) override;
   bool IsGloballyIsolatedOriginForTesting(const url::Origin& origin) override;
   std::vector<url::Origin> GetIsolatedOrigins(
-      absl::optional<IsolatedOriginSource> source = absl::nullopt,
+      std::optional<IsolatedOriginSource> source = std::nullopt,
       BrowserContext* browser_context = nullptr) override;
   bool IsIsolatedSiteFromSource(const url::Origin& origin,
                                 IsolatedOriginSource source) override;
@@ -337,11 +329,10 @@ class CONTENT_EXPORT ChildProcessSecurityPolicyImpl
       const storage::FileSystemContext* file_system_context,
       const scoped_refptr<network::ResourceRequestBody>& body);
 
-  // Validate that the renderer process for |site_instance| is allowed to access
-  // data in the POST body specified by |body|.  Has to be called on the UI
-  // thread.
+  // Validate that `process` is allowed to access data in the POST body
+  // specified by |body|.  Has to be called on the UI thread.
   bool CanReadRequestBody(
-      SiteInstance* site_instance,
+      RenderProcessHost* process,
       const scoped_refptr<network::ResourceRequestBody>& body);
 
   // Pseudo schemes are treated differently than other schemes because they
@@ -456,7 +447,10 @@ class CONTENT_EXPORT ChildProcessSecurityPolicyImpl
   void RegisterFileSystemPermissionPolicy(storage::FileSystemType type,
                                           int policy);
 
-  // Returns true if sending system exclusive messages is allowed.
+  // Returns true if sending MIDI messages is allowed.
+  bool CanSendMidiMessage(int child_id);
+
+  // Returns true if sending system exclusive (SysEx) MIDI messages is allowed.
   bool CanSendMidiSysExMessage(int child_id);
 
   // Remove all isolated origins associated with |browser_context| and clear any
@@ -547,6 +541,13 @@ class CONTENT_EXPORT ChildProcessSecurityPolicyImpl
   // Allows tests to query the number of BrowsingInstanceIds associated with a
   // child process.
   size_t BrowsingInstanceIdCountForTesting(int child_id);
+
+  void ClearRegisteredSchemeForTesting(const std::string& scheme);
+
+  // Exposes LookupOriginIsolationState() for tests.
+  OriginAgentClusterIsolationState* LookupOriginIsolationStateForTesting(
+      const BrowsingInstanceId& browsing_instance_id,
+      const url::Origin& origin);
 
  private:
   friend class ChildProcessSecurityPolicyInProcessBrowserTest;
@@ -678,8 +679,8 @@ class CONTENT_EXPORT ChildProcessSecurityPolicyImpl
     // applies.  |browser_context_| may be used on the UI thread, and
     // |resource_context_| may be used on the IO thread.  If these are null,
     // then the isolated origin applies globally to all profiles.
-    raw_ptr<BrowserContext, DanglingUntriaged> browser_context_;
-    raw_ptr<ResourceContext, DanglingUntriaged> resource_context_;
+    raw_ptr<BrowserContext> browser_context_;
+    raw_ptr<ResourceContext> resource_context_;
 
     // True if origins at this or lower level should be treated as distinct
     // isolated origins, effectively isolating all domains below a given domain,

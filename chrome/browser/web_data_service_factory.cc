@@ -4,15 +4,15 @@
 
 #include "chrome/browser/web_data_service_factory.h"
 
-#include "base/bind.h"
 #include "base/files/file_path.h"
-#include "base/memory/singleton.h"
+#include "base/functional/bind.h"
+#include "base/no_destructor.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/sql_init_error_message_ids.h"
-#include "chrome/browser/ui/profile_error_dialog.h"
+#include "chrome/browser/ui/profiles/profile_error_dialog.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/search_engines/keyword_web_data_service.h"
 #include "components/signin/public/webdata/token_web_data.h"
@@ -137,7 +137,8 @@ scoped_refptr<TokenWebData> WebDataServiceFactory::GetTokenWebDataForProfile(
 
 // static
 WebDataServiceFactory* WebDataServiceFactory::GetInstance() {
-  return base::Singleton<WebDataServiceFactory>::get();
+  static base::NoDestructor<WebDataServiceFactory> instance;
+  return instance.get();
 }
 
 // static
@@ -151,9 +152,10 @@ content::BrowserContext* WebDataServiceFactory::GetBrowserContextToUse(
   return chrome::GetBrowserContextRedirectedInIncognito(context);
 }
 
-KeyedService* WebDataServiceFactory::BuildServiceInstanceFor(
+std::unique_ptr<KeyedService>
+WebDataServiceFactory::BuildServiceInstanceForBrowserContext(
     content::BrowserContext* context) const {
-  return BuildWebDataService(context).release();
+  return BuildWebDataService(context);
 }
 
 bool WebDataServiceFactory::ServiceIsNULLWhileTesting() const {

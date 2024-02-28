@@ -19,8 +19,9 @@ namespace {
 
 // Whether to enable a series of optimizations that reduce total CPU
 // utilization.
-constexpr Feature kReduceCpuUtilization{"ReduceCpuUtilization",
-                                        FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kReduceCpuUtilization,
+             "ReduceCpuUtilization2",
+             FEATURE_ENABLED_BY_DEFAULT);
 
 class CpuReductionExperimentSubSampler {
  public:

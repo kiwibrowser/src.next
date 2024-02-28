@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -87,6 +87,15 @@ void VideoFrameSinkBundle::SetFrameSinkProviderForTesting(
   g_frame_sink_provider_override = provider;
 }
 
+void VideoFrameSinkBundle::SetBeginFrameObserver(
+    std::unique_ptr<BeginFrameObserver> observer) {
+  begin_frame_observer_ = std::move(observer);
+  if (begin_frame_observer_) {
+    begin_frame_observer_->OnBeginFrameCompletionEnabled(
+        !sinks_needing_begin_frames_.empty());
+  }
+}
+
 base::WeakPtr<VideoFrameSinkBundle> VideoFrameSinkBundle::AddClient(
     const viz::FrameSinkId& frame_sink_id,
     viz::mojom::blink::CompositorFrameSinkClient* client,
@@ -123,8 +132,28 @@ void VideoFrameSinkBundle::InitializeCompositorFrameSinkType(
 
 void VideoFrameSinkBundle::SetNeedsBeginFrame(uint32_t sink_id,
                                               bool needs_begin_frame) {
+  DVLOG(2) << __func__ << " this " << this << " sink_id " << sink_id
+           << " needs_begin_frame " << needs_begin_frame;
+  bool was_empty = sinks_needing_begin_frames_.empty();
+  if (needs_begin_frame) {
+    sinks_needing_begin_frames_.insert(sink_id);
+  } else {
+    sinks_needing_begin_frames_.erase(sink_id);
+  }
+  if (begin_frame_observer_) {
+    if (was_empty && !sinks_needing_begin_frames_.empty()) {
+      begin_frame_observer_->OnBeginFrameCompletionEnabled(true);
+    } else if (!was_empty && sinks_needing_begin_frames_.empty()) {
+      begin_frame_observer_->OnBeginFrameCompletionEnabled(false);
+    }
+  }
   // These messages are not sent often, so we don't bother batching them.
   bundle_->SetNeedsBeginFrame(sink_id, needs_begin_frame);
+}
+
+void VideoFrameSinkBundle::SetWantsBeginFrameAcks(uint32_t sink_id) {
+  // These messages are not sent often, so we don't bother batching them.
+  bundle_->SetWantsBeginFrameAcks(sink_id);
 }
 
 void VideoFrameSinkBundle::SubmitCompositorFrame(
@@ -224,11 +253,15 @@ void VideoFrameSinkBundle::FlushNotifications(
     auto it = clients_.find(entry->sink_id);
     if (it == clients_.end())
       continue;
-    it->value->OnBeginFrame(std::move(entry->args), std::move(entry->details));
+    it->value->OnBeginFrame(std::move(entry->args), std::move(entry->details),
+                            entry->frame_ack, std::move(entry->resources));
   }
   defer_submissions_ = false;
 
   FlushMessages();
+
+  if (begin_frame_observer_ && begin_frames.size())
+    begin_frame_observer_->OnBeginFrameCompletion();
 }
 
 void VideoFrameSinkBundle::OnBeginFramePausedChanged(uint32_t sink_id,
@@ -261,7 +294,7 @@ void VideoFrameSinkBundle::OnDisconnected() {
 }
 
 void VideoFrameSinkBundle::FlushMessages() {
-  if (submission_queue_.IsEmpty()) {
+  if (submission_queue_.empty()) {
     return;
   }
 

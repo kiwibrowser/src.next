@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,7 @@
 namespace blink {
 
 OffscreenFontSelector::OffscreenFontSelector(WorkerGlobalScope* worker)
-    : CSSFontSelectorBase(worker->GetTaskRunner(TaskType::kInternalDefault)),
-      worker_(worker) {
+    : worker_(worker) {
   DCHECK(worker);
   font_face_cache_ = MakeGarbageCollected<FontFaceCache>();
   FontCache::Get().AddClient(this);
@@ -46,18 +45,16 @@ scoped_refptr<FontData> OffscreenFontSelector::GetFontData(
   const auto& family_name = font_family.FamilyName();
   if (CSSSegmentedFontFace* face =
           font_face_cache_->Get(font_description, family_name)) {
-    ReportWebFontFamily(family_name);
     return face->GetFontData(font_description);
   }
-
-  ReportSystemFontFamily(family_name);
 
   // Try to return the correct font based off our settings, in case we were
   // handed the generic font family name.
   AtomicString settings_family_name =
       FamilyNameFromSettings(font_description, font_family);
-  if (settings_family_name.IsEmpty())
+  if (settings_family_name.empty()) {
     return nullptr;
+  }
 
   ReportFontFamilyLookupByGenericFamily(
       family_name, font_description.GetScript(),

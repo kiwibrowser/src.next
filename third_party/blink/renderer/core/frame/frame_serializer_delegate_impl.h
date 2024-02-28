@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,7 +44,6 @@ class FrameSerializerDelegateImpl final : public FrameSerializer::Delegate {
   bool ShouldSkipResourceWithURL(const KURL&) override;
   Vector<Attribute> GetCustomAttributes(const Element&) override;
   std::pair<Node*, Element*> GetAuxiliaryDOMTree(const Element&) const override;
-  bool ShouldCollectProblemMetric() override;
 
  private:
   bool ShouldIgnoreHiddenElement(const Element&);

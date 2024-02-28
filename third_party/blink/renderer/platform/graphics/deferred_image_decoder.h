@@ -29,15 +29,16 @@
 #include <memory>
 
 #include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/renderer/platform/graphics/image_orientation.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_image.h"
 #include "third_party/blink/renderer/platform/graphics/parkable_image.h"
-#include "third_party/blink/renderer/platform/graphics/rw_buffer.h"
 #include "third_party/blink/renderer/platform/image-decoders/image_decoder.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
+#include "third_party/skia/include/private/SkGainmapInfo.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace blink {
@@ -53,7 +54,7 @@ class PLATFORM_EXPORT DeferredImageDecoder final {
       scoped_refptr<SharedBuffer> data,
       bool data_complete,
       ImageDecoder::AlphaOption,
-      const ColorBehavior&);
+      ColorBehavior);
 
   static std::unique_ptr<DeferredImageDecoder> CreateForTesting(
       std::unique_ptr<ImageDecoder>);
@@ -63,8 +64,11 @@ class PLATFORM_EXPORT DeferredImageDecoder final {
   ~DeferredImageDecoder();
 
   String FilenameExtension() const;
+  const AtomicString& MimeType() const;
 
   sk_sp<PaintImageGenerator> CreateGenerator();
+  bool CreateGainmapGenerator(sk_sp<PaintImageGenerator>& generator,
+                              SkGainmapInfo& info);
 
   scoped_refptr<SharedBuffer> Data();
   bool HasData() const;
@@ -99,8 +103,12 @@ class PLATFORM_EXPORT DeferredImageDecoder final {
   friend class DeferredImageDecoderTest;
   ImageFrameGenerator* FrameGenerator() { return frame_generator_.get(); }
 
+  // Lazily create `frame_generator_`, if it has not been created yet.
   void ActivateLazyDecoding();
   void PrepareLazyDecodedFrames();
+
+  // Lazily create `gainmap_`, if it has not been created yet.
+  void ActivateLazyGainmapDecoding();
 
   void SetDataInternal(scoped_refptr<SharedBuffer> data,
                        bool all_data_received,
@@ -112,6 +120,7 @@ class PLATFORM_EXPORT DeferredImageDecoder final {
   std::unique_ptr<ImageDecoder> metadata_decoder_;
 
   String filename_extension_;
+  AtomicString mime_type_;
   gfx::Size size_;
   int repetition_count_;
   bool has_embedded_color_profile_ = false;
@@ -139,6 +148,28 @@ class PLATFORM_EXPORT DeferredImageDecoder final {
   // the index of the first unreceived/incomplete frame in |frame_data_|.
   wtf_size_t received_frame_count_ = 0;
   scoped_refptr<ImageFrameGenerator> frame_generator_;
+
+  // This is set to false when it is known that this image does not contain a
+  // gainmap.
+  bool might_have_gainmap_ = true;
+
+  // Information about the gainmap image. This is initialized in
+  // ActivateLazyGainmapDecoding.
+  struct Gainmap {
+    // The data for the gainmap. This is a subset of `parkable_image_`.
+    scoped_refptr<SegmentReader> data;
+
+    // The rendering parameters for the gainmap.
+    SkGainmapInfo info;
+
+    // Metadata read from the gainmap image.
+    bool can_decode_yuv = false;
+    cc::ImageHeaderMetadata image_metadata;
+
+    // Frame generator for the gainmap image.
+    scoped_refptr<ImageFrameGenerator> frame_generator;
+  };
+  std::unique_ptr<Gainmap> gainmap_;
 };
 
 }  // namespace blink

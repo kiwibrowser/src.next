@@ -43,34 +43,33 @@ void CSSMediaRule::SetMediaQueries(const MediaQuerySet* media_queries) {
 
 String CSSMediaRule::cssText() const {
   StringBuilder result;
-  result.Append("@media ");
+  result.Append("@media");
   if (MediaQueries()) {
-    result.Append(MediaQueries()->MediaText());
     result.Append(' ');
+    result.Append(MediaQueries()->MediaText());
   }
-  result.Append("{\n");
   AppendCSSTextForItems(result);
-  result.Append('}');
   return result.ReleaseString();
 }
 
 String CSSMediaRule::conditionText() const {
-  if (MediaQueries() && MediaQueries()->HasUnknown())
-    CountUse(WebFeature::kCSSOMMediaConditionUnknown);
   return ConditionTextInternal();
 }
 
 String CSSMediaRule::ConditionTextInternal() const {
-  if (!MediaQueries())
+  if (!MediaQueries()) {
     return String();
+  }
   return MediaQueries()->MediaText();
 }
 
 MediaList* CSSMediaRule::media() {
-  if (!MediaQueries())
+  if (!MediaQueries()) {
     return nullptr;
-  if (!media_cssom_wrapper_)
+  }
+  if (!media_cssom_wrapper_) {
     media_cssom_wrapper_ = MakeGarbageCollected<MediaList>(this);
+  }
   return media_cssom_wrapper_.Get();
 }
 

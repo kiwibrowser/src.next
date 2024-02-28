@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include "base/format_macros.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/core/v8/capture_source_location.h"
-#include "third_party/blink/renderer/bindings/core/v8/scheduled_action.h"
 #include "third_party/blink/renderer/core/core_probe_sink.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event_listener.h"
@@ -239,8 +238,9 @@ void PerformanceMonitor::Did(const probe::CallFunction& probe) {
                                     : String(user_callback->atomic_name);
   String text = String::Format("'%s' handler took %" PRId64 "ms",
                                name.Utf8().c_str(), duration.InMilliseconds());
-  InnerReportGenericViolation(probe.context, handler_type, text, duration,
-                              CaptureSourceLocation(probe.function));
+  InnerReportGenericViolation(
+      probe.context, handler_type, text, duration,
+      CaptureSourceLocation(probe.context->GetIsolate(), probe.function));
 }
 
 void PerformanceMonitor::Will(const probe::V8Compile& probe) {

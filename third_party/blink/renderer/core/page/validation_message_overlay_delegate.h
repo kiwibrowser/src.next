@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -72,6 +72,10 @@ class CORE_EXPORT ValidationMessageOverlayDelegate
   String sub_message_;
   TextDirection message_dir_;
   TextDirection sub_message_dir_;
+
+  // Used by CreatePage() to determine if this has been deleted in the middle of
+  // the function.
+  bool* destroyed_ptr_ = nullptr;
 };
 
 }  // namespace blink

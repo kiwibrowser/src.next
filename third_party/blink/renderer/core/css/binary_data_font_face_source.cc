@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,12 +18,14 @@ BinaryDataFontFaceSource::BinaryDataFontFaceSource(CSSFontFace* css_font_face,
                                                    String& ots_parse_message)
     : custom_platform_data_(
           FontCustomPlatformData::Create(data, ots_parse_message)) {
-  if (!css_font_face || !css_font_face->GetFontFace())
+  if (!css_font_face || !css_font_face->GetFontFace()) {
     return;
+  }
   FontFace* font_face = css_font_face->GetFontFace();
   ExecutionContext* context = font_face->GetExecutionContext();
-  if (!context)
+  if (!context) {
     return;
+  }
   probe::FontsUpdated(context, font_face, String(),
                       custom_platform_data_.get());
 }
@@ -47,8 +49,12 @@ scoped_refptr<SimpleFontData> BinaryDataFontFaceSource::CreateFontData(
               font_description.SyntheticItalicAllowed(),
           font_description.GetFontSelectionRequest(),
           font_selection_capabilities, font_description.FontOpticalSizing(),
-          font_description.TextRendering(), font_description.Orientation(),
-          font_description.VariationSettings(),
+          font_description.TextRendering(),
+          font_description.GetFontVariantAlternates()
+              ? font_description.GetFontVariantAlternates()
+                    ->GetResolvedFontFeatures()
+              : ResolvedFontFeatures(),
+          font_description.Orientation(), font_description.VariationSettings(),
           font_description.GetFontPalette()),
       CustomFontData::Create());
 }

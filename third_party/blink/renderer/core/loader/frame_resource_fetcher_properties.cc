@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,8 +23,9 @@ namespace blink {
 namespace {
 
 // Feature for throttling field trial.
-const base::Feature kResourceLoadThrottlingTrial{
-    "ResourceLoadScheduler", base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kResourceLoadThrottlingTrial,
+             "ResourceLoadScheduler",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Field trial parameters.
 // Note: bg_limit is supported on m61+, but bg_sub_limit is only on m63+.
@@ -44,8 +45,7 @@ FrameResourceFetcherProperties::FrameResourceFetcherProperties(
       document_(document),
       fetch_client_settings_object_(
           MakeGarbageCollected<FetchClientSettingsObjectImpl>(
-              *document.domWindow())),
-      web_bundle_physical_url_(document_loader.WebBundlePhysicalUrl()) {}
+              *document.domWindow())) {}
 
 void FrameResourceFetcherProperties::Trace(Visitor* visitor) const {
   visitor->Trace(document_loader_);
@@ -133,10 +133,6 @@ scheduler::FrameStatus FrameResourceFetcherProperties::GetFrameStatus() const {
   LocalFrame* frame = document_->GetFrame();
   DCHECK(frame);
   return scheduler::GetFrameStatus(frame->GetFrameScheduler());
-}
-
-const KURL& FrameResourceFetcherProperties::WebBundlePhysicalUrl() const {
-  return web_bundle_physical_url_;
 }
 
 int FrameResourceFetcherProperties::GetOutstandingThrottledLimit() const {

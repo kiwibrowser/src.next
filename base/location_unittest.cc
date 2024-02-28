@@ -4,7 +4,6 @@
 
 #include "base/location.h"
 
-#include "base/debug/debugging_buildflags.h"
 #include "base/trace_event/base_tracing.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -30,23 +29,15 @@ TEST(LocationTest, CurrentYieldsCorrectValue) {
   [[maybe_unused]] int previous_line = __LINE__;
   Location here = WhereAmI();
   EXPECT_NE(here.program_counter(), WhereAmI().program_counter());
-#if SUPPORTS_LOCATION_BUILTINS
   EXPECT_THAT(here.file_name(), ::testing::EndsWith("location_unittest.cc"));
-#if BUILDFLAG(ENABLE_LOCATION_SOURCE)
   EXPECT_EQ(here.line_number(), previous_line + 1);
   EXPECT_STREQ("TestBody", here.function_name());
-#endif
-#elif defined(OFFICIAL_BUILD)
-#error Location builtins must be supported in official builds.
-#elif BUILDFLAG(FROM_HERE_USES_LOCATION_BUILTINS)
-#error FROM_HERE requires location builtins to be supported.
-#endif
 }
 
 #if BUILDFLAG(ENABLE_BASE_TRACING)
 TEST(LocationTest, TracingSupport) {
-  EXPECT_EQ(perfetto::TracedValueToString(
-                Location("func", "file", 42, WhereAmI().program_counter())),
+  EXPECT_EQ(perfetto::TracedValueToString(Location::CreateForTesting(
+                "func", "file", 42, WhereAmI().program_counter())),
             "{function_name:func,file_name:file,line_number:42}");
 }
 #endif  // BUILDFLAG(ENABLE_BASE_TRACING)

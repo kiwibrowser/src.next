@@ -8,7 +8,7 @@
 
 #include <utility>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/observer_list.h"
 #include "components/value_store/value_store_factory.h"
@@ -99,7 +99,8 @@ StateStore::StateStore(
   if (deferred_load) {
     // Call `Init()` asynchronously with a low priority to not delay startup.
     content::GetUIThreadTaskRunner({base::TaskPriority::USER_VISIBLE})
-        ->PostTask(FROM_HERE, base::BindOnce(&StateStore::Init, AsWeakPtr()));
+        ->PostTask(FROM_HERE, base::BindOnce(&StateStore::Init,
+                                             weak_ptr_factory_.GetWeakPtr()));
   } else {
     Init();
   }
@@ -152,7 +153,7 @@ void StateStore::FlushForTesting(base::OnceClosure flushed_callback) {
   GetExtensionValue("fake_id", "fake_key",
                     base::BindOnce(
                         [](base::OnceClosure flushed_callback,
-                           absl::optional<base::Value> ignored) {
+                           std::optional<base::Value> ignored) {
                           std::move(flushed_callback).Run();
                         },
                         std::move(flushed_callback)));

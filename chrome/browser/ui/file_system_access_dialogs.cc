@@ -19,7 +19,6 @@ void ShowFileSystemAccessPermissionDialog(
 
 void ShowFileSystemAccessRestrictedDirectoryDialog(
     const url::Origin& origin,
-    const base::FilePath& path,
     content::FileSystemAccessPermissionContext::HandleType handle_type,
     base::OnceCallback<
         void(content::FileSystemAccessPermissionContext::SensitiveEntryResult)>
@@ -42,6 +41,15 @@ void ShowFileSystemAccessDangerousFileDialog(
   // if the dialog was instantly dismissed.
   std::move(callback).Run(
       content::FileSystemAccessPermissionContext::SensitiveEntryResult::kAbort);
+}
+
+void ShowFileSystemAccessRestorePermissionDialog(
+    const FileSystemAccessPermissionRequestManager::RequestData& request,
+    base::OnceCallback<void(permissions::PermissionAction result)> callback,
+    content::WebContents* web_contents) {
+  // There's no dialog version of this available outside views, run callback as
+  // if the dialog was instantly cancelled.
+  std::move(callback).Run(permissions::PermissionAction::DISMISSED);
 }
 
 #endif  // !defined(TOOLKIT_VIEWS)

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,18 +21,6 @@
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 
 namespace blink {
-
-namespace {
-
-class UserAgentOverrideWebFrameClient
-    : public frame_test_helpers::TestWebFrameClient {
- public:
-  UserAgentOverrideWebFrameClient() = default;
-
-  WebString UserAgentOverride() override { return WebString("foo"); }
-};
-
-}  // namespace
 
 class FrameLoaderSimTest : public SimTest {
  public:
@@ -164,41 +152,16 @@ TEST_F(FrameLoaderTest, PolicyContainerIsStoredOnCommitNavigation) {
   local_frame->Loader().CommitNavigation(std::move(params), nullptr);
 
   EXPECT_EQ(*mojom::blink::PolicyContainerPolicies::New(
-                network::mojom::CrossOriginEmbedderPolicyValue::kNone,
+                network::CrossOriginEmbedderPolicy(
+                    network::mojom::CrossOriginEmbedderPolicyValue::kNone),
                 network::mojom::ReferrerPolicy::kAlways,
                 Vector<network::mojom::blink::ContentSecurityPolicyPtr>(),
-                /*anonymous=*/false, network::mojom::WebSandboxFlags::kNone),
+                /*anonymous=*/false, network::mojom::WebSandboxFlags::kNone,
+                network::mojom::blink::IPAddressSpace::kUnknown,
+                /*can_navigate_top_without_user_gesture=*/true,
+                /*allow_cross_origin_isolation_under_initial_empty_document=*/
+                false),
             local_frame->DomWindow()->GetPolicyContainer()->GetPolicies());
-}
-
-class UserAgentOverrideFrameLoaderTest : public FrameLoaderTest {
- public:
-  void SetUp() override {
-    FrameLoaderTest::SetUp();
-    scoped_feature_list_.InitAndEnableFeature(
-        blink::features::kUserAgentOverrideExperiment);
-  }
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-};
-
-TEST_F(UserAgentOverrideFrameLoaderTest, UserAgentOverrideIframeNavigation) {
-  frame_test_helpers::WebViewHelper web_view_helper;
-  UserAgentOverrideWebFrameClient client;
-  WebViewImpl* web_view = web_view_helper.Initialize(&client);
-
-  frame_test_helpers::LoadHTMLString(
-      web_view->MainFrameImpl(),
-      R"HTML(
-      <!DOCTYPE html>
-      <iframe src="foo.html"></iframe>
-  )HTML",
-      url_test_helpers::ToKURL("https://example.com/"));
-
-  // Manually reset ro avoid UAF
-  web_view_helper.Reset();
-  // Test passes if there's no crash.
 }
 
 }  // namespace blink

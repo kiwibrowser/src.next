@@ -7,7 +7,6 @@
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "cc/test/pixel_comparator.h"
-#include "chrome/browser/focus_ring_browsertest_mac.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -36,21 +35,32 @@
 // Mac has subtle rendering differences between different versions of MacOS, so
 // we account for them with these fuzzy pixel comparators. These two comparators
 // are used in different tests in order to keep the matching somewhat strict.
-const cc::FuzzyPixelComparator mac_strict_comparator(
-    /* discard_alpha */ true,
-    /* error_pixels_percentage_limit */ 3.f,
-    /* small_error_pixels_percentage_limit */ 0.f,
-    /* avg_abs_error_limit */ 20.f,
-    /* max_abs_error_limit */ 49.f,
-    /* small_error_threshold */ 0);
-const cc::FuzzyPixelComparator mac_loose_comparator(
-    /* discard_alpha */ true,
-    /* error_pixels_percentage_limit */ 8.7f,
-    /* small_error_pixels_percentage_limit */ 0.f,
-    /* avg_abs_error_limit */ 20.f,
-    /* max_abs_error_limit */ 43.f,
-    /* small_error_threshold */ 0);
+const auto mac_strict_comparator = cc::FuzzyPixelComparator()
+                                       .DiscardAlpha()
+                                       .SetErrorPixelsPercentageLimit(3.f)
+                                       .SetAvgAbsErrorLimit(20.f)
+                                       .SetAbsErrorLimit(49);
+const auto mac_loose_comparator = cc::FuzzyPixelComparator()
+                                      .DiscardAlpha()
+                                      .SetErrorPixelsPercentageLimit(8.7f)
+                                      .SetAvgAbsErrorLimit(20.f)
+                                      .SetAbsErrorLimit(43);
 #endif
+
+// The ChromeRefresh2023 trybot has very slightly different rendering output
+// than normal linux bots. It is currently unclear if this is due to the flag or
+// some configuration on the bot. In addition, this bot does not get run on CQ+1
+// so having a separate golden file to rebaseline is not good enough. This fuzzy
+// comparator accounts for this and still make sure that the output is sane.
+// TODO(http://crbug.com/1443584): Remove this fuzzy matcher when
+// ChromeRefresh2023 is enabled by default.
+const auto cr23_comparator = cc::FuzzyPixelComparator()
+                                 .DiscardAlpha()
+                                 .SetErrorPixelsPercentageLimit(3.f)
+                                 .SetAvgAbsErrorLimit(20.f)
+                                 .SetAbsErrorLimit(49);
+
+const auto exact_comparator = cc::AlphaDiscardingExactPixelComparator();
 
 class FocusRingBrowserTest : public InProcessBrowserTest {
  public:
@@ -119,15 +129,18 @@ class FocusRingBrowserTest : public InProcessBrowserTest {
 #endif
 IN_PROC_BROWSER_TEST_F(FocusRingBrowserTest, MAYBE_Checkbox) {
 #if BUILDFLAG(IS_MAC)
-  cc::FuzzyPixelComparator comparator = mac_strict_comparator;
+  auto* comparator = &mac_strict_comparator;
 #else
-  cc::ExactPixelComparator comparator(/*discard_alpha=*/true);
+  const cc::PixelComparator* comparator = &exact_comparator;
+  if (features::IsChromeRefresh2023()) {
+    comparator = &cr23_comparator;
+  }
 #endif
   RunTest("focus_ring_browsertest_checkbox",
           "<input type=checkbox autofocus>"
           "<input type=checkbox>",
           /* screenshot_width */ 60,
-          /* screenshot_height */ 40, comparator);
+          /* screenshot_height */ 40, *comparator);
 }
 
 // TODO(crbug.com/1222757): Flaky on Mac.
@@ -138,15 +151,18 @@ IN_PROC_BROWSER_TEST_F(FocusRingBrowserTest, MAYBE_Checkbox) {
 #endif
 IN_PROC_BROWSER_TEST_F(FocusRingBrowserTest, MAYBE_Radio) {
 #if BUILDFLAG(IS_MAC)
-  cc::FuzzyPixelComparator comparator = mac_loose_comparator;
+  auto* comparator = &mac_loose_comparator;
 #else
-  cc::ExactPixelComparator comparator(/*discard_alpha=*/true);
+  const cc::PixelComparator* comparator = &exact_comparator;
+  if (features::IsChromeRefresh2023()) {
+    comparator = &cr23_comparator;
+  }
 #endif
   RunTest("focus_ring_browsertest_radio",
           "<input type=radio autofocus>"
           "<input type=radio>",
           /* screenshot_width */ 60,
-          /* screenshot_height */ 40, comparator);
+          /* screenshot_height */ 40, *comparator);
 }
 
 // TODO(crbug.com/1222757): Flaky on Mac.
@@ -157,9 +173,12 @@ IN_PROC_BROWSER_TEST_F(FocusRingBrowserTest, MAYBE_Radio) {
 #endif
 IN_PROC_BROWSER_TEST_F(FocusRingBrowserTest, MAYBE_Button) {
 #if BUILDFLAG(IS_MAC)
-  cc::FuzzyPixelComparator comparator = mac_strict_comparator;
+  auto* comparator = &mac_strict_comparator;
 #else
-  cc::ExactPixelComparator comparator(/*discard_alpha=*/true);
+  const cc::PixelComparator* comparator = &exact_comparator;
+  if (features::IsChromeRefresh2023()) {
+    comparator = &cr23_comparator;
+  }
 #endif
   RunTest("focus_ring_browsertest_button",
           "<button autofocus style=\"width:40px;height:20px;\"></button>"
@@ -167,7 +186,7 @@ IN_PROC_BROWSER_TEST_F(FocusRingBrowserTest, MAYBE_Button) {
           "<br>"
           "<button style=\"width:40px;height:20px;\"></button>",
           /* screenshot_width */ 80,
-          /* screenshot_height */ 80, comparator);
+          /* screenshot_height */ 80, *comparator);
 }
 
 // TODO(crbug.com/1222757): Flaky on Mac.
@@ -178,9 +197,12 @@ IN_PROC_BROWSER_TEST_F(FocusRingBrowserTest, MAYBE_Button) {
 #endif
 IN_PROC_BROWSER_TEST_F(FocusRingBrowserTest, MAYBE_Anchor) {
 #if BUILDFLAG(IS_MAC)
-  cc::FuzzyPixelComparator comparator = mac_strict_comparator;
+  auto* comparator = &mac_strict_comparator;
 #else
-  cc::ExactPixelComparator comparator(/*discard_alpha=*/true);
+  const cc::PixelComparator* comparator = &exact_comparator;
+  if (features::IsChromeRefresh2023()) {
+    comparator = &cr23_comparator;
+  }
 #endif
   RunTest("focus_ring_browsertest_anchor",
           "<div style='text-align: center; width: 80px;'>"
@@ -191,7 +213,7 @@ IN_PROC_BROWSER_TEST_F(FocusRingBrowserTest, MAYBE_Anchor) {
           "  <a href='foo'>---- ---<br>---</a>"
           "</div>",
           /* screenshot_width */ 90,
-          /* screenshot_height */ 130, comparator);
+          /* screenshot_height */ 130, *comparator);
 }
 
 // TODO(crbug.com/1222757): Flaky on Mac.
@@ -202,11 +224,12 @@ IN_PROC_BROWSER_TEST_F(FocusRingBrowserTest, MAYBE_Anchor) {
 #endif
 IN_PROC_BROWSER_TEST_F(FocusRingBrowserTest, MAYBE_DarkModeButton) {
 #if BUILDFLAG(IS_MAC)
-  if (!MacOSVersionSupportsDarkMode())
-    return;
-  cc::FuzzyPixelComparator comparator = mac_strict_comparator;
+  auto* comparator = &mac_strict_comparator;
 #else
-  cc::ExactPixelComparator comparator(/*discard_alpha=*/true);
+  const cc::PixelComparator* comparator = &exact_comparator;
+  if (features::IsChromeRefresh2023()) {
+    comparator = &cr23_comparator;
+  }
 #endif
   RunTest("focus_ring_browsertest_dark_mode_button",
           "<meta name=\"color-scheme\" content=\"dark\">"
@@ -215,5 +238,5 @@ IN_PROC_BROWSER_TEST_F(FocusRingBrowserTest, MAYBE_DarkModeButton) {
           "<br>"
           "<button style=\"width:40px;height:20px;\"></button>",
           /* screenshot_width */ 80,
-          /* screenshot_height */ 80, comparator);
+          /* screenshot_height */ 80, *comparator);
 }

@@ -4,24 +4,34 @@
 
 #include <tuple>
 
+#include "base/base64.h"
 #include "base/files/file_path.h"
+#include "base/memory/raw_ref.h"
+#include "base/notreached.h"
 #include "base/path_service.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_restrictions.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_paths.h"
-#include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test.h"
+#include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
+#include "content/public/test/content_browser_test_content_browser_client.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/content_mock_cert_verifier.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/shell/browser/shell.h"
+#include "net/base/features.h"
 #include "net/base/filename_util.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "net/test/embedded_test_server/http_request.h"
+#include "net/test/embedded_test_server/http_response.h"
+#include "net/test/spawned_test_server/spawned_test_server.h"
+#include "net/test/test_data_directory.h"
 
 namespace content {
 
@@ -56,7 +66,7 @@ IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyBrowserTest,
       "following Content Security Policy directive: \"script-src "
       "'unsafe-inline'\".\n");
   EXPECT_TRUE(NavigateToURL(shell(), url));
-  console_observer.Wait();
+  ASSERT_TRUE(console_observer.Wait());
 }
 
 // Test that creating a duplicate Trusted Types policy will yield a console
@@ -83,7 +93,7 @@ IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyBrowserTest,
   WebContentsConsoleObserver console_observer(web_contents());
   console_observer.SetPattern("*already exists*");
   EXPECT_TRUE(NavigateToURL(shell(), url));
-  console_observer.Wait();
+  ASSERT_TRUE(console_observer.Wait());
 }
 
 // Test that creating a Trusted Types policy with a disallowed name will yield
@@ -102,7 +112,7 @@ IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyBrowserTest,
   WebContentsConsoleObserver console_observer(web_contents());
   console_observer.SetPattern("*violates*the following*directive*");
   EXPECT_TRUE(NavigateToURL(shell(), url));
-  console_observer.Wait();
+  ASSERT_TRUE(console_observer.Wait());
 }
 
 IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyBrowserTest,
@@ -122,7 +132,7 @@ IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyBrowserTest,
       "matches `self`'s scheme. The scheme 'mailto:' must be added "
       "explicitly.\n");
   EXPECT_TRUE(NavigateToURL(shell(), url));
-  console_observer.Wait();
+  ASSERT_TRUE(console_observer.Wait());
 }
 
 IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyBrowserTest,
@@ -144,7 +154,7 @@ IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyBrowserTest,
       "scheme matches `self`'s scheme. The scheme 'mailto:' must be added "
       "explicitly.\n");
   EXPECT_TRUE(NavigateToURL(shell(), url));
-  console_observer.Wait();
+  ASSERT_TRUE(console_observer.Wait());
 }
 
 namespace {
@@ -166,43 +176,55 @@ IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyBrowserTest, FileURLs) {
   struct {
     const char* csp;
     std::string element_name;
-    const GURL::Replacements& document_host;
-    const GURL::Replacements& element_host;
+    const raw_ref<const GURL::Replacements> document_host;
+    const raw_ref<const GURL::Replacements> element_host;
     bool expect_allowed;
   } test_cases[] = {
-      {"img-src 'none'", "img", none, none, false},
-      {"img-src file:", "img", none, none, true},
-      {"img-src 'self'", "img", none, none, true},
-      {"img-src 'none'", "img", none, add_localhost, false},
-      {"img-src file:", "img", none, add_localhost, true},
-      {"img-src 'self'", "img", none, add_localhost, true},
-      {"img-src 'none'", "img", add_localhost, none, false},
-      {"img-src file:", "img", add_localhost, none, true},
-      {"img-src 'self'", "img", add_localhost, none, true},
-      {"img-src 'none'", "img", add_localhost, add_localhost, false},
-      {"img-src file:", "img", add_localhost, add_localhost, true},
-      {"img-src 'self'", "img", add_localhost, add_localhost, true},
-      {"frame-src 'none'", "iframe", none, none, false},
-      {"frame-src file:", "iframe", none, none, true},
-      {"frame-src 'self'", "iframe", none, none, true},
-      {"frame-src 'none'", "iframe", none, add_localhost, false},
-      {"frame-src file:", "iframe", none, add_localhost, true},
+      {"img-src 'none'", "img", raw_ref(none), raw_ref(none), false},
+      {"img-src file:", "img", raw_ref(none), raw_ref(none), true},
+      {"img-src 'self'", "img", raw_ref(none), raw_ref(none), true},
+      {"img-src 'none'", "img", raw_ref(none), raw_ref(add_localhost), false},
+      {"img-src file:", "img", raw_ref(none), raw_ref(add_localhost), true},
+      {"img-src 'self'", "img", raw_ref(none), raw_ref(add_localhost), true},
+      {"img-src 'none'", "img", raw_ref(add_localhost), raw_ref(none), false},
+      {"img-src file:", "img", raw_ref(add_localhost), raw_ref(none), true},
+      {"img-src 'self'", "img", raw_ref(add_localhost), raw_ref(none), true},
+      {"img-src 'none'", "img", raw_ref(add_localhost), raw_ref(add_localhost),
+       false},
+      {"img-src file:", "img", raw_ref(add_localhost), raw_ref(add_localhost),
+       true},
+      {"img-src 'self'", "img", raw_ref(add_localhost), raw_ref(add_localhost),
+       true},
+      {"frame-src 'none'", "iframe", raw_ref(none), raw_ref(none), false},
+      {"frame-src file:", "iframe", raw_ref(none), raw_ref(none), true},
+      {"frame-src 'self'", "iframe", raw_ref(none), raw_ref(none), true},
+      {"frame-src 'none'", "iframe", raw_ref(none), raw_ref(add_localhost),
+       false},
+      {"frame-src file:", "iframe", raw_ref(none), raw_ref(add_localhost),
+       true},
       // TODO(antoniosartori): The following one behaves differently than
       // img-src.
-      {"frame-src 'self'", "iframe", none, add_localhost, true},
-      {"frame-src 'none'", "iframe", add_localhost, none, false},
-      {"frame-src file:", "iframe", add_localhost, none, true},
+      {"frame-src 'self'", "iframe", raw_ref(none), raw_ref(add_localhost),
+       true},
+      {"frame-src 'none'", "iframe", raw_ref(add_localhost), raw_ref(none),
+       false},
+      {"frame-src file:", "iframe", raw_ref(add_localhost), raw_ref(none),
+       true},
       // TODO(antoniosartori): The following one behaves differently than
       // img-src.
-      {"frame-src 'self'", "iframe", add_localhost, none, true},
-      {"frame-src 'none'", "iframe", add_localhost, add_localhost, false},
-      {"frame-src file:", "iframe", add_localhost, add_localhost, true},
-      {"frame-src 'self'", "iframe", add_localhost, add_localhost, true},
+      {"frame-src 'self'", "iframe", raw_ref(add_localhost), raw_ref(none),
+       true},
+      {"frame-src 'none'", "iframe", raw_ref(add_localhost),
+       raw_ref(add_localhost), false},
+      {"frame-src file:", "iframe", raw_ref(add_localhost),
+       raw_ref(add_localhost), true},
+      {"frame-src 'self'", "iframe", raw_ref(add_localhost),
+       raw_ref(add_localhost), true},
   };
 
   for (const auto& test_case : test_cases) {
     GURL document_url = net::FilePathToFileURL(TestFilePath("hello.html"))
-                            .ReplaceComponents(test_case.document_host);
+                            .ReplaceComponents(*test_case.document_host);
 
     // On windows, if `document_url` contains the host part "localhost", the
     // actual committed URL does not. So we omit EXPECT_TRUE and ignore the
@@ -211,7 +233,7 @@ IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyBrowserTest, FileURLs) {
 
     GURL element_url = net::FilePathToFileURL(TestFilePath(
         test_case.element_name == "iframe" ? "empty.html" : "blank.jpg"));
-    element_url = element_url.ReplaceComponents(test_case.element_host);
+    element_url = element_url.ReplaceComponents(*test_case.element_host);
     TestNavigationObserver load_observer(shell()->web_contents());
 
     EXPECT_TRUE(
@@ -284,24 +306,131 @@ IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyBrowserTest, CSPAttributeTooLong) {
   WebContentsConsoleObserver console_observer(web_contents());
   console_observer.SetPattern("'csp' attribute too long*");
   EXPECT_TRUE(NavigateToURL(shell(), url));
-  console_observer.Wait();
+  ASSERT_TRUE(console_observer.Wait());
 
   EXPECT_EQ(current_frame_host()->child_count(), 1u);
   EXPECT_FALSE(current_frame_host()->child_at(0)->csp_attribute());
 }
 
-class IsolatedAppContentBrowserClient : public ContentBrowserClient {
- public:
-  bool ShouldUrlUseApplicationIsolationLevel(BrowserContext* browser_context,
-                                             const GURL& url) override {
-    return true;
+namespace {
+
+constexpr char kWebmPath[] = "/csp_video.webm";
+
+std::unique_ptr<net::test_server::HttpResponse> ServeCSPMedia(
+    const net::test_server::HttpRequest& request) {
+  if (request.relative_url != kWebmPath) {
+    return nullptr;
   }
+  auto cookie_header = request.headers.find("cookie");
+  auto response = std::make_unique<net::test_server::BasicHttpResponse>();
+  if (cookie_header == request.headers.end()) {
+    response->set_code(net::HTTP_UNAUTHORIZED);
+    return std::move(response);
+  }
+  response->set_code(net::HTTP_OK);
+  const std::string kOneFrameOnePixelWebm =
+      "GkXfo0AgQoaBAUL3gQFC8oEEQvOBCEKCQAR3ZWJtQoeBAkKFgQIYU4BnQN8VSalmQCgq17FA"
+      "Aw9CQE2AQAZ3aGFtbXlXQUAGd2hhbW15RIlACECPQAAAAAAAFlSua0AxrkAu14EBY8WBAZyB"
+      "ACK1nEADdW5khkAFVl9WUDglhohAA1ZQOIOBAeBABrCBlrqBlh9DtnVAdOeBAKNAboEAAIDy"
+      "CACdASqWAJYAPk0ci0WD+IBAAJiWlu4XdQTSq2H4MW0+sMO0gz8HMRe+"
+      "0jRo0aNGjRo0aNGjRo0aNGjRo0aNGjRo0aNGjRo0aNGjRo0VAAD+/729RWRzH4mOZ9/"
+      "O8Dl319afX4gsgAAA";
+  std::string content;
+  base::Base64Decode(kOneFrameOnePixelWebm, &content);
+  response->AddCustomHeader("Content-Security-Policy", "sandbox allow-scripts");
+  response->AddCustomHeader("Content-Type", "video/webm");
+  response->AddCustomHeader("Access-Control-Allow-Origin", "null");
+  response->AddCustomHeader("Access-Control-Allow-Credentials", "true");
+  response->set_content(content);
+  return std::move(response);
+}
+
+}  // namespace
+
+class ThirdPartyCookiesContentSecurityPolicyBrowserTest
+    : public ContentSecurityPolicyBrowserTest {
+ public:
+  ThirdPartyCookiesContentSecurityPolicyBrowserTest()
+      : https_server_(net::EmbeddedTestServer::TYPE_HTTPS) {
+    feature_list_.InitAndEnableFeature(
+        net::features::kForceThirdPartyCookieBlocking);
+  }
+
+  void SetUpOnMainThread() override {
+    ContentSecurityPolicyBrowserTest::SetUpOnMainThread();
+    host_resolver()->AddRule("*", "127.0.0.1");
+    mock_cert_verifier_.mock_cert_verifier()->set_default_result(net::OK);
+    https_server()->ServeFilesFromSourceDirectory(GetTestDataFilePath());
+    https_server()->RegisterRequestHandler(base::BindRepeating(&ServeCSPMedia));
+    ASSERT_TRUE(https_server()->Start());
+  }
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    ContentSecurityPolicyBrowserTest::SetUpCommandLine(command_line);
+    mock_cert_verifier_.SetUpCommandLine(command_line);
+  }
+
+  void SetUpInProcessBrowserTestFixture() override {
+    ContentSecurityPolicyBrowserTest::SetUpInProcessBrowserTestFixture();
+    mock_cert_verifier_.SetUpInProcessBrowserTestFixture();
+  }
+
+  void TearDownInProcessBrowserTestFixture() override {
+    mock_cert_verifier_.TearDownInProcessBrowserTestFixture();
+    ContentSecurityPolicyBrowserTest::TearDownInProcessBrowserTestFixture();
+  }
+
+ protected:
+  net::EmbeddedTestServer* https_server() { return &https_server_; }
+
+ private:
+  net::EmbeddedTestServer https_server_;
+  ContentMockCertVerifier mock_cert_verifier_;
+  base::test::ScopedFeatureList feature_list_;
 };
+
+// Test that CSP does not break rendering access-controlled media due to
+// third-party cookie blocking.
+IN_PROC_BROWSER_TEST_F(ThirdPartyCookiesContentSecurityPolicyBrowserTest,
+                       CSPMediaThirdPartyCookieBlocking) {
+  ASSERT_TRUE(content::SetCookie(web_contents()->GetBrowserContext(),
+                                 https_server()->GetURL("/"),
+                                 "foo=bar; SameSite=None; Secure;"));
+  ASSERT_TRUE(NavigateToURL(shell(), https_server()->GetURL(kWebmPath)));
+  EXPECT_TRUE(EvalJs(shell(),
+                     "fetch('/csp_video.webm', {credentials: "
+                     "'include'}).then(res => res.status == 200)")
+                  .ExtractBool());
+}
+
+IN_PROC_BROWSER_TEST_F(ThirdPartyCookiesContentSecurityPolicyBrowserTest,
+                       CSPMediaThirdPartyCookieBlocking_IFrame) {
+  ASSERT_TRUE(content::SetCookie(web_contents()->GetBrowserContext(),
+                                 https_server()->GetURL("/"),
+                                 "foo=bar; SameSite=None; Secure;"));
+  std::string page = "data:text/html,<iframe src=\"" +
+                     https_server()->GetURL(kWebmPath).spec() + "\"></iframe>";
+  ASSERT_TRUE(NavigateToURL(shell(), GURL(page)));
+  content::RenderFrameHost* nested_iframe = content::ChildFrameAt(shell(), 0);
+  EXPECT_FALSE(EvalJs(nested_iframe,
+                      "fetch('/csp_video.webm', {credentials: "
+                      "'include'}).then(res => res.status == 200)")
+                   .ExtractBool());
+}
 
 namespace {
 const char kAppHost[] = "app.com";
 const char kNonAppHost[] = "other.com";
 }  // namespace
+
+class IsolatedWebAppContentBrowserClient
+    : public ContentBrowserTestContentBrowserClient {
+ public:
+  bool ShouldUrlUseApplicationIsolationLevel(BrowserContext* browser_context,
+                                             const GURL& url) override {
+    return url.host() == kAppHost;
+  }
+};
 
 class ContentSecurityPolicyIsolatedAppBrowserTest
     : public ContentSecurityPolicyBrowserTest {
@@ -312,28 +441,31 @@ class ContentSecurityPolicyIsolatedAppBrowserTest
   void SetUpCommandLine(base::CommandLine* command_line) override {
     ContentSecurityPolicyBrowserTest::SetUpCommandLine(command_line);
     mock_cert_verifier_.SetUpCommandLine(command_line);
-    command_line->AppendSwitchASCII(switches::kIsolatedAppOrigins,
-                                    std::string("https://") + kAppHost);
   }
 
   void SetUpInProcessBrowserTestFixture() override {
     ContentSecurityPolicyBrowserTest::SetUpInProcessBrowserTestFixture();
     mock_cert_verifier_.SetUpInProcessBrowserTestFixture();
-    old_client_ = SetBrowserClientForTesting(&client_);
   }
 
   void TearDownInProcessBrowserTestFixture() override {
-    SetBrowserClientForTesting(old_client_);
     mock_cert_verifier_.TearDownInProcessBrowserTestFixture();
     ContentSecurityPolicyBrowserTest::TearDownInProcessBrowserTestFixture();
   }
 
   void SetUpOnMainThread() override {
     ContentSecurityPolicyBrowserTest::SetUpOnMainThread();
+    client_ = std::make_unique<IsolatedWebAppContentBrowserClient>();
+
     host_resolver()->AddRule("*", "127.0.0.1");
     mock_cert_verifier_.mock_cert_verifier()->set_default_result(net::OK);
     https_server()->ServeFilesFromSourceDirectory(GetTestDataFilePath());
     ASSERT_TRUE(https_server()->Start());
+  }
+
+  void TearDownOnMainThread() override {
+    client_.reset();
+    ContentSecurityPolicyBrowserTest::TearDownOnMainThread();
   }
 
  protected:
@@ -343,8 +475,7 @@ class ContentSecurityPolicyIsolatedAppBrowserTest
   net::EmbeddedTestServer https_server_;
   ContentMockCertVerifier mock_cert_verifier_;
 
-  IsolatedAppContentBrowserClient client_;
-  raw_ptr<ContentBrowserClient> old_client_;
+  std::unique_ptr<IsolatedWebAppContentBrowserClient> client_;
 };
 
 IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyIsolatedAppBrowserTest, Base) {
@@ -376,13 +507,17 @@ IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyIsolatedAppBrowserTest, Src) {
     std::string path;
     std::string expectation;
   } test_cases[] = {
-      // Only same-origin content can be loaded by default.
+      // Cross-origin HTTPS images and media are allowed (but need a
+      // Cross-Origin-Resource-Policy header, and will error otherwise)
       {"img", kHttps, kAppHost, "/single_face.jpg", "allowed"},
-      {"img", kHttps, kNonAppHost, "/single_face.jpg", "violation"},
+      {"img", kHttps, kNonAppHost, "/single_face.jpg", "error"},
+      {"img", kHttps, kNonAppHost, "/single_face_corp.jpg", "allowed"},
       {"audio", kHttps, kAppHost, "/media/bear.flac", "allowed"},
-      {"audio", kHttps, kNonAppHost, "/media/bear.flac", "violation"},
-      {"video", kHttps, kAppHost, "/media/bear.ogv", "allowed"},
-      {"video", kHttps, kNonAppHost, "/media/bear.obv", "violation"},
+      {"audio", kHttps, kNonAppHost, "/media/bear.flac", "error"},
+      {"audio", kHttps, kNonAppHost, "/media/bear_corp.flac", "allowed"},
+      {"video", kHttps, kAppHost, "/media/bear.webm", "allowed"},
+      {"video", kHttps, kNonAppHost, "/media/bear.webm", "error"},
+      {"video", kHttps, kNonAppHost, "/media/bear_corp.webm", "allowed"},
       // Plugins are disabled.
       {"embed", kHttps, kAppHost, "/single_face.jpg", "violation"},
       // Iframes can contain cross-origin HTTPS content.
@@ -392,6 +527,9 @@ IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyIsolatedAppBrowserTest, Src) {
       // Script tags must be same-origin.
       {"script", kHttps, kAppHost, "/result_queue.js", "allowed"},
       {"script", kHttps, kNonAppHost, "/result_queue.js", "violation"},
+      // Stylesheets must be same-origin as per style-src CSP.
+      {"link", kHttps, kAppHost, "/empty-style.css", "allowed"},
+      {"link", kHttps, kNonAppHost, "/empty-style.css", "violation"},
   };
 
   for (const auto& test_case : test_cases) {
@@ -415,9 +553,17 @@ IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyIsolatedAppBrowserTest, Src) {
         });
 
         let element = document.createElement($1);
-        // Not all elements being tested require Trusted Types, but
-        // passing src through the policy for all elements works.
-        element.src = policy.createScriptURL($2);
+
+        if($1 === 'link') {
+          // Stylesheets require `rel` and `href` instead of `src` to work.
+          element.rel = 'stylesheet';
+          element.href = $2;
+        } else {
+          // Not all elements being tested require Trusted Types, but passing
+          // src through the policy for all non-stylesheet elements works.
+          element.src = policy.createScriptURL($2);
+        }
+
         element.addEventListener('canplay', () => resolve('allowed'));
         element.addEventListener('load', () => resolve('allowed'));
         element.addEventListener('error', e => resolve('error'));
@@ -480,5 +626,98 @@ IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyIsolatedAppBrowserTest, Wasm) {
     })
   )"));
 }
+
+IN_PROC_BROWSER_TEST_F(ContentSecurityPolicyIsolatedAppBrowserTest,
+                       UnsafeInlineStyleSrc) {
+  EXPECT_TRUE(NavigateToURL(
+      shell(),
+      https_server()->GetURL(kAppHost, "/cross-origin-isolated.html")));
+
+  EXPECT_EQ("none", EvalJs(shell(), R"(
+    new Promise(async (resolve) => {
+      document.addEventListener('securitypolicyviolation', e => {
+        resolve('violation');
+      });
+
+      try {
+        document.body.setAttribute("style", "display: none;");
+        const bodyStyles = window.getComputedStyle(document.body);
+        resolve(bodyStyles.getPropertyValue("display"));
+      } catch (e) {
+        resolve('exception: ' + e);
+      }
+    })
+  )"));
+}
+
+struct WebSocketTestParam {
+  net::SpawnedTestServer::Type type;
+  std::string expected_result;
+};
+
+class ContentSecurityPolicyIsolatedAppWebSocketBrowserTest
+    : public ContentSecurityPolicyIsolatedAppBrowserTest,
+      public testing::WithParamInterface<WebSocketTestParam> {};
+
+// Disabled on Android, since we have problems starting up the WebSocket test
+// server on the host.
+//
+// TODO(crbug.com/1448866): Enable the test after solving the WebSocket server
+// issue.
+#if BUILDFLAG(IS_ANDROID)
+#define MAYBE_CheckCsp DISABLED_CheckCsp
+#else
+#define MAYBE_CheckCsp CheckCsp
+#endif
+IN_PROC_BROWSER_TEST_P(ContentSecurityPolicyIsolatedAppWebSocketBrowserTest,
+                       MAYBE_CheckCsp) {
+  auto websocket_test_server = std::make_unique<net::SpawnedTestServer>(
+      GetParam().type, net::GetWebSocketTestDataDirectory());
+  ASSERT_TRUE(websocket_test_server->Start());
+
+  EXPECT_TRUE(NavigateToURL(
+      shell(),
+      https_server()->GetURL(kAppHost, "/cross-origin-isolated.html")));
+
+  // The |websocket_url| will echo the message we send to it.
+  GURL websocket_url = websocket_test_server->GetURL("echo-with-no-extension");
+
+  EXPECT_EQ(GetParam().expected_result,
+            EvalJs(shell(), JsReplace(R"(
+    new Promise(async (resolve) => {
+      document.addEventListener('securitypolicyviolation', e => {
+        resolve('violation');
+      });
+
+      try {
+        new WebSocket($1).onopen = () => resolve('allowed');
+      } catch (e) {
+        resolve('exception: ' + e);
+      }
+    })
+  )",
+                                      websocket_url)));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    /* no prefix */,
+    ContentSecurityPolicyIsolatedAppWebSocketBrowserTest,
+    ::testing::Values(
+        WebSocketTestParam{.type = net::SpawnedTestServer::TYPE_WS,
+                           .expected_result = "violation"},
+        WebSocketTestParam{.type = net::SpawnedTestServer::TYPE_WSS,
+                           .expected_result = "allowed"}),
+    [](const testing::TestParamInfo<
+        ContentSecurityPolicyIsolatedAppWebSocketBrowserTest::ParamType>& info)
+        -> std::string {
+      switch (info.param.type) {
+        case net::SpawnedTestServer::TYPE_WS:
+          return "Ws";
+        case net::SpawnedTestServer::TYPE_WSS:
+          return "Wss";
+        default:
+          NOTREACHED_NORETURN();
+      }
+    });
 
 }  // namespace content

@@ -10,10 +10,12 @@
 #include "base/values.h"
 #include "chrome/browser/extensions/blocklist.h"
 #include "chrome/browser/extensions/extension_management.h"
+#include "chrome/browser/extensions/extension_management_internal.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/test/browser_task_environment.h"
+#include "extensions/browser/pref_names.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/manifest.h"
@@ -87,7 +89,7 @@ TEST_F(StandardManagementPolicyProviderTest, RequiredExtension) {
   auto webstore = ExtensionBuilder("webstore hosted app")
                       .AddJSON(kHostedApp)
                       .SetLocation(ManifestLocation::kComponent)
-                      .SetID(extensions::kWebStoreAppId)
+                      .SetID(kWebStoreAppId)
                       .Build();
   EXPECT_FALSE(provider_.ExtensionMayModifySettings(webstore.get(),
                                                     policy.get(), nullptr));
@@ -149,11 +151,10 @@ TEST_F(StandardManagementPolicyProviderTest, NotRequiredExtension) {
 // Tests the behavior of the ManagementPolicy provider methods for a theme
 // extension with and without a set policy theme.
 TEST_F(StandardManagementPolicyProviderTest, ThemeExtension) {
-  auto extension =
-      ExtensionBuilder("testTheme")
-          .SetLocation(ManifestLocation::kInternal)
-          .SetManifestKey("theme", std::make_unique<base::DictionaryValue>())
-          .Build();
+  auto extension = ExtensionBuilder("testTheme")
+                       .SetLocation(ManifestLocation::kInternal)
+                       .SetManifestKey("theme", base::Value::Dict())
+                       .Build();
   std::u16string error16;
 
   EXPECT_EQ(extension->GetType(), Manifest::TYPE_THEME);
@@ -171,6 +172,30 @@ TEST_F(StandardManagementPolicyProviderTest, ThemeExtension) {
   profile_.GetTestingPrefService()->RemoveManagedPref(prefs::kPolicyThemeColor);
 
   EXPECT_TRUE(provider_.UserMayLoad(extension.get(), &error16));
+}
+
+// Tests the behavior of the ManagementPolicy provider methods for an extension
+// which manifest version is controlled by policy.
+TEST_F(StandardManagementPolicyProviderTest, ManifestVersion) {
+  auto extension = ExtensionBuilder("testManifestVersion")
+                       .SetLocation(ManifestLocation::kExternalPolicyDownload)
+                       .SetManifestVersion(2)
+                       .Build();
+
+  std::u16string error16;
+  EXPECT_TRUE(provider_.UserMayLoad(extension.get(), &error16));
+  EXPECT_TRUE(error16.empty());
+
+  profile_.GetTestingPrefService()->SetManagedPref(
+      pref_names::kManifestV2Availability,
+      std::make_unique<base::Value>(static_cast<int>(
+          internal::GlobalSettings::ManifestV2Setting::kDisabled)));
+
+  EXPECT_FALSE(provider_.UserMayLoad(extension.get(), &error16));
+  EXPECT_EQ(
+      u"The administrator of this machine requires testManifestVersion "
+      "to have a minimum manifest version of 3.",
+      error16);
 }
 
 }  // namespace extensions

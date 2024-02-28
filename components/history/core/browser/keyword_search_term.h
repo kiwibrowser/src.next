@@ -27,7 +27,7 @@ struct KeywordSearchTermVisit {
 
   std::u16string term;             // The search term that was used.
   std::u16string normalized_term;  // The search term, in lower case and with
-                                   // extra whitespaces collapsed.
+                                   // extra whitespace characters collapsed.
   int visit_count{0};              // The search term visit count.
   base::Time last_visit_time;      // The time of the last visit.
   absl::optional<double> score;    // The optional calculated frecency score.
@@ -36,14 +36,14 @@ struct KeywordSearchTermVisit {
 // Used for URLs that have a search term associated with them.
 struct KeywordSearchTermRow {
   KeywordSearchTermRow() = default;
-  KeywordSearchTermRow(const KeywordSearchTermRow& other) = default;
-  ~KeywordSearchTermRow() = default;
+  KeywordSearchTermRow(KeywordSearchTermRow&& other) = default;
+  KeywordSearchTermRow& operator=(KeywordSearchTermRow&& other) = default;
 
   KeywordID keyword_id{0};         // ID of the keyword.
   URLID url_id{0};                 // ID of the url.
   std::u16string term;             // The search term that was used.
   std::u16string normalized_term;  // The search term, in lower case and with
-                                   // extra whitespaces collapsed.
+                                   // extra whitespace characters collapsed.
 };
 
 // KeywordSearchTermVisitEnumerator --------------------------------------------
@@ -56,7 +56,6 @@ class KeywordSearchTermVisitEnumerator {
       delete;
   KeywordSearchTermVisitEnumerator& operator=(
       const KeywordSearchTermVisitEnumerator&) = delete;
-
   ~KeywordSearchTermVisitEnumerator() = default;
 
   // Returns the next search term visit or nullptr if no more visits are left.

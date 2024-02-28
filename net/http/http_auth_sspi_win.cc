@@ -9,6 +9,7 @@
 
 #include "base/base64.h"
 #include "base/logging.h"
+#include "base/notreached.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -27,37 +28,38 @@ using DelegationType = HttpAuth::DelegationType;
 
 namespace {
 
-base::Value SecurityStatusToValue(Error mapped_error, SECURITY_STATUS status) {
+base::Value::Dict SecurityStatusToValue(Error mapped_error,
+                                        SECURITY_STATUS status) {
   base::Value::Dict params;
   params.Set("net_error", mapped_error);
   params.Set("security_status", static_cast<int>(status));
-  return base::Value(std::move(params));
+  return params;
 }
 
-base::Value AcquireCredentialsHandleParams(const std::u16string* domain,
-                                           const std::u16string* user,
-                                           Error result,
-                                           SECURITY_STATUS status) {
+base::Value::Dict AcquireCredentialsHandleParams(const std::u16string* domain,
+                                                 const std::u16string* user,
+                                                 Error result,
+                                                 SECURITY_STATUS status) {
   base::Value::Dict params;
   if (domain && user) {
     params.Set("domain", base::UTF16ToUTF8(*domain));
     params.Set("user", base::UTF16ToUTF8(*user));
   }
   params.Set("status", SecurityStatusToValue(result, status));
-  return base::Value(std::move(params));
+  return params;
 }
 
-base::Value ContextFlagsToValue(DWORD flags) {
+base::Value::Dict ContextFlagsToValue(DWORD flags) {
   base::Value::Dict params;
   params.Set("value", base::StringPrintf("0x%08lx", flags));
   params.Set("delegated", (flags & ISC_RET_DELEGATE) == ISC_RET_DELEGATE);
   params.Set("mutual", (flags & ISC_RET_MUTUAL_AUTH) == ISC_RET_MUTUAL_AUTH);
-  return base::Value(std::move(params));
+  return params;
 }
 
-base::Value ContextAttributesToValue(SSPILibrary* library,
-                                     PCtxtHandle handle,
-                                     DWORD attributes) {
+base::Value::Dict ContextAttributesToValue(SSPILibrary* library,
+                                           PCtxtHandle handle,
+                                           DWORD attributes) {
   base::Value::Dict params;
 
   SecPkgContext_NativeNames native_names = {0};
@@ -89,21 +91,21 @@ base::Value ContextAttributesToValue(SSPILibrary* library,
   }
 
   params.Set("flags", ContextFlagsToValue(attributes));
-  return base::Value(std::move(params));
+  return params;
 }
 
-base::Value InitializeSecurityContextParams(SSPILibrary* library,
-                                            PCtxtHandle handle,
-                                            Error result,
-                                            SECURITY_STATUS status,
-                                            DWORD attributes) {
+base::Value::Dict InitializeSecurityContextParams(SSPILibrary* library,
+                                                  PCtxtHandle handle,
+                                                  Error result,
+                                                  SECURITY_STATUS status,
+                                                  DWORD attributes) {
   base::Value::Dict params;
   params.Set("status", SecurityStatusToValue(result, status));
   if (result == OK) {
     params.Set("context",
                ContextAttributesToValue(library, handle, attributes));
   }
-  return base::Value(std::move(params));
+  return params;
 }
 
 Error MapAcquireCredentialsStatusToError(SECURITY_STATUS status) {
@@ -210,10 +212,10 @@ Error MapInitializeSecurityContextStatusToError(SECURITY_STATUS status) {
     case SEC_E_INSUFFICIENT_MEMORY:
       return ERR_OUT_OF_MEMORY;
     case SEC_E_UNSUPPORTED_FUNCTION:
-      NOTREACHED();
+      DUMP_WILL_BE_NOTREACHED_NORETURN();
       return ERR_UNEXPECTED;
     case SEC_E_INVALID_HANDLE:
-      NOTREACHED();
+      DUMP_WILL_BE_NOTREACHED_NORETURN();
       return ERR_INVALID_HANDLE;
     case SEC_E_INVALID_TOKEN:
       return ERR_INVALID_RESPONSE;
@@ -432,8 +434,7 @@ int HttpAuthSSPI::GenerateAuthToken(const AuthCredentials* credentials,
 
   // Base64 encode data in output buffer and prepend the scheme.
   std::string encode_input(static_cast<char*>(out_buf), out_buf_len);
-  std::string encode_output;
-  base::Base64Encode(encode_input, &encode_output);
+  std::string encode_output = base::Base64Encode(encode_input);
   // OK, we are done with |out_buf|
   free(out_buf);
   if (scheme_ == HttpAuth::AUTH_SCHEME_NEGOTIATE) {
@@ -498,7 +499,6 @@ int HttpAuthSSPI::GetNextSecurityToken(const std::string& spn,
     // sequence.  If we have already initialized our security context, then
     // we're incorrectly reusing the auth handler for a new sequence.
     if (SecIsValidHandle(&ctxt_)) {
-      NOTREACHED();
       return ERR_UNEXPECTED;
     }
   }
@@ -549,7 +549,7 @@ int HttpAuthSSPI::GetNextSecurityToken(const std::string& spn,
     base::Value::Dict params;
     params.Set("spn", spn);
     params.Set("flags", ContextFlagsToValue(context_flags));
-    return base::Value(std::move(params));
+    return params;
   });
 
   // This returns a token that is passed to the remote server.

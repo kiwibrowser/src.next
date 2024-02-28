@@ -43,8 +43,9 @@ bool PageRuleCollector::IsLeftPage(const ComputedStyle* root_element_style,
                                    uint32_t page_index) const {
   bool is_first_page_left = false;
   DCHECK(root_element_style);
-  if (!root_element_style->IsLeftToRightDirection())
+  if (!root_element_style->IsLeftToRightDirection()) {
     is_first_page_left = true;
+  }
 
   return (page_index + (is_first_page_left ? 1 : 0)) % 2;
 }
@@ -66,14 +67,16 @@ PageRuleCollector::PageRuleCollector(const ComputedStyle* root_element_style,
 
 void PageRuleCollector::MatchPageRules(RuleSet* rules,
                                        const CascadeLayerMap* layer_map) {
-  if (!rules)
+  if (!rules) {
     return;
+  }
 
   rules->CompactRulesIfNeeded();
   HeapVector<Member<StyleRulePage>> matched_page_rules;
   MatchPageRulesForList(matched_page_rules, rules->PageRules());
-  if (matched_page_rules.IsEmpty())
+  if (matched_page_rules.empty()) {
     return;
+  }
 
   std::stable_sort(
       matched_page_rules.begin(), matched_page_rules.end(),
@@ -86,8 +89,10 @@ void PageRuleCollector::MatchPageRules(RuleSet* rules,
         return r1->Selector()->Specificity() < r2->Selector()->Specificity();
       });
 
-  for (unsigned i = 0; i < matched_page_rules.size(); i++)
-    result_.AddMatchedProperties(&matched_page_rules[i]->Properties());
+  for (unsigned i = 0; i < matched_page_rules.size(); i++) {
+    result_.AddMatchedProperties(&matched_page_rules[i]->Properties(),
+                                 CascadeOrigin::kNone);
+  }
 }
 
 static bool CheckPageSelectorComponents(const CSSSelector* selector,
@@ -95,12 +100,13 @@ static bool CheckPageSelectorComponents(const CSSSelector* selector,
                                         bool is_first_page,
                                         const AtomicString& page_name) {
   for (const CSSSelector* component = selector; component;
-       component = component->TagHistory()) {
+       component = component->NextSimpleSelector()) {
     if (component->Match() == CSSSelector::kTag) {
       const AtomicString& local_name = component->TagQName().LocalName();
       DCHECK_NE(local_name, CSSSelector::UniversalSelectorAtom());
-      if (local_name != page_name)
+      if (local_name != page_name) {
         return false;
+      }
     }
 
     CSSSelector::PseudoType pseudo_type = component->GetPseudoType();
@@ -120,13 +126,15 @@ void PageRuleCollector::MatchPageRulesForList(
     StyleRulePage* rule = rules[i];
 
     if (!CheckPageSelectorComponents(rule->Selector(), is_left_page_,
-                                     is_first_page_, page_name_))
+                                     is_first_page_, page_name_)) {
       continue;
+    }
 
     // If the rule has no properties to apply, then ignore it.
     const CSSPropertyValueSet& properties = rule->Properties();
-    if (properties.IsEmpty())
+    if (properties.IsEmpty()) {
       continue;
+    }
 
     // Add this rule to our list of matched rules.
     matched_rules.push_back(rule);

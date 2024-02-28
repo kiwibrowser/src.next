@@ -5,14 +5,18 @@
 #include "base/scoped_observation.h"
 
 #include "base/containers/contains.h"
+#include "base/memory/raw_ptr.h"
 #include "base/ranges/algorithm.h"
-#include "base/test/gtest_util.h"
+#include "base/scoped_observation_traits.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace base {
 namespace {
 
-class TestSourceObserver {};
+class TestSourceObserver {
+ public:
+  virtual ~TestSourceObserver() = default;
+};
 
 class TestSource {
  public:
@@ -23,7 +27,7 @@ class TestSource {
   size_t num_observers() const { return observers_.size(); }
 
  private:
-  std::vector<TestSourceObserver*> observers_;
+  std::vector<raw_ptr<TestSourceObserver, VectorExperimental>> observers_;
 };
 
 void TestSource::AddObserver(TestSourceObserver* observer) {
@@ -50,12 +54,18 @@ TEST(ScopedObservationTest, RemovesObservationOnDestruction) {
   {
     TestSourceObserver o1;
     TestScopedObservation obs(&o1);
+    const TestScopedObservation& cobs = obs;
     EXPECT_EQ(0u, s1.num_observers());
     EXPECT_FALSE(s1.HasObserver(&o1));
+    EXPECT_EQ(obs.GetSource(), nullptr);
+    EXPECT_EQ(cobs.GetSource(), nullptr);
 
     obs.Observe(&s1);
     EXPECT_EQ(1u, s1.num_observers());
     EXPECT_TRUE(s1.HasObserver(&o1));
+    TestSource* const got_source = obs.GetSource();
+    EXPECT_EQ(got_source, &s1);
+    EXPECT_EQ(cobs.GetSource(), &s1);
   }
 
   // Test that the observation is removed when it goes out of scope.
@@ -66,32 +76,50 @@ TEST(ScopedObservationTest, Reset) {
   TestSource s1;
   TestSourceObserver o1;
   TestScopedObservation obs(&o1);
+  const TestScopedObservation& cobs = obs;
   EXPECT_EQ(0u, s1.num_observers());
+  EXPECT_EQ(obs.GetSource(), nullptr);
+  EXPECT_EQ(cobs.GetSource(), nullptr);
   obs.Reset();
+  EXPECT_EQ(obs.GetSource(), nullptr);
+  EXPECT_EQ(cobs.GetSource(), nullptr);
 
   obs.Observe(&s1);
   EXPECT_EQ(1u, s1.num_observers());
   EXPECT_TRUE(s1.HasObserver(&o1));
+  EXPECT_EQ(obs.GetSource(), &s1);
+  EXPECT_EQ(cobs.GetSource(), &s1);
 
   obs.Reset();
   EXPECT_EQ(0u, s1.num_observers());
+  EXPECT_EQ(obs.GetSource(), nullptr);
+  EXPECT_EQ(cobs.GetSource(), nullptr);
 
   // Safe to call with no observation.
   obs.Reset();
   EXPECT_EQ(0u, s1.num_observers());
+  EXPECT_EQ(obs.GetSource(), nullptr);
+  EXPECT_EQ(cobs.GetSource(), nullptr);
 }
 
 TEST(ScopedObservationTest, IsObserving) {
   TestSource s1;
   TestSourceObserver o1;
   TestScopedObservation obs(&o1);
-  EXPECT_FALSE(obs.IsObserving());
+  const TestScopedObservation& cobs = obs;
+  EXPECT_FALSE(cobs.IsObserving());
+  EXPECT_EQ(obs.GetSource(), nullptr);
+  EXPECT_EQ(cobs.GetSource(), nullptr);
 
   obs.Observe(&s1);
-  EXPECT_TRUE(obs.IsObserving());
+  EXPECT_TRUE(cobs.IsObserving());
+  EXPECT_EQ(obs.GetSource(), &s1);
+  EXPECT_EQ(cobs.GetSource(), &s1);
 
   obs.Reset();
-  EXPECT_FALSE(obs.IsObserving());
+  EXPECT_FALSE(cobs.IsObserving());
+  EXPECT_EQ(obs.GetSource(), nullptr);
+  EXPECT_EQ(cobs.GetSource(), nullptr);
 }
 
 TEST(ScopedObservationTest, IsObservingSource) {
@@ -99,16 +127,23 @@ TEST(ScopedObservationTest, IsObservingSource) {
   TestSource s2;
   TestSourceObserver o1;
   TestScopedObservation obs(&o1);
-  EXPECT_FALSE(obs.IsObservingSource(&s1));
-  EXPECT_FALSE(obs.IsObservingSource(&s2));
+  const TestScopedObservation& cobs = obs;
+  EXPECT_FALSE(cobs.IsObservingSource(&s1));
+  EXPECT_FALSE(cobs.IsObservingSource(&s2));
+  EXPECT_EQ(obs.GetSource(), nullptr);
+  EXPECT_EQ(cobs.GetSource(), nullptr);
 
   obs.Observe(&s1);
-  EXPECT_TRUE(obs.IsObservingSource(&s1));
-  EXPECT_FALSE(obs.IsObservingSource(&s2));
+  EXPECT_TRUE(cobs.IsObservingSource(&s1));
+  EXPECT_FALSE(cobs.IsObservingSource(&s2));
+  EXPECT_EQ(obs.GetSource(), &s1);
+  EXPECT_EQ(cobs.GetSource(), &s1);
 
   obs.Reset();
-  EXPECT_FALSE(obs.IsObservingSource(&s1));
-  EXPECT_FALSE(obs.IsObservingSource(&s2));
+  EXPECT_FALSE(cobs.IsObservingSource(&s1));
+  EXPECT_FALSE(cobs.IsObservingSource(&s2));
+  EXPECT_EQ(obs.GetSource(), nullptr);
+  EXPECT_EQ(cobs.GetSource(), nullptr);
 }
 
 namespace {
@@ -128,12 +163,22 @@ class TestSourceWithNonDefaultNames {
 };
 
 using TestScopedObservationWithNonDefaultNames =
-    ScopedObservation<TestSourceWithNonDefaultNames,
-                      TestSourceObserver,
-                      &TestSourceWithNonDefaultNames::AddFoo,
-                      &TestSourceWithNonDefaultNames::RemoveFoo>;
+    ScopedObservation<TestSourceWithNonDefaultNames, TestSourceObserver>;
 
 }  // namespace
+
+template <>
+struct ScopedObservationTraits<TestSourceWithNonDefaultNames,
+                               TestSourceObserver> {
+  static void AddObserver(TestSourceWithNonDefaultNames* source,
+                          TestSourceObserver* observer) {
+    source->AddFoo(observer);
+  }
+  static void RemoveObserver(TestSourceWithNonDefaultNames* source,
+                             TestSourceObserver* observer) {
+    source->RemoveFoo(observer);
+  }
+};
 
 TEST(ScopedObservationTest, NonDefaultNames) {
   TestSourceWithNonDefaultNames s1;
@@ -146,6 +191,107 @@ TEST(ScopedObservationTest, NonDefaultNames) {
     EXPECT_EQ(1u, s1.impl().num_observers());
     EXPECT_TRUE(s1.impl().HasObserver(&o1));
   }
+
+  EXPECT_EQ(0u, s1.impl().num_observers());
+}
+
+namespace {
+
+// A forward-declared test source.
+
+class TestSourceFwd;
+
+class ObservationHolder : public TestSourceObserver {
+ public:
+  // Declared but not defined since TestSourceFwd is not yet defined.
+  explicit ObservationHolder(TestSourceFwd* source);
+
+ private:
+  // ScopedObservation<> is instantiated with a forward-declared parameter.
+  ScopedObservation<TestSourceFwd, TestSourceObserver> obs_{this};
+};
+
+// TestSourceFwd gets an actual definition!
+class TestSourceFwd : public TestSource {};
+
+// Calling ScopedObservation::Observe() requires an actual definition rather
+// than just a forward declaration; make sure it compiles now that there is a
+// definition.
+ObservationHolder::ObservationHolder(TestSourceFwd* source) {
+  obs_.Observe(source);
+}
+
+}  // namespace
+
+TEST(ScopedObservationTest, ForwardDeclaredSource) {
+  TestSourceFwd s;
+  ASSERT_EQ(s.num_observers(), 0U);
+  {
+    ObservationHolder o(&s);
+    ASSERT_EQ(s.num_observers(), 1U);
+  }
+  ASSERT_EQ(s.num_observers(), 0U);
+}
+
+namespace {
+
+class TestSourceWithNonDefaultNamesFwd;
+
+class ObservationWithNonDefaultNamesHolder : public TestSourceObserver {
+ public:
+  // Declared but not defined since TestSourceWithNonDefaultNamesFwd is not yet
+  // defined.
+  explicit ObservationWithNonDefaultNamesHolder(
+      TestSourceWithNonDefaultNamesFwd* source);
+
+ private:
+  // ScopedObservation<> is instantiated with a forward-declared parameter.
+  ScopedObservation<TestSourceWithNonDefaultNamesFwd, TestSourceObserver> obs_{
+      this};
+};
+
+// TestSourceWithNonDefaultNamesFwd gets an actual definition!
+class TestSourceWithNonDefaultNamesFwd : public TestSourceWithNonDefaultNames {
+};
+
+}  // namespace
+
+// Now we define the corresponding traits. ScopedObservationTraits
+// specializations must be defined in base::, since that is where the primary
+// template definition lives.
+template <>
+struct ScopedObservationTraits<TestSourceWithNonDefaultNamesFwd,
+                               TestSourceObserver> {
+  static void AddObserver(TestSourceWithNonDefaultNamesFwd* source,
+                          TestSourceObserver* observer) {
+    source->AddFoo(observer);
+  }
+  static void RemoveObserver(TestSourceWithNonDefaultNamesFwd* source,
+                             TestSourceObserver* observer) {
+    source->RemoveFoo(observer);
+  }
+};
+
+namespace {
+
+// Calling ScopedObservation::Observe() requires an actual definition rather
+// than just a forward declaration; make sure it compiles now that there is
+// a definition.
+ObservationWithNonDefaultNamesHolder::ObservationWithNonDefaultNamesHolder(
+    TestSourceWithNonDefaultNamesFwd* source) {
+  obs_.Observe(source);
+}
+
+}  // namespace
+
+TEST(ScopedObservationTest, ForwardDeclaredSourceWithNonDefaultNames) {
+  TestSourceWithNonDefaultNamesFwd s;
+  ASSERT_EQ(s.impl().num_observers(), 0U);
+  {
+    ObservationWithNonDefaultNamesHolder o(&s);
+    ASSERT_EQ(s.impl().num_observers(), 1U);
+  }
+  ASSERT_EQ(s.impl().num_observers(), 0U);
 }
 
 }  // namespace base

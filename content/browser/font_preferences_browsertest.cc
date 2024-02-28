@@ -20,11 +20,6 @@ class FontPreferencesBrowserTest : public DevToolsProtocolTest {
   FontPreferencesBrowserTest() = default;
   ~FontPreferencesBrowserTest() override = default;
 
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitchASCII(switches::kEnableBlinkFeatures,
-                                    "CSSFontFamilyMath");
-  }
-
  protected:
   std::string GetFirstPlatformFontForBody() {
     base::Value::Dict params1;
@@ -32,7 +27,7 @@ class FontPreferencesBrowserTest : public DevToolsProtocolTest {
     const base::Value::Dict* result =
         SendCommand("DOM.getDocument", std::move(params1));
 
-    absl::optional<int> body_node_id =
+    std::optional<int> body_node_id =
         result->FindIntByDottedPath("root.nodeId");
     DCHECK(body_node_id);
 
@@ -79,6 +74,8 @@ class FontPreferencesBrowserTest : public DevToolsProtocolTest {
     const std::string non_default_system_font = "Lucida Console";
 #elif BUILDFLAG(IS_MAC)
     const std::string non_default_system_font = "Monaco";
+#elif BUILDFLAG(IS_IOS)
+    const std::string non_default_system_font = "Verdana";
 #elif BUILDFLAG(IS_FUCHSIA)
     // Fuchsia platforms don't seem to have many pre-installed fonts besides the
     // default Roboto families. Let's instead choose the default monospace

@@ -6,9 +6,9 @@
 
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/check_op.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_auth_challenge_tokenizer.h"
 #include "net/log/net_log.h"
@@ -24,7 +24,7 @@ bool HttpAuthHandler::InitFromChallenge(
     HttpAuthChallengeTokenizer* challenge,
     HttpAuth::Target target,
     const SSLInfo& ssl_info,
-    const NetworkIsolationKey& network_isolation_key,
+    const NetworkAnonymizationKey& network_anonymization_key,
     const url::SchemeHostPort& scheme_host_port,
     const NetLogWithSource& net_log) {
   scheme_host_port_ = scheme_host_port;
@@ -35,12 +35,12 @@ bool HttpAuthHandler::InitFromChallenge(
 
   auth_challenge_ = challenge->challenge_text();
   net_log_.BeginEvent(NetLogEventType::AUTH_HANDLER_INIT);
-  bool ok = Init(challenge, ssl_info, network_isolation_key);
+  bool ok = Init(challenge, ssl_info, network_anonymization_key);
   net_log_.EndEvent(NetLogEventType::AUTH_HANDLER_INIT, [&]() {
     base::Value::Dict params;
     params.Set("succeeded", ok);
     params.Set("allows_default_credentials", AllowsDefaultCredentials());
-    return base::Value(std::move(params));
+    return params;
   });
 
   // Init() is expected to set the scheme, realm, score, and properties.  The

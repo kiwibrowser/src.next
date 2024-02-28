@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,8 @@
 
 #include "third_party/blink/renderer/core/editing/frame_caret.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
+#include "third_party/blink/renderer/core/layout/inline/inline_cursor.h"
 #include "third_party/blink/renderer/core/layout/layout_text.h"
-#include "third_party/blink/renderer/core/layout/line/inline_text_box.h"
-#include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_cursor.h"
 #include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/paint/object_paint_properties.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_painter.h"
@@ -31,37 +30,29 @@ TEST_P(PaintControllerPaintTest, InlineRelayout) {
   auto& div_block =
       *To<LayoutBlock>(GetDocument().body()->firstChild()->GetLayoutObject());
   auto& text = *To<LayoutText>(div_block.FirstChild());
-  const DisplayItemClient* first_text_box = text.FirstTextBox();
-  wtf_size_t first_text_box_fragment_id = 0;
-  if (text.IsInLayoutNGInlineFormattingContext()) {
-    NGInlineCursor cursor;
-    cursor.MoveTo(text);
-    first_text_box = cursor.Current().GetDisplayItemClient();
-    first_text_box_fragment_id = cursor.Current().FragmentId();
-  }
+  InlineCursor cursor;
+  cursor.MoveTo(text);
+  const DisplayItemClient* first_text_box =
+      cursor.Current().GetDisplayItemClient();
+  wtf_size_t first_text_box_fragment_id = cursor.Current().FragmentId();
 
   EXPECT_THAT(ContentDisplayItems(),
               ElementsAre(VIEW_SCROLLING_BACKGROUND_DISPLAY_ITEM,
                           IsSameId(first_text_box->Id(), kForegroundType,
                                    first_text_box_fragment_id)));
 
-  div.setAttribute(html_names::kStyleAttr, "width: 10px; height: 200px");
+  div.setAttribute(html_names::kStyleAttr,
+                   AtomicString("width: 10px; height: 200px"));
   UpdateAllLifecyclePhasesForTest();
 
-  auto& new_text = *To<LayoutText>(div_block.FirstChild());
-  const DisplayItemClient* new_first_text_box = text.FirstTextBox();
-  const DisplayItemClient* second_text_box = nullptr;
-  wtf_size_t second_text_box_fragment_id = 0;
-  if (!text.IsInLayoutNGInlineFormattingContext()) {
-    second_text_box = new_text.FirstTextBox()->NextForSameLayoutObject();
-  } else {
-    NGInlineCursor cursor;
-    cursor.MoveTo(text);
-    new_first_text_box = cursor.Current().GetDisplayItemClient();
-    cursor.MoveToNextForSameLayoutObject();
-    second_text_box = cursor.Current().GetDisplayItemClient();
-    second_text_box_fragment_id = cursor.Current().FragmentId();
-  }
+  cursor = InlineCursor();
+  cursor.MoveTo(text);
+  const DisplayItemClient* new_first_text_box =
+      cursor.Current().GetDisplayItemClient();
+  cursor.MoveToNextForSameLayoutObject();
+  const DisplayItemClient* second_text_box =
+      cursor.Current().GetDisplayItemClient();
+  wtf_size_t second_text_box_fragment_id = cursor.Current().FragmentId();
 
   EXPECT_THAT(ContentDisplayItems(),
               ElementsAre(VIEW_SCROLLING_BACKGROUND_DISPLAY_ITEM,
@@ -116,14 +107,14 @@ TEST_P(PaintControllerPaintTest, FrameScrollingContents) {
   SetBodyInnerHTML(R"HTML(
     <style>
       ::-webkit-scrollbar { display: none }
-      body { margin: 0; width: 10000px; height: 1000px }
+      body { margin: 0; }
       div { position: absolute; width: 100px; height: 100px;
             background: blue; }
     </style>
-    <div id='div1' style='top: 0; left: 0'></div>
-    <div id='div2' style='top: 3000px; left: 3000px'></div>
-    <div id='div3' style='top: 6000px; left: 6000px'></div>
-    <div id='div4' style='top: 9000px; left: 9000px'></div>
+    <div id='div1' style='top: 0'></div>
+    <div id='div2' style='top: 3000px'></div>
+    <div id='div3' style='top: 6000px'></div>
+    <div id='div4' style='top: 9000px'></div>
   )HTML");
 
   const auto& div1 = To<LayoutBox>(*GetLayoutObjectByElementId("div1"));
@@ -160,7 +151,7 @@ TEST_P(PaintControllerPaintTest, FrameScrollingContents) {
                                        contents_properties)));
 
   GetDocument().View()->LayoutViewport()->SetScrollOffset(
-      ScrollOffset(5000, 5000), mojom::blink::ScrollType::kProgrammatic);
+      ScrollOffset(0, 5000), mojom::blink::ScrollType::kProgrammatic);
   UpdateAllLifecyclePhasesForTest();
 
   EXPECT_THAT(ContentDisplayItems(),
@@ -203,9 +194,10 @@ TEST_P(PaintControllerPaintTest, BlockScrollingNonLayeredContents) {
     </style>
     <container id='container'>
       <div id='div1'></div>
-      <div id='div2' style='margin-top: 2900px; margin-left: 3000px'></div>
-      <div id='div3' style='margin-top: 2900px; margin-left: 6000px'></div>
-      <div id='div4' style='margin-top: 2900px; margin-left: 9000px'></div>
+      <div id='div2' style='margin-top: 1200px; margin-left: 1300px'></div>
+      <div id='div3' style='margin-top: 1200px; margin-left: 2600px'></div>
+      <div id='div4' style='margin-top: 1200px; margin-left: 3900px;
+                            width: 8000px; height: 8000px'></div>
     </container>
   )HTML");
 
@@ -215,7 +207,7 @@ TEST_P(PaintControllerPaintTest, BlockScrollingNonLayeredContents) {
   auto& div3 = *GetLayoutObjectByElementId("div3");
   auto& div4 = *GetLayoutObjectByElementId("div4");
 
-  EXPECT_EQ(gfx::Rect(0, 0, 4200, 4200),
+  EXPECT_EQ(gfx::Rect(0, 0, 2200, 2200),
             container.FirstFragment().GetContentsCullRect().Rect());
   EXPECT_THAT(ContentDisplayItems(),
               ElementsAre(VIEW_SCROLLING_BACKGROUND_DISPLAY_ITEM,
@@ -244,14 +236,13 @@ TEST_P(PaintControllerPaintTest, BlockScrollingNonLayeredContents) {
                        container.FirstFragment().ContentsProperties())));
 
   container.GetScrollableArea()->SetScrollOffset(
-      ScrollOffset(5000, 5000), mojom::blink::ScrollType::kProgrammatic);
+      ScrollOffset(4000, 4000), mojom::blink::ScrollType::kProgrammatic);
   UpdateAllLifecyclePhasesForTest();
 
-  EXPECT_EQ(gfx::Rect(1000, 1000, 8100, 8100),
+  EXPECT_EQ(gfx::Rect(2000, 2000, 4200, 4200),
             container.FirstFragment().GetContentsCullRect().Rect());
   EXPECT_THAT(ContentDisplayItems(),
               ElementsAre(VIEW_SCROLLING_BACKGROUND_DISPLAY_ITEM,
-                          IsSameId(div2.Id(), kBackgroundType),
                           IsSameId(div3.Id(), kBackgroundType),
                           IsSameId(div4.Id(), kBackgroundType)));
   EXPECT_THAT(
@@ -267,7 +258,7 @@ TEST_P(PaintControllerPaintTest, BlockScrollingNonLayeredContents) {
               1, 1, PaintChunk::Id(container.Id(), DisplayItem::kScrollHitTest),
               container.FirstFragment().LocalBorderBoxProperties(),
               &container_scroll_hit_test, gfx::Rect(0, 0, 200, 200)),
-          IsPaintChunk(1, 4,
+          IsPaintChunk(1, 3,
                        PaintChunk::Id(container.Id(),
                                       kClippedContentsBackgroundChunkType),
                        container.FirstFragment().ContentsProperties())));
@@ -560,6 +551,50 @@ TEST_P(PaintControllerPaintTest,
               PaintChunk::Id(pos_z_child.Layer()->Id(),
                              DisplayItem::kLayerChunk),
               pos_z_child.FirstFragment().LocalBorderBoxProperties())));
+}
+
+TEST_P(PaintControllerPaintTest, PaintChunkIsSolidColor) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      .target {
+        width: 50px;
+        height: 50px;
+        background-color: blue;
+        position: relative;
+      }
+    </style>
+    <div id="target1" class="target"></div>
+    <div id="target2" class="target">TEXT</div>
+    <div id="target3" class="target"
+         style="background-image: linear-gradient(red, blue)"></div>
+    <div id="target4" class="target" style="background-color: transparent">
+      <div style="width: 200px; height: 40px; background: blue"></div>
+    </div>
+    <div id="target5" class="target" style="background-color: transparent">
+      <div style="width: 200px; height: 60px; background: blue"></div>
+    </div>
+  )HTML");
+
+  auto chunks = ContentPaintChunks();
+  ASSERT_EQ(6u, chunks.size());
+  // View background.
+  EXPECT_TRUE(chunks[0].background_color.is_solid_color);
+  EXPECT_EQ(SkColors::kWhite, chunks[0].background_color.color);
+  // target1.
+  EXPECT_TRUE(chunks[1].background_color.is_solid_color);
+  EXPECT_EQ(SkColors::kBlue, chunks[1].background_color.color);
+  // target2.
+  EXPECT_FALSE(chunks[2].background_color.is_solid_color);
+  EXPECT_EQ(SkColors::kBlue, chunks[2].background_color.color);
+  // target3.
+  EXPECT_FALSE(chunks[3].background_color.is_solid_color);
+  EXPECT_EQ(SkColors::kBlue, chunks[3].background_color.color);
+  // target4.
+  EXPECT_FALSE(chunks[4].background_color.is_solid_color);
+  EXPECT_EQ(SkColors::kBlue, chunks[4].background_color.color);
+  // target5.
+  EXPECT_TRUE(chunks[5].background_color.is_solid_color);
+  EXPECT_EQ(SkColors::kBlue, chunks[5].background_color.color);
 }
 
 }  // namespace blink

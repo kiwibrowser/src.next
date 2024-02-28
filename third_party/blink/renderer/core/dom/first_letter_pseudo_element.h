@@ -46,11 +46,12 @@ class CORE_EXPORT FirstLetterPseudoElement final : public PseudoElement {
   void Trace(Visitor*) const override;
 
   static LayoutText* FirstLetterTextLayoutObject(const Element&);
-  static unsigned FirstLetterLength(const String&);
+  static unsigned FirstLetterLength(const String&,
+                                    bool preserve_breaks = false);
 
   void ClearRemainingTextLayoutObject();
   LayoutTextFragment* RemainingTextLayoutObject() const {
-    return remaining_text_layout_object_;
+    return remaining_text_layout_object_.Get();
   }
 
   void UpdateTextFragments();
@@ -60,7 +61,9 @@ class CORE_EXPORT FirstLetterPseudoElement final : public PseudoElement {
   Node* InnerNodeForHitTesting() const override;
 
  private:
-  scoped_refptr<ComputedStyle> CustomStyleForLayoutObject(
+  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
+
+  const ComputedStyle* CustomStyleForLayoutObject(
       const StyleRecalcContext&) override;
 
   void AttachFirstLetterTextLayoutObjects(LayoutText* first_letter_text);

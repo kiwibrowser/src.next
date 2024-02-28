@@ -36,9 +36,7 @@ import java.util.List;
  * {@link org.chromium.chrome.browser.tab.Tab}s.
  */
 class TabListModel extends ModelList {
-    /**
-     * Required properties for each {@link PropertyModel} managed by this {@link ModelList}.
-     */
+    /** Required properties for each {@link PropertyModel} managed by this {@link ModelList}. */
     static class CardProperties {
         /** Supported Model type within this ModelList. */
         @IntDef({TAB, MESSAGE, NEW_TAB_TILE_DEPRECATED, OTHERS})
@@ -167,9 +165,7 @@ class TabListModel extends ModelList {
         return TabModel.INVALID_TAB_INDEX;
     }
 
-    /**
-     * Get the last index of a message item.
-     */
+    /** Get the last index of a message item. */
     public int lastIndexForMessageItem() {
         for (int i = size() - 1; i >= 0; i--) {
             PropertyModel model = get(i).model;
@@ -211,28 +207,39 @@ class TabListModel extends ModelList {
      * group. When moving a Tab to a group, we always put it at the end of the group. For example:
      * move tab1 to tab2 to form a group, tab1 is after tab2 in the TabModel (tab2, tab1); Then
      * move another Tab tab3 to (tab2, tab1) group, tab3 is after tab1, (tab2, tab1, tab3). Thus,
-     * the last Tab in the related Tabs is the movedTab. We use this to find the srcIndex; and query
-     * all of its related Tabs to find the desIndex, i.e., the index of the current group / Tab to
-     * move to.
+     * the last Tab in the related Tabs is the movedTab. When merging groups merge group1 to group2
+     * then the tab will exist in (group2, group1) order. However it is not guaranteed that the
+     * tab representing group1 in this model will be the last tab in the group. To account for this
+     * start at the front of the group in TabModel index order to find the desIndex of the group or
+     * tab to merge to. Then search the rest of the tabs that were merged for srcIndex that was
+     * merged from. For undoing multi-group merges the srcIndex may be invalid while the desIndex is
+     * always valid as the tab may be moving between existing groups and so has no index in this
+     * model of its own.
      *
      * @param tabModel   The tabModel that owns the tabs.
      * @param tabs       The list that contains tabs of the newly merged group.
-     * @return A Pair with its first member as the index of the tab that is selected to merge and
-     * the second member as the index of the tab that is being merged into.
+     * @return A Pair with its first member as the index of the tab that is selected to merge to and
+     * the second member as the index of the tab that is being merged from.
      */
     Pair<Integer, Integer> getIndexesForMergeToGroup(TabModel tabModel, List<Tab> tabs) {
-        int desIndex = TabModel.INVALID_TAB_INDEX;
         int srcIndex = TabModel.INVALID_TAB_INDEX;
-        int lastTabModelIndex = tabModel.indexOf(tabs.get(tabs.size() - 1));
-        for (int i = lastTabModelIndex; i >= 0; i--) {
+        int desIndex = TabModel.INVALID_TAB_INDEX;
+
+        int startIndex = tabModel.indexOf(tabs.get(0));
+        int endIndex = tabModel.indexOf(tabs.get(tabs.size() - 1));
+        // Ensure the last tab is last in the model and the first tab is the first.
+        assert endIndex - startIndex == tabs.size() - 1;
+        for (int i = startIndex; i <= endIndex; i++) {
             Tab curTab = tabModel.getTabAt(i);
-            if (!tabs.contains(curTab)) break;
+            // Group should be contiguous.
+            assert tabs.contains(curTab);
             int index = indexFromId(curTab.getId());
-            if (index != TabModel.INVALID_TAB_INDEX && srcIndex == TabModel.INVALID_TAB_INDEX) {
-                srcIndex = index;
-            } else if (index != TabModel.INVALID_TAB_INDEX
-                    && desIndex == TabModel.INVALID_TAB_INDEX) {
+            if (index != TabModel.INVALID_TAB_INDEX && desIndex == TabModel.INVALID_TAB_INDEX) {
                 desIndex = index;
+            } else if (index != TabModel.INVALID_TAB_INDEX
+                    && srcIndex == TabModel.INVALID_TAB_INDEX) {
+                srcIndex = index;
+                break;
             }
         }
         return new Pair<>(desIndex, srcIndex);
@@ -251,8 +258,10 @@ class TabListModel extends ModelList {
 
         assert get(index).model.get(CARD_TYPE) == TAB;
 
-        int status = isSelected ? ClosableTabGridView.AnimationStatus.SELECTED_CARD_ZOOM_IN
-                                : ClosableTabGridView.AnimationStatus.SELECTED_CARD_ZOOM_OUT;
+        int status =
+                isSelected
+                        ? ClosableTabGridView.AnimationStatus.SELECTED_CARD_ZOOM_IN
+                        : ClosableTabGridView.AnimationStatus.SELECTED_CARD_ZOOM_OUT;
         if (get(index).model.get(TabProperties.CARD_ANIMATION_STATUS) == status) return;
 
         get(index).model.set(TabProperties.CARD_ANIMATION_STATUS, status);
@@ -272,8 +281,10 @@ class TabListModel extends ModelList {
 
         assert get(index).model.get(CARD_TYPE) == TAB;
 
-        int status = isHovered ? ClosableTabGridView.AnimationStatus.HOVERED_CARD_ZOOM_IN
-                               : ClosableTabGridView.AnimationStatus.HOVERED_CARD_ZOOM_OUT;
+        int status =
+                isHovered
+                        ? ClosableTabGridView.AnimationStatus.HOVERED_CARD_ZOOM_IN
+                        : ClosableTabGridView.AnimationStatus.HOVERED_CARD_ZOOM_OUT;
         if (get(index).model.get(TabProperties.CARD_ANIMATION_STATUS) == status) return;
 
         get(index).model.set(TabProperties.CARD_ANIMATION_STATUS, status);

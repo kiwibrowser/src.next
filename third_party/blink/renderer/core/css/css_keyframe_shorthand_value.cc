@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,8 +14,9 @@ bool ShorthandMatches(CSSPropertyID expected_shorthand,
   Vector<StylePropertyShorthand, 4> shorthands;
   getMatchingShorthandsForLonghand(longhand, &shorthands);
   for (unsigned i = 0; i < shorthands.size(); ++i) {
-    if (shorthands.at(i).id() == expected_shorthand)
+    if (shorthands.at(i).id() == expected_shorthand) {
       return true;
+    }
   }
 
   return false;

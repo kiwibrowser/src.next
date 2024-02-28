@@ -6,11 +6,11 @@
 
 #include <memory>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/cancelable_task_tracker.h"
@@ -174,7 +174,7 @@ class HistoryQueryTest : public testing::Test {
 
   void AddEntryToHistory(const TestEntry& entry) {
     // We need the ID scope and page ID so that the visit tracker can find it.
-    ContextID context_id = reinterpret_cast<ContextID>(1);
+    ContextID context_id = 1;
     GURL url(entry.url);
 
     history_->AddPage(url, entry.time, context_id, nav_entry_id_++, GURL(),

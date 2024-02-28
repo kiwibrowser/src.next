@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -57,16 +57,16 @@ TEST_F(CSSSelectorWatchTest, RecalcOnDocumentChange) {
 
   UpdateAllLifecyclePhasesForTest();
 
-  Element* x = GetDocument().getElementById("x");
-  Element* y = GetDocument().getElementById("y");
-  Element* z = GetDocument().getElementById("z");
+  Element* x = GetDocument().getElementById(AtomicString("x"));
+  Element* y = GetDocument().getElementById(AtomicString("y"));
+  Element* z = GetDocument().getElementById(AtomicString("z"));
   ASSERT_TRUE(x);
   ASSERT_TRUE(y);
   ASSERT_TRUE(z);
 
   x->removeAttribute(html_names::kClassAttr);
   y->removeAttribute(html_names::kClassAttr);
-  z->setAttribute(html_names::kClassAttr, "c");
+  z->setAttribute(html_names::kClassAttr, AtomicString("c"));
 
   ClearAddedRemoved(watch);
 
@@ -83,12 +83,9 @@ TEST_F(CSSSelectorWatchTest, RecalcOnDocumentChange) {
   EXPECT_TRUE(RemovedSelectors(watch).Contains(".b"));
 }
 
-class CSSSelectorWatchCQTest : public CSSSelectorWatchTest,
-                               private ScopedCSSContainerQueriesForTest,
-                               private ScopedLayoutNGForTest {
+class CSSSelectorWatchCQTest : public CSSSelectorWatchTest {
  protected:
-  CSSSelectorWatchCQTest()
-      : ScopedCSSContainerQueriesForTest(true), ScopedLayoutNGForTest(true) {}
+  CSSSelectorWatchCQTest() = default;
 };
 
 TEST_F(CSSSelectorWatchCQTest, ContainerQueryDisplayNone) {
@@ -123,7 +120,7 @@ TEST_F(CSSSelectorWatchCQTest, ContainerQueryDisplayNone) {
   // #container a container 'c1' which is flipping the span back to
   // display:inline.
   ClearAddedRemoved(watch);
-  GetDocument().body()->setAttribute(html_names::kClassAttr, "c");
+  GetDocument().body()->setAttribute(html_names::kClassAttr, AtomicString("c"));
   UpdateAllLifecyclePhasesForTest();
 
   // Element::UpdateCallbackSelectors() will both remove and add #inner in the

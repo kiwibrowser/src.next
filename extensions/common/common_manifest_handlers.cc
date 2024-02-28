@@ -15,6 +15,7 @@
 #include "extensions/common/api/printer_provider/usb_printer_manifest_handler.h"
 #include "extensions/common/api/sockets/sockets_manifest_handler.h"
 #include "extensions/common/manifest_handler.h"
+#include "extensions/common/manifest_handlers/app_display_info.h"
 #include "extensions/common/manifest_handlers/automation.h"
 #include "extensions/common/manifest_handlers/background_info.h"
 #include "extensions/common/manifest_handlers/content_capabilities_handler.h"
@@ -36,6 +37,7 @@
 #include "extensions/common/manifest_handlers/requirements_info.h"
 #include "extensions/common/manifest_handlers/sandboxed_page_info.h"
 #include "extensions/common/manifest_handlers/shared_module_info.h"
+#include "extensions/common/manifest_handlers/trial_tokens_handler.h"
 #include "extensions/common/manifest_handlers/web_accessible_resources_info.h"
 #include "extensions/common/manifest_handlers/webview_info.h"
 #include "extensions/common/manifest_url_handlers.h"
@@ -55,6 +57,7 @@ void RegisterCommonManifestHandlers() {
   registry->RegisterHandler(std::make_unique<ActionHandlersHandler>());
 #endif
   registry->RegisterHandler(std::make_unique<AutomationHandler>());
+  registry->RegisterHandler(std::make_unique<AppDisplayManifestHandler>());
   registry->RegisterHandler(std::make_unique<BackgroundManifestHandler>());
   registry->RegisterHandler(std::make_unique<BluetoothManifestHandler>());
   registry->RegisterHandler(std::make_unique<CommandsHandler>());
@@ -83,6 +86,7 @@ void RegisterCommonManifestHandlers() {
   registry->RegisterHandler(std::make_unique<SandboxedPageHandler>());
   registry->RegisterHandler(std::make_unique<SharedModuleHandler>());
   registry->RegisterHandler(std::make_unique<SocketsManifestHandler>());
+  registry->RegisterHandler(std::make_unique<TrialTokensHandler>());
   registry->RegisterHandler(std::make_unique<UpdateURLHandler>());
   registry->RegisterHandler(std::make_unique<UsbPrinterManifestHandler>());
   registry->RegisterHandler(std::make_unique<WebAccessibleResourcesHandler>());

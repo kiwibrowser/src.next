@@ -61,19 +61,19 @@ class PermissionsBasedManagementPolicyProviderTest : public testing::Test {
   // |optional_permissions|.
   scoped_refptr<const Extension> CreateExtensionWithPermission(
       mojom::ManifestLocation location,
-      const base::ListValue* required_permissions,
-      const base::ListValue* optional_permissions) {
-    base::DictionaryValue manifest_dict;
-    manifest_dict.SetStringPath(manifest_keys::kName, "test");
-    manifest_dict.SetStringPath(manifest_keys::kVersion, "0.1");
-    manifest_dict.SetIntPath(manifest_keys::kManifestVersion, 2);
+      const base::Value::List* required_permissions,
+      const base::Value::List* optional_permissions) {
+    base::Value::Dict manifest_dict;
+    manifest_dict.Set(manifest_keys::kName, "test");
+    manifest_dict.Set(manifest_keys::kVersion, "0.1");
+    manifest_dict.Set(manifest_keys::kManifestVersion, 2);
     if (required_permissions) {
-      manifest_dict.SetPath(manifest_keys::kPermissions,
-                            required_permissions->Clone());
+      manifest_dict.Set(manifest_keys::kPermissions,
+                        required_permissions->Clone());
     }
     if (optional_permissions) {
-      manifest_dict.SetPath(manifest_keys::kOptionalPermissions,
-                            optional_permissions->Clone());
+      manifest_dict.Set(manifest_keys::kOptionalPermissions,
+                        optional_permissions->Clone());
     }
     std::string error;
     scoped_refptr<const Extension> extension = Extension::Create(
@@ -95,11 +95,11 @@ class PermissionsBasedManagementPolicyProviderTest : public testing::Test {
 // Verifies that extensions with conflicting permissions cannot be loaded.
 TEST_F(PermissionsBasedManagementPolicyProviderTest, APIPermissions) {
   // Prepares the extension manifest.
-  base::ListValue required_permissions;
+  base::Value::List required_permissions;
   required_permissions.Append(
       GetAPIPermissionName(APIPermissionID::kDownloads));
   required_permissions.Append(GetAPIPermissionName(APIPermissionID::kCookie));
-  base::ListValue optional_permissions;
+  base::Value::List optional_permissions;
   optional_permissions.Append(GetAPIPermissionName(APIPermissionID::kProxy));
 
   scoped_refptr<const Extension> extension = CreateExtensionWithPermission(

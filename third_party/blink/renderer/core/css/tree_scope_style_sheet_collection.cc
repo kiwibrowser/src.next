@@ -46,29 +46,34 @@ TreeScopeStyleSheetCollection::TreeScopeStyleSheetCollection(
     : tree_scope_(tree_scope) {}
 
 void TreeScopeStyleSheetCollection::AddStyleSheetCandidateNode(Node& node) {
-  if (node.isConnected())
+  if (node.isConnected()) {
     style_sheet_candidate_nodes_.Add(&node);
+  }
 }
 
 void TreeScopeStyleSheetCollection::ApplyActiveStyleSheetChanges(
     StyleSheetCollection& new_collection) {
   GetDocument().GetStyleEngine().ApplyRuleSetChanges(
-      GetTreeScope(), ActiveStyleSheets(), new_collection.ActiveStyleSheets());
+      GetTreeScope(), ActiveStyleSheets(), new_collection.ActiveStyleSheets(),
+      new_collection.RuleSetDiffs());
   new_collection.Swap(*this);
 }
 
 void TreeScopeStyleSheetCollection::UpdateStyleSheetList() {
-  if (!sheet_list_dirty_)
+  if (!sheet_list_dirty_) {
     return;
+  }
 
   HeapVector<Member<StyleSheet>> new_list;
   for (Node* node : style_sheet_candidate_nodes_) {
     StyleSheetCandidate candidate(*node);
     DCHECK(!candidate.IsXSL());
-    if (candidate.IsEnabledAndLoading())
+    if (candidate.IsEnabledAndLoading()) {
       continue;
-    if (StyleSheet* sheet = candidate.Sheet())
+    }
+    if (StyleSheet* sheet = candidate.Sheet()) {
       new_list.push_back(sheet);
+    }
   }
   SwapSheetsForSheetList(new_list);
 }

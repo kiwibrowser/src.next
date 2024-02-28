@@ -18,24 +18,28 @@ namespace {
 
 // Array of features exposed through the Java ExternalIntentsFeatures API.
 const base::Feature* kFeaturesExposedToJava[] = {
-    &kAutofillAssistantGoogleInitiatorOriginCheck,
-    &kExternalNavigationDebugLogs, &kScaryExternalNavigationRefactoring};
+    &kExternalNavigationDebugLogs, &kBlockFrameRenavigations,
+    &kBlockIntentsToSelf, &kTrustedClientGestureBypass};
 
 }  // namespace
 
 // Alphabetical:
 
-// Uses the initiator origin to check whether a navigation was started from a
-// Google domain.
-const base::Feature kAutofillAssistantGoogleInitiatorOriginCheck{
-    "AutofillAssistantGoogleInitiatorOriginCheck",
-    base::FEATURE_ENABLED_BY_DEFAULT};
+BASE_FEATURE(kExternalNavigationDebugLogs,
+             "ExternalNavigationDebugLogs",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
-const base::Feature kExternalNavigationDebugLogs{
-    "ExternalNavigationDebugLogs", base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kBlockFrameRenavigations,
+             "BlockFrameRenavigations3",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
-const base::Feature kScaryExternalNavigationRefactoring{
-    "ScaryExternalNavigationRefactoring", base::FEATURE_ENABLED_BY_DEFAULT};
+BASE_FEATURE(kBlockIntentsToSelf,
+             "BlockIntentsToSelf",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
+BASE_FEATURE(kTrustedClientGestureBypass,
+             "TrustedClientGestureBypass",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 static jlong JNI_ExternalIntentsFeatures_GetFeature(JNIEnv* env, jint ordinal) {
   return reinterpret_cast<jlong>(kFeaturesExposedToJava[ordinal]);

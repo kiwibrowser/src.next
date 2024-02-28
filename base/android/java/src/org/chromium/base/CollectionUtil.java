@@ -16,8 +16,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
 
 /**
  * Functions used for easier initialization of Java collections. Inspired by
@@ -52,10 +50,12 @@ public final class CollectionUtil {
         return array;
     }
 
-    public static int[] integerListToIntArray(@NonNull List<Integer> list) {
-        int[] array = new int[list.size()];
-        for (int i = 0; i < list.size(); i++) {
-            array[i] = list.get(i);
+    public static int[] integerCollectionToIntArray(@NonNull Collection<Integer> collection) {
+        int[] array = new int[collection.size()];
+        int index = 0;
+        for (int num : collection) {
+            array[index] = num;
+            index++;
         }
         return array;
     }
@@ -66,22 +66,6 @@ public final class CollectionUtil {
             array[i] = list.get(i);
         }
         return array;
-    }
-
-    // This is a utility helper method that adds functionality available in API 24 (see
-    // Collection.forEach).
-    public static <T> void forEach(Collection<? extends T> collection, Callback<T> worker) {
-        for (T entry : collection) worker.onResult(entry);
-    }
-
-    // This is a utility helper method that adds functionality available in API 24 (see
-    // Collection.forEach).
-    @SuppressWarnings("unchecked")
-    public static <K, V> void forEach(
-            Map<? extends K, ? extends V> map, Callback<Entry<K, V>> worker) {
-        for (Map.Entry<? extends K, ? extends V> entry : map.entrySet()) {
-            worker.onResult((Map.Entry<K, V>) entry);
-        }
     }
 
     /**

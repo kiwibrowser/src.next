@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "mojo/public/cpp/bindings/remote.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink.h"
+#include "third_party/blink/renderer/core/animation/scroll_timeline.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
@@ -262,6 +263,20 @@ TEST_F(FrameTest, UserActivationTriggerHistograms) {
   histograms.ExpectTotalCount("Event.UserActivation.TriggerForConsuming", 2);
   histograms.ExpectTotalCount("Event.UserActivation.TriggerForSticky", 4);
   histograms.ExpectTotalCount("Event.UserActivation.TriggerForTransient", 4);
+}
+
+TEST_F(FrameTest, NavigateClearsScrollSnapshotClients) {
+  ScrollTimeline::Create(&GetDocument(),
+                         GetDocument().ScrollingElementNoLayout(),
+                         ScrollTimeline::ScrollAxis::kBlock);
+
+  EXPECT_EQ(
+      GetDocument().GetFrame()->GetScrollSnapshotClientsForTesting().size(),
+      1U);
+  NavigateSameDomain("page1");
+  EXPECT_EQ(
+      GetDocument().GetFrame()->GetScrollSnapshotClientsForTesting().size(),
+      0U);
 }
 
 }  // namespace blink

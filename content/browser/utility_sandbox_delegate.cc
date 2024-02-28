@@ -14,7 +14,7 @@
 #include "printing/buildflags/buildflags.h"
 #include "sandbox/policy/mojom/sandbox.mojom.h"
 
-#if BUILDFLAG(USE_ZYGOTE_HANDLE)
+#if BUILDFLAG(USE_ZYGOTE)
 #include "content/common/zygote/zygote_handle_impl_linux.h"
 #include "sandbox/policy/sandbox_type.h"
 #endif
@@ -55,6 +55,7 @@ UtilitySandboxedProcessLauncherDelegate::
       sandbox_type_ == sandbox::mojom::Sandbox::kService ||
       sandbox_type_ == sandbox::mojom::Sandbox::kServiceWithJit ||
       sandbox_type_ == sandbox::mojom::Sandbox::kNetwork ||
+      sandbox_type_ == sandbox::mojom::Sandbox::kOnDeviceModelExecution ||
       sandbox_type_ == sandbox::mojom::Sandbox::kCdm ||
 #if BUILDFLAG(ENABLE_OOP_PRINTING)
       sandbox_type_ == sandbox::mojom::Sandbox::kPrintBackend ||
@@ -69,6 +70,9 @@ UtilitySandboxedProcessLauncherDelegate::
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_ASH)
       sandbox_type_ == sandbox::mojom::Sandbox::kHardwareVideoDecoding ||
 #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+      sandbox_type_ == sandbox::mojom::Sandbox::kHardwareVideoEncoding ||
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 #if BUILDFLAG(IS_CHROMEOS_ASH)
       sandbox_type_ == sandbox::mojom::Sandbox::kIme ||
       sandbox_type_ == sandbox::mojom::Sandbox::kTts ||
@@ -86,7 +90,7 @@ UtilitySandboxedProcessLauncherDelegate::
 }
 
 UtilitySandboxedProcessLauncherDelegate::
-    ~UtilitySandboxedProcessLauncherDelegate() {}
+    ~UtilitySandboxedProcessLauncherDelegate() = default;
 
 sandbox::mojom::Sandbox
 UtilitySandboxedProcessLauncherDelegate::GetSandboxType() {
@@ -99,19 +103,35 @@ base::EnvironmentMap UtilitySandboxedProcessLauncherDelegate::GetEnvironment() {
 }
 #endif  // BUILDFLAG(IS_POSIX)
 
-#if BUILDFLAG(USE_ZYGOTE_HANDLE)
-ZygoteHandle UtilitySandboxedProcessLauncherDelegate::GetZygote() {
+#if BUILDFLAG(USE_ZYGOTE)
+ZygoteCommunication* UtilitySandboxedProcessLauncherDelegate::GetZygote() {
+  if (zygote_.has_value()) {
+    return zygote_.value();
+  }
+
   // If the sandbox has been disabled for a given type, don't use a zygote.
   if (sandbox::policy::IsUnsandboxedSandboxType(sandbox_type_))
     return nullptr;
+
+  // TODO(crbug.com/1427280): remove this special case and fork from the zygote.
+  // For now, browser tests fail when forking the network service from the
+  // unsandboxed zygote, as the forked process only creates the
+  // NetworkServiceTestHelper if the process is exec'd.
+  if (sandbox_type_ == sandbox::mojom::Sandbox::kNetwork) {
+    return nullptr;
+  }
 
   // Utility processes which need specialized sandboxes fork from the
   // unsandboxed zygote and then apply their actual sandboxes in the forked
   // process upon startup.
   if (sandbox_type_ == sandbox::mojom::Sandbox::kNetwork ||
+      sandbox_type_ == sandbox::mojom::Sandbox::kOnDeviceModelExecution ||
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_ASH)
       sandbox_type_ == sandbox::mojom::Sandbox::kHardwareVideoDecoding ||
 #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+      sandbox_type_ == sandbox::mojom::Sandbox::kHardwareVideoEncoding ||
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 #if BUILDFLAG(IS_CHROMEOS_ASH)
       sandbox_type_ == sandbox::mojom::Sandbox::kIme ||
       sandbox_type_ == sandbox::mojom::Sandbox::kTts ||
@@ -133,6 +153,11 @@ ZygoteHandle UtilitySandboxedProcessLauncherDelegate::GetZygote() {
   // All other types use the pre-sandboxed zygote.
   return GetGenericZygote();
 }
-#endif  // BUILDFLAG(USE_ZYGOTE_HANDLE)
+
+void UtilitySandboxedProcessLauncherDelegate::SetZygote(
+    ZygoteCommunication* handle) {
+  zygote_ = handle;
+}
+#endif  // BUILDFLAG(USE_ZYGOTE)
 
 }  // namespace content

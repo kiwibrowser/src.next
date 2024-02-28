@@ -12,6 +12,7 @@
 
 #include "base/base_export.h"
 #include "base/files/file_path.h"
+#include "base/memory/raw_ptr_exclusion.h"
 #include "base/strings/string_piece.h"
 #include "build/build_config.h"
 
@@ -37,11 +38,12 @@ enum NativeLibraryObjCStatus {
 };
 struct NativeLibraryStruct {
   NativeLibraryType type;
-  CFBundleRefNum bundle_resource_ref;
   NativeLibraryObjCStatus objc_status;
   union {
     CFBundleRef bundle;
-    void* dylib;
+    //// This field is not a raw_ptr<> because it was filtered by the rewriter
+    // for: #union
+    RAW_PTR_EXCLUSION void* dylib;
   };
 };
 using NativeLibrary = NativeLibraryStruct*;
@@ -65,9 +67,6 @@ struct BASE_EXPORT NativeLibraryLoadError {
 };
 
 struct BASE_EXPORT NativeLibraryOptions {
-  NativeLibraryOptions() = default;
-  NativeLibraryOptions(const NativeLibraryOptions& options) = default;
-
   // If |true|, a loaded library is required to prefer local symbol resolution
   // before considering global symbols. Note that this is already the default
   // behavior on most systems. Setting this to |false| does not guarantee the
@@ -114,7 +113,7 @@ BASE_EXPORT void UnloadNativeLibrary(NativeLibrary library);
 
 // Gets a function pointer from a native library.
 BASE_EXPORT void* GetFunctionPointerFromNativeLibrary(NativeLibrary library,
-                                                      StringPiece name);
+                                                      const char* name);
 
 // Returns the full platform-specific name for a native library. |name| must be
 // ASCII. This is also the default name for the output of a gn |shared_library|

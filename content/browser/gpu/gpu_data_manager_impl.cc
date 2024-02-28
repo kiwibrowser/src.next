@@ -158,7 +158,7 @@ void GpuDataManagerImpl::StartUmaTimer() {
 
 void GpuDataManagerImpl::UpdateGpuInfo(
     const gpu::GPUInfo& gpu_info,
-    const absl::optional<gpu::GPUInfo>& gpu_info_for_hardware_gpu) {
+    const std::optional<gpu::GPUInfo>& gpu_info_for_hardware_gpu) {
   base::AutoLock auto_lock(lock_);
   private_->UpdateGpuInfo(gpu_info, gpu_info_for_hardware_gpu);
 }
@@ -221,16 +221,16 @@ bool GpuDataManagerImpl::VulkanRequested() const {
   return private_->VulkanRequested();
 }
 
-void GpuDataManagerImpl::PostCreateThreads() {
-  base::AutoLock auto_lock(lock_);
-  private_->PostCreateThreads();
-}
-
 void GpuDataManagerImpl::TerminateInfoCollectionGpuProcess() {
   base::AutoLock auto_lock(lock_);
   private_->TerminateInfoCollectionGpuProcess();
 }
-#endif
+#endif  // BUILDFLAG(IS_WIN)
+
+void GpuDataManagerImpl::PostCreateThreads() {
+  base::AutoLock auto_lock(lock_);
+  private_->PostCreateThreads();
+}
 
 void GpuDataManagerImpl::UpdateDawnInfo(
     const std::vector<std::string>& dawn_info_list) {
@@ -240,7 +240,7 @@ void GpuDataManagerImpl::UpdateDawnInfo(
 
 void GpuDataManagerImpl::UpdateGpuFeatureInfo(
     const gpu::GpuFeatureInfo& gpu_feature_info,
-    const absl::optional<gpu::GpuFeatureInfo>&
+    const std::optional<gpu::GpuFeatureInfo>&
         gpu_feature_info_for_hardware_gpu) {
   base::AutoLock auto_lock(lock_);
   private_->UpdateGpuFeatureInfo(gpu_feature_info,
@@ -404,6 +404,17 @@ void GpuDataManagerImpl::OnDisplayMetricsChanged(
   base::AutoLock auto_lock(lock_);
   private_->OnDisplayMetricsChanged(display, changed_metrics);
 }
+
+#if BUILDFLAG(IS_LINUX)
+bool GpuDataManagerImpl::IsGpuMemoryBufferNV12Supported() {
+  base::AutoLock auto_lock(lock_);
+  return private_->IsGpuMemoryBufferNV12Supported();
+}
+void GpuDataManagerImpl::SetGpuMemoryBufferNV12Supported(bool supported) {
+  base::AutoLock auto_lock(lock_);
+  private_->SetGpuMemoryBufferNV12Supported(supported);
+}
+#endif  // BUILDFLAG(IS_LINUX)
 
 // static
 void GpuDataManagerImpl::BindReceiver(

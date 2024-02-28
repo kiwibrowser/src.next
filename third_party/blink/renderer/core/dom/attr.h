@@ -43,7 +43,7 @@ class CORE_EXPORT Attr final : public Node {
 
   String name() const { return name_.ToString(); }
   bool specified() const { return true; }
-  Element* ownerElement() const { return element_; }
+  Element* ownerElement() const { return element_.Get(); }
 
   const AtomicString& value() const;
   void setValue(const AtomicString&, ExceptionState&);
@@ -64,13 +64,15 @@ class CORE_EXPORT Attr final : public Node {
       delete;  // This will catch anyone doing an unnecessary check.
 
   String nodeName() const override { return name(); }
-  NodeType getNodeType() const override { return kAttributeNode; }
 
   String nodeValue() const override { return value(); }
   void setNodeValue(const String&, ExceptionState&) override;
   void setTextContentForBinding(const V8UnionStringOrTrustedScript* value,
                                 ExceptionState& exception_state) override;
-  Node* Clone(Document&, CloneChildrenFlag) const override;
+  Node* Clone(Document& factory,
+              NodeCloningData& data,
+              ContainerNode* append_to,
+              ExceptionState& append_exception_state) const override;
 
   bool IsAttributeNode() const override { return true; }
 

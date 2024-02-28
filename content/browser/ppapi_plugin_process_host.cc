@@ -10,18 +10,18 @@
 #include <utility>
 
 #include "base/base_switches.h"
-#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "content/browser/browser_child_process_host_impl.h"
+#include "content/browser/child_process_host_impl.h"
 #include "content/browser/plugin_service_impl.h"
 #include "content/browser/ppapi_plugin_sandboxed_process_launcher_delegate.h"
 #include "content/browser/renderer_host/render_message_filter.h"
-#include "content/common/child_process_host_impl.h"
 #include "content/common/content_switches_internal.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -92,7 +92,7 @@ PpapiPluginProcessHost::~PpapiPluginProcessHost() {
 PpapiPluginProcessHost* PpapiPluginProcessHost::CreatePluginHost(
     const ContentPluginInfo& info,
     const base::FilePath& profile_data_directory,
-    const absl::optional<url::Origin>& origin_lock) {
+    const std::optional<url::Origin>& origin_lock) {
   PpapiPluginProcessHost* plugin_host =
       new PpapiPluginProcessHost(info, profile_data_directory, origin_lock);
   if (plugin_host->Init(info))
@@ -172,7 +172,7 @@ void PpapiPluginProcessHost::OpenChannelToPlugin(Client* client) {
 PpapiPluginProcessHost::PpapiPluginProcessHost(
     const ContentPluginInfo& info,
     const base::FilePath& profile_data_directory,
-    const absl::optional<url::Origin>& origin_lock)
+    const std::optional<url::Origin>& origin_lock)
     : profile_data_directory_(profile_data_directory),
       origin_lock_(origin_lock) {
   uint32_t base_permissions = info.permissions;
@@ -235,15 +235,15 @@ bool PpapiPluginProcessHost::Init(const ContentPluginInfo& info) {
   BrowserChildProcessHostImpl::CopyTraceStartupFlags(cmd_line.get());
 
 #if BUILDFLAG(IS_WIN)
-  cmd_line->AppendArg(switches::kPrefetchArgumentPpapi);
+  cmd_line->AppendArg(internal::ChildProcessLauncherHelper::GetPrefetchSwitch(
+      AppLaunchPrefetchType::kPpapi));
 #endif  // BUILDFLAG(IS_WIN)
 
   // These switches are forwarded to plugin pocesses.
   static const char* const kCommonForwardSwitches[] = {
     switches::kVModule
   };
-  cmd_line->CopySwitchesFrom(browser_command_line, kCommonForwardSwitches,
-                             std::size(kCommonForwardSwitches));
+  cmd_line->CopySwitchesFrom(browser_command_line, kCommonForwardSwitches);
 
   static const char* const kPluginForwardSwitches[] = {
     sandbox::policy::switches::kDisableSeccompFilterSandbox,
@@ -254,8 +254,7 @@ bool PpapiPluginProcessHost::Init(const ContentPluginInfo& info) {
     switches::kPpapiStartupDialog,
     switches::kTimeZoneForTesting,
   };
-  cmd_line->CopySwitchesFrom(browser_command_line, kPluginForwardSwitches,
-                             std::size(kPluginForwardSwitches));
+  cmd_line->CopySwitchesFrom(browser_command_line, kPluginForwardSwitches);
 
   std::string locale = GetContentClient()->browser()->GetApplicationLocale();
   if (!locale.empty()) {

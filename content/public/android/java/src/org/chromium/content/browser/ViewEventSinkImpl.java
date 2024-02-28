@@ -13,11 +13,10 @@ import org.chromium.content.browser.webcontents.WebContentsImpl.UserDataFactory;
 import org.chromium.content_public.browser.ViewEventSink;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.ViewAndroidDelegate;
+import org.chromium.ui.base.ViewUtils;
 import org.chromium.ui.base.WindowAndroid.ActivityStateObserver;
 
-/**
- * Implementation of the interface {@link ViewEventSink}.
- */
+/** Implementation of the interface {@link ViewEventSink}. */
 public final class ViewEventSinkImpl implements ViewEventSink, ActivityStateObserver, UserData {
     private final WebContentsImpl mWebContents;
 
@@ -66,8 +65,9 @@ public final class ViewEventSinkImpl implements ViewEventSink, ActivityStateObse
         if (mWebContents.getStylusWritingHandler() != null) {
             ViewAndroidDelegate viewAndroidDelegate = mWebContents.getViewAndroidDelegate();
             if (viewAndroidDelegate != null) {
-                mWebContents.getStylusWritingHandler().onDetachedFromWindow(
-                        viewAndroidDelegate.getContainerView().getContext());
+                mWebContents
+                        .getStylusWritingHandler()
+                        .onDetachedFromWindow(viewAndroidDelegate.getContainerView().getContext());
             }
         }
     }
@@ -103,7 +103,10 @@ public final class ViewEventSinkImpl implements ViewEventSink, ActivityStateObse
             // To request layout has side effect, but it seems OK as it only happen in
             // onConfigurationChange and layout has to be changed in most case.
             ViewAndroidDelegate delegate = mWebContents.getViewAndroidDelegate();
-            if (delegate != null) delegate.getContainerView().requestLayout();
+            if (delegate != null) {
+                ViewUtils.requestLayout(
+                        delegate.getContainerView(), "ViewEventSinkImpl.onConfigurationChanged");
+            }
         } finally {
             TraceEvent.end("ViewEventSink.onConfigurationChanged");
         }

@@ -15,30 +15,30 @@
 #include <vector>
 
 #include "base/base64.h"
-#include "base/bind.h"
 #include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/functional/bind.h"
 #include "base/lazy_instance.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/notreached.h"
-#include "base/threading/sequenced_task_runner_handle.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/typed_macros.h"
 #include "base/unguessable_token.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
+#include "components/download/public/common/in_progress_download_manager.h"
 #include "components/services/storage/privileged/mojom/indexed_db_control.mojom.h"
 #include "content/browser/blob_storage/chrome_blob_storage_context.h"
 #include "content/browser/browser_context_impl.h"
+#include "content/browser/browsing_data/browsing_data_remover_impl.h"
+#include "content/browser/child_process_host_impl.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/media/browser_feature_provider.h"
 #include "content/browser/push_messaging/push_messaging_router.h"
 #include "content/browser/site_info.h"
 #include "content/browser/storage_partition_impl_map.h"
-#include "content/common/child_process_host_impl.h"
 #include "content/public/browser/blob_handle.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -142,31 +142,22 @@ StoragePartition* BrowserContext::GetStoragePartition(
 StoragePartition* BrowserContext::GetStoragePartitionForUrl(
     const GURL& url,
     bool can_create) {
-  auto storage_partition_config = SiteInfo::GetStoragePartitionConfigForUrl(
-      this, url, /*is_site_url=*/false);
+  auto storage_partition_config =
+      SiteInfo::GetStoragePartitionConfigForUrl(this, url);
 
   return GetStoragePartition(storage_partition_config, can_create);
 }
 
-void BrowserContext::ForEachStoragePartition(
-    StoragePartitionCallback callback) {
+void BrowserContext::ForEachLoadedStoragePartition(
+    base::FunctionRef<void(StoragePartition*)> fn) {
   StoragePartitionImplMap* partition_map = impl()->storage_partition_map();
   if (!partition_map)
     return;
 
-  partition_map->ForEach(std::move(callback));
+  partition_map->ForEach(fn);
 }
 
-void BrowserContext::DisposeStoragePartition(
-    StoragePartition* storage_partition) {
-  StoragePartitionImplMap* partition_map = impl()->storage_partition_map();
-  if (!partition_map)
-    return;
-
-  partition_map->DisposeInMemory(storage_partition);
-}
-
-size_t BrowserContext::GetStoragePartitionCount() {
+size_t BrowserContext::GetLoadedStoragePartitionCount() {
   StoragePartitionImplMap* partition_map = impl()->storage_partition_map();
   return partition_map ? partition_map->size() : 0;
 }
@@ -222,7 +213,7 @@ void BrowserContext::DeliverPushMessage(
     const GURL& origin,
     int64_t service_worker_registration_id,
     const std::string& message_id,
-    absl::optional<std::string> payload,
+    std::optional<std::string> payload,
     base::OnceCallback<void(blink::mojom::PushEventStatus)> callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   PushMessagingRouter::DeliverMessage(
@@ -321,19 +312,22 @@ media::learning::LearningSession* BrowserContext::GetLearningSession() {
   return impl()->GetLearningSession();
 }
 
-download::InProgressDownloadManager*
-BrowserContext::RetriveInProgressDownloadManager() {
+std::unique_ptr<download::InProgressDownloadManager>
+BrowserContext::RetrieveInProgressDownloadManager() {
   return nullptr;
-}
-
-// static
-std::string BrowserContext::CreateRandomMediaDeviceIDSalt() {
-  return base::UnguessableToken::Create().ToString();
 }
 
 void BrowserContext::WriteIntoTrace(
     perfetto::TracedProto<ChromeBrowserContext> proto) const {
   perfetto::WriteIntoTracedProto(std::move(proto), impl());
+}
+
+ResourceContext* BrowserContext::GetResourceContext() const {
+  return impl()->GetResourceContext();
+}
+
+base::WeakPtr<BrowserContext> BrowserContext::GetWeakPtr() {
+  return weak_factory_.GetWeakPtr();
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -344,10 +338,6 @@ void BrowserContext::WriteIntoTrace(
 // TODO(https://crbug.com/1179776): Migrate method definitions from this
 // section into a separate BrowserContextDelegate class and a separate
 // browser_context_delegate.cc source file.
-
-std::string BrowserContext::GetMediaDeviceIDSalt() {
-  return UniqueId();
-}
 
 FileSystemAccessPermissionContext*
 BrowserContext::GetFileSystemAccessPermissionContext() {
@@ -396,18 +386,22 @@ BrowserContext::GetFederatedIdentityApiPermissionContext() {
   return nullptr;
 }
 
-FederatedIdentityActiveSessionPermissionContextDelegate*
-BrowserContext::GetFederatedIdentityActiveSessionPermissionContext() {
+FederatedIdentityAutoReauthnPermissionContextDelegate*
+BrowserContext::GetFederatedIdentityAutoReauthnPermissionContext() {
   return nullptr;
 }
 
-FederatedIdentitySharingPermissionContextDelegate*
-BrowserContext::GetFederatedIdentitySharingPermissionContext() {
+FederatedIdentityPermissionContextDelegate*
+BrowserContext::GetFederatedIdentityPermissionContext() {
   return nullptr;
 }
 
-std::unique_ptr<KAnonymityServiceDelegate>
-BrowserContext::CreateKAnonymityServiceDelegate() {
+KAnonymityServiceDelegate* BrowserContext::GetKAnonymityServiceDelegate() {
+  return nullptr;
+}
+
+OriginTrialsControllerDelegate*
+BrowserContext::GetOriginTrialsControllerDelegate() {
   return nullptr;
 }
 

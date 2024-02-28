@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/geometry/physical_rect.h"
 #include "third_party/blink/renderer/core/paint/applied_decoration_painter.h"
+#include "third_party/blink/renderer/core/paint/line_relative_rect.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
 #include "third_party/blink/renderer/core/paint/text_decoration_info.h"
 #include "third_party/blink/renderer/core/paint/text_paint_style.h"
@@ -24,11 +25,10 @@
 
 namespace blink {
 
-struct AutoDarkMode;
 class ComputedStyle;
 class Document;
 class GraphicsContext;
-class NGInlinePaintContext;
+class InlinePaintContext;
 class Node;
 
 namespace {
@@ -42,25 +42,22 @@ constexpr float kDecorationClipMaxDilation = 13;
 
 }  // anonymous namespace
 
-// Base class for text painting. Has no dependencies on the layout tree and thus
-// provides functionality and definitions that can be shared between both legacy
-// layout and LayoutNG.
+// Base class for text painting. This is the base class of TextPainter and
+// TextCombinePainter.
 class CORE_EXPORT TextPainterBase {
   STACK_ALLOCATED();
 
  public:
   TextPainterBase(GraphicsContext&,
                   const Font&,
-                  const PhysicalOffset& text_origin,
-                  const PhysicalRect& text_frame_rect,
-                  NGInlinePaintContext* inline_context,
+                  const LineRelativeOffset& text_origin,
+                  InlinePaintContext* inline_context,
                   bool horizontal);
   ~TextPainterBase();
 
-  const NGInlinePaintContext* InlineContext() const { return inline_context_; }
+  const InlinePaintContext* InlineContext() const { return inline_context_; }
 
   void SetEmphasisMark(const AtomicString&, TextEmphasisPosition);
-  void SetEllipsisOffset(int offset) { ellipsis_offset_ = offset; }
 
   enum ShadowMode { kBothShadowsAndTextProper, kShadowsOnly, kTextProperOnly };
   static void UpdateGraphicsContext(GraphicsContext&,
@@ -102,66 +99,59 @@ class CORE_EXPORT TextPainterBase {
       const Vector<Font::TextIntercept>& text_intercepts);
 
   void PaintDecorationsOnlyLineThrough(TextDecorationInfo&,
-                                       const PaintInfo&,
-                                       const Vector<AppliedTextDecoration>&,
                                        const TextPaintStyle&,
                                        const cc::PaintFlags* flags = nullptr);
 
-  // Paints emphasis mark as for ideographic full stop character. Callers of
-  // this function should rotate canvas to paint emphasis mark at left/right
-  // side instead of top/bottom side.
-  // |emphasis_mark_font| is used for painting emphasis mark because |font_|
-  // may be compressed font (width variants).
-  // TODO(yosin): Once legacy inline layout gone, we should move this function
-  // to |NGTextCombinePainter|.
-  void PaintEmphasisMarkForCombinedText(const TextPaintStyle& text_style,
-                                        const Font& emphasis_mark_font,
-                                        const AutoDarkMode& auto_dark_mode);
+  // We have two functions to paint text decorations, because we should paint
+  // text and decorations in following order:
+  //   1. Paint underline or overline text decorations
+  //   2. Paint text
+  //   3. Paint line through text decoration
+  void PaintUnderOrOverLineDecorations(
+      const TextFragmentPaintInfo& fragment_paint_info,
+      const TextDecorationOffset& decoration_offset,
+      TextDecorationInfo& decoration_info,
+      TextDecorationLine lines_to_paint,
+      const TextPaintStyle& text_style,
+      const cc::PaintFlags* flags = nullptr);
+
+  virtual void ClipDecorationsStripe(const TextFragmentPaintInfo&,
+                                     float upper,
+                                     float stripe_width,
+                                     float dilation) = 0;
 
   enum PaintInternalStep { kPaintText, kPaintEmphasisMark };
 
-  NGInlinePaintContext* inline_context_ = nullptr;
+  InlinePaintContext* inline_context_ = nullptr;
   GraphicsContext& graphics_context_;
   const Font& font_;
-  const PhysicalOffset text_origin_;
-  const PhysicalRect text_frame_rect_;
+  const LineRelativeOffset text_origin_;
   AtomicString emphasis_mark_;
   int emphasis_mark_offset_ = 0;
-  int ellipsis_offset_ = 0;
   const bool horizontal_;
+
+ private:
+  void PaintDecorationUnderOrOverLine(
+      const TextFragmentPaintInfo& fragment_paint_info,
+      TextDecorationInfo& decoration_info,
+      TextDecorationLine line,
+      const cc::PaintFlags* flags = nullptr);
+
+  void PaintUnderOrOverLineDecorationShadows(
+      const TextFragmentPaintInfo& fragment_paint_info,
+      const TextDecorationOffset& decoration_offset,
+      TextDecorationInfo& decoration_info,
+      TextDecorationLine lines_to_paint,
+      const cc::PaintFlags* flags,
+      const TextPaintStyle& text_style);
+
+  void PaintUnderOrOverLineDecorations(
+      const TextFragmentPaintInfo& fragment_paint_info,
+      const TextDecorationOffset& decoration_offset,
+      TextDecorationInfo& decoration_info,
+      TextDecorationLine lines_to_paint,
+      const cc::PaintFlags* flags);
 };
-
-inline AffineTransform TextPainterBase::Rotation(
-    const PhysicalRect& box_rect,
-    RotationDirection rotation_direction) {
-  // Why this matrix is correct: consider the case of a clockwise rotation.
-
-  // Let the corner points that define |boxRect| be ABCD, where A is top-left
-  // and B is bottom-left.
-
-  // 1. We want B to end up at the same pixel position after rotation as A is
-  //    before rotation.
-  // 2. Before rotation, B is at (x(), maxY())
-  // 3. Rotating clockwise by 90 degrees places B at the coordinates
-  //    (-maxY(), x()).
-  // 4. Point A before rotation is at (x(), y())
-  // 5. Therefore the translation from (3) to (4) is (x(), y()) - (-maxY(), x())
-  //    = (x() + maxY(), y() - x())
-
-  // A similar argument derives the counter-clockwise case.
-  return rotation_direction == kClockwise
-             ? AffineTransform(0, 1, -1, 0, box_rect.X() + box_rect.Bottom(),
-                               box_rect.Y() - box_rect.X())
-             : AffineTransform(0, -1, 1, 0, box_rect.X() - box_rect.Y(),
-                               box_rect.X() + box_rect.Bottom());
-}
-
-inline AffineTransform TextPainterBase::Rotation(const PhysicalRect& box_rect,
-                                                 WritingMode writing_mode) {
-  return Rotation(box_rect, writing_mode != WritingMode::kSidewaysLr
-                                ? TextPainterBase::kClockwise
-                                : TextPainterBase::kCounterclockwise);
-}
 
 }  // namespace blink
 

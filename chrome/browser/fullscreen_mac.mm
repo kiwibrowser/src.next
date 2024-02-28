@@ -10,7 +10,7 @@
 
 bool IsFullScreenMode() {
   NSApplicationPresentationOptions options =
-      [NSApp currentSystemPresentationOptions];
+      NSApp.currentSystemPresentationOptions;
 
   bool dock_hidden = (options & NSApplicationPresentationHideDock) ||
                      (options & NSApplicationPresentationAutoHideDock);

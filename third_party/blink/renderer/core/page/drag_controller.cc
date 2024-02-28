@@ -93,6 +93,7 @@
 #include "ui/display/screen_info.h"
 #include "ui/gfx/geometry/point_conversions.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/geometry/vector2d_conversions.h"
 
@@ -102,6 +103,7 @@
 
 namespace blink {
 
+using mojom::blink::FormControlType;
 using ui::mojom::blink::DragOperation;
 
 static const int kMaxOriginalImageArea = 1500 * 1500;
@@ -176,15 +178,15 @@ static DocumentFragment* DocumentFragmentFromDragData(
     if (drag_data->ContainsURL(DragData::kDoNotConvertFilenames)) {
       String title;
       String url = drag_data->AsURL(DragData::kDoNotConvertFilenames, &title);
-      if (!url.IsEmpty()) {
+      if (!url.empty()) {
         auto* anchor = MakeGarbageCollected<HTMLAnchorElement>(document);
         anchor->SetHref(AtomicString(url));
-        if (title.IsEmpty()) {
+        if (title.empty()) {
           // Try the plain text first because the url might be normalized or
           // escaped.
           if (drag_data->ContainsPlainText())
             title = drag_data->AsPlainText();
-          if (title.IsEmpty())
+          if (title.empty())
             title = url;
         }
         Node* anchor_text = document.createTextNode(title);
@@ -255,7 +257,10 @@ void DragController::PerformDrag(DragData* drag_data, LocalFrame& local_root) {
   if ((drag_destination_action_ & kDragDestinationActionDHTML) &&
       document_is_handling_drag_) {
     bool prevented_default = false;
-    if (local_root.View()) {
+    if (drag_data->ForceDefaultAction()) {
+      // Tell the document that the drag has left the building.
+      DragExited(drag_data, local_root);
+    } else if (local_root.View()) {
       // Sending an event can result in the destruction of the view and part.
       DataTransfer* data_transfer = CreateDraggingDataTransfer(
           DataTransferAccessPolicy::kReadable, drag_data);
@@ -295,38 +300,29 @@ void DragController::PerformDrag(DragData* drag_data, LocalFrame& local_root) {
   }
 
   if (OperationForLoad(drag_data, local_root) != DragOperation::kNone) {
-    if (page_->GetSettings().GetNavigateOnDragDrop()) {
-      ResourceRequest resource_request(drag_data->AsURL());
-      resource_request.SetHasUserGesture(LocalFrame::HasTransientUserActivation(
-          document_under_mouse_ ? document_under_mouse_->GetFrame() : nullptr));
+    ResourceRequest resource_request(drag_data->AsURL());
+    resource_request.SetHasUserGesture(LocalFrame::HasTransientUserActivation(
+        document_under_mouse_ ? document_under_mouse_->GetFrame() : nullptr));
 
-      // Use a unique origin to match other navigations that are initiated
-      // outside of a renderer process (e.g. omnibox navigations).  Here, the
-      // initiator of the navigation is a user dragging files from *outside* of
-      // the current page.  See also https://crbug.com/930049.
-      //
-      // TODO(lukasza): Once drag-and-drop remembers the source of the drag
-      // (unique origin for drags started from top-level Chrome like bookmarks
-      // or for drags started from other apps like Windows Explorer;  specific
-      // origin for drags started from another tab) we should use the source of
-      // the drag as the initiator of the navigation below.
-      resource_request.SetRequestorOrigin(SecurityOrigin::CreateUniqueOpaque());
+    // Use a unique origin to match other navigations that are initiated
+    // outside of a renderer process (e.g. omnibox navigations).  Here, the
+    // initiator of the navigation is a user dragging files from *outside* of
+    // the current page.  See also https://crbug.com/930049.
+    //
+    // TODO(lukasza): Once drag-and-drop remembers the source of the drag
+    // (unique origin for drags started from top-level Chrome like bookmarks
+    // or for drags started from other apps like Windows Explorer;  specific
+    // origin for drags started from another tab) we should use the source of
+    // the drag as the initiator of the navigation below.
+    resource_request.SetRequestorOrigin(SecurityOrigin::CreateUniqueOpaque());
 
-      FrameLoadRequest request(nullptr, resource_request);
+    FrameLoadRequest request(nullptr, resource_request);
 
-      // Open the dropped URL in a new tab to avoid potential data-loss in the
-      // current tab. See https://crbug.com/451659.
-      request.SetNavigationPolicy(
-          NavigationPolicy::kNavigationPolicyNewForegroundTab);
-      local_root.Navigate(request, WebFrameLoadType::kStandard);
-    }
-
-    // TODO(bokan): This case happens when we end a URL drag inside a guest
-    // process which doesn't navigate. We assume that since we'll navigate the
-    // page in the general case we don't end up sending `dragleave` and
-    // `dragend` events but for plugins we wont navigate so it seems we should
-    // be sending these events. crbug.com/748243.
-    local_root.GetEventHandler().ClearDragState();
+    // Open the dropped URL in a new tab to avoid potential data-loss in the
+    // current tab. See https://crbug.com/451659.
+    request.SetNavigationPolicy(
+        NavigationPolicy::kNavigationPolicyNewForegroundTab);
+    local_root.Navigate(request, WebFrameLoadType::kStandard);
   }
 
   document_under_mouse_ = nullptr;
@@ -342,8 +338,9 @@ void DragController::MouseMovedIntoDocument(Document* new_document) {
   document_under_mouse_ = new_document;
 }
 
-DragOperation DragController::DragEnteredOrUpdated(DragData* drag_data,
-                                                   LocalFrame& local_root) {
+DragController::Operation DragController::DragEnteredOrUpdated(
+    DragData* drag_data,
+    LocalFrame& local_root) {
   DCHECK(drag_data);
 
   MouseMovedIntoDocument(local_root.DocumentAtPoint(
@@ -356,12 +353,16 @@ DragOperation DragController::DragEnteredOrUpdated(DragData* drag_data,
           : static_cast<DragDestinationAction>(kDragDestinationActionDHTML |
                                                kDragDestinationActionEdit);
 
-  DragOperation drag_operation = DragOperation::kNone;
-  document_is_handling_drag_ = TryDocumentDrag(
-      drag_data, drag_destination_action_, drag_operation, local_root);
+  Operation drag_operation;
+  document_is_handling_drag_ =
+      TryDocumentDrag(drag_data, drag_destination_action_,
+                      drag_operation.operation, local_root);
   if (!document_is_handling_drag_ &&
-      (drag_destination_action_ & kDragDestinationActionLoad))
-    drag_operation = OperationForLoad(drag_data, local_root);
+      (drag_destination_action_ & kDragDestinationActionLoad)) {
+    drag_operation.operation = OperationForLoad(drag_data, local_root);
+  }
+
+  drag_operation.document_is_handling_drag = document_is_handling_drag_;
   return drag_operation;
 }
 
@@ -370,8 +371,9 @@ static HTMLInputElement* AsFileInput(Node* node) {
   for (; node; node = node->OwnerShadowHost()) {
     auto* html_input_element = DynamicTo<HTMLInputElement>(node);
     if (html_input_element &&
-        html_input_element->type() == input_type_names::kFile)
+        html_input_element->FormControlType() == FormControlType::kInputFile) {
       return html_input_element;
+    }
   }
   return nullptr;
 }
@@ -704,7 +706,7 @@ bool DragController::ConcludeEditDrag(DragData* drag_data) {
     }
   } else {
     String text = drag_data->AsPlainText();
-    if (text.IsEmpty())
+    if (text.empty())
       return false;
 
     if (SetSelectionToDragCaret(inner_frame, drag_caret.AsSelection(), range,
@@ -1078,7 +1080,7 @@ bool CanDragImage(const Element& element) {
   // We shouldn't be starting a drag for an image that can't provide an
   // extension.
   // This is an early detection for problems encountered later upon drop.
-  DCHECK(!image_content->GetImage()->FilenameExtension().IsEmpty());
+  DCHECK(!image_content->GetImage()->FilenameExtension().empty());
   return true;
 }
 

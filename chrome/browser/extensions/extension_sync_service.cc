@@ -7,7 +7,8 @@
 #include <utility>
 
 #include "base/auto_reset.h"
-#include "base/callback_helpers.h"
+#include "base/feature_list.h"
+#include "base/functional/callback_helpers.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/one_shot_event.h"
 #include "base/strings/utf_string_conversions.h"
@@ -19,10 +20,8 @@
 #include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/sync_start_util.h"
-#include "chrome/common/buildflags.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "components/sync/model/sync_change.h"
-#include "components/sync/model/sync_error_factory.h"
 #include "extensions/browser/app_sorting.h"
 #include "extensions/browser/blocklist_extension_prefs.h"
 #include "extensions/browser/extension_system.h"
@@ -32,11 +31,6 @@
 #include "extensions/common/extension_set.h"
 #include "extensions/common/permissions/permission_message_provider.h"
 #include "extensions/common/permissions/permissions_data.h"
-
-#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
-#include "chrome/browser/supervised_user/supervised_user_service.h"
-#include "chrome/browser/supervised_user/supervised_user_service_factory.h"
-#endif
 
 using extensions::AppSorting;
 using extensions::Extension;
@@ -50,6 +44,9 @@ using extensions::ExtensionSystem;
 using extensions::SyncBundle;
 
 namespace {
+BASE_FEATURE(kBookmarkAppDeletion,
+             "BookmarkAppDeletion",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Returns true if the sync type of |extension| matches |type|.
 bool IsCorrectSyncType(const Extension& extension, syncer::ModelType type) {
@@ -83,7 +80,7 @@ syncer::SyncDataList ToSyncerSyncDataList(
   return result;
 }
 
-static_assert(extensions::disable_reason::DISABLE_REASON_LAST == (1LL << 22),
+static_assert(extensions::disable_reason::DISABLE_REASON_LAST == (1LL << 23),
               "Please consider whether your new disable reason should be"
               " syncable, and if so update this bitmask accordingly!");
 const int kKnownSyncableDisableReasons =
@@ -154,12 +151,11 @@ void ExtensionSyncService::WaitUntilReadyToSync(base::OnceClosure done) {
   system_->ready().Post(FROM_HERE, std::move(done));
 }
 
-absl::optional<syncer::ModelError>
+std::optional<syncer::ModelError>
 ExtensionSyncService::MergeDataAndStartSyncing(
     syncer::ModelType type,
     const syncer::SyncDataList& initial_sync_data,
-    std::unique_ptr<syncer::SyncChangeProcessor> sync_processor,
-    std::unique_ptr<syncer::SyncErrorFactory> sync_error_factory) {
+    std::unique_ptr<syncer::SyncChangeProcessor> sync_processor) {
   CHECK(sync_processor.get());
   LOG_IF(FATAL, type != syncer::EXTENSIONS && type != syncer::APPS)
       << "Got " << type << " ModelType";
@@ -180,24 +176,6 @@ ExtensionSyncService::MergeDataAndStartSyncing(
     }
   }
 
-  ExtensionRegistry* registry = ExtensionRegistry::Get(profile_);
-  std::unique_ptr<ExtensionSet> all_extensions =
-      registry->GenerateInstalledExtensionsSet();
-  for (const auto& extension : *all_extensions) {
-    if (extension->from_deprecated_bookmark()) {
-      // Deleting deprecated bookmark apps.
-      const std::string& id = extension->id();
-      std::u16string error;
-      bool uninstalled = extension_service()->UninstallExtension(
-          id, extensions::UNINSTALL_REASON_SYNC, &error);
-      if (!uninstalled) {
-        LOG(WARNING) << "Failed to uninstall bookmark apps with id '" << id
-                     << "' : " << error;
-      }
-      base::UmaHistogramBoolean("Extensions.UninstallBookmarkApp", uninstalled);
-    }
-  }
-
   // Now push the local state to sync.
   // Note: We'd like to only send out changes for extensions which have
   // NeedsSync set. However, we can't tell if our changes ever made it to the
@@ -213,7 +191,7 @@ ExtensionSyncService::MergeDataAndStartSyncing(
   if (type == syncer::APPS)
     system_->app_sorting()->FixNTPOrdinalCollisions();
 
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 void ExtensionSyncService::StopSyncing(syncer::ModelType type) {
@@ -238,7 +216,7 @@ syncer::SyncDataList ExtensionSyncService::GetAllSyncDataForTesting(
   return ToSyncerSyncDataList(sync_data_list);
 }
 
-absl::optional<syncer::ModelError> ExtensionSyncService::ProcessSyncChanges(
+std::optional<syncer::ModelError> ExtensionSyncService::ProcessSyncChanges(
     const base::Location& from_here,
     const syncer::SyncChangeList& change_list) {
   for (const syncer::SyncChange& sync_change : change_list) {
@@ -250,7 +228,11 @@ absl::optional<syncer::ModelError> ExtensionSyncService::ProcessSyncChanges(
 
   system_->app_sorting()->FixNTPOrdinalCollisions();
 
-  return absl::nullopt;
+  return std::nullopt;
+}
+
+base::WeakPtr<syncer::SyncableService> ExtensionSyncService::AsWeakPtr() {
+  return weak_ptr_factory_.GetWeakPtr();
 }
 
 ExtensionSyncData ExtensionSyncService::CreateSyncData(
@@ -309,6 +291,17 @@ ExtensionSyncData ExtensionSyncService::CreateSyncData(
 void ExtensionSyncService::ApplySyncData(
     const ExtensionSyncData& extension_sync_data) {
   const std::string& id = extension_sync_data.id();
+
+  // Remove all deprecated bookmark apps immediately, as they aren't loaded into
+  // the extensions system at all (and thus cannot be looked up).
+  if (base::FeatureList::IsEnabled(kBookmarkAppDeletion) &&
+      extension_sync_data.is_deprecated_bookmark_app()) {
+    GetSyncBundle(syncer::APPS)->ApplySyncData(extension_sync_data);
+    GetSyncBundle(syncer::APPS)
+        ->PushSyncDeletion(id, extension_sync_data.GetSyncData());
+    return;
+  }
+
   // Note: |extension| may be null if it hasn't been installed yet.
   const Extension* extension =
       ExtensionRegistry::Get(profile_)->GetInstalledExtension(id);
@@ -653,5 +646,7 @@ void ExtensionSyncService::FillSyncDataList(
 bool ExtensionSyncService::ShouldSync(const Extension& extension) const {
   // Themes are handled by the ThemeSyncableService.
   return extensions::util::ShouldSync(&extension, profile_) &&
-         !extension.is_theme();
+         !extension.is_theme() &&
+         !extensions::blocklist_prefs::IsExtensionBlocklisted(
+             extension.id(), ExtensionPrefs::Get(profile_));
 }

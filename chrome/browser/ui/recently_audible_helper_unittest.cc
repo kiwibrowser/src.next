@@ -6,10 +6,9 @@
 
 #include <list>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
-#include "base/task/current_thread.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/browser_task_environment.h"
@@ -37,7 +36,6 @@ class RecentlyAudibleHelperTest : public testing::Test {
     scoped_context_ =
         std::make_unique<base::TestMockTimeTaskRunner::ScopedContext>(
             task_runner_);
-    base::CurrentThread::Get()->SetTaskRunner(task_runner_);
 
     RecentlyAudibleHelper::CreateForWebContents(contents_);
     helper_ = RecentlyAudibleHelper::FromWebContents(contents_);
@@ -118,8 +116,8 @@ class RecentlyAudibleHelperTest : public testing::Test {
   TestingProfile testing_profile_;
 
   // A test WebContents and its associated helper.
-  raw_ptr<content::WebContents> contents_;
-  raw_ptr<RecentlyAudibleHelper> helper_;
+  raw_ptr<content::WebContents, DanglingUntriaged> contents_;
+  raw_ptr<RecentlyAudibleHelper, DanglingUntriaged> helper_;
   base::CallbackListSubscription subscription_;
 
   std::list<bool> recently_audible_messages_;

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -56,7 +56,7 @@ class PLATFORM_EXPORT PlaceholderImage final : public Image {
   bool IsPlaceholderImage() const override;
 
   const String& GetTextForTesting() const { return text_; }
-  const Font* GetFontForTesting() const;
+  const Font& GetFontForTesting() const;
 
   void SetIconAndTextScaleFactor(float icon_and_text_scale_factor);
 
@@ -83,14 +83,9 @@ class PLATFORM_EXPORT PlaceholderImage final : public Image {
 
   float icon_and_text_scale_factor_ = 1.0f;
 
-  class SharedFont;
-  // Lazily initialized. All instances of PlaceholderImage will share the same
-  // Font object, wrapped as a SharedFont.
-  scoped_refptr<SharedFont> shared_font_;
-
   // Lazily initialized.
   absl::optional<float> cached_text_width_;
-  sk_sp<PaintRecord> paint_record_for_current_frame_;
+  absl::optional<PaintRecord> paint_record_for_current_frame_;
   PaintImage::ContentId paint_record_content_id_;
 };
 

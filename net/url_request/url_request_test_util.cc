@@ -14,13 +14,11 @@
 #include "base/supports_user_data.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "net/base/host_port_pair.h"
 #include "net/cert/cert_verifier.h"
-#include "net/cert/ct_policy_enforcer.h"
 #include "net/cert/do_nothing_ct_verifier.h"
+#include "net/cookies/cookie_setting_override.h"
 #include "net/dns/mock_host_resolver.h"
-#include "net/first_party_sets/same_party_context.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_server_properties.h"
@@ -79,15 +77,12 @@ std::unique_ptr<URLRequestContextBuilder> CreateTestURLRequestContextBuilder() {
       ConfiguredProxyResolutionService::CreateDirect());
   builder->SetCertVerifier(
       CertVerifier::CreateDefault(/*cert_net_fetcher=*/nullptr));
-  builder->set_ct_policy_enforcer(std::make_unique<DefaultCTPolicyEnforcer>());
   builder->set_ssl_config_service(std::make_unique<SSLConfigServiceDefaults>());
   builder->SetHttpAuthHandlerFactory(HttpAuthHandlerFactory::CreateDefault());
   builder->SetHttpServerProperties(std::make_unique<HttpServerProperties>());
   builder->set_quic_context(std::make_unique<QuicContext>());
-  builder->SetCookieStore(
-      std::make_unique<CookieMonster>(/*store=*/nullptr,
-                                      /*netlog=*/nullptr,
-                                      /*first_party_sets_enabled=*/false));
+  builder->SetCookieStore(std::make_unique<CookieMonster>(/*store=*/nullptr,
+                                                          /*netlog=*/nullptr));
   builder->set_http_user_agent_settings(
       std::make_unique<StaticHttpUserAgentSettings>("en-us,fr", std::string()));
   return builder;
@@ -134,26 +129,23 @@ TestURLRequestContextGetter::GetNetworkTaskRunner() const {
 const int TestDelegate::kBufferSize;
 
 TestDelegate::TestDelegate()
-    : buf_(base::MakeRefCounted<IOBuffer>(kBufferSize)) {}
+    : buf_(base::MakeRefCounted<IOBufferWithSize>(kBufferSize)) {}
 
 TestDelegate::~TestDelegate() = default;
 
 void TestDelegate::RunUntilComplete() {
-  use_legacy_on_complete_ = false;
   base::RunLoop run_loop;
   on_complete_ = run_loop.QuitClosure();
   run_loop.Run();
 }
 
 void TestDelegate::RunUntilRedirect() {
-  use_legacy_on_complete_ = false;
   base::RunLoop run_loop;
   on_redirect_ = run_loop.QuitClosure();
   run_loop.Run();
 }
 
 void TestDelegate::RunUntilAuthRequired() {
-  use_legacy_on_complete_ = false;
   base::RunLoop run_loop;
   on_auth_required_ = run_loop.QuitClosure();
   run_loop.Run();
@@ -165,7 +157,7 @@ int TestDelegate::OnConnected(URLRequest* request,
   transports_.push_back(info);
 
   if (on_connected_run_callback_) {
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE, base::BindOnce(std::move(callback), on_connected_result_));
     return net::ERR_IO_PENDING;
   }
@@ -246,11 +238,11 @@ void TestDelegate::OnReadCompleted(URLRequest* request, int bytes_read) {
   // It doesn't make sense for the request to have IO pending at this point.
   DCHECK_NE(bytes_read, ERR_IO_PENDING);
 
-  // If you've reached this, you've either called "RunUntilComplete" or are
-  // using legacy "QuitCurrent*Deprecated". If this DCHECK fails, that probably
-  // means you've run "RunUntilRedirect" or "RunUntilAuthRequired" and haven't
+  // If you've reached this, you've either called "RunUntilComplete"
+  // If this DCHECK fails, that probably  means you've run
+  // "RunUntilRedirect" or "RunUntilAuthRequired" and haven't
   // redirected/auth-challenged
-  DCHECK(on_complete_ || use_legacy_on_complete_);
+  DCHECK(on_complete_);
 
   // If the request was cancelled in a redirect, it should not signal
   // OnReadCompleted. Note that |cancel_in_rs_| may be true due to
@@ -271,9 +263,6 @@ void TestDelegate::OnReadCompleted(URLRequest* request, int bytes_read) {
       request_status_ = request->Cancel();
       // If bytes_read is 0, won't get a notification on cancelation.
       if (bytes_read == 0) {
-        if (use_legacy_on_complete_)
-          base::RunLoop::QuitCurrentWhenIdleDeprecated();
-        else
           std::move(on_complete_).Run();
       }
       return;
@@ -298,10 +287,7 @@ void TestDelegate::OnReadCompleted(URLRequest* request, int bytes_read) {
 
 void TestDelegate::OnResponseCompleted(URLRequest* request) {
   response_completed_ = true;
-  if (use_legacy_on_complete_)
-    base::RunLoop::QuitCurrentWhenIdleDeprecated();
-  else
-    std::move(on_complete_).Run();
+  std::move(on_complete_).Run();
 }
 
 TestNetworkDelegate::TestNetworkDelegate() = default;
@@ -501,8 +487,10 @@ void TestNetworkDelegate::OnURLRequestDestroyed(URLRequest* request) {
 
 bool TestNetworkDelegate::OnAnnotateAndMoveUserBlockedCookies(
     const URLRequest& request,
+    const net::FirstPartySetMetadata& first_party_set_metadata,
     net::CookieAccessResultList& maybe_included_cookies,
     net::CookieAccessResultList& excluded_cookies) {
+  RecordCookieSettingOverrides(request.cookie_setting_overrides());
   bool allow = true;
   if (cookie_options_bit_mask_ & NO_GET_COOKIES)
     allow = false;
@@ -517,16 +505,18 @@ bool TestNetworkDelegate::OnAnnotateAndMoveUserBlockedCookies(
 }
 
 NetworkDelegate::PrivacySetting TestNetworkDelegate::OnForcePrivacyMode(
-    const GURL& url,
-    const SiteForCookies& site_for_cookies,
-    const absl::optional<url::Origin>& top_frame_origin,
-    SamePartyContext::Type same_party_context_type) const {
+    const URLRequest& request) const {
+  RecordCookieSettingOverrides(request.cookie_setting_overrides());
   return NetworkDelegate::PrivacySetting::kStateAllowed;
 }
 
-bool TestNetworkDelegate::OnCanSetCookie(const URLRequest& request,
-                                         const net::CanonicalCookie& cookie,
-                                         CookieOptions* options) {
+bool TestNetworkDelegate::OnCanSetCookie(
+    const URLRequest& request,
+    const net::CanonicalCookie& cookie,
+    CookieOptions* options,
+    const net::FirstPartySetMetadata& first_party_set_metadata,
+    CookieInclusionStatus* inclusion_status) {
+  RecordCookieSettingOverrides(request.cookie_setting_overrides());
   bool allow = true;
   if (cookie_options_bit_mask_ & NO_SET_COOKIE)
     allow = false;
@@ -564,7 +554,9 @@ FilteringTestNetworkDelegate::~FilteringTestNetworkDelegate() = default;
 bool FilteringTestNetworkDelegate::OnCanSetCookie(
     const URLRequest& request,
     const net::CanonicalCookie& cookie,
-    CookieOptions* options) {
+    CookieOptions* options,
+    const net::FirstPartySetMetadata& first_party_set_metadata,
+    CookieInclusionStatus* inclusion_status) {
   // Filter out cookies with the same name as |cookie_name_filter_| and
   // combine with |allowed_from_caller|.
   bool allowed = cookie.Name() != cookie_name_filter_;
@@ -575,28 +567,27 @@ bool FilteringTestNetworkDelegate::OnCanSetCookie(
     ++blocked_set_cookie_count_;
 
   // Call the nested delegate's method first to avoid a short circuit.
-  return TestNetworkDelegate::OnCanSetCookie(request, cookie, options) &&
+  return TestNetworkDelegate::OnCanSetCookie(request, cookie, options,
+                                             first_party_set_metadata,
+                                             inclusion_status) &&
          allowed;
 }
 
 NetworkDelegate::PrivacySetting
 FilteringTestNetworkDelegate::OnForcePrivacyMode(
-    const GURL& url,
-    const SiteForCookies& site_for_cookies,
-    const absl::optional<url::Origin>& top_frame_origin,
-    SamePartyContext::Type same_party_context_type) const {
+    const URLRequest& request) const {
   if (force_privacy_mode_) {
     return partitioned_state_allowed_
                ? NetworkDelegate::PrivacySetting::kPartitionedStateAllowedOnly
                : NetworkDelegate::PrivacySetting::kStateDisallowed;
   }
 
-  return TestNetworkDelegate::OnForcePrivacyMode(
-      url, site_for_cookies, top_frame_origin, same_party_context_type);
+  return TestNetworkDelegate::OnForcePrivacyMode(request);
 }
 
 bool FilteringTestNetworkDelegate::OnAnnotateAndMoveUserBlockedCookies(
     const URLRequest& request,
+    const net::FirstPartySetMetadata& first_party_set_metadata,
     net::CookieAccessResultList& maybe_included_cookies,
     net::CookieAccessResultList& excluded_cookies) {
   // Filter out cookies if |block_annotate_cookies_| is set and
@@ -630,7 +621,8 @@ bool FilteringTestNetworkDelegate::OnAnnotateAndMoveUserBlockedCookies(
 
   // Call the nested delegate's method first to avoid a short circuit.
   return TestNetworkDelegate::OnAnnotateAndMoveUserBlockedCookies(
-             request, maybe_included_cookies, excluded_cookies) &&
+             request, first_party_set_metadata, maybe_included_cookies,
+             excluded_cookies) &&
          allowed;
 }
 
@@ -673,6 +665,7 @@ TestScopedURLInterceptor::TestScopedURLInterceptor(
 TestScopedURLInterceptor::~TestScopedURLInterceptor() {
   DCHECK(interceptor_->job_used());
   interceptor_->set_safe_to_delete();
+  interceptor_ = nullptr;
   URLRequestFilter::GetInstance()->RemoveUrlHandler(url_);
 }
 

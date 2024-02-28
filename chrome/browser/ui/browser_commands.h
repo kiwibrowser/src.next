@@ -5,28 +5,30 @@
 #ifndef CHROME_BROWSER_UI_BROWSER_COMMANDS_H_
 #define CHROME_BROWSER_UI_BROWSER_COMMANDS_H_
 
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/devtools/devtools_toggle_action.h"
-#include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_user_gesture_details.h"
 #include "components/services/screen_ai/buildflags/buildflags.h"
 #include "content/public/common/page_zoom.h"
 #include "printing/buildflags/buildflags.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/base/window_open_disposition.h"
 
 class Browser;
 class CommandObserver;
 class GURL;
 class Profile;
+enum class DevToolsOpenedByAction;
 
 namespace content {
+class NavigationHandle;
 class WebContents;
 }
 
@@ -73,9 +75,13 @@ void OpenWindowWithRestoredTabs(Profile* profile);
 void OpenURLOffTheRecord(Profile* profile, const GURL& url);
 
 bool CanGoBack(const Browser* browser);
+bool CanGoBack(content::WebContents* web_contents);
 void GoBack(Browser* browser, WindowOpenDisposition disposition);
+void GoBack(content::WebContents* web_contents);
 bool CanGoForward(const Browser* browser);
+bool CanGoForward(content::WebContents* web_contents);
 void GoForward(Browser* browser, WindowOpenDisposition disposition);
+void GoForward(content::WebContents* web_contents);
 void NavigateToIndexWithDisposition(Browser* browser,
                                     int index,
                                     WindowOpenDisposition disposition);
@@ -88,7 +94,7 @@ void Stop(Browser* browser);
 void NewWindow(Browser* browser);
 void NewIncognitoWindow(Profile* profile);
 void CloseWindow(Browser* browser);
-void NewTab(Browser* browser);
+content::WebContents& NewTab(Browser* browser);
 void NewTabToRight(Browser* browser);
 void CloseTab(Browser* browser);
 bool CanZoomIn(content::WebContents* contents);
@@ -128,7 +134,7 @@ bool CanMoveTabsToNewWindow(Browser* browser,
 void MoveTabsToNewWindow(
     Browser* browser,
     const std::vector<int>& tab_indices,
-    absl::optional<tab_groups::TabGroupId> group = absl::nullopt);
+    std::optional<tab_groups::TabGroupId> group = std::nullopt);
 bool CanCloseTabsToRight(const Browser* browser);
 bool CanCloseOtherTabs(const Browser* browser);
 content::WebContents* DuplicateTabAt(Browser* browser, int index);
@@ -148,7 +154,12 @@ void ConvertPopupToTabbedBrowser(Browser* browser);
 void CloseTabsToRight(Browser* browser);
 void CloseOtherTabs(Browser* browser);
 void Exit();
+// Bookmarks the current tab in the most recently used folder and shows the
+// edit dialog.
 void BookmarkCurrentTab(Browser* browser);
+// Bookmarks the current tab in the given folder and does not show the edit
+// dialog.
+void BookmarkCurrentTabInFolder(Browser* browser, int64_t folder_id);
 bool CanBookmarkCurrentTab(const Browser* browser);
 void BookmarkAllTabs(Browser* browser);
 bool CanBookmarkAllTabs(const Browser* browser);
@@ -159,13 +170,18 @@ bool MarkCurrentTabAsReadInReadLater(Browser* browser);
 bool IsCurrentTabUnreadInReadLater(Browser* browser);
 void ShowOffersAndRewardsForPage(Browser* browser);
 void SaveCreditCard(Browser* browser);
+void SaveIban(Browser* browser);
+void ShowMandatoryReauthOptInPrompt(Browser* browser);
 void MigrateLocalCards(Browser* browser);
 void SaveAutofillAddress(Browser* browser);
 void ShowVirtualCardManualFallbackBubble(Browser* browser);
 void ShowVirtualCardEnrollBubble(Browser* browser);
-void Translate(Browser* browser);
+void StartTabOrganizationRequest(Browser* browser);
+void ShowTranslateBubble(Browser* browser);
 void ManagePasswordsForPage(Browser* browser);
+bool CanSendTabToSelf(const Browser* browser);
 void SendTabToSelfFromPageAction(Browser* browser);
+bool CanGenerateQrCode(const Browser* browser);
 void GenerateQRCodeFromPageAction(Browser* browser);
 void SharingHubFromPageAction(Browser* browser);
 void ScreenshotCaptureFromPageAction(Browser* browser);
@@ -235,10 +251,13 @@ bool CanViewSource(const Browser* browser);
 bool CanToggleCaretBrowsing(Browser* browser);
 void ToggleCaretBrowsing(Browser* browser);
 void PromptToNameWindow(Browser* browser);
+#if BUILDFLAG(IS_CHROMEOS)
+void ToggleMultitaskMenu(Browser* browser);
+#endif
 void ToggleCommander(Browser* browser);
 void ExecuteUIDebugCommand(int id, const Browser* browser);
 
-absl::optional<int> GetKeyboardFocusedTabIndex(const Browser* browser);
+std::optional<int> GetKeyboardFocusedTabIndex(const Browser* browser);
 
 void ShowIncognitoClearBrowsingDataDialog(Browser* browser);
 void ShowIncognitoHistoryDisclaimerDialog(Browser* browser);
@@ -253,9 +272,11 @@ void FollowSite(content::WebContents* web_contents);
 void UnfollowSite(content::WebContents* web_contents);
 
 #if BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
-// Triggers the Screen AI visual annotations to be run once on the |browser|.
-void RunScreenAIVisualAnnotation(Browser* browser);
+// Triggers the Screen AI layout extraction to be run once on the |browser|.
+void RunScreenAILayoutExtraction(Browser* browser);
 #endif  // BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
+
+void ExecLensRegionSearch(Browser* browser);
 
 }  // namespace chrome
 

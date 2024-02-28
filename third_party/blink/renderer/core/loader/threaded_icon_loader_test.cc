@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,12 @@
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/platform/web_url.h"
-#include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
-#include "third_party/blink/renderer/platform/testing/histogram_tester.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
+#include "third_party/blink/renderer/platform/testing/url_loader_mock_factory.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
@@ -37,7 +36,7 @@ class ThreadedIconLoaderTest : public PageTestBase {
   }
 
   void TearDown() override {
-    WebURLLoaderMockFactory::GetSingletonInstance()
+    URLLoaderMockFactory::GetSingletonInstance()
         ->UnregisterAllURLsAndClearMemoryCache();
   }
 
@@ -65,11 +64,10 @@ class ThreadedIconLoaderTest : public PageTestBase {
     icon_loader->Start(
         GetDocument().GetExecutionContext(), resource_request,
         resize_dimensions,
-        WTF::Bind(&ThreadedIconLoaderTest::DidGetIcon, WTF::Unretained(this),
-                  run_loop.QuitClosure(), WTF::Unretained(&icon),
-                  WTF::Unretained(&resize_scale)));
-    WebURLLoaderMockFactory::GetSingletonInstance()
-        ->ServeAsynchronousRequests();
+        WTF::BindOnce(&ThreadedIconLoaderTest::DidGetIcon,
+                      WTF::Unretained(this), run_loop.QuitClosure(),
+                      WTF::Unretained(&icon), WTF::Unretained(&resize_scale)));
+    URLLoaderMockFactory::GetSingletonInstance()->ServeAsynchronousRequests();
     run_loop.Run();
 
     return {icon, resize_scale};
@@ -134,12 +132,6 @@ TEST_F(ThreadedIconLoaderTest, InvalidResourceReturnsNullIcon) {
 
   ASSERT_TRUE(icon.isNull());
   EXPECT_EQ(resize_scale, -1.0);
-}
-
-TEST_F(ThreadedIconLoaderTest, LoadTimeRecordedByUMA) {
-  HistogramTester histogram_tester;
-  LoadIcon(RegisterMockedURL(kIconLoaderIcon100x100));
-  histogram_tester.ExpectTotalCount("Blink.ThreadedIconLoader.LoadTime", 1);
 }
 
 TEST_F(ThreadedIconLoaderTest, ResizeFailed) {

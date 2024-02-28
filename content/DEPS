@@ -24,12 +24,13 @@ include_rules = [
   # as autofill or extensions, and chrome implementation details such as
   # settings, packaging details, installation or crash reporting.
 
+  "+components/attribution_reporting",
   "+components/browsing_topics/common",
   "+components/memory_pressure",
   "+components/ml/mojom",
-  "+components/power_scheduler",
   "+components/services/filesystem",
   "+components/services/font/public",
+  "+components/startup_metric_utils",
   "+components/variations",
   "+components/value_store",
 
@@ -94,8 +95,8 @@ include_rules = [
   "+ui/latency",
   "+ui/native_theme",
   "+ui/resources/grit/ui_resources.h",
-  "+ui/resources/grit/webui_generated_resources.h",
-  "+ui/resources/grit/webui_generated_resources_map.h",
+  "+ui/resources/grit/webui_resources.h",
+  "+ui/resources/grit/webui_resources_map.h",
   "+ui/shell_dialogs",
   "+ui/snapshot",
   "+ui/strings/grit/ui_strings.h",
@@ -109,6 +110,7 @@ include_rules = [
   # These files aren't related to grd, so they're fine.
   "+ui/base/l10n/l10n_util_android.h",
   "+ui/base/l10n/l10n_util_win.h",
+  "+ui/base/resource/resource_scale_factor.h",
 
   # Content shouldn't depend on views. While we technically don't need this
   # line, since the top level DEPS doesn't allow it, we add it to make this
@@ -120,6 +122,7 @@ include_rules = [
 
   # For generated JNI includes.
   "+content/public/android/content_jni_headers",
+  "+content/public/android/content_main_dex_jni",
   "+content/public/android/jar_jni",
 ]
 

@@ -7,11 +7,13 @@
 #include "components/keyed_service/content/browser_context_keyed_service_shutdown_notifier_factory.h"
 #include "components/keyed_service/core/keyed_service_shutdown_notifier.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/browser/extensions_browser_client.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/browser/process_manager_factory.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/manifest_handlers/background_info.h"
 
+#if BUILDFLAG(ENABLE_EXTENSIONS_LEGACY_IPC)
 using content::BrowserThread;
 
 namespace extensions {
@@ -37,6 +39,12 @@ class ShutdownNotifierFactory
     DependsOn(ProcessManagerFactory::GetInstance());
   }
   ~ShutdownNotifierFactory() override {}
+
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override {
+    return ExtensionsBrowserClient::Get()->GetContextOwnInstance(
+        context, /*force_guest_profile=*/true);
+  }
 };
 
 }  // namespace
@@ -143,3 +151,4 @@ void ExtensionMessageFilter::SendWakeEventPageResponse(int request_id,
 }
 
 }  // namespace extensions
+#endif

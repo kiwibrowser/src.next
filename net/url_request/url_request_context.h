@@ -14,7 +14,6 @@
 #include <string>
 
 #include "base/memory/raw_ptr.h"
-#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "base/types/pass_key.h"
@@ -33,7 +32,6 @@ namespace net {
 class CertVerifier;
 class ClientSocketFactory;
 class CookieStore;
-class CTPolicyEnforcer;
 class HostResolver;
 class HttpAuthHandlerFactory;
 class HttpNetworkSession;
@@ -168,10 +166,6 @@ class NET_EXPORT URLRequestContext final {
     return transport_security_state_.get();
   }
 
-  CTPolicyEnforcer* ct_policy_enforcer() const {
-    return ct_policy_enforcer_.get();
-  }
-
   SCTAuditingDelegate* sct_auditing_delegate() const {
     return sct_auditing_delegate_.get();
   }
@@ -220,11 +214,13 @@ class NET_EXPORT URLRequestContext final {
 
   bool enable_brotli() const { return enable_brotli_; }
 
+  bool enable_zstd() const { return enable_zstd_; }
+
   // Returns current value of the |check_cleartext_permitted| flag.
   bool check_cleartext_permitted() const { return check_cleartext_permitted_; }
 
-  bool require_network_isolation_key() const {
-    return require_network_isolation_key_;
+  bool require_network_anonymization_key() const {
+    return require_network_anonymization_key_;
   }
 
   // If != handles::kInvalidNetworkHandle, the network which this
@@ -238,6 +234,14 @@ class NET_EXPORT URLRequestContext final {
   // DEPRECATED: Do not use this even in tests. This is for a legacy use.
   void SetJobFactoryForTesting(const URLRequestJobFactory* job_factory) {
     job_factory_ = job_factory;
+  }
+
+  const absl::optional<std::string>& cookie_deprecation_label() const {
+    return cookie_deprecation_label_;
+  }
+
+  void set_cookie_deprecation_label(const absl::optional<std::string>& label) {
+    cookie_deprecation_label_ = label;
   }
 
  private:
@@ -266,7 +270,6 @@ class NET_EXPORT URLRequestContext final {
   void set_cookie_store(std::unique_ptr<CookieStore> cookie_store);
   void set_transport_security_state(
       std::unique_ptr<TransportSecurityState> state);
-  void set_ct_policy_enforcer(std::unique_ptr<CTPolicyEnforcer> enforcer);
   void set_sct_auditing_delegate(std::unique_ptr<SCTAuditingDelegate> delegate);
   void set_job_factory(std::unique_ptr<const URLRequestJobFactory> job_factory);
   void set_throttler_manager(
@@ -289,11 +292,13 @@ class NET_EXPORT URLRequestContext final {
           network_error_logging_service);
 #endif  // BUILDFLAG(ENABLE_REPORTING)
   void set_enable_brotli(bool enable_brotli) { enable_brotli_ = enable_brotli; }
+  void set_enable_zstd(bool enable_zstd) { enable_zstd_ = enable_zstd; }
   void set_check_cleartext_permitted(bool check_cleartext_permitted) {
     check_cleartext_permitted_ = check_cleartext_permitted;
   }
-  void set_require_network_isolation_key(bool require_network_isolation_key) {
-    require_network_isolation_key_ = require_network_isolation_key;
+  void set_require_network_anonymization_key(
+      bool require_network_anonymization_key) {
+    require_network_anonymization_key_ = require_network_anonymization_key;
   }
   void set_bound_network(handles::NetworkHandle network) {
     bound_network_ = network;
@@ -302,20 +307,21 @@ class NET_EXPORT URLRequestContext final {
   void set_transport_security_persister(
       std::unique_ptr<TransportSecurityPersister> transport_security_persister);
 
-  raw_ptr<NetLog> net_log_ = nullptr;
+  raw_ptr<NetLog, DanglingUntriaged> net_log_ = nullptr;
 
   std::unique_ptr<HostResolver> host_resolver_;
   std::unique_ptr<CertVerifier> cert_verifier_;
   std::unique_ptr<HttpAuthHandlerFactory> http_auth_handler_factory_;
-  std::unique_ptr<ProxyDelegate> proxy_delegate_;
   std::unique_ptr<NetworkDelegate> network_delegate_;
+  // `proxy_resolution_service_` may store a pointer to `proxy_delegate_`, so
+  // ensure that the latter outlives the former.
+  std::unique_ptr<ProxyDelegate> proxy_delegate_;
   std::unique_ptr<ProxyResolutionService> proxy_resolution_service_;
   std::unique_ptr<SSLConfigService> ssl_config_service_;
   std::unique_ptr<HttpServerProperties> http_server_properties_;
   std::unique_ptr<const HttpUserAgentSettings> http_user_agent_settings_;
   std::unique_ptr<CookieStore> cookie_store_;
   std::unique_ptr<TransportSecurityState> transport_security_state_;
-  std::unique_ptr<CTPolicyEnforcer> ct_policy_enforcer_;
   std::unique_ptr<SCTAuditingDelegate> sct_auditing_delegate_;
   std::unique_ptr<QuicContext> quic_context_;
   std::unique_ptr<ClientSocketFactory> client_socket_factory_;
@@ -352,13 +358,17 @@ class NET_EXPORT URLRequestContext final {
 
   // Enables Brotli Content-Encoding support.
   bool enable_brotli_ = false;
+  // Enables Zstd Content-Encoding support.
+  bool enable_zstd_ = false;
   // Enables checking system policy before allowing a cleartext http or ws
   // request. Only used on Android.
   bool check_cleartext_permitted_ = false;
 
-  // Triggers a DCHECK if a NetworkIsolationKey/IsolationInfo is not provided to
-  // a request when true.
-  bool require_network_isolation_key_ = false;
+  // Triggers a DCHECK if a NetworkAnonymizationKey/IsolationInfo is not
+  // provided to a request when true.
+  bool require_network_anonymization_key_ = false;
+
+  absl::optional<std::string> cookie_deprecation_label_;
 
   handles::NetworkHandle bound_network_;
 

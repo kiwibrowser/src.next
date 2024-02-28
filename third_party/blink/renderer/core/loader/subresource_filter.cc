@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,15 +43,6 @@ SubresourceFilter::SubresourceFilter(
     : execution_context_(execution_context),
       subresource_filter_(std::move(subresource_filter)) {
   DCHECK(subresource_filter_);
-  // Report the main resource as an ad if the subresource filter is
-  // associated with an ad subframe.
-  if (auto* window = DynamicTo<LocalDOMWindow>(execution_context_.Get())) {
-    auto* frame = window->GetFrame();
-    if (frame->IsAdFrame()) {
-      ReportAdRequestId(
-          frame->Loader().GetDocumentLoader()->GetResponse().RequestId());
-    }
-  }
 }
 
 SubresourceFilter::~SubresourceFilter() = default;
@@ -84,9 +75,9 @@ void SubresourceFilter::ReportLoadAsync(
   scoped_refptr<base::SingleThreadTaskRunner> task_runner =
       execution_context_->GetTaskRunner(TaskType::kNetworking);
   DCHECK(task_runner->RunsTasksInCurrentSequence());
-  task_runner->PostTask(
-      FROM_HERE, WTF::Bind(&SubresourceFilter::ReportLoad, WrapPersistent(this),
-                           resource_url, load_policy));
+  task_runner->PostTask(FROM_HERE, WTF::BindOnce(&SubresourceFilter::ReportLoad,
+                                                 WrapPersistent(this),
+                                                 resource_url, load_policy));
 }
 
 bool SubresourceFilter::AllowWebSocketConnection(const KURL& url) {
@@ -118,10 +109,6 @@ bool SubresourceFilter::IsAdResource(
   }
 
   return load_policy != WebDocumentSubresourceFilter::kAllow;
-}
-
-void SubresourceFilter::ReportAdRequestId(int request_id) {
-  subresource_filter_->ReportAdRequestId(request_id);
 }
 
 void SubresourceFilter::ReportLoad(

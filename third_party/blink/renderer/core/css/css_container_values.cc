@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,16 +13,22 @@ namespace blink {
 CSSContainerValues::CSSContainerValues(Document& document,
                                        Element& container,
                                        absl::optional<double> width,
-                                       absl::optional<double> height)
+                                       absl::optional<double> height,
+                                       ContainerStuckPhysical stuck_horizontal,
+                                       ContainerStuckPhysical stuck_vertical)
     : MediaValuesDynamic(document.GetFrame()),
       element_(&container),
       width_(width),
       height_(height),
-      writing_mode_(container.ComputedStyleRef().GetWritingMode()),
+      writing_direction_(container.ComputedStyleRef().GetWritingDirection()),
+      stuck_horizontal_(stuck_horizontal),
+      stuck_vertical_(stuck_vertical),
       font_sizes_(CSSToLengthConversionData::FontSizes(
-                      container.GetComputedStyle(),
-                      document.documentElement()->GetComputedStyle())
-                      .Unzoomed()),
+          container.ComputedStyleRef().GetFontSizeStyle(),
+          document.documentElement()->GetComputedStyle())),
+      line_height_size_(CSSToLengthConversionData::LineHeightSize(
+          container.ComputedStyleRef().GetFontSizeStyle(),
+          document.documentElement()->GetComputedStyle())),
       container_sizes_(container.ParentOrShadowHostElement()) {}
 
 void CSSContainerValues::Trace(Visitor* visitor) const {
@@ -31,24 +37,52 @@ void CSSContainerValues::Trace(Visitor* visitor) const {
   MediaValuesDynamic::Trace(visitor);
 }
 
-float CSSContainerValues::EmFontSize() const {
-  return font_sizes_.Em();
+float CSSContainerValues::EmFontSize(float zoom) const {
+  return font_sizes_.Em(zoom);
 }
 
-float CSSContainerValues::RemFontSize() const {
-  return font_sizes_.Rem();
+float CSSContainerValues::RemFontSize(float zoom) const {
+  return font_sizes_.Rem(zoom);
 }
 
-float CSSContainerValues::ExFontSize() const {
-  return font_sizes_.Ex();
+float CSSContainerValues::ExFontSize(float zoom) const {
+  return font_sizes_.Ex(zoom);
 }
 
-float CSSContainerValues::ChFontSize() const {
-  return font_sizes_.Ch();
+float CSSContainerValues::RexFontSize(float zoom) const {
+  return font_sizes_.Rex(zoom);
 }
 
-float CSSContainerValues::IcFontSize() const {
-  return font_sizes_.Ic();
+float CSSContainerValues::ChFontSize(float zoom) const {
+  return font_sizes_.Ch(zoom);
+}
+
+float CSSContainerValues::RchFontSize(float zoom) const {
+  return font_sizes_.Rch(zoom);
+}
+
+float CSSContainerValues::IcFontSize(float zoom) const {
+  return font_sizes_.Ic(zoom);
+}
+
+float CSSContainerValues::RicFontSize(float zoom) const {
+  return font_sizes_.Ric(zoom);
+}
+
+float CSSContainerValues::LineHeight(float zoom) const {
+  return line_height_size_.Lh(zoom);
+}
+
+float CSSContainerValues::RootLineHeight(float zoom) const {
+  return line_height_size_.Rlh(zoom);
+}
+
+float CSSContainerValues::CapFontSize(float zoom) const {
+  return font_sizes_.Cap(zoom);
+}
+
+float CSSContainerValues::RcapFontSize(float zoom) const {
+  return font_sizes_.Rcap(zoom);
 }
 
 double CSSContainerValues::ContainerWidth() const {
@@ -57,6 +91,50 @@ double CSSContainerValues::ContainerWidth() const {
 
 double CSSContainerValues::ContainerHeight() const {
   return container_sizes_.Height().value_or(SmallViewportHeight());
+}
+
+namespace {
+
+// Converts from left/right/top/bottom to start/end as if the writing mode and
+// direction was horizontal-tb and ltr.
+ContainerStuckLogical PhysicalToLogicalLtrHorizontalTb(
+    ContainerStuckPhysical physical) {
+  switch (physical) {
+    case ContainerStuckPhysical::kNo:
+      return ContainerStuckLogical::kNo;
+    case ContainerStuckPhysical::kLeft:
+    case ContainerStuckPhysical::kTop:
+      return ContainerStuckLogical::kStart;
+    case ContainerStuckPhysical::kRight:
+    case ContainerStuckPhysical::kBottom:
+      return ContainerStuckLogical::kEnd;
+  }
+}
+
+}  // namespace
+
+ContainerStuckLogical CSSContainerValues::StuckInline() const {
+  // TODO(crbug.com/1445189): The WritingDirection should be taken from the
+  // container's containing block, not the container. Otherwise the inset
+  // properties on the sticky positioned will not match the same inset features
+  // in container queries when writing-mode or direction changes on the sticky
+  // positioned itself.
+  ContainerStuckPhysical physical =
+      writing_direction_.IsHorizontal() ? StuckHorizontal() : StuckVertical();
+  ContainerStuckLogical logical = PhysicalToLogicalLtrHorizontalTb(physical);
+  return writing_direction_.IsRtl() ? Flip(logical) : logical;
+}
+
+ContainerStuckLogical CSSContainerValues::StuckBlock() const {
+  // TODO(crbug.com/1445189): The WritingDirection should be taken from the
+  // container's containing block, not the container. Otherwise the inset
+  // properties on the sticky positioned will not match the same inset features
+  // in container queries when writing-mode or direction changes on the sticky
+  // positioned itself.
+  ContainerStuckPhysical physical =
+      writing_direction_.IsHorizontal() ? StuckVertical() : StuckHorizontal();
+  ContainerStuckLogical logical = PhysicalToLogicalLtrHorizontalTb(physical);
+  return writing_direction_.IsFlippedBlocks() ? Flip(logical) : logical;
 }
 
 }  // namespace blink

@@ -1,10 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/frame/find_in_page.h"
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/frame/find_in_page.mojom-blink.h"
 #include "third_party/blink/renderer/core/editing/finder/text_finder.h"
@@ -12,6 +12,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
@@ -39,6 +40,7 @@ class FindInPageTest : public testing::Test {
   TextFinder& GetTextFinder() const;
 
  private:
+  test::TaskEnvironment task_environment_;
   frame_test_helpers::WebViewHelper web_view_helper_;
   Persistent<Document> document_;
   Persistent<FindInPage> find_in_page_;
@@ -100,10 +102,10 @@ TEST_F(FindInPageTest, FindMatchRectsReturnsCorrectRects) {
   FindInPageCallbackReceiver callback_receiver;
   GetFindInPage().FindMatchRects(
       rects_version - 1,
-      base::BindOnce(&FindInPageCallbackReceiver::AssertFindMatchRects,
-                     base::Unretained(&callback_receiver), rects_version,
-                     GetTextFinder().FindMatchRects(),
-                     GetTextFinder().ActiveFindMatchRect()));
+      WTF::BindOnce(&FindInPageCallbackReceiver::AssertFindMatchRects,
+                    WTF::Unretained(&callback_receiver), rects_version,
+                    GetTextFinder().FindMatchRects(),
+                    GetTextFinder().ActiveFindMatchRect()));
   EXPECT_TRUE(callback_receiver.IsCalled());
 }
 #endif

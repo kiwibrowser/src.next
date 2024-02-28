@@ -6,9 +6,9 @@
 
 #include <utility>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/location.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/task/single_thread_task_runner.h"
 
 namespace chrome {
 namespace android {
@@ -29,7 +29,7 @@ void MockDownloadController::StartContextMenuDownload(
 void MockDownloadController::AcquireFileAccessPermission(
     const content::WebContents::Getter& wc_getter,
     DownloadControllerBase::AcquireFileAccessPermissionCallback cb) {
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE, base::BindOnce(std::move(cb), approve_file_access_request_));
 }
 
@@ -41,9 +41,5 @@ void MockDownloadController::SetApproveFileAccessRequestForTesting(
 void MockDownloadController::CreateAndroidDownload(
     const content::WebContents::Getter& wc_getter,
     const DownloadInfo& info) {}
-
-void MockDownloadController::AboutToResumeDownload(
-    download::DownloadItem* download_item) {}
-
 }  // namespace android
 }  // namespace chrome

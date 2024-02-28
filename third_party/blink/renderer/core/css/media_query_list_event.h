@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,10 +35,12 @@ class MediaQueryListEvent final : public Event {
   MediaQueryListEvent(const AtomicString& event_type,
                       const MediaQueryListEventInit* initializer)
       : Event(event_type, initializer), matches_(false) {
-    if (initializer->hasMedia())
+    if (initializer->hasMedia()) {
       media_ = initializer->media();
-    if (initializer->hasMatches())
+    }
+    if (initializer->hasMatches()) {
       matches_ = initializer->matches();
+    }
   }
 
   String media() const {

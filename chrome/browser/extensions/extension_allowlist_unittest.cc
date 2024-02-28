@@ -42,7 +42,10 @@ class ExtensionAllowlistUnitTestBase : public ExtensionServiceTestBase {
  protected:
   // Creates a test extension service with 3 installed extensions.
   void CreateExtensionService(bool enhanced_protection_enabled) {
-    InitializeGoodInstalledExtensionService();
+    ExtensionServiceInitParams params;
+    ASSERT_TRUE(
+        params.ConfigureByTestDataDirectory(data_dir().AppendASCII("good")));
+    InitializeExtensionService(params);
     extension_prefs_ = ExtensionPrefs::Get(profile());
 
     if (enhanced_protection_enabled) {
@@ -53,10 +56,7 @@ class ExtensionAllowlistUnitTestBase : public ExtensionServiceTestBase {
   }
 
   void CreateEmptyExtensionService() {
-    ExtensionServiceTestBase::ExtensionServiceInitParams params =
-        CreateDefaultInitParams();
-    params.pref_file = base::FilePath();
-    InitializeExtensionService(params);
+    InitializeExtensionService(ExtensionServiceInitParams());
     extension_prefs_ = ExtensionPrefs::Get(profile());
     safe_browsing::SetSafeBrowsingState(
         profile()->GetPrefs(),
@@ -66,11 +66,10 @@ class ExtensionAllowlistUnitTestBase : public ExtensionServiceTestBase {
   void PerformActionBasedOnOmahaAttributes(const std::string& extension_id,
                                            bool is_malware,
                                            bool is_allowlisted) {
-    base::Value attributes(base::Value::Type::DICTIONARY);
-    if (is_malware)
-      attributes.SetBoolKey("_malware", true);
-
-    attributes.SetBoolKey("_esbAllowlist", is_allowlisted);
+    auto attributes = base::Value::Dict().Set("_esbAllowlist", is_allowlisted);
+    if (is_malware) {
+      attributes.Set("_malware", true);
+    }
 
     service()->PerformActionBasedOnOmahaAttributes(extension_id, attributes);
   }
@@ -465,7 +464,7 @@ TEST_F(ExtensionAllowlistUnitTest, MissingAttributeAreIgnored) {
             extension_prefs()->GetDisableReasons(kExtensionId2));
 
   // Simulate an update check with no custom attribute defined.
-  base::Value attributes(base::Value::Type::DICTIONARY);
+  base::Value::Dict attributes;
   service()->PerformActionBasedOnOmahaAttributes(kExtensionId1, attributes);
   service()->PerformActionBasedOnOmahaAttributes(kExtensionId2, attributes);
 
@@ -650,9 +649,9 @@ TEST_F(ExtensionAllowlistUnitTest, BypassFrictionSetAckowledgeEnabledByUser) {
   installer->set_bypassed_safebrowsing_friction_for_testing(true);
 
   base::RunLoop run_loop;
-  installer->set_installer_callback(base::BindOnce(
+  installer->AddInstallerCallback(base::BindOnce(
       [](base::OnceClosure quit_closure,
-         const absl::optional<CrxInstallError>& error) {
+         const std::optional<CrxInstallError>& error) {
         ASSERT_FALSE(error) << error->message();
         std::move(quit_closure).Run();
       },

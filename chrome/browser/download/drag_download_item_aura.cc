@@ -7,7 +7,6 @@
 #include <string>
 
 #include "build/build_config.h"
-#include "chrome/browser/profiles/profile.h"
 #include "components/download/public/common/download_item.h"
 #include "net/base/mime_util.h"
 #include "ui/aura/client/drag_drop_client.h"
@@ -34,7 +33,7 @@ void DragDownloadItem(const download::DownloadItem* download,
   if (!root_window || !aura::client::GetDragDropClient(root_window))
     return;
 
-  // Set up our OLE machinery
+  // Set up our OLE machinery.
   auto data = std::make_unique<ui::OSExchangeData>();
 
   button_drag_utils::SetDragImage(
@@ -43,8 +42,7 @@ void DragDownloadItem(const download::DownloadItem* download,
 
   base::FilePath full_path = download->GetTargetFilePath();
   std::vector<ui::FileInfo> file_infos;
-  file_infos.push_back(
-      ui::FileInfo(full_path, download->GetFileNameToReportUser()));
+  file_infos.emplace_back(full_path, download->GetFileNameToReportUser());
   data->SetFilenames(file_infos);
 
   gfx::Point location = display::Screen::GetScreen()->GetCursorScreenPoint();

@@ -52,22 +52,21 @@ GURL IconsInfo::GetIconURL(const Extension* extension,
   return path.empty() ? GURL() : extension->GetResourceURL(path);
 }
 
-IconsHandler::IconsHandler() {
-}
+IconsHandler::IconsHandler() = default;
 
-IconsHandler::~IconsHandler() {
-}
+IconsHandler::~IconsHandler() = default;
 
 bool IconsHandler::Parse(Extension* extension, std::u16string* error) {
   std::unique_ptr<IconsInfo> icons_info(new IconsInfo);
-  const base::Value* icons_dict = nullptr;
-  if (!extension->manifest()->GetDictionary(keys::kIcons, &icons_dict)) {
+  const base::Value::Dict* icons_dict =
+      extension->manifest()->available_values().FindDict(keys::kIcons);
+  if (!icons_dict) {
     *error = manifest_errors::kInvalidIcons;
     return false;
   }
 
   if (!manifest_handler_helpers::LoadIconsFromDictionary(
-          icons_dict, &icons_info->icons, error)) {
+          *icons_dict, &icons_info->icons, error)) {
     return false;
   }
 
@@ -81,8 +80,7 @@ bool IconsHandler::Validate(const Extension* extension,
   // Analyze the icons for visibility using the default toolbar color, since
   // the majority of Chrome users don't modify their theme.
   return file_util::ValidateExtensionIconSet(
-      IconsInfo::GetIcons(extension), extension, manifest_keys::kIcons,
-      image_util::kDefaultToolbarColor, error);
+      IconsInfo::GetIcons(extension), extension, manifest_keys::kIcons, error);
 }
 
 base::span<const char* const> IconsHandler::Keys() const {

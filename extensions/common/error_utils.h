@@ -6,37 +6,37 @@
 #define EXTENSIONS_COMMON_ERROR_UTILS_H_
 
 #include <string>
+#include <string_view>
 
-#include "base/strings/string_piece.h"
+#include "base/containers/span.h"
 
 namespace extensions {
 
 class ErrorUtils {
  public:
-  // Creates an error messages from a pattern.
-  static std::string FormatErrorMessage(base::StringPiece format,
-                                        base::StringPiece s1);
+  static std::string FormatErrorMessage(
+      std::string_view format,
+      base::span<const std::string_view> args);
 
-  static std::string FormatErrorMessage(base::StringPiece format,
-                                        base::StringPiece s1,
-                                        base::StringPiece s2);
+  template <typename... Args>
+  static std::string FormatErrorMessage(std::string_view format,
+                                        std::string_view s1,
+                                        const Args&... args) {
+    const std::string_view pieces[] = {s1, args...};
+    return FormatErrorMessage(format, pieces);
+  }
 
-  static std::string FormatErrorMessage(base::StringPiece format,
-                                        base::StringPiece s1,
-                                        base::StringPiece s2,
-                                        base::StringPiece s3);
+  static std::u16string FormatErrorMessageUTF16(
+      std::string_view format,
+      base::span<const std::string_view> args);
 
-  static std::u16string FormatErrorMessageUTF16(base::StringPiece format,
-                                                base::StringPiece s1);
-
-  static std::u16string FormatErrorMessageUTF16(base::StringPiece format,
-                                                base::StringPiece s1,
-                                                base::StringPiece s2);
-
-  static std::u16string FormatErrorMessageUTF16(base::StringPiece format,
-                                                base::StringPiece s1,
-                                                base::StringPiece s2,
-                                                base::StringPiece s3);
+  template <typename... Args>
+  static std::u16string FormatErrorMessageUTF16(std::string_view format,
+                                                std::string_view s1,
+                                                const Args&... args) {
+    const std::string_view pieces[] = {s1, args...};
+    return FormatErrorMessageUTF16(format, pieces);
+  }
 };
 
 }  // namespace extensions

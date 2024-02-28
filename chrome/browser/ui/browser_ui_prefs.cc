@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/browser_ui_prefs.h"
 
 #include <memory>
+#include <string>
 
 #include "base/numerics/safe_conversions.h"
 #include "build/build_config.h"
@@ -13,6 +14,7 @@
 #include "chrome/browser/upgrade_detector/upgrade_detector.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/pref_names.h"
+#include "components/policy/core/common/policy_pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
@@ -23,10 +25,6 @@
 
 #if !BUILDFLAG(IS_CHROMEOS_ASH)
 #include "ui/accessibility/accessibility_features.h"
-#endif
-
-#if BUILDFLAG(IS_WIN)
-#include "base/win/windows_version.h"
 #endif
 
 namespace {
@@ -58,6 +56,13 @@ void RegisterBrowserPrefs(PrefRegistrySimple* registry) {
   registry->RegisterIntegerPref(
       prefs::kMacRestoreLocationPermissionsExperimentCount, 0);
 #endif  // BUILDFLAG(IS_MAC)
+
+  registry->RegisterBooleanPref(prefs::kHoverCardImagesEnabled, true);
+
+#if defined(USE_AURA)
+  registry->RegisterBooleanPref(prefs::kOverscrollHistoryNavigationEnabled,
+                                true);
+#endif
 }
 
 void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
@@ -69,7 +74,7 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterInt64Pref(prefs::kDefaultBrowserLastDeclined, 0);
   bool reset_check_default = false;
 #if BUILDFLAG(IS_WIN)
-  reset_check_default = base::win::GetVersion() >= base::win::Version::WIN10;
+  reset_check_default = true;
 #endif
   registry->RegisterBooleanPref(prefs::kResetCheckDefaultBrowser,
                                 reset_check_default);
@@ -81,13 +86,9 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterStringPref(prefs::kCloudPrintEmail, std::string());
   registry->RegisterBooleanPref(prefs::kCloudPrintProxyEnabled, true);
-  registry->RegisterBooleanPref(prefs::kCloudPrintSubmitEnabled, true);
   registry->RegisterDictionaryPref(prefs::kBrowserWindowPlacement);
   registry->RegisterDictionaryPref(prefs::kBrowserWindowPlacementPopup);
   registry->RegisterDictionaryPref(prefs::kAppWindowPlacement);
-  registry->RegisterBooleanPref(
-      prefs::kEnableDoNotTrack, false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
 #if !BUILDFLAG(IS_CHROMEOS_ASH) && !BUILDFLAG(IS_ANDROID)
   registry->RegisterBooleanPref(prefs::kPrintPreviewUseSystemDefaultPrinter,
                                 false);
@@ -97,20 +98,11 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterStringPref(prefs::kWebRTCUDPPortRange, std::string());
   registry->RegisterBooleanPref(prefs::kWebRtcEventLogCollectionAllowed, false);
   registry->RegisterListPref(prefs::kWebRtcLocalIpsAllowedUrls);
-  registry->RegisterBooleanPref(prefs::kWebRTCAllowLegacyTLSProtocols, false);
-
-  // Dictionaries to keep track of default tasks in the file browser.
-  registry->RegisterDictionaryPref(
-      prefs::kDefaultTasksByMimeType,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterDictionaryPref(
-      prefs::kDefaultTasksBySuffix,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kWebRtcTextLogCollectionAllowed, true);
 
   // We need to register the type of these preferences in order to query
   // them even though they're only typically controlled via policy.
-  registry->RegisterBooleanPref(prefs::kClearPluginLSODataEnabled, true);
-  registry->RegisterBooleanPref(prefs::kHideWebStoreIcon, false);
+  registry->RegisterBooleanPref(policy::policy_prefs::kHideWebStoreIcon, false);
   registry->RegisterBooleanPref(prefs::kSharedClipboardEnabled, true);
 
 #if BUILDFLAG(ENABLE_CLICK_TO_CALL)
@@ -165,4 +157,13 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(
       prefs::kHttpsOnlyModeEnabled, false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kHttpsFirstModeIncognito, true,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterListPref(prefs::kHttpAllowlist);
+  registry->RegisterBooleanPref(prefs::kHttpsUpgradesEnabled, true);
+
+  registry->RegisterDictionaryPref(prefs::kHttpsUpgradeFallbacks);
+  registry->RegisterDictionaryPref(prefs::kHttpsUpgradeNavigations);
+  registry->RegisterBooleanPref(prefs::kHttpsOnlyModeAutoEnabled, false);
 }

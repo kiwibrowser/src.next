@@ -5,10 +5,9 @@
 #ifndef EXTENSIONS_COMMON_FEATURE_SWITCH_H_
 #define EXTENSIONS_COMMON_FEATURE_SWITCH_H_
 
+#include <optional>
 #include <string>
-
 #include "base/memory/raw_ptr.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 class CommandLine;
@@ -83,11 +82,12 @@ class FeatureSwitch {
   std::string GetLegacyDisableFlag() const;
   bool ComputeValue() const;
 
-  raw_ptr<const base::CommandLine> command_line_;
+  // TODO(crbug.com/1449286): detect under BRP.
+  raw_ptr<const base::CommandLine, DanglingUntriaged> command_line_;
   const char* switch_name_;
   bool default_value_;
   OverrideValue override_value_;
-  mutable absl::optional<bool> cached_value_;
+  mutable std::optional<bool> cached_value_;
 };
 
 }  // namespace extensions

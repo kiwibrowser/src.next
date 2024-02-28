@@ -6,9 +6,8 @@
 
 #include <utility>
 
-#include "base/bind.h"
-#include "base/threading/sequenced_task_runner_handle.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/functional/bind.h"
+#include "base/task/sequenced_task_runner.h"
 
 DelayedCallbackGroup::CallbackEntry::CallbackEntry(
     Callback callback,
@@ -35,13 +34,14 @@ DelayedCallbackGroup::~DelayedCallbackGroup() {
 }
 
 void DelayedCallbackGroup::Add(Callback callback) {
-  DCHECK(base::SequencedTaskRunnerHandle::IsSet());
+  DCHECK(base::SequencedTaskRunner::HasCurrentDefault());
   {
     base::AutoLock lock(callbacks_lock_);
     base::TimeTicks expiration_time =
         base::TimeTicks::Now() + expiration_delay_;
     callbacks_.emplace(std::move(callback),
-                       base::SequencedTaskRunnerHandle::Get(), expiration_time);
+                       base::SequencedTaskRunner::GetCurrentDefault(),
+                       expiration_time);
   }
   expiration_task_runner_->PostTask(
       FROM_HERE,

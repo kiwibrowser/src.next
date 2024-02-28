@@ -80,6 +80,10 @@ class MockInputApi(object):
     self.presubmit_local_path = os.path.dirname(__file__)
     self.is_windows = sys.platform == 'win32'
     self.no_diffs = False
+    # Although this makes assumptions about command line arguments used by test
+    # scripts that create mocks, it is a convenient way to set up the verbosity
+    # via the input api.
+    self.verbose = '--verbose' in sys.argv
 
   def CreateMockFileInPath(self, f_list):
     self.os_path.exists = lambda x: x in f_list
@@ -204,6 +208,9 @@ class MockFile(object):
       for l in new_contents:
         self._scm_diff += "+%s\n" % l
     self._old_contents = old_contents
+
+  def __str__(self):
+    return self._local_path
 
   def Action(self):
     return self._action

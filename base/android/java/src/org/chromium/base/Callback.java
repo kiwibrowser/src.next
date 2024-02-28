@@ -4,7 +4,9 @@
 
 package org.chromium.base;
 
-import org.chromium.base.annotations.CalledByNative;
+import androidx.annotation.Nullable;
+
+import org.jni_zero.CalledByNative;
 
 /**
  * A simple single-argument callback to handle the result of a computation.
@@ -13,9 +15,7 @@ import org.chromium.base.annotations.CalledByNative;
  */
 @FunctionalInterface
 public interface Callback<T> {
-    /**
-     * Invoked with the result of a computation.
-     */
+    /** Invoked with the result of a computation. */
     void onResult(T result);
 
     /**
@@ -28,6 +28,18 @@ public interface Callback<T> {
      */
     default Runnable bind(T result) {
         return () -> onResult(result);
+    }
+
+    /**
+     * Runs a callback checking if the callback may be null.
+     *
+     * <p>Can be used as syntactic sugar for: if (callback != null) callback.onResult(object);
+     *
+     * @param callback The {@link Callback} to run.
+     * @param object The payload to provide to the callback (may be null).
+     */
+    static <T> void runNullSafe(@Nullable Callback<T> callback, @Nullable T object) {
+        if (callback != null) callback.onResult(object);
     }
 
     /**

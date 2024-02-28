@@ -38,7 +38,8 @@ class ExecutionContext;
 class MutableCSSPropertyValueSet;
 class StyleSheetContents;
 
-class AbstractPropertySetCSSStyleDeclaration : public CSSStyleDeclaration {
+class CORE_EXPORT AbstractPropertySetCSSStyleDeclaration
+    : public CSSStyleDeclaration {
  public:
   virtual Element* ParentElement() const { return nullptr; }
   StyleSheetContents* ContextStyleSheet() const;
@@ -48,6 +49,7 @@ class AbstractPropertySetCSSStyleDeclaration : public CSSStyleDeclaration {
   void Trace(Visitor*) const override;
 
  private:
+  bool IsAbstractPropertySet() const final { return true; }
   CSSRule* parentRule() const override { return nullptr; }
   unsigned length() const final;
   String item(unsigned index) const final;
@@ -77,7 +79,7 @@ class AbstractPropertySetCSSStyleDeclaration : public CSSStyleDeclaration {
                                      unsigned index) final;
   void SetPropertyInternal(CSSPropertyID,
                            const String& custom_property_name,
-                           const String& value,
+                           StringView value,
                            bool important,
                            SecureContextMode,
                            ExceptionState&) final;
@@ -98,6 +100,15 @@ class AbstractPropertySetCSSStyleDeclaration : public CSSStyleDeclaration {
   virtual void DidMutate(MutationType) {}
   virtual MutableCSSPropertyValueSet& PropertySet() const = 0;
   virtual bool IsKeyframeStyle() const { return false; }
+  bool FastPathSetProperty(CSSPropertyID unresolved_property,
+                           double value) override;
+};
+
+template <>
+struct DowncastTraits<AbstractPropertySetCSSStyleDeclaration> {
+  static bool AllowFrom(const CSSStyleDeclaration& declaration) {
+    return declaration.IsAbstractPropertySet();
+  }
 };
 
 }  // namespace blink

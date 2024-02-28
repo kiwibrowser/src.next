@@ -34,7 +34,7 @@ namespace blink {
 namespace {
 
 bool CheckEmptyToken(const String& token, ExceptionState& exception_state) {
-  if (!token.IsEmpty())
+  if (!token.empty())
     return true;
   exception_state.ThrowDOMException(DOMExceptionCode::kSyntaxError,
                                     "The token provided must not be empty.");
@@ -81,6 +81,7 @@ bool CheckTokensSyntax(const Vector<String>& tokens,
 void DOMTokenList::Trace(Visitor* visitor) const {
   visitor->Trace(element_);
   ScriptWrappable::Trace(visitor);
+  ElementRareDataField::Trace(visitor);
 }
 
 // https://dom.spec.whatwg.org/#concept-domtokenlist-validation

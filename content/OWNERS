@@ -13,7 +13,7 @@
 # to content-owners@chromium.org.
 
 set noparent
-# NOTE: keep this in sync with lsc-owners-override@chromium.org owners
+# NOTE: keep this in sync with global-owners-override@chromium.org owners
 # by emailing lsc-policy@chromium.org when this list changes.
 alexmos@chromium.org
 altimin@chromium.org
@@ -22,11 +22,12 @@ avi@chromium.org
 clamy@chromium.org
 creis@chromium.org
 dgozman@chromium.org
+dtapuska@chromium.org
 jam@chromium.org
 kinuko@chromium.org
 nasko@chromium.org
-pfeldman@chromium.org
-# NOTE: keep this in sync with lsc-owners-override@chromium.org owners
+rakina@chromium.org
+# NOTE: keep this in sync with global-owners-override@chromium.org owners
 # by emailing lsc-policy@chromium.org when this list changes.
 
 # per-file rules:

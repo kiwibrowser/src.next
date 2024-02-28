@@ -8,9 +8,11 @@
 #include "base/no_destructor.h"
 #include "build/build_config.h"
 #include "chrome/browser/ssl/security_state_tab_helper.h"
+#include "chrome/common/url_constants.h"
 #include "components/infobars/content/content_infobar_manager.h"
 #include "components/webapps/browser/installable/installable_metrics.h"
 #include "content/public/browser/web_contents.h"
+#include "url/origin.h"
 
 #if BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/android/shortcut_helper.h"
@@ -32,6 +34,10 @@ namespace webapps {
 ChromeWebappsClient* ChromeWebappsClient::GetInstance() {
   static base::NoDestructor<ChromeWebappsClient> instance;
   return instance.get();
+}
+
+bool ChromeWebappsClient::IsOriginConsideredSecure(const url::Origin& origin) {
+  return origin.scheme() == chrome::kIsolatedAppScheme;
 }
 
 security_state::SecurityLevel
@@ -92,9 +98,9 @@ AppBannerManager* ChromeWebappsClient::GetAppBannerManager(
 #if BUILDFLAG(IS_ANDROID)
 bool ChromeWebappsClient::IsInstallationInProgress(
     content::WebContents* web_contents,
-    const GURL& manifest_url) {
+    const GURL& manifest_id) {
   return WebApkInstallService::Get(web_contents->GetBrowserContext())
-      ->IsInstallInProgress(manifest_url);
+      ->IsInstallInProgress(manifest_id);
 }
 
 bool ChromeWebappsClient::CanShowAppBanners(
@@ -118,14 +124,14 @@ void ChromeWebappsClient::InstallWebApk(content::WebContents* web_contents,
                                         const AddToHomescreenParams& params) {
   WebApkInstallService::Get(web_contents->GetBrowserContext())
       ->InstallAsync(web_contents, *(params.shortcut_info), params.primary_icon,
-                     params.has_maskable_primary_icon, params.install_source);
+                     params.install_source);
 }
 
 void ChromeWebappsClient::InstallShortcut(content::WebContents* web_contents,
                                           const AddToHomescreenParams& params) {
   ShortcutHelper::AddToLauncherWithSkBitmap(
       web_contents, *(params.shortcut_info), params.primary_icon,
-      params.has_maskable_primary_icon, params.installable_status);
+      params.installable_status);
 }
 #endif
 

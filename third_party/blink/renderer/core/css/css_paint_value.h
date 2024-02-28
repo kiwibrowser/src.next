@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,7 +47,7 @@ class CORE_EXPORT CSSPaintValue : public CSSImageGeneratorValue {
       const Document&) const;
 
   const CSSStyleValueVector* GetParsedInputArgumentsForTesting() {
-    return parsed_input_arguments_;
+    return parsed_input_arguments_.Get();
   }
   void BuildInputArgumentValuesForTesting(
       Vector<std::unique_ptr<CrossThreadStyleValue>>& style_value) {

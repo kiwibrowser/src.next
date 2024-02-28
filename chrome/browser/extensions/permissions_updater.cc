@@ -8,9 +8,9 @@
 #include <utility>
 #include <vector>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/feature_list.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/ref_counted.h"
 #include "base/no_destructor.h"
 #include "base/values.h"
@@ -34,6 +34,7 @@
 #include "extensions/browser/network_permissions_updater.h"
 #include "extensions/browser/permissions_manager.h"
 #include "extensions/browser/renderer_startup_helper.h"
+#include "extensions/browser/script_injection_tracker.h"
 #include "extensions/common/cors_util.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_features.h"
@@ -358,7 +359,7 @@ void PermissionsUpdater::RevokeRuntimePermissions(
       extension.permissions_data()->active_permissions();
 
   // Unlike adding permissions, we should know that any permissions we remove
-  // are a superset of the permissions the extension has active (because we only
+  // are a subset of the permissions the extension has active (because we only
   // allow removal origins and the extension can't have a broader origin than
   // what it has granted). Because of this, we can just look for any patterns
   // contained in both sets.
@@ -367,8 +368,7 @@ void PermissionsUpdater::RevokeRuntimePermissions(
           active, permissions,
           URLPatternSet::IntersectionBehavior::kPatternsContainedByBoth);
 
-  CHECK(extension.permissions_data()->active_permissions().Contains(
-      *active_permissions_to_remove))
+  CHECK(active.Contains(*active_permissions_to_remove))
       << "Cannot remove permissions that are not active.";
   CHECK(GetRevokablePermissions(&extension)->Contains(permissions))
       << "Cannot remove non-revokable permissions.";
@@ -517,9 +517,8 @@ PermissionsUpdater::GetRevokablePermissions(const Extension* extension) const {
   // Additionally, some required permissions may be revokable if they can be
   // withheld by the ScriptingPermissionsModifier.
   std::unique_ptr<const PermissionSet> revokable_scripting_permissions =
-      ScriptingPermissionsModifier(browser_context_,
-                                   base::WrapRefCounted(extension))
-          .GetRevokablePermissions();
+      PermissionsManager::Get(browser_context_)
+          ->GetRevokablePermissions(*extension);
 
   if (revokable_scripting_permissions) {
     revokable_permissions = PermissionSet::CreateUnion(
@@ -550,8 +549,7 @@ void PermissionsUpdater::InitializePermissions(const Extension* extension) {
     desired_permissions = &extension->permissions_data()->active_permissions();
   } else {
     desired_permissions_wrapper =
-        PermissionsManager::Get(browser_context_)
-            ->GetBoundedExtensionDesiredPermissions(*extension);
+        permissions_manager->GetBoundedExtensionDesiredPermissions(*extension);
     desired_permissions = desired_permissions_wrapper.get();
   }
 
@@ -674,6 +672,12 @@ void PermissionsUpdater::NotifyPermissionsUpdated(
             permissions_data->policy_blocked_hosts(),
             permissions_data->policy_allowed_hosts(),
             permissions_data->UsesDefaultPolicyHostRestrictions());
+
+        // Notify ScriptInjectionTracker when host permissions change.
+        if (!changed->effective_hosts().is_empty()) {
+          ScriptInjectionTracker::DidUpdatePermissionsInRenderer(
+              base::PassKey<PermissionsUpdater>(), *extension, *host);
+        }
       }
     }
   }
@@ -787,6 +791,11 @@ void PermissionsUpdater::RemovePermissionsImpl(
   NetworkPermissionsUpdateHelper::UpdatePermissions(
       browser_context_, REMOVED, &extension, permissions_to_remove_from_prefs,
       std::move(completion_callback));
+}
+
+// static
+void PermissionsUpdater::EnsureAssociatedFactoryBuilt() {
+  PermissionsUpdaterShutdownNotifierFactory::GetInstance();
 }
 
 }  // namespace extensions

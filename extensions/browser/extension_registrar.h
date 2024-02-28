@@ -7,7 +7,8 @@
 
 #include <memory>
 
-#include "base/memory/ref_counted.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
 #include "extensions/browser/process_manager.h"
@@ -96,6 +97,9 @@ class ExtensionRegistrar : public ProcessManagerObserver {
 
   ~ExtensionRegistrar() override;
 
+  // Called when the associated Profile is going to be destroyed.
+  void Shutdown();
+
   // Adds the extension to the ExtensionRegistry. The extension will be added to
   // the enabled, disabled, blocklisted or blocked set. If the extension is
   // added as enabled, it will be activated.
@@ -162,15 +166,16 @@ class ExtensionRegistrar : public ProcessManagerObserver {
   void DeactivateExtension(const Extension* extension,
                            UnloadedExtensionReason reason);
 
+  // Unregister the service worker that is not from manifest and has extension
+  // root scope.
+  void UnregisterServiceWorkerWithRootScope(const Extension* extension);
+  void NotifyServiceWorkerUnregistered(const ExtensionId& extension_id,
+                                       bool success);
+
   // Given an extension that was disabled for reloading, completes the reload
   // by replacing the old extension with the new version and enabling it.
   // Returns true on success.
   bool ReplaceReloadedExtension(scoped_refptr<const Extension> extension);
-
-  // Marks the extension ready after URLRequestContexts have been updated on
-  // the IO thread.
-  void OnExtensionRegisteredWithRequestContexts(
-      scoped_refptr<const Extension> extension);
 
   // Upon reloading an extension, spins up its context if necessary.
   void MaybeSpinUpLazyContext(const Extension* extension, bool is_newly_added);
@@ -178,16 +183,16 @@ class ExtensionRegistrar : public ProcessManagerObserver {
   // ProcessManagerObserver overrides
   void OnServiceWorkerRegistered(const WorkerId& worker_id) override;
 
-  content::BrowserContext* const browser_context_;
+  const raw_ptr<content::BrowserContext> browser_context_;
 
   // Delegate provided in the constructor. Should outlive this object.
-  Delegate* const delegate_;
+  const raw_ptr<Delegate> delegate_;
 
   // Keyed services we depend on. Cached here for repeated access.
-  ExtensionSystem* const extension_system_;
-  ExtensionPrefs* const extension_prefs_;
-  ExtensionRegistry* const registry_;
-  RendererStartupHelper* const renderer_helper_;
+  raw_ptr<ExtensionSystem> extension_system_;
+  const raw_ptr<ExtensionPrefs> extension_prefs_;
+  const raw_ptr<ExtensionRegistry> registry_;
+  const raw_ptr<RendererStartupHelper> renderer_helper_;
 
   // Map of DevToolsAgentHost instances that are detached,
   // waiting for an extension to be reloaded.

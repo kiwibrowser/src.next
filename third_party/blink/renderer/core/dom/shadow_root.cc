@@ -40,6 +40,7 @@
 #include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/dom/whitespace_attacher.h"
 #include "third_party/blink/renderer/core/editing/serializers/serialization.h"
+#include "third_party/blink/renderer/core/html/custom/custom_element_registry.h"
 #include "third_party/blink/renderer/core/html/html_slot_element.h"
 #include "third_party/blink/renderer/core/trustedtypes/trusted_types_util.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
@@ -47,7 +48,9 @@
 
 namespace blink {
 
-struct SameSizeAsShadowRoot : public DocumentFragment, public TreeScope {
+struct SameSizeAsShadowRoot : public DocumentFragment,
+                              public TreeScope,
+                              public ElementRareDataField {
   Member<void*> member[2];
   unsigned flags[1];
 };
@@ -63,7 +66,6 @@ ShadowRoot::ShadowRoot(Document& document, ShadowRootType type)
               &ShadowRoot::OnAdoptedStyleSheetSet),
           static_cast<V8ObservableArrayCSSStyleSheet::DeleteAlgorithmCallback>(
               &ShadowRoot::OnAdoptedStyleSheetDelete)),
-      style_sheet_list_(nullptr),
       child_shadow_root_count_(0),
       type_(static_cast<unsigned>(type)),
       registered_with_parent_shadow_root_(false),
@@ -98,7 +100,10 @@ void ShadowRoot::DidChangeHostChildSlotName(const AtomicString& old_value,
   slot_assignment_->DidChangeHostChildSlotName(old_value, new_value);
 }
 
-Node* ShadowRoot::Clone(Document&, CloneChildrenFlag) const {
+Node* ShadowRoot::Clone(Document&,
+                        NodeCloningData&,
+                        ContainerNode*,
+                        ExceptionState&) const {
   NOTREACHED() << "ShadowRoot nodes are not clonable.";
   return nullptr;
 }
@@ -148,11 +153,25 @@ String ShadowRoot::getInnerHTML(const GetInnerHTMLOptions* options) const {
 void ShadowRoot::setInnerHTML(const String& html,
                               ExceptionState& exception_state) {
   if (DocumentFragment* fragment = CreateFragmentForInnerOuterHTML(
-          html, &host(), kAllowScriptingContent, "innerHTML",
-          /*include_shadow_roots=*/false, exception_state)) {
+          html, &host(), kAllowScriptingContent,
+          Element::IncludeShadowRoots::kDontInclude,
+          Element::ForceHtml::kDontForce, exception_state)) {
     ReplaceChildrenWithFragment(this, fragment, exception_state);
     if (auto* element = DynamicTo<HTMLElement>(host()))
       element->AdjustDirectionalityIfNeededAfterShadowRootChanged();
+  }
+}
+
+void ShadowRoot::setHTMLUnsafe(const String& html,
+                               ExceptionState& exception_state) {
+  if (DocumentFragment* fragment = CreateFragmentForInnerOuterHTML(
+          html, &host(), kAllowScriptingContent,
+          Element::IncludeShadowRoots::kInclude, Element::ForceHtml::kDontForce,
+          exception_state)) {
+    ReplaceChildrenWithFragment(this, fragment, exception_state);
+    if (auto* element = DynamicTo<HTMLElement>(host())) {
+      element->AdjustDirectionalityIfNeededAfterShadowRootChanged();
+    }
   }
 }
 
@@ -234,7 +253,13 @@ bool ShadowRoot::NeedsSlotAssignmentRecalc() const {
 void ShadowRoot::ChildrenChanged(const ChildrenChange& change) {
   ContainerNode::ChildrenChanged(change);
 
-  if (change.IsChildElementChange()) {
+  if (change.type ==
+      ChildrenChangeType::kFinishedBuildingDocumentFragmentTree) {
+    // No need to call CheckForSiblingStyleChanges() as at this point the
+    // node is not in the active document (CheckForSiblingStyleChanges() does
+    // nothing when not in the active document).
+    DCHECK(!InActiveDocument());
+  } else if (change.IsChildElementChange()) {
     CheckForSiblingStyleChanges(
         change.type == ChildrenChangeType::kElementRemoved
             ? kSiblingElementRemoved
@@ -242,17 +267,33 @@ void ShadowRoot::ChildrenChanged(const ChildrenChange& change) {
         To<Element>(change.sibling_changed), change.sibling_before_change,
         change.sibling_after_change);
   }
+
+  // In the case of input types like button where the child element is not
+  // in a container, we need to explicit adjust directionality.
+  if (RuntimeEnabledFeatures::CSSPseudoDirEnabled() &&
+      RuntimeEnabledFeatures::DirnameMoreInputTypesEnabled()) {
+    if (TextControlElement* text_element =
+            HTMLElement::ElementIfAutoDirectionalityFormAssociatedOrNull(
+                &host())) {
+      text_element->AdjustDirectionalityIfNeededAfterChildrenChanged(change);
+    }
+  }
 }
 
-StyleSheetList& ShadowRoot::StyleSheets() {
-  if (!style_sheet_list_)
-    SetStyleSheets(MakeGarbageCollected<StyleSheetList>(this));
-  return *style_sheet_list_;
+void ShadowRoot::SetRegistry(CustomElementRegistry* registry) {
+  DCHECK(!registry_);
+  DCHECK(!registry ||
+         RuntimeEnabledFeatures::ScopedCustomElementRegistryEnabled());
+  registry_ = registry;
+  if (registry) {
+    registry->AssociatedWith(GetDocument());
+  }
 }
 
 void ShadowRoot::Trace(Visitor* visitor) const {
-  visitor->Trace(style_sheet_list_);
   visitor->Trace(slot_assignment_);
+  visitor->Trace(registry_);
+  ElementRareDataField::Trace(visitor);
   TreeScope::Trace(visitor);
   DocumentFragment::Trace(visitor);
 }

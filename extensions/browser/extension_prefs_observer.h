@@ -40,6 +40,9 @@ class ExtensionPrefsObserver {
   virtual void OnExtensionStateChanged(const std::string& extension_id,
                                        bool state) {}
 
+  // Called when an extension's pref has been updated or changed.
+  virtual void OnExtensionPrefsUpdated(const std::string& extension_id) {}
+
   // Called when the runtime permissions for an extension are changed.
   // TODO(devlin): This is a bit out of place here, and may be better suited on
   // a general "extension permissions" observer, if/when we have one. See
@@ -56,7 +59,7 @@ class ExtensionPrefsObserver {
   // Called when the ExtensionPrefs object (the thing that this observer
   // observes) will be destroyed. In response, the observer, |this|, should
   // call "prefs->RemoveObserver(this)", whether directly or indirectly (e.g.
-  // via ScopedObserver::Remove).
+  // via ScopedObservation::Reset).
   virtual void OnExtensionPrefsWillBeDestroyed(ExtensionPrefs* prefs) {}
 };
 
@@ -85,7 +88,7 @@ class EarlyExtensionPrefsObserver {
   // calling AddObserver.
   //
   // The recommended technique for ensuring matching AddObserver and
-  // RemoveObserver calls is to used a ScopedObserver.
+  // RemoveObserver calls is to used a ScopedObservation.
   //
   // Unlike other ExtensionPrefsObserver methods, this method does not have an
   // "const std::string& extension_id" argument. It is not about any one

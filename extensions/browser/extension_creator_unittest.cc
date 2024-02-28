@@ -10,9 +10,12 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
+#include "base/values.h"
 #include "crypto/rsa_private_key.h"
+#include "extensions/common/constants.h"
 #include "extensions/common/extension_paths.h"
 #include "extensions/strings/grit/extensions_strings.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -40,11 +43,14 @@ class ExtensionCreatorTest : public testing::Test {
     extension_creator_ = std::make_unique<ExtensionCreator>();
   }
 
-  // A helper function to call ExtensionCreator::ReadInputKey(...) because it's
-  // a private method of ExtensionCreator.
+  // Helper functions to call private methods of ExtensionCreator.
   std::unique_ptr<crypto::RSAPrivateKey> ReadInputKey(
       const base::FilePath& private_key_path) {
     return extension_creator_->ReadInputKey(private_key_path);
+  }
+
+  bool ValidateExtension(const base::FilePath& dir, int flags) {
+    return extension_creator_->ValidateExtension(dir, flags);
   }
 
   ExtensionCreator* extension_creator() const {
@@ -77,8 +83,7 @@ TEST_F(ExtensionCreatorTest, ReadInputKeyDangerousPath) {
   ASSERT_TRUE(file_path_dangerous.ReferencesParent());
 
   const char kTestData[] = "0123";
-  ASSERT_EQ(static_cast<int>(strlen(kTestData)),
-            base::WriteFile(file_path_dangerous, kTestData, strlen(kTestData)));
+  ASSERT_TRUE(base::WriteFile(file_path_dangerous, kTestData));
 
   // If a path includes parent reference `..`, reading the path must fail.
   EXPECT_EQ(nullptr, ReadInputKey(file_path_dangerous));
@@ -93,8 +98,7 @@ TEST_F(ExtensionCreatorTest, ReadInputKeyInvalidPEMFormat) {
   // Creates a file that starts with `-----BEGIN`. but it doesn't end with
   // `KEY-----`.
   const char kTestData[] = "-----BEGIN foo";
-  ASSERT_EQ(static_cast<int>(strlen(kTestData)),
-            base::WriteFile(file_path, kTestData, strlen(kTestData)));
+  ASSERT_TRUE(base::WriteFile(file_path, kTestData));
 
   EXPECT_EQ(nullptr, ReadInputKey(file_path));
   EXPECT_EQ(l10n_util::GetStringUTF8(IDS_EXTENSION_PRIVATE_KEY_INVALID),
@@ -110,6 +114,67 @@ TEST_F(ExtensionCreatorTest, ReadInputKeyNotPKCSFormat) {
 TEST_F(ExtensionCreatorTest, ReadInputKeyPKCSFormat) {
   EXPECT_NE(nullptr, ReadInputKey(GetTestFile("pkcs8.pem")));
   EXPECT_TRUE(extension_creator()->error_message().empty());
+}
+
+TEST_F(ExtensionCreatorTest, ValidateExtension) {
+  const base::FilePath src_path = CreateTestPath();
+  ASSERT_TRUE(base::CreateDirectory(src_path));
+
+  EXPECT_FALSE(ValidateExtension(src_path, 0));
+  EXPECT_EQ("Manifest file is missing or unreadable",
+            extension_creator()->error_message());
+
+  // Add partial manifest file.
+  auto manifest_file = src_path.Append(FILE_PATH_LITERAL("manifest.json"));
+  ASSERT_TRUE(base::WriteFile(manifest_file, R"({ "manifest_version": 3)"));
+
+  EXPECT_FALSE(ValidateExtension(src_path, 0));
+  EXPECT_TRUE(extension_creator()->error_message().starts_with(
+      "Manifest is not valid JSON."));
+
+  // Replace partial manifest with correct minimum file.
+  ASSERT_TRUE(base::WriteFile(manifest_file,
+      R"({ "manifest_version": 3, "name": "test", "version": "1" })"));
+
+  EXPECT_TRUE(ValidateExtension(src_path, 0));
+  // TODO(crbug.com/1472723) Adjust GetDefaultLocaleFromManifest method.
+  // EXPECT_TRUE(extension_creator()->error_message().empty());
+
+  // Replace manifest specifying default_locale without adding folder yet.
+  ASSERT_TRUE(base::WriteFile(manifest_file, R"({ "manifest_version": 3,
+      "name": "test", "version": "1", "default_locale": "en" })"));
+
+  EXPECT_FALSE(ValidateExtension(src_path, 0));
+  EXPECT_EQ("Default locale was specified, but _locales subtree is missing.",
+            extension_creator()->error_message());
+
+  // Add localization folder.
+  const auto locale_path = src_path.Append(kLocaleFolder);
+  base::FilePath en_locale = locale_path.AppendASCII("en");
+  ASSERT_TRUE(base::CreateDirectory(en_locale));
+
+  EXPECT_FALSE(ValidateExtension(src_path, 0));
+  EXPECT_EQ("Catalog file is missing for locale en.",
+            extension_creator()->error_message());
+
+  // Add valid default localization file.
+  base::FilePath en_messages_file = en_locale.Append(kMessagesFilename);
+  const std::string en_data = R"({ "name": { "message": "default" } })";
+  ASSERT_TRUE(base::WriteFile(en_messages_file, en_data));
+
+  EXPECT_TRUE(ValidateExtension(src_path, 0));
+  EXPECT_TRUE(extension_creator()->error_message().empty());
+
+  // Add additional localization file with undefined variable.
+  base::FilePath de_locale = locale_path.AppendASCII("de");
+  ASSERT_TRUE(base::CreateDirectory(de_locale));
+  base::FilePath de_messages_file = de_locale.Append(kMessagesFilename);
+  const std::string de_data = R"({ "name": { "message": "with $VAR$" } })";
+  ASSERT_TRUE(base::WriteFile(de_messages_file, de_data));
+
+  EXPECT_FALSE(ValidateExtension(src_path, 0));
+  EXPECT_THAT(extension_creator()->error_message(),
+              testing::HasSubstr("Variable $VAR$ used but not defined."));
 }
 
 }  // namespace extensions

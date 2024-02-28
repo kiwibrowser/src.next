@@ -15,7 +15,7 @@
 #include <memory>
 #include <string>
 
-#include "base/callback_forward.h"
+#include "base/functional/callback_forward.h"
 #include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
@@ -28,7 +28,6 @@ class BuildState;
 class DownloadRequestLimiter;
 class DownloadStatusUpdater;
 class GpuModeManager;
-class HidPolicyAllowedDevices;
 class IconManager;
 class MediaFileSystemRegistry;
 class NotificationPlatformBridge;
@@ -42,11 +41,13 @@ class SystemNetworkContextManager;
 class WebRtcLogUploader;
 
 #if !BUILDFLAG(IS_ANDROID)
+class HidSystemTrayIcon;
+class UsbSystemTrayIcon;
 class IntranetRedirectDetector;
 #endif
 
-namespace breadcrumbs {
-class BreadcrumbPersistentStorageManager;
+namespace embedder_support {
+class OriginTrialsSettingsStorage;
 }
 
 namespace network {
@@ -88,6 +89,10 @@ class MetricsServicesManager;
 
 namespace network_time {
 class NetworkTimeTracker;
+}
+
+namespace os_crypt_async {
+class OSCryptAsync;
 }
 
 namespace policy {
@@ -132,7 +137,11 @@ class BrowserProcess {
   virtual metrics_services_manager::MetricsServicesManager*
   GetMetricsServicesManager() = 0;
 
-  // Services: any of these getters may return NULL
+  // Gets the OriginTrialsSettingsStorage, constructing it if necessary.
+  virtual embedder_support::OriginTrialsSettingsStorage*
+  GetOriginTrialsSettingsStorage() = 0;
+
+  // Services: any of these getters may return null.
   virtual metrics::MetricsService* metrics_service() = 0;
   virtual ProfileManager* profile_manager() = 0;
   virtual PrefService* local_state() = 0;
@@ -261,17 +270,20 @@ class BrowserProcess {
   // through the policy engine.
   virtual SerialPolicyAllowedPorts* serial_policy_allowed_ports() = 0;
 
-  // Returns the object which keeps track of Human Interface Device (HID)
-  // permissions configured through the policy engine.
-  virtual HidPolicyAllowedDevices* hid_policy_allowed_devices() = 0;
+  // Returns the object which maintains Human Interface Device (HID) system tray
+  // icon.
+  virtual HidSystemTrayIcon* hid_system_tray_icon() = 0;
+
+  // Returns the object which maintains Universal Serial Bus (USB) system tray
+  // icon.
+  virtual UsbSystemTrayIcon* usb_system_tray_icon() = 0;
 #endif
 
-  virtual BuildState* GetBuildState() = 0;
+  // Obtain the browser instance of OSCryptAsync, which should be used for data
+  // encryption.
+  virtual os_crypt_async::OSCryptAsync* os_crypt_async() = 0;
 
-  // Returns the BreadcrumbPersistentStorageManager writing breadcrumbs to disk,
-  // or nullptr if breadcrumbs logging is disabled.
-  virtual breadcrumbs::BreadcrumbPersistentStorageManager*
-  GetBreadcrumbPersistentStorageManager() = 0;
+  virtual BuildState* GetBuildState() = 0;
 };
 
 extern BrowserProcess* g_browser_process;

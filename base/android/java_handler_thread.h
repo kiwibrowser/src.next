@@ -15,7 +15,6 @@
 #include "base/task/sequence_manager/sequence_manager.h"
 #include "base/task/sequence_manager/task_queue.h"
 #include "base/task/single_thread_task_runner.h"
-#include "base/threading/thread_task_runner_handle.h"
 
 namespace base {
 
@@ -81,7 +80,7 @@ class BASE_EXPORT JavaHandlerThread {
     ~State();
 
     std::unique_ptr<sequence_manager::SequenceManager> sequence_manager;
-    scoped_refptr<sequence_manager::TaskQueue> default_task_queue;
+    sequence_manager::TaskQueue::Handle default_task_queue;
     raw_ptr<MessagePumpForUI> pump = nullptr;
   };
 

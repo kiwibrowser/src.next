@@ -20,7 +20,6 @@
 #include "content/public/test/web_contents_tester.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/common/extension_builder.h"
-#include "extensions/common/value_builder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -35,39 +34,26 @@ using content::BrowserThread;
 
 namespace {
 
-std::unique_ptr<base::DictionaryValue> MakeExtensionManifest(
-    const base::Value& manifest_extra) {
-  std::unique_ptr<base::DictionaryValue> manifest =
-      DictionaryBuilder()
-          .Set("name", "Extension")
-          .Set("version", "1.0")
-          .Set("manifest_version", 2)
-          .Build();
-  const base::DictionaryValue* manifest_extra_dict;
-  if (manifest_extra.GetAsDictionary(&manifest_extra_dict)) {
-    manifest->MergeDictionary(manifest_extra_dict);
-  } else {
-    std::string manifest_json;
-    base::JSONWriter::Write(manifest_extra, &manifest_json);
-    ADD_FAILURE() << "Expected dictionary; got \"" << manifest_json << "\"";
-  }
+base::Value::Dict MakeExtensionManifest(
+    const base::Value::Dict& manifest_extra) {
+  base::Value::Dict manifest = base::Value::Dict()
+                                   .Set("name", "Extension")
+                                   .Set("version", "1.0")
+                                   .Set("manifest_version", 2);
+  manifest.Merge(manifest_extra.Clone());
   return manifest;
 }
 
-std::unique_ptr<base::DictionaryValue> MakePackagedAppManifest() {
-  return extensions::DictionaryBuilder()
+base::Value::Dict MakePackagedAppManifest() {
+  return base::Value::Dict()
       .Set("name", "Test App Name")
       .Set("version", "2.0")
       .Set("manifest_version", 2)
-      .Set("app", extensions::DictionaryBuilder()
-                      .Set("background",
-                           extensions::DictionaryBuilder()
-                               .Set("scripts", extensions::ListBuilder()
-                                                   .Append("background.js")
-                                                   .Build())
-                               .Build())
-                      .Build())
-      .Build();
+      .Set("app",
+           base::Value::Dict().Set(
+               "background",
+               base::Value::Dict().Set(
+                   "scripts", base::Value::List().Append("background.js"))));
 }
 
 }  // namespace
@@ -131,9 +117,8 @@ ExtensionPrefs* TestExtensionEnvironment::GetExtensionPrefs() {
 }
 
 const Extension* TestExtensionEnvironment::MakeExtension(
-    const base::Value& manifest_extra) {
-  std::unique_ptr<base::DictionaryValue> manifest =
-      MakeExtensionManifest(manifest_extra);
+    const base::Value::Dict& manifest_extra) {
+  base::Value::Dict manifest = MakeExtensionManifest(manifest_extra);
   scoped_refptr<const Extension> result =
       ExtensionBuilder().SetManifest(std::move(manifest)).Build();
   GetExtensionService()->AddExtension(result.get());
@@ -141,10 +126,9 @@ const Extension* TestExtensionEnvironment::MakeExtension(
 }
 
 const Extension* TestExtensionEnvironment::MakeExtension(
-    const base::Value& manifest_extra,
+    const base::Value::Dict& manifest_extra,
     const std::string& id) {
-  std::unique_ptr<base::DictionaryValue> manifest =
-      MakeExtensionManifest(manifest_extra);
+  base::Value::Dict manifest = MakeExtensionManifest(manifest_extra);
   scoped_refptr<const Extension> result =
       ExtensionBuilder().SetManifest(std::move(manifest)).SetID(id).Build();
   GetExtensionService()->AddExtension(result.get());

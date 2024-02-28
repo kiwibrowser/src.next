@@ -24,11 +24,9 @@
 #include "chrome/browser/web_applications/web_app_helpers.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/services/app_service/public/cpp/app_launch_util.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
-#include "extensions/browser/notification_types.h"
 #include "extensions/common/extension.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -38,8 +36,7 @@
 #include "chrome/browser/extensions/updater/local_extension_cache.h"
 #endif
 
-namespace extensions {
-namespace browsertest_util {
+namespace extensions::browsertest_util {
 
 void CreateAndInitializeLocalCache() {
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -82,5 +79,35 @@ content::WebContents* AddTab(Browser* browser, const GURL& url) {
   return browser->tab_strip_model()->GetActiveWebContents();
 }
 
-}  // namespace browsertest_util
-}  // namespace extensions
+bool DidChangeTitle(content::WebContents& web_contents,
+                    const std::u16string& original_title,
+                    const std::u16string& changed_title) {
+  const std::u16string& title = web_contents.GetTitle();
+  if (title == changed_title) {
+    return true;
+  }
+  if (title == original_title) {
+    return false;
+  }
+  ADD_FAILURE() << "Unexpected page title found:  " << title;
+  return false;
+}
+
+BlockedActionWaiter::BlockedActionWaiter(ExtensionActionRunner* runner)
+    : runner_(runner) {
+  runner_->set_observer_for_testing(this);  // IN-TEST
+}
+
+BlockedActionWaiter::~BlockedActionWaiter() {
+  runner_->set_observer_for_testing(nullptr);  // IN-TEST
+}
+
+void BlockedActionWaiter::Wait() {
+  run_loop_.Run();
+}
+
+void BlockedActionWaiter::OnBlockedActionAdded() {
+  run_loop_.Quit();
+}
+
+}  // namespace extensions::browsertest_util

@@ -22,8 +22,6 @@
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "components/security_state/core/security_state.h"
 #include "components/services/app_service/public/cpp/app_types.h"
-#include "components/services/app_service/public/mojom/types.mojom-forward.h"
-#include "components/url_formatter/url_formatter.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_view_host.h"
@@ -228,11 +226,10 @@ void HostedAppBrowserController::OnTabRemoved(content::WebContents* contents) {
 void HostedAppBrowserController::LoadAppIcon(
     bool allow_placeholder_icon) const {
   apps::AppServiceProxyFactory::GetForProfile(browser()->profile())
-      ->LoadIcon(apps::AppType::kChromeApp, GetExtension()->id(),
-                 apps::IconType::kStandard,
+      ->LoadIcon(GetExtension()->id(), apps::IconType::kStandard,
                  extension_misc::EXTENSION_ICON_SMALL, allow_placeholder_icon,
                  base::BindOnce(&HostedAppBrowserController::OnLoadIcon,
-                                weak_ptr_factory_.GetWeakPtr()));
+                                weak_ptr_factory_.GetMutableWeakPtr()));
 }
 
 void HostedAppBrowserController::OnLoadIcon(apps::IconValuePtr icon_value) {

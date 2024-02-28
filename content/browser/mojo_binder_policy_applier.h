@@ -7,8 +7,10 @@
 
 #include <string>
 
-#include "base/bind.h"
-#include "base/callback.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
+#include "base/functional/callback_forward.h"
+#include "base/memory/raw_ref.h"
 #include "content/browser/mojo_binder_policy_map_impl.h"
 #include "content/common/content_export.h"
 
@@ -54,6 +56,12 @@ class CONTENT_EXPORT MojoBinderPolicyApplier {
   // that triggered the prerendering are same origin.
   static std::unique_ptr<MojoBinderPolicyApplier>
   CreateForSameOriginPrerendering(
+      base::OnceCallback<void(const std::string& interface_name)>
+          cancel_closure);
+
+  // Returns the instance used by BrowserInterfaceBrokerImpl for preview mode.
+  // This is used when a page is shown in preview mode.
+  static std::unique_ptr<MojoBinderPolicyApplier> CreateForPreview(
       base::OnceCallback<void(const std::string& interface_name)>
           cancel_closure);
 
@@ -109,12 +117,18 @@ class CONTENT_EXPORT MojoBinderPolicyApplier {
   const MojoBinderNonAssociatedPolicy default_policy_ =
       MojoBinderNonAssociatedPolicy::kDefer;
   // Maps Mojo interface name to its policy.
-  const MojoBinderPolicyMapImpl& policy_map_;
+  const raw_ref<const MojoBinderPolicyMapImpl> policy_map_;
+
   // Will be executed upon a request for a kCancel interface.
   base::OnceCallback<void(const std::string& interface_name)> cancel_callback_;
   Mode mode_ = Mode::kEnforce;
+
   // Stores binders which are delayed running.
   std::vector<base::OnceClosure> deferred_binders_;
+
+  // Stores binders that can be used to send synchronous messages but
+  // are delayed running.
+  std::vector<base::OnceClosure> deferred_sync_binders_;
 };
 
 }  // namespace content

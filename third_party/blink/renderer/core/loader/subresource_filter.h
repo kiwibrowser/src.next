@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,8 +40,6 @@ class CORE_EXPORT SubresourceFilter final
 
   // Returns if |resource_url| is an ad resource.
   bool IsAdResource(const KURL& resource_url, mojom::blink::RequestContextType);
-  // Reports the resource request id as an ad to the |subresource_filter_|.
-  void ReportAdRequestId(int request_id);
 
   virtual void Trace(Visitor*) const;
 

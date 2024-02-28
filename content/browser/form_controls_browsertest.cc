@@ -7,7 +7,6 @@
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "cc/test/pixel_comparator.h"
-#include "content/browser/form_controls_browsertest_mac.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
@@ -17,15 +16,12 @@
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
+#include "gpu/config/gpu_finch_features.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/base/ui_base_switches.h"
 
 #if BUILDFLAG(IS_ANDROID)
 #include "base/android/build_info.h"
-#endif
-
-#if BUILDFLAG(IS_WIN)
-#include "base/win/windows_version.h"
 #endif
 
 // TODO(crbug.com/958242): Move the baselines to skia gold for easier
@@ -83,6 +79,8 @@ class FormControlsBrowserTest : public ContentBrowserTest {
     }
 #elif BUILDFLAG(IS_FUCHSIA)
     platform_suffix = "_fuchsia";
+#elif BUILDFLAG(IS_IOS)
+    platform_suffix = "_ios";
 #endif
 
     base::FilePath dir_test_data;
@@ -101,34 +99,30 @@ class FormControlsBrowserTest : public ContentBrowserTest {
         NavigateToURL(shell()->web_contents(),
                       GURL("data:text/html,<!DOCTYPE html>" + body_html)));
 
-#if BUILDFLAG(IS_MAC)
+#if BUILDFLAG(IS_APPLE)
     // This fuzzy pixel comparator handles several mac behaviors:
     // - Different font rendering after 10.14
-    // - 10.12 subpixel rendering differences: crbug.com/1037971
     // - Slight differences in radio and checkbox rendering in 10.15
-    cc::FuzzyPixelComparator comparator(
-        /* discard_alpha */ true,
-        /* error_pixels_percentage_limit */ 18.f,
-        /* small_error_pixels_percentage_limit */ 0.f,
-        /* avg_abs_error_limit */ 20.f,
-        /* max_abs_error_limit */ 120.f,
-        /* small_error_threshold */ 0);
+    // TODO(wangxianzhu): Tighten these parameters.
+    auto comparator = cc::FuzzyPixelComparator()
+                          .DiscardAlpha()
+                          .SetErrorPixelsPercentageLimit(26.f)
+                          .SetAvgAbsErrorLimit(20.f)
+                          .SetAbsErrorLimit(120);
 #elif BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_WIN) || (OS_LINUX) || \
     BUILDFLAG(IS_FUCHSIA)
     // Different versions of android may have slight differences in rendering.
     // Some versions have more significant differences than others, which are
     // tracked separately in separate baseline image files. The less significant
     // differences are accommodated for with this fuzzy pixel comparator.
-    // This also applies to different versions of windows.
-    cc::FuzzyPixelComparator comparator(
-        /* discard_alpha */ true,
-        /* error_pixels_percentage_limit */ 11.f,
-        /* small_error_pixels_percentage_limit */ 0.f,
-        /* avg_abs_error_limit */ 5.f,
-        /* max_abs_error_limit */ 140.f,
-        /* small_error_threshold */ 0);
+    // This also applies to different versions of other OSes.
+    auto comparator = cc::FuzzyPixelComparator()
+                          .DiscardAlpha()
+                          .SetErrorPixelsPercentageLimit(11.f)
+                          .SetAvgAbsErrorLimit(5.f)
+                          .SetAbsErrorLimit(140);
 #else
-    cc::ExactPixelComparator comparator(/* disard_alpha */ true);
+    cc::AlphaDiscardingExactPixelComparator comparator;
 #endif
     EXPECT_TRUE(CompareWebContentsOutputToReference(
         shell()->web_contents(), golden_filepath,
@@ -146,16 +140,6 @@ class FormControlsBrowserTest : public ContentBrowserTest {
       return true;
     }
 #endif  // BUILDFLAG(IS_ANDROID)
-    return false;
-  }
-
-  bool SkipTestForOldWinVersion() const {
-#if BUILDFLAG(IS_WIN)
-    // Win7 font rendering causes too large of rendering diff for pixel
-    // comparison.
-    if (base::win::GetVersion() <= base::win::Version::WIN7)
-      return true;
-#endif  // BUILDFLAG(IS_WIN)
     return false;
   }
 };
@@ -201,12 +185,12 @@ IN_PROC_BROWSER_TEST_F(FormControlsBrowserTest, Radio) {
           /* screenshot_height */ 40);
 }
 
-IN_PROC_BROWSER_TEST_F(FormControlsBrowserTest, DarkModeTextSelection) {
 #if BUILDFLAG(IS_MAC)
-  if (!MacOSVersionSupportsDarkMode())
-    return;
+#define MAYBE_DarkModeTextSelection DISABLED_DarkModeTextSelection
+#else
+#define MAYBE_DarkModeTextSelection DarkModeTextSelection
 #endif
-
+IN_PROC_BROWSER_TEST_F(FormControlsBrowserTest, MAYBE_DarkModeTextSelection) {
   if (SkipTestForOldAndroidVersions())
     return;
 
@@ -270,9 +254,6 @@ IN_PROC_BROWSER_TEST_F(FormControlsBrowserTest, Textarea) {
 
 IN_PROC_BROWSER_TEST_F(FormControlsBrowserTest, Button) {
   if (SkipTestForOldAndroidVersions())
-    return;
-
-  if (SkipTestForOldWinVersion())
     return;
 
   RunTest("form_controls_browsertest_button",
@@ -374,6 +355,15 @@ IN_PROC_BROWSER_TEST_F(FormControlsBrowserTest, MultiSelect) {
 IN_PROC_BROWSER_TEST_F(FormControlsBrowserTest, Progress) {
   if (SkipTestForOldAndroidVersions())
     return;
+
+#if BUILDFLAG(IS_MAC) && !defined(ARCH_CPU_ARM64)
+  // The pixel comparison fails on Mac Intel GPUs with Graphite due to MSAA
+  // issues.
+  // TODO(crbug.com/1500259): Re-enable test if possible.
+  if (features::IsSkiaGraphiteEnabled(base::CommandLine::ForCurrentProcess())) {
+    return;
+  }
+#endif
 
   RunTest("form_controls_browsertest_progress",
           R"HTML(

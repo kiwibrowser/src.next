@@ -18,7 +18,6 @@ import org.chromium.base.CallbackController;
 import org.chromium.base.MathUtils;
 import org.chromium.base.supplier.ObservableSupplier;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.fullscreen.FullscreenManager;
 import org.chromium.chrome.browser.fullscreen.FullscreenOptions;
 import org.chromium.chrome.browser.layouts.FilterLayoutStateObserver;
@@ -30,18 +29,13 @@ import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorObserver;
-import org.chromium.chrome.browser.tasks.tab_management.TabUiFeatureUtilities;
-import org.chromium.chrome.browser.vr.VrModuleProvider;
 import org.chromium.components.browser_ui.styles.SemanticColorUtils;
 import org.chromium.ui.UiUtils;
 import org.chromium.ui.util.ColorUtils;
-import org.chromium.ui.vr.VrModeObserver;
 
-/**
- * Controls the bottom system navigation bar color for the provided {@link Window}.
- */
+/** Controls the bottom system navigation bar color for the provided {@link Window}. */
 @RequiresApi(Build.VERSION_CODES.O_MR1)
-class TabbedNavigationBarColorController implements VrModeObserver {
+class TabbedNavigationBarColorController {
     private final Window mWindow;
     private final ViewGroup mRootView;
     private final Context mContext;
@@ -59,7 +53,6 @@ class TabbedNavigationBarColorController implements VrModeObserver {
 
     private @ColorInt int mNavigationBarColor;
     private boolean mForceDarkNavigationBarColor;
-    private boolean mOverviewModeHiding;
     private boolean mIsInFullscreen;
     private float mNavigationBarScrimFraction;
 
@@ -73,7 +66,9 @@ class TabbedNavigationBarColorController implements VrModeObserver {
      * @param fullscreenManager The {@link FullscreenManager} used to determine if fullscreen is
      *                          enabled
      */
-    TabbedNavigationBarColorController(Window window, TabModelSelector tabModelSelector,
+    TabbedNavigationBarColorController(
+            Window window,
+            TabModelSelector tabModelSelector,
             ObservableSupplier<LayoutManager> layoutManagerSupplier,
             FullscreenManager fullscreenManager) {
         assert Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1;
@@ -87,25 +82,28 @@ class TabbedNavigationBarColorController implements VrModeObserver {
                 mContext.getResources().getBoolean(R.bool.window_light_navigation_bar);
 
         mTabModelSelector = tabModelSelector;
-        mTabModelSelectorObserver = new TabModelSelectorObserver() {
-            @Override
-            public void onTabModelSelected(TabModel newModel, TabModel oldModel) {
-                updateNavigationBarColor();
-            }
-        };
+        mTabModelSelectorObserver =
+                new TabModelSelectorObserver() {
+                    @Override
+                    public void onTabModelSelected(TabModel newModel, TabModel oldModel) {
+                        updateNavigationBarColor();
+                    }
+                };
         mTabModelSelector.addObserver(mTabModelSelectorObserver);
-        mFullscreenObserver = new FullscreenManager.Observer() {
-            @Override
-            public void onEnterFullscreen(Tab tab, FullscreenOptions options) {
-                mIsInFullscreen = true;
-                updateNavigationBarColor();
-            }
-            @Override
-            public void onExitFullscreen(Tab tab) {
-                mIsInFullscreen = false;
-                updateNavigationBarColor();
-            }
-        };
+        mFullscreenObserver =
+                new FullscreenManager.Observer() {
+                    @Override
+                    public void onEnterFullscreen(Tab tab, FullscreenOptions options) {
+                        mIsInFullscreen = true;
+                        updateNavigationBarColor();
+                    }
+
+                    @Override
+                    public void onExitFullscreen(Tab tab) {
+                        mIsInFullscreen = false;
+                        updateNavigationBarColor();
+                    }
+                };
         mFullScreenManager.addObserver(mFullscreenObserver);
         layoutManagerSupplier.addObserver(
                 mCallbackController.makeCancelable(this::setLayoutManager));
@@ -114,13 +112,9 @@ class TabbedNavigationBarColorController implements VrModeObserver {
         // incognito NTP.
 
         updateNavigationBarColor();
-
-        VrModuleProvider.registerVrModeObserver(this);
     }
 
-    /**
-     * Destroy this {@link TabbedNavigationBarColorController} instance.
-     */
+    /** Destroy this {@link TabbedNavigationBarColorController} instance. */
     public void destroy() {
         if (mTabModelSelector != null) mTabModelSelector.removeObserver(mTabModelSelectorObserver);
         if (mLayoutManager != null) {
@@ -130,7 +124,6 @@ class TabbedNavigationBarColorController implements VrModeObserver {
             mCallbackController.destroy();
             mCallbackController = null;
         }
-        VrModuleProvider.unregisterVrModeObserver(this);
         mFullScreenManager.removeObserver(mFullscreenObserver);
     }
 
@@ -145,52 +138,26 @@ class TabbedNavigationBarColorController implements VrModeObserver {
 
         mLayoutManager = layoutManager;
         mLayoutStateObserver =
-                new FilterLayoutStateObserver(LayoutType.TAB_SWITCHER, new LayoutStateObserver() {
-                    @Override
-                    public void onStartedShowing(int layoutType, boolean showToolbar) {
-                        mOverviewModeHiding = false;
-                        updateNavigationBarColor();
-                    }
+                new FilterLayoutStateObserver(
+                        LayoutType.TAB_SWITCHER,
+                        new LayoutStateObserver() {
+                            @Override
+                            public void onStartedShowing(@LayoutType int layoutType) {
+                                updateNavigationBarColor();
+                            }
 
-                    @Override
-                    public void onStartedHiding(
-                            int layoutType, boolean showToolbar, boolean delayAnimation) {
-                        mOverviewModeHiding = true;
-                        updateNavigationBarColor();
-                    }
-
-                    @Override
-                    public void onFinishedHiding(int layoutType) {
-                        mOverviewModeHiding = false;
-                    }
-                });
+                            @Override
+                            public void onStartedHiding(@LayoutType int layoutType) {
+                                updateNavigationBarColor();
+                            }
+                        });
         mLayoutManager.addObserver(mLayoutStateObserver);
         updateNavigationBarColor();
     }
 
-    @Override
-    public void onExitVr() {
-        // The platform ignores the light navigation bar system UI flag when launching an Activity
-        // in VR mode, so we need to restore it when VR is exited.
-        UiUtils.setNavigationBarIconColor(
-                mRootView, !mForceDarkNavigationBarColor && mLightNavigationBar);
-    }
-
-    @Override
-    public void onEnterVr() {}
-
     @SuppressLint("NewApi")
     private void updateNavigationBarColor() {
-        boolean forceDarkNavigation;
-        if (DeviceClassManager.enableAccessibilityLayout(mRootView.getContext())
-                || TabUiFeatureUtilities.isGridTabSwitcherEnabled(mRootView.getContext())) {
-            forceDarkNavigation = mTabModelSelector.isIncognitoSelected();
-        } else {
-            boolean overviewVisible = mLayoutManager != null
-                    && mLayoutManager.isLayoutVisible(LayoutType.TAB_SWITCHER)
-                    && !mOverviewModeHiding;
-            forceDarkNavigation = mTabModelSelector.isIncognitoSelected() && !overviewVisible;
-        }
+        boolean forceDarkNavigation = mTabModelSelector.isIncognitoSelected();
 
         forceDarkNavigation &= !UiUtils.isSystemUiThemingDisabled();
         forceDarkNavigation |= mIsInFullscreen;
@@ -226,8 +193,9 @@ class TabbedNavigationBarColorController implements VrModeObserver {
         mWindow.setNavigationBarColor(
                 applyCurrentScrimToColor(getNavigationBarColor(mForceDarkNavigationBarColor)));
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            mWindow.setNavigationBarDividerColor(applyCurrentScrimToColor(
-                    getNavigationBarDividerColor(mForceDarkNavigationBarColor)));
+            mWindow.setNavigationBarDividerColor(
+                    applyCurrentScrimToColor(
+                            getNavigationBarDividerColor(mForceDarkNavigationBarColor)));
         }
 
         // Adjust the color of navigation bar icons based on color state of the navigation bar.
@@ -251,10 +219,6 @@ class TabbedNavigationBarColorController implements VrModeObserver {
     }
 
     private @ColorInt int applyCurrentScrimToColor(@ColorInt int color) {
-        // Apply a color overlay.
-        float scrimColorAlpha = (mDefaultScrimColor >>> 24) / 255f;
-        int scrimColorOpaque = mDefaultScrimColor & 0xFF000000;
-        return ColorUtils.getColorWithOverlay(
-                color, scrimColorOpaque, mNavigationBarScrimFraction * scrimColorAlpha, true);
+        return ColorUtils.overlayColor(color, mDefaultScrimColor, mNavigationBarScrimFraction);
     }
 }

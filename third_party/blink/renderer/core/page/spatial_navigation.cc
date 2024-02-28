@@ -335,8 +335,9 @@ bool IsScrollableNode(const Node* node) {
   if (node->IsDocumentNode())
     return true;
 
-  if (auto* box = DynamicTo<LayoutBox>(node->GetLayoutObject()))
-    return box->CanBeScrolledAndHasScrollableArea();
+  if (auto* box = DynamicTo<LayoutBox>(node->GetLayoutObject())) {
+    return box->IsUserScrollable();
+  }
   return false;
 }
 
@@ -429,19 +430,19 @@ bool CanScrollInDirection(const LocalFrame* frame,
       mojom::blink::ScrollbarMode::kAlwaysOff == vertical_mode)
     return false;
   ScrollableArea* scrollable_area = frame->View()->GetScrollableArea();
-  LayoutSize size(scrollable_area->ContentsSize());
-  LayoutSize offset(scrollable_area->ScrollOffsetInt());
+  gfx::Size size = scrollable_area->ContentsSize();
+  gfx::Vector2d offset = scrollable_area->ScrollOffsetInt();
   PhysicalRect rect(scrollable_area->VisibleContentRect(kIncludeScrollbars));
 
   switch (direction) {
     case SpatialNavigationDirection::kLeft:
-      return offset.Width() > 0;
+      return offset.x() > 0;
     case SpatialNavigationDirection::kUp:
-      return offset.Height() > 0;
+      return offset.y() > 0;
     case SpatialNavigationDirection::kRight:
-      return rect.Width() + offset.Width() < size.Width();
+      return rect.Width() + offset.x() < size.width();
     case SpatialNavigationDirection::kDown:
-      return rect.Height() + offset.Height() < size.Height();
+      return rect.Height() + offset.y() < size.height();
     default:
       NOTREACHED();
       return false;
@@ -839,8 +840,9 @@ PhysicalRect ShrinkInlineBoxToLineBox(const LayoutObject& layout_object,
                                       PhysicalRect node_rect,
                                       int line_boxes) {
   if (!layout_object.IsInline() || layout_object.IsLayoutReplaced() ||
-      layout_object.IsButtonIncludingNG())
+      layout_object.IsButton()) {
     return node_rect;
+  }
 
   // If actual line-height is bigger than the inline box, we shouldn't change
   // anything. This is, for example, needed to not break

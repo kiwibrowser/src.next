@@ -35,6 +35,7 @@
 #include <utility>
 
 #include "base/memory/ptr_util.h"
+#include "base/task/single_thread_task_runner.h"
 #include "services/network/public/cpp/request_destination.h"
 #include "services/network/public/cpp/request_mode.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -88,7 +89,7 @@ class HTTPRequestHeaderValidator : public WebHTTPHeaderVisitor {
 void HTTPRequestHeaderValidator::VisitHeader(const WebString& name,
                                              const WebString& value) {
   is_safe_ = is_safe_ && IsValidHTTPToken(name) &&
-             !cors::IsForbiddenHeaderName(name) &&
+             !cors::IsForbiddenRequestHeader(name, value) &&
              IsValidHTTPHeaderValue(value);
 }
 
@@ -360,14 +361,21 @@ void WebAssociatedURLLoaderImpl::LoadAsynchronously(
   DCHECK(!client_adapter_);
 
   DCHECK(client);
+  client_ = client;
+
+  if (!observer_) {
+    ReleaseClient()->DidFail(
+        WebURLError(ResourceError::CancelledError(KURL())));
+    return;
+  }
 
   bool allow_load = true;
   WebURLRequest new_request;
   new_request.CopyFrom(request);
   if (options_.untrusted_http) {
     WebString method = new_request.HttpMethod();
-    allow_load = observer_ && IsValidHTTPToken(method) &&
-                 !FetchUtils::IsForbiddenMethod(method);
+    allow_load =
+        IsValidHTTPToken(method) && !FetchUtils::IsForbiddenMethod(method);
     if (allow_load) {
       new_request.SetHttpMethod(FetchUtils::NormalizeMethod(method));
       HTTPRequestHeaderValidator validator;
@@ -377,7 +385,7 @@ void WebAssociatedURLLoaderImpl::LoadAsynchronously(
       // consult it separately, if set.
       if (request.ReferrerString() !=
           blink::WebString(Referrer::ClientReferrerString())) {
-        DCHECK(cors::IsForbiddenHeaderName("Referer"));
+        DCHECK(cors::IsForbiddenRequestHeader("Referer", ""));
         // `Referer` is a forbidden header name, so we must disallow this to
         // load.
         allow_load = false;
@@ -389,17 +397,9 @@ void WebAssociatedURLLoaderImpl::LoadAsynchronously(
   new_request.ToMutableResourceRequest().SetCorsPreflightPolicy(
       options_.preflight_policy);
 
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner;
-  // |observer_| can be null if Cancel, ContextDestroyed or
-  // ClientAdapterDone gets called between creating the loader and
-  // calling LoadAsynchronously.
-  if (observer_) {
-    task_runner = observer_->GetExecutionContext()->GetTaskRunner(
-        TaskType::kInternalLoading);
-  } else {
-    task_runner = Thread::Current()->GetDeprecatedTaskRunner();
-  }
-  client_ = client;
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner =
+      observer_->GetExecutionContext()->GetTaskRunner(
+          TaskType::kInternalLoading);
   client_adapter_ = MakeGarbageCollected<ClientAdapter>(
       this, client, options_, request.GetMode(), request.GetCredentialsMode(),
       std::move(task_runner));
@@ -440,12 +440,10 @@ void WebAssociatedURLLoaderImpl::LoadAsynchronously(
           fetch_initiator_type_names::kAudio;
     }
 
-    if (observer_) {
-      loader_ = MakeGarbageCollected<ThreadableLoader>(
-          *observer_->GetExecutionContext(), client_adapter_,
-          resource_loader_options);
-      loader_->Start(std::move(webcore_request));
-    }
+    loader_ = MakeGarbageCollected<ThreadableLoader>(
+        *observer_->GetExecutionContext(), client_adapter_,
+        resource_loader_options);
+    loader_->Start(std::move(webcore_request));
   }
 
   if (!loader_) {
@@ -519,9 +517,8 @@ void WebAssociatedURLLoaderImpl::DisposeObserver() {
   // ThreadState::current() is null. However, the fact we reached here
   // without cancelling the loader means that it's possible there're some
   // non-Blink non-on-heap objects still facing on-heap Blink objects. E.g.
-  // there could be a WebURLLoader instance behind the
-  // ThreadableLoader instance. So, for safety, we chose to just
-  // crash here.
+  // there could be a URLLoader instance behind the ThreadableLoader instance.
+  // So, for safety, we chose to just crash here.
   CHECK(ThreadState::Current());
 
   observer_->Dispose();

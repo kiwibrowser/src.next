@@ -400,18 +400,15 @@ Each `FragmentData` receives its own `ClipPaintPropertyNode`. They
 also store a unique `PaintOffset, `PaginationOffset and
 `LocalBorderBoxProperties` object.
 
-See
-[`LayoutMultiColumnFlowThread.h`](../layout/layout_multi_column_flow_thread.h)
-for a much more detail about multicolumn/pagination.
-
 ## Paint
 
-Paint walks the LayoutObject tree in paint-order and produces a list of
-display items. This is implemented using static painter classes
-(e.g., [`BlockPainter`](block_painter.cc)) and appends display items to a
-[`PaintController`](../../platform/graphics/paint/paint_controller.h). There
-is only one `PaintController` for the entire `LocalFrameView`. During
-this treewalk, the current property tree state is maintained (see:
+Within a PaintLayer, paint walks the PhysicalFragment tree in paint-order and
+produces a list of display items. This is implemented using static painter
+classes (such as [`BoxFragmentPainter`](box_fragment_painter.cc)) and
+appends display items to a
+[`PaintController`](../../platform/graphics/paint/paint_controller.h). There is
+only one `PaintController` for the entire `LocalFrameView`. During this
+treewalk, the current property tree state is maintained (see:
 `PaintController::UpdateCurrentPaintChunkProperties`). The `PaintController`
 segments the display item list into
 [`PaintChunk`](../../platform/graphics/paint/paint_chunk.h)s which are
@@ -461,6 +458,29 @@ subtree, we need to manually update the `NeedsPaintPhaseXXX` flags. For example,
 if an object changes style and creates a self-painting-layer, we copy the flags
 from its containing self-painting layer to this layer, assuming that this layer
 needs all paint phases that its container self-painting layer needs.
+
+### Property tree update optimization
+
+In some specific cases of style updates, we can directly update the property
+tree without needing to run the property tree builder (Which requires a layout
+tree walk). During `PaintLayer::StyleDidChange` we check if this update meets
+the requirements for a quick update, and if so we add it to a list of pending
+updates (Those updates can't be executed on the fly because then paint offset
+changes can't be detected correctly).
+
+The updates are executed later in `PrePaintTreeWalk::WalkTree`.
+If at some point during pre-paint we reach a node that has a pending update,
+we mark that node as needs full update, and remove the pending update from the
+list
+
+When setting the display-locked property of an object (or ending a forced
+scope, effectively locking it), we remove all the pending opacity updates of
+that document. We actually need to remove only the updates for objects that are
+in that display, but the check is too expensive, so we remove all of the
+pending updates.
+
+Current updates that are checked for an optimized update are transform updates
+and opacity updates.
 
 ### Hit test information recording
 
@@ -516,27 +536,3 @@ of type cc::SolidColorScrollbarLayer, cc::PaintedScrollbarLayer or
 cc::PaintedOverlayScrollbarLayer depending on the type of the scrollbar.
 
 Custom scrollbars are still painted into drawing display items directly.
-
-### PaintNG
-
-[LayoutNG](../layout/ng/README.md) is a project that will change how Layout
-generates geometry/style information for painting. Instead of modifying
-LayoutObjects, LayoutNG will generate an NGFragment tree.
-
-NGPaintFragments are:
-
-*    immutable
-*    all coordinates are physical. See
-[layout_box_model_object.h](../layout/layout_box_model_object.h).
-*    instead of Location(), NGFragment has Offset(), a physical offset from parent
-fragment.
-
-The goal is for PaintNG to eventually paint from NGFragment tree,
-and not see LayoutObjects at all. Until this goal is reached,
-LegacyPaint, and NGPaint will coexist.
-
-When a particular LayoutObject subclass fully migrates to NG, its LayoutObject
-geometry information might no longer be updated\(\*\), and its
-painter needs to be rewritten to paint NGFragments.
-For example, see how BlockPainter is being rewritten as NGBoxFragmentPainter.
-

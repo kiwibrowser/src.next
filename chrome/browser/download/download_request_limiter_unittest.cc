@@ -6,11 +6,10 @@
 
 #include <memory>
 
-#include "base/bind.h"
 #include "base/command_line.h"
+#include "base/functional/bind.h"
 #include "base/run_loop.h"
 #include "build/build_config.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/download/download_permission_request.h"
 #include "chrome/browser/profiles/profile.h"
@@ -21,8 +20,6 @@
 #include "components/permissions/test/mock_permission_prompt_factory.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/navigation_simulator.h"
 #include "content/public/test/web_contents_tester.h"
@@ -72,11 +69,11 @@ class DownloadRequestLimiterTest : public ChromeRenderViewHostTestHarness {
   }
 
   void CanDownloadFor(WebContents* web_contents) {
-    CanDownloadFor(web_contents, absl::nullopt);
+    CanDownloadFor(web_contents, std::nullopt);
   }
 
   void CanDownloadFor(WebContents* web_contents,
-                      absl::optional<url::Origin> origin) {
+                      std::optional<url::Origin> origin) {
     download_request_limiter_->CanDownloadImpl(
         web_contents,
         "GET",  // request method
@@ -289,11 +286,12 @@ TEST_F(DownloadRequestLimiterTest, ResetOnNavigation) {
             download_request_limiter_->GetDownloadUiStatus(web_contents()));
 
   // Do a user gesture, that will reset all the state if current state is not
-  // DOWNLOADS_NOT_ALLOWED or content setting is not block.
+  // DOWNLOADS_NOT_ALLOWED or ALLOW_ALL_DOWNLOADS or content setting is not
+  // block.
   OnUserInteraction(blink::WebInputEvent::Type::kRawKeyDown);
-  EXPECT_EQ(DownloadRequestLimiter::ALLOW_ONE_DOWNLOAD,
+  EXPECT_EQ(DownloadRequestLimiter::ALLOW_ALL_DOWNLOADS,
             download_request_limiter_->GetDownloadStatus(web_contents()));
-  EXPECT_EQ(DownloadRequestLimiter::DOWNLOAD_UI_DEFAULT,
+  EXPECT_EQ(DownloadRequestLimiter::DOWNLOAD_UI_ALLOWED,
             download_request_limiter_->GetDownloadUiStatus(web_contents()));
 
   // Navigate to a completely different host, which should reset the state.
@@ -506,7 +504,7 @@ TEST_F(DownloadRequestLimiterTest, RendererInitiated) {
             download_request_limiter_->GetDownloadUiStatus(web_contents()));
   // Since a download is allowed earlier, a new download will prompt user.
   CanDownload();
-  ExpectAndResetCounts(1, 0, 1, __LINE__);
+  ExpectAndResetCounts(1, 0, 0, __LINE__);
 }
 
 // Test that history back will not change the tab download state if all the

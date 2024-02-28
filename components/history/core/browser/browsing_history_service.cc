@@ -11,15 +11,16 @@
 #include <string>
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/check.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/default_clock.h"
 #include "base/time/time.h"
+#include "base/types/optional_ref.h"
 #include "base/values.h"
 #include "components/history/core/browser/browsing_history_driver.h"
 #include "components/history/core/browser/history_types.h"
@@ -40,11 +41,6 @@ enum WebHistoryQueryBuckets {
   WEB_HISTORY_QUERY_TIMED_OUT,
   NUM_WEB_HISTORY_QUERY_BUCKETS
 };
-
-void RecordMetricsForNoticeAboutOtherFormsOfBrowsingHistory(bool shown) {
-  UMA_HISTOGRAM_BOOLEAN("History.ShownHeaderAboutOtherFormsOfBrowsingHistory",
-                        shown);
-}
 
 QueryOptions OptionsWithEndTime(QueryOptions original_options,
                                 base::Time end_time) {
@@ -223,10 +219,6 @@ void BrowsingHistoryService::WebHistoryTimeout(
   // TODO(dubroy): Communicate the failure to the front end.
   if (!query_task_tracker_.HasTrackedTasks())
     ReturnResultsToDriver(std::move(state));
-
-  UMA_HISTOGRAM_ENUMERATION("WebHistory.QueryCompletion",
-                            WEB_HISTORY_QUERY_TIMED_OUT,
-                            NUM_WEB_HISTORY_QUERY_BUCKETS);
 }
 
 void BrowsingHistoryService::QueryHistory(const std::u16string& search_text,
@@ -323,7 +315,6 @@ void BrowsingHistoryService::QueryHistoryInternal(
   } else {
     state->remote_status = NO_DEPENDENCY;
     // The notice could not have been shown, because there is no web history.
-    RecordMetricsForNoticeAboutOtherFormsOfBrowsingHistory(false);
     has_synced_results_ = false;
     has_other_forms_of_browsing_history_ = false;
   }
@@ -622,24 +613,6 @@ void BrowsingHistoryService::ReturnResultsToDriver(
   // results at the same time as we have pending local.
   if (!state->remote_results.empty()) {
     MergeDuplicateResults(state.get(), &results);
-
-    // In the best case, we expect that all local results are duplicated on
-    // the server. Keep track of how many are missing.
-    int combined_count = 0;
-    int local_count = 0;
-    for (const HistoryEntry& entry : results) {
-      if (entry.entry_type == HistoryEntry::LOCAL_ENTRY)
-        ++local_count;
-      else if (entry.entry_type == HistoryEntry::COMBINED_ENTRY)
-        ++combined_count;
-    }
-
-    int local_and_combined = combined_count + local_count;
-    if (local_and_combined > 0) {
-      UMA_HISTOGRAM_PERCENTAGE("WebHistory.LocalResultMissingOnServer",
-                               local_count * 100.0 / local_and_combined);
-    }
-
   } else {
     // TODO(skym): Is the optimization to skip merge on local only results worth
     // the complexity increase here?
@@ -669,10 +642,7 @@ void BrowsingHistoryService::WebHistoryQueryComplete(
     scoped_refptr<QueryHistoryState> state,
     base::Time start_time,
     WebHistoryService::Request* request,
-    const base::Value* results_value) {
-  base::TimeDelta delta = clock_->Now() - start_time;
-  UMA_HISTOGRAM_TIMES("WebHistory.ResponseTime", delta);
-
+    base::optional_ref<const base::Value::Dict> results_dict) {
   // If the response came in too late, do nothing.
   // TODO(dubroy): Maybe show a banner, and prompt the user to reload?
   if (!web_history_timer_->IsRunning())
@@ -680,32 +650,33 @@ void BrowsingHistoryService::WebHistoryQueryComplete(
   web_history_timer_->Stop();
   web_history_request_.reset();
 
-  UMA_HISTOGRAM_ENUMERATION(
-      "WebHistory.QueryCompletion",
-      results_value ? WEB_HISTORY_QUERY_SUCCEEDED : WEB_HISTORY_QUERY_FAILED,
-      NUM_WEB_HISTORY_QUERY_BUCKETS);
-
-  if (results_value) {
+  if (results_dict.has_value()) {
     has_synced_results_ = true;
-    if (const base::Value* events = results_value->FindListKey("event")) {
+    if (const base::Value::List* events = results_dict->FindList("event")) {
       state->remote_results.reserve(state->remote_results.size() +
-                                    events->GetListDeprecated().size());
+                                    events->size());
       std::string host_name_utf8 = base::UTF16ToUTF8(state->search_text);
-      for (const base::Value& event : events->GetListDeprecated()) {
-        if (!event.is_dict())
+      for (const base::Value& event : *events) {
+        const base::Value::Dict* event_dict = event.GetIfDict();
+        if (!event_dict) {
           continue;
-        const base::Value* results = event.FindListKey("result");
-        if (!results || results->GetListDeprecated().empty())
+        }
+        const base::Value::List* results = event_dict->FindList("result");
+        if (!results || results->empty()) {
           continue;
-        const base::Value& result = results->GetListDeprecated()[0];
-        if (!result.is_dict())
+        }
+        const base::Value::Dict* result = results->front().GetIfDict();
+        if (!result) {
           continue;
-        const std::string* url = result.FindStringKey("url");
-        if (!url)
+        }
+        const std::string* url = result->FindString("url");
+        if (!url) {
           continue;
-        const base::Value* ids = result.FindListKey("id");
-        if (!ids || ids->GetListDeprecated().empty())
+        }
+        const base::Value::List* ids = result->FindList("id");
+        if (!ids || ids->empty()) {
           continue;
+        }
 
         GURL gurl(*url);
         if (state->original_options.host_only) {
@@ -722,21 +693,24 @@ void BrowsingHistoryService::WebHistoryQueryComplete(
         std::u16string title;
 
         // Title is optional.
-        if (const std::string* s = result.FindStringKey("title"))
+        if (const std::string* s = result->FindString("title")) {
           title = base::UTF8ToUTF16(*s);
+        }
 
         std::string favicon_url;
-        if (const std::string* s = result.FindStringKey("favicon_url"))
+        if (const std::string* s = result->FindString("favicon_url")) {
           favicon_url = *s;
+        }
 
         // Extract the timestamps of all the visits to this URL.
         // They are referred to as "IDs" by the server.
-        for (const base::Value& id : ids->GetListDeprecated()) {
+        for (const base::Value& id : *ids) {
           const std::string* timestamp_string;
           int64_t timestamp_usec = 0;
 
-          if (!id.is_dict() ||
-              !(timestamp_string = id.FindStringKey("timestamp_usec")) ||
+          auto* id_dict = id.GetIfDict();
+          if (!id_dict ||
+              !(timestamp_string = id_dict->FindString("timestamp_usec")) ||
               !base::StringToInt64(*timestamp_string, &timestamp_usec)) {
             NOTREACHED() << "Unable to extract timestamp.";
             continue;
@@ -747,8 +721,9 @@ void BrowsingHistoryService::WebHistoryQueryComplete(
 
           // Get the ID of the client that this visit came from.
           std::string client_id;
-          if (const std::string* s = result.FindStringKey("client_id"))
+          if (const std::string* s = result->FindString("client_id")) {
             client_id = *s;
+          }
 
           state->remote_results.emplace_back(HistoryEntry(
               HistoryEntry::REMOTE_ENTRY, gurl, title, time, client_id,
@@ -758,7 +733,7 @@ void BrowsingHistoryService::WebHistoryQueryComplete(
       }
     }
     const std::string* continuation_token =
-        results_value->FindStringKey("continuation_token");
+        results_dict->FindString("continuation_token");
     state->remote_status = !continuation_token || continuation_token->empty()
                                ? REACHED_BEGINNING
                                : MORE_RESULTS;
@@ -774,10 +749,6 @@ void BrowsingHistoryService::WebHistoryQueryComplete(
 void BrowsingHistoryService::OtherFormsOfBrowsingHistoryQueryComplete(
     bool found_other_forms_of_browsing_history) {
   has_other_forms_of_browsing_history_ = found_other_forms_of_browsing_history;
-
-  RecordMetricsForNoticeAboutOtherFormsOfBrowsingHistory(
-      has_other_forms_of_browsing_history_);
-
   driver_->HasOtherFormsOfBrowsingHistory(has_other_forms_of_browsing_history_,
                                           has_synced_results_);
 }

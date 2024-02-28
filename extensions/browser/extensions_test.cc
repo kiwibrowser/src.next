@@ -10,8 +10,8 @@
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service_factory.h"
 #include "components/prefs/testing_pref_store.h"
+#include "content/public/browser/network_service_util.h"
 #include "content/public/common/content_client.h"
-#include "content/public/common/network_service_util.h"
 #include "content/public/test/test_browser_context.h"
 #include "extensions/browser/extension_pref_value_map.h"
 #include "extensions/browser/extension_prefs.h"
@@ -41,7 +41,6 @@ ExtensionsTest::ExtensionsTest(
 ExtensionsTest::~ExtensionsTest() {
   // Destroy the task runners before nulling the browser/utility clients, as
   // posted tasks may use them.
-  rvh_test_enabler_.reset();
   task_environment_.reset();
   content::SetUtilityClientForTesting(nullptr);
 }
@@ -54,7 +53,7 @@ void ExtensionsTest::SetExtensionsBrowserClient(
 }
 
 void ExtensionsTest::SetUp() {
-  content::ForceInProcessNetworkService(true);
+  content::ForceInProcessNetworkService();
   browser_context_ = std::make_unique<content::TestBrowserContext>();
   incognito_context_ = CreateTestIncognitoContext();
 
@@ -82,11 +81,11 @@ void ExtensionsTest::SetUp() {
   pref_service_ = factory.Create(pref_registry);
   extensions_browser_client_->set_pref_service(pref_service_.get());
 
-  std::unique_ptr<ExtensionPrefs> extension_prefs(ExtensionPrefs::Create(
+  std::unique_ptr<ExtensionPrefs> extension_prefs = ExtensionPrefs::Create(
       browser_context(), pref_service_.get(),
       browser_context()->GetPath().AppendASCII("Extensions"),
       extension_pref_value_map_.get(), false /* extensions_disabled */,
-      std::vector<EarlyExtensionPrefsObserver*>()));
+      std::vector<EarlyExtensionPrefsObserver*>());
 
   ExtensionPrefsFactory::GetInstance()->SetInstanceForTesting(
       browser_context(), std::move(extension_prefs));
@@ -110,6 +109,7 @@ void ExtensionsTest::TearDown() {
   extensions_browser_client_.reset();
   ExtensionsBrowserClient::Set(nullptr);
 
+  rvh_test_enabler_.reset();
   incognito_context_.reset();
   browser_context_.reset();
   pref_service_.reset();

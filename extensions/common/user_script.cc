@@ -12,13 +12,20 @@
 
 #include "base/atomic_sequence_num.h"
 #include "base/command_line.h"
+#include "base/files/file_path.h"
+#include "base/memory/ptr_util.h"
+#include "base/notreached.h"
 #include "base/pickle.h"
 #include "base/strings/pattern.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "extensions/common/mojom/host_id.mojom.h"
 #include "extensions/common/switches.h"
 
 namespace {
+
+// The length of all internally appended prefixes for a UserScript's ID.
+const size_t kIDPrefixLength = 4;
 
 // This cannot be a plain int or int64_t because we need to generate unique IDs
 // from multiple threads.
@@ -26,13 +33,32 @@ base::AtomicSequenceNumber g_user_script_id_generator;
 
 bool UrlMatchesGlobs(const std::vector<std::string>* globs,
                      const GURL& url) {
-  for (auto glob = globs->cbegin(); glob != globs->cend(); ++glob) {
-    if (base::MatchPattern(url.spec(), *glob))
+  for (const auto& glob : *globs) {
+    if (base::MatchPattern(url.spec(), glob)) {
       return true;
+    }
   }
 
   return false;
 }
+
+constexpr const char* kAllPrefixes[] = {
+    extensions::UserScript::kManifestContentScriptPrefix,
+    extensions::UserScript::kDynamicContentScriptPrefix,
+    extensions::UserScript::kDynamicUserScriptPrefix,
+};
+
+constexpr bool ValidatePrefixes() {
+  for (const char* prefix : kAllPrefixes) {
+    if (prefix[0] != extensions::UserScript::kReservedScriptIDPrefix ||
+        std::char_traits<char>::length(prefix) != kIDPrefixLength) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static_assert(ValidatePrefixes(), "At least one prefix is invalid.");
 
 }  // namespace
 
@@ -47,18 +73,39 @@ enum {
 };
 
 // static
-const char UserScript::kFileExtension[] = ".user.js";
-
-// static
-const char UserScript::kGeneratedIDPrefix = '_';
-
-// static
 std::string UserScript::GenerateUserScriptID() {
   // This could just as easily use a GUID. The actual value of the id is not
   // important as long a unique id is generated for each UserScript.
-  return "_" + base::NumberToString(g_user_script_id_generator.GetNext());
+  return kManifestContentScriptPrefix +
+         base::NumberToString(g_user_script_id_generator.GetNext());
 }
 
+// static
+std::string UserScript::TrimPrefixFromScriptID(const std::string& script_id) {
+  return script_id.substr(kIDPrefixLength);
+}
+
+// static
+UserScript::Source UserScript::GetSourceForScriptID(
+    const std::string& script_id) {
+  if (base::StartsWith(script_id, kManifestContentScriptPrefix)) {
+    return Source::kStaticContentScript;
+  }
+
+  if (base::StartsWith(script_id, kDynamicContentScriptPrefix)) {
+    return Source::kDynamicContentScript;
+  }
+
+  if (base::StartsWith(script_id, kDynamicUserScriptPrefix)) {
+    return Source::kDynamicUserScript;
+  }
+
+  // TODO(crbug.com/1475409): Handle gracefully when a new source is handed,
+  // specially when user has different Chrome versions.
+  NOTREACHED_NORETURN();
+}
+
+// static
 bool UserScript::IsURLUserScript(const GURL& url,
                                  const std::string& mime_type) {
   return base::EndsWith(url.ExtractFileName(), kFileExtension,
@@ -78,28 +125,41 @@ int UserScript::ValidUserScriptSchemes(bool can_execute_script_everywhere) {
   return valid_schemes;
 }
 
-// static
-bool UserScript::IsIDGenerated(const std::string& id) {
-  return !id.empty() && id[0] == kGeneratedIDPrefix;
-}
-
-UserScript::File::File(const base::FilePath& extension_root,
-                       const base::FilePath& relative_path,
-                       const GURL& url)
-    : extension_root_(extension_root),
+UserScript::Content::Content(Source source,
+                             const base::FilePath& extension_root,
+                             const base::FilePath& relative_path,
+                             const GURL& url)
+    : source_(source),
+      extension_root_(extension_root),
       relative_path_(relative_path),
-      url_(url) {
+      url_(url) {}
+
+// static
+std::unique_ptr<UserScript::Content> UserScript::Content::CreateFile(
+    const base::FilePath& extension_root,
+    const base::FilePath& relative_path,
+    const GURL& url) {
+  return base::WrapUnique(new UserScript::Content(Source::kFile, extension_root,
+                                                  relative_path, url));
 }
 
-UserScript::File::File() {}
+// static
+std::unique_ptr<UserScript::Content> UserScript::Content::CreateInlineCode(
+    const GURL& url) {
+  return base::WrapUnique(new UserScript::Content(
+      Source::kInlineCode, base::FilePath(), base::FilePath(), url));
+}
+
+UserScript::Content::Content() = default;
 
 // File content is not copied.
-UserScript::File::File(const File& other)
-    : extension_root_(other.extension_root_),
+UserScript::Content::Content(const Content& other)
+    : source_(other.source_),
+      extension_root_(other.extension_root_),
       relative_path_(other.relative_path_),
       url_(other.url_) {}
 
-UserScript::File::~File() {}
+UserScript::Content::~Content() = default;
 
 UserScript::UserScript() = default;
 UserScript::~UserScript() = default;
@@ -118,13 +178,13 @@ std::unique_ptr<UserScript> UserScript::CopyMetadataFrom(
   script->url_set_ = other.url_set_.Clone();
   script->exclude_url_set_ = other.exclude_url_set_.Clone();
 
-  // Note: File content is not copied.
-  for (const std::unique_ptr<File>& file : other.js_scripts()) {
-    std::unique_ptr<File> file_copy(new File(*file));
+  // Note: Content is not copied.
+  for (const std::unique_ptr<Content>& file : other.js_scripts()) {
+    std::unique_ptr<Content> file_copy(new Content(*file));
     script->js_scripts_.push_back(std::move(file_copy));
   }
-  for (const std::unique_ptr<File>& file : other.css_scripts()) {
-    std::unique_ptr<File> file_copy(new File(*file));
+  for (const std::unique_ptr<Content>& file : other.css_scripts()) {
+    std::unique_ptr<Content> file_copy(new Content(*file));
     script->css_scripts_.push_back(std::move(file_copy));
   }
   script->host_id_ = other.host_id_;
@@ -147,28 +207,35 @@ void UserScript::add_exclude_url_pattern(const URLPattern& pattern) {
   exclude_url_set_.AddPattern(pattern);
 }
 
+std::string UserScript::GetIDWithoutPrefix() const {
+  return TrimPrefixFromScriptID(user_script_id_);
+}
+
+UserScript::Source UserScript::GetSource() const {
+  if (host_id_.type == mojom::HostID::HostType::kWebUi) {
+    return Source::kWebUIScript;
+  }
+
+  return GetSourceForScriptID(user_script_id_);
+}
+
 bool UserScript::MatchesURL(const GURL& url) const {
-  if (!url_set_.is_empty()) {
-    if (!url_set_.MatchesURL(url))
-      return false;
+  if (!exclude_url_set_.is_empty() && exclude_url_set_.MatchesURL(url)) {
+    return false;
   }
 
-  if (!exclude_url_set_.is_empty()) {
-    if (exclude_url_set_.MatchesURL(url))
-      return false;
+  if (!exclude_globs_.empty() && UrlMatchesGlobs(&exclude_globs_, url)) {
+    return false;
   }
 
-  if (!globs_.empty()) {
-    if (!UrlMatchesGlobs(&globs_, url))
-      return false;
+  // User scripts need to match url patterns OR include globs, if present.
+  if (GetSource() == UserScript::Source::kDynamicUserScript) {
+    return (url_set_.MatchesURL(url) || UrlMatchesGlobs(&globs_, url));
   }
 
-  if (!exclude_globs_.empty()) {
-    if (UrlMatchesGlobs(&exclude_globs_, url))
-      return false;
-  }
-
-  return true;
+  // Other scripts need to match url patterns AND include globs, if present.
+  return (url_set_.is_empty() || url_set_.MatchesURL(url)) &&
+         (globs_.empty() || UrlMatchesGlobs(&globs_, url));
 }
 
 bool UserScript::MatchesDocument(const GURL& effective_document_url,
@@ -179,14 +246,14 @@ bool UserScript::MatchesDocument(const GURL& effective_document_url,
   return MatchesURL(effective_document_url);
 }
 
-void UserScript::File::Pickle(base::Pickle* pickle) const {
+void UserScript::Content::Pickle(base::Pickle* pickle) const {
   pickle->WriteString(url_.spec());
   // Do not write path. It's not needed in the renderer.
   // Do not write content. It will be serialized by other means.
 }
 
-void UserScript::File::Unpickle(const base::Pickle& pickle,
-                                base::PickleIterator* iter) {
+void UserScript::Content::Unpickle(const base::Pickle& pickle,
+                                   base::PickleIterator* iter) {
   // Read the url from the pickle.
   std::string url;
   CHECK(iter->ReadString(&url));
@@ -238,10 +305,11 @@ void UserScript::PickleURLPatternSet(base::Pickle* pickle,
 }
 
 void UserScript::PickleScripts(base::Pickle* pickle,
-                               const FileList& scripts) const {
+                               const ContentList& scripts) const {
   pickle->WriteUInt32(scripts.size());
-  for (const std::unique_ptr<File>& file : scripts)
+  for (const std::unique_ptr<Content>& file : scripts) {
     file->Pickle(pickle);
+  }
 }
 
 void UserScript::Unpickle(const base::Pickle& pickle,
@@ -282,11 +350,6 @@ void UserScript::Unpickle(const base::Pickle& pickle,
   UnpickleURLPatternSet(pickle, iter, &exclude_url_set_);
   UnpickleScripts(pickle, iter, &js_scripts_);
   UnpickleScripts(pickle, iter, &css_scripts_);
-}
-
-bool UserScript::IsIDGenerated() const {
-  CHECK(!user_script_id_.empty());
-  return IsIDGenerated(user_script_id_);
 }
 
 void UserScript::UnpickleGlobs(const base::Pickle& pickle,
@@ -339,12 +402,12 @@ void UserScript::UnpickleURLPatternSet(const base::Pickle& pickle,
 
 void UserScript::UnpickleScripts(const base::Pickle& pickle,
                                  base::PickleIterator* iter,
-                                 FileList* scripts) {
+                                 ContentList* scripts) {
   uint32_t num_files = 0;
   CHECK(iter->ReadUInt32(&num_files));
   scripts->clear();
   for (uint32_t i = 0; i < num_files; ++i) {
-    std::unique_ptr<File> file(new File());
+    std::unique_ptr<Content> file(new Content());
     file->Unpickle(pickle, iter);
     scripts->push_back(std::move(file));
   }

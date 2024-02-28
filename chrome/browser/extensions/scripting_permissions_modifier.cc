@@ -4,10 +4,7 @@
 
 #include "chrome/browser/extensions/scripting_permissions_modifier.h"
 
-#include "base/callback_helpers.h"
 #include "chrome/browser/extensions/permissions_updater.h"
-#include "chrome/common/webui_url_constants.h"
-#include "content/public/common/url_constants.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_util.h"
@@ -21,37 +18,26 @@
 
 namespace extensions {
 
-namespace {
-
-// Returns true if the extension should even be considered for being affected
-// by the runtime host permissions experiment.
-bool ShouldConsiderExtension(const Extension& extension) {
-  // Certain extensions are always exempt from having permissions withheld.
-  if (!util::CanWithholdPermissionsFromExtension(extension))
-    return false;
-
-  return true;
-}
-
-}  // namespace
-
 ScriptingPermissionsModifier::ScriptingPermissionsModifier(
     content::BrowserContext* browser_context,
     const scoped_refptr<const Extension>& extension)
     : browser_context_(browser_context),
       extension_(extension),
-      extension_prefs_(ExtensionPrefs::Get(browser_context_)) {
+      extension_prefs_(ExtensionPrefs::Get(browser_context_)),
+      permissions_manager_(PermissionsManager::Get(browser_context_)) {
   DCHECK(extension_);
 }
 
-ScriptingPermissionsModifier::~ScriptingPermissionsModifier() {}
+ScriptingPermissionsModifier::~ScriptingPermissionsModifier() = default;
 
 void ScriptingPermissionsModifier::SetWithholdHostPermissions(
     bool should_withhold) {
-  DCHECK(CanAffectExtension());
+  DCHECK(permissions_manager_->CanAffectExtension(*extension_));
 
-  if (HasWithheldHostPermissions() == should_withhold)
+  if (permissions_manager_->HasWithheldHostPermissions(*extension_) ==
+      should_withhold) {
     return;
+  }
 
   // Set the pref first, so that listeners for permission changes get the proper
   // value if they query HasWithheldHostPermissions().
@@ -64,31 +50,8 @@ void ScriptingPermissionsModifier::SetWithholdHostPermissions(
     GrantWithheldHostPermissions();
 }
 
-bool ScriptingPermissionsModifier::HasWithheldHostPermissions() const {
-  DCHECK(CanAffectExtension());
-
-  return PermissionsManager::Get(browser_context_)
-      ->HasWithheldHostPermissions(extension_->id());
-}
-
-bool ScriptingPermissionsModifier::CanAffectExtension() const {
-  if (!ShouldConsiderExtension(*extension_))
-    return false;
-
-  // The extension can be affected if it currently has host permissions, or if
-  // it did and they are actively withheld.
-  return !extension_->permissions_data()
-              ->active_permissions()
-              .effective_hosts()
-              .is_empty() ||
-         !extension_->permissions_data()
-              ->withheld_permissions()
-              .effective_hosts()
-              .is_empty();
-}
-
 void ScriptingPermissionsModifier::GrantHostPermission(const GURL& url) {
-  DCHECK(CanAffectExtension());
+  DCHECK(permissions_manager_->CanAffectExtension(*extension_));
   // Check that we don't grant host permission to a restricted URL.
   DCHECK(
       !extension_->permissions_data()->IsRestrictedUrl(url, /*error=*/nullptr))
@@ -107,31 +70,13 @@ void ScriptingPermissionsModifier::GrantHostPermission(const GURL& url) {
           base::DoNothing());
 }
 
-bool ScriptingPermissionsModifier::HasGrantedHostPermission(
-    const GURL& url) const {
-  DCHECK(CanAffectExtension());
-
-  return GetRuntimePermissionsFromPrefs()
-      ->effective_hosts()
-      .MatchesSecurityOrigin(url);
-}
-
-bool ScriptingPermissionsModifier::HasBroadGrantedHostPermissions() {
-  std::unique_ptr<const PermissionSet> runtime_permissions =
-      GetRuntimePermissionsFromPrefs();
-
-  // Don't consider API permissions in this case.
-  constexpr bool kIncludeApiPermissions = false;
-  return runtime_permissions->ShouldWarnAllHosts(kIncludeApiPermissions);
-}
-
 void ScriptingPermissionsModifier::RemoveGrantedHostPermission(
     const GURL& url) {
-  DCHECK(CanAffectExtension());
-  DCHECK(HasGrantedHostPermission(url));
+  DCHECK(permissions_manager_->CanAffectExtension(*extension_));
+  DCHECK(permissions_manager_->HasGrantedHostPermission(*extension_, url));
 
   std::unique_ptr<const PermissionSet> runtime_permissions =
-      GetRuntimePermissionsFromPrefs();
+      permissions_manager_->GetRuntimePermissionsFromPrefs(*extension_);
 
   URLPatternSet explicit_hosts;
   for (const auto& pattern : runtime_permissions->explicit_hosts()) {
@@ -153,10 +98,10 @@ void ScriptingPermissionsModifier::RemoveGrantedHostPermission(
 }
 
 void ScriptingPermissionsModifier::RemoveBroadGrantedHostPermissions() {
-  DCHECK(CanAffectExtension());
+  DCHECK(permissions_manager_->CanAffectExtension(*extension_));
 
   std::unique_ptr<const PermissionSet> runtime_permissions =
-      GetRuntimePermissionsFromPrefs();
+      permissions_manager_->GetRuntimePermissionsFromPrefs(*extension_);
 
   URLPatternSet explicit_hosts;
   for (const auto& pattern : runtime_permissions->explicit_hosts()) {
@@ -180,59 +125,8 @@ void ScriptingPermissionsModifier::RemoveBroadGrantedHostPermissions() {
 }
 
 void ScriptingPermissionsModifier::RemoveAllGrantedHostPermissions() {
-  DCHECK(CanAffectExtension());
+  DCHECK(permissions_manager_->CanAffectExtension(*extension_));
   WithholdHostPermissions();
-}
-
-std::unique_ptr<const PermissionSet>
-ScriptingPermissionsModifier::GetRevokablePermissions() const {
-  // No extra revokable permissions if the extension couldn't ever be affected.
-  if (!ShouldConsiderExtension(*extension_))
-    return nullptr;
-
-  // If we aren't withholding host permissions, then there may be some
-  // permissions active on the extension that should be revokable. Otherwise,
-  // all granted permissions should be stored in the preferences (and these
-  // can be a superset of permissions on the extension, as in the case of e.g.
-  // granting origins when only a subset is requested by the extension).
-  // TODO(devlin): This is confusing and subtle. We should instead perhaps just
-  // add all requested hosts as runtime-granted hosts if we aren't withholding
-  // host permissions.
-  const PermissionSet* current_granted_permissions = nullptr;
-  std::unique_ptr<const PermissionSet> runtime_granted_permissions =
-      GetRuntimePermissionsFromPrefs();
-  std::unique_ptr<const PermissionSet> union_set;
-  if (runtime_granted_permissions) {
-    union_set = PermissionSet::CreateUnion(
-        *runtime_granted_permissions,
-        extension_->permissions_data()->active_permissions());
-    current_granted_permissions = union_set.get();
-  } else {
-    current_granted_permissions =
-        &extension_->permissions_data()->active_permissions();
-  }
-
-  // Unrevokable permissions include granted API permissions, manifest
-  // permissions, and host permissions that are always allowed.
-  PermissionSet unrevokable_permissions(
-      current_granted_permissions->apis().Clone(),
-      current_granted_permissions->manifest_permissions().Clone(),
-      URLPatternSet(), URLPatternSet());
-  {
-    // TODO(devlin): We do this pattern of "required + optional" enough. Make it
-    // a part of PermissionsParser and stop duplicating the set each time.
-    std::unique_ptr<PermissionSet> requested_permissions =
-        PermissionSet::CreateUnion(
-            PermissionsParser::GetRequiredPermissions(extension_.get()),
-            PermissionsParser::GetOptionalPermissions(extension_.get()));
-    ExtensionsBrowserClient::Get()->AddAdditionalAllowedHosts(
-        *requested_permissions, &unrevokable_permissions);
-  }
-
-  // Revokable permissions are, predictably, any in the current set that aren't
-  // considered unrevokable.
-  return PermissionSet::CreateDifference(*current_granted_permissions,
-                                         unrevokable_permissions);
 }
 
 void ScriptingPermissionsModifier::GrantWithheldHostPermissions() {
@@ -248,17 +142,11 @@ void ScriptingPermissionsModifier::GrantWithheldHostPermissions() {
 
 void ScriptingPermissionsModifier::WithholdHostPermissions() {
   std::unique_ptr<const PermissionSet> revokable_permissions =
-      GetRevokablePermissions();
+      permissions_manager_->GetRevokablePermissions(*extension_);
   DCHECK(revokable_permissions);
   PermissionsUpdater(browser_context_)
       .RevokeRuntimePermissions(*extension_, *revokable_permissions,
                                 base::DoNothing());
-}
-
-std::unique_ptr<const PermissionSet>
-ScriptingPermissionsModifier::GetRuntimePermissionsFromPrefs() const {
-  return PermissionsManager::Get(browser_context_)
-      ->GetRuntimePermissionsFromPrefs(*extension_);
 }
 
 }  // namespace extensions

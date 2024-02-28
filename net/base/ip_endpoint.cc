@@ -4,16 +4,20 @@
 
 #include "net/base/ip_endpoint.h"
 
-#include <ostream>
-
 #include <string.h>
+
+#include <optional>
+#include <ostream>
 #include <tuple>
+#include <utility>
 
 #include "base/check.h"
 #include "base/check_op.h"
 #include "base/notreached.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/sys_byteorder.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "net/base/ip_address.h"
 #include "net/base/sys_addrinfo.h"
@@ -26,6 +30,39 @@
 #endif
 
 namespace net {
+
+namespace {
+
+// Value dictionary keys
+constexpr std::string_view kValueAddressKey = "address";
+constexpr std::string_view kValuePortKey = "port";
+
+}  // namespace
+
+// static
+std::optional<IPEndPoint> IPEndPoint::FromValue(const base::Value& value) {
+  const base::Value::Dict* dict = value.GetIfDict();
+  if (!dict)
+    return std::nullopt;
+
+  const base::Value* address_value = dict->Find(kValueAddressKey);
+  if (!address_value)
+    return std::nullopt;
+  std::optional<IPAddress> address = IPAddress::FromValue(*address_value);
+  if (!address.has_value())
+    return std::nullopt;
+  // Expect IPAddress to only allow deserializing valid addresses.
+  DCHECK(address.value().IsValid());
+
+  std::optional<int> port = dict->FindInt(kValuePortKey);
+  if (!port.has_value() ||
+      !base::IsValueInRangeForNumericType<uint16_t>(port.value())) {
+    return std::nullopt;
+  }
+
+  return IPEndPoint(address.value(),
+                    base::checked_cast<uint16_t>(port.value()));
+}
 
 IPEndPoint::IPEndPoint() = default;
 
@@ -180,6 +217,16 @@ bool IPEndPoint::operator==(const IPEndPoint& other) const {
 
 bool IPEndPoint::operator!=(const IPEndPoint& that) const {
   return !(*this == that);
+}
+
+base::Value IPEndPoint::ToValue() const {
+  base::Value::Dict dict;
+
+  DCHECK(address_.IsValid());
+  dict.Set(kValueAddressKey, address_.ToValue());
+  dict.Set(kValuePortKey, port_);
+
+  return base::Value(std::move(dict));
 }
 
 std::ostream& operator<<(std::ostream& os, const IPEndPoint& ip_endpoint) {

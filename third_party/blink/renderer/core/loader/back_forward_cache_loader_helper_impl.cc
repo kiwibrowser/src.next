@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,10 +20,12 @@ void BackForwardCacheLoaderHelperImpl::EvictFromBackForwardCache(
 }
 
 void BackForwardCacheLoaderHelperImpl::DidBufferLoadWhileInBackForwardCache(
+    bool update_process_wide_count,
     size_t num_bytes) {
   if (!delegate_)
     return;
-  delegate_->DidBufferLoadWhileInBackForwardCache(num_bytes);
+  delegate_->DidBufferLoadWhileInBackForwardCache(update_process_wide_count,
+                                                  num_bytes);
 }
 
 void BackForwardCacheLoaderHelperImpl::Detach() {

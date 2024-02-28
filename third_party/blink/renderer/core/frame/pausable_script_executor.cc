@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,8 @@
 #include <memory>
 #include <utility>
 
-#include "base/callback.h"
 #include "base/check.h"
+#include "base/functional/callback.h"
 #include "base/logging.h"
 #include "base/numerics/safe_conversions.h"
 #include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink.h"
@@ -41,11 +41,10 @@ namespace {
 // then-able).
 class PromiseAggregator : public GarbageCollected<PromiseAggregator> {
  public:
-  using Callback =
-      base::OnceCallback<void(const Vector<v8::Local<v8::Value>>&)>;
+  using Callback = base::OnceCallback<void(const v8::LocalVector<v8::Value>&)>;
 
   PromiseAggregator(ScriptState* script_state,
-                    const Vector<v8::Local<v8::Value>>& values,
+                    const v8::LocalVector<v8::Value>& values,
                     Callback callback);
 
   void Trace(Visitor* visitor) const { visitor->Trace(results_); }
@@ -111,9 +110,10 @@ class PromiseAggregator : public GarbageCollected<PromiseAggregator> {
 };
 
 PromiseAggregator::PromiseAggregator(ScriptState* script_state,
-                                     const Vector<v8::Local<v8::Value>>& values,
+                                     const v8::LocalVector<v8::Value>& values,
                                      Callback callback)
-    : results_(values.size()), callback_(std::move(callback)) {
+    : results_(static_cast<wtf_size_t>(values.size())),
+      callback_(std::move(callback)) {
   for (wtf_size_t i = 0; i < values.size(); ++i) {
     if (values[i].IsEmpty())
       continue;
@@ -134,7 +134,7 @@ PromiseAggregator::PromiseAggregator(ScriptState* script_state,
 
 void PromiseAggregator::OnAllSettled(v8::Isolate* isolate) {
   DCHECK_EQ(0u, outstanding_);
-  Vector<v8::Local<v8::Value>> converted_results(results_.size());
+  v8::LocalVector<v8::Value> converted_results(isolate, results_.size());
   for (wtf_size_t i = 0; i < results_.size(); ++i)
     converted_results[i] = results_[i].Get(isolate);
 
@@ -148,8 +148,8 @@ class WebScriptExecutor : public PausableScriptExecutor::Executor {
       : sources_(std::move(sources)),
         execute_script_policy_(execute_script_policy) {}
 
-  Vector<v8::Local<v8::Value>> Execute(ScriptState* script_state) override {
-    Vector<v8::Local<v8::Value>> results;
+  v8::LocalVector<v8::Value> Execute(ScriptState* script_state) override {
+    v8::LocalVector<v8::Value> results(script_state->GetIsolate());
     for (const auto& source : sources_) {
       // Note: An error event in an isolated world will never be dispatched to
       // a foreign world.
@@ -177,7 +177,7 @@ class V8FunctionExecutor : public PausableScriptExecutor::Executor {
                      int argc,
                      v8::Local<v8::Value> argv[]);
 
-  Vector<v8::Local<v8::Value>> Execute(ScriptState*) override;
+  v8::LocalVector<v8::Value> Execute(ScriptState*) override;
 
   void Trace(Visitor*) const override;
 
@@ -193,26 +193,27 @@ V8FunctionExecutor::V8FunctionExecutor(v8::Isolate* isolate,
                                        int argc,
                                        v8::Local<v8::Value> argv[])
     : function_(isolate, function), receiver_(isolate, receiver) {
-  args_.ReserveCapacity(base::checked_cast<wtf_size_t>(argc));
+  args_.reserve(base::checked_cast<wtf_size_t>(argc));
   for (int i = 0; i < argc; ++i)
     args_.push_back(TraceWrapperV8Reference<v8::Value>(isolate, argv[i]));
 }
 
-Vector<v8::Local<v8::Value>> V8FunctionExecutor::Execute(
+v8::LocalVector<v8::Value> V8FunctionExecutor::Execute(
     ScriptState* script_state) {
   v8::Isolate* isolate = script_state->GetIsolate();
-  Vector<v8::Local<v8::Value>> results;
-  v8::Local<v8::Value> single_result;
 
-  Vector<v8::Local<v8::Value>> args;
-  args.ReserveCapacity(args_.size());
+  v8::LocalVector<v8::Value> args(isolate);
+  args.reserve(args_.size());
   for (wtf_size_t i = 0; i < args_.size(); ++i)
     args.push_back(args_[i].Get(isolate));
 
+  v8::LocalVector<v8::Value> results(isolate);
   {
+    v8::Local<v8::Value> single_result;
     if (V8ScriptRunner::CallFunction(
             function_.Get(isolate), ExecutionContext::From(script_state),
-            receiver_.Get(isolate), args.size(), args.data(), isolate)
+            receiver_.Get(isolate), static_cast<int>(args.size()), args.data(),
+            isolate)
             .ToLocal(&single_result)) {
       results.push_back(single_result);
     }
@@ -320,7 +321,7 @@ PausableScriptExecutor::~PausableScriptExecutor() = default;
 void PausableScriptExecutor::Run() {
   ExecutionContext* context = GetExecutionContext();
   DCHECK(context);
-  if (!context->IsContextPaused()) {
+  if (!context->IsContextFrozenOrPaused()) {
     ExecuteAndDestroySelf();
     return;
   }
@@ -337,8 +338,8 @@ void PausableScriptExecutor::PostExecuteAndDestroySelf(
     ExecutionContext* context) {
   task_handle_ = PostCancellableTask(
       *context->GetTaskRunner(TaskType::kJavascriptTimerImmediate), FROM_HERE,
-      WTF::Bind(&PausableScriptExecutor::ExecuteAndDestroySelf,
-                WrapPersistent(this)));
+      WTF::BindOnce(&PausableScriptExecutor::ExecuteAndDestroySelf,
+                    WrapPersistent(this)));
 }
 
 void PausableScriptExecutor::ExecuteAndDestroySelf() {
@@ -358,7 +359,7 @@ void PausableScriptExecutor::ExecuteAndDestroySelf() {
     }
   }
 
-  Vector<v8::Local<v8::Value>> results = executor_->Execute(script_state_);
+  v8::LocalVector<v8::Value> results = executor_->Execute(script_state_);
 
   // The script may have removed the frame, in which case contextDestroyed()
   // will have handled the disposal/callback.
@@ -375,8 +376,8 @@ void PausableScriptExecutor::ExecuteAndDestroySelf() {
       keep_alive_ = this;
       MakeGarbageCollected<PromiseAggregator>(
           script_state_, results,
-          WTF::Bind(&PausableScriptExecutor::HandleResults,
-                    WrapWeakPersistent(this)));
+          WTF::BindOnce(&PausableScriptExecutor::HandleResults,
+                        WrapWeakPersistent(this)));
       break;
 
     case mojom::blink::PromiseResultOption::kDoNotWait:
@@ -386,7 +387,7 @@ void PausableScriptExecutor::ExecuteAndDestroySelf() {
 }
 
 void PausableScriptExecutor::HandleResults(
-    const Vector<v8::Local<v8::Value>>& results) {
+    const v8::LocalVector<v8::Value>& results) {
   // The script may have removed the frame, in which case ContextDestroyed()
   // will have handled the disposal/callback.
   if (!script_state_->ContextIsValid())
@@ -402,7 +403,7 @@ void PausableScriptExecutor::HandleResults(
     switch (want_result_option_) {
       case mojom::blink::WantResultOption::kWantResult:
       case mojom::blink::WantResultOption::kWantResultDateAndRegExpAllowed:
-        if (!results.IsEmpty() && !results.back().IsEmpty()) {
+        if (!results.empty() && !results.back().IsEmpty()) {
           v8::Context::Scope context_scope(script_state_->GetContext());
           std::unique_ptr<WebV8ValueConverter> converter =
               Platform::Current()->CreateWebV8ValueConverter();

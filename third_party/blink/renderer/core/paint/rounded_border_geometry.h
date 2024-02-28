@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@ namespace blink {
 
 class ComputedStyle;
 class FloatRoundedRect;
-class LayoutRectOutsets;
+struct PhysicalBoxStrut;
 struct PhysicalRect;
 
 class CORE_EXPORT RoundedBorderGeometry {
@@ -41,7 +41,7 @@ class CORE_EXPORT RoundedBorderGeometry {
   static FloatRoundedRect PixelSnappedRoundedBorderWithOutsets(
       const ComputedStyle&,
       const PhysicalRect& border_rect,
-      const LayoutRectOutsets& outsets_from_border,
+      const PhysicalBoxStrut& outsets_from_border,
       PhysicalBoxSides edges_to_include = PhysicalBoxSides());
 };
 

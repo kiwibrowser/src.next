@@ -12,9 +12,7 @@ import androidx.annotation.Nullable;
 import org.chromium.base.ContextUtils;
 import org.chromium.chrome.browser.tab.Tab;
 
-/**
- * Helper class to handle tab group title related utilities.
- */
+/** Helper class to handle tab group title related utilities. */
 public class TabGroupTitleUtils {
     private static final String TAB_GROUP_TITLES_FILE_NAME = "tab_group_titles";
 
@@ -43,14 +41,15 @@ public class TabGroupTitleUtils {
      * @param tabRootId  The tab root ID whose related tab group title will be fetched.
      * @return The stored title of the target tab group, default value is null.
      */
-    @Nullable
-    public static String getTabGroupTitle(int tabRootId) {
+    public static @Nullable String getTabGroupTitle(int tabRootId) {
         assert tabRootId != Tab.INVALID_TAB_ID;
+        // TODO(crbug/1419842): Consider checking if this looks like the default plural string and
+        // deleting and returning null if any users have saved tab group titles.
         return getSharedPreferences().getString(String.valueOf(tabRootId), null);
     }
 
     private static SharedPreferences getSharedPreferences() {
-        return ContextUtils.getApplicationContext().getSharedPreferences(
-                TAB_GROUP_TITLES_FILE_NAME, Context.MODE_PRIVATE);
+        return ContextUtils.getApplicationContext()
+                .getSharedPreferences(TAB_GROUP_TITLES_FILE_NAME, Context.MODE_PRIVATE);
     }
 }

@@ -20,6 +20,7 @@
 #include "components/signin/core/browser/mirror_account_reconcilor_delegate.h"
 #include "components/signin/public/base/account_consistency_method.h"
 #include "components/signin/public/base/signin_buildflags.h"
+#include "components/signin/public/base/signin_client.h"
 
 #if BUILDFLAG(IS_CHROMEOS)
 #include "components/account_manager_core/chromeos/account_manager_facade_factory.h"
@@ -33,7 +34,6 @@
 #include "chromeos/ash/components/install_attributes/install_attributes.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
-#include "components/signin/core/browser/active_directory_account_reconcilor_delegate.h"
 #include "components/signin/public/base/signin_pref_names.h"
 #include "components/user_manager/user_manager.h"
 #include "google_apis/gaia/google_service_auth_error.h"
@@ -117,12 +117,19 @@ class ChromeOSLimitedAccessAccountReconcilorDelegate
 }  // namespace
 
 AccountReconcilorFactory::AccountReconcilorFactory()
-    : ProfileKeyedServiceFactory("AccountReconcilor") {
+    : ProfileKeyedServiceFactory(
+          "AccountReconcilor",
+          ProfileSelections::Builder()
+              .WithRegular(ProfileSelection::kOriginalOnly)
+              // TODO(crbug.com/1418376): Check if this service is needed in
+              // Guest mode.
+              .WithGuest(ProfileSelection::kOriginalOnly)
+              .Build()) {
   DependsOn(ChromeSigninClientFactory::GetInstance());
   DependsOn(IdentityManagerFactory::GetInstance());
 }
 
-AccountReconcilorFactory::~AccountReconcilorFactory() {}
+AccountReconcilorFactory::~AccountReconcilorFactory() = default;
 
 // static
 AccountReconcilor* AccountReconcilorFactory::GetForProfile(Profile* profile) {
@@ -132,7 +139,8 @@ AccountReconcilor* AccountReconcilorFactory::GetForProfile(Profile* profile) {
 
 // static
 AccountReconcilorFactory* AccountReconcilorFactory::GetInstance() {
-  return base::Singleton<AccountReconcilorFactory>::get();
+  static base::NoDestructor<AccountReconcilorFactory> instance;
+  return instance.get();
 }
 
 KeyedService* AccountReconcilorFactory::BuildServiceInstanceFor(
@@ -181,16 +189,6 @@ AccountReconcilorFactory::CreateAccountReconcilorDelegate(Profile* profile) {
             IdentityManagerFactory::GetForProfile(profile));
       }
 
-      // Only for Active Directory accounts on Chrome OS.
-      // TODO(https://crbug.com/993317): Remove the check for
-      // |IsAccountManagerAvailable| after fixing https://crbug.com/1008349 and
-      // https://crbug.com/993317.
-      if (ash::IsAccountManagerAvailable(profile) &&
-          ash::InstallAttributes::Get()->IsActiveDirectoryManaged()) {
-        return std::make_unique<
-            signin::ActiveDirectoryAccountReconcilorDelegate>();
-      }
-
       if (profile->GetPrefs()->GetBoolean(
               prefs::kForceLogoutUnauthenticatedUserEnabled)) {
         return std::make_unique<ChromeOSLimitedAccessAccountReconcilorDelegate>(
@@ -218,7 +216,8 @@ AccountReconcilorFactory::CreateAccountReconcilorDelegate(Profile* profile) {
     case signin::AccountConsistencyMethod::kDice:
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
       return std::make_unique<signin::DiceAccountReconcilorDelegate>(
-          IdentityManagerFactory::GetForProfile(profile));
+          IdentityManagerFactory::GetForProfile(profile),
+          ChromeSigninClientFactory::GetForProfile(profile));
 #else
       NOTREACHED();
       return nullptr;

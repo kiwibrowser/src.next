@@ -42,6 +42,7 @@
 #include "third_party/blink/renderer/platform/graphics/graphics_context_state_saver.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_canvas.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+#include "third_party/blink/renderer/platform/text/writing_mode.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/native_theme/native_theme.h"
 
@@ -49,14 +50,17 @@
 
 namespace blink {
 
+using mojom::blink::FormControlType;
+
 namespace {
 
-bool IsMultipleFieldsTemporalInput(const AtomicString& type) {
+bool IsMultipleFieldsTemporalInput(FormControlType type) {
 #if !BUILDFLAG(IS_ANDROID)
-  return type == input_type_names::kDate ||
-         type == input_type_names::kDatetimeLocal ||
-         type == input_type_names::kMonth || type == input_type_names::kTime ||
-         type == input_type_names::kWeek;
+  return type == FormControlType::kInputDate ||
+         type == FormControlType::kInputDatetimeLocal ||
+         type == FormControlType::kInputMonth ||
+         type == FormControlType::kInputTime ||
+         type == FormControlType::kInputWeek;
 #else
   return false;
 #endif
@@ -71,8 +75,8 @@ ThemePainter::ThemePainter() = default;
 
 void CountAppearanceTextFieldPart(const Element& element) {
   if (auto* input = DynamicTo<HTMLInputElement>(element)) {
-    const AtomicString& type = input->type();
-    if (type == input_type_names::kSearch) {
+    FormControlType type = input->FormControlType();
+    if (type == FormControlType::kInputSearch) {
       UseCounter::Count(element.GetDocument(),
                         WebFeature::kCSSValueAppearanceTextFieldForSearch);
     } else if (input->IsTextField()) {
@@ -102,18 +106,15 @@ bool ThemePainter::Paint(const LayoutObject& o,
   if (part == kButtonPart) {
     if (IsA<HTMLButtonElement>(element)) {
       UseCounter::Count(doc, WebFeature::kCSSValueAppearanceButtonForButton);
-    } else if (IsA<HTMLInputElement>(element) &&
-               To<HTMLInputElement>(element).IsTextButton()) {
+    } else if (auto* input_element = DynamicTo<HTMLInputElement>(element);
+               input_element && input_element->IsTextButton()) {
       // Text buttons (type=button, reset, submit) has
       // -webkit-appearance:push-button by default.
       UseCounter::Count(doc,
                         WebFeature::kCSSValueAppearanceButtonForOtherButtons);
-    } else if (IsA<HTMLInputElement>(element) &&
-               To<HTMLInputElement>(element).type() ==
-                   input_type_names::kColor) {
-      //  'button' for input[type=color], of which default appearance is
-      // 'square-button', is not deprecated.
     }
+    //  'button' for input[type=color], of which default appearance is
+    // 'square-button', is not deprecated.
   }
 
   // Call the appropriate paint method based off the appearance value.
@@ -167,9 +168,16 @@ bool ThemePainter::Paint(const LayoutObject& o,
       return PaintSliderThumb(element, style, paint_info, r);
     }
     case kMediaSliderPart:
+      COUNT_APPEARANCE(doc, MediaSlider);
+      return true;
     case kMediaSliderThumbPart:
+      COUNT_APPEARANCE(doc, MediaSliderThumb);
+      return true;
     case kMediaVolumeSliderPart:
+      COUNT_APPEARANCE(doc, MediaVolumeSlider);
+      return true;
     case kMediaVolumeSliderThumbPart:
+      COUNT_APPEARANCE(doc, MediaVolumeSliderThumb);
       return true;
     case kMenulistButtonPart:
       return true;
@@ -283,9 +291,10 @@ void ThemePainter::PaintSliderTicks(const LayoutObject& o,
   if (!input)
     return;
 
-  if (input->type() != input_type_names::kRange ||
-      !input->UserAgentShadowRoot()->HasChildren())
+  if (input->FormControlType() != FormControlType::kInputRange ||
+      !input->UserAgentShadowRoot()->HasChildren()) {
     return;
+  }
 
   HTMLDataListElement* data_list = input->DataList();
   if (!data_list)
@@ -298,9 +307,17 @@ void ThemePainter::PaintSliderTicks(const LayoutObject& o,
 
   ControlPart part = o.StyleRef().EffectiveAppearance();
   // We don't support ticks on alternate sliders like MediaVolumeSliders.
-  if (part != kSliderHorizontalPart && part != kSliderVerticalPart)
+  if (!(part == kSliderHorizontalPart ||
+        (part == kSliderVerticalPart &&
+         RuntimeEnabledFeatures::
+             NonStandardAppearanceValueSliderVerticalEnabled()))) {
     return;
-  bool is_horizontal = part == kSliderHorizontalPart;
+  }
+  bool is_horizontal =
+      part == kSliderHorizontalPart &&
+      !(RuntimeEnabledFeatures::
+            FormControlsVerticalWritingModeSupportEnabled() &&
+        !IsHorizontalWritingMode(o.StyleRef().GetWritingMode()));
 
   gfx::Size thumb_size;
   LayoutObject* thumb_layout_object =
@@ -350,19 +367,23 @@ void ThemePainter::PaintSliderTicks(const LayoutObject& o,
     tick_region_width = track_bounds.height() - thumb_size.height();
   }
   HTMLDataListOptionsCollection* options = data_list->options();
+  bool flip_tick_direction =
+      (is_horizontal && o.StyleRef().IsLeftToRightDirection()) ||
+      (RuntimeEnabledFeatures::
+           FormControlsVerticalWritingModeDirectionSupportEnabled() &&
+       !is_horizontal && o.StyleRef().IsLeftToRightDirection());
   for (unsigned i = 0; HTMLOptionElement* option_element = options->Item(i);
        i++) {
     String value = option_element->value();
-    if (option_element->IsDisabledFormControl() || value.IsEmpty())
+    if (option_element->IsDisabledFormControl() || value.empty())
       continue;
     if (!input->IsValidValue(value))
       continue;
     double parsed_value =
         ParseToDoubleForNumberType(input->SanitizeValue(value));
     double tick_fraction = (parsed_value - min) / (max - min);
-    double tick_ratio = is_horizontal && o.StyleRef().IsLeftToRightDirection()
-                            ? tick_fraction
-                            : 1.0 - tick_fraction;
+    double tick_ratio =
+        flip_tick_direction ? tick_fraction : 1.0 - tick_fraction;
     double tick_position =
         round(tick_region_side_margin + tick_region_width * tick_ratio);
     if (is_horizontal)

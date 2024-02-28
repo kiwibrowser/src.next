@@ -1,8 +1,9 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/platform/graphics/parkable_image.h"
+#include "base/memory/raw_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
@@ -41,17 +42,17 @@ class ParkableImageBaseTest : public ::testing::Test {
                   ThreadPoolExecutionMode::DEFAULT) {}
 
   void SetUp() override {
-    Platform::SetMainThreadTaskRunnerForTesting();
     auto& manager = ParkableImageManager::Instance();
     manager.ResetForTesting();
-    manager.SetDataAllocatorForTesting(
-        std::make_unique<InMemoryDataAllocator>());
+    auto tmp = std::make_unique<InMemoryDataAllocator>();
+    allocator_for_testing_ = tmp.get();
+    manager.SetDataAllocatorForTesting(std::move(tmp));
+    manager.SetTaskRunnerForTesting(task_env_.GetMainThreadTaskRunner());
   }
 
   void TearDown() override {
     CHECK_EQ(ParkableImageManager::Instance().Size(), 0u);
     task_env_.FastForwardUntilNoTasksRemain();
-    Platform::UnsetMainThreadTaskRunnerForTesting();
   }
 
  protected:
@@ -73,8 +74,12 @@ class ParkableImageBaseTest : public ::testing::Test {
     return task_env_.GetPendingMainThreadTaskCount();
   }
 
-  static bool MaybePark(scoped_refptr<ParkableImage> pi) {
-    return pi->impl_->MaybePark();
+  void set_may_write(bool may_write) {
+    allocator_for_testing_->set_may_write_for_testing(may_write);
+  }
+
+  bool MaybePark(scoped_refptr<ParkableImage> pi) {
+    return pi->impl_->MaybePark(task_env_.GetMainThreadTaskRunner());
   }
   static void Unpark(scoped_refptr<ParkableImage> pi) {
     base::AutoLock lock(pi->impl_->lock_);
@@ -137,8 +142,7 @@ class ParkableImageBaseTest : public ::testing::Test {
 
   // This checks that the "Memory.ParkableImage.Write.*" statistics from
   // |RecordReadStatistics()| are recorded correctly, namely
-  // "Memory.ParkableImage.Write.Latency",
-  // "Memory.ParkableImage.Write.Throughput", and
+  // "Memory.ParkableImage.Write.Latency" and
   // "Memory.ParkableImage.Write.Size".
   //
   // Checks the counts for all 3 metrics, but only checks the value for
@@ -147,41 +151,38 @@ class ParkableImageBaseTest : public ::testing::Test {
                              base::HistogramBase::Count expected_count) {
     histogram_tester_.ExpectTotalCount("Memory.ParkableImage.Write.Latency",
                                        expected_count);
-    histogram_tester_.ExpectTotalCount("Memory.ParkableImage.Write.Throughput",
-                                       expected_count);
     histogram_tester_.ExpectBucketCount("Memory.ParkableImage.Write.Size",
                                         sample, expected_count);
   }
 
   // This checks that the "Memory.ParkableImage.Read.*" statistics from
   // |RecordReadStatistics()| are recorded correctly, namely
-  // "Memory.ParkableImage.Read.Latency",
-  // "Memory.ParkableImage.Read.Throughput", and
-  // "Memory.ParkableImage.Read.Size".
+  // "Memory.ParkableImage.Read.Latency", and
+  // "Memory.ParkableImage.Read.Throughput".
   //
-  // Checks the counts for all 3 metrics, but only checks the value for
-  // "Memory.ParkableImage.Read.Size", since the others can't be easily tested.
+  // Checks the counts for both metrics, but not their values, since they can't
+  // be easily tested.
   void ExpectReadStatistics(base::HistogramBase::Sample sample,
                             base::HistogramBase::Count expected_count) {
     histogram_tester_.ExpectTotalCount("Memory.ParkableImage.Read.Latency",
                                        expected_count);
     histogram_tester_.ExpectTotalCount("Memory.ParkableImage.Read.Throughput",
                                        expected_count);
-    histogram_tester_.ExpectTotalCount(
-        "Memory.ParkableImage.Read.TimeSinceFreeze", expected_count);
   }
 
   base::HistogramTester histogram_tester_;
 
  private:
   base::test::TaskEnvironment task_env_;
+  raw_ptr<InMemoryDataAllocator, ExperimentalRenderer> allocator_for_testing_;
 };
 
 // Parking is enabled for these tests.
 class ParkableImageTest : public ParkableImageBaseTest {
  public:
   ParkableImageTest() {
-    fl_.InitWithFeatures({kParkableImagesToDisk}, {kDelayParkingImages});
+    fl_.InitWithFeatures({features::kParkableImagesToDisk},
+                         {kDelayParkingImages});
   }
 
  private:
@@ -192,7 +193,8 @@ class ParkableImageTest : public ParkableImageBaseTest {
 class ParkableImageDelayedTest : public ParkableImageBaseTest {
  public:
   ParkableImageDelayedTest() {
-    fl_.InitWithFeatures({kParkableImagesToDisk, kDelayParkingImages}, {});
+    fl_.InitWithFeatures({features::kParkableImagesToDisk, kDelayParkingImages},
+                         {});
   }
 
  private:
@@ -203,7 +205,20 @@ class ParkableImageDelayedTest : public ParkableImageBaseTest {
 class ParkableImageNoParkingTest : public ParkableImageBaseTest {
  public:
   ParkableImageNoParkingTest() {
-    fl_.InitAndDisableFeature(kParkableImagesToDisk);
+    fl_.InitAndDisableFeature(features::kParkableImagesToDisk);
+  }
+
+ private:
+  base::test::ScopedFeatureList fl_;
+};
+
+class ParkableImageWithLimitedDiskCapacityTest : public ParkableImageBaseTest {
+ public:
+  ParkableImageWithLimitedDiskCapacityTest() {
+    const std::vector<base::test::FeatureRefAndParams> enabled_features = {
+        {features::kParkableImagesToDisk, {}},
+        {features::kCompressParkableStrings, {{"max_disk_capacity_mb", "1"}}}};
+    fl_.InitWithFeaturesAndParameters(enabled_features, {kDelayParkingImages});
   }
 
  private:
@@ -700,8 +715,6 @@ TEST_F(ParkableImageTest, ManagerStatistics5min) {
   // We expect "Memory.ParkableImage.OnDiskFootprintKb.5min" not to be emitted,
   // since we've mocked the DiskDataAllocator for testing (and therefore cannot
   // actually write to disk).
-  histogram_tester_.ExpectTotalCount("Memory.ParkableImage.DiskIsUsable.5min",
-                                     1);
   histogram_tester_.ExpectTotalCount(
       "Memory.ParkableImage.OnDiskFootprintKb.5min", 0);
   histogram_tester_.ExpectTotalCount("Memory.ParkableImage.OnDiskSize.5min", 1);
@@ -728,8 +741,6 @@ TEST_F(ParkableImageNoParkingTest, ManagerStatistics5min) {
   Wait5MinForStatistics();
 
   // Note that we expect 0 counts of some of these metrics.
-  histogram_tester_.ExpectTotalCount("Memory.ParkableImage.DiskIsUsable.5min",
-                                     0);
   histogram_tester_.ExpectTotalCount(
       "Memory.ParkableImage.OnDiskFootprintKb.5min", 0);
   histogram_tester_.ExpectTotalCount("Memory.ParkableImage.OnDiskSize.5min", 1);
@@ -889,6 +900,30 @@ TEST_F(ParkableImageTest, DestroyOnSeparateThread) {
   EXPECT_EQ(0u, GetPendingMainThreadTaskCount());
 }
 
+TEST_F(ParkableImageTest, FailedWrite) {
+  auto& manager = ParkableImageManager::Instance();
+  set_may_write(false);
+
+  const size_t kDataSize = 3.5 * 4096;
+  char data[kDataSize];
+  PrepareReferenceData(data, kDataSize);
+
+  EXPECT_EQ(0u, manager.Size());
+
+  WaitForParking();
+
+  {
+    auto pi = MakeParkableImageForTesting(data, kDataSize);
+    pi->Freeze();
+    manager.MaybeParkImagesForTesting();
+    EXPECT_EQ(1u, manager.Size());
+  }
+
+  WaitForParking();
+
+  EXPECT_EQ(0u, manager.Size());
+}
+
 // Test that we park only after 30 seconds, not immediately after freezing.
 TEST_F(ParkableImageDelayedTest, Simple) {
   const size_t kDataSize = 3.5 * 4096;
@@ -996,6 +1031,31 @@ TEST_F(ParkableImageDelayedTest, ParkAndUnpark) {
 
   // No need to wait 30 more seconds, we can park immediately.
   EXPECT_TRUE(is_on_disk(pi));
+}
+
+TEST_F(ParkableImageWithLimitedDiskCapacityTest, ParkWithLimitedDiskCapacity) {
+  constexpr size_t kMB = 1024 * 1024;
+  constexpr size_t kDataSize = kMB;
+  std::unique_ptr<char[]> data(new char[kDataSize]);
+  PrepareReferenceData(data.get(), kDataSize);
+
+  auto pi = MakeParkableImageForTesting(data.get(), kDataSize);
+  pi->Freeze();
+  EXPECT_TRUE(MaybePark(pi));
+  RunPostedTasks();
+  EXPECT_TRUE(is_on_disk(pi));
+
+  // Create another parkable image and attempt to write to disk.
+  auto pi2 = MakeParkableImageForTesting(data.get(), kDataSize);
+  pi2->Freeze();
+  // Should be false because there is no free space.
+  EXPECT_FALSE(MaybePark(pi2));
+
+  // Remove first parkable image. Now we can park second image.
+  pi = nullptr;
+  EXPECT_TRUE(MaybePark(pi2));
+  RunPostedTasks();
+  EXPECT_TRUE(is_on_disk(pi2));
 }
 
 }  // namespace blink

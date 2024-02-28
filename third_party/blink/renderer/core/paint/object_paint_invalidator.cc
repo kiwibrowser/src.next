@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/paint/paint_invalidator.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
+#include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 
 namespace blink {
 
@@ -24,6 +25,23 @@ void ObjectPaintInvalidator::CheckPaintLayerNeedsRepaint() {
 void ObjectPaintInvalidator::SlowSetPaintingLayerNeedsRepaint() {
   if (PaintLayer* painting_layer = object_.PaintingLayer())
     painting_layer->SetNeedsRepaint();
+}
+
+void ObjectPaintInvalidator::InvalidateDisplayItemClient(
+    const DisplayItemClient& client,
+    PaintInvalidationReason reason) {
+#if DCHECK_IS_ON()
+  // It's caller's responsibility to ensure PaintingLayer's NeedsRepaint is
+  // set. Don't set the flag here because getting PaintLayer has cost and the
+  // caller can use various ways (e.g.
+  // PaintInvalidatinContext::painting_layer) to reduce the cost.
+  CheckPaintLayerNeedsRepaint();
+#endif
+  TRACE_EVENT_INSTANT2(TRACE_DISABLED_BY_DEFAULT("blink.invalidation"),
+                       "InvalidateDisplayItemClient", TRACE_EVENT_SCOPE_GLOBAL,
+                       "client", client.DebugName().Utf8(), "reason",
+                       PaintInvalidationReasonToString(reason));
+  client.Invalidate(reason);
 }
 
 DISABLE_CFI_PERF
@@ -42,15 +60,16 @@ ObjectPaintInvalidatorWithContext::ComputePaintInvalidationReason() {
     return PaintInvalidationReason::kNone;
   }
 
-  if (object_.ShouldDoFullPaintInvalidation())
-    return object_.FullPaintInvalidationReason();
-
   if (context_.subtree_flags &
       PaintInvalidatorContext::kSubtreeFullInvalidation)
     return PaintInvalidationReason::kSubtree;
 
   if (context_.fragment_data->PaintOffset() != context_.old_paint_offset)
-    return PaintInvalidationReason::kGeometry;
+    return PaintInvalidationReason::kLayout;
+
+  if (object_.ShouldDoFullPaintInvalidation()) {
+    return object_.PaintInvalidationReasonForPrePaint();
+  }
 
   if (object_.GetDocument().InForcedColorsMode() && object_.IsLayoutBlockFlow())
     return PaintInvalidationReason::kBackplate;
@@ -80,8 +99,9 @@ void ObjectPaintInvalidatorWithContext::InvalidatePaintWithComputedReason(
       return;
     // See layout_selection.cc SetShouldInvalidateIfNeeded() for the reason
     // for the IsSVGText() condition here.
-    if (!object_.CanBeSelectionLeaf() && !object_.IsSVGText())
+    if (!object_.CanBeSelectionLeaf()) {
       return;
+    }
 
     reason = PaintInvalidationReason::kSelection;
     if (const auto* selection_client =

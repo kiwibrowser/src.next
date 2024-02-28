@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,8 +20,10 @@ namespace blink {
 constexpr static double kApproxDoubleInfinityAngle = 2867080569122160;
 
 double CSSValueClampingUtils::ClampDouble(double value) {
-  if (std::isnan(value))
-    value = std::numeric_limits<double>::max();
+  // https://www.w3.org/TR/css-values-4/#top-level-calculation
+  if (std::isnan(value)) {
+    value = 0;
+  }
   return ClampTo<double>(value);
 }
 
@@ -34,15 +36,17 @@ double CSSValueClampingUtils::ClampTime(double value) {
 }
 
 double CSSValueClampingUtils::ClampAngle(double value) {
-  if (std::isnan(value))
+  if (std::isnan(value)) {
     value = kApproxDoubleInfinityAngle;
+  }
   return ClampTo<double>(value, -kApproxDoubleInfinityAngle,
                          kApproxDoubleInfinityAngle);
 }
 
 float CSSValueClampingUtils::ClampLength(float value) {
-  if (std::isnan(value))
+  if (std::isnan(value)) {
     value = std::numeric_limits<float>::max();
+  }
   return ClampTo<float>(value);
 }
 

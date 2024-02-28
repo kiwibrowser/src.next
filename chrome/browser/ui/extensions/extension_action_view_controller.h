@@ -17,7 +17,6 @@
 #include "extensions/browser/extension_host_observer.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_id.h"
-#include "ui/gfx/image/image.h"
 
 class Browser;
 class ExtensionActionPlatformDelegate;
@@ -32,6 +31,10 @@ class ExtensionAction;
 class ExtensionRegistry;
 class ExtensionViewHost;
 class SitePermissionsHelper;
+}  // namespace extensions
+
+namespace ui {
+class ImageModel;
 }
 
 // The platform-independent controller for an ExtensionAction that is shown on
@@ -64,8 +67,8 @@ class ExtensionActionViewController
   // ToolbarActionViewController:
   std::string GetId() const override;
   void SetDelegate(ToolbarActionViewDelegate* delegate) override;
-  gfx::Image GetIcon(content::WebContents* web_contents,
-                     const gfx::Size& size) override;
+  ui::ImageModel GetIcon(content::WebContents* web_contents,
+                         const gfx::Size& size) override;
   std::u16string GetActionName() const override;
   std::u16string GetAccessibleName(
       content::WebContents* web_contents) const override;
@@ -76,15 +79,17 @@ class ExtensionActionViewController
       content::WebContents* web_contents) const override;
   bool IsEnabled(content::WebContents* web_contents) const override;
   bool IsShowingPopup() const override;
-  bool IsRequestingSiteAccess(
+  bool ShouldShowSiteAccessRequestInToolbar(
       content::WebContents* web_contents) const override;
   void HidePopup() override;
   gfx::NativeView GetPopupNativeView() override;
   ui::MenuModel* GetContextMenu(
       extensions::ExtensionContextMenuModel::ContextMenuSource
           context_menu_source) override;
-  void OnContextMenuShown() override;
-  void OnContextMenuClosed() override;
+  void OnContextMenuShown(
+      extensions::ExtensionContextMenuModel::ContextMenuSource source) override;
+  void OnContextMenuClosed(
+      extensions::ExtensionContextMenuModel::ContextMenuSource source) override;
   void ExecuteUserAction(InvocationSource source) override;
   void TriggerPopupForAPI(ShowPopupCallback callback) override;
   void UpdateState() override;
@@ -118,7 +123,6 @@ class ExtensionActionViewController
   std::unique_ptr<IconWithBadgeImageSource> GetIconImageSourceForTesting(
       content::WebContents* web_contents,
       const gfx::Size& size);
-  bool HasBeenBlockedForTesting(content::WebContents* web_contents) const;
 
  private:
   // New instances should be instantiated with Create().
@@ -177,7 +181,8 @@ class ExtensionActionViewController
 
   // The browser action this view represents. The ExtensionAction is not owned
   // by this class.
-  const raw_ptr<extensions::ExtensionAction> extension_action_;
+  const raw_ptr<extensions::ExtensionAction, DanglingUntriaged>
+      extension_action_;
 
   // The corresponding ExtensionsContainer on the toolbar.
   const raw_ptr<ExtensionsContainer> extensions_container_;

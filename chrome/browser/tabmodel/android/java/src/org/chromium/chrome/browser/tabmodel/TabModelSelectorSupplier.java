@@ -5,8 +5,8 @@
 package org.chromium.chrome.browser.tabmodel;
 
 import androidx.annotation.Nullable;
-import androidx.annotation.VisibleForTesting;
 
+import org.chromium.base.ResettersForTesting;
 import org.chromium.base.UnownedUserDataKey;
 import org.chromium.base.supplier.ObservableSupplier;
 import org.chromium.base.supplier.ObservableSupplierImpl;
@@ -51,9 +51,9 @@ public class TabModelSelectorSupplier extends UnownedUserDataSupplier<TabModelSe
     }
 
     /** Sets an instance for testing. */
-    @VisibleForTesting
     public static void setInstanceForTesting(TabModelSelector tabModelSelector) {
         sInstanceForTesting = new ObservableSupplierImpl<>();
         sInstanceForTesting.set(tabModelSelector);
+        ResettersForTesting.register(() -> sInstanceForTesting = null);
     }
 }

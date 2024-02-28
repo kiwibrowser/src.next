@@ -6,7 +6,6 @@
 
 #include "base/command_line.h"
 #include "base/feature_list.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
@@ -25,11 +24,12 @@
 
 namespace chrome {
 
-void AddTabAt(Browser* browser,
-              const GURL& url,
-              int idx,
-              bool foreground,
-              absl::optional<tab_groups::TabGroupId> group) {
+content::WebContents* AddAndReturnTabAt(
+    Browser* browser,
+    const GURL& url,
+    int idx,
+    bool foreground,
+    std::optional<tab_groups::TabGroupId> group) {
   // Time new tab page creation time.  We keep track of the timing data in
   // WebContents, but we want to include the time it takes to create the
   // WebContents object too.
@@ -43,11 +43,21 @@ void AddTabAt(Browser* browser,
   Navigate(&params);
 
   if (!params.navigated_or_inserted_contents)
-    return;
+    return nullptr;
 
   CoreTabHelper* core_tab_helper =
       CoreTabHelper::FromWebContents(params.navigated_or_inserted_contents);
   core_tab_helper->set_new_tab_start_time(new_tab_start_time);
+
+  return params.navigated_or_inserted_contents;
+}
+
+void AddTabAt(Browser* browser,
+              const GURL& url,
+              int idx,
+              bool foreground,
+              std::optional<tab_groups::TabGroupId> group) {
+  /*void*/ AddAndReturnTabAt(browser, url, idx, foreground, std::move(group));
 }
 
 content::WebContents* AddSelectedTabWithURL(Browser* browser,
@@ -75,7 +85,7 @@ void AddWebContents(Browser* browser,
   params.source_contents = source_contents;
   params.url = target_url;
   params.disposition = disposition;
-  params.window_bounds = window_features.bounds;
+  params.window_features = window_features;
   params.window_action = window_action;
   // At this point, we're already beyond the popup blocker. Even if the popup
   // was created without a user gesture, we have to set |user_gesture| to true,

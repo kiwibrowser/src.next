@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,7 @@
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller_test.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_record_builder.h"
 #include "third_party/blink/renderer/platform/testing/paint_test_configurations.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 
 using testing::ElementsAre;
@@ -79,6 +80,7 @@ class FrameOverlayTest : public testing::Test, public PaintTestConfigurations {
   void RunFrameOverlayTestWithAcceleratedCompositing();
 
  private:
+  test::TaskEnvironment task_environment_;
   frame_test_helpers::WebViewHelper helper_;
 };
 
@@ -105,7 +107,7 @@ TEST_P(FrameOverlayTest, AcceleratedCompositing) {
 
   auto* builder = MakeGarbageCollected<PaintRecordBuilder>();
   frame_overlay->Paint(builder->Context());
-  builder->EndRecording()->Playback(&canvas);
+  builder->EndRecording().Playback(&canvas);
   frame_overlay->Destroy();
 }
 
@@ -125,7 +127,7 @@ TEST_P(FrameOverlayTest, DeviceEmulationScale) {
                         ->GetPage()
                         ->GetVisualViewport()
                         .GetDeviceEmulationTransformNode();
-  EXPECT_EQ(TransformationMatrix().Scale(1.5), transform->Matrix());
+  EXPECT_EQ(gfx::Transform::MakeScale(1.5), transform->Matrix());
   const auto& state = frame_overlay->DefaultPropertyTreeState();
   EXPECT_EQ(transform, &state.Transform());
   EXPECT_EQ(&ClipPaintPropertyNode::Root(), &state.Clip());

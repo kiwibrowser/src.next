@@ -4,8 +4,8 @@
 
 #include "chrome/browser/ui/extensions/extension_installed_waiter.h"
 
-#include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/load_error_reporter.h"
@@ -71,7 +71,8 @@ class ExtensionInstalledWaiterTest : public BrowserWithTestWindowTest {
   }
 
  private:
-  raw_ptr<extensions::ExtensionService> extension_service_ = nullptr;
+  raw_ptr<extensions::ExtensionService, DanglingUntriaged> extension_service_ =
+      nullptr;
 };
 
 TEST_F(ExtensionInstalledWaiterTest, ExtensionIsAlreadyInstalled) {
@@ -139,7 +140,7 @@ TEST_F(ExtensionInstalledWaiterTest, BrowserShutdownWhileWaiting) {
   auto foo = MakeExtensionNamed("foo");
   WaitFor(foo, browser.get());
 
-  browser->OnWindowClosing();
+  browser.reset();
   EXPECT_EQ(1, giving_up_called_);
   EXPECT_EQ(0, done_called_);
 }

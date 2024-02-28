@@ -88,7 +88,7 @@ struct AllElementsSelectorQueryTrait {
   typedef HeapVector<Member<Element>> OutputType;
   static const bool kShouldOnlyMatchFirstElement = false;
   ALWAYS_INLINE static bool IsEmpty(const OutputType& output) {
-    return output.IsEmpty();
+    return output.empty();
   }
   ALWAYS_INLINE static void AppendElement(OutputType& output,
                                           Element& element) {
@@ -117,13 +117,15 @@ Element* SelectorQuery::Closest(Element& target_element) const {
   QUERY_STATS_RESET();
   CheckPseudoHasCacheScope check_pseudo_has_cache_scope(
       &target_element.GetDocument());
-  if (selectors_.IsEmpty())
+  if (selectors_.empty()) {
     return nullptr;
+  }
 
   for (Element* current_element = &target_element; current_element;
        current_element = current_element->parentElement()) {
-    if (SelectorListMatches(target_element, *current_element))
+    if (SelectorListMatches(target_element, *current_element)) {
       return current_element;
+    }
   }
   return nullptr;
 }
@@ -157,28 +159,34 @@ static void CollectElementsByClassName(
   SelectorChecker checker(SelectorChecker::kQueryingRules);
   for (Element& element : ElementTraversal::DescendantsOf(root_node)) {
     QUERY_STATS_INCREMENT(fast_class);
-    if (!element.HasClassName(class_name))
+    if (!element.HasClassName(class_name)) {
       continue;
-    if (selector && !SelectorMatches(*selector, element, root_node, checker))
+    }
+    if (selector && !SelectorMatches(*selector, element, root_node, checker)) {
       continue;
+    }
     SelectorQueryTrait::AppendElement(output, element);
-    if (SelectorQueryTrait::kShouldOnlyMatchFirstElement)
+    if (SelectorQueryTrait::kShouldOnlyMatchFirstElement) {
       return;
+    }
   }
 }
 
 inline bool MatchesTagName(const QualifiedName& tag_name,
                            const Element& element) {
-  if (tag_name == AnyQName())
+  if (tag_name == AnyQName()) {
     return true;
-  if (element.HasLocalName(tag_name.LocalName()))
+  }
+  if (element.HasLocalName(tag_name.LocalName())) {
     return true;
+  }
   // Non-html elements in html documents are normalized to their camel-cased
   // version during parsing if applicable. Yet, type selectors are lower-cased
   // for selectors in html documents. Compare the upper case converted names
   // instead to allow matching SVG elements like foreignObject.
-  if (!element.IsHTMLElement() && IsA<HTMLDocument>(element.GetDocument()))
+  if (!element.IsHTMLElement() && IsA<HTMLDocument>(element.GetDocument())) {
     return element.TagQName().LocalNameUpper() == tag_name.LocalNameUpper();
+  }
   return false;
 }
 
@@ -192,8 +200,9 @@ static void CollectElementsByTagName(
     QUERY_STATS_INCREMENT(fast_tag_name);
     if (MatchesTagName(tag_name, element)) {
       SelectorQueryTrait::AppendElement(output, element);
-      if (SelectorQueryTrait::kShouldOnlyMatchFirstElement)
+      if (SelectorQueryTrait::kShouldOnlyMatchFirstElement) {
         return;
+      }
     }
   }
 }
@@ -201,13 +210,15 @@ static void CollectElementsByTagName(
 inline bool AncestorHasClassName(ContainerNode& root_node,
                                  const AtomicString& class_name) {
   auto* root_node_element = DynamicTo<Element>(root_node);
-  if (!root_node_element)
+  if (!root_node_element) {
     return false;
+  }
 
   for (auto* element = root_node_element; element;
        element = element->parentElement()) {
-    if (element->HasClassName(class_name))
+    if (element->HasClassName(class_name)) {
       return true;
+    }
   }
   return false;
 }
@@ -225,7 +236,7 @@ void SelectorQuery::FindTraverseRootsAndExecute(
   bool is_affected_by_sibling_combinator = false;
 
   for (const CSSSelector* selector = selectors_[0]; selector;
-       selector = selector->TagHistory()) {
+       selector = selector->NextSimpleSelector()) {
     if (!is_affected_by_sibling_combinator &&
         selector->Match() == CSSSelector::kClass) {
       if (is_rightmost_selector) {
@@ -235,8 +246,9 @@ void SelectorQuery::FindTraverseRootsAndExecute(
       }
       // Since there exists some ancestor element which has the class name, we
       // need to see all children of rootNode.
-      if (AncestorHasClassName(root_node, selector->Value()))
+      if (AncestorHasClassName(root_node, selector->Value())) {
         break;
+      }
 
       const AtomicString& class_name = selector->Value();
       Element* element = ElementTraversal::FirstWithin(root_node);
@@ -246,8 +258,9 @@ void SelectorQuery::FindTraverseRootsAndExecute(
           ExecuteForTraverseRoot<SelectorQueryTrait>(*element, root_node,
                                                      output);
           if (SelectorQueryTrait::kShouldOnlyMatchFirstElement &&
-              !SelectorQueryTrait::IsEmpty(output))
+              !SelectorQueryTrait::IsEmpty(output)) {
             return;
+          }
           element =
               ElementTraversal::NextSkippingChildren(*element, &root_node);
         } else {
@@ -257,8 +270,9 @@ void SelectorQuery::FindTraverseRootsAndExecute(
       return;
     }
 
-    if (selector->Relation() == CSSSelector::kSubSelector)
+    if (selector->Relation() == CSSSelector::kSubSelector) {
       continue;
+    }
     is_rightmost_selector = false;
     is_affected_by_sibling_combinator =
         selector->Relation() == CSSSelector::kDirectAdjacent ||
@@ -282,8 +296,9 @@ void SelectorQuery::ExecuteForTraverseRoot(
     QUERY_STATS_INCREMENT(fast_scan);
     if (SelectorMatches(selector, element, root_node, checker)) {
       SelectorQueryTrait::AppendElement(output, element);
-      if (SelectorQueryTrait::kShouldOnlyMatchFirstElement)
+      if (SelectorQueryTrait::kShouldOnlyMatchFirstElement) {
         return;
+      }
     }
   }
 }
@@ -292,8 +307,9 @@ bool SelectorQuery::SelectorListMatches(ContainerNode& root_node,
                                         Element& element) const {
   SelectorChecker checker(SelectorChecker::kQueryingRules);
   for (auto* const selector : selectors_) {
-    if (SelectorMatches(*selector, element, root_node, checker))
+    if (SelectorMatches(*selector, element, root_node, checker)) {
       return true;
+    }
   }
   return false;
 }
@@ -304,11 +320,13 @@ void SelectorQuery::ExecuteSlow(
     typename SelectorQueryTrait::OutputType& output) const {
   for (Element& element : ElementTraversal::DescendantsOf(root_node)) {
     QUERY_STATS_INCREMENT(slow_scan);
-    if (!SelectorListMatches(root_node, element))
+    if (!SelectorListMatches(root_node, element)) {
       continue;
+    }
     SelectorQueryTrait::AppendElement(output, element);
-    if (SelectorQueryTrait::kShouldOnlyMatchFirstElement)
+    if (SelectorQueryTrait::kShouldOnlyMatchFirstElement) {
       return;
+    }
   }
 }
 
@@ -332,36 +350,44 @@ void SelectorQuery::ExecuteWithId(
     }
     const auto& elements = scope.GetAllElementsById(selector_id_);
     for (const auto& element : elements) {
-      if (!element->IsDescendantOf(&root_node))
+      if (!element->IsDescendantOf(&root_node)) {
         continue;
+      }
       QUERY_STATS_INCREMENT(fast_id);
       if (SelectorMatches(first_selector, *element, root_node, checker)) {
         SelectorQueryTrait::AppendElement(output, *element);
-        if (SelectorQueryTrait::kShouldOnlyMatchFirstElement)
+        if (SelectorQueryTrait::kShouldOnlyMatchFirstElement) {
           return;
+        }
       }
     }
     return;
   }
 
   Element* element = scope.getElementById(selector_id_);
-  if (!element)
+  if (!element) {
     return;
+  }
   if (selector_id_is_rightmost_) {
-    if (!element->IsDescendantOf(&root_node))
+    if (!element->IsDescendantOf(&root_node)) {
       return;
+    }
     QUERY_STATS_INCREMENT(fast_id);
-    if (SelectorMatches(first_selector, *element, root_node, checker))
+    if (SelectorMatches(first_selector, *element, root_node, checker)) {
       SelectorQueryTrait::AppendElement(output, *element);
+    }
     return;
   }
   ContainerNode* start = &root_node;
-  if (element->IsDescendantOf(&root_node))
+  if (element->IsDescendantOf(&root_node)) {
     start = element;
-  if (selector_id_affected_by_sibling_combinator_)
-    start = start->parentNode();
-  if (!start)
+    if (selector_id_affected_by_sibling_combinator_) {
+      start = start->parentNode();
+    }
+  }
+  if (!start) {
     return;
+  }
   QUERY_STATS_INCREMENT(fast_id);
   ExecuteForTraverseRoot<SelectorQueryTrait>(*start, root_node, output);
 }
@@ -370,8 +396,9 @@ template <typename SelectorQueryTrait>
 void SelectorQuery::Execute(
     ContainerNode& root_node,
     typename SelectorQueryTrait::OutputType& output) const {
-  if (selectors_.IsEmpty())
+  if (selectors_.empty()) {
     return;
+  }
 
   if (use_slow_scan_) {
     ExecuteSlow<SelectorQueryTrait>(root_node, output);
@@ -391,7 +418,7 @@ void SelectorQuery::Execute(
   }
 
   const CSSSelector& first_selector = *selectors_[0];
-  if (!first_selector.TagHistory()) {
+  if (!first_selector.NextSimpleSelector()) {
     // Fast path for querySelector*('.foo'), and querySelector*('div').
     switch (first_selector.Match()) {
       case CSSSelector::kClass:
@@ -418,27 +445,28 @@ void SelectorQuery::Execute(
 }
 
 std::unique_ptr<SelectorQuery> SelectorQuery::Adopt(
-    CSSSelectorList selector_list) {
-  return base::WrapUnique(new SelectorQuery(std::move(selector_list)));
+    CSSSelectorList* selector_list) {
+  return base::WrapUnique(new SelectorQuery(selector_list));
 }
 
-SelectorQuery::SelectorQuery(CSSSelectorList selector_list)
-    : selector_list_(std::move(selector_list)),
+SelectorQuery::SelectorQuery(CSSSelectorList* selector_list)
+    : selector_list_(selector_list),
       selector_id_is_rightmost_(true),
       selector_id_affected_by_sibling_combinator_(false),
       use_slow_scan_(true) {
-  selectors_.ReserveInitialCapacity(selector_list_.ComputeLength());
-  for (const CSSSelector* selector = selector_list_.First(); selector;
+  selectors_.ReserveInitialCapacity(selector_list_->ComputeLength());
+  for (const CSSSelector* selector = selector_list_->First(); selector;
        selector = CSSSelectorList::Next(*selector)) {
-    if (selector->MatchesPseudoElement())
+    if (selector->MatchesPseudoElement()) {
       continue;
+    }
     selectors_.UncheckedAppend(selector);
   }
 
   if (selectors_.size() == 1) {
     use_slow_scan_ = false;
     for (const CSSSelector* current = selectors_[0]; current;
-         current = current->TagHistory()) {
+         current = current->NextSimpleSelector()) {
       if (current->Match() == CSSSelector::kId) {
         selector_id_ = current->Value();
         break;
@@ -452,8 +480,9 @@ SelectorQuery::SelectorQuery(CSSSelectorList selector_list)
         selector_id_ = current->Value();
         break;
       }
-      if (current->Relation() == CSSSelector::kSubSelector)
+      if (current->Relation() == CSSSelector::kSubSelector) {
         continue;
+      }
       selector_id_is_rightmost_ = false;
       selector_id_affected_by_sibling_combinator_ =
           current->Relation() == CSSSelector::kDirectAdjacent ||
@@ -465,7 +494,7 @@ SelectorQuery::SelectorQuery(CSSSelectorList selector_list)
 SelectorQuery* SelectorQueryCache::Add(const AtomicString& selectors,
                                        const Document& document,
                                        ExceptionState& exception_state) {
-  if (selectors.IsEmpty()) {
+  if (selectors.empty()) {
     exception_state.ThrowDOMException(DOMExceptionCode::kSyntaxError,
                                       "The provided selector is empty.");
     return nullptr;
@@ -473,33 +502,33 @@ SelectorQuery* SelectorQueryCache::Add(const AtomicString& selectors,
 
   HashMap<AtomicString, std::unique_ptr<SelectorQuery>>::iterator it =
       entries_.find(selectors);
-  if (it != entries_.end())
+  if (it != entries_.end()) {
     return it->value.get();
+  }
 
-  Arena arena;
-  CSSSelectorVector</*UseArena=*/true> selector_vector =
-      CSSParser::ParseSelector</*UseArena=*/true>(
-          MakeGarbageCollected<CSSParserContext>(
-              document, document.BaseURL(), true /* origin_clean */, Referrer(),
-              WTF::TextEncoding(), CSSParserContext::kSnapshotProfile),
-          nullptr, selectors, arena);
+  HeapVector<CSSSelector> arena;
+  base::span<CSSSelector> selector_vector = CSSParser::ParseSelector(
+      MakeGarbageCollected<CSSParserContext>(
+          document, document.BaseURL(), true /* origin_clean */, Referrer()),
+      CSSNestingType::kNone, /*parent_rule_for_nesting=*/nullptr,
+      /*is_within_scope=*/false, nullptr, selectors, arena);
 
-  if (selector_vector.IsEmpty()) {
+  if (selector_vector.empty()) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kSyntaxError,
         "'" + selectors + "' is not a valid selector.");
     return nullptr;
   }
 
-  CSSSelectorList selector_list =
-      CSSSelectorList::AdoptSelectorVector</*UseArena=*/true>(selector_vector);
+  CSSSelectorList* selector_list =
+      CSSSelectorList::AdoptSelectorVector(selector_vector);
 
   const unsigned kMaximumSelectorQueryCacheSize = 256;
-  if (entries_.size() == kMaximumSelectorQueryCacheSize)
+  if (entries_.size() == kMaximumSelectorQueryCacheSize) {
     entries_.erase(entries_.begin());
+  }
 
-  return entries_
-      .insert(selectors, SelectorQuery::Adopt(std::move(selector_list)))
+  return entries_.insert(selectors, SelectorQuery::Adopt(selector_list))
       .stored_value->value.get();
 }
 

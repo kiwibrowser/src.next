@@ -29,6 +29,7 @@
 #include <utility>
 
 #include "base/synchronization/lock.h"
+#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/platform/graphics/image_decoder_wrapper.h"
 #include "third_party/blink/renderer/platform/graphics/image_decoding_store.h"
 #include "third_party/blink/renderer/platform/image-decoders/image_decoder.h"
@@ -78,7 +79,7 @@ static bool UpdateYUVAInfoSubsamplingAndWidthBytes(
 
 ImageFrameGenerator::ImageFrameGenerator(const SkISize& full_size,
                                          bool is_multi_frame,
-                                         const ColorBehavior& color_behavior,
+                                         ColorBehavior color_behavior,
                                          Vector<SkISize> supported_sizes)
     : full_size_(full_size),
       decoder_color_behavior_(color_behavior),
@@ -104,10 +105,7 @@ bool ImageFrameGenerator::DecodeAndScale(
     SegmentReader* data,
     bool all_data_received,
     wtf_size_t index,
-    const SkImageInfo& info,
-    void* pixels,
-    size_t row_bytes,
-    ImageDecoder::AlphaOption alpha_option,
+    const SkPixmap& pixmap,
     cc::PaintImage::GeneratorClientId client_id) {
   {
     base::AutoLock lock(generator_lock_);
@@ -121,14 +119,8 @@ bool ImageFrameGenerator::DecodeAndScale(
 
   // This implementation does not support arbitrary scaling so check the
   // requested size.
-  SkISize scaled_size = SkISize::Make(info.width(), info.height());
+  const SkISize scaled_size = pixmap.dimensions();
   CHECK(GetSupportedDecodeSize(scaled_size) == scaled_size);
-
-  ImageDecoder::HighBitDepthDecodingOption high_bit_depth_decoding_option =
-      ImageDecoder::kDefaultBitDepth;
-  if (info.colorType() == kRGBA_F16_SkColorType) {
-    high_bit_depth_decoding_option = ImageDecoder::kHighBitDepthToHalfFloat;
-  }
 
   wtf_size_t frame_count = 0u;
   bool has_alpha = true;
@@ -142,10 +134,9 @@ bool ImageFrameGenerator::DecodeAndScale(
   {
     // Lock the mutex, so only one thread can use the decoder at once.
     ClientAutoLock lock(this, client_id);
-    ImageDecoderWrapper decoder_wrapper(
-        this, data, scaled_size, alpha_option, decoder_color_behavior_,
-        high_bit_depth_decoding_option, index, info, pixels, row_bytes,
-        all_data_received, client_id);
+    ImageDecoderWrapper decoder_wrapper(this, data, pixmap,
+                                        decoder_color_behavior_, index,
+                                        all_data_received, client_id);
     current_decode_succeeded = decoder_wrapper.Decode(
         image_decoder_factory_.get(), &frame_count, &has_alpha);
     decode_failed = decoder_wrapper.decode_failed();
@@ -194,7 +185,8 @@ bool ImageFrameGenerator::DecodeToYUV(
   const bool all_data_received = true;
   std::unique_ptr<ImageDecoder> decoder = ImageDecoder::Create(
       data, all_data_received, ImageDecoder::kAlphaPremultiplied,
-      ImageDecoder::kDefaultBitDepth, decoder_color_behavior_);
+      ImageDecoder::kDefaultBitDepth, decoder_color_behavior_,
+      Platform::GetMaxDecodedImageBytes());
   // getYUVComponentSizes was already called and was successful, so
   // ImageDecoder::create must succeed.
   DCHECK(decoder);
@@ -283,11 +275,13 @@ bool ImageFrameGenerator::GetYUVAInfo(
   if (yuv_decoding_failed_)
     return false;
   std::unique_ptr<ImageDecoder> decoder = ImageDecoder::Create(
-      data, true /* data_complete */, ImageDecoder::kAlphaPremultiplied,
-      ImageDecoder::kDefaultBitDepth, decoder_color_behavior_);
+      data, /*data_complete=*/true, ImageDecoder::kAlphaPremultiplied,
+      ImageDecoder::kDefaultBitDepth, decoder_color_behavior_,
+      Platform::GetMaxDecodedImageBytes());
   DCHECK(decoder);
 
-  DCHECK(decoder->CanDecodeToYUV());
+  DCHECK(decoder->CanDecodeToYUV())
+      << decoder->FilenameExtension() << " image decoder";
   SkYUVAInfo::Subsampling subsampling;
   size_t width_bytes[SkYUVAInfo::kMaxPlanes];
   if (!UpdateYUVAInfoSubsamplingAndWidthBytes(decoder.get(), &subsampling,

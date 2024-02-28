@@ -10,8 +10,8 @@
 #include <string>
 #include <utility>
 
-#include "base/bind.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -21,8 +21,6 @@
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/policy/dlp/dlp_rules_manager.h"
-#include "chrome/browser/chromeos/policy/dlp/dlp_rules_manager_factory.h"
 #include "chrome/browser/enterprise/connectors/common.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -30,6 +28,8 @@
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/enterprise/buildflags/buildflags.h"
+#include "components/enterprise/common/proto/connectors.pb.h"
 #include "components/safe_browsing/buildflags.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -37,8 +37,6 @@
 #include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/render_view_host.h"
-#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/filename_util.h"
@@ -52,7 +50,6 @@
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/ash/file_manager/fileapi_util.h"
-#include "chrome/browser/ash/policy/dlp/dlp_files_controller.h"
 #include "content/public/browser/site_instance.h"
 #endif
 
@@ -67,8 +64,6 @@ using blink::mojom::FileChooserFileInfoPtr;
 using blink::mojom::FileChooserParams;
 using blink::mojom::FileChooserParamsPtr;
 using content::BrowserThread;
-using content::RenderViewHost;
-using content::RenderWidgetHost;
 using content::WebContents;
 
 namespace {
@@ -85,6 +80,9 @@ void DeleteFiles(std::vector<base::FilePath> paths) {
 
 bool IsValidProfile(Profile* profile) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  if (!profile) {
+    return false;
+  }
   // No profile manager in unit tests.
   if (!g_browser_process->profile_manager())
     return true;
@@ -115,13 +113,16 @@ bool IsDownloadAllowedBySafeBrowsing(
     // Safe Browsing should only return these results for client downloads, not
     // for PPAPI downloads.
     case Result::ASYNC_SCANNING:
+    case Result::ASYNC_LOCAL_PASSWORD_SCANNING:
     case Result::BLOCKED_PASSWORD_PROTECTED:
     case Result::BLOCKED_TOO_LARGE:
     case Result::SENSITIVE_CONTENT_BLOCK:
     case Result::SENSITIVE_CONTENT_WARNING:
     case Result::DEEP_SCANNED_SAFE:
     case Result::PROMPT_FOR_SCANNING:
+    case Result::PROMPT_FOR_LOCAL_PASSWORD_SCANNING:
     case Result::BLOCKED_UNSUPPORTED_FILE_TYPE:
+    case Result::DEEP_SCANNED_FAILED:
       NOTREACHED();
       return true;
   }
@@ -159,20 +160,13 @@ FileSelectHelper::FileSelectHelper(Profile* profile)
 FileSelectHelper::~FileSelectHelper() {
   // There may be pending file dialogs, we need to tell them that we've gone
   // away so they don't try and call back to us.
-  if (select_file_dialog_.get())
+  if (select_file_dialog_)
     select_file_dialog_->ListenerDestroyed();
 }
 
-void FileSelectHelper::FileSelected(const base::FilePath& path,
+void FileSelectHelper::FileSelected(const ui::SelectedFileInfo& file,
                                     int index,
                                     void* params) {
-  FileSelectedWithExtraInfo(ui::SelectedFileInfo(path, path), index, params);
-}
-
-void FileSelectHelper::FileSelectedWithExtraInfo(
-    const ui::SelectedFileInfo& file,
-    int index,
-    void* params) {
   if (IsValidProfile(profile_)) {
     base::FilePath path = file.file_path;
     if (dialog_mode_ != FileChooserParams::Mode::kUploadFolder)
@@ -205,15 +199,6 @@ void FileSelectHelper::FileSelectedWithExtraInfo(
 }
 
 void FileSelectHelper::MultiFilesSelected(
-    const std::vector<base::FilePath>& files,
-    void* params) {
-  std::vector<ui::SelectedFileInfo> selected_files =
-      ui::FilePathListToSelectedFileInfoList(files);
-
-  MultiFilesSelectedWithExtraInfo(selected_files, params);
-}
-
-void FileSelectHelper::MultiFilesSelectedWithExtraInfo(
     const std::vector<ui::SelectedFileInfo>& files,
     void* params) {
   if (!files.empty() && IsValidProfile(profile_)) {
@@ -317,8 +302,10 @@ void FileSelectHelper::ConvertToFileChooserFileInfoList(
     storage::FileSystemContext* file_system_context =
         profile_->GetStoragePartition(site_instance)->GetFileSystemContext();
     file_manager::util::ConvertSelectedFileInfoListToFileChooserFileInfoList(
-        file_system_context, site_instance->GetSiteURL(), files,
-        base::BindOnce(&FileSelectHelper::CheckIfPolicyAllowed, this));
+        file_system_context, render_frame_host_->GetLastCommittedOrigin(),
+        files,
+        base::BindOnce(&FileSelectHelper::PerformContentAnalysisIfNeeded,
+                       this));
     return;
   }
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
@@ -331,35 +318,7 @@ void FileSelectHelper::ConvertToFileChooserFileInfoList(
             base::FilePath(file.display_name).AsUTF16Unsafe())));
   }
 
-  CheckIfPolicyAllowed(std::move(chooser_files));
-}
-
-void FileSelectHelper::CheckIfPolicyAllowed(
-    std::vector<blink::mojom::FileChooserFileInfoPtr> list) {
-  if (AbortIfWebContentsDestroyed())
-    return;
-
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  DCHECK(render_frame_host_);
-  policy::DlpFilesController* files_controller = nullptr;
-  policy::DlpRulesManager* rules_manager =
-      policy::DlpRulesManagerFactory::GetForPrimaryProfile();
-  if (rules_manager)
-    files_controller = rules_manager->GetDlpFilesController();
-
-  if (files_controller) {
-    files_controller->FilterDisallowedUploads(
-        std::move(list),
-        render_frame_host_->GetMainFrame()->GetLastCommittedURL(),
-        base::BindOnce(&FileSelectHelper::PerformContentAnalysisIfNeeded,
-                       weak_ptr_factory_.GetWeakPtr()));
-  } else {
-    PerformContentAnalysisIfNeeded(std::move(list));
-  }
-
-#else
-  PerformContentAnalysisIfNeeded(std::move(list));
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+  PerformContentAnalysisIfNeeded(std::move(chooser_files));
 }
 
 void FileSelectHelper::PerformContentAnalysisIfNeeded(
@@ -367,11 +326,13 @@ void FileSelectHelper::PerformContentAnalysisIfNeeded(
   if (AbortIfWebContentsDestroyed())
     return;
 
-#if BUILDFLAG(FULL_SAFE_BROWSING)
+#if BUILDFLAG(ENTERPRISE_CLOUD_CONTENT_ANALYSIS)
   enterprise_connectors::ContentAnalysisDelegate::Data data;
   if (enterprise_connectors::ContentAnalysisDelegate::IsEnabled(
           profile_, web_contents_->GetLastCommittedURL(), &data,
           enterprise_connectors::AnalysisConnector::FILE_ATTACHED)) {
+    data.reason =
+        enterprise_connectors::ContentAnalysisRequest::FILE_PICKER_DIALOG;
     data.paths.reserve(list.size());
     for (const auto& file : list) {
       if (file && file->is_native_file())
@@ -392,14 +353,14 @@ void FileSelectHelper::PerformContentAnalysisIfNeeded(
   }
 #else
   NotifyListenerAndEnd(std::move(list));
-#endif  // BUILDFLAG(FULL_SAFE_BROWSING)
+#endif  // BUILDFLAG(ENTERPRISE_CLOUD_CONTENT_ANALYSIS)
 }
 
-#if BUILDFLAG(FULL_SAFE_BROWSING)
+#if BUILDFLAG(ENTERPRISE_CLOUD_CONTENT_ANALYSIS)
 void FileSelectHelper::ContentAnalysisCompletionCallback(
     std::vector<blink::mojom::FileChooserFileInfoPtr> list,
     const enterprise_connectors::ContentAnalysisDelegate::Data& data,
-    const enterprise_connectors::ContentAnalysisDelegate::Result& result) {
+    enterprise_connectors::ContentAnalysisDelegate::Result& result) {
   if (AbortIfWebContentsDestroyed())
     return;
 
@@ -408,8 +369,23 @@ void FileSelectHelper::ContentAnalysisCompletionCallback(
   DCHECK_EQ(data.paths.size(), result.paths_results.size());
   DCHECK_GE(list.size(), result.paths_results.size());
 
-  // Remove any files that did not pass the deep scan. Non-native files are
-  // skipped.
+  // If the user chooses to upload a folder and the folder contains sensitive
+  // files, block the entire folder and update `result` to reflect the block
+  // verdict for all files scanned.
+  if (dialog_type_ == ui::SelectFileDialog::SELECT_UPLOAD_FOLDER) {
+    if (base::Contains(result.paths_results, false)) {
+      list.clear();
+      for (size_t index = 0; index < data.paths.size(); ++index) {
+        result.paths_results[index] = false;
+      }
+    }
+    // Early return for folder upload, regardless of list being empty or not.
+    NotifyListenerAndEnd(std::move(list));
+    return;
+  }
+
+  // For single or multiple file uploads, remove any files that did not pass the
+  // deep scan. Non-native files are skipped.
   size_t i = 0;
   for (auto it = list.begin(); it != list.end();) {
     if ((*it)->is_native_file()) {
@@ -428,7 +404,7 @@ void FileSelectHelper::ContentAnalysisCompletionCallback(
 
   NotifyListenerAndEnd(std::move(list));
 }
-#endif  // BUILDFLAG(FULL_SAFE_BROWSING)
+#endif  // BUILDFLAG(ENTERPRISE_CLOUD_CONTENT_ANALYSIS)
 
 void FileSelectHelper::NotifyListenerAndEnd(
     std::vector<blink::mojom::FileChooserFileInfoPtr> list) {
@@ -481,14 +457,13 @@ void FileSelectHelper::DontAbortOnMissingWebContentsForTesting() {
 std::unique_ptr<ui::SelectFileDialog::FileTypeInfo>
 FileSelectHelper::GetFileTypesFromAcceptType(
     const std::vector<std::u16string>& accept_types) {
-  std::unique_ptr<ui::SelectFileDialog::FileTypeInfo> base_file_type(
-      new ui::SelectFileDialog::FileTypeInfo());
+  auto base_file_type = std::make_unique<ui::SelectFileDialog::FileTypeInfo>();
   if (accept_types.empty())
     return base_file_type;
 
   // Create FileTypeInfo and pre-allocate for the first extension list.
-  std::unique_ptr<ui::SelectFileDialog::FileTypeInfo> file_type(
-      new ui::SelectFileDialog::FileTypeInfo(*base_file_type));
+  auto file_type =
+      std::make_unique<ui::SelectFileDialog::FileTypeInfo>(*base_file_type);
   file_type->include_all_files = true;
   file_type->extensions.resize(1);
   std::vector<base::FilePath::StringType>* extensions =
@@ -604,9 +579,7 @@ void FileSelectHelper::RunFileChooser(
   render_frame_host_ = render_frame_host;
   web_contents_ = WebContents::FromRenderFrameHost(render_frame_host);
   listener_ = std::move(listener);
-  observation_.Reset();
   content::WebContentsObserver::Observe(web_contents_);
-  observation_.Observe(render_frame_host_->GetRenderViewHost()->GetWidget());
 
   base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock()},
@@ -707,7 +680,7 @@ void FileSelectHelper::RunFileChooserOnUIThread(
 
   select_file_dialog_ = ui::SelectFileDialog::Create(
       this, std::make_unique<ChromeSelectFilePolicy>(web_contents_));
-  if (!select_file_dialog_.get())
+  if (!select_file_dialog_)
     return;
 
   dialog_mode_ = params->mode;
@@ -737,6 +710,9 @@ void FileSelectHelper::RunFileChooserOnUIThread(
   // Android needs the original MIME types and an additional capture value.
   std::pair<std::vector<std::u16string>, bool> accept_types =
       std::make_pair(params->accept_types, params->use_media_capture);
+  void* accept_types_ptr = &accept_types;
+#else
+  void* accept_types_ptr = nullptr;
 #endif
 
   // Never consider the current scope as hung. The hang watching deadline (if
@@ -744,17 +720,17 @@ void FileSelectHelper::RunFileChooserOnUIThread(
   // file.
   base::HangWatcher::InvalidateActiveExpectations();
 
-  select_file_dialog_->SelectFile(
-      dialog_type_, params->title, default_file_path, select_file_types_.get(),
-      select_file_types_.get() && !select_file_types_->extensions.empty()
-          ? 1
-          : 0,  // 1-based index of default extension to show.
-      base::FilePath::StringType(), owning_window,
-#if BUILDFLAG(IS_ANDROID)
-      &accept_types);
-#else
-      nullptr);
-#endif
+  // 1-based index of default extension to show.
+  int file_type_index =
+      select_file_types_ && !select_file_types_->extensions.empty() ? 1 : 0;
+
+  const GURL* caller =
+      &render_frame_host_->GetMainFrame()->GetLastCommittedURL();
+
+  select_file_dialog_->SelectFile(dialog_type_, params->title,
+                                  default_file_path, select_file_types_.get(),
+                                  file_type_index, base::FilePath::StringType(),
+                                  owning_window, accept_types_ptr, caller);
 
   select_file_types_.reset();
 }
@@ -773,7 +749,11 @@ void FileSelectHelper::RunFileChooserEnd() {
     listener_->FileSelectionCanceled();
   render_frame_host_ = nullptr;
   web_contents_ = nullptr;
-  select_file_dialog_.reset();
+  // If the dialog was actually opened, dispose of our reference.
+  if (select_file_dialog_) {
+    select_file_dialog_->ListenerDestroyed();
+    select_file_dialog_.reset();
+  }
   Release();
 }
 
@@ -802,13 +782,6 @@ void FileSelectHelper::EnumerateDirectoryEnd() {
   Release();
 }
 
-void FileSelectHelper::RenderWidgetHostDestroyed(
-    content::RenderWidgetHost* widget_host) {
-  render_frame_host_ = nullptr;
-  DCHECK(observation_.IsObservingSource(widget_host));
-  observation_.Reset();
-}
-
 void FileSelectHelper::RenderFrameHostChanged(
     content::RenderFrameHost* old_host,
     content::RenderFrameHost* new_host) {
@@ -832,6 +805,7 @@ void FileSelectHelper::RenderFrameDeleted(
 void FileSelectHelper::WebContentsDestroyed() {
   render_frame_host_ = nullptr;
   web_contents_ = nullptr;
+  profile_ = nullptr;
   CleanUp();
 }
 

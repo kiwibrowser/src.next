@@ -38,6 +38,22 @@ using base::android::ScopedJavaLocalRef;
 using content::NavigationController;
 using content::WebContents;
 
+WebContentsStateByteBuffer::WebContentsStateByteBuffer(
+    base::android::ScopedJavaLocalRef<jobject> web_contents_byte_buffer_result,
+    int saved_state_version)
+    : state_version(saved_state_version) {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  byte_buffer_result.Reset(web_contents_byte_buffer_result);
+  byte_buffer_data = env->GetDirectBufferAddress(byte_buffer_result.obj());
+  byte_buffer_size = env->GetDirectBufferCapacity(byte_buffer_result.obj());
+}
+WebContentsStateByteBuffer::~WebContentsStateByteBuffer() = default;
+
+WebContentsStateByteBuffer& WebContentsStateByteBuffer::operator=(
+    WebContentsStateByteBuffer&& other) noexcept = default;
+WebContentsStateByteBuffer::WebContentsStateByteBuffer(
+    WebContentsStateByteBuffer&& other) noexcept = default;
+
 namespace {
 
 ScopedJavaLocalRef<jobject> CreateByteBufferDirect(JNIEnv* env, jint size) {
@@ -346,47 +362,7 @@ ScopedJavaLocalRef<jobject> WriteNavigationsAsByteBuffer(
                                                 serialized, current_entry);
 }
 
-// Restores a WebContents from the passed in state.
-WebContents* RestoreContentsFromByteBuffer(void* data,
-                                           int size,
-                                           int saved_state_version,
-                                           bool initially_hidden,
-                                           bool no_renderer) {
-  bool is_off_the_record;
-  int current_entry_index;
-  std::vector<sessions::SerializedNavigationEntry> navigations;
-  bool success = ExtractNavigationEntries(data, size, saved_state_version,
-                                          &is_off_the_record,
-                                          &current_entry_index, &navigations);
-  if (!success)
-    return nullptr;
-
-  Profile* profile = ProfileManager::GetActiveUserProfile();
-  std::vector<std::unique_ptr<content::NavigationEntry>> entries =
-      sessions::ContentSerializedNavigationBuilder::ToNavigationEntries(
-          navigations, profile);
-
-  if (is_off_the_record) {
-    // Serialization and deserialization related functionalities are only
-    // supported for Incognito tabbed Activities and they use primary OTR
-    // profile.
-    profile = profile->GetPrimaryOTRProfile(/*create_if_needed=*/true);
-  }
-
-  WebContents::CreateParams params(profile);
-
-  params.initially_hidden = initially_hidden;
-  if (no_renderer) {
-    params.desired_renderer_state =
-        WebContents::CreateParams::kNoRendererProcess;
-  }
-  std::unique_ptr<WebContents> web_contents(WebContents::Create(params));
-  web_contents->GetController().Restore(
-      current_entry_index, content::RestoreType::kRestored, &entries);
-  return web_contents.release();
-}
-
-}  // anonymous namespace
+}  // namespace
 
 ScopedJavaLocalRef<jobject> WebContentsState::GetContentsStateAsByteBuffer(
     JNIEnv* env,
@@ -399,7 +375,7 @@ ScopedJavaLocalRef<jobject> WebContentsState::GetContentsStateAsByteBuffer(
   // Don't try to persist initial NavigationEntry, as it is not actually
   // associated with any navigation and will just result in about:blank on
   // session restore.
-  if (entry_count == 0 || controller.GetLastCommittedEntry()->IsInitialEntry())
+  if (controller.GetLastCommittedEntry()->IsInitialEntry())
     return ScopedJavaLocalRef<jobject>();
 
   std::vector<content::NavigationEntry*> navigations(entry_count);
@@ -500,13 +476,67 @@ ScopedJavaLocalRef<jobject> WebContentsState::RestoreContentsFromByteBuffer(
   if (!data || size <= 0)
     return ScopedJavaLocalRef<jobject>();
 
-  WebContents* web_contents = ::RestoreContentsFromByteBuffer(
-      data, size, saved_state_version, initially_hidden, no_renderer);
+  WebContents* web_contents =
+      WebContentsState::RestoreContentsFromByteBufferImpl(
+          data, size, saved_state_version, initially_hidden, no_renderer)
+          .release();
 
   if (web_contents)
     return web_contents->GetJavaWebContents();
   else
     return ScopedJavaLocalRef<jobject>();
+}
+
+std::unique_ptr<WebContents> WebContentsState::RestoreContentsFromByteBuffer(
+    const WebContentsStateByteBuffer* byte_buffer,
+    bool initially_hidden,
+    bool no_renderer) {
+  return WebContentsState::RestoreContentsFromByteBufferImpl(
+      byte_buffer->byte_buffer_data, byte_buffer->byte_buffer_size,
+      byte_buffer->state_version, initially_hidden, no_renderer);
+}
+
+std::unique_ptr<WebContents>
+WebContentsState::RestoreContentsFromByteBufferImpl(void* data,
+                                                    int size,
+                                                    int saved_state_version,
+                                                    bool initially_hidden,
+                                                    bool no_renderer) {
+  DCHECK_NE(data, nullptr);
+  DCHECK_GT(size, 0);
+
+  bool is_off_the_record;
+  int current_entry_index;
+  std::vector<sessions::SerializedNavigationEntry> navigations;
+  bool success = ExtractNavigationEntries(data, size, saved_state_version,
+                                          &is_off_the_record,
+                                          &current_entry_index, &navigations);
+  if (!success)
+    return nullptr;
+
+  Profile* profile = ProfileManager::GetActiveUserProfile();
+  std::vector<std::unique_ptr<content::NavigationEntry>> entries =
+      sessions::ContentSerializedNavigationBuilder::ToNavigationEntries(
+          navigations, profile);
+
+  if (is_off_the_record) {
+    // Serialization and deserialization related functionalities are only
+    // supported for Incognito tabbed Activities and they use primary OTR
+    // profile.
+    profile = profile->GetPrimaryOTRProfile(/*create_if_needed=*/true);
+  }
+
+  WebContents::CreateParams params(profile);
+
+  params.initially_hidden = initially_hidden;
+  if (no_renderer) {
+    params.desired_renderer_state =
+        WebContents::CreateParams::kNoRendererProcess;
+  }
+  std::unique_ptr<WebContents> web_contents(WebContents::Create(params));
+  web_contents->GetController().Restore(
+      current_entry_index, content::RestoreType::kRestored, &entries);
+  return web_contents;
 }
 
 ScopedJavaLocalRef<jobject>
@@ -527,10 +557,13 @@ WebContentsState::CreateSingleNavigationStateAsByteBuffer(
   url::Origin initiator_origin;
   if (jinitiator_origin)
     initiator_origin = url::Origin::FromJavaObject(jinitiator_origin);
+  // TODO(https://crbug.com/1399608): Deal with getting initiator_base_url
+  // plumbed here too.
   std::unique_ptr<content::NavigationEntry> entry(
       content::NavigationController::CreateNavigationEntry(
           GURL(base::android::ConvertJavaStringToUTF8(env, url)), referrer,
-          initiator_origin, ui::PAGE_TRANSITION_LINK,
+          initiator_origin, /* initiator_base_url= */ std::nullopt,
+          ui::PAGE_TRANSITION_LINK,
           true,  // is_renderer_initiated
           "",    // extra_headers
           ProfileManager::GetActiveUserProfile(),

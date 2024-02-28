@@ -14,6 +14,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_constants.h"
 #include "ui/base/device_form_factor.h"
+#include "url/android/gurl_android.h"
 
 using base::android::JavaParamRef;
 using base::android::JavaRef;
@@ -47,10 +48,18 @@ ScopedJavaLocalRef<jstring> LocationBarModelAndroid::GetURLForDisplay(
       env, location_bar_model_->GetURLForDisplay());
 }
 
+ScopedJavaLocalRef<jobject>
+LocationBarModelAndroid::GetUrlOfVisibleNavigationEntry(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
+  return url::GURLAndroid::FromNativeGURL(env, location_bar_model_->GetURL());
+}
+
 jint LocationBarModelAndroid::GetPageClassification(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& obj,
-    bool is_focused_from_fakebox) {
+    bool is_focused_from_fakebox,
+    bool is_prefetch) {
   // On phones, the omnibox is not initially shown on the NTP.  In this case,
   // treat the fakebox like the omnibox.
   if (ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_PHONE)
@@ -67,7 +76,7 @@ jint LocationBarModelAndroid::GetPageClassification(
 
   // TODO: Android does not save the homepage to the native pref, so we will
   // never get the HOME_PAGE classification. Fix this by overriding IsHomePage.
-  return location_bar_model_->GetPageClassification(source);
+  return location_bar_model_->GetPageClassification(source, is_prefetch);
 }
 
 content::WebContents* LocationBarModelAndroid::GetActiveWebContents() const {

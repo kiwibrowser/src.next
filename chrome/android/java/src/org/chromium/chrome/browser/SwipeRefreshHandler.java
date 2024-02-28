@@ -16,15 +16,14 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.base.task.PostTask;
+import org.chromium.base.task.TaskTraits;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.gesturenav.HistoryNavigationCoordinator;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabWebContentsUserData;
 import org.chromium.components.browser_ui.styles.ChromeColors;
 import org.chromium.components.browser_ui.styles.SemanticColorUtils;
-import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.third_party.android.swiperefresh.SwipeRefreshLayout;
 import org.chromium.ui.OverscrollAction;
@@ -35,8 +34,8 @@ import org.chromium.ui.base.WindowAndroid;
  * An overscroll handler implemented in terms a modified version of the Android
  * compat library's SwipeRefreshLayout effect.
  */
-public class SwipeRefreshHandler
-        extends TabWebContentsUserData implements OverscrollRefreshHandler {
+public class SwipeRefreshHandler extends TabWebContentsUserData
+        implements OverscrollRefreshHandler {
     private static final Class<SwipeRefreshHandler> USER_DATA_KEY = SwipeRefreshHandler.class;
 
     // Synthetic delay between the {@link #didStopRefreshing()} signal and the
@@ -87,8 +86,7 @@ public class SwipeRefreshHandler
         return handler;
     }
 
-    @Nullable
-    public static SwipeRefreshHandler get(Tab tab) {
+    public static @Nullable SwipeRefreshHandler get(Tab tab) {
         return tab.getUserDataHost().getUserData(USER_DATA_KEY);
     }
 
@@ -100,18 +98,20 @@ public class SwipeRefreshHandler
     private SwipeRefreshHandler(Tab tab) {
         super(tab);
         mTab = tab;
-        mTabObserver = new EmptyTabObserver() {
-            @Override
-            public void onActivityAttachmentChanged(Tab tab, @Nullable WindowAndroid window) {
-                if (window == null && mSwipeRefreshLayout != null) {
-                    cancelStopRefreshingRunnable();
-                    detachSwipeRefreshLayoutIfNecessary();
-                    mSwipeRefreshLayout.setOnRefreshListener(null);
-                    mSwipeRefreshLayout.setOnResetListener(null);
-                    mSwipeRefreshLayout = null;
-                }
-            }
-        };
+        mTabObserver =
+                new EmptyTabObserver() {
+                    @Override
+                    public void onActivityAttachmentChanged(
+                            Tab tab, @Nullable WindowAndroid window) {
+                        if (window == null && mSwipeRefreshLayout != null) {
+                            cancelStopRefreshingRunnable();
+                            detachSwipeRefreshLayoutIfNecessary();
+                            mSwipeRefreshLayout.setOnRefreshListener(null);
+                            mSwipeRefreshLayout.setOnResetListener(null);
+                            mSwipeRefreshLayout = null;
+                        }
+                    }
+                };
         mTab.addObserver(mTabObserver);
     }
 
@@ -120,36 +120,43 @@ public class SwipeRefreshHandler
         mSwipeRefreshLayout.setLayoutParams(
                 new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
         final boolean incognito = mTab.isIncognito();
-        final @ColorInt int backgroundColor = incognito
-                ? context.getColor(R.color.default_bg_color_dark_elev_2_baseline)
-                : ChromeColors.getSurfaceColor(context, R.dimen.default_elevation_2);
+        final @ColorInt int backgroundColor =
+                incognito
+                        ? context.getColor(R.color.default_bg_color_dark_elev_2_baseline)
+                        : ChromeColors.getSurfaceColor(context, R.dimen.default_elevation_2);
         mSwipeRefreshLayout.setProgressBackgroundColorSchemeColor(backgroundColor);
-        final @ColorInt int iconColor = incognito
-                ? context.getColor(R.color.default_icon_color_blue_light)
-                : SemanticColorUtils.getDefaultIconColorAccent1(context);
+        final @ColorInt int iconColor =
+                incognito
+                        ? context.getColor(R.color.default_icon_color_blue_light)
+                        : SemanticColorUtils.getDefaultIconColorAccent1(context);
         mSwipeRefreshLayout.setColorSchemeColors(iconColor);
         if (mContainerView != null) mSwipeRefreshLayout.setEnabled(true);
 
-        mSwipeRefreshLayout.setOnRefreshListener(() -> {
-            cancelStopRefreshingRunnable();
-            PostTask.postDelayedTask(UiThreadTaskTraits.DEFAULT, getStopRefreshingRunnable(),
-                    MAX_REFRESH_ANIMATION_DURATION_MS);
-            if (mAccessibilityRefreshString == null) {
-                int resId = R.string.accessibility_swipe_refresh;
-                mAccessibilityRefreshString = context.getResources().getString(resId);
-            }
-            mSwipeRefreshLayout.announceForAccessibility(mAccessibilityRefreshString);
-            mTab.reload();
-            RecordUserAction.record("MobilePullGestureReload");
-        });
-        mSwipeRefreshLayout.setOnResetListener(() -> {
-            if (mDetachRefreshLayoutRunnable != null) return;
-            mDetachRefreshLayoutRunnable = () -> {
-                mDetachRefreshLayoutRunnable = null;
-                detachSwipeRefreshLayoutIfNecessary();
-            };
-            PostTask.postTask(UiThreadTaskTraits.DEFAULT, mDetachRefreshLayoutRunnable);
-        });
+        mSwipeRefreshLayout.setOnRefreshListener(
+                () -> {
+                    cancelStopRefreshingRunnable();
+                    PostTask.postDelayedTask(
+                            TaskTraits.UI_DEFAULT,
+                            getStopRefreshingRunnable(),
+                            MAX_REFRESH_ANIMATION_DURATION_MS);
+                    if (mAccessibilityRefreshString == null) {
+                        int resId = R.string.accessibility_swipe_refresh;
+                        mAccessibilityRefreshString = context.getResources().getString(resId);
+                    }
+                    mSwipeRefreshLayout.announceForAccessibility(mAccessibilityRefreshString);
+                    mTab.reload();
+                    RecordUserAction.record("MobilePullGestureReload");
+                });
+        mSwipeRefreshLayout.setOnResetListener(
+                () -> {
+                    if (mDetachRefreshLayoutRunnable != null) return;
+                    mDetachRefreshLayoutRunnable =
+                            () -> {
+                                mDetachRefreshLayoutRunnable = null;
+                                detachSwipeRefreshLayoutIfNecessary();
+                            };
+                    PostTask.postTask(TaskTraits.UI_DEFAULT, mDetachRefreshLayoutRunnable);
+                });
     }
 
     @SuppressLint("NewApi")
@@ -196,8 +203,7 @@ public class SwipeRefreshHandler
         if (type == OverscrollAction.PULL_TO_REFRESH) {
             if (mSwipeRefreshLayout == null) initSwipeRefreshLayout(mTab.getContext());
             attachSwipeRefreshLayoutIfNecessary();
-            return mSwipeRefreshLayout.start(ChromeFeatureList.isEnabled(
-                    ChromeFeatureList.OPTIMIZE_LAYOUTS_FOR_PULL_REFRESH));
+            return mSwipeRefreshLayout.start();
         } else if (type == OverscrollAction.HISTORY_NAVIGATION) {
             if (mNavigationCoordinator != null) {
                 mNavigationCoordinator.startGesture();
@@ -225,7 +231,7 @@ public class SwipeRefreshHandler
         if (mSwipeType == OverscrollAction.PULL_TO_REFRESH) {
             mSwipeRefreshLayout.pull(yDelta);
         } else if (mSwipeType == OverscrollAction.HISTORY_NAVIGATION) {
-            if (mNavigationCoordinator != null) mNavigationCoordinator.pull(xDelta);
+            if (mNavigationCoordinator != null) mNavigationCoordinator.pull(xDelta, yDelta);
         }
         TraceEvent.end("SwipeRefreshHandler.pull");
     }
@@ -268,11 +274,12 @@ public class SwipeRefreshHandler
 
     private Runnable getStopRefreshingRunnable() {
         if (mStopRefreshingRunnable == null) {
-            mStopRefreshingRunnable = () -> {
-                if (mSwipeRefreshLayout != null) {
-                    mSwipeRefreshLayout.setRefreshing(false);
-                }
-            };
+            mStopRefreshingRunnable =
+                    () -> {
+                        if (mSwipeRefreshLayout != null) {
+                            mSwipeRefreshLayout.setRefreshing(false);
+                        }
+                    };
         }
         return mStopRefreshingRunnable;
     }

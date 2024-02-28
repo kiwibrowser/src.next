@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,7 +42,7 @@ class CORE_EXPORT LayoutShiftRegion {
   }
 
   const Vector<gfx::Rect>& GetRects() const { return rects_; }
-  bool IsEmpty() const { return rects_.IsEmpty(); }
+  bool IsEmpty() const { return rects_.empty(); }
   void Reset() { rects_.clear(); }
 
   uint64_t Area() const;

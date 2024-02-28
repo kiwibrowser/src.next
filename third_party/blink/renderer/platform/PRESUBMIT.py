@@ -1,4 +1,4 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Presubmit script for changes affecting Source/platform.
@@ -12,7 +12,6 @@ import os
 import re
 import sys
 
-USE_PYTHON3 = True
 RUNTIMEENABLED_NAME = re.compile(r'\s*name\s*:\s*"([^"]*)"')
 ASH_STATUS = "ChromeOS_Ash"
 LACROS_STATUS = "ChromeOS_Lacros"
@@ -22,6 +21,7 @@ LACROS_STATUS = "ChromeOS_Lacros"
 # TODO(erikchen): This list doesn't match what in the .json5 file.
 ASH_LACROS_FEATURE_STATUS_PARITY_IGNORE_LIST = [
     'DigitalGoods',  # crbug.com/1235859
+    'DocumentPictureInPictureAPI',  # crbug.com/1373334
     'NetInfoDownlinkMax',  # crbug.com/1235864
     'WebBluetooth',  # crbug.com/1235867
 ]
@@ -48,7 +48,7 @@ def RuntimeEnabledFeatures(input_api, filename):
 def RuntimeEnabledFeatureNames(filename):
     """Reads the 'name' of each feature in runtime_enabled_features.json5."""
     # Note: We don't have a JSON5 parser available, so just use a regex.
-    with open(filename) as f:
+    with open(filename, encoding='utf-8') as f:
         for line in f:
             match = RUNTIMEENABLED_NAME.match(line)
             if match:

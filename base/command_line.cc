@@ -9,6 +9,7 @@
 #include "base/check_op.h"
 #include "base/containers/contains.h"
 #include "base/containers/span.h"
+#include "base/debug/debugging_buildflags.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/notreached.h"
@@ -24,6 +25,7 @@
 
 #if BUILDFLAG(IS_WIN)
 #include <windows.h>
+
 #include <shellapi.h>
 
 #include "base/strings/string_util_win.h"
@@ -106,53 +108,52 @@ bool IsSwitchWithKey(CommandLine::StringPieceType string,
 }
 
 #if BUILDFLAG(IS_WIN)
-// Quote a string as necessary for CommandLineToArgvW compatibility *on
+// Quotes a string as necessary for CommandLineToArgvW compatibility *on
 // Windows*.
-std::wstring QuoteForCommandLineToArgvW(const std::wstring& arg,
-                                        bool allow_unsafe_insert_sequences) {
-  // Ensure that GetCommandLineString isn't used to generate command-line
+// http://msdn.microsoft.com/en-us/library/17w5ykft.aspx#parsing-c-command-line-arguments.
+std::wstring QuoteForCommandLineToArgvWInternal(
+    const std::wstring& arg,
+    bool allow_unsafe_insert_sequences) {
+  // Ensures that GetCommandLineString isn't used to generate command-line
   // strings for the Windows shell by checking for Windows insert sequences like
   // "%1". GetCommandLineStringForShell should be used instead to get a string
   // with the correct placeholder format for the shell.
   DCHECK(arg.size() != 2 || arg[0] != L'%' || allow_unsafe_insert_sequences);
 
-  // We follow the quoting rules of CommandLineToArgvW.
-  // http://msdn.microsoft.com/en-us/library/17w5ykft.aspx
-  std::wstring quotable_chars(L" \\\"");
-  if (arg.find_first_of(quotable_chars) == std::wstring::npos) {
-    // No quoting necessary.
+  constexpr wchar_t kQuotableCharacters[] = L" \t\\\"";
+  if (arg.find_first_of(kQuotableCharacters) == std::wstring::npos) {
     return arg;
   }
 
-  std::wstring out;
-  out.push_back('"');
+  std::wstring out(1, L'"');
   for (size_t i = 0; i < arg.size(); ++i) {
-    if (arg[i] == '\\') {
-      // Find the extent of this run of backslashes.
-      size_t start = i, end = start + 1;
-      for (; end < arg.size() && arg[end] == '\\'; ++end) {}
-      size_t backslash_count = end - start;
+    if (arg[i] == L'\\') {
+      // Finds the extent of this run of backslashes.
+      size_t end = i + 1;
+      while (end < arg.size() && arg[end] == L'\\') {
+        ++end;
+      }
 
-      // Backslashes are escapes only if the run is followed by a double quote.
+      const size_t backslash_count = end - i;
+
+      // Backslashes are escaped only if the run is followed by a double quote.
       // Since we also will end the string with a double quote, we escape for
       // either a double quote or the end of the string.
-      if (end == arg.size() || arg[end] == '"') {
-        // To quote, we need to output 2x as many backslashes.
-        backslash_count *= 2;
-      }
-      for (size_t j = 0; j < backslash_count; ++j)
-        out.push_back('\\');
+      const size_t backslash_multiplier =
+          (end == arg.size() || arg[end] == L'"') ? 2 : 1;
 
-      // Advance i to one before the end to balance i++ in loop.
+      out.append(std::wstring(backslash_count * backslash_multiplier, L'\\'));
+
+      // Advances `i` to one before `end` to balance `++i` in loop.
       i = end - 1;
-    } else if (arg[i] == '"') {
-      out.push_back('\\');
-      out.push_back('"');
+    } else if (arg[i] == L'"') {
+      out.append(LR"(\")");
     } else {
       out.push_back(arg[i]);
     }
   }
-  out.push_back('"');
+
+  out.push_back(L'"');
 
   return out;
 }
@@ -252,6 +253,13 @@ bool CommandLine::InitializedForCurrentProcess() {
   return !!current_process_commandline_;
 }
 
+// static
+CommandLine CommandLine::FromArgvWithoutProgram(const StringVector& argv) {
+  CommandLine cmd(NO_PROGRAM);
+  cmd.AppendSwitchesAndArguments(argv);
+  return cmd;
+}
+
 #if BUILDFLAG(IS_WIN)
 // static
 CommandLine CommandLine::FromString(StringPieceType command_line) {
@@ -274,7 +282,9 @@ void CommandLine::InitFromArgv(const StringVector& argv) {
   switches_.clear();
   begin_args_ = 1;
   SetProgram(argv.empty() ? FilePath() : FilePath(argv[0]));
-  AppendSwitchesAndArguments(argv);
+  if (!argv.empty()) {
+    AppendSwitchesAndArguments(make_span(argv).subspan(1));
+  }
 }
 
 FilePath CommandLine::GetProgram() const {
@@ -282,6 +292,9 @@ FilePath CommandLine::GetProgram() const {
 }
 
 void CommandLine::SetProgram(const FilePath& program) {
+#if BUILDFLAG(ENABLE_COMMANDLINE_SEQUENCE_CHECKS)
+  sequence_checker_.Check();
+#endif
 #if BUILDFLAG(IS_WIN)
   argv_[0] = StringType(TrimWhitespace(program.value(), TRIM_ALL));
 #elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
@@ -339,6 +352,9 @@ void CommandLine::AppendSwitchPath(StringPiece switch_string,
 
 void CommandLine::AppendSwitchNative(StringPiece switch_string,
                                      CommandLine::StringPieceType value) {
+#if BUILDFLAG(ENABLE_COMMANDLINE_SEQUENCE_CHECKS)
+  sequence_checker_.Check();
+#endif
 #if BUILDFLAG(IS_WIN)
   const std::string switch_key = ToLowerASCII(switch_string);
   StringType combined_switch_string(UTF8ToWide(switch_key));
@@ -379,6 +395,9 @@ void CommandLine::AppendSwitchASCII(StringPiece switch_string,
 }
 
 void CommandLine::RemoveSwitch(base::StringPiece switch_key_without_prefix) {
+#if BUILDFLAG(ENABLE_COMMANDLINE_SEQUENCE_CHECKS)
+  sequence_checker_.Check();
+#endif
 #if BUILDFLAG(IS_WIN)
   StringType switch_key_native = UTF8ToWide(switch_key_without_prefix);
 #elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
@@ -411,11 +430,11 @@ void CommandLine::RemoveSwitch(base::StringPiece switch_key_without_prefix) {
 }
 
 void CommandLine::CopySwitchesFrom(const CommandLine& source,
-                                   const char* const switches[],
-                                   size_t count) {
-  for (size_t i = 0; i < count; ++i) {
-    if (source.HasSwitch(switches[i]))
-      AppendSwitchNative(switches[i], source.GetSwitchValueNative(switches[i]));
+                                   span<const char* const> switches) {
+  for (const char* entry : switches) {
+    if (source.HasSwitch(entry)) {
+      AppendSwitchNative(entry, source.GetSwitchValueNative(entry));
+    }
   }
 }
 
@@ -445,6 +464,9 @@ void CommandLine::AppendArgPath(const FilePath& path) {
 }
 
 void CommandLine::AppendArgNative(StringPieceType value) {
+#if BUILDFLAG(ENABLE_COMMANDLINE_SEQUENCE_CHECKS)
+  sequence_checker_.Check();
+#endif
   argv_.push_back(StringType(value));
 }
 
@@ -452,10 +474,15 @@ void CommandLine::AppendArguments(const CommandLine& other,
                                   bool include_program) {
   if (include_program)
     SetProgram(other.GetProgram());
-  AppendSwitchesAndArguments(other.argv());
+  if (!other.argv().empty()) {
+    AppendSwitchesAndArguments(make_span(other.argv()).subspan(1));
+  }
 }
 
 void CommandLine::PrependWrapper(StringPieceType wrapper) {
+#if BUILDFLAG(ENABLE_COMMANDLINE_SEQUENCE_CHECKS)
+  sequence_checker_.Check();
+#endif
   if (wrapper.empty())
     return;
   // Split the wrapper command based on whitespace (with quoting).
@@ -484,7 +511,7 @@ void CommandLine::ParseFromString(StringPieceType command_line) {
   int num_args = 0;
   wchar_t** args = NULL;
   // When calling CommandLineToArgvW, use the apiset if available.
-  // Doing so will bypass loading shell32.dll on Win8+.
+  // Doing so will bypass loading shell32.dll on Windows.
   HMODULE downlevel_shell32_dll =
       ::LoadLibraryEx(L"api-ms-win-downlevel-shell32-l1-1-0.dll", nullptr,
                       LOAD_LIBRARY_SEARCH_SYSTEM32);
@@ -510,16 +537,15 @@ void CommandLine::ParseFromString(StringPieceType command_line) {
   if (downlevel_shell32_dll)
     ::FreeLibrary(downlevel_shell32_dll);
 }
+
 #endif  // BUILDFLAG(IS_WIN)
 
-void CommandLine::AppendSwitchesAndArguments(
-    const CommandLine::StringVector& argv) {
+void CommandLine::AppendSwitchesAndArguments(span<const StringType> argv) {
   bool parse_switches = true;
 #if BUILDFLAG(IS_WIN)
   const bool is_parsed_from_string = !raw_command_line_string_.empty();
 #endif
-  for (size_t i = 1; i < argv.size(); ++i) {
-    CommandLine::StringType arg = argv[i];
+  for (StringType arg : argv) {
 #if BUILDFLAG(IS_WIN)
     arg = CommandLine::StringType(TrimWhitespace(arg, TRIM_ALL));
 #elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
@@ -553,6 +579,10 @@ CommandLine::StringType CommandLine::GetArgumentsStringInternal(
   StringType params;
   // Append switches and arguments.
   bool parse_switches = true;
+#if BUILDFLAG(IS_WIN)
+  bool appended_single_argument_switch = false;
+#endif
+
   for (size_t i = 1; i < argv_.size(); ++i) {
     StringType arg = argv_[i];
     StringType switch_string;
@@ -564,14 +594,24 @@ CommandLine::StringType CommandLine::GetArgumentsStringInternal(
       params.append(switch_string);
       if (!switch_value.empty()) {
 #if BUILDFLAG(IS_WIN)
-        switch_value = QuoteForCommandLineToArgvW(
+        switch_value = QuoteForCommandLineToArgvWInternal(
             switch_value, allow_unsafe_insert_sequences);
 #endif
         params.append(kSwitchValueSeparator + switch_value);
       }
     } else {
 #if BUILDFLAG(IS_WIN)
-      arg = QuoteForCommandLineToArgvW(arg, allow_unsafe_insert_sequences);
+      if (has_single_argument_switch_) {
+        // Check that we don't have multiple arguments when
+        // `has_single_argument_switch_` is true.
+        DCHECK(!appended_single_argument_switch);
+        appended_single_argument_switch = true;
+        params.append(base::StrCat(
+            {kSwitchPrefixes[0], kSingleArgument, FILE_PATH_LITERAL(" ")}));
+      } else {
+        arg = QuoteForCommandLineToArgvWInternal(arg,
+                                                 allow_unsafe_insert_sequences);
+      }
 #endif
       params.append(arg);
     }
@@ -582,8 +622,9 @@ CommandLine::StringType CommandLine::GetArgumentsStringInternal(
 CommandLine::StringType CommandLine::GetCommandLineString() const {
   StringType string(argv_[0]);
 #if BUILDFLAG(IS_WIN)
-  string = QuoteForCommandLineToArgvW(string,
-                                      /*allow_unsafe_insert_sequences=*/false);
+  string = QuoteForCommandLineToArgvWInternal(
+      string,
+      /*allow_unsafe_insert_sequences=*/false);
 #endif
   StringType params(GetArgumentsString());
   if (!params.empty()) {
@@ -594,6 +635,12 @@ CommandLine::StringType CommandLine::GetCommandLineString() const {
 }
 
 #if BUILDFLAG(IS_WIN)
+// static
+std::wstring CommandLine::QuoteForCommandLineToArgvW(const std::wstring& arg) {
+  return QuoteForCommandLineToArgvWInternal(
+      arg, /*allow_unsafe_insert_sequences=*/false);
+}
+
 // NOTE: this function is used to set Chrome's open command in the registry
 // during update. Any change to the syntax must be compatible with the prior
 // version (i.e., any new syntax must be understood by older browsers expecting
@@ -612,8 +659,9 @@ CommandLine::StringType CommandLine::GetCommandLineStringForShell() const {
 CommandLine::StringType
 CommandLine::GetCommandLineStringWithUnsafeInsertSequences() const {
   StringType string(argv_[0]);
-  string = QuoteForCommandLineToArgvW(string,
-                                      /*allow_unsafe_insert_sequences=*/true);
+  string = QuoteForCommandLineToArgvWInternal(
+      string,
+      /*allow_unsafe_insert_sequences=*/true);
   StringType params(
       GetArgumentsStringInternal(/*allow_unsafe_insert_sequences=*/true));
   if (!params.empty()) {
@@ -650,11 +698,18 @@ void CommandLine::ParseAsSingleArgument(
       single_arg_switch_position + single_arg_switch.length() + 1;
   if (arg_position >= raw_command_line_string_.length())
     return;
+  has_single_argument_switch_ = true;
   const StringPieceType arg = raw_command_line_string_.substr(arg_position);
   if (!arg.empty()) {
     AppendArgNative(arg);
   }
 }
 #endif  // BUILDFLAG(IS_WIN)
+
+void CommandLine::DetachFromCurrentSequence() {
+#if BUILDFLAG(ENABLE_COMMANDLINE_SEQUENCE_CHECKS)
+  sequence_checker_.Detach();
+#endif  // BUILDFLAG(ENABLE_COMMANDLINE_SEQUENCE_CHECKS)
+}
 
 }  // namespace base

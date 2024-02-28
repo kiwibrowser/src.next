@@ -11,7 +11,7 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -22,7 +22,8 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if BUILDFLAG(IS_APPLE)
-#include "base/mac/scoped_nsautorelease_pool.h"
+#include "base/apple/scoped_nsautorelease_pool.h"
+#include "base/memory/stack_allocated.h"
 #endif
 
 using net::test::IsError;
@@ -45,9 +46,8 @@ class UploadFileElementReaderTest : public testing::TestWithParam<bool>,
 
     ASSERT_TRUE(
         base::CreateTemporaryFileInDir(temp_dir_.GetPath(), &temp_file_path_));
-    ASSERT_EQ(
-        static_cast<int>(bytes_.size()),
-        base::WriteFile(temp_file_path_, &bytes_[0], bytes_.size()));
+    ASSERT_TRUE(base::WriteFile(
+        temp_file_path_, std::string_view(bytes_.data(), bytes_.size())));
 
     reader_ =
         CreateReader(0, std::numeric_limits<uint64_t>::max(), base::Time());
@@ -72,8 +72,8 @@ class UploadFileElementReaderTest : public testing::TestWithParam<bool>,
       base::Time expected_modification_time) {
     if (GetParam()) {
       return std::make_unique<UploadFileElementReader>(
-          base::ThreadTaskRunnerHandle::Get().get(), temp_file_path_, offset,
-          length, expected_modification_time);
+          base::SingleThreadTaskRunner::GetCurrentDefault().get(),
+          temp_file_path_, offset, length, expected_modification_time);
     }
 
     // The base::File::FLAG_WIN_SHARE_DELETE lets the file be deleted without
@@ -88,15 +88,17 @@ class UploadFileElementReaderTest : public testing::TestWithParam<bool>,
     base::File file(temp_file_path_, open_flags);
     EXPECT_TRUE(file.IsValid());
     return std::make_unique<UploadFileElementReader>(
-        base::ThreadTaskRunnerHandle::Get().get(), std::move(file),
+        base::SingleThreadTaskRunner::GetCurrentDefault().get(),
+        std::move(file),
         // Use an incorrect path, to make sure that the file is never re-opened.
         base::FilePath(FILE_PATH_LITERAL("this_should_be_ignored")), offset,
         length, expected_modification_time);
   }
 
 #if BUILDFLAG(IS_APPLE)
-  // May be needed to avoid leaks on OSX.
-  base::mac::ScopedNSAutoreleasePool scoped_pool_;
+  // May be needed to avoid leaks on the Mac.
+  STACK_ALLOCATED_IGNORE("https://crbug.com/1424190")
+  base::apple::ScopedNSAutoreleasePool scoped_pool_;
 #endif
 
   std::vector<char> bytes_;
@@ -109,8 +111,7 @@ TEST_P(UploadFileElementReaderTest, ReadPartially) {
   const size_t kHalfSize = bytes_.size() / 2;
   ASSERT_EQ(bytes_.size(), kHalfSize * 2);
   std::vector<char> buf(kHalfSize);
-  scoped_refptr<IOBuffer> wrapped_buffer =
-      base::MakeRefCounted<WrappedIOBuffer>(&buf[0]);
+  auto wrapped_buffer = base::MakeRefCounted<WrappedIOBuffer>(buf);
   TestCompletionCallback read_callback1;
   ASSERT_EQ(ERR_IO_PENDING,
             reader_->Read(
@@ -130,8 +131,7 @@ TEST_P(UploadFileElementReaderTest, ReadPartially) {
 
 TEST_P(UploadFileElementReaderTest, ReadAll) {
   std::vector<char> buf(bytes_.size());
-  scoped_refptr<IOBuffer> wrapped_buffer =
-      base::MakeRefCounted<WrappedIOBuffer>(&buf[0]);
+  auto wrapped_buffer = base::MakeRefCounted<WrappedIOBuffer>(buf);
   TestCompletionCallback read_callback;
   ASSERT_EQ(ERR_IO_PENDING,
             reader_->Read(
@@ -148,8 +148,7 @@ TEST_P(UploadFileElementReaderTest, ReadAll) {
 TEST_P(UploadFileElementReaderTest, ReadTooMuch) {
   const size_t kTooLargeSize = bytes_.size() * 2;
   std::vector<char> buf(kTooLargeSize);
-  scoped_refptr<IOBuffer> wrapped_buffer =
-      base::MakeRefCounted<WrappedIOBuffer>(&buf[0]);
+  auto wrapped_buffer = base::MakeRefCounted<WrappedIOBuffer>(buf);
   TestCompletionCallback read_callback;
   ASSERT_EQ(ERR_IO_PENDING,
             reader_->Read(
@@ -162,8 +161,7 @@ TEST_P(UploadFileElementReaderTest, ReadTooMuch) {
 
 TEST_P(UploadFileElementReaderTest, MultipleInit) {
   std::vector<char> buf(bytes_.size());
-  scoped_refptr<IOBuffer> wrapped_buffer =
-      base::MakeRefCounted<WrappedIOBuffer>(&buf[0]);
+  auto wrapped_buffer = base::MakeRefCounted<WrappedIOBuffer>(buf);
 
   // Read all.
   TestCompletionCallback read_callback1;
@@ -193,8 +191,7 @@ TEST_P(UploadFileElementReaderTest, MultipleInit) {
 
 TEST_P(UploadFileElementReaderTest, InitDuringAsyncOperation) {
   std::vector<char> buf(bytes_.size());
-  scoped_refptr<IOBuffer> wrapped_buffer =
-      base::MakeRefCounted<WrappedIOBuffer>(&buf[0]);
+  auto wrapped_buffer = base::MakeRefCounted<WrappedIOBuffer>(buf);
 
   // Start reading all.
   TestCompletionCallback read_callback1;
@@ -217,8 +214,7 @@ TEST_P(UploadFileElementReaderTest, InitDuringAsyncOperation) {
 
   // Read half.
   std::vector<char> buf2(bytes_.size() / 2);
-  scoped_refptr<IOBuffer> wrapped_buffer2 =
-      base::MakeRefCounted<WrappedIOBuffer>(&buf2[0]);
+  auto wrapped_buffer2 = base::MakeRefCounted<WrappedIOBuffer>(buf2);
   TestCompletionCallback read_callback2;
   EXPECT_EQ(ERR_IO_PENDING,
             reader_->Read(
@@ -235,8 +231,7 @@ TEST_P(UploadFileElementReaderTest, InitDuringAsyncOperation) {
 
 TEST_P(UploadFileElementReaderTest, RepeatedInitDuringInit) {
   std::vector<char> buf(bytes_.size());
-  scoped_refptr<IOBuffer> wrapped_buffer =
-      base::MakeRefCounted<WrappedIOBuffer>(&buf[0]);
+  auto wrapped_buffer = base::MakeRefCounted<WrappedIOBuffer>(buf);
 
   TestCompletionCallback init_callback1;
   EXPECT_THAT(reader_->Init(init_callback1.callback()),
@@ -278,8 +273,7 @@ TEST_P(UploadFileElementReaderTest, Range) {
   EXPECT_EQ(kLength, reader_->GetContentLength());
   EXPECT_EQ(kLength, reader_->BytesRemaining());
   std::vector<char> buf(kLength);
-  scoped_refptr<IOBuffer> wrapped_buffer =
-      base::MakeRefCounted<WrappedIOBuffer>(&buf[0]);
+  auto wrapped_buffer = base::MakeRefCounted<WrappedIOBuffer>(buf);
   TestCompletionCallback read_callback;
   ASSERT_EQ(
       ERR_IO_PENDING,
@@ -320,7 +314,7 @@ TEST_P(UploadFileElementReaderTest, InexactExpectedTimeStamp) {
 TEST_P(UploadFileElementReaderTest, WrongPath) {
   const base::FilePath wrong_path(FILE_PATH_LITERAL("wrong_path"));
   reader_ = std::make_unique<UploadFileElementReader>(
-      base::ThreadTaskRunnerHandle::Get().get(), wrong_path, 0,
+      base::SingleThreadTaskRunner::GetCurrentDefault().get(), wrong_path, 0,
       std::numeric_limits<uint64_t>::max(), base::Time());
   TestCompletionCallback init_callback;
   ASSERT_THAT(reader_->Init(init_callback.callback()), IsError(ERR_IO_PENDING));

@@ -130,7 +130,7 @@ class ExtensionCrashRecoveryTest : public extensions::ExtensionBrowserTest {
     extensions::TestExtensionRegistryObserver observer(GetExtensionRegistry());
     display_service_->SimulateClick(NotificationHandler::Type::TRANSIENT,
                                     "app.background.crashed." + extension_id,
-                                    absl::nullopt, absl::nullopt);
+                                    std::nullopt, std::nullopt);
     scoped_refptr<const Extension> extension =
         observer.WaitForExtensionLoaded();
     extensions::ExtensionBackgroundPageWaiter(profile(), *extension.get())
@@ -149,7 +149,8 @@ class ExtensionCrashRecoveryTest : public extensions::ExtensionBrowserTest {
   content::ScopedAllowRendererCrashes scoped_allow_renderer_crashes_;
 };
 
-IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, Basic) {
+// TODO(crbug.com/1482434): timeout on wayland, chromeos and mac.
+IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, DISABLED_Basic) {
   const size_t count_before = GetEnabledExtensionCount();
   const size_t crash_count_before = GetTerminatedExtensionCount();
   LoadTestExtension();
@@ -199,8 +200,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest, ReloadIndependently) {
   ASSERT_EQ(0U, CountNotifications());
 }
 
+// TODO(crbug.com/1482434): Flaky on wayland, lacros and mac.
 IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
-                       ReloadIndependentlyChangeTabs) {
+                       DISABLED_ReloadIndependentlyChangeTabs) {
   const size_t count_before = GetEnabledExtensionCount();
   LoadTestExtension();
   CrashExtension(first_extension_id_);
@@ -229,8 +231,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
   ASSERT_EQ(0U, CountNotifications());
 }
 
+// TODO(crbug.com/1482434): timeout on wayland, lacros and mac.
 IN_PROC_BROWSER_TEST_F(ExtensionCrashRecoveryTest,
-                       ReloadIndependentlyNavigatePage) {
+                       DISABLED_ReloadIndependentlyNavigatePage) {
   const size_t count_before = GetEnabledExtensionCount();
   LoadTestExtension();
   CrashExtension(first_extension_id_);

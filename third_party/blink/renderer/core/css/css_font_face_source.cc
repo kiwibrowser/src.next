@@ -29,7 +29,6 @@
 #include "third_party/blink/renderer/platform/fonts/font_cache_key.h"
 #include "third_party/blink/renderer/platform/fonts/font_description.h"
 #include "third_party/blink/renderer/platform/fonts/font_face_creation_params.h"
-#include "third_party/blink/renderer/platform/fonts/lock_for_parallel_text_shaping.h"
 #include "third_party/blink/renderer/platform/fonts/simple_font_data.h"
 
 namespace {
@@ -65,14 +64,14 @@ scoped_refptr<SimpleFontData> CSSFontFaceSource::GetFontData(
   FontCacheKey key =
       font_description.CacheKey(FontFaceCreationParams(), is_unique_match);
 
-  AutoLockForParallelTextShaping guard(lock_);
   // Get or create the font data. Take care to avoid dangling references into
   // font_data_table_, because it is modified below during pruning.
   scoped_refptr<SimpleFontData> font_data;
   {
     auto* it = font_data_table_.insert(key, nullptr).stored_value;
-    if (!it->value)
+    if (!it->value) {
       it->value = CreateFontData(font_description, font_selection_capabilities);
+    }
     font_data = it->value;
   }
 
@@ -86,27 +85,28 @@ scoped_refptr<SimpleFontData> CSSFontFaceSource::GetFontData(
 }
 
 void CSSFontFaceSource::PruneOldestIfNeeded() {
-  lock_.AssertAcquired();
   if (font_cache_key_age.size() > kMaxCachedFontData) {
     DCHECK_EQ(font_cache_key_age.size() - 1, kMaxCachedFontData);
     const FontCacheKey& key = font_cache_key_age.back();
     auto font_data_entry = font_data_table_.Take(key);
     font_cache_key_age.pop_back();
     DCHECK_EQ(font_cache_key_age.size(), kMaxCachedFontData);
-    if (font_data_entry && font_data_entry->GetCustomFontData())
+    if (font_data_entry && font_data_entry->GetCustomFontData()) {
       font_data_entry->GetCustomFontData()->ClearFontFaceSource();
+    }
   }
 }
 
 void CSSFontFaceSource::PruneTable() {
-  AutoLockForParallelTextShaping guard(lock_);
-  if (font_data_table_.IsEmpty())
+  if (font_data_table_.empty()) {
     return;
+  }
 
   for (const auto& item : font_data_table_) {
     SimpleFontData* font_data = item.value.get();
-    if (font_data && font_data->GetCustomFontData())
+    if (font_data && font_data->GetCustomFontData()) {
       font_data->GetCustomFontData()->ClearFontFaceSource();
+    }
   }
   font_cache_key_age.clear();
   font_data_table_.clear();

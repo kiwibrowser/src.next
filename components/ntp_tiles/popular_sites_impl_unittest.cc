@@ -10,15 +10,14 @@
 #include <utility>
 #include <vector>
 
-#include "base/bind.h"
 #include "base/command_line.h"
+#include "base/functional/bind.h"
 #include "base/json/json_writer.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "build/branding_buildflags.h"
 #include "build/build_config.h"
@@ -56,6 +55,11 @@ const char kFaviconUrl[] = "favicon_url";
 const char kSection[] = "section";
 const char kSites[] = "sites";
 const char kTitleSource[] = "title_source";
+#if BUILDFLAG(IS_IOS)
+const char kIOSDefaultPopularSitesLocaleUS[] =
+    "https://www.gstatic.com/chrome/ntp/ios/"
+    "suggested_sites_US_2023q1_mvt_experiment_with_popular_sites.json";
+#endif
 
 using TestPopularSite = std::map<std::string, std::string>;
 using TestPopularSiteVector = std::vector<TestPopularSite>;
@@ -212,7 +216,7 @@ class PopularSitesTest : public ::testing::Test {
   const TestPopularSite kYouTube;
   const TestPopularSite kChromium;
 
-  base::test::SingleThreadTaskEnvironment task_environment_{
+  base::test::TaskEnvironment task_environment_{
       base::test::SingleThreadTaskEnvironment::MainThreadType::UI};
   data_decoder::test::InProcessDataDecoder in_process_data_decoder_;
   std::unique_ptr<sync_preferences::TestingPrefServiceSyncable> prefs_;
@@ -257,6 +261,25 @@ TEST_F(PopularSitesTest, ShouldSucceedFetching) {
   EXPECT_THAT(sites[0].favicon_url, URLEq(""));
   EXPECT_THAT(sites[0].title_source, Eq(TileTitleSource::TITLE_TAG));
 }
+
+#if BUILDFLAG(IS_IOS)
+TEST_F(PopularSitesTest, ShouldSucceedFetchingDefaultPopularSitesForLocaleUS) {
+  SetCountryAndVersion("US", "5");
+  RespondWithV5JSON(kIOSDefaultPopularSitesLocaleUS, {kWikipedia});
+
+  PopularSites::SitesVector sites;
+  EXPECT_THAT(FetchPopularSites(/*force_download=*/true, &sites),
+              Eq(absl::optional<bool>(true)));
+
+  ASSERT_THAT(sites.size(), Eq(1u));
+  EXPECT_THAT(sites[0].title, Str16Eq("Wikipedia, fhta Ph'nglui mglw'nafh"));
+  EXPECT_THAT(sites[0].url, URLEq("https://zz.m.wikipedia.org/"));
+  EXPECT_THAT(sites[0].large_icon_url,
+              URLEq("https://zz.m.wikipedia.org/wikipedia.png"));
+  EXPECT_THAT(sites[0].favicon_url, URLEq(""));
+  EXPECT_THAT(sites[0].title_source, Eq(TileTitleSource::TITLE_TAG));
+}
+#endif
 
 TEST_F(PopularSitesTest, Fallback) {
   SetCountryAndVersion("ZZ", "5");

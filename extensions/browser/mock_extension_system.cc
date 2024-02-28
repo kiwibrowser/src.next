@@ -54,10 +54,6 @@ MockExtensionSystem::store_factory() {
   return nullptr;
 }
 
-InfoMap* MockExtensionSystem::info_map() {
-  return nullptr;
-}
-
 QuotaService* MockExtensionSystem::quota_service() {
   return nullptr;
 }
@@ -94,7 +90,7 @@ void MockExtensionSystem::InstallUpdate(
 
 void MockExtensionSystem::PerformActionBasedOnOmahaAttributes(
     const std::string& extension_id,
-    const base::Value& attributes) {}
+    const base::Value::Dict& attributes) {}
 
 bool MockExtensionSystem::FinishDelayedInstallationIfReady(
     const std::string& extension_id,

@@ -4,13 +4,13 @@
 
 package org.chromium.chrome.browser.gesturenav;
 
-import org.chromium.base.Consumer;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.content_public.browser.NavigationEntry;
 import org.chromium.content_public.browser.NavigationHistory;
 import org.chromium.url.GURL;
+
+import java.util.function.Consumer;
 
 /**
  * Implementation of {@link NavigationSheet#Delegate} that works with
@@ -19,8 +19,6 @@ import org.chromium.url.GURL;
 public class TabbedSheetDelegate implements NavigationSheet.Delegate {
     private static final int MAXIMUM_HISTORY_ITEMS = 8;
     private static final int FULL_HISTORY_ENTRY_INDEX = -1;
-    private static final String INCOGNITO_HISTORY_ENTRIES_FLAG =
-            ChromeFeatureList.UPDATE_HISTORY_ENTRY_POINTS_IN_INCOGNITO;
 
     private final Tab mTab;
     private final Consumer<Tab> mShowHistoryManager;
@@ -35,13 +33,21 @@ public class TabbedSheetDelegate implements NavigationSheet.Delegate {
     @Override
     public NavigationHistory getHistory(boolean forward, boolean isOffTheRecord) {
         NavigationHistory history =
-                mTab.getWebContents().getNavigationController().getDirectedNavigationHistory(
-                        forward, MAXIMUM_HISTORY_ITEMS);
-        if (!isOffTheRecord || !ChromeFeatureList.isEnabled(INCOGNITO_HISTORY_ENTRIES_FLAG)) {
-            history.addEntry(new NavigationEntry(FULL_HISTORY_ENTRY_INDEX,
-                    new GURL(UrlConstants.HISTORY_URL), GURL.emptyGURL(), GURL.emptyGURL(),
-                    GURL.emptyGURL(), mFullHistoryMenu, null, 0, 0,
-                    /* isInitialEntry=*/false));
+                mTab.getWebContents()
+                        .getNavigationController()
+                        .getDirectedNavigationHistory(forward, MAXIMUM_HISTORY_ITEMS);
+        if (!isOffTheRecord) {
+            history.addEntry(
+                    new NavigationEntry(
+                            FULL_HISTORY_ENTRY_INDEX,
+                            new GURL(UrlConstants.HISTORY_URL),
+                            GURL.emptyGURL(),
+                            GURL.emptyGURL(),
+                            mFullHistoryMenu,
+                            null,
+                            0,
+                            0,
+                            /* isInitialEntry= */ false));
         }
         return history;
     }

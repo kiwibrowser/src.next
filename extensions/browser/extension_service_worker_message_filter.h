@@ -5,19 +5,17 @@
 #ifndef EXTENSIONS_BROWSER_EXTENSION_SERVICE_WORKER_MESSAGE_FILTER_H_
 #define EXTENSIONS_BROWSER_EXTENSION_SERVICE_WORKER_MESSAGE_FILTER_H_
 
-#include <string>
-#include <unordered_set>
-
 #include "base/callback_list.h"
 #include "base/memory/raw_ptr.h"
 #include "base/task/sequenced_task_runner_helpers.h"
-#include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/browser_thread.h"
-#include "extensions/common/activation_sequence.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension_id.h"
 #include "extensions/common/mojom/frame.mojom-forward.h"
 
-class GURL;
+#if BUILDFLAG(ENABLE_EXTENSIONS_LEGACY_IPC)
+
+#include "content/public/browser/browser_message_filter.h"
 
 namespace content {
 class BrowserContext;
@@ -25,8 +23,6 @@ class ServiceWorkerContext;
 }
 
 namespace extensions {
-
-class ExtensionFunctionDispatcher;
 
 // IPC handler class for extension service worker.
 //
@@ -60,49 +56,27 @@ class ExtensionServiceWorkerMessageFilter
   void ShutdownOnUIThread();
 
   // Message handlers.
-  void OnRequestWorker(const mojom::RequestParams& params);
-  void OnResponseWorker(int request_id, int64_t service_worker_version_id);
-  void OnIncrementServiceWorkerActivity(int64_t service_worker_version_id,
-                                        const std::string& request_uuid);
-  void OnDecrementServiceWorkerActivity(int64_t service_worker_version_id,
-                                        const std::string& request_uuid);
   void OnEventAckWorker(const ExtensionId& extension_id,
                         int64_t service_worker_version_id,
                         int thread_id,
                         int event_id);
-  void OnDidInitializeServiceWorkerContext(const ExtensionId& extension_id,
-                                           int64_t service_worker_version_id,
-                                           int thread_id);
-  void OnDidStartServiceWorkerContext(const ExtensionId& extension_id,
-                                      ActivationSequence activation_sequence,
-                                      const GURL& service_worker_scope,
-                                      int64_t service_worker_version_id,
-                                      int thread_id);
-  void OnDidStopServiceWorkerContext(const ExtensionId& extension_id,
-                                     ActivationSequence activation_sequence,
-                                     const GURL& service_worker_scope,
-                                     int64_t service_worker_version_id,
-                                     int thread_id);
 
   void DidFailDecrementInflightEvent();
 
   // Only accessed from the UI thread.
-  raw_ptr<content::BrowserContext> browser_context_;
+  raw_ptr<content::BrowserContext, DanglingUntriaged> browser_context_;
 
   const int render_process_id_;
 
   base::CallbackListSubscription shutdown_notifier_subscription_;
 
   // Owned by the StoragePartition of our profile.
-  raw_ptr<content::ServiceWorkerContext> service_worker_context_;
-
-  std::unique_ptr<ExtensionFunctionDispatcher,
-                  content::BrowserThread::DeleteOnUIThread>
-      dispatcher_;
-
-  std::unordered_set<std::string> active_request_uuids_;
+  raw_ptr<content::ServiceWorkerContext, AcrossTasksDanglingUntriaged>
+      service_worker_context_;
 };
 
 }  // namespace extensions
+
+#endif
 
 #endif  // EXTENSIONS_BROWSER_EXTENSION_SERVICE_WORKER_MESSAGE_FILTER_H_

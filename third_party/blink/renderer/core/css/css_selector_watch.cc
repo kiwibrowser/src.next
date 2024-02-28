@@ -33,7 +33,6 @@
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
-#include "third_party/blink/renderer/core/css/parser/css_parser_selector.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -70,7 +69,7 @@ CSSSelectorWatch* CSSSelectorWatch::FromIfExists(Document& document) {
 
 void CSSSelectorWatch::CallbackSelectorChangeTimerFired(TimerBase*) {
   // Should be ensured by updateSelectorMatches():
-  DCHECK(!added_selectors_.IsEmpty() || !removed_selectors_.IsEmpty());
+  DCHECK(!added_selectors_.empty() || !removed_selectors_.empty());
 
   if (timer_expirations_ < 1) {
     timer_expirations_++;
@@ -78,10 +77,8 @@ void CSSSelectorWatch::CallbackSelectorChangeTimerFired(TimerBase*) {
     return;
   }
   if (GetSupplementable()->GetFrame()) {
-    Vector<String> added_selectors;
-    Vector<String> removed_selectors;
-    CopyToVector(added_selectors_, added_selectors);
-    CopyToVector(removed_selectors_, removed_selectors);
+    Vector<String> added_selectors(added_selectors_);
+    Vector<String> removed_selectors(removed_selectors_);
     GetSupplementable()->GetFrame()->Client()->SelectorMatchChanged(
         added_selectors, removed_selectors);
   }
@@ -96,36 +93,41 @@ void CSSSelectorWatch::UpdateSelectorMatches(
   bool should_update_timer = false;
 
   for (const auto& selector : removed_selectors) {
-    if (!matching_callback_selectors_.erase(selector))
+    if (!matching_callback_selectors_.erase(selector)) {
       continue;
+    }
 
     // Count reached 0.
     should_update_timer = true;
     auto it = added_selectors_.find(selector);
-    if (it != added_selectors_.end())
+    if (it != added_selectors_.end()) {
       added_selectors_.erase(it);
-    else
+    } else {
       removed_selectors_.insert(selector);
+    }
   }
 
   for (const auto& selector : added_selectors) {
     HashCountedSet<String>::AddResult result =
         matching_callback_selectors_.insert(selector);
-    if (!result.is_new_entry)
+    if (!result.is_new_entry) {
       continue;
+    }
 
     should_update_timer = true;
     auto it = removed_selectors_.find(selector);
-    if (it != removed_selectors_.end())
+    if (it != removed_selectors_.end()) {
       removed_selectors_.erase(it);
-    else
+    } else {
       added_selectors_.insert(selector);
+    }
   }
 
-  if (!should_update_timer)
+  if (!should_update_timer) {
     return;
+  }
 
-  if (removed_selectors_.IsEmpty() && added_selectors_.IsEmpty()) {
+  if (removed_selectors_.empty() && added_selectors_.empty()) {
     if (callback_selector_change_timer_.IsActive()) {
       timer_expirations_ = 0;
       callback_selector_change_timer_.Stop();
@@ -142,8 +144,9 @@ void CSSSelectorWatch::UpdateSelectorMatches(
 static bool AllCompound(const StyleRule* style_rule) {
   for (const CSSSelector* selector = style_rule->FirstSelector(); selector;
        selector = CSSSelectorList::Next(*selector)) {
-    if (!selector->IsCompound())
+    if (!selector->IsCompound()) {
       return false;
+    }
   }
   return true;
 }
@@ -157,20 +160,22 @@ void CSSSelectorWatch::WatchCSSSelectors(const Vector<String>& selectors) {
   // UA stylesheets always parse in the insecure context mode.
   auto* context = MakeGarbageCollected<CSSParserContext>(
       kUASheetMode, SecureContextMode::kInsecureContext);
-  Arena arena;
+  HeapVector<CSSSelector> arena;
   for (const auto& selector : selectors) {
-    CSSSelectorVector</*UseArena=*/true> selector_vector =
-        CSSParser::ParseSelector</*UseArena=*/true>(context, nullptr, selector,
-                                                    arena);
-    if (selector_vector.IsEmpty())
+    base::span<CSSSelector> selector_vector = CSSParser::ParseSelector(
+        context, CSSNestingType::kNone, /*parent_rule_for_nesting=*/nullptr,
+        /*is_within_scope=*/false, nullptr, selector, arena);
+    if (selector_vector.empty()) {
       continue;
+    }
 
-    StyleRule* style_rule = StyleRule::Create</*UseArena=*/true>(
-        selector_vector, callback_property_set);
+    StyleRule* style_rule =
+        StyleRule::Create(selector_vector, callback_property_set);
 
     // Only accept Compound Selectors, since they're cheaper to match.
-    if (!AllCompound(style_rule))
+    if (!AllCompound(style_rule)) {
       continue;
+    }
 
     watched_callback_selectors_.push_back(style_rule);
   }

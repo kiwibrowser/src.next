@@ -8,8 +8,8 @@
 #include <memory>
 
 #include "chrome/browser/extensions/webstore_standalone_installer.h"
-#include "chrome/browser/ui/native_window_tracker.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/views/native_window_tracker.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -56,7 +56,6 @@ class WebstoreInstallWithPrompt : public WebstoreStandaloneInstaller {
   // extensions::WebstoreStandaloneInstaller overrides:
   bool CheckRequestorAlive() const override;
   bool ShouldShowPostInstallUI() const override;
-  bool ShouldShowAppInstalledBubble() const override;
   content::WebContents* GetWebContents() const override;
   std::unique_ptr<ExtensionInstallPrompt::Prompt> CreateInstallPrompt()
       const override;
@@ -69,7 +68,7 @@ class WebstoreInstallWithPrompt : public WebstoreStandaloneInstaller {
   std::unique_ptr<content::WebContents> dummy_web_contents_;
 
   gfx::NativeWindow parent_window_;
-  std::unique_ptr<NativeWindowTracker> parent_window_tracker_;
+  std::unique_ptr<views::NativeWindowTracker> parent_window_tracker_;
 };
 
 }  // namespace extensions

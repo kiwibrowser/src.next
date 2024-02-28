@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_EXTENSIONS_EXTERNAL_PROVIDER_IMPL_H_
 
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -20,7 +21,6 @@
 class Profile;
 
 namespace base {
-class DictionaryValue;
 class Version;
 }
 
@@ -59,11 +59,11 @@ class ExternalProviderImpl : public ExternalProviderInterface {
 
   // Sets underlying prefs and notifies provider. Only to be called by the
   // owned ExternalLoader instance.
-  virtual void SetPrefs(std::unique_ptr<base::DictionaryValue> prefs);
+  virtual void SetPrefs(base::Value::Dict prefs);
 
   // Updates the underlying prefs and notifies provider.
   // Only to be called by the owned ExternalLoader instance.
-  void UpdatePrefs(std::unique_ptr<base::DictionaryValue> prefs);
+  void UpdatePrefs(base::Value::Dict prefs);
 
   // ExternalProvider implementation:
   void ServiceShutdown() override;
@@ -132,8 +132,8 @@ class ExternalProviderImpl : public ExternalProviderInterface {
   // This is zeroed out by: ServiceShutdown()
   raw_ptr<VisitorInterface> service_;  // weak
 
-  // Dictionary of the external extensions that are provided by this provider.
-  std::unique_ptr<base::Value::Dict> prefs_;
+  // Dict of the external extensions that are provided by this provider.
+  std::optional<base::Value::Dict> prefs_;
 
   // Indicates that the extensions provided by this provider are loaded
   // entirely.
@@ -144,7 +144,7 @@ class ExternalProviderImpl : public ExternalProviderInterface {
   scoped_refptr<ExternalLoader> loader_;
 
   // The profile that will be used to install external extensions.
-  const raw_ptr<Profile> profile_;
+  const raw_ptr<Profile, DanglingUntriaged> profile_;
 
   // Creation flags to use for the extension.  These flags will be used
   // when calling Extension::Create() by the crx installer.

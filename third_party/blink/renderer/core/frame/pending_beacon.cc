@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,7 +28,7 @@ namespace {
 // min(Time evicted from back/forward cache,
 //     `kDefaultPendingBeaconMaxBackgroundTimeout`).
 // Note that this is currently longer than back/forward cache entry's TTL.
-// See https://github.com/WICG/unload-beacon/issues/3
+// See https://github.com/WICG/pending-beacon/issues/3
 constexpr base::TimeDelta kDefaultPendingBeaconMaxBackgroundTimeout =
     base::Minutes(30);  // 30 minutes
 
@@ -40,7 +40,34 @@ base::TimeDelta GetMaxBackgroundTimeout() {
           kDefaultPendingBeaconMaxBackgroundTimeout.InMilliseconds())));
 }
 
+bool ShouldBlockURL(const KURL& url, ExceptionState* exception_state) {
+  if (!url.IsValid()) {
+    if (exception_state) {
+      exception_state->ThrowTypeError(
+          "The URL argument is ill-formed or unsupported.");
+    }
+    return true;
+  }
+
+  if (!url.Protocol().empty() && !url.ProtocolIs(WTF::g_https_atom)) {
+    if (exception_state) {
+      exception_state->ThrowTypeError(
+          "PendingBeacons are only supported over HTTPS.");
+    }
+    return true;
+  }
+
+  return false;
+}
+
 }  // namespace
+
+// static
+bool PendingBeacon::CanSendBeacon(const String& url,
+                                  const ExecutionContext& ec,
+                                  ExceptionState& exception_state) {
+  return !ShouldBlockURL(ec.CompleteURL(url), &exception_state);
+}
 
 PendingBeacon::PendingBeacon(ExecutionContext* ec,
                              const String& url,
@@ -54,6 +81,11 @@ PendingBeacon::PendingBeacon(ExecutionContext* ec,
       method_(method),
       background_timeout_(base::Milliseconds(background_timeout)),
       timeout_timer_(GetTaskRunner(), this, &PendingBeacon::TimeoutTimerFired) {
+  KURL host_url = ec_->CompleteURL(url);
+  // The caller, i.e. JavaScript factory method `Create()`, must ensure `url`
+  // is valid.
+  CHECK(!ShouldBlockURL(host_url, nullptr));
+
   // Creates a corresponding instance of PendingBeacon in the browser process
   // and binds `remote_` to it.
   mojom::blink::BeaconMethod host_method;
@@ -65,7 +97,6 @@ PendingBeacon::PendingBeacon(ExecutionContext* ec,
 
   mojo::PendingReceiver<mojom::blink::PendingBeacon> beacon_receiver =
       remote_.BindNewPipeAndPassReceiver(GetTaskRunner());
-  KURL host_url = ec_->CompleteURL(url);
 
   PendingBeaconDispatcher& dispatcher =
       PendingBeaconDispatcher::FromOrAttachTo(*ec_);
@@ -113,17 +144,22 @@ void PendingBeacon::setTimeout(int32_t timeout) {
 
   // TODO(crbug.com/3774273): Use the nullity of data & url to decide whether
   // beacon should be sent.
-  // https://github.com/WICG/unload-beacon/issues/17#issuecomment-1198871880
+  // https://github.com/WICG/pending-beacon/issues/17#issuecomment-1198871880
 
   // If timeout >= 0, the timer starts immediately after its value is set or
   // updated.
-  // https://github.com/WICG/unload-beacon/blob/main/README.md#properties
+  // https://github.com/WICG/pending-beacon/blob/main/README.md#properties
   timeout_timer_.StartOneShot(timeout_, FROM_HERE);
 }
 
-void PendingBeacon::SetURLInternal(const String& url) {
-  url_ = url;
+void PendingBeacon::SetURLInternal(const String& url,
+                                   ExceptionState& exception_state) {
   KURL host_url = ec_->CompleteURL(url);
+  if (ShouldBlockURL(host_url, &exception_state)) {
+    return;
+  }
+
+  url_ = url;
   remote_->SetRequestURL(host_url);
 }
 
@@ -147,7 +183,7 @@ void PendingBeacon::SetDataInternal(const BeaconData& data,
 
   AtomicString content_type = request.HttpContentType();
   remote_->SetRequestData(std::move(request_body),
-                          content_type.IsNull() ? "" : content_type);
+                          content_type.IsNull() ? g_empty_atom : content_type);
 }
 
 base::TimeDelta PendingBeacon::GetBackgroundTimeout() const {

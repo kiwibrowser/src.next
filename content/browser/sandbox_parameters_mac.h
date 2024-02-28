@@ -6,6 +6,13 @@
 #define CONTENT_BROWSER_SANDBOX_PARAMETERS_MAC_H_
 
 #include "content/common/content_export.h"
+#include "ppapi/buildflags/buildflags.h"
+
+#if BUILDFLAG(ENABLE_PPAPI)
+#include <vector>
+
+#include "content/public/common/webplugininfo.h"
+#endif
 
 namespace base {
 class CommandLine;
@@ -13,7 +20,7 @@ class FilePath;
 }
 
 namespace sandbox {
-class SeatbeltExecClient;
+class SandboxCompiler;
 namespace mojom {
 enum class Sandbox;
 }  // namespace mojom
@@ -26,7 +33,10 @@ namespace content {
 CONTENT_EXPORT void SetupSandboxParameters(
     sandbox::mojom::Sandbox sandbox_type,
     const base::CommandLine& command_line,
-    sandbox::SeatbeltExecClient* client);
+#if BUILDFLAG(ENABLE_PPAPI)
+    const std::vector<content::WebPluginInfo>& plugins,
+#endif
+    sandbox::SandboxCompiler* compiler);
 
 // Expands the SandboxType::kNetwork policy to allow reading files from
 // the specified |path|, which stores TLS certificates used by the browser

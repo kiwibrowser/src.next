@@ -46,12 +46,12 @@ class KeywordExtensionsDelegateImplTest : public ExtensionServiceTestBase {
 
 void KeywordExtensionsDelegateImplTest::SetUp() {
   ExtensionServiceTestBase::SetUp();
-  InitializeExtensionService(CreateDefaultInitParams());
+  InitializeExtensionService(ExtensionServiceInitParams());
 }
 
 void KeywordExtensionsDelegateImplTest::RunTest(bool incognito) {
-  std::unique_ptr<TemplateURLService> empty_model(
-      new TemplateURLService(nullptr, 0));
+  std::unique_ptr<TemplateURLService> empty_model(new TemplateURLService(
+      /*prefs=*/nullptr, /*search_engine_choice_service=*/nullptr));
   MockAutocompleteProviderClient client;
   client.set_template_url_service(std::move(empty_model));
   scoped_refptr<KeywordProvider> keyword_provider =

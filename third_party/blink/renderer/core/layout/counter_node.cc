@@ -22,7 +22,9 @@
 #include "third_party/blink/renderer/core/layout/counter_node.h"
 
 #include "base/numerics/checked_math.h"
+#include "third_party/blink/renderer/core/css/style_containment_scope.h"
 #include "third_party/blink/renderer/core/layout/layout_counter.h"
+#include "third_party/blink/renderer/core/layout/layout_object.h"
 
 #if DCHECK_IS_ON()
 #include <stdio.h>
@@ -30,11 +32,16 @@
 
 namespace blink {
 
-CounterNode::CounterNode(LayoutObject& o, unsigned type_mask, int value)
+CounterNode::CounterNode(LayoutObject& object,
+                         unsigned type_mask,
+                         int value,
+                         bool is_reversed)
     : type_mask_(type_mask),
       value_(value),
+      value_before_(0),
       count_in_parent_(0),
-      owner_(&o),
+      is_reversed_(is_reversed),
+      owner_(&object),
       root_layout_object_(nullptr),
       parent_(nullptr),
       previous_sibling_(nullptr),
@@ -53,22 +60,26 @@ void CounterNode::Destroy() {
     // Instead of calling removeChild() we do this safely as the tree is likely
     // broken if we get here.
     if (parent_) {
-      if (parent_->first_child_ == this)
+      if (parent_->first_child_ == this) {
         parent_->first_child_ = next_sibling_;
-      if (parent_->last_child_ == this)
+      }
+      if (parent_->last_child_ == this) {
         parent_->last_child_ = previous_sibling_;
+      }
       old_parent = parent_;
       parent_ = nullptr;
     }
     if (previous_sibling_) {
-      if (previous_sibling_->next_sibling_ == this)
+      if (previous_sibling_->next_sibling_ == this) {
         previous_sibling_->next_sibling_ = next_sibling_;
+      }
       old_previous_sibling = previous_sibling_;
       previous_sibling_ = nullptr;
     }
     if (next_sibling_) {
-      if (next_sibling_->previous_sibling_ == this)
+      if (next_sibling_->previous_sibling_ == this) {
         next_sibling_->previous_sibling_ = old_previous_sibling;
+      }
       next_sibling_ = nullptr;
     }
     if (first_child_) {
@@ -100,48 +111,57 @@ void CounterNode::Trace(Visitor* visitor) const {
   visitor->Trace(next_sibling_);
   visitor->Trace(first_child_);
   visitor->Trace(last_child_);
+  visitor->Trace(scope_);
+  visitor->Trace(previous_in_parent_);
 }
 
 CounterNode* CounterNode::NextInPreOrderAfterChildren(
     const CounterNode* stay_within) const {
-  if (this == stay_within)
+  if (this == stay_within) {
     return nullptr;
+  }
 
   const CounterNode* current = this;
   CounterNode* next = current->next_sibling_;
   for (; !next; next = current->next_sibling_) {
     current = current->parent_;
-    if (!current || current == stay_within)
+    if (!current || current == stay_within) {
       return nullptr;
+    }
   }
   return next;
 }
 
 CounterNode* CounterNode::NextInPreOrder(const CounterNode* stay_within) const {
-  if (CounterNode* next = first_child_)
+  if (CounterNode* next = first_child_) {
     return next;
+  }
 
   return NextInPreOrderAfterChildren(stay_within);
 }
 
 CounterNode* CounterNode::LastDescendant() const {
   CounterNode* last = last_child_;
-  if (!last)
+  if (!last) {
     return nullptr;
+  }
 
-  while (CounterNode* last_child = last->last_child_)
+  while (CounterNode* last_child = last->last_child_) {
     last = last_child;
+  }
 
   return last;
 }
 
 CounterNode* CounterNode::PreviousInPreOrder() const {
   CounterNode* previous = previous_sibling_;
-  if (!previous)
+  if (!previous) {
     return parent_;
+  }
 
-  while (CounterNode* last_child = previous->last_child_)
+  while (CounterNode* last_child = previous->last_child_) {
     previous = last_child;
+  }
 
   return previous;
 }
@@ -153,8 +173,9 @@ int CounterNode::ComputeCountInParent() const {
 
   // If we have a set type, then we override parent value altogether, so the
   // result is just our value.
-  if (HasSetType())
+  if (HasSetType()) {
     return value_;
+  }
 
   // If we act as a reset, then we don't add anything on top of the parent count
   // (and we don't override it as we would with a set type).
@@ -209,10 +230,11 @@ void CounterNode::RemoveLayoutObject(LayoutCounter* value) {
   for (LayoutCounter* iterator = root_layout_object_; iterator;
        iterator = iterator->next_for_same_counter_) {
     if (iterator == value) {
-      if (previous)
+      if (previous) {
         previous->next_for_same_counter_ = value->next_for_same_counter_;
-      else
+      } else {
         root_layout_object_ = value->next_for_same_counter_;
+      }
       value->next_for_same_counter_ = nullptr;
       value->counter_node_ = nullptr;
       return;
@@ -238,11 +260,13 @@ CounterNode* CounterNode::AncestorNodeAcrossStyleContainment(
   for (auto* ancestor = starting_object.Parent(); ancestor;
        ancestor = ancestor->Parent()) {
     crossed_style_containment |= ancestor->ShouldApplyStyleContainment();
-    if (!crossed_style_containment)
+    if (!crossed_style_containment) {
       continue;
+    }
     if (CounterMap* node_map = LayoutCounter::GetCounterMap(ancestor)) {
-      if (node_map->Contains(identifier))
+      if (node_map->Contains(identifier)) {
         return node_map->at(identifier);
+      }
     }
   }
   return nullptr;
@@ -250,9 +274,27 @@ CounterNode* CounterNode::AncestorNodeAcrossStyleContainment(
 
 CounterNode* CounterNode::ParentCrossingStyleContainment(
     const AtomicString& identifier) const {
-  if (parent_)
+  if (parent_) {
     return parent_;
+  }
   return AncestorNodeAcrossStyleContainment(Owner(), identifier);
+}
+
+Element& CounterNode::OwnerElement() const {
+  LayoutObject* owner = owner_;
+  while (owner && !IsA<Element>(owner->GetNode())) {
+    owner = owner->Parent();
+  }
+  CHECK(owner && IsA<Element>(owner->GetNode()));
+  return *To<Element>(owner->GetNode());
+}
+
+Element& CounterNode::OwnerNonPseudoElement() const {
+  Element& element = OwnerElement();
+  if (element.IsPseudoElement()) {
+    return *element.ParentOrShadowHostElement();
+  }
+  return element;
 }
 
 void CounterNode::ResetThisAndDescendantsLayoutObjects() {
@@ -267,8 +309,9 @@ void CounterNode::Recount() {
   for (CounterNode* node = this; node; node = node->next_sibling_) {
     int old_count = node->count_in_parent_;
     int new_count = node->ComputeCountInParent();
-    if (old_count == new_count)
+    if (old_count == new_count) {
       break;
+    }
     node->count_in_parent_ = new_count;
     node->ResetThisAndDescendantsLayoutObjects();
   }
@@ -285,12 +328,14 @@ void CounterNode::InsertAfter(CounterNode* new_child,
   // hardens against bugs in LayoutCounter.
   // When layoutObjects are reparented it may request that we insert counter
   // nodes improperly.
-  if (ref_child && ref_child->parent_ != this)
+  if (ref_child && ref_child->parent_ != this) {
     return;
+  }
 
   if (new_child->HasResetType()) {
-    while (last_child_ != ref_child)
+    while (last_child_ != ref_child) {
       LayoutCounter::DestroyCounterNode(last_child_->Owner(), identifier);
+    }
   }
 
   CounterNode* next = nullptr;
@@ -318,8 +363,9 @@ void CounterNode::InsertAfter(CounterNode* new_child,
   if (!new_child->first_child_ || new_child->HasResetType()) {
     new_child->count_in_parent_ = new_child->ComputeCountInParent();
     new_child->ResetThisAndDescendantsLayoutObjects();
-    if (next)
+    if (next) {
       next->Recount();
+    }
     return;
   }
 
@@ -330,8 +376,9 @@ void CounterNode::InsertAfter(CounterNode* new_child,
 
   DCHECK(last);
   new_child->next_sibling_ = first;
-  if (last_child_ == new_child)
+  if (last_child_ == new_child) {
     last_child_ = last;
+  }
 
   first->previous_sibling_ = new_child;
 
@@ -355,8 +402,9 @@ void CounterNode::InsertAfter(CounterNode* new_child,
   }
   for (next = first;; next = next->next_sibling_) {
     next->parent_ = this;
-    if (last == next)
+    if (last == next) {
       break;
+    }
   }
 
   new_child->first_child_ = nullptr;
@@ -392,16 +440,18 @@ void CounterNode::RemoveChild(CounterNode* old_child) {
     last_child_ = previous;
   }
 
-  if (next)
+  if (next) {
     next->Recount();
+  }
 }
 
 void CounterNode::MoveNonResetSiblingsToChildOf(
     CounterNode* first_node,
     CounterNode& new_parent,
     const AtomicString& identifier) {
-  if (!first_node)
+  if (!first_node) {
     return;
+  }
 
   CounterNode* cur_node = first_node;
   CounterNode* old_parent = first_node->Parent();
@@ -419,15 +469,17 @@ void CounterNode::MoveNonResetSiblingsToChildOf(
 
 static void ShowTreeAndMark(const CounterNode* node) {
   const CounterNode* root = node;
-  while (root->Parent())
+  while (root->Parent()) {
     root = root->Parent();
+  }
 
   for (const CounterNode* current = root; current;
        current = current->NextInPreOrder()) {
     fprintf(stderr, "%c", (current == node) ? '*' : ' ');
     for (const CounterNode* parent = current; parent && parent != root;
-         parent = parent->Parent())
+         parent = parent->Parent()) {
       fprintf(stderr, "    ");
+    }
     fprintf(stderr, "%p %s: %d %d P:%p PS:%p NS:%p R:%p\n", current,
             current->ActsAsReset() ? "reset____" : "increment",
             current->Value(), current->CountInParent(), current->Parent(),
@@ -439,15 +491,32 @@ static void ShowTreeAndMark(const CounterNode* node) {
 
 #endif
 
+#if DCHECK_IS_ON()
+AtomicString CounterNode::DebugName() const {
+  AtomicString counter_type = AtomicString(
+      HasUseType()
+          ? "USE"
+          : (HasResetType() ? "RESET" : (HasSetType() ? "SET" : "INC")));
+  String counter_name =
+      !OwnerElement().IsPseudoElement()
+          ? OwnerElement().DebugName()
+          : OwnerElement().ParentOrShadowHostElement()->DebugName() +
+                OwnerElement().DebugName();
+  AtomicString result = counter_type + " AT " + counter_name;
+  return result;
+}
+#endif  // DCHECK_IS_ON()
+
 }  // namespace blink
 
 #if DCHECK_IS_ON()
 
 void ShowCounterTree(const blink::CounterNode* counter) {
-  if (counter)
+  if (counter) {
     ShowTreeAndMark(counter);
-  else
+  } else {
     fprintf(stderr, "Cannot showCounterTree for (nil).\n");
+  }
 }
 
 #endif
