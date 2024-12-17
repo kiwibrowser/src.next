@@ -2,20 +2,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "net/url_request/url_request_test_job.h"
 
 #include <algorithm>
 #include <list>
 #include <memory>
 
-#include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/containers/cxx20_erase_list.h"
+#include "base/functional/bind.h"
 #include "base/lazy_instance.h"
 #include "base/location.h"
 #include "base/strings/string_util.h"
 #include "base/task/single_thread_task_runner.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -144,7 +147,7 @@ URLRequestTestJob::URLRequestTestJob(URLRequest* request,
       response_headers_length_(response_headers.size()) {}
 
 URLRequestTestJob::~URLRequestTestJob() {
-  base::Erase(g_pending_jobs.Get(), this);
+  std::erase(g_pending_jobs.Get(), this);
 }
 
 bool URLRequestTestJob::GetMimeType(std::string* mime_type) const {
@@ -161,7 +164,7 @@ void URLRequestTestJob::SetPriority(RequestPriority priority) {
 void URLRequestTestJob::Start() {
   // Start reading asynchronously so that all error reporting and data
   // callbacks happen as they would for network requests.
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE, base::BindOnce(&URLRequestTestJob::StartAsync,
                                 weak_factory_.GetWeakPtr()));
 }
@@ -226,7 +229,7 @@ int URLRequestTestJob::ReadRawData(IOBuffer* buf, int buf_size) {
     async_buf_size_ = buf_size;
     if (stage_ != WAITING) {
       stage_ = WAITING;
-      base::ThreadTaskRunnerHandle::Get()->PostTask(
+      base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
           FROM_HERE, base::BindOnce(&URLRequestTestJob::ProcessNextOperation,
                                     weak_factory_.GetWeakPtr()));
     }
@@ -276,7 +279,7 @@ void URLRequestTestJob::Kill() {
   stage_ = DONE;
   URLRequestJob::Kill();
   weak_factory_.InvalidateWeakPtrs();
-  base::Erase(g_pending_jobs.Get(), this);
+  std::erase(g_pending_jobs.Get(), this);
 }
 
 void URLRequestTestJob::ProcessNextOperation() {
@@ -288,9 +291,10 @@ void URLRequestTestJob::ProcessNextOperation() {
       stage_ = DATA_AVAILABLE;
       // OK if ReadRawData wasn't called yet.
       if (async_buf_) {
-        int result = CopyDataForRead(async_buf_, async_buf_size_);
+        int result = CopyDataForRead(async_buf_.get(), async_buf_size_);
         if (result < 0)
-          NOTREACHED() << "Reads should not fail in DATA_AVAILABLE.";
+          NOTREACHED_IN_MIGRATION()
+              << "Reads should not fail in DATA_AVAILABLE.";
         if (NextReadAsync()) {
           // Make all future reads return io pending until the next
           // ProcessNextOperation().
@@ -309,7 +313,7 @@ void URLRequestTestJob::ProcessNextOperation() {
     case DONE:
       return;
     default:
-      NOTREACHED() << "Invalid stage";
+      NOTREACHED_IN_MIGRATION() << "Invalid stage";
       return;
   }
 }
@@ -320,7 +324,7 @@ bool URLRequestTestJob::NextReadAsync() {
 
 void URLRequestTestJob::AdvanceJob() {
   if (auto_advance_) {
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE, base::BindOnce(&URLRequestTestJob::ProcessNextOperation,
                                   weak_factory_.GetWeakPtr()));
     return;

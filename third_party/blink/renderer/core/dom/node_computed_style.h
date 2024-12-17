@@ -32,27 +32,14 @@
 
 namespace blink {
 
-inline ComputedStyle* Node::MutableComputedStyleForEditingDeprecated() const {
-  return const_cast<ComputedStyle*>(GetComputedStyle());
-}
-
 inline const ComputedStyle* Node::GetComputedStyle() const {
-  if (IsElementNode()) {
-    return HasRareData() ? DataAsNodeRareData()
-                               ->GetNodeRenderingData()
-                               ->GetComputedStyle()
-                         : DataAsNodeRenderingData()->GetComputedStyle();
+  if (const auto* element = DynamicTo<Element>(this)) {
+    return element->GetComputedStyle();
   }
   // Text nodes and Document.
   if (LayoutObject* layout_object = GetLayoutObject())
     return layout_object->Style();
   return nullptr;
-}
-
-inline const ComputedStyle& Node::ComputedStyleRef() const {
-  const ComputedStyle* style = GetComputedStyle();
-  DCHECK(style);
-  return *style;
 }
 
 }  // namespace blink

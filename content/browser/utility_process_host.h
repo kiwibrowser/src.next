@@ -6,32 +6,39 @@
 #define CONTENT_BROWSER_UTILITY_PROCESS_HOST_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "base/environment.h"
-#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/process/launch.h"
 #include "build/build_config.h"
 #include "build/chromecast_buildflags.h"
+#include "content/browser/child_process_launcher.h"
 #include "content/common/child_process.mojom.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/browser_child_process_host_delegate.h"
+#include "content/public/common/zygote/zygote_buildflags.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "sandbox/policy/mojom/sandbox.mojom.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/abseil-cpp/absl/types/variant.h"
 
-// TODO(crbug.com/1328879): Remove this when fixing the bug.
-#if BUILDFLAG(IS_CASTOS) || BUILDFLAG(IS_CAST_ANDROID)
-#include "base/callback.h"
-#include "mojo/public/cpp/system/message_pipe.h"
-#endif
+#if BUILDFLAG(USE_ZYGOTE)
+#include "content/public/common/zygote/zygote_handle.h"
+#endif  // BUILDFLAG(USE_ZYGOTE)
 
 namespace base {
 class Thread;
 }  // namespace base
+
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS_ASH) || \
+    BUILDFLAG(IS_MAC)
+namespace viz {
+class GpuClient;
+}  // namespace viz
+#endif
 
 namespace content {
 class BrowserChildProcessHostImpl;
@@ -71,6 +78,11 @@ class CONTENT_EXPORT UtilityProcessHost
     virtual void OnProcessCrashed() {}
   };
 
+  // This class is self-owned. It must be instantiated using new, and shouldn't
+  // be deleted manually.
+  // TODO(crbug.com/40254698): Make it clearer the caller of the
+  // constructor do not own memory. A static method to create them + private
+  // constructor could be better.
   UtilityProcessHost();
   explicit UtilityProcessHost(std::unique_ptr<Client> client);
 
@@ -94,17 +106,6 @@ class CONTENT_EXPORT UtilityProcessHost
   // Starts the utility process.
   bool Start();
 
-// TODO(crbug.com/1328879): Remove this method when fixing the bug.
-#if BUILDFLAG(IS_CASTOS) || BUILDFLAG(IS_CAST_ANDROID)
-  // Instructs the utility process to run an instance of the named service,
-  // bound to |service_pipe|. This is DEPRECATED and should never be used.
-  using RunServiceDeprecatedCallback =
-      base::OnceCallback<void(absl::optional<base::ProcessId>)>;
-  void RunServiceDeprecated(const std::string& service_name,
-                            mojo::ScopedMessagePipeHandle service_pipe,
-                            RunServiceDeprecatedCallback callback);
-#endif
-
   // Sets the name of the process to appear in the task manager.
   void SetName(const std::u16string& name);
 
@@ -118,6 +119,26 @@ class CONTENT_EXPORT UtilityProcessHost
   // Provides extra switches to append to the process's command line.
   void SetExtraCommandLineSwitches(std::vector<std::string> switches);
 
+  // Allows the child process to bind viz.mojom.Gpu.
+  void SetAllowGpuClient();
+
+#if BUILDFLAG(IS_WIN)
+  // Specifies libraries to preload before the sandbox is locked down. Paths
+  // should be absolute.
+  void SetPreloadLibraries(const std::vector<base::FilePath>& preloads);
+#endif  // BUILDFLAG(IS_WIN)
+
+#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_MAC)
+  // Adds to ChildProcessLauncherFileData::files_to_preload, which maps |key| ->
+  // |file| in the new process's base::FileDescriptorStore.
+  void AddFileToPreload(std::string key,
+                        absl::variant<base::FilePath, base::ScopedFD> file);
+#endif
+
+#if BUILDFLAG(USE_ZYGOTE)
+  void SetZygoteForTesting(ZygoteCommunication* handle);
+#endif  // BUILDFLAG(USE_ZYGOTE)
+
   // Returns a control interface for the running child process.
   mojom::ChildProcess* GetChildProcess();
 
@@ -129,7 +150,7 @@ class CONTENT_EXPORT UtilityProcessHost
   void OnProcessLaunched() override;
   void OnProcessLaunchFailed(int error_code) override;
   void OnProcessCrashed(int exit_code) override;
-  absl::optional<std::string> GetServiceName() override;
+  std::optional<std::string> GetServiceName() override;
   void BindHostReceiver(mojo::GenericPendingReceiver receiver) override;
 
   // Launch the child process with switches that will setup this sandbox type.
@@ -159,6 +180,18 @@ class CONTENT_EXPORT UtilityProcessHost
   // Extra command line switches to append.
   std::vector<std::string> extra_switches_;
 
+#if BUILDFLAG(IS_WIN)
+  // Libraries to load before sandbox lockdown. Only used on Windows.
+  std::vector<base::FilePath> preload_libraries_;
+#endif  // BUILDFLAG(IS_WIN)
+
+  // Extra files and file descriptors to preload in the new process.
+  std::unique_ptr<ChildProcessLauncherFileData> file_data_;
+
+#if BUILDFLAG(USE_ZYGOTE)
+  std::optional<raw_ptr<ZygoteCommunication>> zygote_for_testing_;
+#endif  // BUILDFLAG(USE_ZYGOTE)
+
   // Indicates whether the process has been successfully launched yet, or if
   // launch failed.
   enum class LaunchState {
@@ -168,11 +201,10 @@ class CONTENT_EXPORT UtilityProcessHost
   };
   LaunchState launch_state_ = LaunchState::kLaunchInProgress;
 
-// TODO(crbug.com/1328879): Remove this when fixing the bug.
-#if BUILDFLAG(IS_CASTOS) || BUILDFLAG(IS_CAST_ANDROID)
-  // Collection of callbacks to be run once the process is actually started (or
-  // fails to start).
-  std::vector<RunServiceDeprecatedCallback> pending_run_service_callbacks_;
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS_ASH) || \
+    BUILDFLAG(IS_MAC)
+  bool allowed_gpu_;
+  std::unique_ptr<viz::GpuClient, base::OnTaskRunnerDeleter> gpu_client_;
 #endif
 
   std::unique_ptr<Client> client_;

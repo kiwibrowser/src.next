@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,10 @@
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 
+namespace WTF {
+class String;
+}  // namespace WTF
+
 namespace blink {
 
 class CSSFunctionValue : public CSSValueList {
@@ -16,7 +20,7 @@ class CSSFunctionValue : public CSSValueList {
   CSSFunctionValue(CSSValueID id)
       : CSSValueList(kFunctionClass, kCommaSeparator), value_id_(id) {}
 
-  String CustomCSSText() const;
+  WTF::String CustomCSSText() const;
 
   bool Equals(const CSSFunctionValue& other) const {
     return value_id_ == other.value_id_ && CSSValueList::Equals(other);

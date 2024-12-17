@@ -6,11 +6,12 @@
 
 #include <dlfcn.h>
 
+#include <string_view>
+
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/notreached.h"
 #include "base/strings/strcat.h"
-#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/scoped_blocking_call.h"
@@ -58,16 +59,16 @@ void UnloadNativeLibrary(NativeLibrary library) {
 }
 
 void* GetFunctionPointerFromNativeLibrary(NativeLibrary library,
-                                          StringPiece name) {
-  return dlsym(library, name.data());
+                                          const char* name) {
+  return dlsym(library, name);
 }
 
-std::string GetNativeLibraryName(StringPiece name) {
+std::string GetNativeLibraryName(std::string_view name) {
   DCHECK(IsStringASCII(name));
   return StrCat({"lib", name, ".so"});
 }
 
-std::string GetLoadableModuleName(StringPiece name) {
+std::string GetLoadableModuleName(std::string_view name) {
   return GetNativeLibraryName(name);
 }
 

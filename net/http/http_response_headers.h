@@ -8,25 +8,30 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
-#include "base/callback.h"
+#include "base/check.h"
+#include "base/functional/callback.h"
 #include "base/memory/ref_counted.h"
-#include "base/strings/string_piece.h"
 #include "base/time/time.h"
+#include "base/trace_event/base_tracing_forward.h"
+#include "base/types/pass_key.h"
+#include "base/values.h"
 #include "net/base/net_export.h"
+#include "net/http/http_util.h"
 #include "net/http/http_version.h"
 #include "net/log/net_log_capture_mode.h"
-#include "third_party/perfetto/include/perfetto/tracing/traced_value_forward.h"
+#include "third_party/abseil-cpp/absl/container/inlined_vector.h"
 
 namespace base {
 class Pickle;
 class PickleIterator;
 class Time;
 class TimeDelta;
-class Value;
 }
 
 namespace net {
@@ -43,6 +48,54 @@ enum ValidationType {
 class NET_EXPORT HttpResponseHeaders
     : public base::RefCountedThreadSafe<HttpResponseHeaders> {
  public:
+  // This class provides the most efficient way to build an HttpResponseHeaders
+  // object if the headers are all available in memory at once.
+  // Example usage:
+  // scoped_refptr<HttpResponseHeaders> headers =
+  //   HttpResponseHeaders::Builder(HttpVersion(1, 1), 307)
+  //     .AddHeader("Location", url.spec())
+  //     .Build();
+  class NET_EXPORT Builder {
+   public:
+    // Constructs a builder with a particular `version` and `status`. `version`
+    // must be (1,0), (1,1) or (2,0). `status` is the response code optionally
+    // followed by a space and the status text, eg. "200 OK". The caller is
+    // required to guarantee that `status` does not contain embedded nul
+    // characters, and that it will remain valid until Build() is called.
+    Builder(HttpVersion version, std::string_view status);
+
+    Builder(const Builder&) = delete;
+    Builder& operator=(const Builder&) = delete;
+
+    ~Builder();
+
+    // Adds a header. Returns a reference to the object so that calls can be
+    // chained. Duplicates will be preserved. Order will be preserved. For
+    // performance reasons, strings are not copied until Build() is called. It
+    // is the caller's responsibility to ensure the values remain valid until
+    // then. The caller is required to guarantee that `name` and `value` are
+    // valid HTTP headers and in particular that they do not contain embedded
+    // nul characters.
+    Builder& AddHeader(std::string_view name, std::string_view value) {
+      DCHECK(HttpUtil::IsValidHeaderName(name));
+      DCHECK(HttpUtil::IsValidHeaderValue(value));
+      headers_.push_back({name, value});
+      return *this;
+    }
+
+    scoped_refptr<HttpResponseHeaders> Build();
+
+   private:
+    using KeyValuePair = std::pair<std::string_view, std::string_view>;
+
+    const HttpVersion version_;
+    const std::string_view status_;
+    // 40 is enough for 94% of responses on Windows and 98% on Android.
+    absl::InlinedVector<KeyValuePair, 40> headers_;
+  };
+
+  using BuilderPassKey = base::PassKey<Builder>;
+
   // Persist options.
   typedef int PersistOptions;
   static const PersistOptions PERSIST_RAW = -1;  // Raw, unparsed headers.
@@ -83,12 +136,27 @@ class NET_EXPORT HttpResponseHeaders
   // be passed to the pickle's various Read* methods.
   explicit HttpResponseHeaders(base::PickleIterator* pickle_iter);
 
+  // Use Builder::Build() rather than calling this directly. The BuilderPassKey
+  // prevents accidental use from other code.
+  HttpResponseHeaders(
+      BuilderPassKey,
+      HttpVersion version,
+      std::string_view status,
+      base::span<const std::pair<std::string_view, std::string_view>> headers);
+
   // Takes headers as an ASCII string and tries to parse them as HTTP response
   // headers. returns nullptr on failure. Unlike the HttpResponseHeaders
   // constructor that takes a std::string, HttpUtil::AssembleRawHeaders should
   // not be called on |headers| before calling this method.
   static scoped_refptr<HttpResponseHeaders> TryToCreate(
-      base::StringPiece headers);
+      std::string_view headers);
+
+  // Takes content_type as an ASCII string and tries to combine it with the HTTP
+  // status line for data: URLs. Returns nullptr on failure. Unlike TryToCreate,
+  // HttpUtil::AssembleRawHeaders does not need to be called as the raw headers
+  // are already known.
+  static scoped_refptr<HttpResponseHeaders> TryToCreateForDataURL(
+      std::string_view content_type);
 
   HttpResponseHeaders(const HttpResponseHeaders&) = delete;
   HttpResponseHeaders& operator=(const HttpResponseHeaders&) = delete;
@@ -101,7 +169,7 @@ class NET_EXPORT HttpResponseHeaders
   void Update(const HttpResponseHeaders& new_headers);
 
   // Removes all instances of a particular header.
-  void RemoveHeader(base::StringPiece name);
+  void RemoveHeader(std::string_view name);
 
   // Removes all instances of particular headers.
   void RemoveHeaders(const std::unordered_set<std::string>& header_names);
@@ -113,13 +181,13 @@ class NET_EXPORT HttpResponseHeaders
   // Adds the specified response header. If a header with the same name is
   // already stored, the two headers are not merged together by this method; the
   // one provided is simply put at the end of the list.
-  void AddHeader(base::StringPiece name, base::StringPiece value);
+  void AddHeader(std::string_view name, std::string_view value);
 
   // Sets the specified response header, removing any matching old one if
   // present. The new header is added to the end of the header list, rather than
   // replacing the old one. This is the same as calling RemoveHeader() followed
   // be SetHeader().
-  void SetHeader(base::StringPiece name, base::StringPiece value);
+  void SetHeader(std::string_view name, std::string_view value);
 
   // Adds a cookie header. |cookie_string| should be the header value without
   // the header name (Set-Cookie).
@@ -143,7 +211,22 @@ class NET_EXPORT HttpResponseHeaders
   // that would be returned from repeated calls to EnumerateHeader, joined by
   // the string ", ".
   //
-  // Returns false if this header wasn't found.
+  // Returns std::nullopt if this header wasn't found.
+  //
+  // Example:
+  //   Foo: a, b,c
+  //   Foo: d
+  //
+  //   std::optional<std::string> value = GetNormalizedHeader("Foo");
+  //   // Now, |value| is "a, b, c, d".
+  //
+  // NOTE: Do not make any assumptions about the encoding of this output
+  // string.  It may be non-ASCII, and the encoding used by the server is not
+  // necessarily known to us.  Do not assume that this output is UTF-8!
+  std::optional<std::string> GetNormalizedHeader(std::string_view name) const;
+
+  // Deprecated version of the above. `value` must not be nullptr. Returns false
+  // if this header wasn't found.
   //
   // Example:
   //   Foo: a, b,c
@@ -151,11 +234,7 @@ class NET_EXPORT HttpResponseHeaders
   //
   //   string value;
   //   GetNormalizedHeader("Foo", &value);  // Now, |value| is "a, b, c, d".
-  //
-  // NOTE: Do not make any assumptions about the encoding of this output
-  // string.  It may be non-ASCII, and the encoding used by the server is not
-  // necessarily known to us.  Do not assume that this output is UTF-8!
-  bool GetNormalizedHeader(base::StringPiece name, std::string* value) const;
+  bool GetNormalizedHeader(std::string_view name, std::string* value) const;
 
   // Returns the normalized status line.
   std::string GetStatusLine() const;
@@ -191,12 +270,16 @@ class NET_EXPORT HttpResponseHeaders
                             std::string* name,
                             std::string* value) const;
 
-  // Enumerate the values of the specified header.   If you are only interested
+  // Enumerate the values of the specified header. If you are only interested
   // in the first header, then you can pass nullptr for the 'iter' parameter.
   // Otherwise, to iterate across all values for the specified header,
   // initialize a 'size_t' variable to 0 and pass it by address to
   // EnumerateHeader. Note that a header might have an empty value. Call
-  // EnumerateHeader repeatedly until it returns false.
+  // EnumerateHeader repeatedly until it returns std::nullopt.
+  //
+  // The returned value remains valid for the lifetime of HttpResponseHeaders,
+  // or until the headers are modified, so it is legal to hold onto a returned
+  // string_view while continuing to enumerate other values for a header.
   //
   // Unless a header is explicitly marked as non-coalescing (see
   // HttpUtil::IsNonCoalescingHeader), headers that contain
@@ -215,17 +298,24 @@ class NET_EXPORT HttpResponseHeaders
   //
   // To handle cases such as this, use GetNormalizedHeader to return the full
   // concatenated header, and then parse manually.
+  std::optional<std::string_view> EnumerateHeader(size_t* iter,
+                                                  std::string_view name) const;
+
+  // Deprecated overload of EnumerateHeader. Returns a bool instead of an
+  // options, which is false once all headers with the provided name have been
+  // enumerated, and copies the header's value to `value` whenever it returns
+  // true.
   bool EnumerateHeader(size_t* iter,
-                       base::StringPiece name,
+                       std::string_view name,
                        std::string* value) const;
 
   // Returns true if the response contains the specified header-value pair.
   // Both name and value are compared case insensitively.
-  bool HasHeaderValue(base::StringPiece name, base::StringPiece value) const;
+  bool HasHeaderValue(std::string_view name, std::string_view value) const;
 
   // Returns true if the response contains the specified header.
   // The name is compared case insensitively.
-  bool HasHeader(base::StringPiece name) const;
+  bool HasHeader(std::string_view name) const;
 
   // Get the mime type and charset values in lower case form from the headers.
   // Empty strings are returned if the values are not present.
@@ -243,6 +333,11 @@ class NET_EXPORT HttpResponseHeaders
   // Returns true if this response corresponds to a redirect.  The target
   // location of the redirect is optionally returned if location is non-null.
   bool IsRedirect(std::string* location) const;
+
+  // Returns true if this response included the `Activate-Storage-Access: retry;
+  // allowed-origin=...` header and the "allowed-origin" parameter matched the
+  // `expected_origin`.
+  bool HasStorageAccessRetryHeader(const std::string* expected_origin) const;
 
   // Returns true if the HTTP response code passed in corresponds to a
   // redirect.
@@ -275,19 +370,19 @@ class NET_EXPORT HttpResponseHeaders
                                 const base::Time& response_time,
                                 const base::Time& current_time) const;
 
-  // The following methods extract values from the response headers.  If a
-  // value is not present, or is invalid, then false is returned.  Otherwise,
-  // true is returned and the out param is assigned to the corresponding value.
-  bool GetMaxAgeValue(base::TimeDelta* value) const;
-  bool GetAgeValue(base::TimeDelta* value) const;
-  bool GetDateValue(base::Time* value) const;
-  bool GetLastModifiedValue(base::Time* value) const;
-  bool GetExpiresValue(base::Time* value) const;
-  bool GetStaleWhileRevalidateValue(base::TimeDelta* value) const;
+  // The following methods extract values from the response headers.  If a value
+  // is not present, or is invalid, then std::nullopt is returned.  Otherwise,
+  // the value is returned directly.
+  std::optional<base::TimeDelta> GetMaxAgeValue() const;
+  std::optional<base::TimeDelta> GetAgeValue() const;
+  std::optional<base::Time> GetDateValue() const;
+  std::optional<base::Time> GetLastModifiedValue() const;
+  std::optional<base::Time> GetExpiresValue() const;
+  std::optional<base::TimeDelta> GetStaleWhileRevalidateValue() const;
 
   // Extracts the time value of a particular header.  This method looks for the
   // first matching header value and parses its value as a HTTP-date.
-  bool GetTimeValuedHeader(const std::string& name, base::Time* result) const;
+  std::optional<base::Time> GetTimeValuedHeader(const std::string& name) const;
 
   // Determines if this response indicates a keep-alive connection.
   bool IsKeepAlive() const;
@@ -324,7 +419,7 @@ class NET_EXPORT HttpResponseHeaders
   bool IsChunkEncoded() const;
 
   // Creates a Value for use with the NetLog containing the response headers.
-  base::Value NetLogParams(NetLogCaptureMode capture_mode) const;
+  base::Value::Dict NetLogParams(NetLogCaptureMode capture_mode) const;
 
   // Returns the HTTP response code.  This is 0 if the response code text seems
   // to exist but could not be parsed.  Otherwise, it defaults to 200 if the
@@ -336,10 +431,15 @@ class NET_EXPORT HttpResponseHeaders
 
   // Returns true if |name| is a cookie related header name. This is consistent
   // with |PERSIST_SANS_COOKIES|.
-  static bool IsCookieResponseHeader(base::StringPiece name);
+  static bool IsCookieResponseHeader(std::string_view name);
 
   // Write a representation of this object into tracing proto.
   void WriteIntoTrace(perfetto::TracedValue context) const;
+
+  // Returns true if this instance precises matches another. This is stronger
+  // than semantic equality as it is intended for verification that the new
+  // Builder implementation works correctly.
+  bool StrictlyEquals(const HttpResponseHeaders& other) const;
 
  private:
   friend class base::RefCountedThreadSafe<HttpResponseHeaders>;
@@ -349,6 +449,14 @@ class NET_EXPORT HttpResponseHeaders
   // The members of this structure point into raw_headers_.
   struct ParsedHeader;
   typedef std::vector<ParsedHeader> HeaderList;
+
+  // Whether or not a header value passed to the private AddHeader() method
+  // contains commas.
+  enum class ContainsCommas {
+    kNo,     // Definitely no commas. No need to parse it.
+    kYes,    // Contains commas. Needs to be parsed.
+    kMaybe,  // Unknown whether commas are present. Needs to be parsed.
+  };
 
   ~HttpResponseHeaders();
 
@@ -375,20 +483,22 @@ class NET_EXPORT HttpResponseHeaders
 
   // Find the header in our list (case-insensitive) starting with |parsed_| at
   // index |from|.  Returns string::npos if not found.
-  size_t FindHeader(size_t from, base::StringPiece name) const;
+  size_t FindHeader(size_t from, std::string_view name) const;
 
   // Search the Cache-Control header for a directive matching |directive|. If
-  // present, treat its value as a time offset in seconds, write it to |result|,
-  // and return true.
-  bool GetCacheControlDirective(base::StringPiece directive,
-                                base::TimeDelta* result) const;
+  // present, treat its value as a time offset in seconds.
+  std::optional<base::TimeDelta> GetCacheControlDirective(
+      std::string_view directive) const;
 
-  // Add a header->value pair to our list.  If we already have header in our
-  // list, append the value to it.
+  // Add header->value pair(s) to our list. The value will be split into
+  // multiple values if it contains unquoted commas. If `contains_commas` is
+  // ContainsCommas::kNo then the value will not be parsed as a performance
+  // optimization.
   void AddHeader(std::string::const_iterator name_begin,
                  std::string::const_iterator name_end,
                  std::string::const_iterator value_begin,
-                 std::string::const_iterator value_end);
+                 std::string::const_iterator value_end,
+                 ContainsCommas contains_commas);
 
   // Add to parsed_ given the fields of a ParsedHeader object.
   void AddToParsed(std::string::const_iterator name_begin,
@@ -396,11 +506,13 @@ class NET_EXPORT HttpResponseHeaders
                    std::string::const_iterator value_begin,
                    std::string::const_iterator value_end);
 
-  // Replaces the current headers with the merged version of |raw_headers| and
-  // the current headers without the headers in |headers_to_remove|. Note that
-  // |headers_to_remove| are removed from the current headers (before the
+  // Replaces the current headers with the merged version of `raw_headers` and
+  // the current headers without the headers in `headers_to_remove`. Note that
+  // `headers_to_remove` are removed from the current headers (before the
   // merge), not after the merge.
-  void MergeWithHeaders(const std::string& raw_headers,
+  // `raw_headers` is a std::string, not a const reference to a std::string,
+  // to avoid a potentially excessive copy.
+  void MergeWithHeaders(std::string raw_headers,
                         const HeaderSet& headers_to_remove);
 
   // Adds the values from any 'cache-control: no-cache="foo,bar"' headers.

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,9 @@ const constexpr DarkModeInversionAlgorithm kDefaultDarkModeInversionAlgorithm =
     DarkModeInversionAlgorithm::kInvertLightnessLAB;
 const constexpr DarkModeImagePolicy kDefaultDarkModeImagePolicy =
     DarkModeImagePolicy::kFilterSmart;
+const constexpr DarkModeImageClassifierPolicy
+    kDefaultDarkModeImageClassifierPolicy =
+        DarkModeImageClassifierPolicy::kNumColorsWithMlFallback;
 const constexpr int kDefaultForegroundBrightnessThreshold = 150;
 const constexpr int kDefaultBackgroundBrightnessThreshold = 205;
 const constexpr float kDefaultDarkModeContrastPercent = 0.0f;
@@ -90,7 +93,21 @@ DarkModeInversionAlgorithm GetMode(const SwitchParams& switch_params) {
     case ForceDarkInversionMethod::kRgbBased:
       return DarkModeInversionAlgorithm::kInvertBrightness;
   }
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
+}
+
+DarkModeImageClassifierPolicy GetImageClassifierPolicy(
+    const SwitchParams& switch_params) {
+  switch (features::kForceDarkImageClassifierParam.Get()) {
+    case ForceDarkImageClassifier::kUseBlinkSettings:
+      return GetIntegerSwitchParamValue<DarkModeImageClassifierPolicy>(
+          switch_params, "ImageClassifierPolicy",
+          kDefaultDarkModeImageClassifierPolicy);
+    case ForceDarkImageClassifier::kNumColorsWithMlFallback:
+      return DarkModeImageClassifierPolicy::kNumColorsWithMlFallback;
+    case ForceDarkImageClassifier::kTransparencyAndNumColors:
+      return DarkModeImageClassifierPolicy::kTransparencyAndNumColors;
+  }
 }
 
 DarkModeImagePolicy GetImagePolicy(const SwitchParams& switch_params) {
@@ -106,9 +123,8 @@ DarkModeImagePolicy GetImagePolicy(const SwitchParams& switch_params) {
 }
 
 int GetForegroundBrightnessThreshold(const SwitchParams& switch_params) {
-  const int flag_value = base::GetFieldTrialParamByFeatureAsInt(
-      features::kForceWebContentsDarkMode,
-      features::kForceDarkForegroundLightnessThresholdParam.name, -1);
+  const int flag_value =
+      features::kForceDarkForegroundLightnessThresholdParam.Get();
   return flag_value >= 0 ? flag_value
                          : GetIntegerSwitchParamValue<int>(
                                switch_params, "ForegroundBrightnessThreshold",
@@ -116,9 +132,8 @@ int GetForegroundBrightnessThreshold(const SwitchParams& switch_params) {
 }
 
 int GetBackgroundBrightnessThreshold(const SwitchParams& switch_params) {
-  const int flag_value = base::GetFieldTrialParamByFeatureAsInt(
-      features::kForceWebContentsDarkMode,
-      features::kForceDarkBackgroundLightnessThresholdParam.name, -1);
+  const int flag_value =
+      features::kForceDarkBackgroundLightnessThresholdParam.Get();
   return flag_value >= 0 ? flag_value
                          : GetIntegerSwitchParamValue<int>(
                                switch_params, "BackgroundBrightnessThreshold",
@@ -140,6 +155,10 @@ DarkModeSettings BuildDarkModeSettings() {
   settings.image_policy = Clamp<DarkModeImagePolicy>(
       GetImagePolicy(switch_params), DarkModeImagePolicy::kFirst,
       DarkModeImagePolicy::kLast);
+  settings.image_classifier_policy = Clamp<DarkModeImageClassifierPolicy>(
+      GetImageClassifierPolicy(switch_params),
+      DarkModeImageClassifierPolicy::kFirst,
+      DarkModeImageClassifierPolicy::kLast);
   settings.foreground_brightness_threshold =
       Clamp<int>(GetForegroundBrightnessThreshold(switch_params), 0, 255);
   settings.background_brightness_threshold =

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,79 +15,80 @@ namespace blink {
 
 using CompositingReasons = uint64_t;
 
-#define FOR_EACH_COMPOSITING_REASON(V)                                        \
-  /* Intrinsic reasons that can be known right away by the layer. */          \
-  V(3DTransform)                                                              \
-  V(3DScale)                                                                  \
-  V(3DRotate)                                                                 \
-  V(3DTranslate)                                                              \
-  V(Trivial3DTransform)                                                       \
-  V(Video)                                                                    \
-  V(Canvas)                                                                   \
-  V(Plugin)                                                                   \
-  V(IFrame)                                                                   \
-  V(DocumentTransitionPseudoElement)                                          \
-  V(BackfaceVisibilityHidden)                                                 \
-  V(ActiveTransformAnimation)                                                 \
-  V(ActiveScaleAnimation)                                                     \
-  V(ActiveRotateAnimation)                                                    \
-  V(ActiveTranslateAnimation)                                                 \
-  V(ActiveOpacityAnimation)                                                   \
-  V(ActiveFilterAnimation)                                                    \
-  V(ActiveBackdropFilterAnimation)                                            \
-  V(AffectedByOuterViewportBoundsDelta)                                       \
-  V(FixedPosition)                                                            \
-  V(UndoOverscroll)                                                           \
-  V(StickyPosition)                                                           \
-  V(AnchorScroll)                                                             \
-  V(OverflowScrolling)                                                        \
-  V(WillChangeTransform)                                                      \
-  V(WillChangeScale)                                                          \
-  V(WillChangeRotate)                                                         \
-  V(WillChangeTranslate)                                                      \
-  V(WillChangeOpacity)                                                        \
-  V(WillChangeFilter)                                                         \
-  V(WillChangeBackdropFilter)                                                 \
-                                                                              \
-  /* Reasons that depend on ancestor properties */                            \
-  V(BackfaceInvisibility3DAncestor)                                           \
-  /* TODO(crbug.com/1256990): Transform3DSceneLeaf today depends only on the  \
-     element and its properties, but in the future it could be optimized      \
-     to consider descendants and moved to the subtree group below. */         \
-  V(Transform3DSceneLeaf)                                                     \
-  /* This flag is needed only when none of the explicit kWillChange* reasons  \
-     are set. */                                                              \
-  V(WillChangeOther)                                                          \
-  V(BackdropFilter)                                                           \
-  V(BackdropFilterMask)                                                       \
-  V(RootScroller)                                                             \
-  V(Viewport)                                                                 \
-                                                                              \
-  /* This is based on overlapping relationship among pending layers,          \
-     determined after paint. See PaintArtifactCompositor. */                  \
-  V(Overlap)                                                                  \
-                                                                              \
-  /* Subtree reasons that require knowing what the status of your subtree is  \
-     before knowing the answer. */                                            \
-  V(OpacityWithCompositedDescendants)                                         \
-  V(MaskWithCompositedDescendants)                                            \
-  V(FilterWithCompositedDescendants)                                          \
-  V(BlendingWithCompositedDescendants)                                        \
-  V(PerspectiveWith3DDescendants)                                             \
-  V(Preserve3DWith3DDescendants)                                              \
-                                                                              \
-  /* The root layer is a special case. It may be forced to be a layer, but it \
-  also needs to be a layer if anything else in the subtree is composited. */  \
-  V(Root)                                                                     \
-                                                                              \
-  V(LayerForHorizontalScrollbar)                                              \
-  V(LayerForVerticalScrollbar)                                                \
-  /* Link highlight, frame overlay, etc. */                                   \
-  V(LayerForOther)                                                            \
-                                                                              \
-  /* DocumentTransition shared element.                                       \
-  See third_party/blink/renderer/core/document_transition/README.md. */       \
-  V(DocumentTransitionSharedElement)
+#define FOR_EACH_COMPOSITING_REASON(V)                                         \
+  /* Intrinsic reasons that can be known right away by the layer.           */ \
+  V(3DTransform)                                                               \
+  V(3DScale)                                                                   \
+  V(3DRotate)                                                                  \
+  V(3DTranslate)                                                               \
+  V(Trivial3DTransform)                                                        \
+  V(IFrame)                                                                    \
+  V(ActiveTransformAnimation)                                                  \
+  V(ActiveScaleAnimation)                                                      \
+  V(ActiveRotateAnimation)                                                     \
+  V(ActiveTranslateAnimation)                                                  \
+  V(ActiveOpacityAnimation)                                                    \
+  V(ActiveFilterAnimation)                                                     \
+  V(ActiveBackdropFilterAnimation)                                             \
+  V(AffectedByOuterViewportBoundsDelta)                                        \
+  V(FixedPosition)                                                             \
+  V(UndoOverscroll)                                                            \
+  V(StickyPosition)                                                            \
+  V(AnchorPosition)                                                            \
+  V(BackdropFilter)                                                            \
+  V(BackdropFilterMask)                                                        \
+  V(RootScroller)                                                              \
+  V(Viewport)                                                                  \
+  V(WillChangeTransform)                                                       \
+  V(WillChangeScale)                                                           \
+  V(WillChangeRotate)                                                          \
+  V(WillChangeTranslate)                                                       \
+  V(WillChangeOpacity)                                                         \
+  V(WillChangeFilter)                                                          \
+  V(WillChangeBackdropFilter)                                                  \
+  /* This flag is needed only when none of the explicit kWillChange* reasons   \
+     are set. */                                                               \
+  V(WillChangeOther)                                                           \
+                                                                               \
+  /* Reasons that depend on ancestor properties */                             \
+  V(BackfaceInvisibility3DAncestor)                                            \
+  /* TODO(crbug.com/1256990): Transform3DSceneLeaf today depends only on the   \
+     element and its properties, but in the future it could be optimized       \
+     to consider descendants and moved to the subtree group below. */          \
+  V(Transform3DSceneLeaf)                                                      \
+                                                                               \
+  /* Subtree reasons that require knowing what the status of your subtree is   \
+     before knowing the answer. */                                             \
+  V(PerspectiveWith3DDescendants)                                              \
+  V(Preserve3DWith3DDescendants)                                               \
+                                                                               \
+  /* ViewTransition element.                                                   \
+     See third_party/blink/renderer/core/view_transition/README.md. */         \
+  V(ViewTransitionElement)                                                     \
+  V(ViewTransitionPseudoElement)                                               \
+  V(ViewTransitionElementDescendantWithClipPath)                               \
+                                                                               \
+  /* For composited scrolling, determined after paint. */                      \
+  V(OverflowScrolling)                                                         \
+                                                                               \
+  /* Element is participating in element capture. */                           \
+  V(ElementCapture)                                                            \
+                                                                               \
+  /* The following reasons are not used in paint properties, but are           \
+     determined after paint, for debugging. See PaintArtifactCompositor. */    \
+  /* This is based on overlapping relationship among pending layers. */        \
+  V(Overlap)                                                                   \
+  /* These are based on the type of paint chunks and display items. */         \
+  V(BackfaceVisibilityHidden)                                                  \
+  V(FixedAttachmentBackground)                                                 \
+  V(Caret)                                                                     \
+  V(Video)                                                                     \
+  V(Canvas)                                                                    \
+  V(Plugin)                                                                    \
+  V(Scrollbar)                                                                 \
+  V(LinkHighlight)                                                             \
+  V(DevToolsOverlay)                                                           \
+  V(ViewTransitionContent)
 
 class PLATFORM_EXPORT CompositingReason {
   DISALLOW_NEW();
@@ -128,10 +129,14 @@ class PLATFORM_EXPORT CompositingReason {
         kFixedPosition | kAffectedByOuterViewportBoundsDelta | kUndoOverscroll |
         kVideo | kCanvas | kPlugin | kIFrame,
     // TODO(dbaron): kWillChangeOther probably shouldn't be in this list.
+    // TODO(vmpstr): kViewTransitionElement is needed to make sure that the
+    // capture escapes clips when view transition has a descendant that
+    // naturally escapes clips. See crbug.com/348590918 for details.
     kDirectReasonsForTransformProperty =
         k3DTransform | kTrivial3DTransform | kWillChangeTransform |
         kWillChangeOther | kPerspectiveWith3DDescendants |
-        kPreserve3DWith3DDescendants | kActiveTransformAnimation,
+        kPreserve3DWith3DDescendants | kActiveTransformAnimation |
+        kViewTransitionElementDescendantWithClipPath | kViewTransitionElement,
     kDirectReasonsForScaleProperty =
         k3DScale | kWillChangeScale | kActiveScaleAnimation,
     kDirectReasonsForRotateProperty =
@@ -143,7 +148,7 @@ class PLATFORM_EXPORT CompositingReason {
     kDirectReasonsForEffectProperty =
         kActiveOpacityAnimation | kWillChangeOpacity | kBackdropFilter |
         kWillChangeBackdropFilter | kActiveBackdropFilterAnimation |
-        kDocumentTransitionPseudoElement | kTransform3DSceneLeaf,
+        kViewTransitionPseudoElement | kTransform3DSceneLeaf | kElementCapture,
     kDirectReasonsForFilterProperty =
         kActiveFilterAnimation | kWillChangeFilter,
     kDirectReasonsForBackdropFilter = kBackdropFilter |
@@ -167,8 +172,12 @@ class PLATFORM_EXPORT CompositingReason {
     kRequiresCullRectExpansion =
         kDirectReasonsForTransformProperty | kDirectReasonsForScaleProperty |
         kDirectReasonsForRotateProperty | kDirectReasonsForTranslateProperty |
-        kDirectReasonsForScrollTranslationProperty,
-
+        kDirectReasonsForScrollTranslationProperty |
+        // Normally a sticky element inherits the expanded contents cull rect of
+        // the scroll container, but it needs expansion by itself if there is
+        // additional clip between the sticky element and its scroll container.
+        // Similar for anchor positioned elements.
+        kStickyPosition | kAnchorPosition,
   };
 };
 

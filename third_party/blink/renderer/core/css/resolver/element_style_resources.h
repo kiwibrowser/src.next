@@ -32,9 +32,8 @@
 namespace blink {
 
 class CSSValue;
-class ComputedStyle;
+class ComputedStyleBuilder;
 class Element;
-class PseudoElement;
 class SVGResource;
 class StyleImage;
 
@@ -57,7 +56,7 @@ class PreCachedContainerSizes {
 
  private:
   const CSSToLengthConversionData* conversion_data_{nullptr};
-  mutable absl::optional<ContainerSizes> cache_;
+  mutable std::optional<ContainerSizes> cache_;
 };
 
 // Holds information about resources, requested by stylesheets.
@@ -66,9 +65,7 @@ class ElementStyleResources {
   STACK_ALLOCATED();
 
  public:
-  ElementStyleResources(Element&,
-                        float device_scale_factor,
-                        PseudoElement* pseudo_element);
+  ElementStyleResources(Element&, float device_scale_factor);
   ElementStyleResources(const ElementStyleResources&) = delete;
   ElementStyleResources& operator=(const ElementStyleResources&) = delete;
 
@@ -77,7 +74,7 @@ class ElementStyleResources {
   SVGResource* GetSVGResourceFromValue(CSSPropertyID,
                                        const cssvalue::CSSURIValue&);
 
-  void LoadPendingResources(ComputedStyle&);
+  void LoadPendingResources(ComputedStyleBuilder&);
 
   void UpdateLengthConversionData(const CSSToLengthConversionData*);
 
@@ -85,14 +82,15 @@ class ElementStyleResources {
   bool IsPending(const CSSValue&) const;
   StyleImage* CachedStyleImage(const CSSValue&) const;
 
-  void LoadPendingSVGResources(ComputedStyle&);
-  void LoadPendingImages(ComputedStyle&);
+  StyleImage* LoadMaskSource(CSSValue&);
+
+  void LoadPendingSVGResources(ComputedStyleBuilder&);
+  void LoadPendingImages(ComputedStyleBuilder&);
 
   Element& element_;
   HashSet<CSSPropertyID> pending_image_properties_;
   HashSet<CSSPropertyID> pending_svg_resource_properties_;
   float device_scale_factor_;
-  PseudoElement* pseudo_element_;
   PreCachedContainerSizes pre_cached_container_sizes_;
 };
 

@@ -8,11 +8,12 @@
 #include <utility>
 
 #include "base/base64.h"
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/strcat.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "chrome/browser/download/android/download_open_source.h"
 #include "chrome/browser/download/android/download_utils.h"
@@ -65,11 +66,11 @@ int ContentTypePriority(AvailableContentType type) {
     case AvailableContentType::kUninteresting:
       return 10000;
   }
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
 }
 
 AvailableContentType ContentType(const OfflineItem& item) {
-  // TODO(crbug.com/1033985): Make provider namespace a reusable constant.
+  // TODO(crbug.com/40111585): Make provider namespace a reusable constant.
   if (item.is_transient || item.is_off_the_record ||
       item.state != OfflineItemState::COMPLETE || item.is_dangerous ||
       item.id.name_space == "content_index") {
@@ -159,10 +160,10 @@ class ThumbnailFetch {
   }
 
   void Complete() {
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE,
         base::BindOnce(std::move(complete_callback_), std::move(visuals_)));
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE,
         base::BindOnce(
             [](ThumbnailFetch* thumbnail_fetch) { delete thumbnail_fetch; },
@@ -173,9 +174,7 @@ class ThumbnailFetch {
     scoped_refptr<base::RefCountedMemory> data = image.As1xPNGBytes();
     if (!data || data->size() == 0)
       return GURL();
-    std::string png_base64;
-    base::Base64Encode(base::StringPiece(data->front_as<char>(), data->size()),
-                       &png_base64);
+    std::string png_base64 = base::Base64Encode(*data);
     return GURL(base::StrCat({"data:image/png;base64,", png_base64}));
   }
 

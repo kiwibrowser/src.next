@@ -16,7 +16,6 @@
 #include "chrome/test/base/testing_profile.h"
 #include "extensions/browser/content_verifier/test_utils.h"
 #include "extensions/browser/extension_system.h"
-#include "extensions/browser/info_map.h"
 #include "extensions/common/file_util.h"
 #include "extensions/common/switches.h"
 
@@ -76,7 +75,6 @@ class ChromeContentVerifierTest : public ExtensionServiceTestWithInstall {
     delegate_raw_ = delegate.get();
     content_verifier_ = base::MakeRefCounted<ContentVerifier>(
         browser_context(), std::move(delegate));
-    info_map()->SetContentVerifier(content_verifier_.get());
     content_verifier_->Start();
   }
 
@@ -102,7 +100,6 @@ class ChromeContentVerifierTest : public ExtensionServiceTestWithInstall {
   void AddExtensionToContentVerifier(
       const scoped_refptr<const Extension>& extension,
       VerifierObserver* verifier_observer) {
-    info_map()->AddExtension(extension.get(), base::Time::Now(), false, false);
     EXPECT_TRUE(
         ExtensionRegistry::Get(browser_context())->AddEnabled(extension));
     ExtensionRegistry::Get(browser_context())->TriggerOnLoaded(extension.get());
@@ -127,10 +124,6 @@ class ChromeContentVerifierTest : public ExtensionServiceTestWithInstall {
   }
 
  private:
-  InfoMap* info_map() {
-    return ExtensionSystem::Get(browser_context())->info_map();
-  }
-
   content::BrowserContext* browser_context() { return testing_profile_.get(); }
 
   scoped_refptr<const Extension> extension_;
@@ -223,9 +216,7 @@ TEST_F(ChromeContentVerifierTest, VerifyFailedOnLoad) {
     constexpr char kTamperedContent[] = "// Evil content";
     base::FilePath background_script_path =
         extension()->path().AppendASCII("d.js");
-    ASSERT_EQ(static_cast<int>(sizeof(kTamperedContent)),
-              base::WriteFile(background_script_path, kTamperedContent,
-                              sizeof(kTamperedContent)));
+    ASSERT_TRUE(base::WriteFile(background_script_path, kTamperedContent));
   }
 
   AddExtensionToContentVerifier(extension(), &verifier_observer);
@@ -242,7 +233,7 @@ TEST_F(ChromeContentVerifierTest, VerifyFailedOnLoad) {
 // kDisableAppContentVerification flag.
 TEST_F(ChromeContentVerifierTest, CfmChecksHashWithoutForceFlag) {
   ASSERT_FALSE(base::CommandLine::ForCurrentProcess()->HasSwitch(
-      extensions::switches::kDisableAppContentVerification));
+      switches::kDisableAppContentVerification));
   InitContentVerifier();
   ASSERT_TRUE(InstallExtension(kCaseSensitiveManifestPathsCrx));
   // Ensure that content verifier has checked hashes from |extension|.
@@ -254,7 +245,7 @@ TEST_F(ChromeContentVerifierTest, CfmChecksHashWithoutForceFlag) {
 // kDisableAppContentVerification flag is present.
 TEST_F(ChromeContentVerifierTest, CfmDoesNotCheckHashWithForceFlag) {
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      extensions::switches::kDisableAppContentVerification);
+      switches::kDisableAppContentVerification);
   InitContentVerifier();
   ASSERT_TRUE(InstallExtension(kCaseSensitiveManifestPathsCrx));
   // Ensure that content verifier has NOT checked hashes from |extension|.
@@ -266,7 +257,7 @@ TEST_F(ChromeContentVerifierTest, CfmDoesNotCheckHashWithForceFlag) {
 // kDisableAppContentVerification flag is present.
 TEST_F(ChromeContentVerifierTest, NonCfmChecksHashEvenWithForceFlag) {
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      extensions::switches::kDisableAppContentVerification);
+      switches::kDisableAppContentVerification);
   InitContentVerifier();
   ASSERT_TRUE(InstallExtension(kCaseSensitiveManifestPathsCrx));
   // Ensure that content verifier has checked hashes from |extension|.

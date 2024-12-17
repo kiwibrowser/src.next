@@ -8,7 +8,7 @@
 
 #include <utility>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/observer_list.h"
 #include "components/value_store/value_store_factory.h"
@@ -18,10 +18,11 @@
 #include "extensions/browser/extension_file_task_runner.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_id.h"
 
 namespace {
 
-std::string GetFullKey(const std::string& extension_id,
+std::string GetFullKey(const extensions::ExtensionId& extension_id,
                        const std::string& key) {
   return extension_id + "." + key;
 }
@@ -99,7 +100,8 @@ StateStore::StateStore(
   if (deferred_load) {
     // Call `Init()` asynchronously with a low priority to not delay startup.
     content::GetUIThreadTaskRunner({base::TaskPriority::USER_VISIBLE})
-        ->PostTask(FROM_HERE, base::BindOnce(&StateStore::Init, AsWeakPtr()));
+        ->PostTask(FROM_HERE, base::BindOnce(&StateStore::Init,
+                                             weak_ptr_factory_.GetWeakPtr()));
   } else {
     Init();
   }
@@ -112,7 +114,7 @@ void StateStore::RegisterKey(const std::string& key) {
   registered_keys_.insert(key);
 }
 
-void StateStore::GetExtensionValue(const std::string& extension_id,
+void StateStore::GetExtensionValue(const ExtensionId& extension_id,
                                    const std::string& key,
                                    ReadCallback callback) {
   task_queue_->InvokeWhenReady(base::BindOnce(
@@ -120,7 +122,7 @@ void StateStore::GetExtensionValue(const std::string& extension_id,
       GetFullKey(extension_id, key), std::move(callback)));
 }
 
-void StateStore::SetExtensionValue(const std::string& extension_id,
+void StateStore::SetExtensionValue(const ExtensionId& extension_id,
                                    const std::string& key,
                                    base::Value value) {
   for (TestObserver& observer : observers_)
@@ -131,7 +133,7 @@ void StateStore::SetExtensionValue(const std::string& extension_id,
       GetFullKey(extension_id, key), std::move(value)));
 }
 
-void StateStore::RemoveExtensionValue(const std::string& extension_id,
+void StateStore::RemoveExtensionValue(const ExtensionId& extension_id,
                                       const std::string& key) {
   task_queue_->InvokeWhenReady(base::BindOnce(
       &value_store::ValueStoreFrontend::Remove, base::Unretained(store_.get()),
@@ -152,7 +154,7 @@ void StateStore::FlushForTesting(base::OnceClosure flushed_callback) {
   GetExtensionValue("fake_id", "fake_key",
                     base::BindOnce(
                         [](base::OnceClosure flushed_callback,
-                           absl::optional<base::Value> ignored) {
+                           std::optional<base::Value> ignored) {
                           std::move(flushed_callback).Run();
                         },
                         std::move(flushed_callback)));
@@ -184,7 +186,7 @@ void StateStore::Init() {
   task_queue_->SetReady();
 }
 
-void StateStore::RemoveKeysForExtension(const std::string& extension_id) {
+void StateStore::RemoveKeysForExtension(const ExtensionId& extension_id) {
   for (auto key = registered_keys_.begin(); key != registered_keys_.end();
        ++key) {
     task_queue_->InvokeWhenReady(base::BindOnce(

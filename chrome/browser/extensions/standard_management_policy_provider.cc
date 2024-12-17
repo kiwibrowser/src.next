@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_management.h"
+#include "chrome/grit/generated_resources.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest.h"
@@ -35,7 +36,7 @@ bool AdminPolicyIsModifiable(const Extension* source_extension,
   // extensions even though it is a component extension, because it doesn't
   // need this capability and it can open up interesting attacks if it's
   // leveraged via bookmarklets or devtools.
-  // TODO(crbug.com/1365660): This protection should be expanded by also
+  // TODO(crbug.com/40239460): This protection should be expanded by also
   // blocking bookmarklets on the Webstore Origin through checks on the Blink
   // side.
   const bool is_webstore_hosted_app =
@@ -65,8 +66,9 @@ bool AdminPolicyIsModifiable(const Extension* source_extension,
 }  // namespace
 
 StandardManagementPolicyProvider::StandardManagementPolicyProvider(
-    ExtensionManagement* settings)
-    : settings_(settings) {}
+    ExtensionManagement* settings,
+    Profile* profile)
+    : profile_(profile), settings_(settings) {}
 
 StandardManagementPolicyProvider::~StandardManagementPolicyProvider() {
 }
@@ -76,7 +78,7 @@ std::string
 #if DCHECK_IS_ON()
   return "extension management policy controlled settings";
 #else
-  IMMEDIATE_CRASH();
+  base::ImmediateCrash();
 #endif
 }
 
@@ -118,7 +120,7 @@ bool StandardManagementPolicyProvider::UserMayLoad(
       break;
     }
     case Manifest::NUM_LOAD_TYPES:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
   }
 
   ExtensionManagement::InstallationMode installation_mode =
@@ -126,6 +128,15 @@ bool StandardManagementPolicyProvider::UserMayLoad(
   if (installation_mode == ExtensionManagement::INSTALLATION_BLOCKED ||
       installation_mode == ExtensionManagement::INSTALLATION_REMOVED) {
     return ReturnLoadError(extension, error);
+  }
+
+  if (!settings_->IsAllowedManifestVersion(extension)) {
+    if (error) {
+      *error = l10n_util::GetStringFUTF16(
+          IDS_EXTENSION_MANIFEST_VERSION_NOT_SUPPORTED,
+          base::UTF8ToUTF16(extension->name()));
+    }
+    return false;
   }
 
   return true;
@@ -181,6 +192,43 @@ bool StandardManagementPolicyProvider::MustRemainDisabled(
     }
     return true;
   }
+
+  if (!settings_->IsAllowedByUnpublishedAvailabilityPolicy(extension)) {
+    if (reason) {
+      *reason = disable_reason::DISABLE_PUBLISHED_IN_STORE_REQUIRED_BY_POLICY;
+    }
+    if (error) {
+      *error = l10n_util::GetStringFUTF16(
+          IDS_EXTENSION_DISABLED_PUBLISHED_IN_STORE_REQUIRED_BY_POLICY,
+          base::UTF8ToUTF16(extension->name()));
+    }
+    return true;
+  }
+
+  if (!settings_->IsAllowedByUnpackedDeveloperModePolicy(*extension)) {
+    if (reason) {
+      *reason = disable_reason::DISABLE_UNSUPPORTED_DEVELOPER_EXTENSION;
+    }
+    if (error) {
+      // TODO(crbug.com/362756477): Replace temporary string with disable
+      // unsupported developer string once ready.
+      *error = u"Unpacked extension blocked by developer mode requirement.";
+    }
+    return true;
+  }
+
+  if (settings_->ShouldBlockForceInstalledOffstoreExtension(*extension)) {
+    if (reason) {
+      *reason = disable_reason::DISABLE_NOT_VERIFIED;
+    }
+    if (error) {
+      *error = l10n_util::GetStringFUTF16(
+          IDS_EXTENSIONS_ADDED_WITHOUT_KNOWLEDGE,
+          l10n_util::GetStringUTF16(IDS_EXTENSION_WEB_STORE_TITLE));
+    }
+    return true;
+  }
+
   return false;
 }
 

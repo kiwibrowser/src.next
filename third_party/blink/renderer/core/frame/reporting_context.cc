@@ -1,10 +1,10 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/frame/reporting_context.h"
 
-#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
+#include "third_party/blink/public/platform/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -76,6 +76,10 @@ void ReportingContext::Bind(
 
 void ReportingContext::QueueReport(Report* report,
                                    const Vector<String>& endpoints) {
+  if (!report->ShouldSendReport()) {
+    return;
+  }
+
   CountReport(report);
 
   NotifyInternal(report);
@@ -193,9 +197,8 @@ void ReportingContext::SendToReportingAPI(Report* report,
         body->referrer(), body->blockedURL(),
         body->effectiveDirective() ? body->effectiveDirective() : "",
         body->originalPolicy() ? body->originalPolicy() : "",
-        body->sourceFile(), body->sample(),
-        body->disposition() ? body->disposition() : "", body->statusCode(),
-        line_number, column_number);
+        body->sourceFile(), body->sample(), body->disposition().AsString(),
+        body->statusCode(), line_number, column_number);
   } else if (type == ReportType::kDeprecation) {
     // Send the deprecation report.
     const DeprecationReportBody* body =
@@ -209,7 +212,7 @@ void ReportingContext::SendToReportingAPI(Report* report,
     const PermissionsPolicyViolationReportBody* body =
         static_cast<PermissionsPolicyViolationReportBody*>(report->body());
     GetReportingService()->QueuePermissionsPolicyViolationReport(
-        url, body->featureId(), body->disposition(), body->message(),
+        url, endpoint, body->featureId(), body->disposition(), body->message(),
         body->sourceFile(), line_number, column_number);
   } else if (type == ReportType::kIntervention) {
     // Send the intervention report.

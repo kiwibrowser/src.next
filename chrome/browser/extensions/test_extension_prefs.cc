@@ -7,13 +7,12 @@
 #include <memory>
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/run_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/sequenced_task_runner.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/clock.h"
 #include "base/time/time.h"
 #include "base/values.h"
@@ -122,9 +121,12 @@ void TestExtensionPrefs::RecreateExtensionPrefs() {
   factory.SetUserPrefsFile(preferences_file_, task_runner_.get());
   factory.set_extension_prefs(
       new ExtensionPrefStore(extension_pref_value_map_.get(), false));
-  pref_service_ = factory.CreateSyncable(pref_registry_.get());
+  // Don't replace `pref_service_` until after re-assigning the `ExtensionPrefs`
+  // testing instance to avoid a dangling pointer.
+  std::unique_ptr<sync_preferences::PrefServiceSyncable> new_pref_service =
+      factory.CreateSyncable(pref_registry_.get());
   std::unique_ptr<ExtensionPrefs> prefs(ExtensionPrefs::Create(
-      &profile_, pref_service_.get(), temp_dir_.GetPath(),
+      &profile_, new_pref_service.get(), temp_dir_.GetPath(),
       extension_pref_value_map_.get(), extensions_disabled_,
       std::vector<EarlyExtensionPrefsObserver*>(),
       // Guarantee that no two extensions get the same installation time
@@ -132,6 +134,7 @@ void TestExtensionPrefs::RecreateExtensionPrefs() {
       clock_.get()));
   ExtensionPrefsFactory::GetInstance()->SetInstanceForTesting(&profile_,
                                                               std::move(prefs));
+  pref_service_ = std::move(new_pref_service);
   // Hack: After recreating ExtensionPrefs, the AppSorting also needs to be
   // recreated. (ExtensionPrefs is never recreated in non-test code.)
   static_cast<TestExtensionSystem*>(ExtensionSystem::Get(&profile_))
@@ -144,14 +147,11 @@ scoped_refptr<Extension> TestExtensionPrefs::AddExtension(
 }
 
 scoped_refptr<Extension> TestExtensionPrefs::AddApp(const std::string& name) {
-  base::DictionaryValue dictionary;
-  AddDefaultManifestKeys(name, &dictionary);
-  dictionary.SetStringPath(manifest_keys::kApp, "true");
+  base::Value::Dict dictionary;
+  AddDefaultManifestKeys(name, dictionary);
 
-  // TODO(crbug.com/949461): Should use SetStringPath() here, but we currently
-  // depend on the special SetString() behavior that overwrites a previous key
-  // with a new path ("app" or "app.launch" vs "app.launch.web_url").
-  dictionary.SetString(manifest_keys::kLaunchWebURL, "http://example.com");
+  dictionary.SetByDottedPath(manifest_keys::kLaunchWebURL,
+                             "http://example.com");
 
   return AddExtensionWithManifest(dictionary, ManifestLocation::kInternal);
 }
@@ -159,31 +159,32 @@ scoped_refptr<Extension> TestExtensionPrefs::AddApp(const std::string& name) {
 scoped_refptr<Extension> TestExtensionPrefs::AddExtensionWithLocation(
     const std::string& name,
     ManifestLocation location) {
-  base::DictionaryValue dictionary;
-  AddDefaultManifestKeys(name, &dictionary);
+  base::Value::Dict dictionary;
+  AddDefaultManifestKeys(name, dictionary);
   return AddExtensionWithManifest(dictionary, location);
 }
 
 scoped_refptr<Extension> TestExtensionPrefs::AddExtensionWithManifest(
-    const base::DictionaryValue& manifest,
+    const base::Value::Dict& manifest,
     ManifestLocation location) {
   return AddExtensionWithManifestAndFlags(manifest, location,
                                           Extension::NO_FLAGS);
 }
 
 scoped_refptr<Extension> TestExtensionPrefs::AddExtensionWithManifestAndFlags(
-    const base::DictionaryValue& manifest,
+    const base::Value::Dict& manifest,
     ManifestLocation location,
     int extra_flags) {
-  const std::string* name = manifest.GetDict().FindString(manifest_keys::kName);
+  const std::string* name = manifest.FindString(manifest_keys::kName);
   EXPECT_TRUE(name);
   base::FilePath path = extensions_dir_.AppendASCII(*name);
   std::string errors;
   scoped_refptr<Extension> extension =
       Extension::Create(path, location, manifest, extra_flags, &errors);
   EXPECT_TRUE(extension.get()) << errors;
-  if (!extension.get())
+  if (!extension.get()) {
     return nullptr;
+  }
 
   EXPECT_TRUE(crx_file::id_util::IdIsValid(extension->id()));
   prefs()->OnExtensionInstalled(extension.get(),
@@ -223,11 +224,10 @@ ChromeAppSorting* TestExtensionPrefs::app_sorting() {
 }
 
 void TestExtensionPrefs::AddDefaultManifestKeys(const std::string& name,
-                                                base::DictionaryValue* dict) {
-  DCHECK(dict);
-  dict->SetStringPath(manifest_keys::kName, name);
-  dict->SetStringPath(manifest_keys::kVersion, "0.1");
-  dict->SetIntPath(manifest_keys::kManifestVersion, 2);
+                                                base::Value::Dict& dict) {
+  dict.Set(manifest_keys::kName, name);
+  dict.Set(manifest_keys::kVersion, "0.1");
+  dict.Set(manifest_keys::kManifestVersion, 2);
 }
 
 }  // namespace extensions

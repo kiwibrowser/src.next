@@ -5,21 +5,20 @@
 #ifndef CONTENT_BROWSER_BROWSER_INTERFACE_BINDERS_H_
 #define CONTENT_BROWSER_BROWSER_INTERFACE_BINDERS_H_
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "content/common/content_export.h"
 #include "mojo/public/cpp/bindings/binder_map.h"
 #include "services/device/public/mojom/battery_monitor.mojom-forward.h"
-#include "services/device/public/mojom/device_posture_provider.mojom.h"
 #include "services/device/public/mojom/vibration_manager.mojom-forward.h"
 #include "url/origin.h"
 
 namespace content {
 
-class AgentSchedulingGroupHost;
 class RenderFrameHost;
 class RenderFrameHostImpl;
 class DedicatedWorkerHost;
 class SharedWorkerHost;
+class SharedStorageWorkletHost;
 class ServiceWorkerHost;
 struct ServiceWorkerVersionInfo;
 struct ServiceWorkerVersionBaseInfo;
@@ -56,19 +55,19 @@ void PopulateBinderMapWithContext(
     mojo::BinderMapWithContext<const url::Origin&>* map);
 url::Origin GetContextForHost(SharedWorkerHost* host);
 
+// Registers the handlers for interfaces requested by shared storage worklets.
+void PopulateBinderMap(SharedStorageWorkletHost* host, mojo::BinderMap* map);
+void PopulateBinderMapWithContext(
+    SharedStorageWorkletHost* host,
+    mojo::BinderMapWithContext<SharedStorageWorkletHost*>* map);
+SharedStorageWorkletHost* GetContextForHost(SharedStorageWorkletHost* host);
+
 // Registers the handlers for interfaces requested by service workers.
 void PopulateBinderMap(ServiceWorkerHost* host, mojo::BinderMap* map);
 void PopulateBinderMapWithContext(
     ServiceWorkerHost* host,
     mojo::BinderMapWithContext<const ServiceWorkerVersionBaseInfo&>* map);
 ServiceWorkerVersionInfo GetContextForHost(ServiceWorkerHost* host);
-
-// Registers the handlers for interfaces requested by `AgentSchedulingGroup`s.
-void PopulateBinderMap(AgentSchedulingGroupHost* host, mojo::BinderMap* map);
-void PopulateBinderMapWithContext(
-    AgentSchedulingGroupHost* host,
-    mojo::BinderMapWithContext<AgentSchedulingGroupHost*>* map);
-AgentSchedulingGroupHost* GetContextForHost(AgentSchedulingGroupHost* host);
 
 }  // namespace internal
 
@@ -78,16 +77,10 @@ using BatteryMonitorBinder = base::RepeatingCallback<void(
 CONTENT_EXPORT void OverrideBatteryMonitorBinderForTesting(
     BatteryMonitorBinder binder);
 
-// Allows tests to override how frame hosts binds DevicePostureProvider
-// receivers.
-using DevicePostureProviderBinder = base::RepeatingCallback<void(
-    mojo::PendingReceiver<device::mojom::DevicePostureProvider>)>;
-CONTENT_EXPORT void OverrideDevicePostureProviderBinderForTesting(
-    DevicePostureProviderBinder binder);
-
 // Allows tests to override how frame hosts bind VibrationManager receivers.
 using VibrationManagerBinder = base::RepeatingCallback<void(
-    mojo::PendingReceiver<device::mojom::VibrationManager>)>;
+    mojo::PendingReceiver<device::mojom::VibrationManager>,
+    mojo::PendingRemote<device::mojom::VibrationManagerListener>)>;
 CONTENT_EXPORT void OverrideVibrationManagerBinderForTesting(
     VibrationManagerBinder binder);
 

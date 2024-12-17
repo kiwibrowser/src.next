@@ -5,29 +5,41 @@
 #include "base/path_service.h"
 
 #include <unordered_map>
+#include <utility>
 
 #include "base/check_op.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/raw_ptr_exclusion.h"
 #include "base/synchronization/lock.h"
 #include "build/build_config.h"
 
 #if BUILDFLAG(IS_WIN)
 #include <windows.h>
+
 #include <shellapi.h>
 #include <shlobj.h>
 #endif
 
+#define ENABLE_BEHAVIOUR_OVERRIDE_PROVIDER                                    \
+  ((BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_ANDROID)) || \
+   BUILDFLAG(IS_WIN))
+
 namespace base {
+
+// Custom behaviour providers.
+bool EnvOverridePathProvider(int key, FilePath* result);
 
 bool PathProvider(int key, FilePath* result);
 
 #if BUILDFLAG(IS_WIN)
 bool PathProviderWin(int key, FilePath* result);
-#elif BUILDFLAG(IS_APPLE)
+#elif BUILDFLAG(IS_MAC)
 bool PathProviderMac(int key, FilePath* result);
+#elif BUILDFLAG(IS_IOS)
+bool PathProviderIOS(int key, FilePath* result);
 #elif BUILDFLAG(IS_ANDROID)
 bool PathProviderAndroid(int key, FilePath* result);
 #elif BUILDFLAG(IS_FUCHSIA)
@@ -46,7 +58,9 @@ typedef std::unordered_map<int, FilePath> PathMap;
 // providers claim overlapping keys.
 struct Provider {
   PathService::ProviderFunc func;
-  struct Provider* next;
+  // This field is not a raw_ptr<> because it was filtered by the rewriter for:
+  // #reinterpret-cast-trivial-type, #global-scope
+  RAW_PTR_EXCLUSION struct Provider* next;
 #ifndef NDEBUG
   int key_start;
   int key_end;
@@ -61,24 +75,37 @@ Provider base_provider = {PathProvider, nullptr,
                           true};
 
 #if BUILDFLAG(IS_WIN)
-Provider base_provider_win = {
-  PathProviderWin,
-  &base_provider,
+Provider win_provider = {PathProviderWin, &base_provider,
 #ifndef NDEBUG
-  PATH_WIN_START,
-  PATH_WIN_END,
+                         PATH_WIN_START, PATH_WIN_END,
 #endif
-  true
-};
+                         true};
+Provider base_provider_win = {EnvOverridePathProvider, &win_provider,
+#ifndef NDEBUG
+                              PATH_START, PATH_END,
+#endif
+                              true};
 #endif
 
-#if BUILDFLAG(IS_APPLE)
+#if BUILDFLAG(IS_MAC)
 Provider base_provider_mac = {
   PathProviderMac,
   &base_provider,
 #ifndef NDEBUG
   PATH_MAC_START,
   PATH_MAC_END,
+#endif
+  true
+};
+#endif
+
+#if BUILDFLAG(IS_IOS)
+Provider base_provider_ios = {
+  PathProviderIOS,
+  &base_provider,
+#ifndef NDEBUG
+  PATH_IOS_START,
+  PATH_IOS_END,
 #endif
   true
 };
@@ -105,15 +132,16 @@ Provider base_provider_fuchsia = {PathProviderFuchsia, &base_provider,
 #endif
 
 #if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_ANDROID)
-Provider base_provider_posix = {
-  PathProviderPosix,
-  &base_provider,
+Provider posix_provider = {PathProviderPosix, &base_provider,
 #ifndef NDEBUG
-  PATH_POSIX_START,
-  PATH_POSIX_END,
+                           PATH_POSIX_START, PATH_POSIX_END,
 #endif
-  true
-};
+                           true};
+Provider base_provider_posix = {EnvOverridePathProvider, &posix_provider,
+#ifndef NDEBUG
+                                PATH_START, PATH_END,
+#endif
+                                true};
 #endif
 
 
@@ -127,8 +155,10 @@ struct PathData {
   PathData() : cache_disabled(false) {
 #if BUILDFLAG(IS_WIN)
     providers = &base_provider_win;
-#elif BUILDFLAG(IS_APPLE)
+#elif BUILDFLAG(IS_MAC)
     providers = &base_provider_mac;
+#elif BUILDFLAG(IS_IOS)
+    providers = &base_provider_ios;
 #elif BUILDFLAG(IS_ANDROID)
     providers = &base_provider_android;
 #elif BUILDFLAG(IS_FUCHSIA)
@@ -254,14 +284,11 @@ bool PathService::OverrideAndCreateIfNeeded(int key,
 
   FilePath file_path = path;
 
-  // For some locations this will fail if called from inside the sandbox there-
-  // fore we protect this call with a flag.
-  if (create) {
-    // Make sure the directory exists. We need to do this before we translate
-    // this to the absolute path because on POSIX, MakeAbsoluteFilePath fails
-    // if called on a non-existent path.
-    if (!PathExists(file_path) && !CreateDirectory(file_path))
-      return false;
+  // Create the directory if requested by the caller. Do this before resolving
+  // `file_path` to an absolute path because on POSIX, MakeAbsoluteFilePath
+  // requires that the path exists.
+  if (create && !CreateDirectory(file_path)) {
+    return false;
   }
 
   // We need to have an absolute path.
@@ -278,7 +305,7 @@ bool PathService::OverrideAndCreateIfNeeded(int key,
   // on the value we are overriding, and are now out of sync with reality.
   path_data->cache.clear();
 
-  path_data->overrides[key] = file_path;
+  path_data->overrides[key] = std::move(file_path);
 
   return true;
 }
@@ -303,7 +330,7 @@ bool PathService::RemoveOverrideForTests(int key) {
 }
 
 // static
-bool PathService::IsOverriddenForTests(int key) {
+bool PathService::IsOverriddenForTesting(int key) {
   PathData* path_data = GetPathData();
   DCHECK(path_data);
 

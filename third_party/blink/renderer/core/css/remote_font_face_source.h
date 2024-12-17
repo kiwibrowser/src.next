@@ -1,10 +1,11 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_REMOTE_FONT_FACE_SOURCE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_REMOTE_FONT_FACE_SOURCE_H_
 
+#include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "third_party/blink/renderer/core/css/css_font_face_source.h"
 #include "third_party/blink/renderer/core/execution_context/security_context.h"
@@ -21,7 +22,11 @@ class FontCustomPlatformData;
 class RemoteFontFaceSource final : public CSSFontFaceSource,
                                    public FontResourceClient {
  public:
-  enum Phase { kNoLimitExceeded, kShortLimitExceeded, kLongLimitExceeded };
+  enum Phase : uint8_t {
+    kNoLimitExceeded,
+    kShortLimitExceeded,
+    kLongLimitExceeded
+  };
 
   RemoteFontFaceSource(CSSFontFace*,
                        FontSelector*,
@@ -38,7 +43,7 @@ class RemoteFontFaceSource final : public CSSFontFaceSource,
   bool IsPendingDataUrl() const override;
 
   const FontCustomPlatformData* GetCustomPlaftormData() const override {
-    return custom_font_data_.get();
+    return custom_font_data_.Get();
   }
 
   void BeginLoadIfNeeded() override;
@@ -61,11 +66,10 @@ class RemoteFontFaceSource final : public CSSFontFaceSource,
   void Trace(Visitor*) const override;
 
  protected:
-  scoped_refptr<SimpleFontData> CreateFontData(
+  const SimpleFontData* CreateFontData(
       const FontDescription&,
       const FontSelectionCapabilities&) override;
-  scoped_refptr<SimpleFontData> CreateLoadingFallbackFontData(
-      const FontDescription&);
+  const SimpleFontData* CreateLoadingFallbackFontData(const FontDescription&);
 
  private:
   // Periods of the Font Display Timeline.
@@ -74,7 +78,7 @@ class RemoteFontFaceSource final : public CSSFontFaceSource,
   // the font is loaded from memory cache synchronously, and hence, made
   // immediately available. As we never need to use a fallback for it, using
   // other DisplayPeriod values seem artificial. So we use a special value.
-  enum DisplayPeriod {
+  enum DisplayPeriod : uint8_t {
     kBlockPeriod,
     kSwapPeriod,
     kFailurePeriod,
@@ -116,8 +120,9 @@ class RemoteFontFaceSource final : public CSSFontFaceSource,
     void MaySetDataSource(DataSource);
 
     static DataSource DataSourceForLoadFinish(const FontResource* font) {
-      if (font->Url().ProtocolIsData())
+      if (font->Url().ProtocolIsData()) {
         return kFromDataURL;
+      }
       return font->GetResponse().WasCached() ? kFromDiskCache : kFromNetwork;
     }
 
@@ -143,28 +148,21 @@ class RemoteFontFaceSource final : public CSSFontFaceSource,
   bool UpdatePeriod() override;
   bool ShouldTriggerWebFontsIntervention();
   bool IsLowPriorityLoadingAllowedForRemoteFont() const override;
-  FontDisplay GetFontDisplayWithDocumentPolicyCheck(FontDisplay,
-                                                    const FontSelector*,
-                                                    ReportOptions) const;
 
   // Our owning font face.
   Member<CSSFontFace> face_;
   Member<FontSelector> font_selector_;
 
-#if defined(USE_PARALLEL_TEXT_SHAPING)
-  // Post `BeginLoadIfNeeded()` unless context thread.
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
-#endif
-
   // |nullptr| if font is not loaded or failed to decode.
-  scoped_refptr<FontCustomPlatformData> custom_font_data_;
+  Member<const FontCustomPlatformData> custom_font_data_;
   // |nullptr| if font is not loaded or failed to decode.
   String url_;
+
+  FontLoadHistograms histograms_;
 
   FontDisplay display_;
   Phase phase_;
   DisplayPeriod period_;
-  FontLoadHistograms histograms_;
   bool is_intervention_triggered_;
   bool finished_before_document_rendering_begin_;
 

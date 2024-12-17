@@ -7,6 +7,8 @@
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
+#include "chrome/browser/extensions/external_policy_loader.h"
+#include "chrome/browser/policy/policy_test_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
@@ -15,7 +17,6 @@
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/manifest.h"
-#include "extensions/common/value_builder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using extensions::mojom::ManifestLocation;
@@ -39,11 +40,11 @@ class InstallVerifierTest : public ExtensionServiceTestBase {
 
   // Adds an extension as being allowed by policy.
   void AddExtensionAsPolicyInstalled(const ExtensionId& id) {
-    std::unique_ptr<base::DictionaryValue> extension_entry =
-        DictionaryBuilder().Set("installation_mode", "allowed").Build();
+    base::Value::Dict extension_entry =
+        base::Value::Dict().Set("installation_mode", "allowed");
     testing_profile()->GetTestingPrefService()->SetManagedPref(
         pref_names::kExtensionManagement,
-        DictionaryBuilder().Set(id, std::move(extension_entry)).Build());
+        base::Value::Dict().Set(id, std::move(extension_entry)));
     EXPECT_TRUE(ExtensionManagementFactory::GetForBrowserContext(profile())
                     ->IsInstallationExplicitlyAllowed(id));
   }
@@ -72,7 +73,7 @@ TEST_F(InstallVerifierTest, TestIsFromStoreAndMustRemainDisabled) {
   struct {
     const char* test_name;
     ManifestLocation location;
-    absl::optional<GURL> update_url;
+    std::optional<GURL> update_url;
     FromStoreStatus expected_from_store_status;
     MustRemainDisabledStatus expected_must_remain_disabled_status;
   } test_cases[] = {
@@ -80,13 +81,13 @@ TEST_F(InstallVerifierTest, TestIsFromStoreAndMustRemainDisabled) {
        FROM_STORE, CAN_BE_ENABLED},
       {"internal non-store update url", ManifestLocation::kInternal,
        non_store_update_url, NOT_FROM_STORE, MUST_REMAIN_DISABLED},
-      {"internal no update url", ManifestLocation::kInternal, absl::nullopt,
+      {"internal no update url", ManifestLocation::kInternal, std::nullopt,
        NOT_FROM_STORE, MUST_REMAIN_DISABLED},
       {"unpacked from store", ManifestLocation::kUnpacked, store_update_url,
        FROM_STORE, CAN_BE_ENABLED},
       {"unpacked non-store update url", ManifestLocation::kUnpacked,
        non_store_update_url, NOT_FROM_STORE, CAN_BE_ENABLED},
-      {"unpacked no update url", ManifestLocation::kUnpacked, absl::nullopt,
+      {"unpacked no update url", ManifestLocation::kUnpacked, std::nullopt,
        NOT_FROM_STORE, CAN_BE_ENABLED},
       {"external from store", ManifestLocation::kExternalPolicyDownload,
        store_update_url, FROM_STORE, CAN_BE_ENABLED},
@@ -120,5 +121,58 @@ TEST_F(InstallVerifierTest, TestIsFromStoreAndMustRemainDisabled) {
         << error;
   }
 }
+
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
+// Test the behavior of the InstallVerifier when an extension is
+// force-installed in different trust environments.
+TEST_F(InstallVerifierTest, ForceInstalledExtensionBehaviorWithTrustLevels) {
+  InstallVerifier* install_verifier = InstallVerifier::Get(profile());
+  scoped_refptr<const Extension> forced_extension =
+      ExtensionBuilder("Force Installed Extension")
+          .SetLocation(ManifestLocation::kExternalPolicyDownload)
+          .Build();
+  base::Value::Dict forced_list_pref;
+  ExternalPolicyLoader::AddExtension(forced_list_pref, forced_extension->id(),
+                                     "http://example.com/update_url");
+  testing_profile()->GetTestingPrefService()->SetManagedPref(
+      pref_names::kInstallForceList, forced_list_pref.Clone());
+
+  {
+    // Set up a low-trust environment.
+    policy::ScopedManagementServiceOverrideForTesting browser_management(
+        policy::ManagementServiceFactory::GetForPlatform(),
+        policy::EnterpriseManagementAuthority::NONE);
+
+    EXPECT_TRUE(ExtensionManagementFactory::GetForBrowserContext(profile())
+                    ->IsForceInstalledInLowTrustEnvironment(*forced_extension));
+
+    // In a low-trust environment, the extension should remain disabled.
+    disable_reason::DisableReason disable_reason = disable_reason::DISABLE_NONE;
+    std::u16string error;
+    EXPECT_TRUE(install_verifier->MustRemainDisabled(forced_extension.get(),
+                                                     &disable_reason, &error));
+    EXPECT_EQ(disable_reason::DISABLE_NOT_VERIFIED, disable_reason);
+  }
+
+  {
+    // Set up a high-trust environment.
+    policy::ScopedManagementServiceOverrideForTesting browser_management(
+        policy::ManagementServiceFactory::GetForPlatform(),
+        policy::EnterpriseManagementAuthority::CLOUD_DOMAIN);
+
+    EXPECT_FALSE(
+        ExtensionManagementFactory::GetForBrowserContext(profile())
+            ->IsForceInstalledInLowTrustEnvironment(*forced_extension));
+
+    // In a high-trust environment, the extension should not remain disabled.
+    disable_reason::DisableReason disable_reason = disable_reason::DISABLE_NONE;
+    std::u16string error;
+    EXPECT_FALSE(install_verifier->MustRemainDisabled(forced_extension.get(),
+                                                      &disable_reason, &error));
+    // Verify that disable_reason is still DISABLE_NONE.
+    EXPECT_EQ(disable_reason::DISABLE_NONE, disable_reason);
+  }
+}
+#endif
 
 }  // namespace extensions

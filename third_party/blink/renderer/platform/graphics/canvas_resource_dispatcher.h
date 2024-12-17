@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,10 @@
 
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/read_only_shared_memory_region.h"
+#include "base/task/single_thread_task_runner.h"
 #include "cc/paint/paint_flags.h"
-#include "components/power_scheduler/power_mode_voter.h"
 #include "components/viz/common/frame_sinks/begin_frame_args.h"
 #include "components/viz/common/resources/resource_id.h"
 #include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
@@ -35,6 +36,16 @@ class CanvasResourceDispatcherClient {
 class PLATFORM_EXPORT CanvasResourceDispatcher
     : public viz::mojom::blink::CompositorFrameSinkClient {
  public:
+  static constexpr unsigned kMaxPendingCompositorFrames = 2;
+
+  // In theory, the spec allows an unlimited number of frames to be retained
+  // on the main thread. For example, by acquiring ImageBitmaps from the
+  // placeholder canvas.  We nonetheless set a limit to the number of
+  // outstanding placeholder frames in order to prevent potential resource
+  // leaks that can happen when the main thread is in a jam, causing posted
+  // frames to pile-up.
+  static constexpr unsigned kMaxUnreclaimedPlaceholderFrames = 50;
+
   base::WeakPtr<CanvasResourceDispatcher> GetWeakPtr() {
     return weak_ptr_factory_.GetWeakPtr();
   }
@@ -45,13 +56,18 @@ class PLATFORM_EXPORT CanvasResourceDispatcher
     kInvalidPlaceholderCanvasId = -1,
   };
 
-  CanvasResourceDispatcher(CanvasResourceDispatcherClient*,
-                           scoped_refptr<base::SingleThreadTaskRunner>
-                               agent_group_scheduler_compositor_task_runner,
-                           uint32_t client_id,
-                           uint32_t sink_id,
-                           int placeholder_canvas_id,
-                           const gfx::Size&);
+  // `task_runner` is the task runner this object is associated with and
+  // executes on. `agent_group_scheduler_compositor_task_runner` is the
+  // compositor task runner for the associated canvas element.
+  CanvasResourceDispatcher(
+      CanvasResourceDispatcherClient*,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner>
+          agent_group_scheduler_compositor_task_runner,
+      uint32_t client_id,
+      uint32_t sink_id,
+      int placeholder_canvas_id,
+      const gfx::Size&);
 
   ~CanvasResourceDispatcher() override;
   void SetNeedsBeginFrame(bool);
@@ -81,17 +97,19 @@ class PLATFORM_EXPORT CanvasResourceDispatcher
   // viz::mojom::blink::CompositorFrameSinkClient implementation.
   void DidReceiveCompositorFrameAck(
       WTF::Vector<viz::ReturnedResource> resources) final;
-  void OnBeginFrame(
-      const viz::BeginFrameArgs&,
-      const WTF::HashMap<uint32_t, viz::FrameTimingDetails>&) final;
+  void OnBeginFrame(const viz::BeginFrameArgs&,
+                    const WTF::HashMap<uint32_t, viz::FrameTimingDetails>&,
+                    bool frame_ack,
+                    WTF::Vector<viz::ReturnedResource> resources) final;
   void OnBeginFramePausedChanged(bool paused) final {}
   void ReclaimResources(WTF::Vector<viz::ReturnedResource> resources) final;
   void OnCompositorFrameTransitionDirectiveProcessed(
       uint32_t sequence_id) final {}
+  void OnSurfaceEvicted(const viz::LocalSurfaceId& local_surface_id) final {}
 
   void DidAllocateSharedBitmap(base::ReadOnlySharedMemoryRegion region,
-                               const gpu::Mailbox& id);
-  void DidDeleteSharedBitmap(const gpu::Mailbox& id);
+                               const viz::SharedBitmapId& id);
+  void DidDeleteSharedBitmap(const viz::SharedBitmapId& id);
 
   void SetFilterQuality(cc::PaintFlags::FilterQuality filter_quality);
   void SetPlaceholderCanvasDispatcher(int placeholder_canvas_id);
@@ -101,8 +119,7 @@ class PLATFORM_EXPORT CanvasResourceDispatcher
   friend class CanvasResourceDispatcherTest;
   struct FrameResource;
 
-  using ResourceMap =
-      HashMap<viz::ResourceId, std::unique_ptr<FrameResource>, ResourceIdHash>;
+  using ResourceMap = HashMap<viz::ResourceId, std::unique_ptr<FrameResource>>;
 
   bool PrepareFrame(scoped_refptr<CanvasResource>&&,
                     base::TimeTicks commit_start_time,
@@ -119,7 +136,7 @@ class PLATFORM_EXPORT CanvasResourceDispatcher
   bool change_size_for_next_commit_;
   bool suspend_animation_ = false;
   bool needs_begin_frame_ = false;
-  int pending_compositor_frames_ = 0;
+  unsigned pending_compositor_frames_ = 0;
 
   void SetNeedsBeginFrameInternal();
 
@@ -153,10 +170,9 @@ class PLATFORM_EXPORT CanvasResourceDispatcher
 
   viz::BeginFrameAck current_begin_frame_ack_;
 
-  CanvasResourceDispatcherClient* client_;
+  raw_ptr<CanvasResourceDispatcherClient> client_;
 
-  std::unique_ptr<power_scheduler::PowerModeVoter> animation_power_mode_voter_;
-
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner>
       agent_group_scheduler_compositor_task_runner_;
 

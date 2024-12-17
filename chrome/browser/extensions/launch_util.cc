@@ -9,9 +9,8 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
+#include "chrome/browser/extensions/bookmark_app_util.h"
 #include "chrome/browser/extensions/extension_sync_service.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/web_applications/extensions/bookmark_app_util.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "components/pref_registry/pref_registry_syncable.h"
@@ -31,8 +30,9 @@ const char kPrefLaunchType[] = "launchType";
 
 LaunchType GetLaunchType(const ExtensionPrefs* prefs,
                          const Extension* extension) {
-  if (!extension)
+  if (!extension) {
     return LAUNCH_TYPE_INVALID;
+  }
   LaunchType result = LAUNCH_TYPE_DEFAULT;
 
   int value = GetLaunchTypePrefValue(prefs, extension->id());
@@ -65,7 +65,7 @@ void SetLaunchType(content::BrowserContext* context,
 
   ExtensionPrefs::Get(context)->UpdateExtensionPref(
       extension_id, kPrefLaunchType,
-      std::make_unique<base::Value>(static_cast<int>(launch_type)));
+      base::Value(static_cast<int>(launch_type)));
 
   // Sync the launch type.
   const Extension* extension =
@@ -80,7 +80,7 @@ apps::LaunchContainer GetLaunchContainer(const ExtensionPrefs* prefs,
   apps::LaunchContainer manifest_launch_container =
       AppLaunchInfo::GetLaunchContainer(extension);
 
-  absl::optional<apps::LaunchContainer> result;
+  std::optional<apps::LaunchContainer> result;
 
   if (manifest_launch_container ==
       apps::LaunchContainer::kLaunchContainerPanelDeprecated) {
@@ -95,7 +95,7 @@ apps::LaunchContainer GetLaunchContainer(const ExtensionPrefs* prefs,
       // If the pref is set to launch a window (or no pref is set, and
       // window opening is the default), make the container a window.
       result = apps::LaunchContainer::kLaunchContainerWindow;
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
     } else if (prefs_launch_type == LAUNCH_TYPE_FULLSCREEN) {
       // LAUNCH_TYPE_FULLSCREEN launches in a maximized app window in ash.
       // For desktop chrome AURA on all platforms we should open the
@@ -112,7 +112,7 @@ apps::LaunchContainer GetLaunchContainer(const ExtensionPrefs* prefs,
     // If a new value for app.launch.container is added, logic for it should be
     // added here. apps::LaunchContainer::kLaunchContainerWindow is not
     // present because there is no way to set it in a manifest.
-    NOTREACHED() << static_cast<int>(manifest_launch_container);
+    NOTREACHED_IN_MIGRATION() << static_cast<int>(manifest_launch_container);
   }
 
   // All paths should set |result|.

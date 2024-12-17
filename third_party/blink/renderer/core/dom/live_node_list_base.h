@@ -27,13 +27,15 @@
 
 #include "base/check_op.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
+#include "third_party/blink/renderer/core/dom/node_list_invalidation_type.h"
 #include "third_party/blink/renderer/core/html/collection_type.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
+
+class Document;
 
 enum class NodeListSearchRoot {
   kOwnerNode,
@@ -57,7 +59,7 @@ class CORE_EXPORT LiveNodeListBase : public GarbageCollectedMixin {
 
   virtual ~LiveNodeListBase() = default;
 
-  ContainerNode& RootNode() const;
+  virtual ContainerNode& RootNode() const;
 
   void DidMoveToDocument(Document& old_document, Document& new_document);
   ALWAYS_INLINE bool IsRootedAtTreeScope() const {
@@ -82,10 +84,6 @@ class CORE_EXPORT LiveNodeListBase : public GarbageCollectedMixin {
 
  protected:
   Document& GetDocument() const { return owner_node_->GetDocument(); }
-
-  ALWAYS_INLINE NodeListSearchRoot SearchRoot() const {
-    return static_cast<NodeListSearchRoot>(search_root_);
-  }
 
   template <typename MatchFunc>
   static Element* TraverseMatchingElementsForwardToOffset(
@@ -130,6 +128,10 @@ ALWAYS_INLINE bool LiveNodeListBase::ShouldInvalidateTypeOnAttributeChange(
              attr_name == html_names::kTypeAttr;
     case kInvalidateOnHRefAttrChange:
       return attr_name == html_names::kHrefAttr;
+    case kInvalidateOnPopoverInvokerAttrChange:
+      return attr_name == html_names::kPopoverAttr ||
+             attr_name == html_names::kPopovertargetAttr ||
+             attr_name == html_names::kPopovertargetactionAttr;
     case kDoNotInvalidateOnAttributeChanges:
       return false;
     case kInvalidateOnAnyAttrChange:

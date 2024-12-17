@@ -4,10 +4,10 @@
 
 #include "chrome/browser/extensions/blocklist_state_fetcher.h"
 
-#include "base/bind.h"
 #include "base/containers/contains.h"
+#include "base/functional/bind.h"
 #include "base/strings/escape.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/task/single_thread_task_runner.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/common/safe_browsing/crx_info.pb.h"
@@ -43,7 +43,7 @@ void BlocklistStateFetcher::Request(const std::string& id,
       SetSafeBrowsingConfig(
           g_browser_process->safe_browsing_service()->GetV4ProtocolConfig());
     } else {
-      base::ThreadTaskRunnerHandle::Get()->PostTask(
+      base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
           FROM_HERE, base::BindOnce(std::move(callback), BLOCKLISTED_UNKNOWN));
       return;
     }
@@ -51,8 +51,9 @@ void BlocklistStateFetcher::Request(const std::string& id,
 
   bool request_already_sent = base::Contains(callbacks_, id);
   callbacks_.insert(std::make_pair(id, std::move(callback)));
-  if (request_already_sent)
+  if (request_already_sent) {
     return;
+  }
 
   SendRequest(id);
 }
@@ -92,11 +93,18 @@ void BlocklistStateFetcher::SendRequest(const std::string& id) {
             "and your device from dangerous sites' in Chromium settings under "
             "Privacy. This feature is enabled by default."
           chrome_policy {
+            SafeBrowsingProtectionLevel {
+              policy_options {mode: MANDATORY}
+              SafeBrowsingProtectionLevel: 0
+            }
+          }
+          chrome_policy {
             SafeBrowsingEnabled {
               policy_options {mode: MANDATORY}
               SafeBrowsingEnabled: false
             }
           }
+          deprecated_policies: "SafeBrowsingEnabled"
         })");
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = request_url;
@@ -126,12 +134,14 @@ void BlocklistStateFetcher::OnURLLoaderComplete(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   int response_code = 0;
-  if (url_loader->ResponseInfo() && url_loader->ResponseInfo()->headers)
+  if (url_loader->ResponseInfo() && url_loader->ResponseInfo()->headers) {
     response_code = url_loader->ResponseInfo()->headers->response_code();
+  }
 
   std::string response_body_str;
-  if (response_body.get())
+  if (response_body.get()) {
     response_body_str = std::move(*response_body.get());
+  }
 
   OnURLLoaderCompleteInternal(url_loader, response_body_str, response_code,
                               url_loader->NetError());
@@ -144,7 +154,7 @@ void BlocklistStateFetcher::OnURLLoaderCompleteInternal(
     int net_error) {
   auto it = requests_.find(url_loader);
   if (it == requests_.end()) {
-    NOTREACHED();
+    NOTREACHED_IN_MIGRATION();
     return;
   }
 

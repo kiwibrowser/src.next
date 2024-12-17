@@ -38,10 +38,12 @@ class ScrollableArea;
 
 class CORE_EXPORT LayoutCustomScrollbarPart final : public LayoutReplaced {
  public:
-  static LayoutCustomScrollbarPart* CreateAnonymous(Document*,
-                                                    ScrollableArea*,
-                                                    CustomScrollbar* = nullptr,
-                                                    ScrollbarPart = kNoPart);
+  static LayoutCustomScrollbarPart* CreateAnonymous(
+      Document*,
+      ScrollableArea*,
+      CustomScrollbar* = nullptr,
+      ScrollbarPart = kNoPart,
+      bool suppress_use_counters = false);
 
   void Trace(Visitor*) const override;
 
@@ -68,22 +70,31 @@ class CORE_EXPORT LayoutCustomScrollbarPart final : public LayoutReplaced {
   // available.
   int ComputeLength() const;
 
+  // Update the overridden size.
+  void SetOverriddenSize(const PhysicalSize& size);
+  // This should not be called.
+  LayoutPoint LocationInternal() const override;
+  // Rerturn the overridden size set by SetOverriddenSize();
+  PhysicalSize Size() const override;
+
   LayoutUnit MarginTop() const override;
   LayoutUnit MarginBottom() const override;
   LayoutUnit MarginLeft() const override;
   LayoutUnit MarginRight() const override;
 
-  bool IsOfType(LayoutObjectType type) const override {
+  bool IsLayoutCustomScrollbarPart() const final {
     NOT_DESTROYED();
-    return type == kLayoutObjectCustomScrollbarPart ||
-           LayoutReplaced::IsOfType(type);
+    return true;
   }
   ScrollableArea* GetScrollableArea() const {
     NOT_DESTROYED();
-    return scrollable_area_;
+    return scrollable_area_.Get();
   }
 
-  LayoutCustomScrollbarPart(ScrollableArea*, CustomScrollbar*, ScrollbarPart);
+  LayoutCustomScrollbarPart(ScrollableArea*,
+                            CustomScrollbar*,
+                            ScrollbarPart,
+                            bool suppress_use_counters);
 
  private:
   void UpdateFromStyle() override;
@@ -96,14 +107,6 @@ class CORE_EXPORT LayoutCustomScrollbarPart final : public LayoutReplaced {
   LayoutBox* LocationContainer() const override {
     NOT_DESTROYED();
     return nullptr;
-  }
-
-  // A scrollbar part is not in the layout tree and is not laid out like other
-  // layout objects. CustomScrollbar will call scrollbar parts' SetFrameRect()
-  // from its SetFrameRect() when needed.
-  void UpdateLayout() override {
-    NOT_DESTROYED();
-    NOTREACHED();
   }
 
   // Have all padding getters return 0. The important point here is to avoid
@@ -132,16 +135,15 @@ class CORE_EXPORT LayoutCustomScrollbarPart final : public LayoutReplaced {
 
   void RecordPercentLengthStats() const;
 
-  int ComputeSize(SizeType size_type,
-                  const Length& length,
-                  int container_size) const;
+  int ComputeSize(const Length& length, int container_size) const;
   int ComputeWidth(int container_width) const;
   int ComputeHeight(int container_height) const;
 
   Member<ScrollableArea> scrollable_area_;
   Member<CustomScrollbar> scrollbar_;
-
+  PhysicalSize overridden_size_;
   ScrollbarPart part_;
+  bool suppress_use_counters_ = false;
 };
 
 template <>

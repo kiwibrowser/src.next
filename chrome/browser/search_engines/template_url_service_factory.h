@@ -7,11 +7,15 @@
 
 #include <memory>
 
-#include "base/memory/singleton.h"
+#include "base/no_destructor.h"
 #include "chrome/browser/profiles/profile_keyed_service_factory.h"
 
 class Profile;
 class TemplateURLService;
+
+namespace content {
+class BrowserContext;
+}  // namespace content
 
 // Singleton that owns all TemplateURLService and associates them with
 // Profiles.
@@ -25,14 +29,14 @@ class TemplateURLServiceFactory : public ProfileKeyedServiceFactory {
       content::BrowserContext* profile);
 
  private:
-  friend struct base::DefaultSingletonTraits<TemplateURLServiceFactory>;
+  friend base::NoDestructor<TemplateURLServiceFactory>;
 
   TemplateURLServiceFactory();
   ~TemplateURLServiceFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const override;
+  std::unique_ptr<KeyedService> BuildServiceInstanceForBrowserContext(
+      content::BrowserContext* context) const override;
   void RegisterProfilePrefs(
       user_prefs::PrefRegistrySyncable* registry) override;
   bool ServiceIsNULLWhileTesting() const override;

@@ -31,6 +31,8 @@
 #include "third_party/blink/renderer/core/css/selector_filter.h"
 
 #include "third_party/blink/renderer/core/css/css_selector.h"
+#include "third_party/blink/renderer/core/css/style_rule.h"
+#include "third_party/blink/renderer/core/css/style_scope.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
 
@@ -48,53 +50,58 @@ inline bool IsExcludedAttribute(const AtomicString& name) {
          name == html_names::kStyleAttr.LocalName();
 }
 
-inline void CollectElementIdentifierHashes(
-    const Element& element,
-    Vector<unsigned, 4>& identifier_hashes) {
-  identifier_hashes.push_back(
-      element.LocalNameForSelectorMatching().Impl()->ExistingHash() *
-      kTagNameSalt);
+template <class Func>
+inline void CollectElementIdentifierHashes(const Element& element,
+                                           Func&& func) {
+  func(element.LocalNameForSelectorMatching().Hash() * kTagNameSalt);
   if (element.HasID()) {
-    identifier_hashes.push_back(
-        element.IdForStyleResolution().Impl()->ExistingHash() * kIdSalt);
+    func(element.IdForStyleResolution().Hash() * kIdSalt);
   }
 
   if (element.IsStyledElement() && element.HasClass()) {
-    const SpaceSplitString& class_names = element.ClassNames();
-    wtf_size_t count = class_names.size();
-    for (wtf_size_t i = 0; i < count; ++i) {
-      identifier_hashes.push_back(class_names[i].Impl()->ExistingHash() *
-                                  kClassSalt);
+    for (const AtomicString& class_name : element.ClassNames()) {
+      func(class_name.Hash() * kClassSalt);
     }
   }
   AttributeCollection attributes = element.AttributesWithoutUpdate();
   for (const auto& attribute_item : attributes) {
-    auto attribute_name = attribute_item.LocalName();
-    if (IsExcludedAttribute(attribute_name))
+    const AtomicString& attribute_name = attribute_item.LocalName();
+    if (IsExcludedAttribute(attribute_name)) {
       continue;
-    auto lower = attribute_name.IsLowerASCII() ? attribute_name
-                                               : attribute_name.LowerASCII();
-    identifier_hashes.push_back(lower.Impl()->ExistingHash() * kAttributeSalt);
+    }
+    if (attribute_name.IsLowerASCII()) {
+      func(attribute_name.Hash() * kAttributeSalt);
+    } else {
+      func(attribute_name.LowerASCII().Hash() * kAttributeSalt);
+    }
   }
 }
 
+void CollectDescendantCompoundSelectorIdentifierHashes(
+    const CSSSelector* selector,
+    CSSSelector::RelationType relation,
+    const StyleScope* style_scope,
+    Vector<unsigned>& hashes);
+
 inline void CollectDescendantSelectorIdentifierHashes(
     const CSSSelector& selector,
-    unsigned*& hash) {
+    const StyleScope* style_scope,
+    Vector<unsigned>& hashes) {
   switch (selector.Match()) {
     case CSSSelector::kId:
-      if (!selector.Value().IsEmpty())
-        (*hash++) = selector.Value().Impl()->ExistingHash() * kIdSalt;
+      if (!selector.Value().empty()) {
+        hashes.push_back(selector.Value().Hash() * kIdSalt);
+      }
       break;
     case CSSSelector::kClass:
-      if (!selector.Value().IsEmpty())
-        (*hash++) = selector.Value().Impl()->ExistingHash() * kClassSalt;
+      if (!selector.Value().empty()) {
+        hashes.push_back(selector.Value().Hash() * kClassSalt);
+      }
       break;
     case CSSSelector::kTag:
       if (selector.TagQName().LocalName() !=
           CSSSelector::UniversalSelectorAtom()) {
-        (*hash++) = selector.TagQName().LocalName().Impl()->ExistingHash() *
-                    kTagNameSalt;
+        hashes.push_back(selector.TagQName().LocalName().Hash() * kTagNameSalt);
       }
       break;
     case CSSSelector::kAttributeExact:
@@ -105,96 +112,66 @@ inline void CollectDescendantSelectorIdentifierHashes(
     case CSSSelector::kAttributeEnd:
     case CSSSelector::kAttributeHyphen: {
       auto attribute_name = selector.Attribute().LocalName();
-      if (IsExcludedAttribute(attribute_name))
+      if (IsExcludedAttribute(attribute_name)) {
         break;
+      }
       auto lower_name = attribute_name.IsLowerASCII()
                             ? attribute_name
                             : attribute_name.LowerASCII();
-      (*hash++) = lower_name.Impl()->ExistingHash() * kAttributeSalt;
+      hashes.push_back(lower_name.Hash() * kAttributeSalt);
     } break;
+    case CSSSelector::kPseudoClass:
+      switch (selector.GetPseudoType()) {
+        case CSSSelector::kPseudoIs:
+        case CSSSelector::kPseudoWhere:
+        case CSSSelector::kPseudoParent: {
+          // If we have a one-element :is(), :where() or &, treat it
+          // as if the given list was written out as a normal descendant.
+          const CSSSelector* selector_list = selector.SelectorListOrParent();
+          if (selector_list &&
+              CSSSelectorList::Next(*selector_list) == nullptr) {
+            CollectDescendantCompoundSelectorIdentifierHashes(
+                selector_list, CSSSelector::kDescendant, style_scope, hashes);
+          }
+          break;
+        }
+        case CSSSelector::kPseudoScope:
+          if (style_scope) {
+            const CSSSelector* selector_list = style_scope->From();
+            if (selector_list &&
+                CSSSelectorList::Next(*selector_list) == nullptr) {
+              CollectDescendantCompoundSelectorIdentifierHashes(
+                  selector_list, CSSSelector::kDescendant,
+                  style_scope->Parent(), hashes);
+            }
+          }
+          break;
+        default:
+          break;
+      }
+      break;
     default:
       break;
   }
 }
 
-}  // namespace
-
-void SelectorFilter::PushParentStackFrame(Element& parent) {
-  DCHECK(ancestor_identifier_filter_);
-  DCHECK(parent_stack_.IsEmpty() ||
-         parent_stack_.back().element ==
-             FlatTreeTraversal::ParentElement(parent));
-  DCHECK(!parent_stack_.IsEmpty() || !FlatTreeTraversal::ParentElement(parent));
-  parent_stack_.push_back(ParentStackFrame(parent));
-  ParentStackFrame& parent_frame = parent_stack_.back();
-  // Mix tags, class names and ids into some sort of weird bouillabaisse.
-  // The filter is used for fast rejection of child and descendant selectors.
-  CollectElementIdentifierHashes(parent, parent_frame.identifier_hashes);
-  wtf_size_t count = parent_frame.identifier_hashes.size();
-  for (wtf_size_t i = 0; i < count; ++i)
-    ancestor_identifier_filter_->Add(parent_frame.identifier_hashes[i]);
-}
-
-void SelectorFilter::PopParentStackFrame() {
-  DCHECK(!parent_stack_.IsEmpty());
-  DCHECK(ancestor_identifier_filter_);
-  const ParentStackFrame& parent_frame = parent_stack_.back();
-  wtf_size_t count = parent_frame.identifier_hashes.size();
-  for (wtf_size_t i = 0; i < count; ++i)
-    ancestor_identifier_filter_->Remove(parent_frame.identifier_hashes[i]);
-  parent_stack_.pop_back();
-  if (parent_stack_.IsEmpty()) {
-#if DCHECK_IS_ON()
-    DCHECK(ancestor_identifier_filter_->LikelyEmpty());
-#endif
-    ancestor_identifier_filter_.reset();
-  }
-}
-
-void SelectorFilter::PushParent(Element& parent) {
-  DCHECK(parent.GetDocument().InStyleRecalc());
-  DCHECK(parent.InActiveDocument());
-  if (parent_stack_.IsEmpty()) {
-    DCHECK_EQ(parent, parent.GetDocument().documentElement());
-    DCHECK(!ancestor_identifier_filter_);
-    ancestor_identifier_filter_ = std::make_unique<IdentifierFilter>();
-    PushParentStackFrame(parent);
-    return;
-  }
-  DCHECK(ancestor_identifier_filter_);
-  // We may get invoked for some random elements in some wacky cases during
-  // style resolve. Pause maintaining the stack in this case.
-  if (parent_stack_.back().element != FlatTreeTraversal::ParentElement(parent))
-    return;
-  PushParentStackFrame(parent);
-}
-
-void SelectorFilter::PopParent(Element& parent) {
-  DCHECK(parent.GetDocument().InStyleRecalc());
-  DCHECK(parent.InActiveDocument());
-  // Note that we may get invoked for some random elements in some wacky cases
-  // during style resolve. Pause maintaining the stack in this case.
-  if (!ParentStackIsConsistent(&parent))
-    return;
-  PopParentStackFrame();
-}
-
-void SelectorFilter::CollectIdentifierHashes(
-    const CSSSelector& selector,
-    unsigned* identifier_hashes,
-    unsigned maximum_identifier_count) {
-  unsigned* hash = identifier_hashes;
-  unsigned* end = identifier_hashes + maximum_identifier_count;
-  CSSSelector::RelationType relation = selector.Relation();
+void CollectDescendantCompoundSelectorIdentifierHashes(
+    const CSSSelector* selector,
+    CSSSelector::RelationType relation,
+    const StyleScope* style_scope,
+    Vector<unsigned>& hashes) {
   // Skip the rightmost compound. It is handled quickly by the rule hashes.
   bool skip_over_subselectors = true;
-  for (const CSSSelector* current = selector.TagHistory(); current;
-       current = current->TagHistory()) {
+  for (const CSSSelector* current = selector; current;
+       current = current->NextSimpleSelector()) {
     // Only collect identifiers that match ancestors.
     switch (relation) {
       case CSSSelector::kSubSelector:
-        if (!skip_over_subselectors)
-          CollectDescendantSelectorIdentifierHashes(*current, hash);
+      case CSSSelector::kScopeActivation:
+        if (!skip_over_subselectors) {
+          CollectDescendantSelectorIdentifierHashes(*current, style_scope,
+                                                    hashes);
+        }
         break;
       case CSSSelector::kDirectAdjacent:
       case CSSSelector::kIndirectAdjacent:
@@ -206,24 +183,84 @@ void SelectorFilter::CollectIdentifierHashes(
       case CSSSelector::kUAShadow:
       case CSSSelector::kShadowPart:
         skip_over_subselectors = false;
-        CollectDescendantSelectorIdentifierHashes(*current, hash);
+        CollectDescendantSelectorIdentifierHashes(*current, style_scope,
+                                                  hashes);
         break;
       case CSSSelector::kRelativeDescendant:
       case CSSSelector::kRelativeChild:
       case CSSSelector::kRelativeDirectAdjacent:
       case CSSSelector::kRelativeIndirectAdjacent:
-        NOTREACHED();
+        NOTREACHED_IN_MIGRATION();
         break;
     }
-    if (hash == end)
-      return;
     relation = current->Relation();
   }
-  *hash = 0;
 }
 
-void SelectorFilter::ParentStackFrame::Trace(Visitor* visitor) const {
-  visitor->Trace(element);
+}  // namespace
+
+void SelectorFilter::PushParentStackFrame(Element& parent) {
+  parent_stack_.push_back(parent);
+  // Mix tags, class names and ids into some sort of weird bouillabaisse.
+  // The filter is used for fast rejection of child and descendant selectors.
+  CollectElementIdentifierHashes(
+      parent, [this](unsigned hash) { ancestor_identifier_filter_.Add(hash); });
+}
+
+void SelectorFilter::PopParentStackFrame() {
+  DCHECK(!parent_stack_.empty());
+  CollectElementIdentifierHashes(*parent_stack_.back(), [this](unsigned hash) {
+    ancestor_identifier_filter_.Remove(hash);
+  });
+  parent_stack_.pop_back();
+  if (parent_stack_.empty()) {
+#if DCHECK_IS_ON()
+    DCHECK(ancestor_identifier_filter_.LikelyEmpty());
+#endif
+  }
+}
+
+void SelectorFilter::PushAllParentsOf(TreeScope& tree_scope) {
+  PushAncestors(tree_scope.RootNode());
+}
+
+void SelectorFilter::PushAncestors(const Node& node) {
+  Element* parent = node.ParentOrShadowHostElement();
+  if (parent != nullptr) {
+    PushAncestors(*parent);
+    PushParent(*parent);
+  }
+}
+
+void SelectorFilter::PushParent(Element& parent) {
+#if DCHECK_IS_ON()
+  if (parent_stack_.empty()) {
+    DCHECK_EQ(parent, parent.GetDocument().documentElement());
+  } else if (parent_stack_.back() != FlatTreeTraversal::ParentElement(parent) &&
+             parent_stack_.back() != parent.ParentOrShadowHostElement()) {
+    LOG(DFATAL) << "Parent stack must be consistent; pushed " << parent
+                << " with parent " << parent.ParentOrShadowHostElement()
+                << " and flat-tree parent "
+                << FlatTreeTraversal::ParentElement(parent)
+                << ", but the stack contained " << parent_stack_.back()
+                << ", which is neither";
+  }
+#endif
+  PushParentStackFrame(parent);
+}
+
+void SelectorFilter::PopParent(Element& parent) {
+  DCHECK(ParentStackIsConsistent(&parent));
+  PopParentStackFrame();
+}
+
+void SelectorFilter::CollectIdentifierHashes(
+    const CSSSelector& selector,
+    const StyleScope* style_scope,
+    Vector<unsigned>& bloom_hash_backing) {
+  CollectDescendantCompoundSelectorIdentifierHashes(
+      selector.NextSimpleSelector(), selector.Relation(), style_scope,
+      bloom_hash_backing);
 }
 
 void SelectorFilter::Trace(Visitor* visitor) const {

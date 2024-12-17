@@ -116,6 +116,18 @@
     <message name="IDS_PDF_TOOLTIP_ROTATE_CCW" desc="Button tooltip for the button which rotates a PDF document counterclockwise">
       Rotate counterclockwise
     </message>
+    <message name="IDS_PDF_ROTATION_STATE_LABEL_0" desc="Label spoken by screen readers after rotating the PDF document, but is not visually rendered. Describes how many degrees the PDF document is rotated clockwise">
+      0 degrees
+    </message>
+    <message name="IDS_PDF_ROTATION_STATE_LABEL_90" desc="Label spoken by screen readers after rotating the PDF document, but is not visually rendered. Describes how many degrees the PDF document is rotated clockwise">
+      90 degrees
+    </message>
+    <message name="IDS_PDF_ROTATION_STATE_LABEL_180" desc="Label spoken by screen readers after rotating the PDF document, but is not visually rendered. Describes how many degrees the PDF document is rotated clockwise">
+      180 degrees
+    </message>
+    <message name="IDS_PDF_ROTATION_STATE_LABEL_270" desc="Label spoken by screen readers after rotating the PDF document, but is not visually rendered. Describes how many degrees the PDF document is rotated clockwise">
+      270 degrees
+    </message>
     <message name="IDS_PDF_TOOLTIP_DOWNLOAD" desc="Button tooltip for the button to download a PDF document">
       Download
     </message>
@@ -149,8 +161,23 @@
     <message name="IDS_PDF_TOOLTIP_DOCUMENT_OUTLINE" desc="Button tooltip for the button which selects the PDF document outline view in the sidenav">
       Document outline
     </message>
+    <message name="IDS_PDF_TOOLTIP_ATTACHMENTS" desc="Button tooltip for the button which selects the PDF document attachment view in the sidenav">
+      Attachments
+    </message>
+    <message name="IDS_PDF_TOOLTIP_DOWNLOAD_ATTACHMENT" desc="Button tooltip for the button which downloads the PDF attachment">
+      Download the attachment
+    </message>
     <message name="IDS_PDF_LABEL_PAGE_NUMBER" desc="Label for the input field containing the current page number">
       Page number
+    </message>
+    <message name="IDS_PDF_LOADING_TO_A11Y_TREE" is_accessibility_with_no_ui="true" desc="Notification to inform the user that PDF content is being loaded to an accessibility tree.">
+      Loading PDF
+    </message>
+    <message name="IDS_PDF_LOADED_TO_A11Y_TREE" is_accessibility_with_no_ui="true" desc="Notification to inform the user that PDF content has been loaded to an accessibility tree.">
+      Finished loading PDF
+    </message>
+    <message name="IDS_PDF_OVERSIZE_ATTACHMENT_WARNING" desc="Disclaimer for why download buttons are not available for oversize attachments">
+      Files over 100MB are not available for download
     </message>
     <message name="IDS_PDF_PAGE_INDEX" desc="Accessible label for each page, describing the page number">
       {COUNT, plural,
@@ -165,7 +192,7 @@
     <message name="IDS_PDF_THUMBNAIL_PAGE_ARIA_LABEL" desc="aria-label describing a thumbnail by its corresponding PDF page number">
       Thumbnail for page <ph name="THUMBNAIL_PAGE"><ex>1</ex>$1</ph>
     </message>
-    <if expr="chromeos_ash">
+    <if expr="chromeos_ash or enable_pdf_ink2">
       <message name="IDS_PDF_ANNOTATION_ANNOTATE" desc="Button tooltip for entering the 'Annotation mode' which allows writing, drawing and highlighting of the PDF document">
         Annotate
       </message>
@@ -329,6 +356,35 @@
     </message>
     <message name="IDS_AX_ROLE_DESCRIPTION_PDF_POPUP_NOTE" desc="Accessibility role description for popup note annotation associated with a PDF highlight">
       Note
+    </message>
+  </if>
+  <if expr="enable_screen_ai_service">
+    <message name="IDS_PDF_OCR_FEATURE_ALERT" is_accessibility_with_no_ui="true" desc="Notification of the PDF OCR feature when the user encounters an inaccessible PDF.">
+      This PDF is inaccessible. Couldn't download text extraction files. Please try again later.
+    </message>
+    <message name="IDS_PDF_OCR_IN_PROGRESS" is_accessibility_with_no_ui="true" desc="Notification to inform the user that OCR is in progress.">
+      This PDF is inaccessible. Extracting text, powered by Google AI
+    </message>
+    <if expr="is_win">
+      <then>
+        <message name="IDS_PDF_OCR_IN_PROGRESS_AX_UNLABELED_IMAGE" is_accessibility_with_no_ui="true" desc="Notification to inform the user that OCR is running on a graphic (image) in a PDF, which does not have a description for blind users.">
+          Unlabeled graphic. Extracting text, powered by Google AI
+        </message>
+      </then>
+      <else>
+        <message name="IDS_PDF_OCR_IN_PROGRESS_AX_UNLABELED_IMAGE" is_accessibility_with_no_ui="true" desc="Notification to inform the user that OCR is running on a graphic (image) in a PDF, which does not have a description for blind users.">
+          Unlabeled image. Extracting text, powered by Google AI
+        </message>
+      </else>
+    </if>
+    <message name="IDS_PDF_OCR_COMPLETED" is_accessibility_with_no_ui="true" desc="Notification to inform the user that OCR is completed.">
+      This PDF is inaccessible. Text extracted, powered by Google AI
+    </message>
+    <message name="IDS_PDF_OCR_NO_RESULT" is_accessibility_with_no_ui="true" desc="Notification to inform the user that no text was converted by OCR from images.">
+      This PDF is inaccessible. No text extracted
+    </message>
+    <message name="IDS_PDF_OCR_POSTAMBLE_PAGE" is_accessibility_with_no_ui="true" desc="Notification that appears on a page on its own and which is used to inform the user that OCR is still in progress.">
+      Extracting text in next few pages
     </message>
   </if>
 </grit-part>

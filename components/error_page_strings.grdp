@@ -49,6 +49,9 @@
   <message name="IDS_ERRORPAGES_SUGGESTION_RELOAD_REPOST_SUMMARY" desc="When a page fails to load, sometimes we suggest reloading a page.  In the case that reloading the page requires resubmitting data to a website, this is displayed in a list.">
     Press the reload button to resubmit the data needed to load the page.
   </message>
+  <message name="IDS_ERRORPAGES_SUGGESTION_RELOAD_PRIVATE_NETWORK_ACCESS" desc="When a page fails to load because of private network access checks, we suggest reloading a page to allow the request.">
+    Press the reload button to allow the connection to devices or servers on your private network.
+  </message>
   <message name="IDS_ERRORPAGES_SUGGESTION_CHECK_CONNECTION_HEADER" desc="When a page fails to load, sometimes we suggest checking the network connections.  This is a header above some details.">
     Check your Internet connection
   </message>
@@ -89,6 +92,9 @@
       <ph name="PLATFORM_TEXT">$1<ex>Goto the wrench menu and choose Fix It.</ex></ph>
     </message>
   </if>
+  <message name="IDS_ERRORPAGES_SUGGESTION_CAPTIVE_PORTAL_SIGNIN" desc="ChromeOS instructions for signing in to a WiFi captive portal.">
+    <ph name="BEGIN_LINK">&lt;a href="javascript:portalSignin()"&gt;</ph>Signing in<ph name="END_LINK">&lt;/a&gt;</ph> to the WiFi network
+  </message>
   <if expr="is_chromeos">
     <message name="IDS_ERRORPAGES_SUGGESTION_PROXY_DISABLE_PLATFORM" desc="ChromeOS instructions for disabling use of a proxy server.">
       You can disable any proxies configured for a connection from the settings page.
@@ -117,6 +123,15 @@
   </message>
   <message name="IDS_ERRORPAGES_HEADING_INTERNET_DISCONNECTED" desc="Heading of the error page when the network connection failed.">
     No internet
+  </message>
+  <message name="IDS_ERRORPAGES_HEADING_YOU_ARE_OFFLINE" desc="Message of the error page for when a PWA/TWA/IWA is offline.">
+    You're offline
+  </message>
+  <message name="IDS_ERRORPAGES_MESSAGE_IWA_INVALID_WEB_BUNDLE" desc="Message of the error page for when an IWA has invalid web bundle.">
+    This application is missing or damaged
+  </message>
+  <message name="IDS_ERRORPAGES_MESSAGE_IWA_CONNECTION_REFUSED" desc="Message of the error page for when an IWA can't connect to dev server.">
+    The development server for this application cannot be reached
   </message>
   <message name="IDS_ERRORPAGES_HEADING_CACHE_READ_FAILURE" desc="Heading in the error page when we encountered an error reading from the cache.  Generally this happens when the disk cache is corrupted from improper shutdown.">
     This site can’t be loaded from the cache
@@ -247,23 +262,38 @@
   <message name="IDS_ERRORPAGES_HEADING_INSECURE_CONNECTION" desc="Heading in the error page for insecure connections.">
     This site can’t provide a secure connection
   </message>
-  <message name="IDS_ERRORPAGES_SUMMARY_BAD_SSL_CLIENT_AUTH_CERT" desc="Summary in the error page for SSL client certificate authentication failure.">
+  <message name="IDS_ERRORPAGES_SUMMARY_BAD_SSL_CLIENT_AUTH_CERT" desc="Summary in the error page when the server rejected the connection due to a SSL client certificate authentication failure.">
     <ph name="HOST_NAME">&lt;strong jscontent="hostName"&gt;&lt;/strong&gt;<ex>www.whatever.com</ex></ph> didn’t accept your login certificate, or one may not have been provided.
+  </message>
+  <message name="IDS_ERRORPAGES_SUMMARY_SSL_CLIENT_AUTH_SIGNATURE_FAILED" desc="Summary in the error page when authenticating with the user's SSL client certificate failed.">
+    There was a problem using your login certificate.
   </message>
   <message name="IDS_ERRORPAGES_SUMMARY_BLOCKED_BY_EXTENSION" desc="Summary in the error page when an extension blocks a request.">
     This page has been blocked by an extension
   </message>
   <message name="IDS_ERRORPAGES_SUMMARY_BLOCKED_BY_ADMINISTRATOR" desc="Summary in the error page when an administrator policy blocks a request.">
-    The person who set up this computer has chosen to block this site.
+    Your organization doesn’t allow you to view this site
   </message>
 
   <message name="IDS_ERRORPAGES_SUMMARY_BLOCKED_BY_SECURITY" desc="Summary in the error page when the request has been blocked because of some security configuration of the site.">
     This content is blocked. Contact the site owner to fix the issue.
   </message>
 
+  <message name="IDS_ERRORPAGES_SUMMARY_BLOCKED_BY_PRIVATE_NETWORK_ACCESS_CHECKS" desc="Summary in the error page when the request has been blocked by private network access checks.">
+    The connection is blocked because it was initiated by a public page to connect to devices or servers on your private network. Reload this page to allow the connection.
+  </message>
+
   <message name="IDS_ERRORPAGES_HTTP_POST_WARNING" desc="The error message displayed when the user navigates back or forward to a page which would resubmit post data. They can hit reload to send POST data again and load the page.">
     This webpage requires data that you entered earlier in order to be properly displayed. You can send this data again, but by doing so you will repeat any action this page previously performed.
   </message>
+
+  <message name="IDS_ERRORPAGES_HEADING_LINKPREVIEW_NON_HTTPS_FORBIDDEN" desc="Heading in the error page when a user tries to preview non-HTTPS URL.">
+    Can't preview non-HTTPS URL
+  </message>
+  <message name="IDS_ERRORPAGES_SUMMARY_LINKPREVIEW_NON_HTTPS_FORBIDDEN" desc="Summary in the error page when a user tries to preview non-HTTPS URL.">
+    Previewing non-HTTPS URL is not allowed.
+  </message>
+
 
   <!-- Suggestions summary list messages. -->
   <message name="IDS_ERRORPAGES_SUGGESTION_LIST_HEADER" desc="Message that prefixes a list of suggestions to try when encountering a network error.">
@@ -306,8 +336,8 @@
   <message name="IDS_ERRORPAGES_SUGGESTION_LEARNMORE_SUMMARY_STANDALONE" desc="When a webpage fails to load, we provide a link to the help center to learn more about the failure.">
     <ph name="BEGIN_LINK">&lt;a jsvalues="href:learnMoreUrl"&gt;</ph>Learn more<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph> about this problem.
   </message>
-  <message name="IDS_ERRORPAGES_SUGGESTION_CLEAR_COOKIES_SUMMARY" desc="The message displayed following a network error suggesting the user could try clearing their cookies. We also provide a link to the help center to learn more about the failure.">
-    <ph name="BEGIN_LINK">&lt;a jsvalues="href:learnMoreUrl"&gt;</ph>Try clearing your cookies<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex>.</ph>
+  <message name="IDS_ERRORPAGES_SUGGESTION_DELETE_COOKIES_SUMMARY" desc="The message displayed following a network error suggesting the user could try deleting their cookies. We also provide a link to the help center to learn more about the failure.">
+    <ph name="BEGIN_LINK">&lt;a jsvalues="href:learnMoreUrl"&gt;</ph>Try deleting your cookies<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex>.</ph>
   </message>
   <if expr="is_ios or is_android">
     <message name="IDS_ERRORPAGES_SUGGESTION_TURN_OFF_AIRPLANE_SUMMARY" desc="When a page fails to load and the device is offline, we provide a suggestion that the user try turning off airplane mode. The suggestions list is prefixed with 'Try:'.">
@@ -325,12 +355,6 @@
   </message>
   <message name="IDS_ERRORPAGES_SUGGESTION_CHECK_WIFI_SUMMARY" desc="The message displayed in a list of suggestions following a network error suggesting to the user to reconnect to Wi-Fi. The suggestions list is prefixed with 'Try:'.">
     Reconnecting to Wi-Fi
-  </message>
-  <message name="IDS_ERRORPAGES_SUGGESTION_DIAGNOSE_CONNECTION_SUMMARY" desc="The message displayed asking the user to check their network connection using the diagnostics tool.">
-    Fix your connection using the <ph name="BEGIN_LINK">&lt;a  href="#buttons" onclick="javascript:diagnoseErrors()"&gt;</ph>diagnostics app<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph>
-  </message>
-  <message name="IDS_ERRORPAGES_SUGGESTION_COMPLETE_SETUP_SUMMARY" desc="The message displayed asking the user to sign out and complete their device setup.">
-    Sign out and complete setup
   </message>
   <message name="IDS_ERRORPAGES_SUGGESTION_DISABLE_EXTENSION_SUMMARY" desc="When a page fails to load, we provide a suggestion that the user try disabling the extension that's blocking it.">
     Try disabling your extensions.
@@ -379,6 +403,9 @@
     <message name="IDS_ERRORPAGE_DINO_GAME_DESCRIPTION" desc="Message to be spoken by a screen reader to give the user context and instructions for playing the net error dino game. Tapping the screen activates the game and causes the dinosaur to jump. Mobile platforms only.">
       Dino game. A pixelated dinosaur dodges cacti and pterodactyls as it runs across a desolate landscape. When you hear an audio cue, tap to jump over obstacles.
     </message>
+    <message name="IDS_ERRORPAGE_DINO_ARIA_LABEL" desc="Message to be spoken by a screen reader for the dino button element used to start the net error dino game.">
+    Dino game, tap to play
+    </message>
   </if>
   <if expr="not is_android and not is_ios">
     <message name="IDS_ERRORPAGES_GAME_INSTRUCTIONS" desc="Instructions on how to start playing the offline game.">
@@ -387,10 +414,10 @@
     <message name="IDS_ERRORPAGE_DINO_GAME_DESCRIPTION" desc="Message to be spoken by a screen reader to give the user context and instructions for playing the net error dino game. Pressing space activates the game and causes the dinosaur to jump. Desktop platforms only.">
       Dino game. A pixelated dinosaur dodges cacti and pterodactyls as it runs across a desolate landscape. When you hear an audio cue, press space to jump over obstacles.
     </message>
+    <message name="IDS_ERRORPAGE_DINO_ARIA_LABEL" desc="Message to be spoken by a screen reader for the dino button element used to start the net error dino game.">
+    Dino game, press space to play
+    </message>
   </if>
-  <message name="IDS_ERRORPAGE_DINO_ARIA_LABEL" desc="Message to be spoken by a screen reader to for the dino button element used to start the net error dino game.">
-    Dino game, play
-  </message>
   <message name="IDS_ERRORPAGE_DINO_GAME_START" desc="Message to be spoken by a screen reader to notify the user that the dino game has started and the dinosaur is running.">
     Game started.
   </message>

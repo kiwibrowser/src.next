@@ -6,18 +6,21 @@
 #define EXTENSIONS_BROWSER_ZIPFILE_INSTALLER_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 
-#include "base/callback.h"
 #include "base/files/file_path.h"
+#include "base/functional/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/values.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace extensions {
+
+using ZipResultVariant = absl::variant<base::FilePath, std::string>;
 
 // ZipFileInstaller unzips an extension safely using the Unzipper and
 // SafeJSONParser services.
@@ -40,35 +43,54 @@ class ZipFileInstaller : public base::RefCountedThreadSafe<ZipFileInstaller> {
       const scoped_refptr<base::SequencedTaskRunner>& io_task_runner,
       DoneCallback done_callback);
 
-  // Creates a temporary directory and unzips the extension in it.
-  void LoadFromZipFile(const base::FilePath& zip_file);
+  // First attempts to create `unpacked_extensions_dir` and does not load the
+  // extension if unsuccessful. If successful, then unzips the extension into a
+  // unique directory within `unpacked_extensions_dir`.
+  // `unpacked_extensions_dir` should be the unpacked extensions directory from
+  // the extensions service. The directory name will have the format of
+  // "hello-world.zip" -> "hello-world_XXXXXX/" in the style of mkdtemp().
+  void InstallZipFileToUnpackedExtensionsDir(
+      const base::FilePath& zip_file,
+      const base::FilePath& unpacked_extensions_dir);
 
-  // Unzips the extension in |unzip_dir|.
+  // Unzips the extension in `unzip_dir`. If `unzip_dir` is empty, the extension
+  // will not be unzipped.
   void LoadFromZipFileInDir(const base::FilePath& zip_file,
                             const base::FilePath& unzip_dir);
 
  private:
   friend class base::RefCountedThreadSafe<ZipFileInstaller>;
-  FRIEND_TEST_ALL_PREFIXES(ZipFileInstallerTest, NonTheme_FileExtractionFilter);
-  FRIEND_TEST_ALL_PREFIXES(ZipFileInstallerTest, Theme_FileExtractionFilter);
-  FRIEND_TEST_ALL_PREFIXES(ZipFileInstallerTest, ManifestExtractionFilter);
+  FRIEND_TEST_ALL_PREFIXES(ZipFileInstallerFilterTest,
+                           NonTheme_FileExtractionFilter);
+  FRIEND_TEST_ALL_PREFIXES(ZipFileInstallerFilterTest,
+                           Theme_FileExtractionFilter);
+  FRIEND_TEST_ALL_PREFIXES(ZipFileInstallerFilterTest,
+                           ManifestExtractionFilter);
 
   explicit ZipFileInstaller(
       const scoped_refptr<base::SequencedTaskRunner>& io_task_runner,
       DoneCallback done_callback);
   ~ZipFileInstaller();
 
+  // Unzip `zip_file` into `unzip_dir`. `create_unzip_dir` indicates that
+  // `unzip_dir` might need to be created before installing the .zip file to the
+  // dir. extensions_features::kExtensionsZipFileInstalledInProfileDir being
+  // enabled causes `create_unzip_dir` to create a
   void LoadFromZipFileImpl(const base::FilePath& zip_file,
-                           const base::FilePath& unzip_dir);
+                           const base::FilePath& unzip_dir,
+                           bool create_unzip_dir = false);
 
-  // Unzip an extension into |unzip_dir| and load it with an UnpackedInstaller.
-  void Unzip(absl::optional<base::FilePath> unzip_dir);
+  // Unzip an extension the `base::FilePath` provided by the result and load it
+  // with an UnpackedInstaller. String in the result is an error explaining why
+  // the path couldn't be created.
+  void Unzip(ZipResultVariant result);
+
   void ManifestUnzipped(const base::FilePath& unzip_dir, bool success);
   void ManifestRead(const base::FilePath& unzip_dir,
-                    absl::optional<std::string> manifest_content);
+                    std::optional<std::string> manifest_content);
   void ManifestParsed(const base::FilePath& unzip_dir,
-                      absl::optional<base::Value> result,
-                      const absl::optional<std::string>& error);
+                      std::optional<base::Value> result,
+                      const std::optional<std::string>& error);
   void UnzipDone(const base::FilePath& unzip_dir, bool success);
 
   // On failure, report the |error| reason.

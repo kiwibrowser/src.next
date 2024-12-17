@@ -1,12 +1,10 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/css/cascade_layer.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
-
-#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 
 namespace blink {
 
@@ -23,11 +21,13 @@ class CascadeLayerTest : public testing::Test {
 };
 
 TEST_F(CascadeLayerTest, Basic) {
-  CascadeLayer* one = root_layer_->GetOrAddSubLayer(LayerName({"one"}));
-  one->GetOrAddSubLayer(LayerName({"two"}));
-  root_layer_->GetOrAddSubLayer(LayerName({"three", "four"}));
+  CascadeLayer* one =
+      root_layer_->GetOrAddSubLayer(LayerName({AtomicString("one")}));
+  one->GetOrAddSubLayer(LayerName({AtomicString("two")}));
+  root_layer_->GetOrAddSubLayer(
+      LayerName({AtomicString("three"), AtomicString("four")}));
   root_layer_->GetOrAddSubLayer(LayerName({g_empty_atom}));
-  root_layer_->GetOrAddSubLayer(LayerName({"five"}));
+  root_layer_->GetOrAddSubLayer(LayerName({AtomicString("five")}));
 
   EXPECT_EQ(
       "one,"
@@ -42,12 +42,13 @@ TEST_F(CascadeLayerTest, Basic) {
 TEST_F(CascadeLayerTest, RepeatedGetOrAdd) {
   // GetOrAddSubLayer() does not add duplicate layers.
 
-  root_layer_->GetOrAddSubLayer(LayerName({"one", "two"}));
-  root_layer_->GetOrAddSubLayer(LayerName({"three"}));
+  root_layer_->GetOrAddSubLayer(
+      LayerName({AtomicString("one"), AtomicString("two")}));
+  root_layer_->GetOrAddSubLayer(LayerName({AtomicString("three")}));
 
-  root_layer_->GetOrAddSubLayer(LayerName({"one"}))
-      ->GetOrAddSubLayer(LayerName({"two"}));
-  root_layer_->GetOrAddSubLayer(LayerName({"three"}));
+  root_layer_->GetOrAddSubLayer(LayerName({AtomicString("one")}))
+      ->GetOrAddSubLayer(LayerName({AtomicString("two")}));
+  root_layer_->GetOrAddSubLayer(LayerName({AtomicString("three")}));
 
   EXPECT_EQ(
       "one,"
@@ -64,15 +65,17 @@ TEST_F(CascadeLayerTest, RepeatedGetOrAddAnonymous) {
   root_layer_->GetOrAddSubLayer(LayerName({g_empty_atom}));
 
   // Two distinct anonymous sublayers of "one"
-  CascadeLayer* one = root_layer_->GetOrAddSubLayer(LayerName({"one"}));
-  root_layer_->GetOrAddSubLayer(LayerName({"one", g_empty_atom}));
+  CascadeLayer* one =
+      root_layer_->GetOrAddSubLayer(LayerName({AtomicString("one")}));
+  root_layer_->GetOrAddSubLayer(LayerName({AtomicString("one"), g_empty_atom}));
   CascadeLayer* anonymous = one->GetOrAddSubLayer(LayerName({g_empty_atom}));
 
-  anonymous->GetOrAddSubLayer(LayerName({"two"}));
+  anonymous->GetOrAddSubLayer(LayerName({AtomicString("two")}));
 
   // This is a different layer "two" from the previously inserted "two" because
   // the parent layers are different anonymous layers.
-  root_layer_->GetOrAddSubLayer(LayerName({"one", g_empty_atom, "two"}));
+  root_layer_->GetOrAddSubLayer(
+      LayerName({AtomicString("one"), g_empty_atom, AtomicString("two")}));
 
   EXPECT_EQ(
       "(anonymous),"
@@ -89,9 +92,10 @@ TEST_F(CascadeLayerTest, RepeatedGetOrAddAnonymous) {
 TEST_F(CascadeLayerTest, LayerOrderNotInsertionOrder) {
   // Layer order and insertion order can be different.
 
-  root_layer_->GetOrAddSubLayer(LayerName({"one"}));
-  root_layer_->GetOrAddSubLayer(LayerName({"two"}));
-  root_layer_->GetOrAddSubLayer(LayerName({"one", "three"}));
+  root_layer_->GetOrAddSubLayer(LayerName({AtomicString("one")}));
+  root_layer_->GetOrAddSubLayer(LayerName({AtomicString("two")}));
+  root_layer_->GetOrAddSubLayer(
+      LayerName({AtomicString("one"), AtomicString("three")}));
 
   EXPECT_EQ(
       "one,"

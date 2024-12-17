@@ -15,6 +15,7 @@
 #include "chromeos/startup/browser_params_proxy.h"
 #include "content/public/browser/tts_platform.h"
 #include "content/public/common/result_codes.h"
+#include "ui/ozone/public/ozone_platform.h"
 #include "ui/wm/core/wm_core_switches.h"
 
 ChromeBrowserMainPartsLacros::ChromeBrowserMainPartsLacros(
@@ -86,8 +87,30 @@ void ChromeBrowserMainPartsLacros::PreProfileInit() {
   content::TtsPlatform::GetInstance();
 }
 
+void ChromeBrowserMainPartsLacros::PostProfileInit(Profile* profile,
+                                                   bool is_initial_profile) {
+  ChromeBrowserMainPartsLinux::PostProfileInit(profile, is_initial_profile);
+  prefs_ash_observer_->InitPostProfileInitialized(profile);
+}
+
+void ChromeBrowserMainPartsLacros::PostMainMessageLoopRun() {
+  // Reset MetricsReportingObserver here to guarantee it's destroyed before
+  // `g_browser_process->metrics_service()` is destructed as
+  // MetricsReportingObserver depends on metrics service.
+  metrics_reporting_observer_.reset();
+
+  ChromeBrowserMainParts::PostMainMessageLoopRun();
+
+  ui::OzonePlatform::GetInstance()->PostMainMessageLoopRun();
+}
+
 void ChromeBrowserMainPartsLacros::PostDestroyThreads() {
   chromeos::LacrosShutdownDBus();
+
+  // Reset PrefsAshObserver here to guarantee it's destroyed before
+  // `g_browser_process->local_state()` is destructed as PrefsAshObserver
+  // depends on local state.
+  prefs_ash_observer_.reset();
 
   ChromeBrowserMainPartsLinux::PostDestroyThreads();
 }

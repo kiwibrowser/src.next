@@ -12,7 +12,9 @@
 #include "net/base/net_error_details.h"
 #include "net/base/net_export.h"
 #include "net/base/request_priority.h"
+#include "net/http/alternative_service.h"
 #include "net/http/http_response_info.h"
+#include "net/http/http_stream_pool_switching_info.h"
 #include "net/log/net_log_source.h"
 #include "net/log/net_log_with_source.h"
 #include "net/proxy_resolution/proxy_info.h"
@@ -54,51 +56,33 @@ class NET_EXPORT_PRIVATE HttpStreamRequest {
 
     // This is the success case for RequestStream.
     // |stream| is now owned by the delegate.
-    // |used_ssl_config| indicates the actual SSL configuration used for this
-    // stream, since the HttpStreamRequest may have modified the configuration
-    // during stream processing.
     // |used_proxy_info| indicates the actual ProxyInfo used for this stream,
     // since the HttpStreamRequest performs the proxy resolution.
-    virtual void OnStreamReady(const SSLConfig& used_ssl_config,
-                               const ProxyInfo& used_proxy_info,
+    virtual void OnStreamReady(const ProxyInfo& used_proxy_info,
                                std::unique_ptr<HttpStream> stream) = 0;
 
     // This is the success case for RequestWebSocketHandshakeStream.
     // |stream| is now owned by the delegate.
-    // |used_ssl_config| indicates the actual SSL configuration used for this
-    // stream, since the HttpStreamRequest may have modified the configuration
-    // during stream processing.
     // |used_proxy_info| indicates the actual ProxyInfo used for this stream,
     // since the HttpStreamRequest performs the proxy resolution.
     virtual void OnWebSocketHandshakeStreamReady(
-        const SSLConfig& used_ssl_config,
         const ProxyInfo& used_proxy_info,
         std::unique_ptr<WebSocketHandshakeStreamBase> stream) = 0;
 
     virtual void OnBidirectionalStreamImplReady(
-        const SSLConfig& used_ssl_config,
         const ProxyInfo& used_proxy_info,
         std::unique_ptr<BidirectionalStreamImpl> stream) = 0;
 
     // This is the failure to create a stream case.
-    // |used_ssl_config| indicates the actual SSL configuration used for this
-    // stream, since the HttpStreamRequest may have modified the configuration
-    // during stream processing.
     // |used_proxy_info| indicates the actual ProxyInfo used for this stream,
     // since the HttpStreamRequest performs the proxy resolution.
     virtual void OnStreamFailed(int status,
                                 const NetErrorDetails& net_error_details,
-                                const SSLConfig& used_ssl_config,
                                 const ProxyInfo& used_proxy_info,
                                 ResolveErrorInfo resolve_error_info) = 0;
 
     // Called when we have a certificate error for the request.
-    // |used_ssl_config| indicates the actual SSL configuration used for this
-    // stream, since the HttpStreamRequest may have modified the configuration
-    // during stream processing.
-    virtual void OnCertificateError(int status,
-                                    const SSLConfig& used_ssl_config,
-                                    const SSLInfo& ssl_info) = 0;
+    virtual void OnCertificateError(int status, const SSLInfo& ssl_info) = 0;
 
     // This is the failure case where we need proxy authentication during
     // proxy tunnel establishment.  For the tunnel case, we were unable to
@@ -114,12 +98,7 @@ class NET_EXPORT_PRIVATE HttpStreamRequest {
     // after the lifetime of this callback.  The delegate may take a reference
     // to |auth_controller| if it is needed beyond the lifetime of this
     // callback.
-    //
-    // |used_ssl_config| indicates the actual SSL configuration used for this
-    // stream, since the HttpStreamRequest may have modified the configuration
-    // during stream processing.
     virtual void OnNeedsProxyAuth(const HttpResponseInfo& proxy_response,
-                                  const SSLConfig& used_ssl_config,
                                   const ProxyInfo& used_proxy_info,
                                   HttpAuthController* auth_controller) = 0;
 
@@ -127,12 +106,19 @@ class NET_EXPORT_PRIVATE HttpStreamRequest {
     // Ownership of |cert_info| is retained by the HttpStreamRequest.  The
     // delegate may take a reference if it needs the cert_info beyond the
     // lifetime of this callback.
-    virtual void OnNeedsClientAuth(const SSLConfig& used_ssl_config,
-                                   SSLCertRequestInfo* cert_info) = 0;
+    virtual void OnNeedsClientAuth(SSLCertRequestInfo* cert_info) = 0;
 
     // Called when finding all QUIC alternative services are marked broken for
     // the origin in this request which advertises supporting QUIC.
     virtual void OnQuicBroken() = 0;
+
+    // Called when the call site should use HttpStreamPool to request an
+    // HttpStream.
+    // TODO(crbug.com/346835898): Remove this method once we figure out a
+    // better way to resolve proxies. This method is needed because currently
+    // HttpStreamFactory::JobController resolves proxies.
+    virtual void OnSwitchesToHttpStreamPool(
+        HttpStreamPoolSwitchingInfo request_info) = 0;
   };
 
   class NET_EXPORT_PRIVATE Helper {
@@ -153,11 +139,9 @@ class NET_EXPORT_PRIVATE HttpStreamRequest {
     virtual void SetPriority(RequestPriority priority) = 0;
   };
 
-  // Request will notify |job_controller| when it's destructed.
-  // Thus |job_controller| is valid for the lifetime of the |this| Request.
-  HttpStreamRequest(const GURL& url,
-                    Helper* helper,
-                    HttpStreamRequest::Delegate* delegate,
+  // Request will notify `helper` when it's destructed.
+  // Thus `helper` is valid for the lifetime of the `this` Request.
+  HttpStreamRequest(Helper* helper,
                     WebSocketHandshakeStreamBase::CreateHelper*
                         websocket_handshake_stream_create_helper,
                     const NetLogWithSource& net_log,
@@ -179,9 +163,8 @@ class NET_EXPORT_PRIVATE HttpStreamRequest {
   void SetPriority(RequestPriority priority);
 
   // Marks completion of the request. Must be called before OnStreamReady().
-  void Complete(bool was_alpn_negotiated,
-                NextProto negotiated_protocol,
-                bool using_spdy);
+  void Complete(NextProto negotiated_protocol,
+                AlternateProtocolUsage alternate_protocol_usage);
 
   // Called by |helper_| to record connection attempts made by the socket
   // layer in an attached Job for this stream request.
@@ -190,14 +173,12 @@ class NET_EXPORT_PRIVATE HttpStreamRequest {
   // Returns the LoadState for the request.
   LoadState GetLoadState() const;
 
-  // Returns true if TLS/ALPN was negotiated for this stream.
-  bool was_alpn_negotiated() const;
-
   // Protocol negotiated with the server.
   NextProto negotiated_protocol() const;
 
-  // Returns true if this stream is being fetched over SPDY.
-  bool using_spdy() const;
+  // The reason why Chrome uses a specific transport protocol for HTTP
+  // semantics.
+  AlternateProtocolUsage alternate_protocol_usage() const;
 
   // Returns socket-layer connection attempts made for this stream request.
   const ConnectionAttempts& connection_attempts() const;
@@ -207,18 +188,24 @@ class NET_EXPORT_PRIVATE HttpStreamRequest {
   WebSocketHandshakeStreamBase::CreateHelper*
   websocket_handshake_stream_create_helper() const;
 
-  // The GURL from the HttpRequestInfo the started the Request.
-  const GURL& url() const { return url_; }
-
   const NetLogWithSource& net_log() const { return net_log_; }
 
   StreamType stream_type() const { return stream_type_; }
 
   bool completed() const { return completed_; }
 
- private:
-  const GURL url_;
+  void SetDnsResolutionTimeOverrides(
+      base::TimeTicks dns_resolution_start_time_override,
+      base::TimeTicks dns_resolution_end_time_override);
 
+  base::TimeTicks dns_resolution_start_time_override() const {
+    return dns_resolution_start_time_override_;
+  }
+  base::TimeTicks dns_resolution_end_time_override() const {
+    return dns_resolution_end_time_override_;
+  }
+
+ private:
   // Unowned. The helper must not be destroyed before this object is.
   raw_ptr<Helper> helper_;
 
@@ -227,12 +214,17 @@ class NET_EXPORT_PRIVATE HttpStreamRequest {
   const NetLogWithSource net_log_;
 
   bool completed_ = false;
-  bool was_alpn_negotiated_ = false;
   // Protocol negotiated with the server.
   NextProto negotiated_protocol_ = kProtoUnknown;
-  bool using_spdy_ = false;
+  // The reason why Chrome uses a specific transport protocol for HTTP
+  // semantics.
+  AlternateProtocolUsage alternate_protocol_usage_ =
+      AlternateProtocolUsage::ALTERNATE_PROTOCOL_USAGE_UNSPECIFIED_REASON;
   ConnectionAttempts connection_attempts_;
   const StreamType stream_type_;
+
+  base::TimeTicks dns_resolution_start_time_override_;
+  base::TimeTicks dns_resolution_end_time_override_;
 };
 
 }  // namespace net

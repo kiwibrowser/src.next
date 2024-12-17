@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,8 @@
 namespace blink {
 
 // The following methods are inlined for performance but not put in
-// LayoutObject.h because that would unnecessarily tie LayoutObject.h
-// to StyleEngine.h for all users of LayoutObject.h that don't use
+// layout_object.h because that would unnecessarily tie layout_object.h
+// to style_engine.h for all users of layout_object.h that don't use
 // these methods.
 
 inline const ComputedStyle* LayoutObject::FirstLineStyle() const {
@@ -25,7 +25,7 @@ inline const ComputedStyle* LayoutObject::FirstLineStyle() const {
 
 inline const ComputedStyle& LayoutObject::FirstLineStyleRef() const {
   const ComputedStyle* style = FirstLineStyle();
-  DCHECK(style);
+  CHECK(style);
   return *style;
 }
 
@@ -35,7 +35,7 @@ inline const ComputedStyle* LayoutObject::Style(bool first_line) const {
 
 inline const ComputedStyle& LayoutObject::StyleRef(bool first_line) const {
   const ComputedStyle* style = Style(first_line);
-  DCHECK(style);
+  CHECK(style);
   return *style;
 }
 

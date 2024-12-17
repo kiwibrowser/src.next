@@ -2,6 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "chrome/browser/shutdown_signal_handlers_posix.h"
 
 #include <limits.h>
@@ -11,13 +16,12 @@
 
 #include <utility>
 
-#include "base/callback.h"
 #include "base/debug/leak_annotations.h"
+#include "base/functional/callback.h"
 #include "base/logging.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/platform_thread.h"
-#include "base/threading/thread_task_runner_handle.h"
 
 namespace {
 
@@ -137,11 +141,11 @@ void ShutdownDetector::ThreadMain() {
                             reinterpret_cast<char*>(&signal) + bytes_read,
                             sizeof(signal) - bytes_read));
     if (ret < 0) {
-      NOTREACHED() << "Unexpected error: " << strerror(errno);
+      NOTREACHED_IN_MIGRATION() << "Unexpected error: " << strerror(errno);
       ShutdownFDReadError();
       break;
     } else if (ret == 0) {
-      NOTREACHED() << "Unexpected closure of shutdown pipe.";
+      NOTREACHED_IN_MIGRATION() << "Unexpected closure of shutdown pipe.";
       ShutdownFDClosedError();
       break;
     }
@@ -187,19 +191,11 @@ void InstallShutdownSignalHandlers(
   g_pipe_pid = getpid();
   g_shutdown_pipe_read_fd = pipefd[0];
   g_shutdown_pipe_write_fd = pipefd[1];
-#if !defined(ADDRESS_SANITIZER)
-  const size_t kShutdownDetectorThreadStackSize = PTHREAD_STACK_MIN * 2;
-#else
-  // ASan instrumentation bloats the stack frames, so we need to increase the
-  // stack size to avoid hitting the guard page.
-  const size_t kShutdownDetectorThreadStackSize = PTHREAD_STACK_MIN * 4;
-#endif
   ShutdownDetector* detector = new ShutdownDetector(
       g_shutdown_pipe_read_fd, std::move(shutdown_callback), task_runner);
   // PlatformThread does not delete its delegate.
   ANNOTATE_LEAKING_OBJECT_PTR(detector);
-  if (!base::PlatformThread::CreateNonJoinable(kShutdownDetectorThreadStackSize,
-                                               detector)) {
+  if (!base::PlatformThread::CreateNonJoinable(0, detector)) {
     LOG(DFATAL) << "Failed to create shutdown detector task.";
   }
 

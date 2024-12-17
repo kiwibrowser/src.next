@@ -38,15 +38,15 @@
 namespace blink {
 
 DocumentLoadTiming::DocumentLoadTiming(DocumentLoader& document_loader)
-    : user_timing_mark_fully_loaded_(absl::nullopt),
-      user_timing_mark_fully_visible_(absl::nullopt),
-      user_timing_mark_interactive_(absl::nullopt),
-      redirect_count_(0),
-      has_cross_origin_redirect_(false),
-      can_request_from_previous_document_(false),
+    : user_timing_mark_fully_loaded_(std::nullopt),
+      user_timing_mark_fully_visible_(std::nullopt),
+      user_timing_mark_interactive_(std::nullopt),
       clock_(base::DefaultClock::GetInstance()),
       tick_clock_(base::DefaultTickClock::GetInstance()),
-      document_loader_(document_loader) {}
+      document_loader_(document_loader),
+      redirect_count_(0),
+      has_cross_origin_redirect_(false),
+      can_request_from_previous_document_(false) {}
 
 void DocumentLoadTiming::Trace(Visitor* visitor) const {
   visitor->Trace(document_loader_);
@@ -73,7 +73,8 @@ void DocumentLoadTiming::NotifyDocumentTimingChanged() {
 
 void DocumentLoadTiming::EnsureReferenceTimesSet() {
   if (reference_wall_time_.is_zero()) {
-    reference_wall_time_ = base::Seconds(clock_->Now().ToDoubleT());
+    reference_wall_time_ =
+        base::Seconds(clock_->Now().InSecondsFSinceUnixEpoch());
   }
   if (reference_monotonic_time_.is_null())
     reference_monotonic_time_ = tick_clock_->NowTicks();
@@ -116,7 +117,7 @@ void DocumentLoadTiming::MarkNavigationStart() {
   navigation_start_ = reference_monotonic_time_;
   TRACE_EVENT_MARK_WITH_TIMESTAMP2(
       "blink.user_timing", "navigationStart", navigation_start_, "frame",
-      ToTraceValue(GetFrame()), "data", [&](perfetto::TracedValue ctx) {
+      GetFrameIdForTracing(GetFrame()), "data", [&](perfetto::TracedValue ctx) {
         WriteNavigationStartDataIntoTracedValue(std::move(ctx));
       });
   NotifyDocumentTimingChanged();
@@ -125,8 +126,9 @@ void DocumentLoadTiming::MarkNavigationStart() {
 void DocumentLoadTiming::WriteNavigationStartDataIntoTracedValue(
     perfetto::TracedValue context) const {
   auto dict = std::move(context).WriteDictionary();
-  dict.Add("documentLoaderURL",
-           document_loader_ ? document_loader_->Url().GetString() : "");
+  dict.Add("documentLoaderURL", document_loader_
+                                    ? document_loader_->Url().GetString()
+                                    : g_empty_string);
   dict.Add("isLoadingMainFrame",
            GetFrame() ? GetFrame()->IsMainFrame() : false);
   dict.Add("isOutermostMainFrame",
@@ -142,7 +144,8 @@ void DocumentLoadTiming::SetNavigationStart(base::TimeTicks navigation_start) {
   navigation_start_ = navigation_start;
   TRACE_EVENT_MARK_WITH_TIMESTAMP2(
       "blink.user_timing", "navigationStart", navigation_start_, "frame",
-      ToTraceValue(GetFrame()), "data", [&](perfetto::TracedValue context) {
+      GetFrameIdForTracing(GetFrame()), "data",
+      [&](perfetto::TracedValue context) {
         WriteNavigationStartDataIntoTracedValue(std::move(context));
       });
 
@@ -183,6 +186,14 @@ void DocumentLoadTiming::SetUserTimingMarkInteractive(
   NotifyDocumentTimingChanged();
 }
 
+void DocumentLoadTiming::NotifyCustomUserTimingMarkAdded(
+    const AtomicString& mark_name,
+    const base::TimeDelta& start_time) {
+  custom_user_timing_mark_.emplace(std::make_tuple(mark_name, start_time));
+  NotifyDocumentTimingChanged();
+  custom_user_timing_mark_.reset();
+}
+
 void DocumentLoadTiming::AddRedirect(const KURL& redirecting_url,
                                      const KURL& redirected_url) {
   redirect_count_++;
@@ -202,7 +213,7 @@ void DocumentLoadTiming::SetRedirectStart(base::TimeTicks redirect_start) {
   redirect_start_ = redirect_start;
   TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "redirectStart",
                                    redirect_start_, "frame",
-                                   ToTraceValue(GetFrame()));
+                                   GetFrameIdForTracing(GetFrame()));
   NotifyDocumentTimingChanged();
 }
 
@@ -210,7 +221,7 @@ void DocumentLoadTiming::SetRedirectEnd(base::TimeTicks redirect_end) {
   redirect_end_ = redirect_end;
   TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "redirectEnd",
                                    redirect_end_, "frame",
-                                   ToTraceValue(GetFrame()));
+                                   GetFrameIdForTracing(GetFrame()));
   NotifyDocumentTimingChanged();
 }
 
@@ -218,14 +229,15 @@ void DocumentLoadTiming::SetUnloadEventStart(base::TimeTicks start_time) {
   unload_event_start_ = start_time;
   TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "unloadEventStart",
                                    start_time, "frame",
-                                   ToTraceValue(GetFrame()));
+                                   GetFrameIdForTracing(GetFrame()));
   NotifyDocumentTimingChanged();
 }
 
 void DocumentLoadTiming::SetUnloadEventEnd(base::TimeTicks end_time) {
   unload_event_end_ = end_time;
   TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "unloadEventEnd",
-                                   end_time, "frame", ToTraceValue(GetFrame()));
+                                   end_time, "frame",
+                                   GetFrameIdForTracing(GetFrame()));
   NotifyDocumentTimingChanged();
 }
 
@@ -237,7 +249,7 @@ void DocumentLoadTiming::SetFetchStart(base::TimeTicks fetch_start) {
   fetch_start_ = fetch_start;
   TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "fetchStart",
                                    fetch_start_, "frame",
-                                   ToTraceValue(GetFrame()));
+                                   GetFrameIdForTracing(GetFrame()));
   NotifyDocumentTimingChanged();
 }
 
@@ -245,7 +257,7 @@ void DocumentLoadTiming::SetResponseEnd(base::TimeTicks response_end) {
   response_end_ = response_end;
   TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "responseEnd",
                                    response_end_, "frame",
-                                   ToTraceValue(GetFrame()));
+                                   GetFrameIdForTracing(GetFrame()));
   NotifyDocumentTimingChanged();
 }
 
@@ -253,7 +265,7 @@ void DocumentLoadTiming::MarkLoadEventStart() {
   load_event_start_ = tick_clock_->NowTicks();
   TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "loadEventStart",
                                    load_event_start_, "frame",
-                                   ToTraceValue(GetFrame()));
+                                   GetFrameIdForTracing(GetFrame()));
   NotifyDocumentTimingChanged();
 }
 
@@ -261,7 +273,7 @@ void DocumentLoadTiming::MarkLoadEventEnd() {
   load_event_end_ = tick_clock_->NowTicks();
   TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "loadEventEnd",
                                    load_event_end_, "frame",
-                                   ToTraceValue(GetFrame()));
+                                   GetFrameIdForTracing(GetFrame()));
   NotifyDocumentTimingChanged();
 }
 
@@ -269,7 +281,7 @@ void DocumentLoadTiming::MarkRedirectEnd() {
   redirect_end_ = tick_clock_->NowTicks();
   TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "redirectEnd",
                                    redirect_end_, "frame",
-                                   ToTraceValue(GetFrame()));
+                                   GetFrameIdForTracing(GetFrame()));
   NotifyDocumentTimingChanged();
 }
 
@@ -277,15 +289,21 @@ void DocumentLoadTiming::MarkCommitNavigationEnd() {
   commit_navigation_end_ = tick_clock_->NowTicks();
   TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "commitNavigationEnd",
                                    commit_navigation_end_, "frame",
-                                   ToTraceValue(GetFrame()));
+                                   GetFrameIdForTracing(GetFrame()));
   NotifyDocumentTimingChanged();
 }
 
 void DocumentLoadTiming::SetActivationStart(base::TimeTicks activation_start) {
   activation_start_ = activation_start;
-  TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "activationtart",
-                                   activation_start, "frame",
-                                   ToTraceValue(GetFrame()));
+  TRACE_EVENT_MARK_WITH_TIMESTAMP1("blink.user_timing", "activationStart",
+                                   activation_start_, "frame",
+                                   GetFrameIdForTracing(GetFrame()));
+  NotifyDocumentTimingChanged();
+}
+
+void DocumentLoadTiming::SetCriticalCHRestart(
+    base::TimeTicks critical_ch_restart) {
+  critical_ch_restart_ = critical_ch_restart;
   NotifyDocumentTimingChanged();
 }
 

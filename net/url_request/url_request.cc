@@ -6,17 +6,23 @@
 
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback.h"
-#include "base/callback_helpers.h"
 #include "base/compiler_specific.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
+#include "base/functional/callback_helpers.h"
+#include "base/metrics/histogram_functions_internal_overloads.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/notreached.h"
 #include "base/rand_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/types/optional_util.h"
+#include "base/types/pass_key.h"
 #include "base/values.h"
 #include "net/base/auth.h"
+#include "net/base/features.h"
+#include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/net_errors.h"
@@ -24,6 +30,7 @@
 #include "net/base/network_delegate.h"
 #include "net/base/upload_data_stream.h"
 #include "net/cert/x509_certificate.h"
+#include "net/cookies/cookie_setting_override.h"
 #include "net/cookies/cookie_store.h"
 #include "net/cookies/cookie_util.h"
 #include "net/dns/public/secure_dns_policy.h"
@@ -35,6 +42,7 @@
 #include "net/socket/next_proto.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_private_key.h"
+#include "net/storage_access_api/status.h"
 #include "net/url_request/redirect_info.h"
 #include "net/url_request/redirect_util.h"
 #include "net/url_request/url_request_context.h"
@@ -45,9 +53,6 @@
 #include "net/url_request/url_request_redirect_job.h"
 #include "url/gurl.h"
 #include "url/origin.h"
-
-using base::Time;
-using std::string;
 
 namespace net {
 
@@ -132,11 +137,28 @@ void ConvertRealLoadTimesToBlockingTimes(LoadTimingInfo* load_timing_info) {
 
 NetLogWithSource CreateNetLogWithSource(
     NetLog* net_log,
-    absl::optional<net::NetLogSource> net_log_source) {
+    std::optional<net::NetLogSource> net_log_source) {
   if (net_log_source) {
     return NetLogWithSource::Make(net_log, net_log_source.value());
   }
   return NetLogWithSource::Make(net_log, NetLogSourceType::URL_REQUEST);
+}
+
+// TODO(https://crbug.com/366284840): remove this, once the "retry" header is
+// handled in URLLoader.
+net::cookie_util::SecFetchStorageAccessValueOutcome
+ConvertSecFetchStorageAccessHeaderValueToOutcome(
+    net::cookie_util::StorageAccessStatus storage_access_status) {
+  using enum net::cookie_util::SecFetchStorageAccessValueOutcome;
+  switch (storage_access_status) {
+    case net::cookie_util::StorageAccessStatus::kInactive:
+      return kValueInactive;
+    case net::cookie_util::StorageAccessStatus::kActive:
+      return kValueActive;
+    case net::cookie_util::StorageAccessStatus::kNone:
+      return kValueNone;
+  }
+  NOTREACHED();
 }
 
 }  // namespace
@@ -174,7 +196,7 @@ void URLRequest::Delegate::OnSSLCertificateError(URLRequest* request,
 
 void URLRequest::Delegate::OnResponseStarted(URLRequest* request,
                                              int net_error) {
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -182,12 +204,6 @@ void URLRequest::Delegate::OnResponseStarted(URLRequest* request,
 
 URLRequest::~URLRequest() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-
-  // Log the redirect count during destruction, to ensure that it is only
-  // recorded at the end of following all redirect chains.
-  UMA_HISTOGRAM_EXACT_LINEAR("Net.RedirectChainLength",
-                             kMaxRedirects - redirect_limit_,
-                             kMaxRedirects + 1);
 
   Cancel();
 
@@ -224,8 +240,8 @@ bool URLRequest::has_upload() const {
   return upload_data_stream_.get() != nullptr;
 }
 
-void URLRequest::SetExtraRequestHeaderByName(const string& name,
-                                             const string& value,
+void URLRequest::SetExtraRequestHeaderByName(std::string_view name,
+                                             std::string_view value,
                                              bool overwrite) {
   DCHECK(!is_pending_ || is_redirecting_);
   if (overwrite) {
@@ -235,7 +251,7 @@ void URLRequest::SetExtraRequestHeaderByName(const string& name,
   }
 }
 
-void URLRequest::RemoveRequestHeaderByName(const string& name) {
+void URLRequest::RemoveRequestHeaderByName(std::string_view name) {
   DCHECK(!is_pending_ || is_redirecting_);
   extra_request_headers_.RemoveHeader(name);
 }
@@ -263,9 +279,16 @@ int64_t URLRequest::GetTotalSentBytes() const {
 }
 
 int64_t URLRequest::GetRawBodyBytes() const {
-  if (!job_.get())
+  if (!job_.get()) {
     return 0;
+  }
 
+  if (int64_t bytes = job_->GetReceivedBodyBytes()) {
+    return bytes;
+  }
+
+  // GetReceivedBodyBytes() is available only when the body was received from
+  // the network. Otherwise, returns prefilter_bytes_read() instead.
   return job_->prefilter_bytes_read();
 }
 
@@ -282,19 +305,19 @@ LoadStateWithParam URLRequest::GetLoadState() const {
                             std::u16string());
 }
 
-base::Value URLRequest::GetStateAsValue() const {
+base::Value::Dict URLRequest::GetStateAsValue() const {
   base::Value::Dict dict;
   dict.Set("url", original_url().possibly_invalid_spec());
 
   if (url_chain_.size() > 1) {
-    base::Value list(base::Value::Type::LIST);
+    base::Value::List list;
     for (const GURL& url : url_chain_) {
       list.Append(url.possibly_invalid_spec());
     }
     dict.Set("url_chain", std::move(list));
   }
 
-  dict.Set("load_flags", load_flags_);
+  dict.Set("load_flags", load_flags());
 
   LoadStateWithParam load_state = GetLoadState();
   dict.Set("load_state", load_state.state);
@@ -304,6 +327,8 @@ base::Value URLRequest::GetStateAsValue() const {
     dict.Set("delegate_blocked_by", blocked_by_);
 
   dict.Set("method", method_);
+  dict.Set("network_anonymization_key",
+           isolation_info_.network_anonymization_key().ToDebugString());
   dict.Set("network_isolation_key",
            isolation_info_.network_isolation_key().ToDebugString());
   dict.Set("has_upload", has_upload());
@@ -313,12 +338,11 @@ base::Value URLRequest::GetStateAsValue() const {
 
   if (status_ != OK)
     dict.Set("net_error", status_);
-  return base::Value(std::move(dict));
+  return dict;
 }
 
-void URLRequest::LogBlockedBy(const char* blocked_by) {
-  DCHECK(blocked_by);
-  DCHECK_GT(strlen(blocked_by), 0u);
+void URLRequest::LogBlockedBy(std::string_view blocked_by) {
+  DCHECK(!blocked_by.empty());
 
   // Only log information to NetLog during startup and certain deferring calls
   // to delegates.  For all reads but the first, do nothing.
@@ -326,14 +350,14 @@ void URLRequest::LogBlockedBy(const char* blocked_by) {
     return;
 
   LogUnblocked();
-  blocked_by_ = blocked_by;
+  blocked_by_ = std::string(blocked_by);
   use_blocked_by_as_load_param_ = false;
 
   net_log_.BeginEventWithStringParams(NetLogEventType::DELEGATE_INFO,
                                       "delegate_blocked_by", blocked_by_);
 }
 
-void URLRequest::LogAndReportBlockedBy(const char* source) {
+void URLRequest::LogAndReportBlockedBy(std::string_view source) {
   LogBlockedBy(source);
   use_blocked_by_as_load_param_ = true;
 }
@@ -365,8 +389,8 @@ UploadProgress URLRequest::GetUploadProgress() const {
   return UploadProgress();
 }
 
-void URLRequest::GetResponseHeaderByName(const string& name,
-                                         string* value) const {
+void URLRequest::GetResponseHeaderByName(std::string_view name,
+                                         std::string* value) const {
   DCHECK(value);
   if (response_info_.headers.get()) {
     response_info_.headers->GetNormalizedHeader(name, value);
@@ -384,7 +408,7 @@ HttpResponseHeaders* URLRequest::response_headers() const {
   return response_info_.headers.get();
 }
 
-const absl::optional<AuthChallengeInfo>& URLRequest::auth_challenge_info()
+const std::optional<AuthChallengeInfo>& URLRequest::auth_challenge_info()
     const {
   return response_info_.auth_challenge;
 }
@@ -406,12 +430,12 @@ bool URLRequest::GetTransactionRemoteEndpoint(IPEndPoint* endpoint) const {
   return job_->GetTransactionRemoteEndpoint(endpoint);
 }
 
-void URLRequest::GetMimeType(string* mime_type) const {
+void URLRequest::GetMimeType(std::string* mime_type) const {
   DCHECK(job_.get());
   job_->GetMimeType(mime_type);
 }
 
-void URLRequest::GetCharset(string* charset) const {
+void URLRequest::GetCharset(std::string* charset) const {
   DCHECK(job_.get());
   job_->GetCharset(charset);
 }
@@ -431,17 +455,18 @@ void URLRequest::set_maybe_stored_cookies(
 }
 
 void URLRequest::SetLoadFlags(int flags) {
-  if ((load_flags_ & LOAD_IGNORE_LIMITS) != (flags & LOAD_IGNORE_LIMITS)) {
+  if ((load_flags() & LOAD_IGNORE_LIMITS) != (flags & LOAD_IGNORE_LIMITS)) {
     DCHECK(!job_.get());
     DCHECK(flags & LOAD_IGNORE_LIMITS);
     DCHECK_EQ(priority_, MAXIMUM_PRIORITY);
   }
-  load_flags_ = flags;
+  partial_load_flags_ = flags;
 
   // This should be a no-op given the above DCHECKs, but do this
   // anyway for release mode.
-  if ((load_flags_ & LOAD_IGNORE_LIMITS) != 0)
+  if ((load_flags() & LOAD_IGNORE_LIMITS) != 0) {
     SetPriority(MAXIMUM_PRIORITY);
+  }
 }
 
 void URLRequest::SetSecureDnsPolicy(SecureDnsPolicy secure_dns_policy) {
@@ -476,22 +501,45 @@ void URLRequest::set_site_for_cookies(const SiteForCookies& site_for_cookies) {
   site_for_cookies_ = site_for_cookies;
 }
 
+void URLRequest::set_isolation_info(const IsolationInfo& isolation_info,
+                                    std::optional<GURL> redirect_info_new_url) {
+  isolation_info_ = isolation_info;
+
+  bool is_main_frame_navigation = isolation_info.IsMainFrameRequest() ||
+                                  force_main_frame_for_same_site_cookies();
+
+  cookie_partition_key_ = CookiePartitionKey::FromNetworkIsolationKey(
+      isolation_info.network_isolation_key(), isolation_info.site_for_cookies(),
+      net::SchemefulSite(redirect_info_new_url.has_value()
+                             ? redirect_info_new_url.value()
+                             : url_chain_.back()),
+      is_main_frame_navigation);
+}
+
+void URLRequest::set_isolation_info_from_network_anonymization_key(
+    const NetworkAnonymizationKey& network_anonymization_key) {
+  set_isolation_info(URLRequest::CreateIsolationInfoFromNetworkAnonymizationKey(
+      network_anonymization_key));
+
+  is_created_from_network_anonymization_key_ = true;
+}
+
 void URLRequest::set_first_party_url_policy(
     RedirectInfo::FirstPartyURLPolicy first_party_url_policy) {
   DCHECK(!is_pending_);
   first_party_url_policy_ = first_party_url_policy;
 }
 
-void URLRequest::set_initiator(const absl::optional<url::Origin>& initiator) {
+void URLRequest::set_initiator(const std::optional<url::Origin>& initiator) {
   DCHECK(!is_pending_);
   DCHECK(!initiator.has_value() || initiator.value().opaque() ||
          initiator.value().GetURL().is_valid());
   initiator_ = initiator;
 }
 
-void URLRequest::set_method(const std::string& method) {
+void URLRequest::set_method(std::string_view method) {
   DCHECK(!is_pending_);
-  method_ = method;
+  method_ = std::string(method);
 }
 
 #if BUILDFLAG(ENABLE_REPORTING)
@@ -501,13 +549,13 @@ void URLRequest::set_reporting_upload_depth(int reporting_upload_depth) {
 }
 #endif
 
-void URLRequest::SetReferrer(const std::string& referrer) {
+void URLRequest::SetReferrer(std::string_view referrer) {
   DCHECK(!is_pending_);
   GURL referrer_url(referrer);
   if (referrer_url.is_valid()) {
     referrer_ = referrer_url.GetAsReferrer().spec();
   } else {
-    referrer_ = referrer;
+    referrer_ = std::string(referrer);
   }
 }
 
@@ -519,9 +567,9 @@ void URLRequest::set_referrer_policy(ReferrerPolicy referrer_policy) {
 void URLRequest::set_allow_credentials(bool allow_credentials) {
   allow_credentials_ = allow_credentials;
   if (allow_credentials) {
-    load_flags_ &= ~LOAD_DO_NOT_SAVE_COOKIES;
+    partial_load_flags_ &= ~LOAD_DO_NOT_SAVE_COOKIES;
   } else {
-    load_flags_ |= LOAD_DO_NOT_SAVE_COOKIES;
+    partial_load_flags_ |= LOAD_DO_NOT_SAVE_COOKIES;
   }
 }
 
@@ -531,8 +579,9 @@ void URLRequest::Start() {
   if (status_ != OK)
     return;
 
-  if (context_->require_network_isolation_key())
+  if (context_->require_network_anonymization_key()) {
     DCHECK(!isolation_info_.IsEmpty());
+  }
 
   // Some values can be NULL, but the job factory must not be.
   DCHECK(context_->job_factory());
@@ -567,13 +616,14 @@ void URLRequest::Start() {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-URLRequest::URLRequest(const GURL& url,
+URLRequest::URLRequest(base::PassKey<URLRequestContext> pass_key,
+                       const GURL& url,
                        RequestPriority priority,
                        Delegate* delegate,
                        const URLRequestContext* context,
                        NetworkTrafficAnnotationTag traffic_annotation,
                        bool is_for_websockets,
-                       absl::optional<net::NetLogSource> net_log_source)
+                       std::optional<net::NetLogSource> net_log_source)
     : context_(context),
       net_log_(CreateNetLogWithSource(context->net_log(), net_log_source)),
       url_chain_(1, url),
@@ -585,7 +635,7 @@ URLRequest::URLRequest(const GURL& url,
       creation_time_(base::TimeTicks::Now()),
       traffic_annotation_(traffic_annotation) {
   // Sanity check out environment.
-  DCHECK(base::ThreadTaskRunnerHandle::IsSet());
+  DCHECK(base::SingleThreadTaskRunner::HasCurrentDefault());
 
   context->url_requests()->insert(this);
   net_log_.BeginEvent(NetLogEventType::REQUEST_ALIVE, [&] {
@@ -624,10 +674,14 @@ void URLRequest::BeforeRequestComplete(int error) {
 void URLRequest::StartJob(std::unique_ptr<URLRequestJob> job) {
   DCHECK(!is_pending_);
   DCHECK(!job_);
+  if (is_created_from_network_anonymization_key_) {
+    DCHECK(load_flags() & LOAD_DISABLE_CACHE);
+    DCHECK(!allow_credentials_);
+  }
 
   net_log_.BeginEvent(NetLogEventType::URL_REQUEST_START_JOB, [&] {
     return NetLogURLRequestStartParams(
-        url(), method_, load_flags_, isolation_info_, site_for_cookies_,
+        url(), method_, load_flags(), isolation_info_, site_for_cookies_,
         initiator_,
         upload_data_stream_ ? upload_data_stream_->identifier() : -1);
   });
@@ -637,19 +691,26 @@ void URLRequest::StartJob(std::unique_ptr<URLRequestJob> job) {
   job_->SetPriority(priority_);
   job_->SetRequestHeadersCallback(request_headers_callback_);
   job_->SetEarlyResponseHeadersCallback(early_response_headers_callback_);
+  if (is_shared_dictionary_read_allowed_callback_) {
+    job_->SetIsSharedDictionaryReadAllowedCallback(
+        is_shared_dictionary_read_allowed_callback_);
+  }
   job_->SetResponseHeadersCallback(response_headers_callback_);
+  if (shared_dictionary_getter_) {
+    job_->SetSharedDictionaryGetter(shared_dictionary_getter_);
+  }
 
   if (upload_data_stream_.get())
     job_->SetUpload(upload_data_stream_.get());
 
   is_pending_ = true;
   is_redirecting_ = false;
+  deferred_redirect_info_.reset();
 
   response_info_.was_cached = false;
 
   maybe_sent_cookies_.clear();
   maybe_stored_cookies_.clear();
-  has_partitioned_cookie_ = false;
 
   GURL referrer_url(referrer_);
   bool same_origin_for_metrics;
@@ -702,7 +763,7 @@ int URLRequest::CancelWithError(int error) {
 void URLRequest::CancelWithSSLError(int error, const SSLInfo& ssl_info) {
   // This should only be called on a started request.
   if (!is_pending_ || !job_.get() || job_->has_response_started()) {
-    NOTREACHED();
+    NOTREACHED_IN_MIGRATION();
     return;
   }
   DoCancel(error, ssl_info);
@@ -768,6 +829,9 @@ int URLRequest::Read(IOBuffer* dest, int dest_size) {
     return OK;
   }
 
+  // Caller should provide a buffer.
+  DCHECK(dest && dest->data());
+
   int rv = job_->Read(dest, dest_size);
   if (rv == ERR_IO_PENDING) {
     set_status(ERR_IO_PENDING);
@@ -806,12 +870,31 @@ int URLRequest::NotifyConnected(const TransportInfo& info,
   return result;
 }
 
-void URLRequest::NotifyReceivedRedirect(const RedirectInfo& redirect_info,
-                                        bool* defer_redirect) {
+void URLRequest::ReceivedRedirect(RedirectInfo redirect_info) {
   DCHECK_EQ(OK, status_);
   is_redirecting_ = true;
   OnCallToDelegate(NetLogEventType::URL_REQUEST_DELEGATE_RECEIVED_REDIRECT);
-  delegate_->OnReceivedRedirect(this, redirect_info, defer_redirect);
+
+  // When notifying the URLRequest::Delegate, it can destroy the request,
+  // which will destroy |this|.  After calling to the URLRequest::Delegate,
+  // pointer must be checked to see if |this| still exists, and if not, the
+  // code must return immediately.
+  base::WeakPtr<URLRequest> weak_this(weak_factory_.GetWeakPtr());
+  bool defer_redirect = false;
+  delegate_->OnReceivedRedirect(this, redirect_info, &defer_redirect);
+
+  // Ensure that the request wasn't detached, destroyed, or canceled in
+  // NotifyReceivedRedirect.
+  if (!weak_this || failed()) {
+    return;
+  }
+
+  if (defer_redirect) {
+    deferred_redirect_info_ = std::move(redirect_info);
+  } else {
+    Redirect(redirect_info, /*removed_headers=*/std::nullopt,
+             /*modified_headers=*/std::nullopt);
+  }
   // |this| may be have been destroyed here.
 }
 
@@ -847,17 +930,25 @@ void URLRequest::NotifyResponseStarted(int net_error) {
 }
 
 void URLRequest::FollowDeferredRedirect(
-    const absl::optional<std::vector<std::string>>& removed_headers,
-    const absl::optional<net::HttpRequestHeaders>& modified_headers) {
+    const std::optional<std::vector<std::string>>& removed_headers,
+    const std::optional<net::HttpRequestHeaders>& modified_headers) {
   DCHECK(job_.get());
   DCHECK_EQ(OK, status_);
+  DCHECK(is_redirecting_);
+  DCHECK(deferred_redirect_info_);
 
   maybe_sent_cookies_.clear();
   maybe_stored_cookies_.clear();
-  has_partitioned_cookie_ = false;
 
   status_ = ERR_IO_PENDING;
-  job_->FollowDeferredRedirect(removed_headers, modified_headers);
+
+  // While this move is not strictly needed, Redirect() will start a new Job,
+  // which will delete `deferred_redirect_info_`. While `redirect_info` should
+  // not be needed after it's been deleted, it's best to not have a reference to
+  // a deleted object on the stack.
+  RedirectInfo redirect_info = std::move(deferred_redirect_info_).value();
+
+  Redirect(redirect_info, removed_headers, modified_headers);
 }
 
 void URLRequest::SetAuth(const AuthCredentials& credentials) {
@@ -866,7 +957,6 @@ void URLRequest::SetAuth(const AuthCredentials& credentials) {
 
   maybe_sent_cookies_.clear();
   maybe_stored_cookies_.clear();
-  has_partitioned_cookie_ = false;
 
   status_ = ERR_IO_PENDING;
   job_->SetAuth(credentials);
@@ -929,13 +1019,13 @@ void URLRequest::PrepareToRestart() {
 
   status_ = OK;
   is_pending_ = false;
-  proxy_server_ = ProxyServer();
+  proxy_chain_ = ProxyChain();
 }
 
 void URLRequest::Redirect(
     const RedirectInfo& redirect_info,
-    const absl::optional<std::vector<std::string>>& removed_headers,
-    const absl::optional<net::HttpRequestHeaders>& modified_headers) {
+    const std::optional<std::vector<std::string>>& removed_headers,
+    const std::optional<net::HttpRequestHeaders>& modified_headers) {
   // This method always succeeds. Whether |job_| is allowed to redirect to
   // |redirect_info| is checked in URLRequestJob::CanFollowRedirect, before
   // NotifyReceivedRedirect. This means the delegate can assume that, if it
@@ -966,10 +1056,49 @@ void URLRequest::Redirect(
   referrer_ = redirect_info.new_referrer;
   referrer_policy_ = redirect_info.new_referrer_policy;
   site_for_cookies_ = redirect_info.new_site_for_cookies;
-  isolation_info_ = isolation_info_.CreateForRedirect(
-      url::Origin::Create(redirect_info.new_url));
+  set_isolation_info(isolation_info_.CreateForRedirect(
+                         url::Origin::Create(redirect_info.new_url)),
+                     redirect_info.new_url);
+
+  cookie_setting_overrides().Remove(
+      CookieSettingOverride::kStorageAccessGrantEligibleViaHeader);
+
+  if ((load_flags() & LOAD_CAN_USE_SHARED_DICTIONARY) &&
+      (load_flags() &
+       LOAD_DISABLE_SHARED_DICTIONARY_AFTER_CROSS_ORIGIN_REDIRECT) &&
+      !url::Origin::Create(url()).IsSameOriginWith(redirect_info.new_url)) {
+    partial_load_flags_ &= ~LOAD_CAN_USE_SHARED_DICTIONARY;
+  }
 
   url_chain_.push_back(redirect_info.new_url);
+  --redirect_limit_;
+
+  Start();
+}
+
+void URLRequest::RetryWithStorageAccess() {
+  CHECK(!cookie_setting_overrides().Has(
+      CookieSettingOverride::kStorageAccessGrantEligibleViaHeader));
+  CHECK(!cookie_setting_overrides().Has(
+      CookieSettingOverride::kStorageAccessGrantEligible));
+
+  net_log_.AddEvent(NetLogEventType::URL_REQUEST_RETRY_WITH_STORAGE_ACCESS);
+  if (network_delegate()) {
+    network_delegate()->NotifyBeforeRetry(this);
+  }
+
+  cookie_setting_overrides().Put(
+      CookieSettingOverride::kStorageAccessGrantEligibleViaHeader);
+  set_storage_access_status(CalculateStorageAccessStatus());
+
+  if (!final_upload_progress_.position() && upload_data_stream_) {
+    final_upload_progress_ = upload_data_stream_->GetUploadProgress();
+  }
+  PrepareToRestart();
+
+  // This isn't really a proper redirect, but we add to the `url_chain_` and
+  // count it against the redirect limit anyway, to avoid unbounded retries.
+  url_chain_.push_back(url());
   --redirect_limit_;
 
   Start();
@@ -1000,8 +1129,8 @@ void URLRequest::SetPriority(RequestPriority priority) {
   DCHECK_GE(priority, MINIMUM_PRIORITY);
   DCHECK_LE(priority, MAXIMUM_PRIORITY);
 
-  if ((load_flags_ & LOAD_IGNORE_LIMITS) && (priority != MAXIMUM_PRIORITY)) {
-    NOTREACHED();
+  if ((load_flags() & LOAD_IGNORE_LIMITS) && (priority != MAXIMUM_PRIORITY)) {
+    NOTREACHED_IN_MIGRATION();
     // Maintain the invariant that requests with IGNORE_LIMITS set
     // have MAXIMUM_PRIORITY for release mode.
     return;
@@ -1016,6 +1145,10 @@ void URLRequest::SetPriority(RequestPriority priority) {
                                     RequestPriorityToString(priority_));
   if (job_.get())
     job_->SetPriority(priority_);
+}
+
+void URLRequest::SetPriorityIncremental(bool priority_incremental) {
+  priority_incremental_ = priority_incremental;
 }
 
 void URLRequest::NotifyAuthRequired(
@@ -1044,12 +1177,16 @@ void URLRequest::NotifySSLCertificateError(int net_error,
   delegate_->OnSSLCertificateError(this, net_error, ssl_info, fatal);
 }
 
-bool URLRequest::CanSetCookie(const net::CanonicalCookie& cookie,
-                              CookieOptions* options) const {
-  DCHECK(!(load_flags_ & LOAD_DO_NOT_SAVE_COOKIES));
+bool URLRequest::CanSetCookie(
+    const net::CanonicalCookie& cookie,
+    CookieOptions* options,
+    const net::FirstPartySetMetadata& first_party_set_metadata,
+    CookieInclusionStatus* inclusion_status) const {
+  DCHECK(!(load_flags() & LOAD_DO_NOT_SAVE_COOKIES));
   bool can_set_cookies = g_default_can_use_cookies;
   if (network_delegate()) {
-    can_set_cookies = network_delegate()->CanSetCookie(*this, cookie, options);
+    can_set_cookies = network_delegate()->CanSetCookie(
+        *this, cookie, options, first_party_set_metadata, inclusion_status);
   }
   if (!can_set_cookies)
     net_log_.AddEvent(NetLogEventType::COOKIE_SET_BLOCKED_BY_NETWORK_DELEGATE);
@@ -1113,6 +1250,7 @@ void URLRequest::NotifyRequestCompleted() {
 
   is_pending_ = false;
   is_redirecting_ = false;
+  deferred_redirect_info_.reset();
   has_notified_completion_ = true;
   if (network_delegate())
     network_delegate()->NotifyCompleted(this, job_.get() != nullptr, status_);
@@ -1161,6 +1299,35 @@ void URLRequest::RecordReferrerGranularityMetrics(
   }
 }
 
+IsolationInfo URLRequest::CreateIsolationInfoFromNetworkAnonymizationKey(
+    const NetworkAnonymizationKey& network_anonymization_key) {
+  if (!network_anonymization_key.IsFullyPopulated()) {
+    return IsolationInfo();
+  }
+
+  url::Origin top_frame_origin =
+      network_anonymization_key.GetTopFrameSite()->site_as_origin_;
+
+  std::optional<url::Origin> frame_origin;
+  if (network_anonymization_key.IsCrossSite()) {
+    // If we know that the origin is cross site to the top level site, create an
+    // empty origin to use as the frame origin for the isolation info. This
+    // should be cross site with the top level origin.
+    frame_origin = url::Origin();
+  } else {
+    // If we don't know that it's cross site to the top level site, use the top
+    // frame site to set the frame origin.
+    frame_origin = top_frame_origin;
+  }
+
+  auto isolation_info = IsolationInfo::Create(
+      IsolationInfo::RequestType::kOther, top_frame_origin,
+      frame_origin.value(), SiteForCookies(),
+      network_anonymization_key.GetNonce());
+  // TODO(crbug.com/40852603): DCHECK isolation info is fully populated.
+  return isolation_info;
+}
+
 ConnectionAttempts URLRequest::GetConnectionAttempts() const {
   if (job_)
     return job_->GetConnectionAttempts();
@@ -1186,10 +1353,65 @@ void URLRequest::SetEarlyResponseHeadersCallback(
   early_response_headers_callback_ = std::move(callback);
 }
 
+void URLRequest::SetIsSharedDictionaryReadAllowedCallback(
+    base::RepeatingCallback<bool()> callback) {
+  DCHECK(!job_.get());
+  DCHECK(is_shared_dictionary_read_allowed_callback_.is_null());
+  is_shared_dictionary_read_allowed_callback_ = std::move(callback);
+}
+
 void URLRequest::set_socket_tag(const SocketTag& socket_tag) {
   DCHECK(!is_pending_);
   DCHECK(url().SchemeIsHTTPOrHTTPS());
   socket_tag_ = socket_tag;
+}
+std::optional<net::cookie_util::StorageAccessStatus>
+URLRequest::CalculateStorageAccessStatus() const {
+  std::optional<net::cookie_util::StorageAccessStatus> storage_access_status =
+      network_delegate()->GetStorageAccessStatus(*this);
+
+  auto get_storage_access_value_outcome_if_omitted = [&]()
+      -> std::optional<net::cookie_util::SecFetchStorageAccessValueOutcome> {
+    if (!network_delegate()->IsStorageAccessHeaderEnabled(
+            base::OptionalToPtr(isolation_info().top_frame_origin()), url())) {
+      return net::cookie_util::SecFetchStorageAccessValueOutcome::
+          kOmittedFeatureDisabled;
+    }
+    // Avoid attaching the header in cases where credentials are not included in
+    // the request.
+    if (!allow_credentials_) {
+      return net::cookie_util::SecFetchStorageAccessValueOutcome::
+          kOmittedRequestOmitsCredentials;
+    }
+    if (!storage_access_status) {
+      return net::cookie_util::SecFetchStorageAccessValueOutcome::
+          kOmittedSameSite;
+    }
+    return std::nullopt;
+  };
+
+  auto storage_access_value_outcome =
+      get_storage_access_value_outcome_if_omitted();
+  if (storage_access_value_outcome) {
+    storage_access_status = std::nullopt;
+  } else {
+    storage_access_value_outcome =
+        ConvertSecFetchStorageAccessHeaderValueToOutcome(
+            storage_access_status.value());
+  }
+
+  base::UmaHistogramEnumeration(
+      "API.StorageAccessHeader.SecFetchStorageAccessValueOutcome",
+      storage_access_value_outcome.value());
+
+  return storage_access_status;
+}
+
+void URLRequest::SetSharedDictionaryGetter(
+    SharedDictionaryGetter shared_dictionary_getter) {
+  CHECK(!job_.get());
+  CHECK(shared_dictionary_getter_.is_null());
+  shared_dictionary_getter_ = std::move(shared_dictionary_getter);
 }
 
 base::WeakPtr<URLRequest> URLRequest::GetWeakPtr() {

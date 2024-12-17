@@ -79,19 +79,18 @@ TEST(GraphicsContextTest, Recording) {
   bitmap.eraseColor(0);
   SkiaPaintCanvas canvas(bitmap);
 
-  auto paint_controller = std::make_unique<PaintController>();
-  GraphicsContext context(*paint_controller);
+  PaintController paint_controller;
+  GraphicsContext context(paint_controller);
 
   Color opaque = Color::FromRGBA(255, 0, 0, 255);
-  gfx::RectF bounds(0, 0, 100, 100);
 
-  context.BeginRecording(bounds);
+  context.BeginRecording();
   context.FillRect(gfx::RectF(0, 0, 50, 50), opaque, AutoDarkModeDisabled(),
                    SkBlendMode::kSrcOver);
   canvas.drawPicture(context.EndRecording());
   EXPECT_OPAQUE_PIXELS_ONLY_IN_RECT(bitmap, gfx::Rect(0, 0, 50, 50))
 
-  context.BeginRecording(bounds);
+  context.BeginRecording();
   context.FillRect(gfx::RectF(0, 0, 100, 100), opaque, AutoDarkModeDisabled(),
                    SkBlendMode::kSrcOver);
   // Make sure the opaque region was unaffected by the rect drawn during
@@ -110,23 +109,12 @@ TEST(GraphicsContextTest, UnboundedDrawsAreClipped) {
 
   Color opaque = Color::FromRGBA(255, 0, 0, 255);
   Color transparent = Color::kTransparent;
-  gfx::RectF bounds(0, 0, 100, 100);
 
-  auto paint_controller = std::make_unique<PaintController>();
-  GraphicsContext context(*paint_controller);
-  context.BeginRecording(bounds);
+  PaintController paint_controller;
+  GraphicsContext context(paint_controller);
+  context.BeginRecording();
 
   context.SetShouldAntialias(false);
-  context.SetMiterLimit(1);
-  context.SetStrokeThickness(5);
-  context.SetLineCap(kSquareCap);
-  context.SetStrokeStyle(kSolidStroke);
-
-  // Make skia unable to compute fast bounds for our paths.
-  DashArray dash_array;
-  dash_array.push_back(1);
-  dash_array.push_back(0);
-  context.SetLineDash(dash_array, 0);
 
   // Make the device opaque in 10,10 40x40.
   context.FillRect(gfx::RectF(10, 10, 40, 40), opaque, AutoDarkModeDisabled(),
@@ -134,7 +122,7 @@ TEST(GraphicsContextTest, UnboundedDrawsAreClipped) {
   canvas.drawPicture(context.EndRecording());
   EXPECT_OPAQUE_PIXELS_ONLY_IN_RECT(bitmap, gfx::Rect(10, 10, 40, 40));
 
-  context.BeginRecording(bounds);
+  context.BeginRecording();
   // Clip to the left edge of the opaque area.
   context.Clip(gfx::Rect(10, 10, 10, 40));
 
@@ -158,15 +146,15 @@ class GraphicsContextDarkModeTest : public testing::Test {
     bitmap_.allocN32Pixels(4, 1);
     bitmap_.eraseColor(0);
     canvas_ = std::make_unique<SkiaPaintCanvas>(bitmap_);
-    paint_controller_ = std::make_unique<PaintController>();
   }
 
   void DrawColorsToContext(bool is_dark_mode_on,
                            const DarkModeSettings& settings) {
-    GraphicsContext context(*paint_controller_);
+    PaintController paint_controller;
+    GraphicsContext context(paint_controller);
     if (is_dark_mode_on)
       context.UpdateDarkModeSettingsForTest(settings);
-    context.BeginRecording(gfx::RectF(0, 0, 4, 1));
+    context.BeginRecording();
     context.FillRect(gfx::RectF(0, 0, 1, 1), Color::kBlack,
                      AutoDarkMode(DarkModeFilter::ElementRole::kBackground,
                                   is_dark_mode_on));
@@ -185,7 +173,6 @@ class GraphicsContextDarkModeTest : public testing::Test {
 
   SkBitmap bitmap_;
   std::unique_ptr<SkiaPaintCanvas> canvas_;
-  std::unique_ptr<PaintController> paint_controller_;
 };
 
 // This is a baseline test where dark mode is turned off. Compare other variants

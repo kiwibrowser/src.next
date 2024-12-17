@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,13 +52,124 @@ TEST_P(SVGContainerPainterTest, FilterPaintProperties) {
 
   const auto* after = GetLayoutObjectByElementId("after");
   PaintChunk::Id after_id(after->Id(), kSVGEffectPaintPhaseForeground);
+
   const auto& after_properties = after->FirstFragment().ContentsProperties();
 
-  EXPECT_THAT(ContentPaintChunks(),
-              ElementsAre(VIEW_SCROLLING_BACKGROUND_CHUNK_COMMON,
-                          IsPaintChunk(1, 2, before_id, before_properties),
-                          IsPaintChunk(2, 3, rect_id, container_properties),
-                          IsPaintChunk(3, 4, after_id, after_properties)));
+  if (RuntimeEnabledFeatures::HitTestOpaquenessEnabled()) {
+    EXPECT_THAT(ContentPaintChunks(),
+                ElementsAre(VIEW_SCROLLING_BACKGROUND_CHUNK_COMMON,
+                            IsPaintChunk(1, 1),  // Hit test for svg.
+                            IsPaintChunk(1, 2, before_id, before_properties),
+                            IsPaintChunk(2, 3, rect_id, container_properties),
+                            IsPaintChunk(3, 4, after_id, after_properties)));
+  } else {
+    EXPECT_THAT(ContentPaintChunks(),
+                ElementsAre(VIEW_SCROLLING_BACKGROUND_CHUNK_COMMON,
+                            IsPaintChunk(1, 2, before_id, before_properties),
+                            IsPaintChunk(2, 3, rect_id, container_properties),
+                            IsPaintChunk(3, 4, after_id, after_properties)));
+  }
+}
+
+TEST_P(SVGContainerPainterTest, ScaleAnimationFrom0) {
+  SetBodyInnerHTML(R"HTML(
+    <svg>
+      <style>
+        @keyframes scale { to { scale: 1; } }
+        .scale { animation: 1s scale 1s forwards; }
+        @keyframes transform-scale { to { transform: scale(1); } }
+        .transform-scale { animation: 1s transform-scale 1s forwards; }
+        #rect1 { scale: 0; }
+        #rect2 { transform: scale(0); }
+      </style>
+      <g>
+        <g>
+          <rect id="rect1" width="100" height="100"/>
+        </g>
+      </g>
+      <g>
+        <g>
+          <rect id="rect2" width="100" height="100"/>
+        </g>
+      </g>
+    </svg>
+  )HTML");
+
+  // Initially all <g>s and <rect>s are empty and don't paint.
+
+  if (RuntimeEnabledFeatures::HitTestOpaquenessEnabled()) {
+    EXPECT_THAT(ContentPaintChunks(),
+                ElementsAre(VIEW_SCROLLING_BACKGROUND_CHUNK_COMMON,
+                            IsPaintChunk(1, 1)));  // Svg hit test.
+  } else {
+    EXPECT_THAT(ContentPaintChunks(),
+                ElementsAre(VIEW_SCROLLING_BACKGROUND_CHUNK_COMMON));
+  }
+
+  auto* rect1_element = GetDocument().getElementById(AtomicString("rect1"));
+  auto* rect2_element = GetDocument().getElementById(AtomicString("rect2"));
+  rect1_element->setAttribute(html_names::kClassAttr, AtomicString("scale"));
+  rect2_element->setAttribute(html_names::kClassAttr,
+                              AtomicString("transform-scale"));
+  UpdateAllLifecyclePhasesForTest();
+
+  // Start animations on the rects.
+  const DisplayItem::Type kSVGTransformPaintPhaseForeground =
+      static_cast<DisplayItem::Type>(DisplayItem::kSVGTransformPaintPhaseFirst +
+                                     5);
+  auto* rect1 = GetLayoutObjectByElementId("rect1");
+  auto* rect2 = GetLayoutObjectByElementId("rect2");
+  PaintChunk::Id rect1_id(rect1->Id(), kSVGTransformPaintPhaseForeground);
+  auto rect1_properties = rect1->FirstFragment().ContentsProperties();
+  PaintChunk::Id rect2_id(rect2->Id(), kSVGTransformPaintPhaseForeground);
+  auto rect2_properties = rect2->FirstFragment().ContentsProperties();
+  // Both rects should be painted to be ready for composited animation.
+  if (RuntimeEnabledFeatures::HitTestOpaquenessEnabled()) {
+    EXPECT_THAT(ContentPaintChunks(),
+                ElementsAre(VIEW_SCROLLING_BACKGROUND_CHUNK_COMMON,
+                            IsPaintChunk(1, 1),  // Svg hit test.
+                            IsPaintChunk(1, 2, rect1_id, rect1_properties),
+                            IsPaintChunk(2, 3, rect2_id, rect2_properties)));
+  } else {
+    EXPECT_THAT(ContentPaintChunks(),
+                ElementsAre(VIEW_SCROLLING_BACKGROUND_CHUNK_COMMON,
+                            IsPaintChunk(1, 2, rect1_id, rect1_properties),
+                            IsPaintChunk(2, 3, rect2_id, rect2_properties)));
+  }
+
+  // Remove the animations.
+  rect1_element->removeAttribute(html_names::kClassAttr);
+  rect2_element->removeAttribute(html_names::kClassAttr);
+  UpdateAllLifecyclePhasesForTest();
+  // We don't remove the paintings of the rects immediately because they are
+  // harmless and we want to avoid repaints.
+  if (RuntimeEnabledFeatures::HitTestOpaquenessEnabled()) {
+    EXPECT_THAT(ContentPaintChunks(),
+                ElementsAre(VIEW_SCROLLING_BACKGROUND_CHUNK_COMMON,
+                            IsPaintChunk(1, 1),  // Svg hit test.
+                            IsPaintChunk(1, 2, rect1_id, rect1_properties),
+                            IsPaintChunk(2, 3, rect2_id, rect2_properties)));
+  } else {
+    EXPECT_THAT(ContentPaintChunks(),
+                ElementsAre(VIEW_SCROLLING_BACKGROUND_CHUNK_COMMON,
+                            IsPaintChunk(1, 2, rect1_id, rect1_properties),
+                            IsPaintChunk(2, 3, rect2_id, rect2_properties)));
+  }
+
+  // We remove the paintings only after anything else trigger a layout and a
+  // repaint.
+  rect1->Parent()->SetNeedsLayout("test");
+  rect2->Parent()->SetNeedsLayout("test");
+  rect1->EnclosingLayer()->SetNeedsRepaint();
+  UpdateAllLifecyclePhasesForTest();
+  if (RuntimeEnabledFeatures::HitTestOpaquenessEnabled()) {
+    EXPECT_THAT(ContentPaintChunks(),
+                ElementsAre(VIEW_SCROLLING_BACKGROUND_CHUNK_COMMON,
+                            IsPaintChunk(1, 1)));  // Svg hit test.
+  } else {
+    EXPECT_THAT(ContentPaintChunks(),
+                ElementsAre(VIEW_SCROLLING_BACKGROUND_CHUNK_COMMON));
+  }
 }
 
 }  // namespace blink

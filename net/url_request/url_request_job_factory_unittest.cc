@@ -4,13 +4,12 @@
 
 #include "net/url_request/url_request_job_factory.h"
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/test/task_environment.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "net/base/request_priority.h"
 #include "net/test/gtest_util.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
@@ -38,7 +37,7 @@ class MockURLRequestJob : public URLRequestJob {
   void Start() override {
     // Start reading asynchronously so that all error reporting and data
     // callbacks happen as they would for network requests.
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE, base::BindOnce(&MockURLRequestJob::StartAsync,
                                   weak_factory_.GetWeakPtr()));
   }
@@ -66,7 +65,7 @@ TEST(URLRequestJobFactoryTest, NoProtocolHandler) {
                                      &delegate, TRAFFIC_ANNOTATION_FOR_TESTS));
   request->Start();
 
-  base::RunLoop().Run();
+  delegate.RunUntilComplete();
   EXPECT_EQ(ERR_UNKNOWN_URL_SCHEME, delegate.request_status());
 }
 
@@ -83,7 +82,7 @@ TEST(URLRequestJobFactoryTest, BasicProtocolHandler) {
                                      &delegate, TRAFFIC_ANNOTATION_FOR_TESTS));
   request->Start();
 
-  base::RunLoop().Run();
+  delegate.RunUntilComplete();
   EXPECT_EQ(OK, delegate.request_status());
 }
 

@@ -84,7 +84,7 @@
     },
     {
       name: "x",
-      unit_type: "kDotsPerPixel",
+      unit_type: "kX",
     },
     {
       name: "vw",
@@ -211,8 +211,20 @@
       unit_type: "kRems",
     },
     {
+      name: "rex",
+      unit_type: "kRexs",
+    },
+    {
+      name: "rch",
+      unit_type: "kRchs",
+    },
+    {
+      name: "ric",
+      unit_type: "kRics",
+    },
+    {
       name: "fr",
-      unit_type: "kFraction",
+      unit_type: "kFlex",
     },
     {
       name: "turn",
@@ -225,6 +237,22 @@
     {
       name: "ic",
       unit_type: "kIcs",
+    },
+    {
+      name: "lh",
+      unit_type: "kLhs",
+    },
+    {
+      name: "rlh",
+      unit_type: "kRlhs",
+    },
+    {
+      name: "cap",
+      unit_type: "kCaps",
+    },
+    {
+      name: "rcap",
+      unit_type: "kRcaps",
     },
     {
       name: "__qem",

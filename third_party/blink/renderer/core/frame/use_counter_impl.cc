@@ -97,10 +97,9 @@ bool UseCounterImpl::IsCounted(WebFeature web_feature) const {
   if (mute_count_)
     return false;
 
-  // PageDestruction is reserved as a scaling factor.
-  DCHECK_NE(WebFeature::kOBSOLETE_PageDestruction, web_feature);
-  DCHECK_NE(WebFeature::kPageVisits, web_feature);
-  DCHECK_GE(WebFeature::kNumberOfFeatures, web_feature);
+  // PageVisits is reserved as a scaling factor.
+  DCHECK_NE(web_feature, WebFeature::kPageVisits);
+  DCHECK_LE(web_feature, WebFeature::kMaxValue);
 
   return feature_tracker_.Test(
       {mojom::blink::UseCounterFeatureType::kWebFeature,
@@ -111,6 +110,26 @@ void UseCounterImpl::ClearMeasurementForTesting(WebFeature web_feature) {
   feature_tracker_.ResetForTesting(
       {mojom::blink::UseCounterFeatureType::kWebFeature,
        static_cast<uint32_t>(web_feature)});
+}
+
+bool UseCounterImpl::IsWebDXFeatureCounted(WebDXFeature webdx_feature) const {
+  if (mute_count_) {
+    return false;
+  }
+
+  // PageDestruction is reserved as a scaling factor.
+  DCHECK_NE(webdx_feature, WebDXFeature::kPageVisits);
+  DCHECK_LE(webdx_feature, WebDXFeature::kMaxValue);
+
+  return feature_tracker_.Test(
+      {mojom::blink::UseCounterFeatureType::kWebDXFeature,
+       static_cast<uint32_t>(webdx_feature)});
+}
+
+void UseCounterImpl::ClearMeasurementForTesting(WebDXFeature webdx_feature) {
+  feature_tracker_.ResetForTesting(
+      {mojom::blink::UseCounterFeatureType::kWebDXFeature,
+       static_cast<uint32_t>(webdx_feature)});
 }
 
 void UseCounterImpl::Trace(Visitor* visitor) const {
@@ -202,12 +221,22 @@ void UseCounterImpl::Count(CSSPropertyID property,
 
 void UseCounterImpl::Count(WebFeature web_feature,
                            const LocalFrame* source_frame) {
-  // PageDestruction is reserved as a scaling factor.
-  DCHECK_NE(WebFeature::kOBSOLETE_PageDestruction, web_feature);
-  DCHECK_NE(WebFeature::kPageVisits, web_feature);
-  DCHECK_GE(WebFeature::kNumberOfFeatures, web_feature);
+  // PageVisits is reserved as a scaling factor.
+  DCHECK_NE(web_feature, WebFeature::kPageVisits);
+  DCHECK_LE(web_feature, WebFeature::kMaxValue);
 
   Count({mojom::blink::UseCounterFeatureType::kWebFeature,
+         static_cast<uint32_t>(web_feature)},
+        source_frame);
+}
+
+void UseCounterImpl::CountWebDXFeature(WebDXFeature web_feature,
+                                       const LocalFrame* source_frame) {
+  // PageVisits is reserved as a scaling factor.
+  DCHECK_NE(web_feature, WebDXFeature::kPageVisits);
+  DCHECK_LE(web_feature, WebDXFeature::kMaxValue);
+
+  Count({mojom::blink::UseCounterFeatureType::kWebDXFeature,
          static_cast<uint32_t>(web_feature)},
         source_frame);
 }
@@ -238,21 +267,20 @@ void UseCounterImpl::CountFeature(WebFeature feature) const {
     case kDefaultContext:
       // Feature usage for the default context is recorded on the browser side.
       // components/page_load_metrics/browser/observers/use_counter_page_load_metrics_observer
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       return;
     case kExtensionContext:
-      UMA_HISTOGRAM_ENUMERATION("Blink.UseCounter.Extensions.Features", feature,
-                                WebFeature::kNumberOfFeatures);
+      UMA_HISTOGRAM_ENUMERATION("Blink.UseCounter.Extensions.Features",
+                                feature);
       return;
     case kFileContext:
-      UMA_HISTOGRAM_ENUMERATION("Blink.UseCounter.File.Features", feature,
-                                WebFeature::kNumberOfFeatures);
+      UMA_HISTOGRAM_ENUMERATION("Blink.UseCounter.File.Features", feature);
       return;
     case kDisabledContext:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       return;
   }
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
 }
 
 bool UseCounterImpl::ReportMeasurement(const UseCounterFeature& feature,
@@ -292,6 +320,9 @@ void UseCounterImpl::TraceMeasurement(const UseCounterFeature& feature) {
     case mojom::blink::UseCounterFeatureType::kWebFeature:
       trace_name = "FeatureFirstUsed";
       break;
+    case mojom::blink::UseCounterFeatureType::kWebDXFeature:
+      trace_name = "WebDXFeatureFirstUsed";
+      break;
     case mojom::blink::UseCounterFeatureType::kAnimatedCssProperty:
       trace_name = "AnimatedCSSFirstUsed";
       break;
@@ -305,20 +336,9 @@ void UseCounterImpl::TraceMeasurement(const UseCounterFeature& feature) {
       // TODO(crbug.com/1206004): Add trace event for permissions policy metrics
       // gathering.
       return;
-    case mojom::blink::UseCounterFeatureType::kUserAgentOverride:
-      return;
   }
   DCHECK(trace_name);
   TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("blink.feature_usage"), trace_name,
                "feature", feature.value());
 }
-
-void UseCounterImpl::CountUserAgentOverride(
-    blink::UserAgentOverride::UserAgentOverrideHistogram ua_override,
-    const LocalFrame* source_frame) {
-  Count({mojom::blink::UseCounterFeatureType::kUserAgentOverride,
-         static_cast<uint32_t>(ua_override)},
-        source_frame);
-}
-
 }  // namespace blink

@@ -8,13 +8,14 @@
 #include <set>
 #include <string>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/scoped_observation.h"
 #include "components/value_store/value_store_frontend.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
+#include "extensions/common/extension_id.h"
 
 namespace content {
 class BrowserContext;
@@ -28,10 +29,9 @@ class ValueStoreFactory;
 namespace extensions {
 
 // A storage area for per-extension state that needs to be persisted to disk.
-class StateStore : public base::SupportsWeakPtr<StateStore>,
-                   public ExtensionRegistryObserver {
+class StateStore : public ExtensionRegistryObserver {
  public:
-  typedef value_store::ValueStoreFrontend::ReadCallback ReadCallback;
+  using ReadCallback = value_store::ValueStoreFrontend::ReadCallback;
 
   // The kind of extensions data stored in a backend.
   enum class BackendType { RULES, STATE, SCRIPTS };
@@ -39,7 +39,7 @@ class StateStore : public base::SupportsWeakPtr<StateStore>,
   class TestObserver {
    public:
     virtual ~TestObserver() {}
-    virtual void WillSetExtensionValue(const std::string& extension_id,
+    virtual void WillSetExtensionValue(const ExtensionId& extension_id,
                                        const std::string& key) = 0;
   };
 
@@ -51,7 +51,7 @@ class StateStore : public base::SupportsWeakPtr<StateStore>,
              bool deferred_load);
   // This variant is useful for testing (using a mock ValueStore).
   StateStore(content::BrowserContext* context,
-             absl::optional<base::Value> store);
+             std::optional<base::Value> store);
 
   StateStore(const StateStore&) = delete;
   StateStore& operator=(const StateStore&) = delete;
@@ -64,17 +64,17 @@ class StateStore : public base::SupportsWeakPtr<StateStore>,
 
   // Get the value associated with the given extension and key, and pass
   // it to |callback| asynchronously.
-  void GetExtensionValue(const std::string& extension_id,
+  void GetExtensionValue(const ExtensionId& extension_id,
                          const std::string& key,
                          ReadCallback callback);
 
   // Sets a value for a given extension and key.
-  void SetExtensionValue(const std::string& extension_id,
+  void SetExtensionValue(const ExtensionId& extension_id,
                          const std::string& key,
                          base::Value value);
 
   // Removes a value for a given extension and key.
-  void RemoveExtensionValue(const std::string& extension_id,
+  void RemoveExtensionValue(const ExtensionId& extension_id,
                             const std::string& key);
 
   // Return whether or not the StateStore has initialized itself.
@@ -93,7 +93,7 @@ class StateStore : public base::SupportsWeakPtr<StateStore>,
   void Init();
 
   // Removes all keys registered for the given extension.
-  void RemoveKeysForExtension(const std::string& extension_id);
+  void RemoveKeysForExtension(const ExtensionId& extension_id);
 
   // ExtensionRegistryObserver implementation.
   void OnExtensionUninstalled(content::BrowserContext* browser_context,
@@ -118,6 +118,8 @@ class StateStore : public base::SupportsWeakPtr<StateStore>,
 
   base::ScopedObservation<ExtensionRegistry, ExtensionRegistryObserver>
       extension_registry_observation_{this};
+
+  base::WeakPtrFactory<StateStore> weak_ptr_factory_{this};
 };
 
 }  // namespace extensions

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 namespace blink {
 
 bool BoxDecorationData::BorderObscuresBackgroundEdge() const {
-  BorderEdge edges[4];
+  BorderEdgeArray edges;
   style_.GetBorderEdgeInfo(edges);
 
   for (auto& edge : edges) {
@@ -40,7 +40,7 @@ BackgroundBleedAvoidance BoxDecorationData::ComputeBleedAvoidance() const {
       // behind the top layer.  But only if we need to draw something
       // underneath.
       const FillLayer& fill_layer = style_.BackgroundLayers();
-      if ((BackgroundColor().Alpha() || fill_layer.Next()) &&
+      if ((!BackgroundColor().IsFullyTransparent() || fill_layer.Next()) &&
           !fill_layer.ImageOccludesNextLayers(layout_box_.GetDocument(),
                                               style_)) {
         return kBackgroundBleedClipLayer;

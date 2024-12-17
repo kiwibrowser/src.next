@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,13 +14,14 @@
 #include "base/synchronization/lock.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "third_party/blink/public/mojom/disk_allocator.mojom-blink.h"
+#include "third_party/blink/renderer/platform/allow_discouraged_type.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/threading.h"
-#include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
 
 namespace blink {
 
 class DiskDataMetadata;
+class ReservedChunk;
 
 // Stores data onto a single file.
 //
@@ -43,9 +44,14 @@ class PLATFORM_EXPORT DiskDataAllocator : public mojom::blink::DiskAllocator {
   // returns false, writes will fail.
   bool may_write() LOCKS_EXCLUDED(lock_);
 
+  // Return valid |ReservedChunk| if success, otherwise nullptr.
+  // It may fail to reserve if remaining free space is not enough for |size|.
+  std::unique_ptr<ReservedChunk> TryReserveChunk(size_t size);
+
   // Returns |nullptr| in case of error.
   // Note that this performs a blocking disk write.
-  std::unique_ptr<DiskDataMetadata> Write(const void* data, size_t size);
+  std::unique_ptr<DiskDataMetadata> Write(std::unique_ptr<ReservedChunk> chunk,
+                                          const void* data);
 
   // Reads data. A read failure is fatal.
   // Caller must make sure that this is not called at the same time as
@@ -74,13 +80,14 @@ class PLATFORM_EXPORT DiskDataAllocator : public mojom::blink::DiskAllocator {
     return free_chunks_size_;
   }
 
+  void set_may_write_for_testing(bool may_write) LOCKS_EXCLUDED(lock_);
+
  protected:
   // Protected methods for testing.
   DiskDataAllocator();
-  void set_may_write_for_testing(bool may_write) LOCKS_EXCLUDED(lock_);
 
  private:
-  DiskDataMetadata FindChunk(size_t size) EXCLUSIVE_LOCKS_REQUIRED(lock_);
+  DiskDataMetadata FindFreeChunk(size_t size) EXCLUSIVE_LOCKS_REQUIRED(lock_);
   void ReleaseChunk(const DiskDataMetadata& metadata)
       EXCLUSIVE_LOCKS_REQUIRED(lock_);
 
@@ -93,21 +100,25 @@ class PLATFORM_EXPORT DiskDataAllocator : public mojom::blink::DiskAllocator {
   mojo::Receiver<mojom::blink::DiskAllocator> receiver_{this};
   base::File file_;  // May be invalid.
 
+  bool has_capacity_limit_ = false;
+  size_t max_capacity_ = 0;
+
  protected:  // For testing.
   base::Lock lock_;
-  // Using a std::map because we rely on |{lower,upper}_bound()|.
-  std::map<int64_t, size_t> free_chunks_ GUARDED_BY(lock_);
-  size_t free_chunks_size_ GUARDED_BY(lock_);
+  std::map<int64_t, size_t> free_chunks_ GUARDED_BY(lock_)
+      ALLOW_DISCOURAGED_TYPE("We rely on |{lower,upper}_bound()|");
+  size_t free_chunks_size_ GUARDED_BY(lock_) = 0;
 
  private:
-  int64_t file_tail_ GUARDED_BY(lock_);
+  int64_t file_tail_ GUARDED_BY(lock_) = 0;
   // Whether writing is possible now. This can be true if:
   // - |set_may_write_for_testing()| was called, or
   // - |file_.IsValid()| and no write error occurred (which would set
   //   |may_write_| to false).
-  bool may_write_ GUARDED_BY(lock_);
+  bool may_write_ GUARDED_BY(lock_) = false;
 #if DCHECK_IS_ON()
-  std::map<int64_t, size_t> allocated_chunks_ GUARDED_BY(lock_);
+  std::map<int64_t, size_t> allocated_chunks_ GUARDED_BY(lock_)
+      ALLOW_DISCOURAGED_TYPE("We rely on |{lower,upper}_bound()|");
 #endif
 
   FRIEND_TEST_ALL_PREFIXES(DiskDataAllocatorTest, ProvideInvalidFile);

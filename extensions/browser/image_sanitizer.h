@@ -13,6 +13,7 @@
 
 #include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/time/time.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/data_decoder/public/mojom/image_decoder.mojom.h"
@@ -102,9 +103,7 @@ class ImageSanitizer {
   void ImageReencoded(const base::FilePath& image_path,
                       std::pair<bool, std::vector<unsigned char>> result);
 
-  void ImageWritten(const base::FilePath& image_path,
-                    int expected_size,
-                    int actual_size);
+  void ImageWritten(const base::FilePath& image_path, bool success);
 
   void ReportSuccess();
   void ReportError(Status status, const base::FilePath& path);

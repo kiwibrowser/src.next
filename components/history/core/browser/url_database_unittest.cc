@@ -4,9 +4,13 @@
 
 #include "components/history/core/browser/url_database.h"
 
+#include <limits>
+
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_feature_list.h"
+#include "components/history/core/browser/features.h"
 #include "components/history/core/browser/keyword_search_term.h"
 #include "components/history/core/browser/keyword_search_term_util.h"
 #include "sql/database.h"
@@ -39,9 +43,8 @@ class URLDatabaseTest : public testing::Test,
   void CreateVersion33URLTable() {
     EXPECT_TRUE(GetDB().Execute("DROP TABLE urls"));
 
-    std::string sql;
     // create a version 33 urls table
-    sql.append(
+    static constexpr char kSql[] =
         "CREATE TABLE urls ("
         "id INTEGER PRIMARY KEY,"
         "url LONGVARCHAR,"
@@ -50,9 +53,9 @@ class URLDatabaseTest : public testing::Test,
         "typed_count INTEGER DEFAULT 0 NOT NULL,"
         "last_visit_time INTEGER NOT NULL,"
         "hidden INTEGER DEFAULT 0 NOT NULL,"
-        "favicon_id INTEGER DEFAULT 0 NOT NULL)");  // favicon_id is not used
-                                                    // now.
-    EXPECT_TRUE(GetDB().Execute(sql.c_str()));
+        "favicon_id INTEGER DEFAULT 0 NOT NULL)";  // favicon_id is not used
+                                                   // now.
+    EXPECT_TRUE(GetDB().Execute(kSql));
   }
 
  protected:
@@ -217,32 +220,14 @@ TEST_F(URLDatabaseTest, KeywordSearchTerms_Prefix) {
 
   // Make sure we get "food" and "foo" back with the last term and visit time
   // that generated the normalized search terms.
-  // In fact we get near-duplicate matches if different search terms generated
-  // the same normalized search term.
-  std::vector<std::unique_ptr<KeywordSearchTermVisit>> matches;
-  GetMostRecentKeywordSearchTerms(keyword_id, u"f", 10, &matches);
-  ASSERT_EQ(4U, matches.size());
-  EXPECT_EQ(u"Food", matches[0]->term);
-  EXPECT_EQ(u"food", matches[0]->normalized_term);
-  EXPECT_EQ(1, matches[0]->visit_count);
-  EXPECT_EQ(local_midnight + base::Hours(5), matches[0]->last_visit_time);
-  EXPECT_EQ(u"FOO", matches[1]->term);
-  EXPECT_EQ(u"foo", matches[1]->normalized_term);
-  EXPECT_EQ(1, matches[1]->visit_count);
-  EXPECT_EQ(local_midnight + base::Hours(3), matches[1]->last_visit_time);
-  EXPECT_EQ(u"FOo", matches[2]->term);
-  EXPECT_EQ(u"foo", matches[2]->normalized_term);
-  EXPECT_EQ(1, matches[2]->visit_count);
-  EXPECT_EQ(local_midnight + base::Hours(2), matches[2]->last_visit_time);
-  EXPECT_EQ(u"Foo", matches[3]->term);
-  EXPECT_EQ(u"foo", matches[3]->normalized_term);
-  EXPECT_EQ(1, matches[3]->visit_count);
-  EXPECT_EQ(local_midnight + base::Hours(1), matches[3]->last_visit_time);
-
-  // We could miss out on potential visits and/or matches if not requesting
-  // enough matches.
-  matches.clear();
-  GetMostRecentKeywordSearchTerms(keyword_id, u"f", 2, &matches);
+  // CreateKeywordSearchTermVisitEnumerator accumulates the visits to unique
+  // normalized search terms.
+  auto enumerator_1 = CreateKeywordSearchTermVisitEnumerator(keyword_id, u"f");
+  ASSERT_TRUE(enumerator_1);
+  KeywordSearchTermVisitList matches;
+  GetAutocompleteSearchTermsFromEnumerator(*enumerator_1, /*count=*/SIZE_MAX,
+                                           SearchTermRankingPolicy::kRecency,
+                                           &matches);
   ASSERT_EQ(2U, matches.size());
   EXPECT_EQ(u"Food", matches[0]->term);
   EXPECT_EQ(u"food", matches[0]->normalized_term);
@@ -250,26 +235,20 @@ TEST_F(URLDatabaseTest, KeywordSearchTerms_Prefix) {
   EXPECT_EQ(local_midnight + base::Hours(5), matches[0]->last_visit_time);
   EXPECT_EQ(u"FOO", matches[1]->term);
   EXPECT_EQ(u"foo", matches[1]->normalized_term);
-  EXPECT_EQ(1, matches[1]->visit_count);
+  EXPECT_EQ(3, matches[1]->visit_count);
   EXPECT_EQ(local_midnight + base::Hours(3), matches[1]->last_visit_time);
 
-  // CreateKeywordSearchTermVisitEnumerator solves that problem by accumulating
-  // the visits to unique normalized search terms.
-  auto enumerator = CreateKeywordSearchTermVisitEnumerator(keyword_id, u"f");
-  ASSERT_TRUE(enumerator);
-  std::vector<std::unique_ptr<KeywordSearchTermVisit>> matches_v2;
+  // Make sure we get only as many search terms as requested in the expected
+  // order.
+  auto enumerator_2 = CreateKeywordSearchTermVisitEnumerator(keyword_id, u"f");
+  ASSERT_TRUE(enumerator_2);
+  matches.clear();
   GetAutocompleteSearchTermsFromEnumerator(
-      *enumerator, /*ignore_duplicate_visits=*/false,
-      SearchTermRankingPolicy::kRecency, &matches_v2);
-  ASSERT_EQ(2U, matches_v2.size());
-  EXPECT_EQ(u"Food", matches_v2[0]->term);
-  EXPECT_EQ(u"food", matches_v2[0]->normalized_term);
-  EXPECT_EQ(1, matches_v2[0]->visit_count);
-  EXPECT_EQ(local_midnight + base::Hours(5), matches_v2[0]->last_visit_time);
-  EXPECT_EQ(u"FOO", matches_v2[1]->term);
-  EXPECT_EQ(u"foo", matches_v2[1]->normalized_term);
-  EXPECT_EQ(3, matches_v2[1]->visit_count);
-  EXPECT_EQ(local_midnight + base::Hours(3), matches_v2[1]->last_visit_time);
+      *enumerator_2, /*count=*/1U, SearchTermRankingPolicy::kRecency, &matches);
+  ASSERT_EQ(1U, matches.size());
+  EXPECT_EQ(u"Food", matches[0]->term);
+  EXPECT_EQ(u"food", matches[0]->normalized_term);
+  EXPECT_EQ(1, matches[0]->visit_count);
 
   KeywordSearchTermRow keyword_search_term_row;
   ASSERT_TRUE(GetKeywordSearchTermRow(foo_url_3_id, &keyword_search_term_row));
@@ -285,17 +264,13 @@ TEST_F(URLDatabaseTest, KeywordSearchTerms_Prefix) {
   DeleteAllSearchTermsForKeyword(keyword_id);
 
   // Make sure we get nothing back.
+  auto enumerator_3 = CreateKeywordSearchTermVisitEnumerator(keyword_id, u"f");
+  ASSERT_TRUE(enumerator_3);
   matches.clear();
-  GetMostRecentKeywordSearchTerms(keyword_id, u"f", 10, &matches);
+  GetAutocompleteSearchTermsFromEnumerator(*enumerator_3, /*count=*/SIZE_MAX,
+                                           SearchTermRankingPolicy::kRecency,
+                                           &matches);
   ASSERT_EQ(0U, matches.size());
-
-  enumerator = CreateKeywordSearchTermVisitEnumerator(keyword_id, u"f");
-  ASSERT_TRUE(enumerator);
-  matches_v2.clear();
-  GetAutocompleteSearchTermsFromEnumerator(
-      *enumerator, /*ignore_duplicate_visits=*/false,
-      SearchTermRankingPolicy::kRecency, &matches_v2);
-  ASSERT_EQ(0U, matches_v2.size());
 
   ASSERT_FALSE(GetKeywordSearchTermRow(foo_url_3_id, &keyword_search_term_row));
 }
@@ -347,39 +322,37 @@ TEST_F(URLDatabaseTest, KeywordSearchTerms_ZeroPrefix) {
   ASSERT_NE(0, foo_url_4_id);
   ASSERT_TRUE(SetKeywordSearchTermsForURL(foo_url_4_id, keyword_id, u"foo"));
 
-  // Make sure we get both "foo" and "bar" back. "bar" should come first since
-  // it was searched for most recently.
-  std::vector<std::unique_ptr<KeywordSearchTermVisit>> matches;
-  GetMostRecentKeywordSearchTerms(
-      keyword_id, history::AutocompleteAgeThreshold(), &matches);
-  ASSERT_EQ(2U, matches.size());
-  EXPECT_EQ(u"BAR", matches[0]->term);
-  EXPECT_EQ(u"bar", matches[0]->normalized_term);
-  EXPECT_EQ(1, matches[0]->visit_count);
-  EXPECT_EQ(local_midnight + base::Hours(4), matches[0]->last_visit_time);
-  EXPECT_EQ(u"Foo", matches[1]->term);
-  EXPECT_EQ(u"foo", matches[1]->normalized_term);
-  EXPECT_EQ(3, matches[1]->visit_count);
-  EXPECT_EQ(local_midnight + base::Hours(3), matches[1]->last_visit_time);
-
   // Make sure we get both "foo" and "bar" back. "foo" should come first since
   // it has more visits and thus a higher frecency score.
-  auto enumerator = CreateKeywordSearchTermVisitEnumerator(
-      keyword_id, history::AutocompleteAgeThreshold());
-  ASSERT_TRUE(enumerator);
-  std::vector<std::unique_ptr<KeywordSearchTermVisit>> matches_v2;
-  GetAutocompleteSearchTermsFromEnumerator(
-      *enumerator, /*ignore_duplicate_visits=*/true,
-      SearchTermRankingPolicy::kFrecency, &matches_v2);
-  ASSERT_EQ(2U, matches_v2.size());
-  EXPECT_EQ(u"FOO", matches_v2[0]->term);
-  EXPECT_EQ(u"foo", matches_v2[0]->normalized_term);
-  EXPECT_EQ(3, matches_v2[0]->visit_count);
-  EXPECT_EQ(local_midnight + base::Hours(3), matches_v2[0]->last_visit_time);
-  EXPECT_EQ(u"BAR", matches_v2[1]->term);
-  EXPECT_EQ(u"bar", matches_v2[1]->normalized_term);
-  EXPECT_EQ(1, matches_v2[1]->visit_count);
-  EXPECT_EQ(local_midnight + base::Hours(4), matches_v2[1]->last_visit_time);
+  auto enumerator_1 = CreateKeywordSearchTermVisitEnumerator(keyword_id);
+  ASSERT_TRUE(enumerator_1);
+  KeywordSearchTermVisitList matches;
+  GetAutocompleteSearchTermsFromEnumerator(*enumerator_1, /*count=*/SIZE_MAX,
+                                           SearchTermRankingPolicy::kFrecency,
+                                           &matches);
+  ASSERT_EQ(2U, matches.size());
+  EXPECT_EQ(u"FOO", matches[0]->term);
+  EXPECT_EQ(u"foo", matches[0]->normalized_term);
+  EXPECT_EQ(3, matches[0]->visit_count);
+  EXPECT_EQ(local_midnight + base::Hours(3), matches[0]->last_visit_time);
+  EXPECT_EQ(u"BAR", matches[1]->term);
+  EXPECT_EQ(u"bar", matches[1]->normalized_term);
+  EXPECT_EQ(1, matches[1]->visit_count);
+  EXPECT_EQ(local_midnight + base::Hours(4), matches[1]->last_visit_time);
+
+  // Make sure we get only as many search terms as requested in the expected
+  // order.
+  auto enumerator_2 = CreateKeywordSearchTermVisitEnumerator(keyword_id);
+  ASSERT_TRUE(enumerator_2);
+  matches.clear();
+  GetAutocompleteSearchTermsFromEnumerator(*enumerator_2, /*count=*/1U,
+                                           SearchTermRankingPolicy::kFrecency,
+                                           &matches);
+  ASSERT_EQ(1U, matches.size());
+  EXPECT_EQ(u"FOO", matches[0]->term);
+  EXPECT_EQ(u"foo", matches[0]->normalized_term);
+  EXPECT_EQ(3, matches[0]->visit_count);
+  EXPECT_EQ(local_midnight + base::Hours(3), matches[0]->last_visit_time);
 
   KeywordSearchTermRow keyword_search_term_row;
   ASSERT_TRUE(GetKeywordSearchTermRow(foo_url_3_id, &keyword_search_term_row));
@@ -395,25 +368,24 @@ TEST_F(URLDatabaseTest, KeywordSearchTerms_ZeroPrefix) {
   DeleteAllSearchTermsForKeyword(keyword_id);
 
   // Make sure we get nothing back.
+  auto enumerator_3 = CreateKeywordSearchTermVisitEnumerator(keyword_id);
+  ASSERT_TRUE(enumerator_3);
   matches.clear();
-  GetMostRecentKeywordSearchTerms(
-      keyword_id, history::AutocompleteAgeThreshold(), &matches);
+  GetAutocompleteSearchTermsFromEnumerator(*enumerator_3, /*count=*/SIZE_MAX,
+                                           SearchTermRankingPolicy::kFrecency,
+                                           &matches);
   ASSERT_EQ(0U, matches.size());
-
-  enumerator = CreateKeywordSearchTermVisitEnumerator(
-      keyword_id, history::AutocompleteAgeThreshold());
-  ASSERT_TRUE(enumerator);
-  matches_v2.clear();
-  GetAutocompleteSearchTermsFromEnumerator(
-      *enumerator, /*ignore_duplicate_visits=*/true,
-      SearchTermRankingPolicy::kFrecency, &matches_v2);
-  ASSERT_EQ(0U, matches_v2.size());
 
   ASSERT_FALSE(GetKeywordSearchTermRow(foo_url_3_id, &keyword_search_term_row));
 }
 
 // Tests querying most repeated keyword search terms.
 TEST_F(URLDatabaseTest, KeywordSearchTerms_MostRepeated) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeatureWithParameters(
+      history::kOrganicRepeatableQueries,
+      {{history::kRepeatableQueriesIgnoreDuplicateVisits.name, "false"},
+       {history::kRepeatableQueriesMinVisitCount.name, "1"}});
   KeywordID keyword_id = 100;
   // Choose the local midnight of yesterday as the baseline for the time.
   base::Time local_midnight = Time::Now().LocalMidnight() - base::Days(1);
@@ -486,17 +458,28 @@ TEST_F(URLDatabaseTest, KeywordSearchTerms_MostRepeated) {
 
   // Make sure we get both "foo" and "bar" back. search terms with identical
   // scores are ranked in alphabetical order.
-  auto enumerator = CreateKeywordSearchTermVisitEnumerator(
-      keyword_id, history::AutocompleteAgeThreshold());
-  ASSERT_TRUE(enumerator);
-  std::vector<std::unique_ptr<KeywordSearchTermVisit>> matches;
-  GetMostRepeatedSearchTermsFromEnumerator(*enumerator, &matches);
+  auto enumerator_1 = CreateKeywordSearchTermVisitEnumerator(keyword_id);
+  ASSERT_TRUE(enumerator_1);
+  KeywordSearchTermVisitList matches;
+  GetMostRepeatedSearchTermsFromEnumerator(*enumerator_1, /*count=*/SIZE_MAX,
+                                           &matches);
   ASSERT_EQ(2U, matches.size());
   EXPECT_EQ(matches[0]->score, matches[1]->score);
   EXPECT_EQ(u"BAR", matches[0]->term);
   EXPECT_EQ(u"bar", matches[0]->normalized_term);
   EXPECT_EQ(u"FOO", matches[1]->term);
   EXPECT_EQ(u"foo", matches[1]->normalized_term);
+
+  // Make sure we get only as many search terms as requested in the expected
+  // order.
+  auto enumerator_2 = CreateKeywordSearchTermVisitEnumerator(keyword_id);
+  ASSERT_TRUE(enumerator_2);
+  matches.clear();
+  GetMostRepeatedSearchTermsFromEnumerator(*enumerator_2, /*count=*/1U,
+                                           &matches);
+  ASSERT_EQ(1U, matches.size());
+  EXPECT_EQ(u"BAR", matches[0]->term);
+  EXPECT_EQ(u"bar", matches[0]->normalized_term);
 
   KeywordSearchTermRow keyword_search_term_row;
   ASSERT_TRUE(GetKeywordSearchTermRow(foo_url_4_id, &keyword_search_term_row));
@@ -509,11 +492,11 @@ TEST_F(URLDatabaseTest, KeywordSearchTerms_MostRepeated) {
   ASSERT_FALSE(GetKeywordSearchTermRow(bar_url_4_id, &keyword_search_term_row));
 
   // Make sure we get nothing back.
-  enumerator = CreateKeywordSearchTermVisitEnumerator(
-      keyword_id, history::AutocompleteAgeThreshold());
-  ASSERT_TRUE(enumerator);
+  auto enumerator_3 = CreateKeywordSearchTermVisitEnumerator(keyword_id);
+  ASSERT_TRUE(enumerator_3);
   matches.clear();
-  GetMostRepeatedSearchTermsFromEnumerator(*enumerator, &matches);
+  GetMostRepeatedSearchTermsFromEnumerator(*enumerator_3, /*count=*/SIZE_MAX,
+                                           &matches);
   ASSERT_EQ(0U, matches.size());
 }
 
@@ -535,8 +518,13 @@ TEST_F(URLDatabaseTest, DeleteURLDeletesKeywordSearchTermVisit) {
   ASSERT_TRUE(DeleteURLRow(url_id));
 
   // Make sure the keyword visit was deleted.
-  std::vector<std::unique_ptr<KeywordSearchTermVisit>> matches;
-  GetMostRecentKeywordSearchTerms(1, u"visit", 10, &matches);
+  KeywordSearchTermVisitList matches;
+  auto enumerator = CreateKeywordSearchTermVisitEnumerator(1, u"visit");
+  ASSERT_TRUE(enumerator);
+  matches.clear();
+  GetAutocompleteSearchTermsFromEnumerator(*enumerator, /*count=*/SIZE_MAX,
+                                           SearchTermRankingPolicy::kRecency,
+                                           &matches);
   ASSERT_EQ(0U, matches.size());
 }
 
@@ -778,6 +766,33 @@ TEST_F(URLDatabaseTest, URLTableContainsAUTOINCREMENTTest) {
   // Upgrade urls table.
   RecreateURLTableWithAllContents();
   EXPECT_TRUE(URLTableContainsAutoincrement());
+}
+
+TEST_F(URLDatabaseTest, CreateTemporaryURLTableDropsExistingTable) {
+  EXPECT_TRUE(CreateTemporaryURLTable());
+  const GURL url("http://www.google.com/");
+  URLRow url_info(url);
+  url_info.set_title(u"Google");
+  url_info.set_visit_count(4);
+  url_info.set_typed_count(2);
+  url_info.set_last_visit(Time::Now() - base::Days(1));
+  url_info.set_hidden(false);
+  EXPECT_TRUE(AddTemporaryURL(url_info));
+  {
+    sql::Statement count_statement(
+        GetDB().GetUniqueStatement("SELECT COUNT(*) from temp_urls"));
+    ASSERT_TRUE(count_statement.Step());
+    EXPECT_EQ(1, count_statement.ColumnInt(0));
+  }
+
+  // Calling CreateTemporaryURLTable() should drop the existing table.
+  CreateTemporaryURLTable();
+  {
+    sql::Statement count_statement(
+        GetDB().GetUniqueStatement("SELECT COUNT(*) from temp_urls"));
+    ASSERT_TRUE(count_statement.Step());
+    EXPECT_EQ(0, count_statement.ColumnInt(0));
+  }
 }
 
 }  // namespace history

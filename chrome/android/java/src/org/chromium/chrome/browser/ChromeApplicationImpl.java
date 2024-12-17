@@ -5,14 +5,16 @@
 package org.chromium.chrome.browser;
 
 import android.app.Application;
-import android.content.Intent;
 import android.content.res.Configuration;
-import android.os.Bundle;
 
 import androidx.annotation.Nullable;
 
-import org.chromium.base.ApplicationStatus;
+import org.chromium.base.BinderCallsListener;
 import org.chromium.base.library_loader.LibraryLoader;
+import org.chromium.base.version_info.Channel;
+import org.chromium.base.version_info.VersionConstants;
+import org.chromium.build.BuildConfig;
+import org.chromium.chrome.browser.accessibility.hierarchysnapshotter.HierarchySnapshotter;
 import org.chromium.chrome.browser.app.notifications.ContextualNotificationPermissionRequesterImpl;
 import org.chromium.chrome.browser.background_task_scheduler.ChromeBackgroundTaskFactory;
 import org.chromium.chrome.browser.base.SplitCompatApplication;
@@ -25,14 +27,12 @@ import org.chromium.chrome.browser.dependency_injection.ModuleFactoryOverrides;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.fonts.FontPreloader;
 import org.chromium.chrome.browser.night_mode.SystemNightModeMonitor;
+import org.chromium.chrome.browser.notifications.chime.ChimeDelegate;
 import org.chromium.chrome.browser.profiles.ProfileResolver;
-import org.chromium.chrome.browser.vr.OnExitVrRequestListener;
-import org.chromium.chrome.browser.vr.VrModuleProvider;
+import org.chromium.components.browser_ui.util.BrowserUiUtilsCachedFlags;
 import org.chromium.components.browser_ui.util.GlobalDiscardableReferencePool;
 import org.chromium.components.embedder_support.browser_context.PartitionResolverSupplier;
 import org.chromium.components.module_installer.util.ModuleUtil;
-import org.chromium.components.version_info.Channel;
-import org.chromium.components.version_info.VersionConstants;
 import org.chromium.url.GURL;
 
 /**
@@ -45,8 +45,8 @@ import org.chromium.url.GURL;
 public class ChromeApplicationImpl extends SplitCompatApplication.Impl {
     /** Lock on creation of sComponent. */
     private static final Object sLock = new Object();
-    @Nullable
-    private static volatile ChromeAppComponent sComponent;
+
+    @Nullable private static volatile ChromeAppComponent sComponent;
 
     public ChromeApplicationImpl() {}
 
@@ -57,16 +57,27 @@ public class ChromeApplicationImpl extends SplitCompatApplication.Impl {
         if (SplitCompatApplication.isBrowserProcess()) {
             FontPreloader.getInstance().load(getApplication());
 
+            // Registers the extensions for all protos which would be in the Chrome split, whether
+            // or not we are actually building with splits.
+            AppHooks.get().registerProtoExtensions();
+
+            // TODO(crbug.com/40266922): Remove this after code changes allow for //components to
+            // access cached flags.
+            BrowserUiUtilsCachedFlags.getInstance()
+                    .setAsyncNotificationManagerFlag(
+                            ChromeFeatureList.sAsyncNotificationManager.isEnabled());
+
+            if (ChromeFeatureList.sTraceBinderIpc.isEnabled()) {
+                BinderCallsListener.getInstance().installListener();
+            }
+
             // Only load the native library early for bundle builds since some tests use the
             // "--disable-native-initialization" switch, and the CommandLine is not initialized at
             // this point to check.
-            if (ChromeFeatureList.sEarlyLibraryLoad.isEnabled() && ProductConfig.IS_BUNDLE) {
+            if (BuildConfig.IS_BUNDLE) {
                 // Kick off library loading in a separate thread so it's ready when we need it.
-                new Thread(() -> LibraryLoader.getInstance().ensureMainDexInitialized()).start();
+                new Thread(() -> LibraryLoader.getInstance().ensureInitialized()).start();
             }
-
-            ApplicationStatus.registerStateListenerForAllActivities(
-                    ChromePowerModeVoter.getInstance());
 
             // Initializes the support for dynamic feature modules (browser only).
             ModuleUtil.initApplication();
@@ -81,7 +92,12 @@ public class ChromeApplicationImpl extends SplitCompatApplication.Impl {
             ContextualNotificationPermissionRequesterImpl.initialize();
             PartitionResolverSupplier.setInstance(new ProfileResolver());
 
-            AppHooks.get().getChimeDelegate().initialize();
+            new ChimeDelegate().initialize();
+
+            // Initialize the AccessibilityHierarchySnapshotter. Do not include in release builds.
+            if (!BuildConfig.IS_CHROME_BRANDED) {
+                HierarchySnapshotter.initialize();
+            }
         }
     }
 
@@ -93,28 +109,6 @@ public class ChromeApplicationImpl extends SplitCompatApplication.Impl {
             GlobalDiscardableReferencePool.getReferencePool().drain();
         }
         CustomTabsConnection.onTrimMemory(level);
-    }
-
-    @Override
-    public void startActivity(Intent intent, Bundle options) {
-        if (VrModuleProvider.getDelegate().canLaunch2DIntents()
-                || VrModuleProvider.getIntentDelegate().isVrIntent(intent)) {
-            super.startActivity(intent, options);
-            return;
-        }
-
-        VrModuleProvider.getDelegate().requestToExitVr(new OnExitVrRequestListener() {
-            @Override
-            public void onSucceeded() {
-                if (!VrModuleProvider.getDelegate().canLaunch2DIntents()) {
-                    throw new IllegalStateException("Still in VR after having exited VR.");
-                }
-                startActivity(intent, options);
-            }
-
-            @Override
-            public void onDenied() {}
-        });
     }
 
     @Override
@@ -134,7 +128,7 @@ public class ChromeApplicationImpl extends SplitCompatApplication.Impl {
         // The conditions are expressed using ranges to capture intermediate levels possibly added
         // to the API in the future.
         return (level >= Application.TRIM_MEMORY_RUNNING_LOW
-                       && level < Application.TRIM_MEMORY_UI_HIDDEN)
+                        && level < Application.TRIM_MEMORY_UI_HIDDEN)
                 || level >= Application.TRIM_MEMORY_MODERATE;
     }
 

@@ -59,10 +59,10 @@ class CORE_EXPORT LayoutThemeDefault : public LayoutTheme {
 
   gfx::Size SliderTickSize() const override;
   int SliderTickOffsetFromTrackCenter() const override;
-  void AdjustSliderThumbSize(ComputedStyle&) const override;
+  void AdjustSliderThumbSize(ComputedStyleBuilder&) const override;
 
-  void AdjustInnerSpinButtonStyle(ComputedStyle&) const override;
-  void AdjustButtonStyle(ComputedStyle&) const override;
+  void AdjustInnerSpinButtonStyle(ComputedStyleBuilder&) const override;
+  void AdjustButtonStyle(ComputedStyleBuilder&) const override;
 
   Color PlatformTapHighlightColor() const override {
     return kDefaultTapHighlightColor;
@@ -74,7 +74,7 @@ class CORE_EXPORT LayoutThemeDefault : public LayoutTheme {
                           Color inactive_foreground_color) override;
   Color PlatformFocusRingColor() const override;
 
-  void AdjustSearchFieldCancelButtonStyle(ComputedStyle&) const override;
+  void AdjustSearchFieldCancelButtonStyle(ComputedStyleBuilder&) const override;
 
   // MenuList refers to an unstyled menulist (meaning a menulist without
   // background-color or border set) and MenuListButton refers to a styled
@@ -85,8 +85,8 @@ class CORE_EXPORT LayoutThemeDefault : public LayoutTheme {
   // In short, we either go down the MenuList code path or the MenuListButton
   // codepath. We never go down both. And in both cases, they layout the
   // entire menulist.
-  void AdjustMenuListStyle(ComputedStyle&) const override;
-  void AdjustMenuListButtonStyle(ComputedStyle&) const override;
+  void AdjustMenuListStyle(ComputedStyleBuilder&) const override;
+  void AdjustMenuListButtonStyle(ComputedStyleBuilder&) const override;
 
   // These methods define the padding for the MenuList's inner block.
   int PopupInternalPaddingStart(const ComputedStyle&) const override;

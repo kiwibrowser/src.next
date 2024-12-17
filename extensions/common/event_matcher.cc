@@ -6,7 +6,7 @@
 
 #include <utility>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "extensions/common/mojom/event_dispatcher.mojom.h"
 
 namespace {
@@ -18,7 +18,7 @@ namespace extensions {
 
 const char kEventFilterServiceTypeKey[] = "serviceType";
 
-EventMatcher::EventMatcher(std::unique_ptr<base::DictionaryValue> filter,
+EventMatcher::EventMatcher(std::unique_ptr<base::Value::Dict> filter,
                            int routing_id)
     : filter_(std::move(filter)), routing_id_(routing_id) {}
 
@@ -46,8 +46,9 @@ bool EventMatcher::MatchNonURLCriteria(
   if (event_info.has_window_exposed_by_default) {
     // An event with a |window_exposed_by_default| set is only
     // relevant to the listener if no window type filter is set.
-    if (HasWindowTypes())
+    if (GetWindowTypeCount() > 0) {
       return false;
+    }
     return event_info.window_exposed_by_default;
   }
 
@@ -58,18 +59,16 @@ bool EventMatcher::MatchNonURLCriteria(
 }
 
 int EventMatcher::GetURLFilterCount() const {
-  base::ListValue* url_filters = nullptr;
-  if (filter_->GetList(kUrlFiltersKey, &url_filters))
-    return url_filters->GetList().size();
+  base::Value::List* url_filters = filter_->FindList(kUrlFiltersKey);
+  if (url_filters)
+    return url_filters->size();
   return 0;
 }
 
 const base::Value::Dict* EventMatcher::GetURLFilter(int i) {
-  base::ListValue* url_filters = nullptr;
-  if (filter_->GetList(kUrlFiltersKey, &url_filters)) {
-    base::Value& dict = url_filters->GetList()[i];
-    return dict.GetIfDict();
-  }
+  base::Value::List* url_filters = filter_->FindList(kUrlFiltersKey);
+  if (url_filters)
+    return (*url_filters)[i].GetIfDict();
   return nullptr;
 }
 
@@ -80,7 +79,7 @@ bool EventMatcher::HasURLFilters() const {
 std::string EventMatcher::GetServiceTypeFilter() const {
   std::string service_type_filter;
   if (const std::string* ptr =
-          filter_->FindStringKey(kEventFilterServiceTypeKey)) {
+          filter_->FindString(kEventFilterServiceTypeKey)) {
     if (base::IsStringASCII(*ptr))
       service_type_filter = *ptr;
   }
@@ -88,35 +87,26 @@ std::string EventMatcher::GetServiceTypeFilter() const {
 }
 
 int EventMatcher::GetInstanceID() const {
-  return filter_->FindIntKey("instanceId").value_or(0);
+  return filter_->FindInt("instanceId").value_or(0);
 }
 
 int EventMatcher::GetWindowTypeCount() const {
-  base::ListValue* window_type_filters = nullptr;
-  if (filter_->GetList(kWindowTypesKey, &window_type_filters))
-    return window_type_filters->GetList().size();
+  base::Value::List* window_type_filters = filter_->FindList(kWindowTypesKey);
+  if (window_type_filters)
+    return window_type_filters->size();
   return 0;
 }
 
 bool EventMatcher::GetWindowType(int i, std::string* window_type_out) const {
-  base::ListValue* window_types = nullptr;
-  if (filter_->GetList(kWindowTypesKey, &window_types)) {
-    const base::Value::List& types_list = window_types->GetList();
-    if (i >= 0 && static_cast<size_t>(i) < types_list.size() &&
-        types_list[i].is_string()) {
-      *window_type_out = types_list[i].GetString();
+  base::Value::List* window_types = filter_->FindList(kWindowTypesKey);
+  if (window_types) {
+    if (i >= 0 && static_cast<size_t>(i) < window_types->size() &&
+        (*window_types)[i].is_string()) {
+      *window_type_out = (*window_types)[i].GetString();
       return true;
     }
   }
   return false;
-}
-
-bool EventMatcher::HasWindowTypes() const {
-  return GetWindowTypeCount() != 0;
-}
-
-int EventMatcher::GetRoutingID() const {
-  return routing_id_;
 }
 
 }  // namespace extensions

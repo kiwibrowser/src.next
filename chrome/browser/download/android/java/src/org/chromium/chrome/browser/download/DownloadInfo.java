@@ -8,7 +8,9 @@ import android.graphics.Bitmap;
 
 import androidx.annotation.NonNull;
 
-import org.chromium.base.annotations.CalledByNative;
+import org.jni_zero.CalledByNative;
+import org.jni_zero.JniType;
+
 import org.chromium.chrome.browser.profiles.OTRProfileID;
 import org.chromium.components.download.DownloadState;
 import org.chromium.components.offline_items_collection.ContentId;
@@ -17,15 +19,12 @@ import org.chromium.components.offline_items_collection.LegacyHelpers;
 import org.chromium.components.offline_items_collection.OfflineItem;
 import org.chromium.components.offline_items_collection.OfflineItem.Progress;
 import org.chromium.components.offline_items_collection.OfflineItemProgressUnit;
-import org.chromium.components.offline_items_collection.OfflineItemSchedule;
 import org.chromium.components.offline_items_collection.OfflineItemState;
 import org.chromium.components.offline_items_collection.OfflineItemVisuals;
 import org.chromium.components.offline_items_collection.PendingState;
 import org.chromium.url.GURL;
 
-/**
- * Class representing the state of a single download.
- */
+/** Class representing the state of a single download. */
 public final class DownloadInfo {
     private final @NonNull GURL mUrl;
     private final String mUserAgent;
@@ -59,12 +58,9 @@ public final class DownloadInfo {
     private final boolean mIsTransient;
     private final boolean mIsParallelDownload;
     private final Bitmap mIcon;
-    @PendingState
-    private final int mPendingState;
-    @FailState
-    private final int mFailState;
+    @PendingState private final int mPendingState;
+    @FailState private final int mFailState;
     private final boolean mShouldPromoteOrigin;
-    private final OfflineItemSchedule mSchedule;
 
     private DownloadInfo(Builder builder) {
         mUrl = builder.mUrl == null ? GURL.emptyGURL() : builder.mUrl;
@@ -105,11 +101,9 @@ public final class DownloadInfo {
         mPendingState = builder.mPendingState;
         mFailState = builder.mFailState;
         mShouldPromoteOrigin = builder.mShouldPromoteOrigin;
-        mSchedule = builder.mSchedule;
     }
 
-    @NonNull
-    public GURL getUrl() {
+    public @NonNull GURL getUrl() {
         return mUrl;
     }
 
@@ -137,13 +131,11 @@ public final class DownloadInfo {
         return mFilePath;
     }
 
-    @NonNull
-    public GURL getReferrer() {
+    public @NonNull GURL getReferrer() {
         return mReferrer;
     }
 
-    @NonNull
-    public GURL getOriginalUrl() {
+    public @NonNull GURL getOriginalUrl() {
         return mOriginalUrl;
     }
 
@@ -246,10 +238,6 @@ public final class DownloadInfo {
         return mShouldPromoteOrigin;
     }
 
-    public OfflineItemSchedule getOfflineItemSchedule() {
-        return mSchedule;
-    }
-
     /**
      * Helper method to build a {@link DownloadInfo} from an {@link OfflineItem}.
      * @param item    The {@link OfflineItem} to mimic.
@@ -316,13 +304,10 @@ public final class DownloadInfo {
                 .setIcon(visuals == null ? null : visuals.icon)
                 .setPendingState(item.pendingState)
                 .setFailState(item.failState)
-                .setShouldPromoteOrigin(item.promoteOrigin)
-                .setOfflineItemSchedule(item.schedule);
+                .setShouldPromoteOrigin(item.promoteOrigin);
     }
 
-    /**
-     * Helper class for building the DownloadInfo object.
-     */
+    /** Helper class for building the DownloadInfo object. */
     public static class Builder {
         private GURL mUrl;
         private String mUserAgent;
@@ -354,12 +339,9 @@ public final class DownloadInfo {
         private boolean mIsTransient;
         private boolean mIsParallelDownload;
         private Bitmap mIcon;
-        @PendingState
-        private int mPendingState;
-        @FailState
-        private int mFailState;
+        @PendingState private int mPendingState;
+        @FailState private int mFailState;
         private boolean mShouldPromoteOrigin;
-        private OfflineItemSchedule mSchedule;
 
         public Builder setUrl(GURL url) {
             mUrl = url;
@@ -522,11 +504,6 @@ public final class DownloadInfo {
             return this;
         }
 
-        public Builder setOfflineItemSchedule(OfflineItemSchedule schedule) {
-            mSchedule = schedule;
-            return this;
-        }
-
         public DownloadInfo build() {
             return new DownloadInfo(this);
         }
@@ -567,23 +544,40 @@ public final class DownloadInfo {
                     .setIcon(downloadInfo.getIcon())
                     .setPendingState(downloadInfo.getPendingState())
                     .setFailState(downloadInfo.getFailState())
-                    .setShouldPromoteOrigin(downloadInfo.getShouldPromoteOrigin())
-                    .setOfflineItemSchedule(downloadInfo.getOfflineItemSchedule());
+                    .setShouldPromoteOrigin(downloadInfo.getShouldPromoteOrigin());
             return builder;
         }
     }
 
     @CalledByNative
-    private static DownloadInfo createDownloadInfo(String downloadGuid, String fileName,
-            String filePath, GURL url, String mimeType, long bytesReceived, long bytesTotalSize,
-            OTRProfileID otrProfileId, int state, int percentCompleted, boolean isPaused,
-            boolean hasUserGesture, boolean isResumable, boolean isParallelDownload,
-            GURL originalUrl, GURL referrerUrl, long timeRemainingInMs, long lastAccessTime,
-            boolean isDangerous, @FailState int failState, OfflineItemSchedule schedule) {
+    private static DownloadInfo createDownloadInfo(
+            @JniType("std::string") String downloadGuid,
+            @JniType("std::string") String fileName,
+            @JniType("std::string") String filePath,
+            @JniType("GURL") GURL url,
+            @JniType("std::string") String mimeType,
+            long bytesReceived,
+            long bytesTotalSize,
+            OTRProfileID otrProfileId,
+            int state,
+            int percentCompleted,
+            boolean isPaused,
+            boolean hasUserGesture,
+            boolean isResumable,
+            boolean isParallelDownload,
+            @JniType("GURL") GURL originalUrl,
+            @JniType("GURL") GURL referrerUrl,
+            long timeRemainingInMs,
+            long lastAccessTime,
+            boolean isDangerous,
+            @FailState int failState) {
         String remappedMimeType = MimeUtils.remapGenericMimeType(mimeType, url.getSpec(), fileName);
 
-        Progress progress = new Progress(bytesReceived,
-                percentCompleted == -1 ? null : bytesTotalSize, OfflineItemProgressUnit.BYTES);
+        Progress progress =
+                new Progress(
+                        bytesReceived,
+                        percentCompleted == -1 ? null : bytesTotalSize,
+                        OfflineItemProgressUnit.BYTES);
         return new DownloadInfo.Builder()
                 .setBytesReceived(bytesReceived)
                 .setBytesTotalSize(bytesTotalSize)
@@ -606,7 +600,6 @@ public final class DownloadInfo {
                 .setIsDangerous(isDangerous)
                 .setUrl(url)
                 .setFailState(failState)
-                .setOfflineItemSchedule(schedule)
                 .build();
     }
 }

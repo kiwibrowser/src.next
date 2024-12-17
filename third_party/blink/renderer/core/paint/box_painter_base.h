@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 
 #include "third_party/blink/renderer/core/layout/background_bleed_avoidance.h"
 #include "third_party/blink/renderer/core/layout/geometry/box_sides.h"
+#include "third_party/blink/renderer/core/layout/geometry/box_strut.h"
 #include "third_party/blink/renderer/core/layout/geometry/physical_size.h"
 #include "third_party/blink/renderer/core/style/style_image.h"
-#include "third_party/blink/renderer/platform/geometry/layout_rect_outsets.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
 #include "third_party/blink/renderer/platform/graphics/image_orientation.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -22,10 +22,12 @@ class Rect;
 namespace blink {
 
 class BackgroundImageGeometry;
+class BoxBackgroundPaintContext;
 class ComputedStyle;
 class Document;
 class FillLayer;
 class FloatRoundedRect;
+class GraphicsContext;
 class ImageResourceObserver;
 class LayoutBox;
 class Node;
@@ -40,7 +42,7 @@ class BoxPainterBase {
   STACK_ALLOCATED();
 
  public:
-  BoxPainterBase(const Document* document,
+  BoxPainterBase(const Document& document,
                  const ComputedStyle& style,
                  Node* node)
       : document_(document), style_(style), node_(node) {}
@@ -49,7 +51,7 @@ class BoxPainterBase {
                        const Color&,
                        const FillLayer&,
                        const PhysicalRect&,
-                       BackgroundImageGeometry&,
+                       const BoxBackgroundPaintContext&,
                        BackgroundBleedAvoidance = kBackgroundBleedNone);
 
   void PaintFillLayer(const PaintInfo&,
@@ -57,14 +59,14 @@ class BoxPainterBase {
                       const FillLayer&,
                       const PhysicalRect&,
                       BackgroundBleedAvoidance,
-                      BackgroundImageGeometry&,
+                      const BoxBackgroundPaintContext&,
                       bool object_has_multiple_boxes = false,
                       const PhysicalSize& flow_box_size = PhysicalSize());
 
   void PaintMaskImages(const PaintInfo&,
                        const PhysicalRect&,
                        const ImageResourceObserver&,
-                       BackgroundImageGeometry&,
+                       const BoxBackgroundPaintContext&,
                        PhysicalBoxSides sides_to_include);
 
   static void PaintNormalBoxShadow(
@@ -118,7 +120,6 @@ class BoxPainterBase {
                   Color bg_color,
                   const FillLayer&,
                   BackgroundBleedAvoidance,
-                  RespectImageOrientationEnum,
                   PhysicalBoxSides sides_to_include,
                   bool is_inline,
                   bool is_painting_background_in_contents_space);
@@ -138,15 +139,13 @@ class BoxPainterBase {
     bool is_printing;
     bool should_paint_image;
     bool should_paint_color;
+    bool background_forced_to_white = false;
     // True if we paint background color off main thread, design doc here:
     // https://docs.google.com/document/d/1usCnwWs8HsH5FU_185q6MsrZehFmpl5QgbbB4pvHIjI/edit
     bool should_paint_color_with_paint_worklet_image;
   };
 
  protected:
-  virtual LayoutRectOutsets ComputeBorders() const = 0;
-  virtual LayoutRectOutsets ComputePadding() const = 0;
-  LayoutRectOutsets AdjustedBorderOutsets(const FillLayerInfo&) const;
   void PaintFillLayerTextFillBox(const PaintInfo&,
                                  const FillLayerInfo&,
                                  Image*,
@@ -160,9 +159,10 @@ class BoxPainterBase {
                                  const PhysicalOffset& paint_offset,
                                  bool object_has_multiple_boxes) = 0;
 
-  virtual PhysicalRect AdjustRectForScrolledContent(const PaintInfo&,
-                                                    const FillLayerInfo&,
-                                                    const PhysicalRect&) = 0;
+  virtual PhysicalRect AdjustRectForScrolledContent(
+      GraphicsContext&,
+      const PhysicalBoxStrut& borders,
+      const PhysicalRect&) const = 0;
   virtual FillLayerInfo GetFillLayerInfo(
       const Color&,
       const FillLayer&,
@@ -175,9 +175,7 @@ class BoxPainterBase {
       PhysicalBoxSides sides_to_include = PhysicalBoxSides());
 
  private:
-  LayoutRectOutsets ComputeSnappedBorders() const;
-
-  const Document* document_;
+  const Document& document_;
   const ComputedStyle& style_;
   Node* node_;
 };

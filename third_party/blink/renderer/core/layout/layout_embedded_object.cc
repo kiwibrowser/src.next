@@ -61,7 +61,7 @@ static String LocalizedUnavailablePluginReplacementText(
                         // empty String(). See crbug.com/302130 for more
                         // details.
   }
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
   return String();
 }
 
@@ -91,22 +91,11 @@ void LayoutEmbeddedObject::PaintReplaced(
   EmbeddedObjectPainter(*this).PaintReplaced(paint_info, paint_offset);
 }
 
-void LayoutEmbeddedObject::UpdateLayout() {
+void LayoutEmbeddedObject::UpdateAfterLayout() {
   NOT_DESTROYED();
-  DCHECK(NeedsLayout());
-
-  UpdateLogicalWidth();
-  UpdateLogicalHeight();
-
-  ClearLayoutOverflow();
-
-  UpdateAfterLayout();
-
+  LayoutEmbeddedContent::UpdateAfterLayout();
   if (!GetEmbeddedContentView() && GetFrameView())
     GetFrameView()->AddPartToUpdate(*this);
-
-  ClearSelfNeedsLayoutOverflowRecalc();
-  ClearNeedsLayout();
 }
 
 void LayoutEmbeddedObject::ComputeIntrinsicSizingInfo(
@@ -115,35 +104,12 @@ void LayoutEmbeddedObject::ComputeIntrinsicSizingInfo(
   DCHECK(!ShouldApplySizeContainment());
   FrameView* frame_view = ChildFrameView();
   if (frame_view && frame_view->GetIntrinsicSizingInfo(intrinsic_sizing_info)) {
-    // Handle zoom & vertical writing modes here, as the embedded document
-    // doesn't know about them.
+    // Scale based on our zoom as the embedded document doesn't have that info.
     intrinsic_sizing_info.size.Scale(StyleRef().EffectiveZoom());
-
-    // Handle an overridden aspect ratio
-    const StyleAspectRatio& aspect_ratio = StyleRef().AspectRatio();
-    if (aspect_ratio.GetType() == EAspectRatioType::kRatio ||
-        (aspect_ratio.GetType() == EAspectRatioType::kAutoAndRatio &&
-         intrinsic_sizing_info.aspect_ratio.IsEmpty())) {
-      intrinsic_sizing_info.aspect_ratio.set_width(
-          aspect_ratio.GetRatio().width());
-      intrinsic_sizing_info.aspect_ratio.set_height(
-          aspect_ratio.GetRatio().height());
-    }
-
-    if (!IsHorizontalWritingMode())
-      intrinsic_sizing_info.Transpose();
     return;
   }
 
   LayoutEmbeddedContent::ComputeIntrinsicSizingInfo(intrinsic_sizing_info);
-}
-
-bool LayoutEmbeddedObject::NeedsPreferredWidthsRecalculation() const {
-  NOT_DESTROYED();
-  if (LayoutEmbeddedContent::NeedsPreferredWidthsRecalculation())
-    return true;
-  FrameView* frame_view = ChildFrameView();
-  return frame_view && frame_view->HasIntrinsicSizingInfo();
 }
 
 }  // namespace blink

@@ -9,11 +9,11 @@
 #include <string>
 #include <vector>
 
-#include "base/bind.h"
-#include "base/callback.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/strings/string_util.h"
 #include "components/crx_file/crx_creator.h"
 #include "components/crx_file/id_util.h"
@@ -21,6 +21,7 @@
 #include "crypto/signature_creator.h"
 #include "extensions/browser/extension_creator_filter.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_l10n_util.h"
 #include "extensions/common/file_util.h"
 #include "extensions/strings/grit/extensions_strings.h"
 #include "third_party/zlib/google/zip.h"
@@ -84,38 +85,20 @@ bool ExtensionCreator::InitializeInput(
   return true;
 }
 
-bool ExtensionCreator::ValidateManifest(const base::FilePath& extension_dir,
-                                        crypto::RSAPrivateKey* key_pair,
-                                        int run_flags) {
-  std::vector<uint8_t> public_key_bytes;
-  if (!key_pair->ExportPublicKey(&public_key_bytes)) {
-    error_message_ =
-        l10n_util::GetStringUTF8(IDS_EXTENSION_PUBLIC_KEY_FAILED_TO_EXPORT);
-    return false;
-  }
-
-  std::string public_key;
-  public_key.insert(public_key.begin(), public_key_bytes.begin(),
-                    public_key_bytes.end());
-
-  std::string extension_id = crx_file::id_util::GenerateId(public_key);
-
-  // Load the extension once. We don't really need it, but this does a lot of
-  // useful validation of the structure.
+bool ExtensionCreator::ValidateExtension(const base::FilePath& extension_dir,
+                                         int run_flags) {
   int create_flags =
       Extension::FOLLOW_SYMLINKS_ANYWHERE | Extension::ERROR_ON_PRIVATE_KEY;
   if (run_flags & kRequireModernManifestVersion)
     create_flags |= Extension::REQUIRE_MODERN_MANIFEST_VERSION;
 
-  if (run_flags & kBookmarkApp)
-    create_flags |= Extension::FROM_BOOKMARK;
-
+  // Loading the extension does a lot of useful validation of the structure.
   scoped_refptr<Extension> extension(file_util::LoadExtension(
-      extension_dir, extension_id,
-      run_flags & kSystemApp ? mojom::ManifestLocation::kExternalComponent
-                             : mojom::ManifestLocation::kInternal,
+      extension_dir, mojom::ManifestLocation::kInternal,
       create_flags, &error_message_));
-  return !!extension.get();
+
+  return !!extension.get() && extension_l10n_util::ValidateExtensionLocales(
+      extension_dir, *extension.get()->manifest()->value(), &error_message_);
 }
 
 std::unique_ptr<crypto::RSAPrivateKey> ExtensionCreator::ReadInputKey(
@@ -186,8 +169,7 @@ std::unique_ptr<crypto::RSAPrivateKey> ExtensionCreator::GenerateKey(
   }
 
   if (!output_private_key_path.empty()) {
-    if (-1 == base::WriteFile(output_private_key_path, pem_output.c_str(),
-                              pem_output.size())) {
+    if (!base::WriteFile(output_private_key_path, pem_output)) {
       error_message_ =
           l10n_util::GetStringUTF8(IDS_EXTENSION_PRIVATE_KEY_FAILED_TO_OUTPUT);
       return nullptr;
@@ -207,7 +189,7 @@ bool ExtensionCreator::CreateZip(const base::FilePath& extension_dir,
   zip::FilterCallback filter_cb =
       base::BindRepeating(&ExtensionCreatorFilter::ShouldPackageFile, filter);
 
-  // TODO(crbug.com/862471): Surface a warning to the user for files excluded
+  // TODO(crbug.com/40584446): Surface a warning to the user for files excluded
   // from being packed.
   if (!zip::ZipWithFilterCallback(extension_dir, *zip_path,
                                   std::move(filter_cb))) {
@@ -223,7 +205,7 @@ bool ExtensionCreator::CreateCrx(
     const base::FilePath& zip_path,
     crypto::RSAPrivateKey* private_key,
     const base::FilePath& crx_path,
-    const absl::optional<std::string>& compressed_verified_contents) {
+    const std::optional<std::string>& compressed_verified_contents) {
   crx_file::CreatorResult result;
   if (compressed_verified_contents.has_value()) {
     result = crx_file::CreateCrxWithVerifiedContentsInHeader(
@@ -253,7 +235,7 @@ bool ExtensionCreator::CreateCrxAndPerformCleanup(
     const base::FilePath& extension_dir,
     const base::FilePath& crx_path,
     crypto::RSAPrivateKey* private_key,
-    const absl::optional<std::string>& compressed_verified_contents) {
+    const std::optional<std::string>& compressed_verified_contents) {
   base::ScopedTempDir temp_dir;
   if (!temp_dir.CreateUniqueTempDir())
     return false;
@@ -266,20 +248,6 @@ bool ExtensionCreator::CreateCrxAndPerformCleanup(
   return result;
 }
 
-bool ExtensionCreator::CreateCrxWithVerifiedContentsInHeaderForTesting(
-    const base::FilePath& extension_dir,
-    const base::FilePath& crx_path,
-    const std::string& compressed_verified_contents,
-    std::string* extension_id) {
-  auto signing_key = crypto::RSAPrivateKey::Create(kRSAKeySize);
-  std::vector<uint8_t> public_key;
-  signing_key->ExportPublicKey(&public_key);
-  const std::string public_key_str(public_key.begin(), public_key.end());
-  *extension_id = crx_file::id_util::GenerateId(public_key_str);
-  return CreateCrxAndPerformCleanup(extension_dir, crx_path, signing_key.get(),
-                                    compressed_verified_contents);
-}
-
 bool ExtensionCreator::Run(const base::FilePath& extension_dir,
                            const base::FilePath& crx_path,
                            const base::FilePath& private_key_path,
@@ -288,6 +256,10 @@ bool ExtensionCreator::Run(const base::FilePath& extension_dir,
   // Check input diretory and read manifest.
   if (!InitializeInput(extension_dir, crx_path, private_key_path,
                        output_private_key_path, run_flags)) {
+    return false;
+  }
+
+  if (!ValidateExtension(extension_dir, run_flags)) {
     return false;
   }
 
@@ -302,14 +274,8 @@ bool ExtensionCreator::Run(const base::FilePath& extension_dir,
     return false;
   }
 
-  // Perform some extra validation by loading the extension.
-  // TODO(aa): Can this go before creating the key pair? This would mean not
-  // passing ID into LoadExtension which seems OK.
-  if (!ValidateManifest(extension_dir, key_pair.get(), run_flags))
-    return false;
-
   return CreateCrxAndPerformCleanup(extension_dir, crx_path, key_pair.get(),
-                                    absl::nullopt);
+                                    std::nullopt);
 }
 
 }  // namespace extensions

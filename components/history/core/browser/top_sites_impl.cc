@@ -6,22 +6,28 @@
 
 #include <stdint.h>
 
+#include <algorithm>
 #include <memory>
+#include <optional>
 #include <utility>
+#include <vector>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/check.h"
 #include "base/containers/contains.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/hash/md5.h"
 #include "base/location.h"
+#include "base/memory/ref_counted.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/numerics/safe_conversions.h"
+#include "base/ranges/algorithm.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/task/task_runner.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "components/history/core/browser/features.h"
@@ -58,16 +64,8 @@ void RunOrPostGetMostVisitedURLsCallback(
 // Checks if the titles stored in `old_list` and `new_list` have changes.
 bool DoTitlesDiffer(const MostVisitedURLList& old_list,
                     const MostVisitedURLList& new_list) {
-  // If the two lists have different sizes, the most visited titles are
-  // considered to have changes.
-  if (old_list.size() != new_list.size())
-    return true;
-
-  return !std::equal(std::begin(old_list), std::end(old_list),
-                     std::begin(new_list),
-                     [](const auto& old_item_ptr, const auto& new_item_ptr) {
-                       return old_item_ptr.title == new_item_ptr.title;
-                     });
+  return !base::ranges::equal(old_list, new_list, std::equal_to<>(),
+                              &MostVisitedURL::title, &MostVisitedURL::title);
 }
 
 // Transforms |number| in the range given by |max| and |min| to a number in the
@@ -102,30 +100,47 @@ constexpr base::TimeDelta kDelayForUpdates = base::Minutes(60);
 // TODO(sky): rename actual value to 'most_visited_blocked_urls.'
 const char kBlockedUrlsPrefsKey[] = "ntp.most_visited_blacklist";
 
-void RecordDBMetrics(const base::TimeTicks db_query_time,
-                     const size_t result_size) {
-  base::UmaHistogramTimes("History.TopSites.SearchTermsExtractionTime",
-                          base::TimeTicks::Now() - db_query_time);
-  base::UmaHistogramCounts10000("History.TopSites.SearchTermsExtractedCount",
-                                result_size);
+void LogMostVisitedScores(const MostVisitedURLList& sites) {
+  // This needs to be kept in sync with the variants list in histograms.xml.
+  constexpr int kMaxTileIndexCount = 10;
+  int size = std::min(static_cast<int>(sites.size()), kMaxTileIndexCount);
+
+  for (int tile_index = 0; tile_index < size; ++tile_index) {
+    const auto& site = sites[tile_index];
+    std::string name = "NewTabPage.MostVisited.DeciScore." +
+                       base::NumberToString(tile_index) + ".Local";
+    base::UmaHistogramCounts1M(name,
+                               base::saturated_cast<int>(site.score * 10));
+  }
 }
 
 }  // namespace
 
+// Stores the most visited sites and the most repeated queries returned from
+// the history service. Used to synchronize parallel requests to the history
+// service in order to combine the sites and the queries.
+struct SitesAndQueriesRequest
+    : public base::RefCounted<SitesAndQueriesRequest> {
+ public:
+  SitesAndQueriesRequest() = default;
+  SitesAndQueriesRequest(const SitesAndQueriesRequest&) = delete;
+  SitesAndQueriesRequest& operator=(const SitesAndQueriesRequest&) = delete;
+
+  bool request_is_complete() const {
+    return sites.has_value() && queries.has_value();
+  }
+
+  std::optional<MostVisitedURLList> sites;
+  std::optional<KeywordSearchTermVisitList> queries;
+  base::TimeTicks begin_time{base::TimeTicks::Now()};
+
+ private:
+  friend class base::RefCounted<SitesAndQueriesRequest>;
+
+  ~SitesAndQueriesRequest() = default;
+};
+
 // Initially, histogram is not recorded.
-bool TopSitesImpl::histogram_recorded_ = false;
-
-bool GetSearchResultsPageForDefaultSearchProvider(
-    const TemplateURL& default_provider,
-    const SearchTermsData& search_terms_data,
-    const std::u16string& search_terms,
-    GURL* url) {
-  TemplateURLRef::SearchTermsArgs search_terms_args(search_terms);
-  *url = GURL(default_provider.url_ref().ReplaceSearchTerms(search_terms_args,
-                                                            search_terms_data));
-  return url->is_valid();
-}
-
 TopSitesImpl::TopSitesImpl(PrefService* pref_service,
                            HistoryService* history_service,
                            TemplateURLService* template_url_service,
@@ -161,10 +176,10 @@ void TopSitesImpl::GetMostVisitedURLs(GetMostVisitedURLsCallback callback) {
     if (!loaded_) {
       // A request came in before we finished loading. Store the callback and
       // we'll run it on current thread when we finish loading.
-      pending_callbacks_.push_back(
-          base::BindOnce(&RunOrPostGetMostVisitedURLsCallback,
-                         base::RetainedRef(base::ThreadTaskRunnerHandle::Get()),
-                         std::move(callback)));
+      pending_callbacks_.push_back(base::BindOnce(
+          &RunOrPostGetMostVisitedURLsCallback,
+          base::RetainedRef(base::SingleThreadTaskRunner::GetCurrentDefault()),
+          std::move(callback)));
       return;
     }
     filtered_urls = thread_safe_cache_;
@@ -186,9 +201,8 @@ void TopSitesImpl::AddBlockedUrl(const GURL& url) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   {
-    DictionaryPrefUpdate update(pref_service_, kBlockedUrlsPrefsKey);
-    base::Value* blocked_urls = update.Get();
-    blocked_urls->SetKey(GetURLHash(url), base::Value());
+    ScopedDictPrefUpdate update(pref_service_, kBlockedUrlsPrefsKey);
+    update->Set(GetURLHash(url), base::Value());
   }
 
   ResetThreadSafeCache();
@@ -198,9 +212,8 @@ void TopSitesImpl::AddBlockedUrl(const GURL& url) {
 void TopSitesImpl::RemoveBlockedUrl(const GURL& url) {
   DCHECK(thread_checker_.CalledOnValidThread());
   {
-    DictionaryPrefUpdate update(pref_service_, kBlockedUrlsPrefsKey);
-    base::Value* blocked_urls = update.Get();
-    blocked_urls->RemoveKey(GetURLHash(url));
+    ScopedDictPrefUpdate update(pref_service_, kBlockedUrlsPrefsKey);
+    update->Remove(GetURLHash(url));
   }
   ResetThreadSafeCache();
   NotifyTopSitesChanged(TopSitesObserver::ChangeReason::BLOCKED_URLS);
@@ -213,11 +226,7 @@ bool TopSitesImpl::IsBlocked(const GURL& url) {
 
 void TopSitesImpl::ClearBlockedUrls() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  {
-    DictionaryPrefUpdate update(pref_service_, kBlockedUrlsPrefsKey);
-    base::Value* blocked_urls = update.Get();
-    blocked_urls->DictClear();
-  }
+  pref_service_->SetDict(kBlockedUrlsPrefsKey, base::Value::Dict());
   ResetThreadSafeCache();
   NotifyTopSitesChanged(TopSitesObserver::ChangeReason::BLOCKED_URLS);
 }
@@ -265,13 +274,37 @@ void TopSitesImpl::StartQueryForMostVisited() {
   DCHECK(loaded_);
   timer_.Stop();
 
-  if (!history_service_)
+  // Request the most visited URLs if the history service is available.
+  if (!history_service_) {
     return;
+  }
+
+  auto request = base::MakeRefCounted<SitesAndQueriesRequest>();
 
   history_service_->QueryMostVisitedURLs(
       num_results_to_request_from_history(),
-      base::BindOnce(&TopSitesImpl::OnTopSitesAvailableFromHistory,
-                     base::Unretained(this)),
+      base::BindOnce(&TopSitesImpl::OnGotMostVisitedURLsFromHistory,
+                     base::Unretained(this), request),
+      &cancelable_task_tracker_);
+
+  // Request the most repeated queries if the corresponding feature is enabled
+  // and the default search provider is available.
+  if (!base::FeatureList::IsEnabled(kOrganicRepeatableQueries)) {
+    request->queries = KeywordSearchTermVisitList();
+    return;
+  }
+
+  const auto* default_provider =
+      template_url_service_->GetDefaultSearchProvider();
+  if (!default_provider) {
+    request->queries = KeywordSearchTermVisitList();
+    return;
+  }
+
+  history_service_->QueryMostRepeatedQueriesForKeyword(
+      default_provider->id(), num_results_to_request_from_history(),
+      base::BindOnce(&TopSitesImpl::OnGotMostRepeatedQueriesFromHistory,
+                     base::Unretained(this), request),
       &cancelable_task_tracker_);
 }
 
@@ -312,115 +345,6 @@ void TopSitesImpl::DiffMostVisited(const MostVisitedURLList& old_list,
     if (old_url.second != kAlreadyFoundMarker)
       delta->deleted.push_back(old_list[old_url.second]);
   }
-}
-
-MostVisitedURLList TopSitesImpl::AddMostRepeatedQueries(
-    const MostVisitedURLList& sites) {
-  history::URLDatabase* url_db = history_service_->InMemoryDatabase();
-  if (!url_db) {
-    return sites;
-  }
-
-  if (!template_url_service_) {
-    return sites;
-  }
-
-  const auto* default_provider =
-      template_url_service_->GetDefaultSearchProvider();
-  if (!default_provider) {
-    return sites;
-  }
-
-  const base::Time age_threshold = base::Time::Now() - base::Days(90);
-  auto enumerator = url_db->CreateKeywordSearchTermVisitEnumerator(
-      default_provider->id(), age_threshold);
-  if (!enumerator) {
-    return sites;
-  }
-
-  // Generate the final list of the most repeated queries in descending order of
-  // their scores. Ensure the correct search results page URLs are set.
-  // TODO(crbug.com/1317829): Investigate moving this to a background thread.
-  MostVisitedURLList repeatable_query_sites;
-  std::vector<std::unique_ptr<KeywordSearchTermVisit>> search_terms;
-  const base::TimeTicks db_query_time = base::TimeTicks::Now();
-  history::GetMostRepeatedSearchTermsFromEnumerator(*enumerator, &search_terms);
-  RecordDBMetrics(db_query_time, search_terms.size());
-  for (const auto& search_term : search_terms) {
-    GURL url;
-    if (!GetSearchResultsPageForDefaultSearchProvider(
-            *default_provider, template_url_service_->search_terms_data(),
-            search_term->normalized_term, &url) ||
-        IsBlocked(url)) {
-      continue;
-    }
-    repeatable_query_sites.emplace_back(url, search_term->normalized_term,
-                                        *search_term->score);
-    if (repeatable_query_sites.size() >=
-        static_cast<size_t>(kMaxNumRepeatableQueries.Get())) {
-      break;
-    }
-  }
-
-  // If there are no most repeated queries, there is nothing left to do.
-  if (repeatable_query_sites.empty()) {
-    return sites;
-  }
-
-  // Generate the final list of the most visited sites arranged in descending
-  // order of their scores. Exclude any site that is the search results page.
-  // TODO(crbug.com/1317829): Get rid of |most_visted_sites| by passing |sites|
-  // by value and modify it destructively.
-  MostVisitedURLList most_visted_sites;
-  for (const auto& site : sites) {
-    if (template_url_service_->IsSearchResultsPageFromDefaultSearchProvider(
-            site.url) ||
-        IsBlocked(site.url)) {
-      continue;
-    }
-    most_visted_sites.emplace_back(site.url, site.title, site.score);
-    if (most_visted_sites.size() >= kTopSitesNumber) {
-      break;
-    }
-  }
-
-  // If there are no most visited sites, there is nothing left to do.
-  if (most_visted_sites.empty()) {
-    return repeatable_query_sites;
-  }
-
-  // To achieve a uniform mix of the sites and the queries as much as possible,
-  // scale the scores to the new range which includes both sites and queries.
-  if (kScaleRepeatableQueriesScores.Get()) {
-    const auto queries_max = repeatable_query_sites.front().score;
-    const auto queries_min = repeatable_query_sites.back().score;
-    const auto sites_max = most_visted_sites.front().score;
-    const auto sites_min = most_visted_sites.back().score;
-    const auto new_min = std::min(sites_min, queries_min);
-    const auto new_max = std::max(sites_max, queries_max);
-    for (auto& query : repeatable_query_sites) {
-      query.score = GetNumberInNewRange(query.score, queries_max, queries_min,
-                                        new_max, new_min);
-    }
-    for (auto& site : most_visted_sites) {
-      site.score = GetNumberInNewRange(site.score, sites_max, sites_min,
-                                       new_max, new_min);
-    }
-  }
-
-  // Merge the two sorted lists of sites and queries into a single list. Equal
-  // elements from the first list precede the elements from the second list.
-  const auto& first_list = kPrivilegeRepeatableQueries.Get()
-                               ? repeatable_query_sites
-                               : most_visted_sites;
-  const auto& second_list = kPrivilegeRepeatableQueries.Get()
-                                ? most_visted_sites
-                                : repeatable_query_sites;
-  MostVisitedURLList merged_list;
-  std::merge(first_list.begin(), first_list.end(), second_list.begin(),
-             second_list.end(), std::back_inserter(merged_list),
-             [](const auto& a, const auto& b) { return a.score > b.score; });
-  return merged_list;
 }
 
 bool TopSitesImpl::AddPrepopulatedPages(MostVisitedURLList* urls) const {
@@ -466,27 +390,10 @@ void TopSitesImpl::SetTopSites(MostVisitedURLList top_sites,
   TopSitesDelta delta;
   DiffMostVisited(top_sites_, top_sites, &delta);
 
-  TopSitesBackend::RecordHistogram record_or_not =
-      TopSitesBackend::RECORD_HISTOGRAM_NO;
-
-  // Record the delta size into a histogram if this function is called from
-  // function OnGotMostVisitedURLs and no histogram value has been recorded
-  // before.
-  if (location == CALL_LOCATION_FROM_ON_GOT_MOST_VISITED_URLS &&
-      !histogram_recorded_) {
-    size_t delta_size =
-        delta.deleted.size() + delta.added.size() + delta.moved.size();
-    UMA_HISTOGRAM_COUNTS_100("History.FirstSetTopSitesDeltaSize", delta_size);
-    // Will be passed to TopSitesBackend to let it record the histogram too.
-    record_or_not = TopSitesBackend::RECORD_HISTOGRAM_YES;
-    // Change it to true so that the histogram will not be recorded any more.
-    histogram_recorded_ = true;
-  }
-
   bool should_notify_observers = false;
   // If there is a change in urls, update the db and notify observers.
   if (!delta.deleted.empty() || !delta.added.empty() || !delta.moved.empty()) {
-    backend_->UpdateTopSites(delta, record_or_not);
+    backend_->UpdateTopSites(delta);
     should_notify_observers = true;
   }
   // If there is no url change in top sites, check if the titles have changes.
@@ -567,16 +474,119 @@ void TopSitesImpl::OnGotMostVisitedURLs(MostVisitedURLList sites) {
                &TopSitesImpl::StartQueryForMostVisited);
 }
 
-void TopSitesImpl::OnTopSitesAvailableFromHistory(MostVisitedURLList sites) {
-  if (base::FeatureList::IsEnabled(kOrganicRepeatableQueries)) {
-    SetTopSites(AddMostRepeatedQueries(sites), CALL_LOCATION_FROM_OTHER_PLACES);
-  } else {
-    SetTopSites(std::move(sites), CALL_LOCATION_FROM_OTHER_PLACES);
+void TopSitesImpl::OnGotMostVisitedURLsFromHistory(
+    scoped_refptr<SitesAndQueriesRequest> request,
+    MostVisitedURLList sites) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  LogMostVisitedScores(sites);
+
+  request->sites = std::move(sites);
+  if (request->request_is_complete()) {
+    SetTopSitesFromHistory(request);
   }
 }
 
-void TopSitesImpl::OnURLsDeleted(HistoryService* history_service,
-                                 const DeletionInfo& deletion_info) {
+void TopSitesImpl::OnGotMostRepeatedQueriesFromHistory(
+    scoped_refptr<SitesAndQueriesRequest> request,
+    KeywordSearchTermVisitList queries) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  request->queries = std::move(queries);
+  if (request->request_is_complete()) {
+    SetTopSitesFromHistory(request);
+  }
+}
+
+void TopSitesImpl::SetTopSitesFromHistory(
+    scoped_refptr<SitesAndQueriesRequest> request) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  DCHECK(request->request_is_complete());
+  base::UmaHistogramTimes("History.TopSites.QueryFromHistoryTime",
+                          base::TimeTicks::Now() - request->begin_time);
+
+  // Generate the final list of the most repeated queries in descending order of
+  // their scores. Ensure the correct search results page URLs are set.
+  MostVisitedURLList most_repeated_queries;
+  const size_t most_repeated_queries_limit = kMaxNumRepeatableQueries.Get();
+  for (const auto& query : *request->queries) {
+    GURL url = template_url_service_->GenerateSearchURLForDefaultSearchProvider(
+        query->normalized_term);
+    if (!url.is_valid() || IsBlocked(url)) {
+      continue;
+    }
+    most_repeated_queries.emplace_back(url, query->normalized_term);
+    most_repeated_queries.back().visit_count = query->visit_count;
+    most_repeated_queries.back().last_visit_time = query->last_visit_time;
+    most_repeated_queries.back().score = *query->score;
+    if (most_repeated_queries.size() >= most_repeated_queries_limit) {
+      break;
+    }
+  }
+
+  // Generate the final list of the most visited sites arranged in descending
+  // order of their scores. Exclude any site that is the search results page.
+  MostVisitedURLList most_visited_sites = std::move(*request->sites);
+  std::erase_if(most_visited_sites, [&](const auto& site) {
+    return (template_url_service_ &&
+            template_url_service_->IsSearchResultsPageFromDefaultSearchProvider(
+                site.url)) ||
+           IsBlocked(site.url);
+  });
+  if (most_visited_sites.size() > kTopSitesNumber) {
+    most_visited_sites.resize(kTopSitesNumber);
+  }
+
+  // If there are no more queries left, there is nothing left to do.
+  if (most_repeated_queries.empty()) {
+    SetTopSites(std::move(most_visited_sites), CALL_LOCATION_FROM_OTHER_PLACES);
+    return;
+  }
+
+  // If there are no more sites left, there is nothing left to do.
+  if (most_visited_sites.empty()) {
+    SetTopSites(std::move(most_repeated_queries),
+                CALL_LOCATION_FROM_OTHER_PLACES);
+    return;
+  }
+
+  // To achieve a uniform mix of the sites and the queries as much as possible,
+  // scale the scores to the new range which includes both sites and queries.
+  if (kScaleRepeatableQueriesScores.Get()) {
+    const auto queries_max = most_repeated_queries.front().score;
+    const auto queries_min = most_repeated_queries.back().score;
+    const auto sites_max = most_visited_sites.front().score;
+    const auto sites_min = most_visited_sites.back().score;
+    const auto new_min = std::min(sites_min, queries_min);
+    const auto new_max = std::max(sites_max, queries_max);
+    for (auto& query : most_repeated_queries) {
+      query.score = GetNumberInNewRange(query.score, queries_max, queries_min,
+                                        new_max, new_min);
+    }
+    for (auto& site : most_visited_sites) {
+      site.score = GetNumberInNewRange(site.score, sites_max, sites_min,
+                                       new_max, new_min);
+    }
+  }
+
+  // Merge the two sorted lists of sites and queries into a single list. Equal
+  // elements from the first list precede the elements from the second list.
+  const auto& first_list = kPrivilegeRepeatableQueries.Get()
+                               ? most_repeated_queries
+                               : most_visited_sites;
+  const auto& second_list = kPrivilegeRepeatableQueries.Get()
+                                ? most_visited_sites
+                                : most_repeated_queries;
+  MostVisitedURLList merged_list;
+  std::merge(first_list.begin(), first_list.end(), second_list.begin(),
+             second_list.end(), std::back_inserter(merged_list),
+             [](const auto& a, const auto& b) { return a.score > b.score; });
+  SetTopSites(std::move(merged_list), CALL_LOCATION_FROM_OTHER_PLACES);
+}
+
+void TopSitesImpl::OnHistoryDeletions(HistoryService* history_service,
+                                      const DeletionInfo& deletion_info) {
   if (!loaded_)
     return;
 

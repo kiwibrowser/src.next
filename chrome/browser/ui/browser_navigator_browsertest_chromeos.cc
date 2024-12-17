@@ -2,15 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/constants/ash_switches.h"
 #include "base/command_line.h"
 #include "build/chromeos_buildflags.h"
-#include "chrome/browser/ash/login/chrome_restart_request.h"
-#include "chrome/browser/ash/profiles/profile_helper.h"
-#include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
-#include "chrome/browser/ui/ash/multi_user/multi_user_window_manager_helper.h"
-#include "chrome/browser/ui/ash/multi_user/test_multi_user_window_manager.h"
-#include "chrome/browser/ui/ash/window_pin_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -25,12 +18,24 @@
 #include "content/public/test/browser_test.h"
 #include "ui/aura/window.h"
 
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "ash/constants/ash_switches.h"
+#include "ash/wm/window_pin_util.h"
+#include "chrome/browser/ash/login/chrome_restart_request.h"
+#include "chrome/browser/ash/profiles/profile_helper.h"
+#include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
+#include "chrome/browser/ui/ash/multi_user/multi_user_window_manager_helper.h"
+#include "chrome/browser/ui/ash/multi_user/test_multi_user_window_manager.h"
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "base/test/run_until.h"
+#include "base/test/test_future.h"
 #include "chromeos/crosapi/mojom/crosapi.mojom.h"
-#include "chromeos/crosapi/mojom/test_controller.mojom-test-utils.h"
+#include "chromeos/crosapi/mojom/test_controller.mojom.h"
 #include "chromeos/lacros/lacros_test_helper.h"
 #include "chromeos/startup/browser_init_params.h"
-#endif
+#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
 
 namespace {
 
@@ -91,6 +96,37 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTestChromeOS,
       GURL(chrome::kChromeUIVersionURL),
       params.browser->tab_strip_model()->GetActiveWebContents()->GetURL());
 }
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+// Verify that page navigation is allowed in locked fullscreen mode when locked
+// for OnTask. Only applicable for non-web browser scenarios.
+IN_PROC_BROWSER_TEST_F(BrowserNavigatorTestChromeOS,
+                       NavigationAllowedInLockedFullscreenWhenLockedForOnTask) {
+  // Set locked fullscreen state.
+  aura::Window* const window = browser()->window()->GetNativeWindow();
+  PinWindow(window, /*trusted=*/true);
+  browser()->SetLockedForOnTask(true);
+
+  // Navigate to a page.
+  const GURL kUrl(chrome::kChromeUIVersionURL);
+  NavigateParams params(MakeNavigateParams(browser()));
+  params.disposition = WindowOpenDisposition::NEW_WINDOW;
+  params.url = kUrl;
+  params.window_action = NavigateParams::SHOW_WINDOW;
+  Navigate(&params);
+
+  // The original browser should still be at the same page, but the newly
+  // opened browser should sit on the chrome:version page.
+  ASSERT_EQ(2u, chrome::GetTotalBrowserCount());
+  ASSERT_EQ(1, browser()->tab_strip_model()->count());
+  EXPECT_EQ(GURL(url::kAboutBlankURL),
+            browser()->tab_strip_model()->GetActiveWebContents()->GetURL());
+  ASSERT_EQ(1, params.browser->tab_strip_model()->count());
+  EXPECT_EQ(
+      kUrl,
+      params.browser->tab_strip_model()->GetActiveWebContents()->GetURL());
+}
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 // Subclass that tests navigation while in the Guest session.
 class BrowserGuestSessionNavigatorTest : public BrowserNavigatorTest {
@@ -214,29 +250,21 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTestChromeOS, OsSchemeRedirectFail) {
 // Verifies that the navigation of an os:// scheme page is opening an app on
 // the ash side and does not produce a navigation on the Lacros side.
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTestChromeOS, OsSchemeRedirectSucceed) {
-  if (chromeos::LacrosService::Get()->GetInterfaceVersion(
-          crosapi::mojom::TestController::Uuid_) <
+  if (chromeos::LacrosService::Get()
+          ->GetInterfaceVersion<crosapi::mojom::TestController>() <
       static_cast<int>(crosapi::mojom::TestController::MethodMinVersions::
                            kGetOpenAshBrowserWindowsMinVersion)) {
     LOG(WARNING) << "Unsupported ash version.";
     return;
   }
 
-  crosapi::mojom::TestControllerAsyncWaiter waiter(
-      chromeos::LacrosService::Get()
-          ->GetRemote<crosapi::mojom::TestController>()
-          .get());
+  auto& test_controller = chromeos::LacrosService::Get()
+                              ->GetRemote<crosapi::mojom::TestController>();
 
   // Ash shouldn't have a browser window open by now.
-  uint32_t number = 1;
-  waiter.GetOpenAshBrowserWindows(&number);
-  EXPECT_EQ(0u, number);
-
-  // First we make sure that the GURL we are interested in is in our allow list.
-  auto init_params = crosapi::mojom::BrowserInitParams::New();
-  init_params->accepted_internal_ash_urls =
-      std::vector<GURL>{GURL(chrome::kOsUIFlagsURL)};
-  chromeos::BrowserInitParams::SetInitParamsForTests(std::move(init_params));
+  base::test::TestFuture<uint32_t> window_count_future;
+  test_controller->GetOpenAshBrowserWindows(window_count_future.GetCallback());
+  EXPECT_EQ(0u, window_count_future.Take());
 
   EXPECT_EQ(1u, chrome::GetTotalBrowserCount());
   EXPECT_EQ(1, browser()->tab_strip_model()->count());
@@ -262,23 +290,25 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTestChromeOS, OsSchemeRedirectSucceed) {
   // Clean up the window we have created.
 
   // Wait until we have the app running.
-  while (0 == number) {
-    usleep(25000);
-    waiter.GetOpenAshBrowserWindows(&number);
-  }
+  ASSERT_TRUE(base::test::RunUntil([&] {
+    test_controller->GetOpenAshBrowserWindows(
+        window_count_future.GetCallback());
+    return window_count_future.Take() > 0;
+  }));
 
   // Close it.
-  bool success = false;
-  waiter.CloseAllBrowserWindows(&success);
-  EXPECT_TRUE(success);
+  base::test::TestFuture<bool> success_future;
+  test_controller->CloseAllBrowserWindows(success_future.GetCallback());
+  EXPECT_TRUE(success_future.Get());
 
   // Wait until all are gone.
-  while (0 != number) {
-    usleep(25000);
-    waiter.GetOpenAshBrowserWindows(&number);
-  }
+  ASSERT_TRUE(base::test::RunUntil([&] {
+    test_controller->GetOpenAshBrowserWindows(
+        window_count_future.GetCallback());
+    return window_count_future.Take() == 0;
+  }));
 }
 
-#endif
+#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
 
 }  // namespace

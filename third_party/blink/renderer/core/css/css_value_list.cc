@@ -41,6 +41,23 @@ CSSValueList::CSSValueList(ValueListSeparator list_separator)
   value_list_separator_ = list_separator;
 }
 
+CSSValueList::CSSValueList(ValueListSeparator list_separator,
+                           HeapVector<Member<const CSSValue>, 4> values)
+    : CSSValue(kValueListClass), values_(std::move(values)) {
+  value_list_separator_ = list_separator;
+}
+
+void CSSValueList::Append(const CSSValue& value) {
+  values_.push_back(value);
+  // Note: this will be changed if we need to support tree scoped names and
+  // references in any subclass.
+  // TODO(crbug.com/1410362): Make CSSValueList immutable so that we don't need
+  // to track it here.
+  if (IsBaseValueList() && !value.IsScopedValue()) {
+    needs_tree_scope_population_ = true;
+  }
+}
+
 bool CSSValueList::RemoveAll(const CSSValue& val) {
   bool found = false;
   for (int index = values_.size() - 1; index >= 0; --index) {
@@ -50,13 +67,27 @@ bool CSSValueList::RemoveAll(const CSSValue& val) {
       found = true;
     }
   }
+  // Note: this will be changed if we need to support tree scoped names and
+  // references in any subclass.
+  // TODO(crbug.com/1410362): Make CSSValueList immutable so that we don't need
+  // to track it here.
+  if (IsBaseValueList()) {
+    needs_tree_scope_population_ = false;
+    for (const CSSValue* value : values_) {
+      if (!value->IsScopedValue()) {
+        needs_tree_scope_population_ = true;
+        break;
+      }
+    }
+  }
   return found;
 }
 
 bool CSSValueList::HasValue(const CSSValue& val) const {
   for (const auto& value : values_) {
-    if (value && *value == val)
+    if (value && *value == val) {
       return true;
+    }
   }
   return false;
 }
@@ -74,10 +105,56 @@ CSSValueList* CSSValueList::Copy() const {
       new_list = CreateSlashSeparated();
       break;
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
   }
   new_list->values_ = values_;
+  new_list->needs_tree_scope_population_ = needs_tree_scope_population_;
   return new_list;
+}
+
+const CSSValue* CSSValueList::UntaintedCopy() const {
+  bool changed = false;
+  HeapVector<Member<const CSSValue>, 4> untainted_values;
+  for (const CSSValue* value : values_) {
+    untainted_values.push_back(value->UntaintedCopy());
+    if (value != untainted_values.back().Get()) {
+      changed = true;
+    }
+  }
+  if (!changed) {
+    return this;
+  }
+  return MakeGarbageCollected<CSSValueList>(
+      static_cast<ValueListSeparator>(value_list_separator_),
+      std::move(untainted_values));
+}
+
+const CSSValueList& CSSValueList::PopulateWithTreeScope(
+    const TreeScope* tree_scope) const {
+  // Note: this will be changed if any subclass also involves values that need
+  // TreeScope population, as in that case, we will need to return an instance
+  // of the subclass.
+  DCHECK(IsBaseValueList());
+  DCHECK(!IsScopedValue());
+  CSSValueList* new_list = nullptr;
+  switch (value_list_separator_) {
+    case kSpaceSeparator:
+      new_list = CreateSpaceSeparated();
+      break;
+    case kCommaSeparator:
+      new_list = CreateCommaSeparated();
+      break;
+    case kSlashSeparator:
+      new_list = CreateSlashSeparated();
+      break;
+    default:
+      NOTREACHED_IN_MIGRATION();
+  }
+  new_list->values_.ReserveInitialCapacity(values_.size());
+  for (const CSSValue* value : values_) {
+    new_list->values_.push_back(&value->EnsureScopedValue(tree_scope));
+  }
+  return *new_list;
 }
 
 String CSSValueList::CustomCSSText() const {
@@ -93,13 +170,14 @@ String CSSValueList::CustomCSSText() const {
       separator = " / ";
       break;
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
   }
 
   StringBuilder result;
   for (const auto& value : values_) {
-    if (!result.IsEmpty())
+    if (!result.empty()) {
       result.Append(separator);
+    }
     // TODO(crbug.com/1213338): value_[i] can be null by CSSMathExpressionNode
     // which is implemented by css-values-3. Until fully implement the
     // css-values-4 features, we should append empty string to remove
@@ -116,23 +194,26 @@ bool CSSValueList::Equals(const CSSValueList& other) const {
 
 bool CSSValueList::HasFailedOrCanceledSubresources() const {
   for (const auto& value : values_) {
-    if (value->HasFailedOrCanceledSubresources())
+    if (value->HasFailedOrCanceledSubresources()) {
       return true;
+    }
   }
   return false;
 }
 
 bool CSSValueList::MayContainUrl() const {
   for (const auto& value : values_) {
-    if (value->MayContainUrl())
+    if (value->MayContainUrl()) {
       return true;
+    }
   }
   return false;
 }
 
 void CSSValueList::ReResolveUrl(const Document& document) const {
-  for (const auto& value : values_)
+  for (const auto& value : values_) {
     value->ReResolveUrl(document);
+  }
 }
 
 void CSSValueList::TraceAfterDispatch(blink::Visitor* visitor) const {

@@ -5,7 +5,9 @@
 #ifndef CHROME_BROWSER_DOWNLOAD_DOWNLOAD_MANAGER_UTILS_H_
 #define CHROME_BROWSER_DOWNLOAD_DOWNLOAD_MANAGER_UTILS_H_
 
-#include "base/callback_forward.h"
+#include <memory>
+
+#include "base/functional/callback_forward.h"
 
 class Profile;
 class ProfileKey;
@@ -20,8 +22,8 @@ class DownloadManagerUtils {
   DownloadManagerUtils& operator=(const DownloadManagerUtils&) = delete;
 
   // Creates an InProgressDownloadManager from a profile.
-  static download::InProgressDownloadManager* RetrieveInProgressDownloadManager(
-      Profile* profile);
+  static std::unique_ptr<download::InProgressDownloadManager>
+  RetrieveInProgressDownloadManager(Profile* profile);
 
   // Initializes the SimpleDownloadManager that is associated with |key| whenver
   // possible.

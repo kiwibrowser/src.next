@@ -10,7 +10,7 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/file_util.h"
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/extensions/extension_assets_manager_chromeos.h"
 #endif
 
@@ -41,10 +41,12 @@ class ExtensionAssetsManagerImpl :  public ExtensionAssetsManager {
   }
 
   void UninstallExtension(const std::string& id,
-                          Profile* profile,
-                          const base::FilePath& local_install_dir,
-                          const base::FilePath& extension_root) override {
-    file_util::UninstallExtension(local_install_dir, id);
+                          const std::string& profile_user_name,
+                          const base::FilePath& extensions_install_dir,
+                          const base::FilePath& extension_dir_to_delete,
+                          const base::FilePath& profile_dir) override {
+    file_util::UninstallExtension(profile_dir, extensions_install_dir,
+                                  extension_dir_to_delete);
   }
 
  private:
@@ -58,12 +60,12 @@ class ExtensionAssetsManagerImpl :  public ExtensionAssetsManager {
 
 // static
 ExtensionAssetsManager* ExtensionAssetsManager::GetInstance() {
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   return ExtensionAssetsManagerChromeOS::GetInstance();
 #else
   // If not Chrome OS, use trivial implementation that doesn't share anything.
   return ExtensionAssetsManagerImpl::GetInstance();
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 }
 
 }  // namespace extensions

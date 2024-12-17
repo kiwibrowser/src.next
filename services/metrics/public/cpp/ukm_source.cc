@@ -10,6 +10,7 @@
 #include "base/check_op.h"
 #include "base/hash/hash.h"
 #include "base/notreached.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
 #include "third_party/metrics_proto/ukm/source.pb.h"
 
 namespace ukm {
@@ -24,10 +25,8 @@ constexpr char kMaxUrlLengthMessage[] = "URLTooLong";
 
 // Using a simple global assumes that all access to it will be done on the same
 // thread, namely the UI thread. If this becomes not the case then it can be
-// changed to an Atomic32 (make CustomTabState derive from int32_t) and accessed
-// with no-barrier loads and stores.
-UkmSource::CustomTabState g_custom_tab_state = UkmSource::kCustomTabUnset;
-// TODO(crbug/1228735): This will be replacing g_custom_tab_state above.
+// changed to an Atomic32 (make AndroidActivityTypeState derive from int32_t)
+// and accessed with no-barrier loads and stores.
 int32_t g_android_activity_type_state = -1;
 
 // Returns a URL that is under the length limit, by returning a constant
@@ -53,7 +52,7 @@ SourceType ToProtobufSourceType(SourceIdType source_id_type) {
       return SourceType::WEBAPK_ID;
     case SourceIdType::PAYMENT_APP_ID:
       return SourceType::PAYMENT_APP_ID;
-    case SourceIdType::DESKTOP_WEB_APP_ID:
+    case SourceIdType::DEPRECATED_DESKTOP_WEB_APP_ID:
       return SourceType::DESKTOP_WEB_APP_ID;
     case SourceIdType::WORKER_ID:
       return SourceType::WORKER_ID;
@@ -63,6 +62,12 @@ SourceType ToProtobufSourceType(SourceIdType source_id_type) {
       return SourceType::REDIRECT_ID;
     case SourceIdType::WEB_IDENTITY_ID:
       return SourceType::WEB_IDENTITY_ID;
+    case SourceIdType::CHROMEOS_WEBSITE_ID:
+      return SourceType::CHROMEOS_WEBSITE_ID;
+    case SourceIdType::EXTENSION_ID:
+      return SourceType::EXTENSION_ID;
+    case SourceIdType::NOTIFICATION_ID:
+      return SourceType::NOTIFICATION_ID;
   }
 }
 
@@ -79,17 +84,12 @@ AndroidActivityType ToProtobufActivityType(int32_t type) {
     case 4:
       return AndroidActivityType::WEB_APK;
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       return AndroidActivityType::TABBED;
   }
 }
 
 }  // namespace
-
-// static
-void UkmSource::SetCustomTabVisible(bool visible) {
-  g_custom_tab_state = visible ? kCustomTabTrue : kCustomTabFalse;
-}
 
 // static
 void UkmSource::SetAndroidActivityTypeState(int32_t activity_type) {
@@ -128,7 +128,6 @@ UkmSource::NavigationData UkmSource::NavigationData::CopyWithSanitizedUrls(
 UkmSource::UkmSource(ukm::SourceId id, const GURL& url)
     : id_(id),
       type_(GetSourceIdType(id_)),
-      custom_tab_state_(g_custom_tab_state),
       android_activity_type_state_(g_android_activity_type_state),
       creation_time_(base::TimeTicks::Now()) {
   navigation_data_.urls = {url};
@@ -139,7 +138,6 @@ UkmSource::UkmSource(ukm::SourceId id, const NavigationData& navigation_data)
     : id_(id),
       type_(GetSourceIdType(id_)),
       navigation_data_(navigation_data),
-      custom_tab_state_(g_custom_tab_state),
       android_activity_type_state_(g_android_activity_type_state),
       creation_time_(base::TimeTicks::Now()) {
   DCHECK(type_ == SourceIdType::NAVIGATION_ID);
@@ -160,17 +158,12 @@ void UkmSource::UpdateUrl(const GURL& new_url) {
 void UkmSource::PopulateProto(Source* proto_source) const {
   DCHECK(!proto_source->has_id());
   DCHECK(!proto_source->has_type());
-  DCHECK(!proto_source->has_url());
-  DCHECK(!proto_source->has_initial_url());
 
   proto_source->set_id(id_);
   proto_source->set_type(ToProtobufSourceType(type_));
   for (const auto& url : urls()) {
     proto_source->add_urls()->set_url(GetShortenedURL(url));
   }
-
-  if (custom_tab_state_ != kCustomTabUnset)
-    proto_source->set_is_custom_tab(custom_tab_state_ == kCustomTabTrue);
 
   // -1 corresponds to the unset state. Android activity type values start at 0.
   // See chrome/browser/flags/ActivityType.java
@@ -197,13 +190,14 @@ void UkmSource::PopulateProto(Source* proto_source) const {
   if (navigation_data_.is_same_document_navigation)
     proto_source->set_is_same_document_navigation(true);
 
-  ukm::Source_SameOriginStatus status = ukm::Source::UNSET;
+  ukm::SameOriginStatus status = ukm::SAME_ORIGIN_STATUS_UNSET;
   if (navigation_data_.same_origin_status ==
-      UkmSource::NavigationData::SameOriginStatus::SAME_ORIGIN) {
-    status = ukm::Source::SAME_ORIGIN;
+      UkmSource::NavigationData::SourceSameOriginStatus::SOURCE_SAME_ORIGIN) {
+    status = ukm::SAME_ORIGIN;
   } else if (navigation_data_.same_origin_status ==
-             UkmSource::NavigationData::SameOriginStatus::CROSS_ORIGIN) {
-    status = ukm::Source::CROSS_ORIGIN;
+             UkmSource::NavigationData::SourceSameOriginStatus::
+                 SOURCE_CROSS_ORIGIN) {
+    status = ukm::CROSS_ORIGIN;
   }
 
   proto_source->mutable_navigation_metadata()->set_same_origin_status(status);

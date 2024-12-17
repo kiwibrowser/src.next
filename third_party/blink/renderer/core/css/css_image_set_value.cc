@@ -26,149 +26,133 @@
 #include "third_party/blink/renderer/core/css/css_image_set_value.h"
 
 #include <algorithm>
-#include "third_party/blink/public/common/loader/referrer_utils.h"
-#include "third_party/blink/renderer/core/css/css_image_value.h"
-#include "third_party/blink/renderer/core/css/css_primitive_value.h"
-#include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+
+#include "third_party/blink/renderer/core/css/css_image_set_option_value.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_content.h"
-#include "third_party/blink/renderer/core/style/style_fetched_image_set.h"
-#include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
-#include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
-#include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
-#include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
-#include "third_party/blink/renderer/platform/weborigin/kurl.h"
-#include "third_party/blink/renderer/platform/weborigin/referrer.h"
+#include "third_party/blink/renderer/core/paint/timing/paint_timing.h"
+#include "third_party/blink/renderer/core/style/style_image_set.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
 
 CSSImageSetValue::CSSImageSetValue()
-    : CSSValueList(kImageSetClass, kCommaSeparator), cached_scale_factor_(1) {}
+    : CSSValueList(kImageSetClass, kCommaSeparator) {}
 
 CSSImageSetValue::~CSSImageSetValue() = default;
 
-void CSSImageSetValue::FillImageSet() {
-  wtf_size_t length = this->length();
-  wtf_size_t i = 0;
-  while (i < length) {
-    wtf_size_t image_index = i;
+const CSSImageSetOptionValue* CSSImageSetValue::GetBestOption(
+    const float device_scale_factor) {
+  // This method is implementing the selection logic described in the
+  // "CSS Images Module Level 4" spec:
+  // https://w3c.github.io/csswg-drafts/css-images-4/#image-set-notation
+  //
+  // Spec definition of image-set-option selection algorithm:
+  //
+  // "An image-set() function contains a list of one or more
+  // <image-set-option>s, and must select only one of them
+  // to determine what image it will represent:
+  //
+  //   1. First, remove any <image-set-option>s from the list that specify an
+  //      unknown or unsupported MIME type in their type() value.
+  //   2. Second, remove any <image-set-option>s from the list that have the
+  //      same <resolution> as a previous option in the list.
+  //   3. Finally, among the remaining <image-set-option>s, make a UA-specific
+  //      choice of which to load, based on whatever criteria deemed relevant
+  //      (such as the resolution of the display, connection speed, etc).
+  //   4. The image-set() function then represents the <image> of the chosen
+  //      <image-set-option>."
 
-    ++i;
-    SECURITY_DCHECK(i < length);
-    const auto& scale_factor_value = To<CSSPrimitiveValue>(Item(i));
+  if (options_.empty()) {
+    for (const auto& i : *this) {
+      auto* option = To<CSSImageSetOptionValue>(i.Get());
+      if (option->IsSupported()) {
+        options_.push_back(option);
+      }
+    }
 
-    images_in_set_.push_back(
-        ImageWithScale{image_index, scale_factor_value.GetFloatValue()});
-    ++i;
+    if (options_.empty()) {
+      // No supported options were identified in the image-set.
+      // As an optimization in order to avoid having to iterate
+      // through the unsupported options on subsequent calls,
+      // nullptr is inserted in the options_ vector.
+      options_.push_back(nullptr);
+    } else {
+      std::stable_sort(options_.begin(), options_.end(),
+                       [](auto& left, auto& right) {
+                         return left->ComputedResolution() <
+                                right->ComputedResolution();
+                       });
+      auto last = std::unique(
+          options_.begin(), options_.end(), [](auto& left, auto& right) {
+            return left->ComputedResolution() == right->ComputedResolution();
+          });
+      options_.erase(last, options_.end());
+    }
   }
 
-  // Sort the images so that they are stored in order from lowest resolution to
-  // highest.
-  std::sort(images_in_set_.begin(), images_in_set_.end(),
-            CSSImageSetValue::CompareByScaleFactor);
-}
-
-CSSImageSetValue::ImageWithScale CSSImageSetValue::BestImageForScaleFactor(
-    float scale_factor) {
-  ImageWithScale image;
-  wtf_size_t number_of_images = images_in_set_.size();
-  for (wtf_size_t i = 0; i < number_of_images; ++i) {
-    image = images_in_set_.at(i);
-    if (image.scale_factor >= scale_factor)
-      return image;
+  for (const auto& option : options_) {
+    if (option && option->ComputedResolution() >= device_scale_factor) {
+      return option.Get();
+    }
   }
-  return image;
+
+  return options_.back().Get();
 }
 
-bool CSSImageSetValue::IsCachePending(float device_scale_factor) const {
-  return !cached_image_ || device_scale_factor != cached_scale_factor_;
+bool CSSImageSetValue::IsCachePending(const float device_scale_factor) const {
+  return !cached_image_ ||
+         !EqualResolutions(device_scale_factor, cached_device_scale_factor_);
 }
 
-StyleImage* CSSImageSetValue::CachedImage(float device_scale_factor) const {
+StyleImage* CSSImageSetValue::CachedImage(
+    const float device_scale_factor) const {
   DCHECK(!IsCachePending(device_scale_factor));
   return cached_image_.Get();
 }
 
 StyleImage* CSSImageSetValue::CacheImage(
-    const Document& document,
-    float device_scale_factor,
-    FetchParameters::ImageRequestBehavior,
-    CrossOriginAttributeValue cross_origin) {
-  if (!images_in_set_.size())
-    FillImageSet();
-
-  if (IsCachePending(device_scale_factor)) {
-    // FIXME: In the future, we want to take much more than deviceScaleFactor
-    // into account here. All forms of scale should be included:
-    // Page::PageScaleFactor(), LocalFrame::PageZoomFactor(), and any CSS
-    // transforms. https://bugs.webkit.org/show_bug.cgi?id=81698
-    ImageWithScale image = BestImageForScaleFactor(device_scale_factor);
-    const auto& image_value = To<CSSImageValue>(Item(image.index));
-
-    // TODO(fs): Forward the image request behavior when other code is prepared
-    // to handle it.
-    FetchParameters params = image_value.PrepareFetch(
-        document, FetchParameters::ImageRequestBehavior::kNone, cross_origin);
-    cached_image_ = MakeGarbageCollected<StyleFetchedImageSet>(
-        ImageResourceContent::Fetch(params, document.Fetcher()),
-        image.scale_factor, this, params.Url());
-    cached_scale_factor_ = device_scale_factor;
-  }
+    StyleImage* style_image,
+    const float device_scale_factor,
+    bool is_origin_clean) {
+  cached_image_ =
+      MakeGarbageCollected<StyleImageSet>(style_image, this, is_origin_clean);
+  cached_device_scale_factor_ = device_scale_factor;
   return cached_image_.Get();
 }
 
 String CSSImageSetValue::CustomCSSText() const {
   StringBuilder result;
-  result.Append("-webkit-image-set(");
+  result.Append("image-set(");
 
-  wtf_size_t length = this->length();
-  wtf_size_t i = 0;
-  while (i < length) {
-    if (i > 0)
+  for (wtf_size_t i = 0, length = this->length(); i < length; ++i) {
+    if (i > 0) {
       result.Append(", ");
+    }
 
-    const CSSValue& image_value = Item(i);
-    result.Append(image_value.CssText());
-    result.Append(' ');
-
-    ++i;
-    SECURITY_DCHECK(i < length);
-    const CSSValue& scale_factor_value = Item(i);
-    result.Append(scale_factor_value.CssText());
-    // FIXME: Eventually the scale factor should contain it's own unit
-    // http://wkb.ug/100120.
-    // For now 'x' is hard-coded in the parser, so we hard-code it here too.
-    result.Append('x');
-
-    ++i;
+    result.Append(Item(i).CssText());
   }
 
   result.Append(')');
+
   return result.ReleaseString();
 }
 
 bool CSSImageSetValue::HasFailedOrCanceledSubresources() const {
-  if (!cached_image_)
+  if (!cached_image_) {
     return false;
-  if (ImageResourceContent* cached_content = cached_image_->CachedImage())
+  }
+
+  if (ImageResourceContent* cached_content = cached_image_->CachedImage()) {
     return cached_content->LoadFailedOrCanceled();
+  }
+
   return true;
 }
 
 void CSSImageSetValue::TraceAfterDispatch(blink::Visitor* visitor) const {
   visitor->Trace(cached_image_);
+  visitor->Trace(options_);
   CSSValueList::TraceAfterDispatch(visitor);
-}
-
-CSSImageSetValue* CSSImageSetValue::ValueWithURLsMadeAbsolute() {
-  auto* value = MakeGarbageCollected<CSSImageSetValue>();
-  for (auto& item : *this) {
-    auto* image_value = DynamicTo<CSSImageValue>(item.Get());
-    image_value ? value->Append(*image_value->ValueWithURLMadeAbsolute())
-                : value->Append(*item);
-  }
-  return value;
 }
 
 }  // namespace blink

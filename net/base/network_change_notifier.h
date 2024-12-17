@@ -13,10 +13,15 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/observer_list_threadsafe.h"
+#include "base/strings/cstring_view.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "net/base/net_export.h"
 #include "net/base/network_handle.h"
+
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#include "net/base/address_map_linux.h"
+#endif
 
 namespace net {
 
@@ -25,11 +30,11 @@ struct NetworkInterface;
 class SystemDnsConfigChangeNotifier;
 typedef std::vector<NetworkInterface> NetworkInterfaceList;
 
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 namespace internal {
-class AddressTrackerLinux;
-}
+#if BUILDFLAG(IS_FUCHSIA)
+class NetworkInterfaceCache;
 #endif
+}  // namespace internal
 
 // NetworkChangeNotifier monitors the system for network changes, and notifies
 // registered observers of those events.  Observers may register on any thread,
@@ -61,15 +66,12 @@ class NET_EXPORT NetworkChangeNotifier {
   };
 
   // This is the NetInfo v3 set of connection technologies as seen in
-  // http://w3c.github.io/netinfo/. This enum is duplicated in histograms.xml
-  // so be sure to change both at once. Additionally, since this enum is used in
-  // a UMA histogram, it should not be re-ordered and any new values should be
-  // added to the end.
+  // http://w3c.github.io/netinfo/.
   //
   // A Java counterpart will be generated for this enum.
   // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.net
   //
-  // TODO(crbug.com/1127134): Introduce subtypes for 5G networks once they can
+  // TODO(crbug.com/40148439): Introduce subtypes for 5G networks once they can
   // be detected.
   enum ConnectionSubtype {
     SUBTYPE_UNKNOWN = 0,
@@ -330,6 +332,20 @@ class NET_EXPORT NetworkChangeNotifier {
         observer_list_;
   };
 
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  // TODO(crbug.com/40232923): Remove this section and align the behavior
+  // with other platforms or confirm that Lacros needs to be separated.
+  static constexpr ConnectionType kDefaultInitialConnectionType =
+      CONNECTION_UNKNOWN;
+  static constexpr ConnectionSubtype kDefaultInitialConnectionSubtype =
+      SUBTYPE_UNKNOWN;
+#else
+  static constexpr ConnectionType kDefaultInitialConnectionType =
+      CONNECTION_NONE;
+  static constexpr ConnectionSubtype kDefaultInitialConnectionSubtype =
+      SUBTYPE_NONE;
+#endif
+
   NetworkChangeNotifier(const NetworkChangeNotifier&) = delete;
   NetworkChangeNotifier& operator=(const NetworkChangeNotifier&) = delete;
   virtual ~NetworkChangeNotifier();
@@ -350,16 +366,8 @@ class NET_EXPORT NetworkChangeNotifier {
   // must do so before any other threads try to access the API below, and it
   // must outlive all other threads which might try to use it.
   static std::unique_ptr<NetworkChangeNotifier> CreateIfNeeded(
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-      // TODO(crbug.com/1347382): Remove this section and align the behavior
-      // with other platforms or confirm that Lacros needs to be separated.
-      NetworkChangeNotifier::ConnectionType initial_type = CONNECTION_UNKNOWN,
-      NetworkChangeNotifier::ConnectionSubtype initial_subtype =
-          SUBTYPE_UNKNOWN);
-#else
-      NetworkChangeNotifier::ConnectionType initial_type = CONNECTION_NONE,
-      NetworkChangeNotifier::ConnectionSubtype initial_subtype = SUBTYPE_NONE);
-#endif
+      ConnectionType initial_type = kDefaultInitialConnectionType,
+      ConnectionSubtype initial_subtype = kDefaultInitialConnectionSubtype);
 
   // Returns the most likely cost attribute for the default network connection.
   // The value does not indicate with absolute certainty if using the connection
@@ -454,7 +462,12 @@ class NET_EXPORT NetworkChangeNotifier {
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   // Returns the AddressTrackerLinux if present.
-  static const internal::AddressTrackerLinux* GetAddressTracker();
+  static AddressMapOwnerLinux* GetAddressMapOwner();
+#endif
+
+#if BUILDFLAG(IS_FUCHSIA)
+  // Returns the NetworkInterfaceCache if present.
+  static const internal::NetworkInterfaceCache* GetNetworkInterfaceCache();
 #endif
 
   // Convenience method to determine if the user is offline.
@@ -554,7 +567,7 @@ class NET_EXPORT NetworkChangeNotifier {
   static bool IsTestNotificationsOnly() { return test_notifications_only_; }
 
   // Returns a string equivalent to |type|.
-  static const char* ConnectionTypeToString(ConnectionType type);
+  static base::cstring_view ConnectionTypeToString(ConnectionType type);
 
   // Allows a second NetworkChangeNotifier to be created for unit testing, so
   // the test suite can create a MockNetworkChangeNotifier, but platform
@@ -610,7 +623,7 @@ class NET_EXPORT NetworkChangeNotifier {
   // |omit_observers_in_constructor_for_testing| is true, internal observers
   // aren't added during construction - this is used to skip registering
   // observers from MockNetworkChangeNotifier, and allow its construction when
-  // SequencedTaskRunnerHandle isn't set.
+  // SingleThreadTaskRunner::CurrentDefaultHandle isn't set.
   explicit NetworkChangeNotifier(
       const NetworkChangeCalculatorParams& params =
           NetworkChangeCalculatorParams(),
@@ -618,10 +631,13 @@ class NET_EXPORT NetworkChangeNotifier {
       bool omit_observers_in_constructor_for_testing = false);
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
-  // Returns the AddressTrackerLinux if present.
-  // TODO(szym): Retrieve AddressMap from NetworkState. http://crbug.com/144212
-  virtual const internal::AddressTrackerLinux*
-      GetAddressTrackerInternal() const;
+  // Returns the AddressMapOwnerLinux if present.
+  virtual AddressMapOwnerLinux* GetAddressMapOwnerInternal();
+#endif
+
+#if BUILDFLAG(IS_FUCHSIA)
+  virtual const internal::NetworkInterfaceCache*
+  GetNetworkInterfaceCacheInternal() const;
 #endif
 
   // These are the actual implementations of the static queryable APIs.
@@ -669,13 +685,6 @@ class NET_EXPORT NetworkChangeNotifier {
   // Clears the global NetworkChangeNotifier pointer.  This should be called
   // as early as possible in the destructor to prevent races.
   void ClearGlobalPointer();
-
-  // Called whenever a new ConnectionCostObserver is added. This method is
-  // needed so that the implementation class can be notified and
-  // potentially take action when an observer gets added. Since the act of
-  // adding an observer and the observer list itself are both static, the
-  // implementation class has no direct capability to watch for changes.
-  virtual void ConnectionCostObserverAdded() {}
 
   // Listening for notifications of this type is expensive as they happen
   // frequently. For this reason, we report {de}registration to the

@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,6 +31,9 @@ enum : unsigned {
 
   // Used to paint SVG resource subtree for masks, filter images, etc.
   kPaintingResourceSubtree = 1 << 4,
+
+  // Used to paint SVG resource subtree for masks.
+  kPaintingSVGMask = 1 << 5,
 };
 }  // namespace PaintFlag
 

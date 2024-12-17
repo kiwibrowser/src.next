@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,8 +23,12 @@ class CORE_EXPORT CSSScopeRule final : public CSSGroupingRule {
 
   String PreludeText() const;
   String cssText() const override;
+  String start() const;
+  String end() const;
 
   void SetPreludeText(const ExecutionContext*, String);
+  StyleRuleScope& GetStyleRuleScope();
+  const StyleRuleScope& GetStyleRuleScope() const;
 
  private:
   CSSRule::Type GetType() const override { return kScopeRule; }

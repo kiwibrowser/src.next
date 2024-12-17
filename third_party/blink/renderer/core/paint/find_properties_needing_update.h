@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -97,8 +97,8 @@ class FindPropertiesNeedingUpdateScope {
   const FragmentData& fragment_data_;
   bool needed_paint_property_update_ = false;
   bool needed_forced_subtree_update_ = false;
-  PropertyTreeStateOrAlias original_local_border_box_properties_ =
-      PropertyTreeState::Uninitialized();
+  PropertyTreeStateOrAlias original_local_border_box_properties_{
+      PropertyTreeState::kUninitialized};
   bool had_original_properties_ = false;
 };
 

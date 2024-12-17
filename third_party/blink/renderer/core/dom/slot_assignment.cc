@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -251,7 +251,8 @@ void SlotAssignment::RecalcAssignment() {
     // tree children in order to clean up soon to be stale relationships.
     // Any <slot> within this shadow root may lose or gain flat tree children
     // during slot reassignment, so call ChildrenChanged() on all of them.
-    if (AXObjectCache* cache = owner_->GetDocument().ExistingAXObjectCache()) {
+    AXObjectCache* cache = owner_->GetDocument().ExistingAXObjectCache();
+    if (cache) {
       for (Member<HTMLSlotElement> slot : Slots())
         cache->SlotAssignmentWillChange(slot);
     }
@@ -288,6 +289,13 @@ void SlotAssignment::RecalcAssignment() {
               slottable->parentElement() == owner_->host()) {
             slot->AppendAssignedNode(*slottable);
             children_to_clear.erase(slottable);
+            // If changing tree scope, recompute the a11y subtree.
+            // This normally occurs when the slottable node is removed
+            // from the flat tree via the below call to RemovedFromFlatTree(),
+            // which calls DetachLayoutTree().
+            if (cache) {
+              cache->RemoveSubtree(slottable);
+            }
           }
         }
       }
@@ -331,20 +339,22 @@ void SlotAssignment::RecalcAssignment() {
     }
   }
 
-  // Update an dir=auto flag from a host of slots to its all descendants.
-  // We should call below functions outside FlatTreeTraversalForbiddenScope
-  // because we can go a tree walk to either their ancestors or descendants
-  // if needed.
-  if (owner_->NeedsDirAutoAttributeUpdate()) {
-    owner_->SetNeedsDirAutoAttributeUpdate(false);
-    if (auto* element = DynamicTo<HTMLElement>(owner_->host())) {
-      element->UpdateDescendantHasDirAutoAttribute(
-          element->SelfOrAncestorHasDirAutoAttribute());
+  // We need to update any slots with dir=auto for two reasons:
+  //  (1) because this call might have assigned them different assigned nodes
+  //      and changed the result of the dir=auto, or
+  //  (2) because an earlier call to the slot's
+  //      CalculateAndAdjustAutoDirectionality method was deferred because the
+  //      slot needed assignment recalc (which is necessary because some such
+  //      calls happen when it's not safe to recalc assignment).
+  //
+  // This needs to happen outside of the scope above, when flat tree traversal
+  // is allowed, because Element::UpdateDescendantHasDirAutoAttribute uses
+  // FlatTreeTraversal.
+  for (HTMLSlotElement* slot : Slots()) {
+    if (slot->HasDirectionAuto()) {
+      slot->AdjustDirectionAutoAfterRecalcAssignedNodes();
     }
   }
-  // Resolve the directionality of elements deferred their adjustment.
-  HTMLElement::AdjustCandidateDirectionalityForSlot(
-      std::move(candidate_directionality_set_));
 }
 
 const HeapVector<Member<HTMLSlotElement>>& SlotAssignment::Slots() {
@@ -379,7 +389,7 @@ void SlotAssignment::CollectSlots() {
   DCHECK(needs_collect_slots_);
   slots_.clear();
 
-  slots_.ReserveCapacity(slot_count_);
+  slots_.reserve(slot_count_);
   for (HTMLSlotElement& slot :
        Traversal<HTMLSlotElement>::DescendantsOf(*owner_)) {
     slots_.push_back(&slot);
@@ -401,7 +411,6 @@ void SlotAssignment::Trace(Visitor* visitor) const {
   visitor->Trace(slots_);
   visitor->Trace(slot_map_);
   visitor->Trace(owner_);
-  visitor->Trace(candidate_directionality_set_);
 }
 
 }  // namespace blink

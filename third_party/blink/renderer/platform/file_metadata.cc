@@ -31,13 +31,13 @@
 #include "third_party/blink/renderer/platform/file_metadata.h"
 
 #include <limits>
+#include <optional>
 #include <string>
 
 #include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/filename_util.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
-#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/file/file_utilities.mojom-blink.h"
+#include "third_party/blink/public/platform/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/platform/file_path_conversion.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/renderer/platform/mojo/mojo_binding_context.h"
@@ -76,7 +76,7 @@ bool GetFileMetadata(const String& path,
   context.GetBrowserInterfaceBroker().GetInterface(
       host.BindNewPipeAndPassReceiver());
 
-  absl::optional<base::File::Info> file_info;
+  std::optional<base::File::Info> file_info;
   if (!host->GetFileInfo(WebStringToFilePath(path), &file_info) || !file_info)
     return false;
 
@@ -89,7 +89,13 @@ bool GetFileMetadata(const String& path,
 }
 
 KURL FilePathToURL(const String& path) {
-  GURL gurl = net::FilePathToFileURL(WebStringToFilePath(path));
+  base::FilePath file_path = WebStringToFilePath(path);
+#if BUILDFLAG(IS_ANDROID)
+  GURL gurl = file_path.IsContentUri() ? GURL(file_path.value())
+                                       : net::FilePathToFileURL(file_path);
+#else
+  GURL gurl = net::FilePathToFileURL(file_path);
+#endif
   const std::string& url_spec = gurl.possibly_invalid_spec();
   return KURL(AtomicString::FromUTF8(url_spec.data(), url_spec.length()),
               gurl.parsed_for_possibly_invalid_spec(), gurl.is_valid());

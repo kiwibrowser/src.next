@@ -33,6 +33,9 @@ struct Activity {
     MEDIA,
 
     // The activity is a message. The extra data is the port ID.
+    MESSAGE,
+
+    // The activity is a message port opening. The extra data is the port ID.
     MESSAGE_PORT,
 
     // The activity is meant to keep the background page alive while
@@ -54,6 +57,11 @@ struct Activity {
     // The activity is internal ProcessManager bookkeeping. The extra data
     // is one of kCancelSuspend or kRenderFrame.
     PROCESS_MANAGER,
+
+    // The activity is an attached debugger session (i.e., using the
+    // chrome.debugger API). This is distinct from `DEV_TOOLS`, which indicates
+    // the user is debugging the extension.
+    DEBUGGER,
   };
 
   static const char* ToString(Type type);

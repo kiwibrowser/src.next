@@ -4,6 +4,7 @@
 
 #include "base/time/time.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/test/browser_test.h"
@@ -40,12 +41,11 @@ class APIBindingPerfBrowserTest : public ExtensionBrowserTest {
   }
 
   base::TimeDelta RunTestAndReportTime() {
-    double time_elapsed_ms = 0;
-    EXPECT_TRUE(content::ExecuteScriptAndExtractDouble(
-        browser()->tab_strip_model()->GetActiveWebContents(),
-        "runTest(time => window.domAutomationController.send(time))",
-        &time_elapsed_ms));
-    return base::Milliseconds(time_elapsed_ms);
+    return base::Milliseconds(
+        content::EvalJs(
+            browser()->tab_strip_model()->GetActiveWebContents(),
+            "new Promise(resolve => runTest(time => resolve(time)))")
+            .ExtractDouble());
   }
 };
 

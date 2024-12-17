@@ -7,7 +7,6 @@
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/services/app_service/public/cpp/app_launch_util.h"
-#include "components/services/app_service/public/mojom/types.mojom.h"
 #include "content/public/test/browser_test.h"
 #include "ui/base/base_window.h"
 #include "ui/base/window_open_disposition.h"
@@ -23,7 +22,7 @@ IN_PROC_BROWSER_TEST_F(ApplicationLaunchBrowserTest, CreateWindowInDisplay) {
   display::DisplayManager* display_manager =
       ash::Shell::Get()->display_manager();
   display::test::DisplayManagerTestApi display_manager_test(display_manager);
-  display_manager_test.UpdateDisplay("800x800,801+0-800x800");
+  display_manager_test.UpdateDisplay("800x750,801+0-800x750");
   int64_t display1 = screen->GetPrimaryDisplay().id();
   int64_t display2 = display_manager_test.GetSecondaryDisplay().id();
   EXPECT_EQ(2, screen->GetNumDisplays());

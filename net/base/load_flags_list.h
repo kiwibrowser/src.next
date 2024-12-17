@@ -21,8 +21,9 @@ LOAD_FLAG(NORMAL, 0)
 // All other caches are used as normal.
 LOAD_FLAG(VALIDATE_CACHE, 1 << 0)
 
-// This is "shift-reload", meaning a "pragma: no-cache" end-to-end fetch. All
-// other caches are used as normal.
+// This is "shift-reload", meaning a "pragma: no-cache" end-to-end fetch.
+// The response is not read from the HTTP cache but is written to the cache,
+// unlike in `DISABLE_CACHE`. All other caches are used as normal.
 LOAD_FLAG(BYPASS_CACHE, 1 << 1)
 
 // This is a back/forward style navigation where the cached content should
@@ -33,8 +34,9 @@ LOAD_FLAG(SKIP_CACHE_VALIDATION, 1 << 2)
 // resource from the cache (or some equivalent local store).
 LOAD_FLAG(ONLY_FROM_CACHE, 1 << 3)
 
-// This is a navigation that will not use the cache at all. It does not
-// impact the HTTP request headers. All other caches are used as normal.
+// This is a request whose response will not be read or written to the HTTP
+// cache. It does not impact the cache-related HTTP request headers. All other
+// caches are used as normal.
 LOAD_FLAG(DISABLE_CACHE, 1 << 4)
 
 // If present, causes dependent network fetches (AIA, CRLs, OCSP) to be
@@ -60,8 +62,9 @@ LOAD_FLAG(BYPASS_PROXY, 1 << 7)
 // page is loaded.
 LOAD_FLAG(MAIN_FRAME_DEPRECATED, 1 << 8)
 
-// Indicates that this load was motivated by the rel=prefetch feature,
-// and is (in theory) not intended for the current frame.
+// Indicates that this load was motivated by the rel=prefetch feature, or the
+// speculationrules prefetch feature, and is (in theory) not intended for the
+// current frame.
 LOAD_FLAG(PREFETCH, 1 << 9)
 
 // Indicates that this load could cause deadlock if it has to wait for another
@@ -92,12 +95,23 @@ LOAD_FLAG(SUPPORT_ASYNC_REVALIDATION, 1 << 14)
 
 // Indicates that a prefetch request's cached response should be restricted in
 // in terms of reuse. The cached response can only be reused by requests with
-// the LOAD_CAN_USE_RESTRICTED_PREFETCH load flag.
-LOAD_FLAG(RESTRICTED_PREFETCH, 1 << 15)
+// the LOAD_CAN_USE_RESTRICTED_PREFETCH_FOR_MAIN_FRAME load flag.
+LOAD_FLAG(RESTRICTED_PREFETCH_FOR_MAIN_FRAME, 1 << 15)
 
 // This flag must be set on requests that are allowed to reuse cache entries
-// that are marked as RESTRICTED_PREFETCH. Requests without this flag cannot
-// reuse restricted prefetch responses in the cache. Restricted response reuse
-// is considered privileged, and therefore this flag must only be set from a
-// trusted process.
-LOAD_FLAG(CAN_USE_RESTRICTED_PREFETCH, 1 << 16)
+// that are marked as RESTRICTED_PREFETCH_FOR_MAIN_FRAME. Requests without this
+// flag cannot reuse restricted prefetch responses in the cache. Restricted
+// response reuse is considered privileged, and therefore this flag must only be
+// set from a trusted process.
+LOAD_FLAG(CAN_USE_RESTRICTED_PREFETCH_FOR_MAIN_FRAME, 1 << 16)
+
+// Indicates that this load can use a shared dictionary.
+LOAD_FLAG(CAN_USE_SHARED_DICTIONARY, 1 << 17)
+
+// Indicates that CAN_USE_SHARED_DICTIONARY must be disabled after a redirect to
+// another origin.
+LOAD_FLAG(DISABLE_SHARED_DICTIONARY_AFTER_CROSS_ORIGIN_REDIRECT, 1 << 18)
+
+// This flag is used to bypass HSTS upgrades. This flag must be set for AIA,
+// CRL, and OCSP requests in order to prevent circular dependencies.
+LOAD_FLAG(SHOULD_BYPASS_HSTS, 1 << 19)

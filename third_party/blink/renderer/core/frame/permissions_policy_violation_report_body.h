@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,7 @@ class CORE_EXPORT PermissionsPolicyViolationReportBody
                                        const String& disposition)
       : feature_id_(feature_id),
         message_("Permissions policy violation: " +
-                 (message.IsEmpty()
+                 (message.empty()
                       ? feature_id + " is not allowed in this document."
                       : message)),
         disposition_(disposition) {}

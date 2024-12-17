@@ -15,9 +15,9 @@ found in the LICENSE file.
     android:layout_width="match_parent"
     android:layout_height="@dimen/toolbar_height_no_shadow" >
 
-    <org.chromium.chrome.browser.toolbar.HomeButton
+    <org.chromium.chrome.browser.toolbar.home_button.HomeButton
         android:id="@+id/home_button"
-        style="@style/ToolbarButton"
+        style="@style/ToolbarHoverableButton"
         android:src="@drawable/btn_toolbar_home"
         android:contentDescription="@string/accessibility_toolbar_btn_home"
         android:visibility="gone"
@@ -31,8 +31,8 @@ found in the LICENSE file.
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_gravity="top"
-        android:paddingStart="@dimen/location_bar_lateral_padding"
-        android:paddingEnd="@dimen/location_bar_lateral_padding"/>
+        android:paddingStart="@dimen/location_bar_start_padding"
+        android:paddingEnd="@dimen/location_bar_end_padding"/>
 
     <LinearLayout android:id="@+id/toolbar_buttons"
         android:orientation="horizontal"
@@ -48,13 +48,13 @@ found in the LICENSE file.
             android:layout_gravity="top"
             android:visibility="gone"
             android:layout_width="52dp"
-            style="@style/ToolbarButton" />
+            style="@style/ToolbarHoverableButton" />
+
         <org.chromium.chrome.browser.toolbar.top.ToggleTabStackButton
             android:id="@+id/tab_switcher_button"
-            style="@style/ToolbarButton"
-            android:paddingStart="8dp"
+            style="@style/ToolbarHoverableButton"
             android:layout_gravity="top"
-            android:contentDescription="@string/accessibility_toolbar_btn_tabswitcher_toggle_default"
+            android:clickable="false"
             app:menuMaxWidth="@dimen/tab_switcher_menu_width"
             app:menuVerticalOverlapAnchor="false" />
 

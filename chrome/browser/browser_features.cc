@@ -5,6 +5,7 @@
 #include "chrome/browser/browser_features.h"
 
 #include "base/feature_list.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 
@@ -14,47 +15,192 @@
 
 namespace features {
 
+#if BUILDFLAG(IS_ANDROID)
+// Kill switch for allowing TWAs to autoplay with sound without requiring a user
+// gesture to unlock, for parity with PWAs.
+BASE_FEATURE(kAllowUnmutedAutoplayForTWA,
+             "AllowUnmutedAutoplayForTWA",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+#endif  // BUILDFLAG(IS_ANDROID)
+
+// This is used to enable an experiment for modifying confidence cutoff of
+// prerender and preconnect for autocomplete action predictor.
+BASE_FEATURE(kAutocompleteActionPredictorConfidenceCutoff,
+             "AutocompleteActionPredictorConfidenceCutoff",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+// This is used to enable an experiment for the bookmarks tree view in the
+// side panel, providing users with a hierarchical view of their bookmarks.
+BASE_FEATURE(kBookmarksTreeView,
+             "BookmarksTreeView",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+// This flag is used for enabling Bookmark triggered prerendering. See
+// crbug.com/1422819 for more details of Bookmark triggered prerendering.
+BASE_FEATURE(kBookmarkTriggerForPrerender2,
+             "BookmarkTriggerForPrerender2",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
+// Enables Certificate Transparency on Desktop and Android Browser (CT is
+// disabled in Android Webview, see aw_browser_context.cc).
+// Enabling CT enforcement requires maintaining a log policy, and the ability to
+// update the list of accepted logs. Embedders who are planning to enable this
+// should first reach out to chrome-certificate-transparency@google.com.
+// On builds where CT is enabled, this flag is also used as an emergency kill
+// switch.
+BASE_FEATURE(kCertificateTransparencyAskBeforeEnabling,
+             "CertificateTransparencyAskBeforeEnabling",
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+             base::FEATURE_ENABLED_BY_DEFAULT);
+#else
+             base::FEATURE_DISABLED_BY_DEFAULT);
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+
+// Enables using network time for certificate verification. If enabled, network
+// time will be used to verify certificate validity, however certificates that
+// fail to validate with network time will fall back to the system time.
+// This has no effect if the network_time::kNetworkTimeServiceQuerying flag is
+// disabled, or the BrowserNetworkTimeQueriesEnabled policy is set to false.
+BASE_FEATURE(kCertVerificationNetworkTime,
+             "CertVerificationNetworkTime",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 // Enables using the ClosedTabCache to instantly restore recently closed tabs
 // using the "Reopen Closed Tab" button.
-const base::Feature kClosedTabCache{"ClosedTabCache",
-                                    base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kClosedTabCache,
+             "ClosedTabCache",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
-// Whether or not to delegate color queries from the ThemeProvider to the
-// ColorProvider.
-const base::Feature kColorProviderRedirectionForThemeProvider = {
-    "ColorProviderRedirectionForThemeProvider",
-    base::FEATURE_DISABLED_BY_DEFAULT};
+#if BUILDFLAG(IS_LINUX)
+// Enables usage of os_crypt_async::SecretPortalKeyProvider.  Once
+// `kSecretPortalKeyProviderUseForEncryption` is enabled, this flag cannot be
+// disabled without losing data.
+BASE_FEATURE(kDbusSecretPortal,
+             "DbusSecretPortal",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+#endif  // BUILDFLAG(IS_LINUX)
 
 // Destroy profiles when their last browser window is closed, instead of when
 // the browser exits.
-const base::Feature kDestroyProfileOnBrowserClose {
-  "DestroyProfileOnBrowserClose",
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
-      base::FEATURE_ENABLED_BY_DEFAULT
-};
+// On Lacros the feature is enabled only for secondary profiles, check the
+// implementation of `ProfileManager::ProfileInfo::FromUnownedProfile()`.
+BASE_FEATURE(kDestroyProfileOnBrowserClose,
+             "DestroyProfileOnBrowserClose",
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || \
+    BUILDFLAG(IS_CHROMEOS_LACROS)
+             base::FEATURE_ENABLED_BY_DEFAULT);
 #else
-      base::FEATURE_DISABLED_BY_DEFAULT
-};
+             base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
 
 // DestroyProfileOnBrowserClose only covers deleting regular (non-System)
 // Profiles. This flags lets us destroy the System Profile, as well.
-const base::Feature kDestroySystemProfiles{"DestroySystemProfiles",
-                                           base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kDestroySystemProfiles,
+             "DestroySystemProfiles",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
-// Let DevTools front-end talk to the target of type "tab" rather than
-// "frame" when inspecting a WebContents.
-const base::Feature kDevToolsTabTarget{"DevToolsTabTarget",
-                                       base::FEATURE_DISABLED_BY_DEFAULT};
+#if BUILDFLAG(IS_CHROMEOS)
+// Enables being able to zoom a web page by double tapping in Chrome OS tablet
+// mode.
+BASE_FEATURE(kDoubleTapToZoomInTabletMode,
+             "DoubleTapToZoomInTabletMode",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+#endif
 
-// Nukes profile directory before creating a new profile using
-// ProfileManager::CreateMultiProfileAsync().
-const base::Feature kNukeProfileBeforeCreateMultiAsync{
-    "NukeProfileBeforeCreateMultiAsync", base::FEATURE_ENABLED_BY_DEFAULT};
+#if BUILDFLAG(IS_WIN)
+// When this feature is enabled, the App-Bound encryption provider is used as
+// the default encryption provider.
+BASE_FEATURE(kUseAppBoundEncryptionProviderForEncryption,
+             "UseAppBoundEncryptionProviderForEncryption",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+#endif  // BUILDFLAG(IS_WIN)
+
+// Enables showing the email of the flex org admin that setup CBCM in the
+// management disclosures.
+BASE_FEATURE(kFlexOrgManagementDisclosure,
+             "FlexOrgManagementDisclosure",
+#if BUILDFLAG(IS_CHROMEOS)
+             base::FEATURE_DISABLED_BY_DEFAULT);
+#else
+             base::FEATURE_ENABLED_BY_DEFAULT);
+#endif  // BUILDFLAG(IS_CHROMEOS)
+
+// Enables the Incoming Call Notifications scenario. When created by an
+// installed origin, an incoming call notification should have increased
+// priority, colored buttons, a ringtone, and a default "close" button.
+// Otherwise, if the origin is not installed, it should behave like the default
+// notifications, but with the added "Close" button. See
+// https://github.com/MicrosoftEdge/MSEdgeExplainers/blob/main/Notifications/notifications_actions_customization.md
+BASE_FEATURE(kIncomingCallNotifications,
+             "IncomingCallNotifications",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+// Controls whether the static key pinning list can be updated via component
+// updater.
+BASE_FEATURE(kKeyPinningComponentUpdater,
+             "KeyPinningComponentUpdater",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
+#if BUILDFLAG(IS_WIN)
+// Enables locking the cookie database for profiles.
+// TODO(crbug.com/40901624): Remove after fully launched.
+BASE_FEATURE(kLockProfileCookieDatabase,
+             "LockProfileCookieDatabase",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+#endif  // BUILDFLAG(IS_WIN)
+
+#if !BUILDFLAG(IS_ANDROID)
+// Adds a "Snooze" action to mute notifications during screen sharing sessions.
+BASE_FEATURE(kMuteNotificationSnoozeAction,
+             "MuteNotificationSnoozeAction",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+#endif
+
+// This feature enables monitoring of first-party network requests in order to
+// find possible violations. Example: A Chrome policy is set to disabled but the
+// network request controlled by that policy is observed.
+BASE_FEATURE(kNetworkAnnotationMonitoring,
+             "NetworkAnnotationMonitoring",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+// This flag is used for enabling New Tab Page triggered prerendering. See
+// crbug.com/1462832 for more details of New Tab Page triggered prerendering.
+BASE_FEATURE(kNewTabPageTriggerForPrerender2,
+             "NewTabPageTriggerForPrerender2",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
+#if BUILDFLAG(IS_ANDROID)
+// Adds an "Unsubscribe" action to web push notifications that allows stopping
+// notifications from a given origin with a single tap (with an option to undo).
+BASE_FEATURE(kNotificationOneTapUnsubscribe,
+             "NotificationOneTapUnsubscribe",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+base::FeatureParam<bool> kNotificationOneTapUnsubscribeUseServiceIntentParam{
+    &kNotificationOneTapUnsubscribe, "use_service_intent", false};
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS)
+// Enables AES keys support in the chrome.enterprise.platformKeys and
+// chrome.platformKeys APIs. The new operations include `sign`, `encrypt` and
+// `decrypt`. For additional details, see the proposal tracked in b/288880151.
+BASE_FEATURE(kPlatformKeysAesEncryption,
+             "PlatformKeysAesEncryption",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+#endif  // BUILDFLAG(IS_CHROMEOS)
+
+// Disables prerendering on the default search engine predictor. This is useful
+// in comparing the impact of the SupportSearchSuggestionForPrerender2 feature
+// during its rollout. Once that rollout is complete, this feature should be
+// removed and instead we should add a new long-term holdback to
+// PreloadingConfig.
+BASE_FEATURE(kPrerenderDSEHoldback,
+             "PrerenderDSEHoldback",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Enables executing the browser commands sent by the NTP promos.
-const base::Feature kPromoBrowserCommands{"PromoBrowserCommands",
-                                          base::FEATURE_ENABLED_BY_DEFAULT};
+BASE_FEATURE(kPromoBrowserCommands,
+             "PromoBrowserCommands",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Parameter name for the promo browser command ID provided along with
 // kPromoBrowserCommands.
@@ -63,41 +209,37 @@ const base::Feature kPromoBrowserCommands{"PromoBrowserCommands",
 // ui/webui/resources/js/browser_command/browser_command.mojom
 const char kBrowserCommandIdParam[] = "BrowserCommandIdParam";
 
-// Enables using policy::ManagementService to get the browser's and platform
-// management state everywhere.
-const base::Feature kUseManagementService{"UseManagementService",
-                                          base::FEATURE_ENABLED_BY_DEFAULT};
-
-#if BUILDFLAG(IS_MAC)
-// Enables integration with the macOS feature Universal Links.
-const base::Feature kEnableUniveralLinks{"EnableUniveralLinks",
-                                         base::FEATURE_DISABLED_BY_DEFAULT};
-#endif
-
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 // Enables reading and writing PWA notification permissions from quick settings
 // menu.
-const base::Feature kQuickSettingsPWANotifications{
-    "QuickSettingsPWA", base::FEATURE_DISABLED_BY_DEFAULT};
-#endif
-
-#if BUILDFLAG(IS_CHROMEOS)
-// Enables being able to zoom a web page by double tapping in Chrome OS tablet
-// mode.
-const base::Feature kDoubleTapToZoomInTabletMode{
-    "DoubleTapToZoomInTabletMode", base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kQuickSettingsPWANotifications,
+             "QuickSettingsPWA",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
 
 #if !BUILDFLAG(IS_ANDROID)
-// Adds an item to the context menu that copies a link to the page with the
-// selected text highlighted.
-const base::Feature kCopyLinkToText{"CopyLinkToText",
-                                    base::FEATURE_ENABLED_BY_DEFAULT};
-
-// Adds a "Snooze" action to mute notifications during screen sharing sessions.
-const base::Feature kMuteNotificationSnoozeAction{
-    "MuteNotificationSnoozeAction", base::FEATURE_DISABLED_BY_DEFAULT};
+// Keeps accessibility enabled for WebContents as ReadAnything observes changes
+// to the active WebContents. This is a holdback study to evaluate the impact of
+// the new behavior, whereby the accessibility modes required by ReadyAnything
+// are cleared on a WebContents when ReadAnything loses interest in it.
+BASE_FEATURE(kReadAnythingPermanentAccessibility,
+             "ReadAnythingPermanentAccessibility",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
+
+// When this feature is enabled, Chrome will register os_update_handler with
+// Omaha, to be run on OS upgrade.
+#if BUILDFLAG(IS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
+BASE_FEATURE(kRegisterOsUpdateHandlerWin,
+             "RegisterOsUpdateHandlerWin",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+#endif  // BUILDFLAG(IS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
+
+// When this feature is enabled, the network service will restart unsandboxed if
+// a previous attempt to launch it sandboxed failed.
+BASE_FEATURE(kRestartNetworkServiceUnsandboxedForFailedLaunch,
+             "RestartNetworkServiceUnsandboxedForFailedLaunch",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Gates sandboxed iframe navigation toward external protocol behind any of:
 // - allow-top-navigation
@@ -118,71 +260,136 @@ const base::Feature kMuteNotificationSnoozeAction{
 // I2S: https://groups.google.com/a/chromium.org/g/blink-dev/c/-t-f7I6VvOI
 //
 // Enabled in M103. Flag to be removed in M106
-const base::Feature kSandboxExternalProtocolBlocked{
-    "SandboxExternalProtocolBlocked", base::FEATURE_ENABLED_BY_DEFAULT};
+BASE_FEATURE(kSandboxExternalProtocolBlocked,
+             "SandboxExternalProtocolBlocked",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 // Enabled in M100. Flag to be removed in M106
-const base::Feature kSandboxExternalProtocolBlockedWarning{
-    "SandboxExternalProtocolBlockedWarning", base::FEATURE_ENABLED_BY_DEFAULT};
+BASE_FEATURE(kSandboxExternalProtocolBlockedWarning,
+             "SandboxExternalProtocolBlockedWarning",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
+#if BUILDFLAG(IS_LINUX)
+// If true, encrypt new data with the key provided by SecretPortalKeyProvider.
+// Otherwise, it will only decrypt existing data.
+BASE_FEATURE(kSecretPortalKeyProviderUseForEncryption,
+             "SecretPortalKeyProviderUseForEncryption",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+#endif  // BUILDFLAG(IS_LINUX)
+
+// This flag controls whether to trigger prerendering when the default search
+// engine suggests to prerender a search result.
+BASE_FEATURE(kSupportSearchSuggestionForPrerender2,
+             "SupportSearchSuggestionForPrerender2",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enables migration of the network context data from `unsandboxed_data_path` to
 // `data_path`. See the explanation in network_context.mojom.
-const base::Feature kTriggerNetworkDataMigration {
-  "TriggerNetworkDataMigration",
+BASE_FEATURE(kTriggerNetworkDataMigration,
+             "TriggerNetworkDataMigration",
 #if BUILDFLAG(IS_WIN)
-      base::FEATURE_ENABLED_BY_DEFAULT
+             base::FEATURE_ENABLED_BY_DEFAULT
 #else
-      base::FEATURE_DISABLED_BY_DEFAULT
+             base::FEATURE_DISABLED_BY_DEFAULT
 #endif
-};
+);
+
+#if BUILDFLAG(IS_CHROMEOS)
+// If enabled, a blue border is drawn around shared tabs on ChromeOS.
+// If disabled, the blue border is not used on ChromeOS.
+//
+// Motivation:
+//  The blue border behavior used to cause problems on ChromeOS - see
+//  crbug.com/1320262 for Ash (fixed) and crbug.com/1030925 for Lacros
+//  (relatively old bug - we would like to observe whether it's still
+//  there). This flag is introduced as means of disabling this feature in case
+//  of possible future regressions.
+//
+// TODO(crbug.com/40198577): Remove this flag once we confirm that blue border
+// works fine on ChromeOS.
+//
+// b/279051234: We suspect the tab sharing blue border may cause a bad issue
+// on ChromeOS where a window can not be interacted at all. Disable the feature
+// on ChromeOS.
+BASE_FEATURE(kTabCaptureBlueBorderCrOS,
+             "TabCaptureBlueBorderCrOS",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+#endif
 
 // Enables runtime detection of USB devices which provide a WebUSB landing page
 // descriptor.
-const base::Feature kWebUsbDeviceDetection{"WebUsbDeviceDetection",
-                                           base::FEATURE_ENABLED_BY_DEFAULT};
-
-#if BUILDFLAG(IS_ANDROID)
-// Enables Certificate Transparency on Android.
-const base::Feature kCertificateTransparencyAndroid{
-    "CertificateTransparencyAndroid", base::FEATURE_ENABLED_BY_DEFAULT};
-#endif
-
-const base::Feature kLargeFaviconFromGoogle{"LargeFaviconFromGoogle",
-                                            base::FEATURE_DISABLED_BY_DEFAULT};
-const base::FeatureParam<int> kLargeFaviconFromGoogleSizeInDip{
-    &kLargeFaviconFromGoogle, "favicon_size_in_dip", 128};
-
-// Enables the use of a `ProfileManagerObserver` to trigger the post profile
-// init step of the browser startup. This affects the initialization order of
-// some features with the goal to improve startup performance in some cases.
-// See https://bit.ly/chromium-startup-no-guest-profile.
-const base::Feature kObserverBasedPostProfileInit{
-    "ObserverBasedPostProfileInit", base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Controls whether the static key pinning list can be updated via component
-// updater.
-const base::Feature kKeyPinningComponentUpdater{
-    "KeyPinningComponentUpdater", base::FEATURE_ENABLED_BY_DEFAULT};
-
-// When this feature is enabled, the network service will restart unsandboxed if
-// a previous attempt to launch it sandboxed failed.
-const base::Feature kRestartNetworkServiceUnsandboxedForFailedLaunch{
-    "RestartNetworkServiceUnsandboxedForFailedLaunch",
-    base::FEATURE_ENABLED_BY_DEFAULT};
+BASE_FEATURE(kWebUsbDeviceDetection,
+             "WebUsbDeviceDetection",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 #if BUILDFLAG(IS_WIN)
-// When this feature is enabled, metrics are gathered regarding the performance
-// and reliability of app-bound encryption primitives on a background thread.
-const base::Feature kAppBoundEncryptionMetrics{
-    "AppBoundEncryptionMetrics", base::FEATURE_ENABLED_BY_DEFAULT};
-#endif
+// Disable dynamic code using ACG. Prevents the browser process from generating
+// dynamic code or modifying executable code. See comments in
+// sandbox/win/src/security_level.h. Only available on Windows 10 RS1 (1607,
+// Build 14393) onwards.
+BASE_FEATURE(kBrowserDynamicCodeDisabled,
+             "BrowserDynamicCodeDisabled",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
-// Enables showing the email of the flex org admin that setup CBCM in the
-// management disclosures.
-#if BUILDFLAG(IS_CHROMEOS)
-extern const base::Feature kFlexOrgManagementDisclosure{
-    "FlexOrgManagementDisclosure", base::FEATURE_DISABLED_BY_DEFAULT};
+// The Chrome DLL can be pre-read with ::PrefetchVirtualMemory() from the
+// browser or a child process. Pre-reading is supposed to bring the whole DLL in
+// physical memory more efficiently than a series of hard faults. However,
+// pre-reading consumes a non-trivial amount of CPU even when the DLL is already
+// in physical memory and it may not be necessary to have the full DLL in
+// physical memory (space taken by unused parts of the DLL could potentially be
+// used for more important stuff). This file has multiple features to experiment
+// with policies for pre-reading the Chrome DLL in child processes. The
+// `kPrefetchVirtualMemoryPolicy` feature defined elsewhere controls pre-reading
+// the Chrome DLL from the browser process.
+
+// When enabled, child processes never pre-read the Chrome DLL.
+BASE_FEATURE(kNoPreReadMainDll,
+             "NoPreReadMainDll",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+// When enabled, child processes don't pre-read the Chrome DLL if we believe the
+// Chrome DLL is on an SSD (i.e. pre-read only on spinning disk).
+BASE_FEATURE(kNoPreReadMainDllIfSsd,
+             "NoPreReadMainDllIfSsd",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+// When enabled, the browser process suppresses pre-read in child processes
+// shortly after browser startup, where "shortly after" is dictated by the
+// feature param below. This is thought to be a productive strategy since the
+// browser process will have recently pre-read the DLL during browser
+// startup. In that case, the browser process has recently pre-read the DLL so
+// pre-reading again is thought to be counter-productive (CPU consumption for no
+// gains).
+BASE_FEATURE(kNoPreReadMainDllStartup,
+             "NoPreReadMainDllStartup",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+// Time after browser startup during which child processes don't pre-read the
+// Chrome DLL when `kNoPreReadMainDllStartup` is enabled.
+const base::FeatureParam<base::TimeDelta>
+    kNoPreReadMainDllStartup_StartupDuration{&kNoPreReadMainDllStartup,
+                                             "no-preread-dll-startup-time",
+                                             base::Minutes(2)};
+#endif  // BUILDFLAG(IS_WIN)
+
+#if !BUILDFLAG(IS_ANDROID)
+// This flag controls whether to perform Pak integrity check on startup to
+// report statistics for on-disk corruption.
+// Disabled on ChromeOS, as dm-verity enforces integrity and the check would
+// be redundant.
+BASE_FEATURE(kReportPakFileIntegrity,
+             "ReportPakFileIntegrity",
+#if !BUILDFLAG(IS_CHROMEOS)
+             base::FEATURE_ENABLED_BY_DEFAULT);
 #else
-extern const base::Feature kFlexOrgManagementDisclosure{
-    "FlexOrgManagementDisclosure", base::FEATURE_ENABLED_BY_DEFAULT};
+             base::FEATURE_DISABLED_BY_DEFAULT);
 #endif  // BUILDFLAG(IS_CHROMEOS)
+#endif  // BUILDFLAG(IS_ANDROID)
+
+// This flag enables the removal of IWAs surface captures from Chrome Tabs
+// category in getDisplayMedia() API. When disabled, IWAs surface captures
+// show both in Chrome Tabs and Windows.
+BASE_FEATURE(kRemovalOfIWAsFromTabCapture,
+             "RemovalOfIWAsFromTabCapture",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
 }  // namespace features

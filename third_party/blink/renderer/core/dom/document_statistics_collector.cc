@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,6 +21,8 @@
 #include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 
 namespace blink {
+
+using mojom::blink::FormControlType;
 
 namespace {
 
@@ -64,7 +66,8 @@ bool IsVisible(const Element& element) {
   if (!style)
     return false;
   return (style->Display() != EDisplay::kNone &&
-          style->Visibility() != EVisibility::kHidden && style->Opacity() != 0);
+          style->UsedVisibility() != EVisibility::kHidden &&
+          style->Opacity() != 0);
 }
 
 bool MatchAttributes(const Element& element, const Vector<String>& words) {
@@ -82,7 +85,7 @@ bool MatchAttributes(const Element& element, const Vector<String>& words) {
 bool IsGoodForScoring(const WebDistillabilityFeatures& features,
                       const Element& element) {
   DEFINE_STATIC_LOCAL(Vector<String>, unlikely_candidates, ());
-  if (unlikely_candidates.IsEmpty()) {
+  if (unlikely_candidates.empty()) {
     auto words = {
         "banner",  "combx",      "comment", "community",  "disqus",  "extra",
         "foot",    "header",     "menu",    "related",    "remark",  "rss",
@@ -93,7 +96,7 @@ bool IsGoodForScoring(const WebDistillabilityFeatures& features,
     }
   }
   DEFINE_STATIC_LOCAL(Vector<String>, highly_likely_candidates, ());
-  if (highly_likely_candidates.IsEmpty()) {
+  if (highly_likely_candidates.empty()) {
     auto words = {"and", "article", "body", "column", "main", "shadow"};
     for (auto* word : words) {
       highly_likely_candidates.push_back(word);
@@ -125,9 +128,9 @@ void CollectFeatures(Element& root,
       features.form_count++;
     } else if (element.HasTagName(html_names::kInputTag)) {
       const auto& input = To<HTMLInputElement>(element);
-      if (input.type() == input_type_names::kText) {
+      if (input.FormControlType() == FormControlType::kInputText) {
         features.text_input_count++;
-      } else if (input.type() == input_type_names::kPassword) {
+      } else if (input.FormControlType() == FormControlType::kInputPassword) {
         features.password_input_count++;
       }
     } else if (element.HasTagName(html_names::kPTag) ||

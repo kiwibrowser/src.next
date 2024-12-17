@@ -57,8 +57,8 @@ class CSSDefaultStyleSheets final
 
   bool EnsureDefaultStyleSheetsForElement(const Element&);
   bool EnsureDefaultStyleSheetsForPseudoElement(PseudoId);
-  bool EnsureDefaultStyleSheetForXrOverlay();
-  void EnsureDefaultStyleSheetForFullscreen();
+  void EnsureDefaultStyleSheetForFullscreen(const Element& element);
+  void RebuildFullscreenRuleSetIfMediaQueriesChanged(const Element& element);
   bool EnsureDefaultStyleSheetForForcedColors();
 
   RuleSet* DefaultHtmlStyle() { return default_html_style_.Get(); }
@@ -67,6 +67,7 @@ class CSSDefaultStyleSheets final
   RuleSet* DefaultHtmlQuirksStyle() { return default_html_quirks_style_.Get(); }
   RuleSet* DefaultPrintStyle() { return default_print_style_.Get(); }
   RuleSet* DefaultViewSourceStyle();
+  RuleSet* DefaultJSONDocumentStyle();
   RuleSet* DefaultForcedColorStyle() {
     return default_forced_color_style_.Get();
   }
@@ -76,16 +77,18 @@ class CSSDefaultStyleSheets final
   RuleSet* DefaultMediaControlsStyle() {
     return default_media_controls_style_.Get();
   }
-
-  StyleSheetContents* EnsureMobileViewportStyleSheet();
-  StyleSheetContents* EnsureTelevisionViewportStyleSheet();
-  StyleSheetContents* EnsureXHTMLMobileProfileStyleSheet();
+  RuleSet* DefaultForcedColorsMediaControlsStyle() {
+    return default_forced_colors_media_controls_style_.Get();
+  }
+  RuleSet* DefaultFullscreenStyle() { return default_fullscreen_style_.Get(); }
 
   StyleSheetContents* DefaultStyleSheet() { return default_style_sheet_.Get(); }
   StyleSheetContents* QuirksStyleSheet() { return quirks_style_sheet_.Get(); }
-  StyleSheetContents* PopupStyleSheet() { return popup_style_sheet_.Get(); }
-  StyleSheetContents* SelectMenuStyleSheet() {
-    return selectmenu_style_sheet_.Get();
+  StyleSheetContents* CustomizableSelectStyleSheet() {
+    return customizable_select_style_sheet_.Get();
+  }
+  StyleSheetContents* CustomizableSelectForcedColorsStyleSheet() {
+    return customizable_select_forced_colors_style_sheet_.Get();
   }
   StyleSheetContents* SvgStyleSheet() { return svg_style_sheet_.Get(); }
   StyleSheetContents* MathmlStyleSheet() { return mathml_style_sheet_.Get(); }
@@ -122,8 +125,21 @@ class CSSDefaultStyleSheets final
 
   void Trace(Visitor*) const;
 
+  // Object that resets the default style sheets on destruction, freeing any SVG
+  // resources they might be holding. Unit tests that use MainThreadIsolate may
+  // need this to avoid DCHECKs relating to "default_microtask_queue_". This is
+  // because SVGImage holds a MicrotaskQueue through its IsolatedSVGDocumentHost
+  // which needs to be GC'ed before attempting to destroy the v8 Isolate.
+  class CORE_EXPORT TestingScope {
+   public:
+    TestingScope();
+    ~TestingScope();
+  };
+
  private:
   void InitializeDefaultStyles();
+  void VerifyUniversalRuleCount();
+  void Reset();
 
   enum class NamespaceType {
     kHTML,
@@ -143,20 +159,24 @@ class CSSDefaultStyleSheets final
   Member<RuleSet> default_forced_color_style_;
   Member<RuleSet> default_pseudo_element_style_;
   Member<RuleSet> default_media_controls_style_;
+  Member<RuleSet> default_fullscreen_style_;
+  Member<RuleSet> default_json_document_style_;
+  Member<RuleSet> default_forced_colors_media_controls_style_;
+  // If new RuleSets are added, make sure to add a new check in
+  // VerifyUniversalRuleCount() as universal rule buckets are performance
+  // sensitive. At least if the added UA styles are matched against all elements
+  // of a given namespace.
 
   Member<StyleSheetContents> default_style_sheet_;
-  Member<StyleSheetContents> mobile_viewport_style_sheet_;
-  Member<StyleSheetContents> television_viewport_style_sheet_;
-  Member<StyleSheetContents> xhtml_mobile_profile_style_sheet_;
   Member<StyleSheetContents> quirks_style_sheet_;
   Member<StyleSheetContents> svg_style_sheet_;
   Member<StyleSheetContents> mathml_style_sheet_;
   Member<StyleSheetContents> media_controls_style_sheet_;
+  Member<StyleSheetContents> permission_element_style_sheet_;
   Member<StyleSheetContents> text_track_style_sheet_;
   Member<StyleSheetContents> fullscreen_style_sheet_;
-  Member<StyleSheetContents> popup_style_sheet_;
-  Member<StyleSheetContents> selectmenu_style_sheet_;
-  Member<StyleSheetContents> webxr_overlay_style_sheet_;
+  Member<StyleSheetContents> customizable_select_style_sheet_;
+  Member<StyleSheetContents> customizable_select_forced_colors_style_sheet_;
   Member<StyleSheetContents> marker_style_sheet_;
   Member<StyleSheetContents> forced_colors_style_sheet_;
 

@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {assertNotReached} from 'chrome://resources/js/assert_ts.js';
-import {isChromeOS, isMac} from 'chrome://resources/js/cr.m.js';
+import {assertNotReached} from 'chrome://resources/js/assert.js';
+import {isChromeOS, isMac} from 'chrome://resources/js/platform.js';
 
 
 export enum Key {
@@ -189,4 +189,8 @@ export function hasValidModifiers(e: KeyboardEvent): boolean {
     default:
       assertNotReached();
   }
+}
+
+export function formatShortcutText(text: string): string {
+  return text.split('+').join(' + ');
 }

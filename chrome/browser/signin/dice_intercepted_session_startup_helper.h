@@ -5,8 +5,8 @@
 #ifndef CHROME_BROWSER_SIGNIN_DICE_INTERCEPTED_SESSION_STARTUP_HELPER_H_
 #define CHROME_BROWSER_SIGNIN_DICE_INTERCEPTED_SESSION_STARTUP_HELPER_H_
 
-#include "base/callback_forward.h"
 #include "base/cancelable_callback.h"
+#include "base/functional/callback_forward.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
@@ -20,7 +20,7 @@ class WebContents;
 }
 
 namespace signin {
-struct AccountsInCookieJarInfo;
+class AccountsInCookieJarInfo;
 class IdentityManager;
 enum class SetAccountsInCookieResult;
 }

@@ -35,6 +35,7 @@
 #include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/layout/layout_inline.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
+#include "third_party/blink/renderer/core/layout/layout_text.h"
 
 namespace blink {
 
@@ -64,7 +65,8 @@ class LayoutTreeBuilder {
                     const ComputedStyle* style)
       : node_(&node), context_(context), style_(style) {
     DCHECK(!node.GetLayoutObject());
-    DCHECK(node.GetDocument().InStyleRecalc());
+    DCHECK(node.GetDocument().InStyleRecalc() ||
+           node.GetDocument().GetStyleEngine().InScrollMarkersAttachment());
     DCHECK(node.InActiveDocument());
     DCHECK(context.parent);
   }
@@ -86,8 +88,14 @@ class LayoutTreeBuilder {
     auto* const parent = next->Parent();
     if (!IsAnonymousInline(parent))
       return next;
-    if (!LIKELY(parent->IsLayoutNGTextCombine()))
+    // Should return a normal result for display:ruby though it can be
+    // an anonymous inline.
+    if (parent->IsInlineRuby()) [[unlikely]] {
+      return next;
+    }
+    if (!parent->IsLayoutTextCombine()) [[unlikely]] {
       return parent;
+    }
     auto* const text_combine_parent = parent->Parent();
     if (IsAnonymousInline(text_combine_parent))
       return text_combine_parent;
@@ -101,23 +109,20 @@ class LayoutTreeBuilder {
 
   NodeType* node_;
   Node::AttachContext& context_;
-  scoped_refptr<const ComputedStyle> style_;
+  const ComputedStyle* style_;
 };
 
 class LayoutTreeBuilderForElement : public LayoutTreeBuilder<Element> {
  public:
   LayoutTreeBuilderForElement(Element&,
                               Node::AttachContext&,
-                              const ComputedStyle*,
-                              LegacyLayout legacy);
+                              const ComputedStyle*);
 
   void CreateLayoutObject();
 
  private:
   LayoutObject* ParentLayoutObject() const;
   LayoutObject* NextLayoutObject() const;
-
-  LegacyLayout legacy_;
 };
 
 class LayoutTreeBuilderForText : public LayoutTreeBuilder<Text> {
@@ -130,10 +135,10 @@ class LayoutTreeBuilderForText : public LayoutTreeBuilder<Text> {
   void CreateLayoutObject();
 
  private:
-  scoped_refptr<ComputedStyle>
-  CreateInlineWrapperStyleForDisplayContentsIfNeeded() const;
+  const ComputedStyle* CreateInlineWrapperStyleForDisplayContentsIfNeeded()
+      const;
   LayoutObject* CreateInlineWrapperForDisplayContentsIfNeeded(
-      ComputedStyle* wrappter_style) const;
+      const ComputedStyle* wrapper_style) const;
 };
 
 }  // namespace blink

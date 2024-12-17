@@ -4,25 +4,29 @@
 
 package org.chromium.chrome.browser.omnibox.suggestions;
 
-import org.chromium.ui.base.PageTransition;
+import androidx.annotation.Nullable;
 
-/**
- * Provides the additional functionality to trigger and interact with autocomplete suggestions.
- */
+import org.chromium.chrome.browser.tab.Tab.LoadUrlResult;
+import org.chromium.components.omnibox.AutocompleteMatch;
+import org.chromium.content_public.browser.LoadUrlParams;
+
+/** Provides the additional functionality to trigger and interact with autocomplete suggestions. */
 public interface AutocompleteDelegate extends UrlBarDelegate {
-    /**
-     * Notified that the URL text has changed.
-     */
+
+    /** Called when loadUrl is done on a {@link Tab}. */
+    interface AutocompleteLoadCallback {
+        void onLoadUrl(LoadUrlParams params, LoadUrlResult loadUrlResult);
+    }
+
+    /** Notified that the URL text has changed. */
     void onUrlTextChanged();
 
     /**
      * Notified that suggestions have changed.
-     * @param autocompleteText The inline autocomplete text that can be appended to the
-     *                         currently entered user text.
-     * @param defaultMatchIsSearch Whether the default match is a search (as opposed to a URL).
-     *         This is true if there are no suggestions.
+     *
+     * @param defaultMatch default AutocompleteMatch.
      */
-    void onSuggestionsChanged(String autocompleteText, boolean defaultMatchIsSearch);
+    void onSuggestionsChanged(@Nullable AutocompleteMatch defaultMatch);
 
     /**
      * Requests the keyboard visibility update.
@@ -33,33 +37,18 @@ public interface AutocompleteDelegate extends UrlBarDelegate {
     void setKeyboardVisibility(boolean shouldShow, boolean delayHide);
 
     /**
-     * @return Reports whether keyboard (whether software or hardware) is active.
-     * Software keyboard is reported as active whenever it is visible on screen; hardware keyboard
-     * is reported as active when it is connected.
+     * @return Reports whether keyboard (whether software or hardware) is active. Software keyboard
+     *     is reported as active whenever it is visible on screen; hardware keyboard is reported as
+     *     active when it is connected.
      */
     boolean isKeyboardActive();
 
     /**
-     * Requests that the given URL be loaded in the current tab.
+     * Requests that the given URL be loaded.
      *
-     * @param url The URL to be loaded.
-     * @param transition The transition type associated with the url load.
-     * @param inputStart The time the input started for the load request.
+     * @param omniboxLoadUrlParams parameters describing the url load.
      */
-    void loadUrl(String url, @PageTransition int transition, long inputStart);
-
-    /**
-     * Requests that the given URL be loaded in the current tab.
-     *
-     * @param url The URL to be loaded.
-     * @param transition The transition type associated with the url load.
-     * @param inputStart The time the input started for the load request.
-     * @param postDataType   postData type.
-     * @param postData       Post-data to include in the tab URL's request body, ex. bitmap when
-     *         image search.
-     */
-    void loadUrlWithPostData(String url, @PageTransition int transition, long inputStart,
-            String postDataType, byte[] postData);
+    void loadUrl(OmniboxLoadUrlParams omniboxLoadUrlParams);
 
     /**
      * @return Whether the omnibox was focused via the NTP fakebox.
@@ -70,4 +59,7 @@ public interface AutocompleteDelegate extends UrlBarDelegate {
      * @return Whether the URL currently has focus.
      */
     boolean isUrlBarFocused();
+
+    /* Requests to show default browser promo when user pasting an URL. */
+    void maybeShowDefaultBrowserPromo();
 }

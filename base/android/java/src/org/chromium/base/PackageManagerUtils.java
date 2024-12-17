@@ -13,19 +13,20 @@ import android.os.TransactionTooLargeException;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * This class provides Android PackageManager related utility methods.
- */
+/** This class provides Android PackageManager related utility methods. */
 public class PackageManagerUtils {
+    public static final String XR_IMMERSIVE_FEATURE_NAME = "android.software.xr.immersive";
+
     private static final String TAG = "PackageManagerUtils";
 
     // This is the intent Android uses internally to detect browser apps.
     // See
     // https://cs.android.com/android/_/android/platform/packages/modules/Permission/+/android12-release:PermissionController/src/com/android/permissioncontroller/role/model/BrowserRoleBehavior.java;drc=86fa7d5dfa43f66b170f93ade4f59b9a770be32f;l=50
-    public static final Intent BROWSER_INTENT = new Intent()
-                                                        .setAction(Intent.ACTION_VIEW)
-                                                        .addCategory(Intent.CATEGORY_BROWSABLE)
-                                                        .setData(Uri.fromParts("http", "", null));
+    public static final Intent BROWSER_INTENT =
+            new Intent()
+                    .setAction(Intent.ACTION_VIEW)
+                    .addCategory(Intent.CATEGORY_BROWSABLE)
+                    .setData(Uri.fromParts("http", "", null));
 
     /**
      * Retrieve information about the Activity that will handle the given Intent.
@@ -85,6 +86,12 @@ public class PackageManagerUtils {
         return canResolveActivity(intent, 0);
     }
 
+    /** Check if the system has the given system feature available. */
+    public static boolean hasSystemFeature(String feature) {
+        PackageManager pm = ContextUtils.getApplicationContext().getPackageManager();
+        return pm.hasSystemFeature(feature);
+    }
+
     /**
      * @return Intent to query a list of installed home launchers.
      */
@@ -108,8 +115,11 @@ public class PackageManagerUtils {
         // Apparently MATCH_ALL doesn't include MATCH_DIRECT_BOOT_*.
         // See
         // https://cs.android.com/android/_/android/platform/packages/modules/Permission/+/android12-release:PermissionController/src/com/android/permissioncontroller/role/model/BrowserRoleBehavior.java;drc=86fa7d5dfa43f66b170f93ade4f59b9a770be32f;l=114
-        int flags = PackageManager.MATCH_ALL | PackageManager.MATCH_DIRECT_BOOT_AWARE
-                | PackageManager.MATCH_DIRECT_BOOT_UNAWARE | PackageManager.MATCH_DEFAULT_ONLY;
+        int flags =
+                PackageManager.MATCH_ALL
+                        | PackageManager.MATCH_DIRECT_BOOT_AWARE
+                        | PackageManager.MATCH_DIRECT_BOOT_UNAWARE
+                        | PackageManager.MATCH_DEFAULT_ONLY;
         return queryIntentActivities(BROWSER_INTENT, flags);
     }
 

@@ -16,7 +16,9 @@
 // THREAD-SAFETY:
 //
 // Cancelable callback objects must be created on, posted to, cancelled on, and
-// destroyed on the same SequencedTaskRunner.
+// destroyed on the same SequencedTaskRunner. The wrapper returned by callback()
+// must also be run on this SequencedTaskRunner, but it may be destroyed on any
+// sequence; see comments on callback().
 //
 //
 // EXAMPLE USAGE:
@@ -35,8 +37,8 @@
 //
 // CancelableOnceClosure timeout(
 //     base::BindOnce(&TimeoutCallback, "Test timed out."));
-// ThreadTaskRunnerHandle::Get()->PostDelayedTask(FROM_HERE, timeout.callback(),
-//                                                Seconds(4));
+// SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
+//     FROM_HERE, timeout.callback(), Seconds(4));
 // RunIntensiveTest();
 // run_loop.Run();
 // timeout.Cancel();  // Hopefully this is hit before the timeout callback runs.
@@ -47,11 +49,11 @@
 
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback.h"
-#include "base/callback_internal.h"
 #include "base/check.h"
 #include "base/compiler_specific.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
+#include "base/functional/callback_internal.h"
 #include "base/memory/weak_ptr.h"
 
 namespace base {
@@ -92,7 +94,12 @@ class CancelableCallbackImpl {
     callback_ = std::move(callback);
   }
 
-  // Returns a callback that can be disabled by calling Cancel().
+  // Returns a callback that can be disabled by calling Cancel(). This returned
+  // callback may only run on the bound SequencedTaskRunner (where
+  // CancelableCallback was constructed), but it may be destroyed on any
+  // sequence. This means the callback may be handed off to other task runners,
+  // e.g. via PostTaskAndReply[WithResult](), to post tasks back on the original
+  // bound sequence.
   CallbackType callback() const {
     if (!callback_)
       return CallbackType();

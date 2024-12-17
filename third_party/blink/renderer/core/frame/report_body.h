@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,6 +25,10 @@ class CORE_EXPORT ReportBody : public ScriptWrappable {
   // Provides a hash-like value for identifying reports with same content.
   // Collision of match id is possible.
   virtual unsigned MatchId() const { return 0; }
+
+  // Returns true if this report body would contain an extension URL as the
+  // report source.
+  virtual bool IsExtensionSource() const { return false; }
 };
 
 }  // namespace blink

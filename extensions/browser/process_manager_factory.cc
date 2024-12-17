@@ -6,6 +6,7 @@
 
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "extensions/browser/extension_registry_factory.h"
+#include "extensions/browser/extensions_browser_client.h"
 #include "extensions/browser/lazy_background_task_queue_factory.h"
 #include "extensions/browser/process_manager.h"
 
@@ -43,7 +44,8 @@ ProcessManagerFactory::ProcessManagerFactory()
 ProcessManagerFactory::~ProcessManagerFactory() {
 }
 
-KeyedService* ProcessManagerFactory::BuildServiceInstanceFor(
+std::unique_ptr<KeyedService>
+ProcessManagerFactory::BuildServiceInstanceForBrowserContext(
     BrowserContext* context) const {
   return ProcessManager::Create(context);
 }
@@ -52,7 +54,8 @@ BrowserContext* ProcessManagerFactory::GetBrowserContextToUse(
     BrowserContext* context) const {
   // ProcessManager::Create handles guest and incognito profiles, returning an
   // IncognitoProcessManager in incognito mode.
-  return context;
+  return ExtensionsBrowserClient::Get()->GetContextOwnInstance(
+      context, /*force_guest_profile=*/true);
 }
 
 }  // namespace extensions

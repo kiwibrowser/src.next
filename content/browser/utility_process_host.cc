@@ -8,33 +8,39 @@
 #include <utility>
 
 #include "base/base_switches.h"
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/containers/span.h"
 #include "base/files/file_path.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/i18n/base_i18n_switches.h"
+#include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
 #include "components/network_session_configurator/common/network_switches.h"
+#include "components/services/storage/public/mojom/storage_service.mojom.h"
 #include "content/browser/browser_child_process_host_impl.h"
+#include "content/browser/child_process_host_impl.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/utility_sandbox_delegate.h"
-#include "content/browser/v8_snapshot_files.h"
-#include "content/common/child_process_host_impl.h"
+#include "content/common/features.h"
 #include "content/common/in_process_child_thread_params.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/content_descriptor_keys.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
+#include "content/public/common/zygote/zygote_buildflags.h"
 #include "media/base/media_switches.h"
+#include "media/media_buildflags.h"
 #include "media/webrtc/webrtc_features.h"
 #include "sandbox/policy/mojom/sandbox.mojom.h"
 #include "sandbox/policy/sandbox_type.h"
@@ -49,21 +55,82 @@
 #endif
 
 #if BUILDFLAG(IS_MAC)
-#include "components/os_crypt/os_crypt_switches.h"
+#include "components/os_crypt/sync/os_crypt_switches.h"
+#endif
+
+#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_MAC)
+#include "content/browser/v8_snapshot_files.h"
+#endif
+
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#include "base/files/file_util.h"
+#include "base/files/scoped_file.h"
+#include "base/pickle.h"
 #endif
 
 #if BUILDFLAG(IS_WIN)
+#include "components/app_launch_prefetch/app_launch_prefetch.h"
 #include "media/capture/capture_switches.h"
+#include "services/audio/public/mojom/audio_service.mojom.h"
+#include "services/network/public/mojom/network_service.mojom.h"
 #endif
 
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-#include "base/posix/global_descriptors.h"
-#include "chromeos/startup/browser_init_params.h"
-#include "chromeos/startup/startup_switches.h"  // nogncheck
-#include "content/public/common/content_descriptors.h"
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS_ASH) || \
+    BUILDFLAG(IS_MAC)
+#include "base/task/sequenced_task_runner.h"
+#include "components/viz/host/gpu_client.h"
+#include "media/capture/capture_switches.h"
+#include "services/video_capture/public/mojom/video_capture_service.mojom.h"
 #endif
 
 namespace content {
+
+namespace {
+
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+base::ScopedFD PassNetworkContextParentDirs(
+    std::vector<base::FilePath> network_context_parent_dirs) {
+  base::Pickle pickle;
+  for (const base::FilePath& dir : network_context_parent_dirs) {
+    pickle.WriteString(dir.value());
+  }
+
+  base::ScopedFD read_fd;
+  base::ScopedFD write_fd;
+  if (!base::CreatePipe(&read_fd, &write_fd)) {
+    PLOG(ERROR) << "Failed to create thepipe necessary to properly sandbox the "
+                   "network service.";
+    return base::ScopedFD();
+  }
+  if (!base::WriteFileDescriptor(write_fd.get(), pickle)) {
+    PLOG(ERROR) << "Failed to write to the pipe which is necessary to properly "
+                   "sandbox the network service.";
+    return base::ScopedFD();
+  }
+
+  return read_fd;
+}
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+
+#if BUILDFLAG(IS_WIN)
+base::CommandLine::StringViewType UtilityToAppLaunchPrefetchArg(
+    const std::string& utility_type) {
+  // Set the default prefetch type for utility processes.
+  app_launch_prefetch::SubprocessType prefetch_type =
+      app_launch_prefetch::SubprocessType::kUtilityOther;
+
+  if (utility_type == network::mojom::NetworkService::Name_) {
+    prefetch_type = app_launch_prefetch::SubprocessType::kUtilityNetworkService;
+  } else if (utility_type == storage::mojom::StorageService::Name_) {
+    prefetch_type = app_launch_prefetch::SubprocessType::kUtilityStorage;
+  } else if (utility_type == audio::mojom::AudioService::Name_) {
+    prefetch_type = app_launch_prefetch::SubprocessType::kUtilityAudio;
+  }
+  return app_launch_prefetch::GetPrefetchSwitch(prefetch_type);
+}
+#endif  // BUILDFLAG(IS_WIN)
+
+}  // namespace
 
 UtilityMainThreadFactoryFunction g_utility_main_thread_factory = nullptr;
 
@@ -84,6 +151,12 @@ UtilityProcessHost::UtilityProcessHost(std::unique_ptr<Client> client)
 #endif
       started_(false),
       name_(u"utility process"),
+      file_data_(std::make_unique<ChildProcessLauncherFileData>()),
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS_ASH) || \
+    BUILDFLAG(IS_MAC)
+      allowed_gpu_(false),
+      gpu_client_(nullptr, base::OnTaskRunnerDeleter(nullptr)),
+#endif
       client_(std::move(client)) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   process_ = std::make_unique<BrowserChildProcessHostImpl>(
@@ -118,28 +191,6 @@ bool UtilityProcessHost::Start() {
   return StartProcess();
 }
 
-// TODO(crbug.com/1328879): Remove this method when fixing the bug.
-#if BUILDFLAG(IS_CASTOS) || BUILDFLAG(IS_CAST_ANDROID)
-void UtilityProcessHost::RunServiceDeprecated(
-    const std::string& service_name,
-    mojo::ScopedMessagePipeHandle service_pipe,
-    RunServiceDeprecatedCallback callback) {
-  if (launch_state_ == LaunchState::kLaunchFailed) {
-    std::move(callback).Run(absl::nullopt);
-    return;
-  }
-
-  process_->GetHost()->RunServiceDeprecated(service_name,
-                                            std::move(service_pipe));
-  if (launch_state_ == LaunchState::kLaunchComplete) {
-    std::move(callback).Run(process_->GetProcess().Pid());
-  } else {
-    DCHECK_EQ(launch_state_, LaunchState::kLaunchInProgress);
-    pending_run_service_callbacks_.push_back(std::move(callback));
-  }
-}
-#endif
-
 void UtilityProcessHost::SetMetricsName(const std::string& metrics_name) {
   metrics_name_ = metrics_name;
 }
@@ -152,6 +203,35 @@ void UtilityProcessHost::SetExtraCommandLineSwitches(
     std::vector<std::string> switches) {
   extra_switches_ = std::move(switches);
 }
+
+#if BUILDFLAG(IS_WIN)
+void UtilityProcessHost::SetPreloadLibraries(
+    const std::vector<base::FilePath>& preloads) {
+  preload_libraries_ = preloads;
+}
+#endif  // BUILDFLAG(IS_WIN)
+
+void UtilityProcessHost::SetAllowGpuClient() {
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS_ASH) || \
+    BUILDFLAG(IS_MAC)
+  allowed_gpu_ = true;
+#endif
+}
+
+#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_MAC)
+void UtilityProcessHost::AddFileToPreload(
+    std::string key,
+    absl::variant<base::FilePath, base::ScopedFD> file) {
+  DCHECK_EQ(file_data_->files_to_preload.count(key), 0u);
+  file_data_->files_to_preload.insert({std::move(key), std::move(file)});
+}
+#endif  // BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_MAC)
+
+#if BUILDFLAG(USE_ZYGOTE)
+void UtilityProcessHost::SetZygoteForTesting(ZygoteCommunication* handle) {
+  zygote_for_testing_ = handle;
+}
+#endif  // BUILDFLAG(USE_ZYGOTE)
 
 mojom::ChildProcess* UtilityProcessHost::GetChildProcess() {
   return static_cast<ChildProcessHostImpl*>(process_->GetHost())
@@ -191,7 +271,7 @@ bool UtilityProcessHost::StartProcess() {
         base::FeatureList::IsEnabled(features::kWarmUpNetworkProcess)) {
       process_->EnableWarmUpConnection();
     }
-#else
+#else  // BUILDFLAG(IS_ANDROID)
 #if BUILDFLAG(IS_MAC)
     if (sandbox_type_ == sandbox::mojom::Sandbox::kServiceWithJit)
       DCHECK_EQ(child_flags_, ChildProcessHost::CHILD_RENDERER);
@@ -208,24 +288,23 @@ bool UtilityProcessHost::StartProcess() {
 
     base::FilePath exe_path = ChildProcessHost::GetChildPath(child_flags);
     if (exe_path.empty()) {
-      NOTREACHED() << "Unable to get utility process binary name.";
+      NOTREACHED_IN_MIGRATION() << "Unable to get utility process binary name.";
       return false;
     }
 
     std::unique_ptr<base::CommandLine> cmd_line =
         std::make_unique<base::CommandLine>(exe_path);
-#endif
+#endif  // BUILDFLAG(IS_ANDROID)
 
     cmd_line->AppendSwitchASCII(switches::kProcessType,
                                 switches::kUtilityProcess);
     // Specify the type of utility process for debugging/profiling purposes.
     cmd_line->AppendSwitchASCII(switches::kUtilitySubType, metrics_name_);
-    BrowserChildProcessHostImpl::CopyTraceStartupFlags(cmd_line.get());
     std::string locale = GetContentClient()->browser()->GetApplicationLocale();
     cmd_line->AppendSwitchASCII(switches::kLang, locale);
 
 #if BUILDFLAG(IS_WIN)
-    cmd_line->AppendArg(switches::kPrefetchArgumentOther);
+    cmd_line->AppendArgNative(UtilityToAppLaunchPrefetchArg(metrics_name_));
 #endif  // BUILDFLAG(IS_WIN)
 
     sandbox::policy::SetCommandLineFlagsForSandboxType(cmd_line.get(),
@@ -233,85 +312,74 @@ bool UtilityProcessHost::StartProcess() {
 
     // Browser command-line switches to propagate to the utility process.
     static const char* const kSwitchNames[] = {
-      network::switches::kAdditionalTrustTokenKeyCommitments,
-      network::switches::kForceEffectiveConnectionType,
-      network::switches::kHostResolverRules,
-      network::switches::kIgnoreCertificateErrorsSPKIList,
-      network::switches::kIgnoreUrlFetcherCertRequests,
-      network::switches::kLogNetLog,
-      network::switches::kNetLogCaptureMode,
-      sandbox::policy::switches::kNoSandbox,
+        network::switches::kAdditionalTrustTokenKeyCommitments,
+        network::switches::kForceEffectiveConnectionType,
+        network::switches::kHostResolverRules,
+        network::switches::kIgnoreCertificateErrorsSPKIList,
+        network::switches::kTestThirdPartyCookiePhaseout,
+        network::switches::kDisableSharedDictionaryStorageCleanupForTesting,
+        sandbox::policy::switches::kNoSandbox,
 #if BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMEOS)
-      switches::kDisableDevShmUsage,
+        switches::kDisableDevShmUsage,
 #endif
 #if BUILDFLAG(IS_MAC)
-      sandbox::policy::switches::kEnableSandboxLogging,
-      os_crypt::switches::kUseMockKeychain,
+        sandbox::policy::switches::kDisableMetalShaderCache,
+        sandbox::policy::switches::kEnableSandboxLogging,
 #endif
-      switches::kDisableTestCerts,
-      switches::kEnableBackgroundThreadPool,
-      switches::kEnableExperimentalCookieFeatures,
-      switches::kEnableLogging,
-      switches::kForceTextDirection,
-      switches::kForceUIDirection,
-      switches::kIgnoreCertificateErrors,
-      switches::kLoggingLevel,
-      switches::kOverrideUseSoftwareGLForTests,
-      switches::kOverrideEnabledCdmInterfaceVersion,
-      switches::kProxyServer,
-      switches::kDisableAcceleratedMjpegDecode,
-      switches::kUseFakeDeviceForMediaStream,
-      switches::kUseFakeMjpegDecodeAccelerator,
-      switches::kUseFileForFakeVideoCapture,
-      switches::kUseMockCertVerifierForTesting,
-      switches::kMockCertVerifierDefaultResultForTesting,
-      switches::kTimeZoneForTesting,
-      switches::kUtilityStartupDialog,
-      switches::kUseANGLE,
-      switches::kUseGL,
-      switches::kV,
-      switches::kVModule,
-#if BUILDFLAG(IS_ANDROID)
-      switches::kEnableReachedCodeProfiler,
-      switches::kReachedCodeSamplingIntervalUs,
-#endif
-      switches::kEnableExperimentalWebPlatformFeatures,
-      // These flags are used by the audio service:
-      switches::kAudioBufferSize,
-      switches::kAudioServiceQuitTimeoutMs,
-      switches::kDisableAudioOutput,
-      switches::kFailAudioStreamCreation,
-      switches::kMuteAudio,
-      switches::kUseFileForFakeAudioCapture,
+        switches::kEnableBackgroundThreadPool,
+        switches::kEnableExperimentalCookieFeatures,
+        switches::kForceTextDirection,
+        switches::kForceUIDirection,
+        switches::kIgnoreCertificateErrors,
+        switches::kOverrideUseSoftwareGLForTests,
+        switches::kOverrideEnabledCdmInterfaceVersion,
+        switches::kDisableAcceleratedMjpegDecode,
+        switches::kUseFakeDeviceForMediaStream,
+        switches::kUseFakeMjpegDecodeAccelerator,
+        switches::kUseFileForFakeVideoCapture,
+        switches::kUseMockCertVerifierForTesting,
+        switches::kMockCertVerifierDefaultResultForTesting,
+        switches::kUtilityStartupDialog,
+        switches::kUseANGLE,
+        switches::kUseGL,
+        switches::kEnableExperimentalWebPlatformFeatures,
+        // These flags are used by the audio service:
+        switches::kAudioBufferSize,
+        switches::kDisableAudioInput,
+        switches::kDisableAudioOutput,
+        switches::kFailAudioStreamCreation,
+        switches::kMuteAudio,
+        switches::kUseFileForFakeAudioCapture,
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FREEBSD) || \
     BUILDFLAG(IS_SOLARIS)
-      switches::kAlsaInputDevice,
-      switches::kAlsaOutputDevice,
+        switches::kAlsaInputDevice,
+        switches::kAlsaOutputDevice,
 #endif
-#if defined(USE_CRAS)
-      switches::kUseCras,
+#if BUILDFLAG(USE_CRAS)
+        switches::kUseCras,
 #endif
 #if BUILDFLAG(IS_WIN)
-      switches::kDisableHighResTimer,
-      switches::kEnableExclusiveAudio,
-      switches::kForceWaveAudio,
-      switches::kRaiseTimerFrequency,
-      switches::kTrySupportedChannelLayouts,
-      switches::kWaveOutBuffers,
-      switches::kWebXrForceRuntime,
-      sandbox::policy::switches::kAddXrAppContainerCaps,
+        switches::kDisableHighResTimer,
+        switches::kEnableExclusiveAudio,
+        switches::kForceWaveAudio,
+        switches::kRaiseTimerFrequency,
+        switches::kTrySupportedChannelLayouts,
+        switches::kWaveOutBuffers,
+        switches::kWebXrForceRuntime,
+        sandbox::policy::switches::kAddXrAppContainerCaps,
 #endif
-      network::switches::kUseFirstPartySet,
-      network::switches::kIpAddressSpaceOverrides,
+        network::switches::kIpAddressSpaceOverrides,
 #if BUILDFLAG(IS_CHROMEOS)
-      switches::kSchedulerBoostUrgent,
+        switches::kSchedulerBoostUrgent,
 #endif
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
-      switches::kEnableResourcesFileSharing,
+        switches::kEnableResourcesFileSharing,
+#endif
+#if BUILDFLAG(USE_CHROMEOS_MEDIA_ACCELERATION)
+        switches::kHardwareVideoDecodeFrameRate,
 #endif
     };
-    cmd_line->CopySwitchesFrom(browser_command_line, kSwitchNames,
-                               std::size(kSwitchNames));
+    cmd_line->CopySwitchesFrom(browser_command_line, kSwitchNames);
 
     network_session_configurator::CopyNetworkSwitches(browser_command_line,
                                                       cmd_line.get());
@@ -329,39 +397,67 @@ bool UtilityProcessHost::StartProcess() {
 #if BUILDFLAG(IS_WIN)
     if (media::IsMediaFoundationD3D11VideoCaptureEnabled()) {
       // MediaFoundationD3D11VideoCapture requires Gpu memory buffers,
-      // which are unavailable if the GPU process isn't running.
-      if (!GpuDataManagerImpl::GetInstance()->IsGpuCompositingDisabled()) {
+      // which are unavailable if the GPU process isn't running or if
+      // D3D shared images are not supported.
+      if (!GpuDataManagerImpl::GetInstance()->IsGpuCompositingDisabled() &&
+          GpuDataManagerImpl::GetInstance()->GetGPUInfo().shared_image_d3d) {
         cmd_line->AppendSwitch(switches::kVideoCaptureUseGpuMemoryBuffer);
       }
     }
 #endif
 
-    auto file_data = std::make_unique<ChildProcessLauncherFileData>();
-#if BUILDFLAG(IS_POSIX)
-    file_data->files_to_preload = GetV8SnapshotFilesToPreload();
+#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_MAC)
+    file_data_->files_to_preload.merge(GetV8SnapshotFilesToPreload(*cmd_line));
 #endif  // BUILDFLAG(IS_POSIX)
 
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-    // Create the file descriptor for Cros startup data and pass it.
-    // This FD will be used to obtain BrowserInitParams in Utility process.
-    base::ScopedFD cros_startup_fd =
-        chromeos::BrowserInitParams::CreateStartupData();
-    if (cros_startup_fd.is_valid()) {
-      constexpr int kStartupDataFD =
-          kCrosStartupDataDescriptor + base::GlobalDescriptors::kBaseDescriptor;
-      cmd_line->AppendSwitchASCII(chromeos::switches::kCrosStartupDataFD,
-                                  base::NumberToString(kStartupDataFD));
-      file_data->additional_remapped_fds.emplace(kStartupDataFD,
-                                                 std::move(cros_startup_fd));
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+    // The network service should have access to the parent directories
+    // necessary for its usage.
+    if (sandbox_type_ == sandbox::mojom::Sandbox::kNetwork) {
+      std::vector<base::FilePath> network_context_parent_dirs =
+          GetContentClient()->browser()->GetNetworkContextsParentDirectory();
+      file_data_->files_to_preload[kNetworkContextParentDirsDescriptor] =
+          PassNetworkContextParentDirs(std::move(network_context_parent_dirs));
     }
-#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_MAC)
+    // Pass `kVideoCaptureUseGpuMemoryBuffer` flag to video capture service only
+    // when the video capture use GPU memory buffer enabled.
+    if (metrics_name_ == video_capture::mojom::VideoCaptureService::Name_) {
+      bool pass_gpu_buffer_flag =
+          switches::IsVideoCaptureUseGpuMemoryBufferEnabled();
+#if BUILDFLAG(IS_LINUX)
+      // Check if NV12 GPU memory buffer supported at the same time.
+      pass_gpu_buffer_flag =
+          pass_gpu_buffer_flag &&
+          GpuDataManagerImpl::GetInstance()->IsGpuMemoryBufferNV12Supported();
+#endif  // BUILDFLAG(IS_LINUX)
+      if (pass_gpu_buffer_flag) {
+        cmd_line->AppendSwitch(switches::kVideoCaptureUseGpuMemoryBuffer);
+      }
+    }
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_ASH) ||
+        // BUILDFLAG(IS_MAC)
 
     std::unique_ptr<UtilitySandboxedProcessLauncherDelegate> delegate =
         std::make_unique<UtilitySandboxedProcessLauncherDelegate>(
             sandbox_type_, env_, *cmd_line);
 
+#if BUILDFLAG(IS_WIN)
+    if (!preload_libraries_.empty()) {
+      delegate->SetPreloadLibraries(preload_libraries_);
+    }
+#endif  // BUILDFLAG(IS_WIN)
+
+#if BUILDFLAG(USE_ZYGOTE)
+    if (zygote_for_testing_.has_value()) {
+      delegate->SetZygote(zygote_for_testing_.value());
+    }
+#endif  // BUILDFLAG(USE_ZYGOTE)
+
     process_->LaunchWithFileData(std::move(delegate), std::move(cmd_line),
-                                 std::move(file_data), true);
+                                 std::move(file_data_), true);
   }
 
   return true;
@@ -369,24 +465,12 @@ bool UtilityProcessHost::StartProcess() {
 
 void UtilityProcessHost::OnProcessLaunched() {
   launch_state_ = LaunchState::kLaunchComplete;
-// TODO(crbug.com/1328879): Remove this when fixing the bug.
-#if BUILDFLAG(IS_CASTOS) || BUILDFLAG(IS_CAST_ANDROID)
-  for (auto& callback : pending_run_service_callbacks_)
-    std::move(callback).Run(process_->GetProcess().Pid());
-  pending_run_service_callbacks_.clear();
-#endif
   if (client_)
     client_->OnProcessLaunched(process_->GetProcess());
 }
 
 void UtilityProcessHost::OnProcessLaunchFailed(int error_code) {
   launch_state_ = LaunchState::kLaunchFailed;
-// TODO(crbug.com/1328879): Remove this when fixing the bug.
-#if BUILDFLAG(IS_CASTOS) || BUILDFLAG(IS_CAST_ANDROID)
-  for (auto& callback : pending_run_service_callbacks_)
-    std::move(callback).Run(absl::nullopt);
-  pending_run_service_callbacks_.clear();
-#endif
 }
 
 void UtilityProcessHost::OnProcessCrashed(int exit_code) {
@@ -399,7 +483,7 @@ void UtilityProcessHost::OnProcessCrashed(int exit_code) {
   client->OnProcessCrashed();
 }
 
-absl::optional<std::string> UtilityProcessHost::GetServiceName() {
+std::optional<std::string> UtilityProcessHost::GetServiceName() {
   return metrics_name_;
 }
 

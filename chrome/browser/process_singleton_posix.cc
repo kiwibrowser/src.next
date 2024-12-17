@@ -2,6 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
+#pragma allow_unsafe_buffers
+#endif
+
 // On Linux, when the user tries to launch a second copy of chrome, we check
 // for a socket in the user's profile directory.  If the socket file is open we
 // send a message to the first chrome browser process with the current
@@ -57,12 +62,12 @@
 #include <type_traits>
 
 #include "base/base_paths.h"
-#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/containers/unique_ptr_adapters.h"
 #include "base/files/file_descriptor_watcher_posix.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/raw_ptr.h"
@@ -82,7 +87,6 @@
 #include "base/task/sequenced_task_runner_helpers.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/platform_thread.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "build/build_config.h"
@@ -90,12 +94,13 @@
 #include "chrome/browser/process_singleton_internal.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/process_singleton_lock_posix.h"
-#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/branded_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/network_interfaces.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/scoped_startup_resource_bundle.h"
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/ui/process_singleton_dialog_linux.h"
@@ -158,7 +163,7 @@ int SetCloseOnExec(int fd) {
 // Close a socket and check return value.
 void CloseSocket(int fd) {
   int rv = IGNORE_EINTR(close(fd));
-  DCHECK_EQ(0, rv) << "Error closing socket: " << base::safe_strerror(errno);
+  DPCHECK(rv == 0) << "Error closing socket";
 }
 
 // Write a message to a socket fd.
@@ -343,6 +348,10 @@ bool SymlinkPath(const base::FilePath& target, const base::FilePath& path) {
 bool DisplayProfileInUseError(const base::FilePath& lock_path,
                               const std::string& hostname,
                               int pid) {
+  // Ensure there is an instance of ResourceBundle that is initialized for
+  // localized string resource accesses.
+  ui::ScopedStartupResourceBundle ensure_startup_resource_bundle;
+
   std::u16string error = l10n_util::GetStringFUTF16(
       IDS_PROFILE_IN_USE_POSIX, base::NumberToString16(pid),
       base::ASCIIToUTF16(hostname));
@@ -360,7 +369,7 @@ bool DisplayProfileInUseError(const base::FilePath& lock_path,
   return true;
 #endif
 
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
   return false;
 }
 
@@ -571,7 +580,8 @@ class ProcessSingleton::LinuxWatcher
 
   // We expect to only be constructed on the UI thread.
   explicit LinuxWatcher(ProcessSingleton* parent)
-      : ui_task_runner_(base::ThreadTaskRunnerHandle::Get()), parent_(parent) {}
+      : ui_task_runner_(base::SingleThreadTaskRunner::GetCurrentDefault()),
+        parent_(parent) {}
 
   LinuxWatcher(const LinuxWatcher&) = delete;
   LinuxWatcher& operator=(const LinuxWatcher&) = delete;
@@ -586,6 +596,11 @@ class ProcessSingleton::LinuxWatcher
   void HandleMessage(const std::string& current_dir,
                      const std::vector<std::string>& argv,
                      SocketReader* reader);
+
+  // Called when the ProcessSingleton that owns this class is about to be
+  // destroyed to remove the raw_ptr reference to it and prevent a leaked
+  // dangling pointer.
+  void OnEminentProcessSingletonDestruction() { parent_ = nullptr; }
 
  private:
   friend struct BrowserThread::DeleteOnThread<BrowserThread::IO>;
@@ -607,7 +622,7 @@ class ProcessSingleton::LinuxWatcher
   scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
 
   // The ProcessSingleton that owns us.
-  const raw_ptr<ProcessSingleton> parent_;
+  raw_ptr<ProcessSingleton> parent_;
 
   std::set<std::unique_ptr<SocketReader>, base::UniquePtrComparator> readers_;
 };
@@ -644,8 +659,8 @@ void ProcessSingleton::LinuxWatcher::HandleMessage(
   DCHECK(ui_task_runner_->BelongsToCurrentThread());
   DCHECK(reader);
 
-  if (parent_->notification_callback_.Run(base::CommandLine(argv),
-                                          base::FilePath(current_dir))) {
+  if (parent_ && parent_->notification_callback_.Run(
+                     base::CommandLine(argv), base::FilePath(current_dir))) {
     // Send back "ACK" message to prevent the client process from starting up.
     reader->FinishWithACK(kACKToken, std::size(kACKToken) - 1);
   } else {
@@ -768,6 +783,9 @@ ProcessSingleton::ProcessSingleton(
 
 ProcessSingleton::~ProcessSingleton() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (watcher_) {
+    watcher_->OnEminentProcessSingletonDestruction();
+  }
 }
 
 ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcess() {
@@ -922,7 +940,8 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcessWithTimeout(
     return PROCESS_NOTIFIED;
   }
 
-  NOTREACHED() << "The other process returned unknown message: " << buf;
+  NOTREACHED_IN_MIGRATION()
+      << "The other process returned unknown message: " << buf;
   return PROCESS_NOTIFIED;
 }
 
@@ -942,18 +961,21 @@ ProcessSingleton::NotifyOtherProcessWithTimeoutOrCreate(
       command_line, retry_attempts, timeout, true);
   if (result != PROCESS_NONE) {
     if (result == PROCESS_NOTIFIED) {
-      UMA_HISTOGRAM_MEDIUM_TIMES("Chrome.ProcessSingleton.TimeToNotify",
-                                 base::TimeTicks::Now() - begin_ticks);
+      DEPRECATED_UMA_HISTOGRAM_MEDIUM_TIMES(
+          "Chrome.ProcessSingleton.TimeToNotify",
+          base::TimeTicks::Now() - begin_ticks);
     } else {
-      UMA_HISTOGRAM_MEDIUM_TIMES("Chrome.ProcessSingleton.TimeToFailure",
-                                 base::TimeTicks::Now() - begin_ticks);
+      DEPRECATED_UMA_HISTOGRAM_MEDIUM_TIMES(
+          "Chrome.ProcessSingleton.TimeToFailure",
+          base::TimeTicks::Now() - begin_ticks);
     }
     return result;
   }
 
   if (Create()) {
-    UMA_HISTOGRAM_MEDIUM_TIMES("Chrome.ProcessSingleton.TimeToCreate",
-                               base::TimeTicks::Now() - begin_ticks);
+    DEPRECATED_UMA_HISTOGRAM_MEDIUM_TIMES(
+        "Chrome.ProcessSingleton.TimeToCreate",
+        base::TimeTicks::Now() - begin_ticks);
     return PROCESS_NONE;
   }
 
@@ -966,11 +988,13 @@ ProcessSingleton::NotifyOtherProcessWithTimeoutOrCreate(
       command_line, retry_attempts, timeout, false);
 
   if (result == PROCESS_NOTIFIED) {
-    UMA_HISTOGRAM_MEDIUM_TIMES("Chrome.ProcessSingleton.TimeToNotify",
-                               base::TimeTicks::Now() - begin_ticks);
+    DEPRECATED_UMA_HISTOGRAM_MEDIUM_TIMES(
+        "Chrome.ProcessSingleton.TimeToNotify",
+        base::TimeTicks::Now() - begin_ticks);
   } else {
-    UMA_HISTOGRAM_MEDIUM_TIMES("Chrome.ProcessSingleton.TimeToFailure",
-                               base::TimeTicks::Now() - begin_ticks);
+    DEPRECATED_UMA_HISTOGRAM_MEDIUM_TIMES(
+        "Chrome.ProcessSingleton.TimeToFailure",
+        base::TimeTicks::Now() - begin_ticks);
   }
 
   if (result != PROCESS_NONE)
@@ -1078,7 +1102,8 @@ bool ProcessSingleton::Create() {
   }
 
   if (listen(sock_, 5) < 0)
-    NOTREACHED() << "listen failed: " << base::safe_strerror(errno);
+    NOTREACHED_IN_MIGRATION()
+        << "listen failed: " << base::safe_strerror(errno);
 
   return true;
 }
@@ -1086,7 +1111,7 @@ bool ProcessSingleton::Create() {
 void ProcessSingleton::StartWatching() {
   DCHECK_GE(sock_, 0);
   DCHECK(!watcher_);
-  watcher_ = new LinuxWatcher(this);
+  watcher_ = base::MakeRefCounted<LinuxWatcher>(this);
   DCHECK(BrowserThread::IsThreadInitialized(BrowserThread::IO));
   content::GetIOThreadTaskRunner({})->PostTask(
       FROM_HERE, base::BindOnce(&ProcessSingleton::LinuxWatcher::StartListening,
@@ -1150,8 +1175,7 @@ void ProcessSingleton::KillProcess(int pid) {
   int rv = kill(static_cast<base::ProcessHandle>(pid), SIGKILL);
   // ESRCH = No Such Process (can happen if the other process is already in
   // progress of shutting down and finishes before we try to kill it).
-  DCHECK(rv == 0 || errno == ESRCH) << "Error killing process: "
-                                    << base::safe_strerror(errno);
+  DPCHECK(rv == 0 || errno == ESRCH) << "Error killing process";
 
   int error_code = (rv == 0) ? 0 : errno;
   base::UmaHistogramSparse(

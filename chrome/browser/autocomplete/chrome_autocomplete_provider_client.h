@@ -22,6 +22,8 @@
 
 class Profile;
 class TabMatcher;
+class AutocompleteScoringModelService;
+class OnDeviceTailModelService;
 
 namespace content {
 class StoragePartition;
@@ -52,6 +54,8 @@ class ChromeAutocompleteProviderClient : public AutocompleteProviderClient {
   history::HistoryService* GetHistoryService() override;
   history_clusters::HistoryClustersService* GetHistoryClustersService()
       override;
+  history_embeddings::HistoryEmbeddingsService* GetHistoryEmbeddingsService()
+      override;
   scoped_refptr<history::TopSites> GetTopSites() override;
   bookmarks::BookmarkModel* GetBookmarkModel() override;
   history::URLDatabase* GetInMemoryDatabase() override;
@@ -60,8 +64,8 @@ class ChromeAutocompleteProviderClient : public AutocompleteProviderClient {
   const TemplateURLService* GetTemplateURLService() const override;
   RemoteSuggestionsService* GetRemoteSuggestionsService(
       bool create_if_necessary) const override;
-  DocumentSuggestionsService* GetDocumentSuggestionsService(
-      bool create_if_necessary) const override;
+  ZeroSuggestCacheService* GetZeroSuggestCacheService() override;
+  const ZeroSuggestCacheService* GetZeroSuggestCacheService() const override;
   OmniboxPedalProvider* GetPedalProvider() const override;
   scoped_refptr<ShortcutsBackend> GetShortcutsBackend() override;
   scoped_refptr<ShortcutsBackend> GetShortcutsBackendIfExists() override;
@@ -73,11 +77,16 @@ class ChromeAutocompleteProviderClient : public AutocompleteProviderClient {
   std::vector<std::u16string> GetBuiltinsToProvideAsUserTypes() override;
   component_updater::ComponentUpdateService* GetComponentUpdateService()
       override;
-  query_tiles::TileService* GetQueryTileService() const override;
   OmniboxTriggeredFeatureService* GetOmniboxTriggeredFeatureService()
       const override;
   signin::IdentityManager* GetIdentityManager() const override;
+  AutocompleteScoringModelService* GetAutocompleteScoringModelService()
+      const override;
+  OnDeviceTailModelService* GetOnDeviceTailModelService() const override;
+  ProviderStateService* GetProviderStateService() const override;
   bool IsOffTheRecord() const override;
+  bool IsIncognitoProfile() const override;
+  bool IsGuestSession() const override;
   bool SearchSuggestEnabled() const override;
   bool AllowDeletingBrowserHistory() const override;
   bool IsPersonalizedUrlDataCollectionActive() const override;
@@ -99,6 +108,8 @@ class ChromeAutocompleteProviderClient : public AutocompleteProviderClient {
   const TabMatcher& GetTabMatcher() const override;
   bool IsIncognitoModeAvailable() const override;
   bool IsSharingHubAvailable() const override;
+  bool IsHistoryEmbeddingsEnabled() const override;
+  bool IsHistoryEmbeddingsSettingVisible() const override;
   base::WeakPtr<AutocompleteProviderClient> GetWeakPtr() override;
 
   // OmniboxAction::Client:

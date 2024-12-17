@@ -5,7 +5,8 @@
 #ifndef CONTENT_BROWSER_URL_LOADER_FACTORY_PARAMS_HELPER_H_
 #define CONTENT_BROWSER_URL_LOADER_FACTORY_PARAMS_HELPER_H_
 
-#include "base/strings/string_piece.h"
+#include <string_view>
+
 #include "content/common/content_export.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/network/public/mojom/cross_origin_embedder_policy.mojom-forward.h"
@@ -17,6 +18,12 @@
 namespace net {
 class IsolationInfo;
 }  // namespace net
+
+namespace network {
+namespace mojom {
+class SharedDictionaryAccessObserver;
+}  // namespace mojom
+}  // namespace network
 
 namespace content {
 
@@ -54,13 +61,17 @@ class URLLoaderFactoryParamsHelper {
       mojo::PendingRemote<network::mojom::CrossOriginEmbedderPolicyReporter>
           coep_reporter,
       RenderProcessHost* process,
-      network::mojom::TrustTokenRedemptionPolicy trust_token_redemption_policy,
-      base::StringPiece debug_tag);
+      network::mojom::TrustTokenOperationPolicyVerdict
+          trust_token_issuance_policy,
+      network::mojom::TrustTokenOperationPolicyVerdict
+          trust_token_redemption_policy,
+      net::CookieSettingOverrides cookie_setting_overrides,
+      std::string_view debug_tag);
 
   // Creates URLLoaderFactoryParams to be used by |isolated_world_origin| hosted
   // within the |frame|.
   //
-  // TODO(https://crbug.com/1098410): Remove the CreateForIsolatedWorld method
+  // TODO(crbug.com/40137011): Remove the CreateForIsolatedWorld method
   // once Chrome Platform Apps are gone.
   static network::mojom::URLLoaderFactoryParamsPtr CreateForIsolatedWorld(
       RenderFrameHostImpl* frame,
@@ -68,11 +79,16 @@ class URLLoaderFactoryParamsHelper {
       const url::Origin& main_world_origin,
       const net::IsolationInfo& isolation_info,
       network::mojom::ClientSecurityStatePtr client_security_state,
-      network::mojom::TrustTokenRedemptionPolicy trust_token_redemption_policy);
+      network::mojom::TrustTokenOperationPolicyVerdict
+          trust_token_issuance_policy,
+      network::mojom::TrustTokenOperationPolicyVerdict
+          trust_token_redemption_policy,
+      net::CookieSettingOverrides cookie_setting_overrides);
 
   static network::mojom::URLLoaderFactoryParamsPtr CreateForPrefetch(
       RenderFrameHostImpl* frame,
-      network::mojom::ClientSecurityStatePtr client_security_state);
+      network::mojom::ClientSecurityStatePtr client_security_state,
+      net::CookieSettingOverrides cookie_setting_overrides);
 
   // Creates URLLoaderFactoryParams for either fetching the worker script or for
   // fetches initiated from a worker.
@@ -86,7 +102,8 @@ class URLLoaderFactoryParamsHelper {
           url_loader_network_observer,
       mojo::PendingRemote<network::mojom::DevToolsObserver> devtools_observer,
       network::mojom::ClientSecurityStatePtr client_security_state,
-      base::StringPiece debug_tag);
+      std::string_view debug_tag,
+      bool require_cross_site_request_for_cookies);
 
   // Creates URLLoaderFactoryParams for Early Hints preload.
   // When a redirect happens, a URLLoaderFactory created from the
@@ -97,8 +114,11 @@ class URLLoaderFactoryParamsHelper {
       const url::Origin& tentative_origin,
       NavigationRequest& navigation_request,
       const network::mojom::EarlyHints& early_hints,
-      mojo::PendingRemote<network::mojom::CookieAccessObserver>
-          cookie_observer);
+      mojo::PendingRemote<network::mojom::CookieAccessObserver> cookie_observer,
+      mojo::PendingRemote<network::mojom::TrustTokenAccessObserver>
+          trust_token_observer,
+      mojo::PendingRemote<network::mojom::SharedDictionaryAccessObserver>
+          shared_dictionary_observer);
 
  private:
   // Only static methods.

@@ -11,7 +11,6 @@
 #include "base/metrics/field_trial.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/chrome_extension_frame_host.h"
-#include "chrome/browser/extensions/error_console/error_console.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
@@ -24,9 +23,8 @@
 #include "content/public/common/content_switches.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/extension_util.h"
 #include "extensions/common/constants.h"
-#include "extensions/common/extension_messages.h"
-#include "extensions/common/extension_urls.h"
 #include "extensions/common/switches.h"
 #include "third_party/blink/public/common/chrome_debug_urls.h"
 
@@ -65,8 +63,9 @@ void ChromeExtensionWebContentsObserver::RenderFrameCreated(
   // This logic should match
   // ChromeContentBrowserClient::RegisterNonNetworkSubresourceURLLoaderFactories.
   const Extension* extension = GetExtensionFromFrame(render_frame_host, false);
-  if (!extension)
+  if (!extension) {
     return;
+  }
 
   int process_id = render_frame_host->GetProcess()->GetID();
   auto* policy = content::ChildProcessSecurityPolicy::GetInstance();
@@ -97,48 +96,6 @@ void ChromeExtensionWebContentsObserver::RenderFrameCreated(
   }
 }
 
-bool ChromeExtensionWebContentsObserver::OnMessageReceived(
-    const IPC::Message& message,
-    content::RenderFrameHost* render_frame_host) {
-  DCHECK(initialized());
-  if (ExtensionWebContentsObserver::OnMessageReceived(message,
-                                                      render_frame_host)) {
-    return true;
-  }
-
-  bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP_WITH_PARAM(ChromeExtensionWebContentsObserver, message,
-                                   render_frame_host)
-    IPC_MESSAGE_HANDLER(ExtensionHostMsg_DetailedConsoleMessageAdded,
-                        OnDetailedConsoleMessageAdded)
-    IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP()
-  return handled;
-}
-
-void ChromeExtensionWebContentsObserver::OnDetailedConsoleMessageAdded(
-    content::RenderFrameHost* render_frame_host,
-    const std::u16string& message,
-    const std::u16string& source,
-    const StackTrace& stack_trace,
-    int32_t severity_level) {
-  DCHECK(initialized());
-  if (!IsSourceFromAnExtension(source))
-    return;
-
-  std::string extension_id = GetExtensionIdFromFrame(render_frame_host);
-  if (extension_id.empty())
-    extension_id = GURL(source).host();
-
-  ErrorConsole::Get(browser_context())
-      ->ReportError(std::unique_ptr<ExtensionError>(new RuntimeError(
-          extension_id, browser_context()->IsOffTheRecord(), source, message,
-          stack_trace, web_contents()->GetLastCommittedURL(),
-          static_cast<logging::LogSeverity>(severity_level),
-          render_frame_host->GetRoutingID(),
-          render_frame_host->GetProcess()->GetID())));
-}
-
 void ChromeExtensionWebContentsObserver::InitializeRenderFrame(
     content::RenderFrameHost* render_frame_host) {
   DCHECK(initialized());
@@ -153,9 +110,10 @@ void ChromeExtensionWebContentsObserver::InitializeRenderFrame(
 void ChromeExtensionWebContentsObserver::ReloadIfTerminated(
     content::RenderFrameHost* render_frame_host) {
   DCHECK(initialized());
-  std::string extension_id = GetExtensionIdFromFrame(render_frame_host);
-  if (extension_id.empty())
+  std::string extension_id = util::GetExtensionIdFromFrame(render_frame_host);
+  if (extension_id.empty()) {
     return;
+  }
 
   ExtensionRegistry* registry = ExtensionRegistry::Get(browser_context());
 
@@ -163,7 +121,7 @@ void ChromeExtensionWebContentsObserver::ReloadIfTerminated(
   // TODO(yoz): This reload doesn't happen synchronously for unpacked
   //            extensions. It seems to be fast enough, but there is a race.
   //            We should delay loading until the extension has reloaded.
-  if (registry->GetExtensionById(extension_id, ExtensionRegistry::TERMINATED)) {
+  if (registry->terminated_extensions().GetByID(extension_id)) {
     ExtensionSystem::Get(browser_context())->
         extension_service()->ReloadExtension(extension_id);
   }

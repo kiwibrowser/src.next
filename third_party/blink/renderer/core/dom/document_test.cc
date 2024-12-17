@@ -30,6 +30,7 @@
 
 #include "third_party/blink/renderer/core/dom/document.h"
 
+#include <algorithm>
 #include <memory>
 
 #include "base/time/time.h"
@@ -38,10 +39,11 @@
 #include "services/network/public/mojom/referrer_policy.mojom-blink.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/permissions_policy/document_policy_features.h"
 #include "third_party/blink/public/common/privacy_budget/identifiable_surface.h"
 #include "third_party/blink/public/mojom/permissions_policy/permissions_policy_feature.mojom-blink.h"
+#include "third_party/blink/public/platform/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/web/web_print_page_description.h"
 #include "third_party/blink/renderer/bindings/core/v8/isolated_world_csp.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_tester.h"
@@ -56,6 +58,7 @@
 #include "third_party/blink/renderer/core/dom/dom_implementation.h"
 #include "third_party/blink/renderer/core/dom/node_with_index.h"
 #include "third_party/blink/renderer/core/dom/range.h"
+#include "third_party/blink/renderer/core/dom/scripted_animation_controller.h"
 #include "third_party/blink/renderer/core/dom/synchronous_mutation_observer.h"
 #include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
@@ -67,16 +70,20 @@
 #include "third_party/blink/renderer/core/frame/viewport_data.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/html/custom/custom_element_test_helpers.h"
+#include "third_party/blink/renderer/core/html/forms/html_form_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
+#include "third_party/blink/renderer/core/html/html_dialog_element.h"
 #include "third_party/blink/renderer/core/html/html_head_element.h"
 #include "third_party/blink/renderer/core/html/html_iframe_element.h"
 #include "third_party/blink/renderer/core/html/html_link_element.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/page/page_animator.h"
 #include "third_party/blink/renderer/core/page/validation_message_client.h"
 #include "third_party/blink/renderer/core/testing/color_scheme_helper.h"
 #include "third_party/blink/renderer/core/testing/mock_policy_container_host.h"
+#include "third_party/blink/renderer/core/testing/null_execution_context.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/core/testing/scoped_mock_overlay_scrollbars.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
@@ -94,8 +101,9 @@ namespace blink {
 
 using network::mojom::ContentSecurityPolicySource;
 using network::mojom::ContentSecurityPolicyType;
+using ::testing::_;
 using ::testing::ElementsAre;
-using ::testing::ElementsAreArray;
+using ::testing::IsEmpty;
 
 class DocumentTest : public PageTestBase {
  public:
@@ -112,9 +120,62 @@ class DocumentTest : public PageTestBase {
 
   void SetHtmlInnerHTML(const char*);
 
+  // Note: callers must mock any urls that are referred to in `html_content`,
+  // with the exception of foo.html, which can be assumed to be defined by this
+  // function.
+  // Note: callers must not use double-quotes in the `html_content` string,
+  // since that will conflict with the srcdoc attribute assignment in the
+  // javascript below.
+  enum SandboxState { kIsSandboxed, kIsNotSandboxed };
+  enum UseCountedExpectation { kIsUseCounted, kIsNotUseCounted };
+  void NavigateSrcdocMaybeSandboxed(
+      const String& base_url,
+      const std::string& html_content,
+      const SandboxState sandbox_state,
+      const UseCountedExpectation use_counted_expectation) {
+    WebURL mocked_mainframe_url =
+        url_test_helpers::RegisterMockedURLLoadFromBase(
+            base_url, test::CoreTestDataPath(),
+            WebString::FromUTF8("foo.html"));
+
+    frame_test_helpers::WebViewHelper web_view_helper;
+    // Load a non-about:blank simple mainframe page.
+    web_view_helper.InitializeAndLoad(mocked_mainframe_url.GetString().Utf8());
+
+    WebLocalFrame* main_frame = web_view_helper.LocalMainFrame();
+    const char js_template[] =
+        R"( javascript:
+            var frm = document.createElement('iframe');
+            %s
+            frm.srcdoc = "%s";
+            document.body.appendChild(frm);
+        )";
+    frame_test_helpers::LoadFrame(
+        main_frame,
+        base::StringPrintf(
+            js_template,
+            sandbox_state == kIsSandboxed ? "frm.sandbox = '';" : "",
+            html_content.c_str()));
+    EXPECT_NE(nullptr, main_frame->FirstChild());
+    WebLocalFrame* iframe = main_frame->FirstChild()->ToWebLocalFrame();
+
+    Document* srcdoc_document = iframe->GetDocument();
+    KURL url("about:srcdoc");
+    EXPECT_EQ(url, srcdoc_document->Url());
+    switch (use_counted_expectation) {
+      case kIsUseCounted:
+        EXPECT_TRUE(srcdoc_document->IsUseCounted(
+            WebFeature::kSandboxedSrcdocFrameResolvesRelativeURL));
+        break;
+      case kIsNotUseCounted:
+        EXPECT_FALSE(srcdoc_document->IsUseCounted(
+            WebFeature::kSandboxedSrcdocFrameResolvesRelativeURL));
+    }
+    url_test_helpers::RegisterMockedURLUnregister(mocked_mainframe_url);
+  }
+
   void NavigateWithSandbox(const KURL& url) {
-    auto params = WebNavigationParams::CreateWithHTMLStringForTesting(
-        /*html=*/"", url);
+    auto params = WebNavigationParams::CreateWithEmptyHTMLForTesting(url);
     MockPolicyContainerHost mock_policy_container_host;
     params->policy_container = std::make_unique<blink::WebPolicyContainer>(
         blink::WebPolicyContainerPolicies(),
@@ -322,7 +383,7 @@ class MockDocumentValidationMessageClient
   bool document_detached_was_called;
 
   // ValidationMessageClient functions.
-  void ShowValidationMessage(const Element& anchor,
+  void ShowValidationMessage(Element& anchor,
                              const String& main_message,
                              TextDirection,
                              const String& sub_message,
@@ -355,8 +416,8 @@ class PrefersColorSchemeTestListener final : public MediaQueryListListener {
 bool IsDOMException(ScriptState* script_state,
                     ScriptValue value,
                     DOMExceptionCode code) {
-  auto* dom_exception = V8DOMException::ToImplWithTypeCheck(
-      script_state->GetIsolate(), value.V8Value());
+  auto* dom_exception =
+      V8DOMException::ToWrappable(script_state->GetIsolate(), value.V8Value());
   if (!dom_exception)
     return false;
 
@@ -369,7 +430,8 @@ bool IsDOMException(ScriptState* script_state,
 
 TEST_F(DocumentTest, CreateRangeAdjustedToTreeScopeWithPositionInShadowTree) {
   GetDocument().body()->setInnerHTML("<div><select><option>012</option></div>");
-  Element* const select_element = GetDocument().QuerySelector("select");
+  Element* const select_element =
+      GetDocument().QuerySelector(AtomicString("select"));
   const Position& position =
       Position(*select_element->UserAgentShadowRoot(),
                select_element->UserAgentShadowRoot()->CountChildren());
@@ -435,7 +497,7 @@ TEST_F(DocumentTest, PrintRelayout) {
   gfx::SizeF page_size(400, 400);
   float maximum_shrink_ratio = 1.6;
 
-  GetDocument().GetFrame()->StartPrinting(page_size, page_size,
+  GetDocument().GetFrame()->StartPrinting(WebPrintParams(page_size),
                                           maximum_shrink_ratio);
   EXPECT_EQ(GetDocument().documentElement()->OffsetWidth(), 400);
   GetDocument().GetFrame()->EndPrinting();
@@ -478,51 +540,53 @@ TEST_F(DocumentTest, LinkManifest) {
   // Check that we use the first manifest with <link rel=manifest>
   auto* link = MakeGarbageCollected<HTMLLinkElement>(GetDocument(),
                                                      CreateElementFlags());
-  link->setAttribute(blink::html_names::kRelAttr, "manifest");
-  link->setAttribute(blink::html_names::kHrefAttr, "foo.json");
+  link->setAttribute(blink::html_names::kRelAttr, AtomicString("manifest"));
+  link->setAttribute(blink::html_names::kHrefAttr, AtomicString("foo.json"));
   GetDocument().head()->AppendChild(link);
   EXPECT_EQ(link, GetDocument().LinkManifest());
 
   auto* link2 = MakeGarbageCollected<HTMLLinkElement>(GetDocument(),
                                                       CreateElementFlags());
-  link2->setAttribute(blink::html_names::kRelAttr, "manifest");
-  link2->setAttribute(blink::html_names::kHrefAttr, "bar.json");
+  link2->setAttribute(blink::html_names::kRelAttr, AtomicString("manifest"));
+  link2->setAttribute(blink::html_names::kHrefAttr, AtomicString("bar.json"));
   GetDocument().head()->InsertBefore(link2, link);
   EXPECT_EQ(link2, GetDocument().LinkManifest());
   GetDocument().head()->AppendChild(link2);
   EXPECT_EQ(link, GetDocument().LinkManifest());
 
   // Check that crazy URLs are accepted.
-  link->setAttribute(blink::html_names::kHrefAttr, "http:foo.json");
+  link->setAttribute(blink::html_names::kHrefAttr,
+                     AtomicString("http:foo.json"));
   EXPECT_EQ(link, GetDocument().LinkManifest());
 
   // Check that empty URLs are accepted.
-  link->setAttribute(blink::html_names::kHrefAttr, "");
+  link->setAttribute(blink::html_names::kHrefAttr, g_empty_atom);
   EXPECT_EQ(link, GetDocument().LinkManifest());
 
   // Check that URLs from different origins are accepted.
   link->setAttribute(blink::html_names::kHrefAttr,
-                     "http://example.org/manifest.json");
+                     AtomicString("http://example.org/manifest.json"));
   EXPECT_EQ(link, GetDocument().LinkManifest());
   link->setAttribute(blink::html_names::kHrefAttr,
-                     "http://foo.example.org/manifest.json");
+                     AtomicString("http://foo.example.org/manifest.json"));
   EXPECT_EQ(link, GetDocument().LinkManifest());
   link->setAttribute(blink::html_names::kHrefAttr,
-                     "http://foo.bar/manifest.json");
+                     AtomicString("http://foo.bar/manifest.json"));
   EXPECT_EQ(link, GetDocument().LinkManifest());
 
   // More than one token in @rel is accepted.
-  link->setAttribute(blink::html_names::kRelAttr, "foo bar manifest");
+  link->setAttribute(blink::html_names::kRelAttr,
+                     AtomicString("foo bar manifest"));
   EXPECT_EQ(link, GetDocument().LinkManifest());
 
   // Such as spaces around the token.
-  link->setAttribute(blink::html_names::kRelAttr, " manifest ");
+  link->setAttribute(blink::html_names::kRelAttr, AtomicString(" manifest "));
   EXPECT_EQ(link, GetDocument().LinkManifest());
 
   // Check that rel=manifest actually matters.
-  link->setAttribute(blink::html_names::kRelAttr, "");
+  link->setAttribute(blink::html_names::kRelAttr, g_empty_atom);
   EXPECT_EQ(link2, GetDocument().LinkManifest());
-  link->setAttribute(blink::html_names::kRelAttr, "manifest");
+  link->setAttribute(blink::html_names::kRelAttr, AtomicString("manifest"));
 
   // Check that link outside of the <head> are ignored.
   GetDocument().head()->RemoveChild(link);
@@ -534,15 +598,16 @@ TEST_F(DocumentTest, LinkManifest) {
   GetDocument().head()->AppendChild(link2);
 
   // Check that some attribute values do not have an effect.
-  link->setAttribute(blink::html_names::kCrossoriginAttr, "use-credentials");
+  link->setAttribute(blink::html_names::kCrossoriginAttr,
+                     AtomicString("use-credentials"));
   EXPECT_EQ(link, GetDocument().LinkManifest());
-  link->setAttribute(blink::html_names::kHreflangAttr, "klingon");
+  link->setAttribute(blink::html_names::kHreflangAttr, AtomicString("klingon"));
   EXPECT_EQ(link, GetDocument().LinkManifest());
-  link->setAttribute(blink::html_names::kTypeAttr, "image/gif");
+  link->setAttribute(blink::html_names::kTypeAttr, AtomicString("image/gif"));
   EXPECT_EQ(link, GetDocument().LinkManifest());
-  link->setAttribute(blink::html_names::kSizesAttr, "16x16");
+  link->setAttribute(blink::html_names::kSizesAttr, AtomicString("16x16"));
   EXPECT_EQ(link, GetDocument().LinkManifest());
-  link->setAttribute(blink::html_names::kMediaAttr, "print");
+  link->setAttribute(blink::html_names::kMediaAttr, AtomicString("print"));
   EXPECT_EQ(link, GetDocument().LinkManifest());
 }
 
@@ -555,23 +620,24 @@ TEST_F(DocumentTest, StyleVersion) {
     <div id='x'><span class='c'></span></div>
   )HTML");
 
-  Element* element = GetDocument().getElementById("x");
+  Element* element = GetDocument().getElementById(AtomicString("x"));
   EXPECT_TRUE(element);
 
   uint64_t previous_style_version = GetDocument().StyleVersion();
-  element->setAttribute(blink::html_names::kClassAttr, "notfound");
+  element->setAttribute(blink::html_names::kClassAttr,
+                        AtomicString("notfound"));
   EXPECT_EQ(previous_style_version, GetDocument().StyleVersion());
 
   UpdateAllLifecyclePhasesForTest();
 
   previous_style_version = GetDocument().StyleVersion();
-  element->setAttribute(blink::html_names::kClassAttr, "a");
+  element->setAttribute(blink::html_names::kClassAttr, AtomicString("a"));
   EXPECT_NE(previous_style_version, GetDocument().StyleVersion());
 
   UpdateAllLifecyclePhasesForTest();
 
   previous_style_version = GetDocument().StyleVersion();
-  element->setAttribute(blink::html_names::kClassAttr, "a b");
+  element->setAttribute(blink::html_names::kClassAttr, AtomicString("a b"));
   EXPECT_NE(previous_style_version, GetDocument().StyleVersion());
 }
 
@@ -593,7 +659,7 @@ TEST_F(DocumentTest, SynchronousMutationNotifier) {
 
   Node* text_node = GetDocument().createTextNode("0123456789");
   bold_node->AppendChild(text_node);
-  EXPECT_TRUE(observer.RemovedNodes().IsEmpty());
+  EXPECT_TRUE(observer.RemovedNodes().empty());
 
   text_node->remove();
   ASSERT_EQ(1u, observer.RemovedNodes().size());
@@ -657,7 +723,9 @@ TEST_F(DocumentTest, SynchronousMutationNotifierMoveTreeToNewDocument) {
   move_sample->appendChild(GetDocument().createTextNode("b456"));
   GetDocument().body()->AppendChild(move_sample);
 
-  Document& another_document = *Document::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  Document& another_document =
+      *Document::CreateForTest(execution_context.GetExecutionContext());
   another_document.AppendChild(move_sample);
 
   EXPECT_EQ(1u, observer.MoveTreeToNewDocumentNodes().size());
@@ -825,29 +893,34 @@ TEST_F(DocumentTest,
   // Asking for any element that is not affected by a sticky element should only
   // advance the lifecycle to layout clean.
   GetDocument().EnsurePaintLocationDataValidForNode(
-      GetDocument().getElementById("ancestor"), DocumentUpdateReason::kTest);
+      GetDocument().getElementById(AtomicString("ancestor")),
+      DocumentUpdateReason::kTest);
   EXPECT_EQ(DocumentLifecycle::kLayoutClean,
             GetDocument().Lifecycle().GetState());
 
   GetDocument().EnsurePaintLocationDataValidForNode(
-      GetDocument().getElementById("nonSticky"), DocumentUpdateReason::kTest);
+      GetDocument().getElementById(AtomicString("nonSticky")),
+      DocumentUpdateReason::kTest);
   EXPECT_EQ(DocumentLifecycle::kLayoutClean,
             GetDocument().Lifecycle().GetState());
 
   // However, asking for either the sticky element or it's descendents should
   // clean compositing inputs as well.
   GetDocument().EnsurePaintLocationDataValidForNode(
-      GetDocument().getElementById("sticky"), DocumentUpdateReason::kTest);
+      GetDocument().getElementById(AtomicString("sticky")),
+      DocumentUpdateReason::kTest);
   EXPECT_EQ(DocumentLifecycle::kLayoutClean,
             GetDocument().Lifecycle().GetState());
 
   // Dirty layout.
-  GetDocument().body()->setAttribute("style", "background: red;");
+  GetDocument().body()->setAttribute(html_names::kStyleAttr,
+                                     AtomicString("background: red;"));
   EXPECT_EQ(DocumentLifecycle::kVisualUpdatePending,
             GetDocument().Lifecycle().GetState());
 
   GetDocument().EnsurePaintLocationDataValidForNode(
-      GetDocument().getElementById("stickyChild"), DocumentUpdateReason::kTest);
+      GetDocument().getElementById(AtomicString("stickyChild")),
+      DocumentUpdateReason::kTest);
   EXPECT_EQ(DocumentLifecycle::kLayoutClean,
             GetDocument().Lifecycle().GetState());
 }
@@ -864,13 +937,87 @@ TEST_F(DocumentTest, ViewportPropagationNoRecalc) {
 
   int old_element_count = GetDocument().GetStyleEngine().StyleForElementCount();
 
-  Element* div = GetDocument().getElementById("recalc");
-  div->setAttribute("style", "color:green");
+  Element* div = GetDocument().getElementById(AtomicString("recalc"));
+  div->setAttribute(html_names::kStyleAttr, AtomicString("color:green"));
   GetDocument().UpdateStyleAndLayoutTree();
 
   int new_element_count = GetDocument().GetStyleEngine().StyleForElementCount();
 
   EXPECT_EQ(1, new_element_count - old_element_count);
+}
+
+// A relative url in a sandboxed, srcdoc frame should trigger a usecount.
+TEST_F(DocumentTest, SandboxedSrcdocUserCounts_BasicRelativeUrl) {
+  String base_url("https://example.com/");
+  WebURL mocked_url = url_test_helpers::RegisterMockedURLLoadFromBase(
+      base_url, test::CoreTestDataPath(), "white-1x1.png", "image/png");
+  std::string content =
+      R"(<html><body><img src='white-1x1.png'></body></html>)";
+  NavigateSrcdocMaybeSandboxed(base_url, content, kIsSandboxed, kIsUseCounted);
+  url_test_helpers::RegisterMockedURLUnregister(mocked_url);
+}
+
+// A relative url in a sandboxed, srcdoc frame should not trigger a usecount
+// if the srcdoc document has defined a base element.
+TEST_F(DocumentTest,
+       SandboxedSrcdocUserCounts_BasicRelativeUrlWithBaseElement) {
+  String base_url("https://example.com/");
+  WebURL mocked_url = url_test_helpers::RegisterMockedURLLoadFromBase(
+      base_url, test::CoreTestDataPath(), "white-1x1.png", "image/png");
+  static constexpr char kSrcdocTemplate[] =
+      R"(<html><head><base href='%s' /></head>
+               <body><img src='white-1x1.png'></body></html>)";
+  std::string content =
+      base::StringPrintf(kSrcdocTemplate, base_url.Utf8().c_str());
+  NavigateSrcdocMaybeSandboxed(base_url, content, kIsSandboxed,
+                               kIsNotUseCounted);
+  url_test_helpers::RegisterMockedURLUnregister(mocked_url);
+}
+
+// An absolute url in a sandboxed, srcdoc frame should not trigger a usecount.
+TEST_F(DocumentTest, SandboxedSrcdocUserCounts_BasicAbsoluteUrl) {
+  String base_url("https://example.com/");
+  WebURL mocked_url = url_test_helpers::RegisterMockedURLLoadFromBase(
+      base_url, test::CoreTestDataPath(), "white-1x1.png", "image/png");
+  std::string content =
+      R"(<html>
+           <body>
+             <img src='https://example.com/white-1x1.png'>
+          </body>
+        </html>)";
+  NavigateSrcdocMaybeSandboxed(base_url, content, kIsSandboxed,
+                               kIsNotUseCounted);
+  url_test_helpers::RegisterMockedURLUnregister(mocked_url);
+}
+
+// As in BasicRelativeUrl, but this time the url is for an iframe.
+TEST_F(DocumentTest, SandboxedSrcdocUserCounts_BasicRelativeUrlInIframe) {
+  String base_url("https://example.com/");
+  std::string content = R"(<html><body><iframe src='foo.html'></body></html>)";
+  NavigateSrcdocMaybeSandboxed(base_url, content, kIsSandboxed, kIsUseCounted);
+}
+
+// Non-sandboxed srcdoc frames with relative urls shouldn't trigger the use
+// count.
+TEST_F(DocumentTest,
+       SandboxedSrcdocUserCounts_BasicRelativeUrlInNonSandboxedIframe) {
+  String base_url("https://example.com/");
+  std::string content = R"(<html><body><iframe src='foo.html'></body></html>)";
+  NavigateSrcdocMaybeSandboxed(base_url, content, kIsNotSandboxed,
+                               kIsNotUseCounted);
+}
+
+// As in BasicAbsoluteUrl, but this time the url is for an iframe.
+TEST_F(DocumentTest, SandboxedSrcdocUserCounts_BasicAbsoluteUrlInIframe) {
+  String base_url("https://example.com/");
+  std::string content =
+      R"(<html>
+           <body>
+             <iframe src='https://example.com/foo.html'>
+           </body>
+         </html>)";
+  NavigateSrcdocMaybeSandboxed(base_url, content, kIsSandboxed,
+                               kIsNotUseCounted);
 }
 
 TEST_F(DocumentTest, CanExecuteScriptsWithSandboxAndIsolatedWorld) {
@@ -882,7 +1029,7 @@ TEST_F(DocumentTest, CanExecuteScriptsWithSandboxAndIsolatedWorld) {
   v8::Isolate* isolate = main_world_script_state->GetIsolate();
 
   constexpr int kIsolatedWorldWithoutCSPId = 1;
-  scoped_refptr<DOMWrapperWorld> world_without_csp =
+  DOMWrapperWorld* world_without_csp =
       DOMWrapperWorld::EnsureIsolatedWorld(isolate, kIsolatedWorldWithoutCSPId);
   ScriptState* isolated_world_without_csp_script_state =
       ToScriptState(frame, *world_without_csp);
@@ -891,7 +1038,7 @@ TEST_F(DocumentTest, CanExecuteScriptsWithSandboxAndIsolatedWorld) {
       kIsolatedWorldWithoutCSPId));
 
   constexpr int kIsolatedWorldWithCSPId = 2;
-  scoped_refptr<DOMWrapperWorld> world_with_csp =
+  DOMWrapperWorld* world_with_csp =
       DOMWrapperWorld::EnsureIsolatedWorld(isolate, kIsolatedWorldWithCSPId);
   IsolatedWorldCSP::Get().SetContentSecurityPolicy(
       kIsolatedWorldWithCSPId, String::FromUTF8("script-src *"),
@@ -922,9 +1069,9 @@ TEST_F(DocumentTest, CanExecuteScriptsWithSandboxAndIsolatedWorld) {
   }
 }
 
-// Android does not support non-overlay top-level scrollbars.
-#if !BUILDFLAG(IS_ANDROID)
 TEST_F(DocumentTest, ElementFromPointOnScrollbar) {
+  USE_NON_OVERLAY_SCROLLBARS_OR_QUIT();
+
   GetDocument().SetCompatibilityMode(Document::kQuirksMode);
   // This test requires that scrollbars take up space.
   ScopedMockOverlayScrollbars no_overlay_scrollbars(false);
@@ -941,8 +1088,8 @@ TEST_F(DocumentTest, ElementFromPointOnScrollbar) {
   EXPECT_EQ(GetDocument().ElementFromPoint(1, 590), GetDocument().body());
 
   // Add width which will cause a horizontal scrollbar.
-  auto* content = GetDocument().getElementById("content");
-  content->setAttribute("style", "width: 101%;");
+  auto* content = GetDocument().getElementById(AtomicString("content"));
+  content->setAttribute(html_names::kStyleAttr, AtomicString("width: 101%;"));
 
   // A hit test on the horizontal scrollbar should not return an element because
   // it is outside the viewport.
@@ -950,7 +1097,6 @@ TEST_F(DocumentTest, ElementFromPointOnScrollbar) {
   // A hit test above the horizontal scrollbar should hit the body element.
   EXPECT_EQ(GetDocument().ElementFromPoint(1, 580), GetDocument().body());
 }
-#endif  // !BUILDFLAG(IS_ANDROID)
 
 TEST_F(DocumentTest, ElementFromPointWithPageZoom) {
   GetDocument().SetCompatibilityMode(Document::kQuirksMode);
@@ -965,13 +1111,13 @@ TEST_F(DocumentTest, ElementFromPointWithPageZoom) {
   )HTML");
 
   // A hit test on the content div should hit it.
-  auto* content = GetDocument().getElementById("content");
+  auto* content = GetDocument().getElementById(AtomicString("content"));
   EXPECT_EQ(GetDocument().ElementFromPoint(1, 8), content);
   // A hit test below the content div should not hit it.
   EXPECT_EQ(GetDocument().ElementFromPoint(1, 12), GetDocument().body());
 
   // Zoom the page by 2x,
-  GetDocument().GetFrame()->SetPageZoomFactor(2);
+  GetDocument().GetFrame()->SetLayoutZoomFactor(2);
 
   // A hit test on the content div should hit it.
   EXPECT_EQ(GetDocument().ElementFromPoint(1, 8), content);
@@ -996,23 +1142,23 @@ TEST_F(DocumentTest, PrefersColorSchemeChanged) {
       mojom::blink::PreferredColorScheme::kDark);
 
   UpdateAllLifecyclePhasesForTest();
-  GetDocument().ServiceScriptedAnimations(base::TimeTicks());
+  PageAnimator::ServiceScriptedAnimations(
+      base::TimeTicks(),
+      {{GetDocument().GetScriptedAnimationController(), false}});
 
   EXPECT_TRUE(listener->IsNotified());
 }
 
 TEST_F(DocumentTest, FindInPageUkm) {
-  GetDocument().ukm_recorder_ = std::make_unique<ukm::TestUkmRecorder>();
-  auto* recorder =
-      static_cast<ukm::TestUkmRecorder*>(GetDocument().UkmRecorder());
+  ukm::TestAutoSetUkmRecorder recorder;
 
-  EXPECT_EQ(recorder->entries_count(), 0u);
+  EXPECT_EQ(recorder.entries_count(), 0u);
   GetDocument().MarkHasFindInPageRequest();
-  EXPECT_EQ(recorder->entries_count(), 1u);
+  EXPECT_EQ(recorder.entries_count(), 1u);
   GetDocument().MarkHasFindInPageRequest();
-  EXPECT_EQ(recorder->entries_count(), 1u);
+  EXPECT_EQ(recorder.entries_count(), 1u);
 
-  auto entries = recorder->GetEntriesByName("Blink.FindInPage");
+  auto entries = recorder.GetEntriesByName("Blink.FindInPage");
   EXPECT_EQ(entries.size(), 1u);
   EXPECT_TRUE(ukm::TestUkmRecorder::EntryHasMetric(entries[0], "DidSearch"));
   EXPECT_EQ(*ukm::TestUkmRecorder::GetEntryMetric(entries[0], "DidSearch"), 1);
@@ -1020,10 +1166,10 @@ TEST_F(DocumentTest, FindInPageUkm) {
       entries[0], "DidHaveRenderSubtreeMatch"));
 
   GetDocument().MarkHasFindInPageContentVisibilityActiveMatch();
-  EXPECT_EQ(recorder->entries_count(), 2u);
+  EXPECT_EQ(recorder.entries_count(), 2u);
   GetDocument().MarkHasFindInPageContentVisibilityActiveMatch();
-  EXPECT_EQ(recorder->entries_count(), 2u);
-  entries = recorder->GetEntriesByName("Blink.FindInPage");
+  EXPECT_EQ(recorder.entries_count(), 2u);
+  entries = recorder.GetEntriesByName("Blink.FindInPage");
   EXPECT_EQ(entries.size(), 2u);
 
   EXPECT_TRUE(ukm::TestUkmRecorder::EntryHasMetric(entries[0], "DidSearch"));
@@ -1057,24 +1203,20 @@ TEST_F(DocumentTest, FindInPageUkmInFrame) {
       DocumentUpdateReason::kTest);
 
   Document* top_doc = web_view_impl->MainFrameImpl()->GetFrame()->GetDocument();
-  auto* iframe = To<HTMLIFrameElement>(top_doc->QuerySelector("iframe"));
+  auto* iframe =
+      To<HTMLIFrameElement>(top_doc->QuerySelector(AtomicString("iframe")));
   Document* document = iframe->contentDocument();
   ASSERT_TRUE(document);
   ASSERT_FALSE(document->IsInMainFrame());
 
-  // Save the old recorder and replace it with a test one.
-  auto old_recorder = std::move(document->ukm_recorder_);
-  document->ukm_recorder_ = std::make_unique<ukm::TestUkmRecorder>();
-
-  auto* recorder = static_cast<ukm::TestUkmRecorder*>(document->UkmRecorder());
-
-  EXPECT_EQ(recorder->entries_count(), 0u);
+  ukm::TestAutoSetUkmRecorder recorder;
+  EXPECT_EQ(recorder.entries_count(), 0u);
   document->MarkHasFindInPageRequest();
-  EXPECT_EQ(recorder->entries_count(), 1u);
+  EXPECT_EQ(recorder.entries_count(), 1u);
   document->MarkHasFindInPageRequest();
-  EXPECT_EQ(recorder->entries_count(), 1u);
+  EXPECT_EQ(recorder.entries_count(), 1u);
 
-  auto entries = recorder->GetEntriesByName("Blink.FindInPage");
+  auto entries = recorder.GetEntriesByName("Blink.FindInPage");
   EXPECT_EQ(entries.size(), 1u);
   EXPECT_TRUE(ukm::TestUkmRecorder::EntryHasMetric(entries[0], "DidSearch"));
   EXPECT_EQ(*ukm::TestUkmRecorder::GetEntryMetric(entries[0], "DidSearch"), 1);
@@ -1082,10 +1224,10 @@ TEST_F(DocumentTest, FindInPageUkmInFrame) {
       entries[0], "DidHaveRenderSubtreeMatch"));
 
   document->MarkHasFindInPageContentVisibilityActiveMatch();
-  EXPECT_EQ(recorder->entries_count(), 2u);
+  EXPECT_EQ(recorder.entries_count(), 2u);
   document->MarkHasFindInPageContentVisibilityActiveMatch();
-  EXPECT_EQ(recorder->entries_count(), 2u);
-  entries = recorder->GetEntriesByName("Blink.FindInPage");
+  EXPECT_EQ(recorder.entries_count(), 2u);
+  entries = recorder.GetEntriesByName("Blink.FindInPage");
   EXPECT_EQ(entries.size(), 2u);
 
   EXPECT_TRUE(ukm::TestUkmRecorder::EntryHasMetric(entries[0], "DidSearch"));
@@ -1099,22 +1241,18 @@ TEST_F(DocumentTest, FindInPageUkmInFrame) {
                                                   "DidHaveRenderSubtreeMatch"),
             1);
   EXPECT_FALSE(ukm::TestUkmRecorder::EntryHasMetric(entries[1], "DidSearch"));
-
-  // Restore the old recorder, since some ukm metrics are recorded at shutdown.
-  document->ukm_recorder_ = std::move(old_recorder);
 }
 
 TEST_F(DocumentTest, AtPageMarginWithDeviceScaleFactor) {
-  GetDocument().GetFrame()->SetPageZoomFactor(2);
+  GetDocument().GetFrame()->SetLayoutZoomFactor(2);
   SetBodyInnerHTML("<style>@page { margin: 50px; size: 400px 10in; }</style>");
 
   constexpr gfx::SizeF initial_page_size(800, 600);
 
-  GetDocument().GetFrame()->StartPrinting(initial_page_size, initial_page_size);
+  GetDocument().GetFrame()->StartPrinting(WebPrintParams(initial_page_size));
   GetDocument().View()->UpdateLifecyclePhasesForPrinting();
 
-  WebPrintPageDescription description;
-  GetDocument().GetPageDescription(0, &description);
+  WebPrintPageDescription description = GetDocument().GetPageDescription(0);
 
   EXPECT_EQ(50, description.margin_top);
   EXPECT_EQ(50, description.margin_right);
@@ -1123,8 +1261,8 @@ TEST_F(DocumentTest, AtPageMarginWithDeviceScaleFactor) {
   EXPECT_EQ(gfx::SizeF(400, 960), description.size);
 }
 
-TEST_F(DocumentTest, HandlesDisconnectDuringHasTrustToken) {
-  // Check that a Mojo handle disconnecting during hasTrustToken operation
+TEST_F(DocumentTest, HandlesDisconnectDuringHasPrivateToken) {
+  // Check that a Mojo handle disconnecting during hasPrivateToken operation
   // execution results in the promise getting rejected with the proper
   // exception.
   V8TestingScope scope(KURL("https://trusttoken.example"));
@@ -1132,12 +1270,9 @@ TEST_F(DocumentTest, HandlesDisconnectDuringHasTrustToken) {
   Document& document = scope.GetDocument();
 
   auto promise =
-      document.hasTrustToken(scope.GetScriptState(), "https://issuer.example",
-                             scope.GetExceptionState());
+      document.hasPrivateToken(scope.GetScriptState(), "https://issuer.example",
+                               scope.GetExceptionState());
   DocumentTest::SimulateTrustTokenQueryAnswererConnectionError(&document);
-
-  ASSERT_TRUE(promise.IsAssociatedWith(scope.GetScriptState()));
-
   ScriptPromiseTester promise_tester(scope.GetScriptState(), promise);
   promise_tester.WaitUntilSettled();
   EXPECT_TRUE(promise_tester.IsRejected());
@@ -1145,32 +1280,30 @@ TEST_F(DocumentTest, HandlesDisconnectDuringHasTrustToken) {
                              DOMExceptionCode::kOperationError));
 }
 
-TEST_F(DocumentTest, RejectsHasTrustTokenCallFromNonHttpNonHttpsDocument) {
-  // Check that hasTrustToken getting called from a secure, but
+TEST_F(DocumentTest, RejectsHasPrivateTokenCallFromNonHttpNonHttpsDocument) {
+  // Check that hasPrivateToken getting called from a secure, but
   // non-http/non-https, document results in an exception being thrown.
   V8TestingScope scope(KURL("file:///trusttoken.txt"));
 
   Document& document = scope.GetDocument();
   ScriptState* script_state = scope.GetScriptState();
   ExceptionState exception_state(script_state->GetIsolate(),
-                                 ExceptionState::kExecutionContext, "Document",
-                                 "hasTrustToken");
+                                 v8::ExceptionContext::kOperation, "Document",
+                                 "hasPrivateToken");
 
-  auto promise = document.hasTrustToken(script_state, "https://issuer.example",
-                                        exception_state);
-
-  ScriptPromiseTester promise_tester(script_state, promise);
-  promise_tester.WaitUntilSettled();
-  EXPECT_TRUE(promise_tester.IsRejected());
-  EXPECT_TRUE(IsDOMException(script_state, promise_tester.Value(),
-                             DOMExceptionCode::kNotAllowedError));
+  auto promise = document.hasPrivateToken(
+      script_state, "https://issuer.example", exception_state);
+  EXPECT_TRUE(promise.IsEmpty());
+  EXPECT_TRUE(exception_state.HadException());
+  EXPECT_EQ(exception_state.CodeAs<DOMExceptionCode>(),
+            DOMExceptionCode::kNotAllowedError);
 }
 
 namespace {
 class MockTrustTokenQueryAnswerer
     : public network::mojom::blink::TrustTokenQueryAnswerer {
  public:
-  enum Outcome { kError, kTrue, kFalse };
+  enum Outcome { kError, kInvalidArgument, kResourceExhausted, kTrue, kFalse };
   explicit MockTrustTokenQueryAnswerer(Outcome outcome) : outcome_(outcome) {}
 
   void HasTrustTokens(
@@ -1186,6 +1319,18 @@ class MockTrustTokenQueryAnswerer
       }
       case kFalse: {
         result->has_trust_tokens = false;
+        std::move(callback).Run(std::move(result));
+        return;
+      }
+      case kInvalidArgument: {
+        result->status =
+            network::mojom::blink::TrustTokenOperationStatus::kInvalidArgument;
+        std::move(callback).Run(std::move(result));
+        return;
+      }
+      case kResourceExhausted: {
+        result->status = network::mojom::blink::TrustTokenOperationStatus::
+            kResourceExhausted;
         std::move(callback).Run(std::move(result));
         return;
       }
@@ -1211,6 +1356,16 @@ class MockTrustTokenQueryAnswerer
         result->has_redemption_record = false;
         break;
       }
+      case kInvalidArgument: {
+        result->status =
+            network::mojom::blink::TrustTokenOperationStatus::kInvalidArgument;
+        break;
+      }
+      case kResourceExhausted: {
+        result->status = network::mojom::blink::TrustTokenOperationStatus::
+            kResourceExhausted;
+        break;
+      }
       case kError: {
         result->status =
             network::mojom::blink::TrustTokenOperationStatus::kUnknownError;
@@ -1233,7 +1388,7 @@ class MockTrustTokenQueryAnswerer
 };
 }  // namespace
 
-TEST_F(DocumentTest, HasTrustTokenSuccess) {
+TEST_F(DocumentTest, HasPrivateTokenSuccess) {
   V8TestingScope scope(KURL("https://secure.example"));
 
   MockTrustTokenQueryAnswerer answerer(MockTrustTokenQueryAnswerer::kTrue);
@@ -1246,11 +1401,11 @@ TEST_F(DocumentTest, HasTrustTokenSuccess) {
 
   ScriptState* script_state = scope.GetScriptState();
   ExceptionState exception_state(script_state->GetIsolate(),
-                                 ExceptionState::kExecutionContext, "Document",
-                                 "hasTrustToken");
+                                 v8::ExceptionContext::kOperation, "Document",
+                                 "hasPrivateToken");
 
-  auto promise = document.hasTrustToken(script_state, "https://issuer.example",
-                                        exception_state);
+  auto promise = document.hasPrivateToken(
+      script_state, "https://issuer.example", exception_state);
 
   ScriptPromiseTester promise_tester(script_state, promise);
   promise_tester.WaitUntilSettled();
@@ -1261,7 +1416,7 @@ TEST_F(DocumentTest, HasTrustTokenSuccess) {
       network::mojom::blink::TrustTokenQueryAnswerer::Name_, {});
 }
 
-TEST_F(DocumentTest, HasTrustTokenSuccessWithFalseValue) {
+TEST_F(DocumentTest, HasPrivateTokenSuccessWithFalseValue) {
   V8TestingScope scope(KURL("https://secure.example"));
 
   MockTrustTokenQueryAnswerer answerer(MockTrustTokenQueryAnswerer::kFalse);
@@ -1274,11 +1429,11 @@ TEST_F(DocumentTest, HasTrustTokenSuccessWithFalseValue) {
 
   ScriptState* script_state = scope.GetScriptState();
   ExceptionState exception_state(script_state->GetIsolate(),
-                                 ExceptionState::kExecutionContext, "Document",
-                                 "hasTrustToken");
+                                 v8::ExceptionContext::kOperation, "Document",
+                                 "hasPrivateToken");
 
-  auto promise = document.hasTrustToken(script_state, "https://issuer.example",
-                                        exception_state);
+  auto promise = document.hasPrivateToken(
+      script_state, "https://issuer.example", exception_state);
 
   ScriptPromiseTester promise_tester(script_state, promise);
   promise_tester.WaitUntilSettled();
@@ -1289,7 +1444,7 @@ TEST_F(DocumentTest, HasTrustTokenSuccessWithFalseValue) {
       network::mojom::blink::TrustTokenQueryAnswerer::Name_, {});
 }
 
-TEST_F(DocumentTest, HasTrustTokenOperationError) {
+TEST_F(DocumentTest, HasPrivateTokenOperationError) {
   V8TestingScope scope(KURL("https://secure.example"));
 
   MockTrustTokenQueryAnswerer answerer(MockTrustTokenQueryAnswerer::kError);
@@ -1302,11 +1457,71 @@ TEST_F(DocumentTest, HasTrustTokenOperationError) {
 
   ScriptState* script_state = scope.GetScriptState();
   ExceptionState exception_state(script_state->GetIsolate(),
-                                 ExceptionState::kExecutionContext, "Document",
-                                 "hasTrustToken");
+                                 v8::ExceptionContext::kOperation, "Document",
+                                 "hasPrivateToken");
 
-  auto promise = document.hasTrustToken(script_state, "https://issuer.example",
-                                        exception_state);
+  auto promise = document.hasPrivateToken(
+      script_state, "https://issuer.example", exception_state);
+
+  ScriptPromiseTester promise_tester(script_state, promise);
+  promise_tester.WaitUntilSettled();
+  EXPECT_TRUE(promise_tester.IsRejected());
+  EXPECT_TRUE(IsDOMException(script_state, promise_tester.Value(),
+                             DOMExceptionCode::kOperationError));
+
+  document.GetFrame()->GetBrowserInterfaceBroker().SetBinderForTesting(
+      network::mojom::blink::TrustTokenQueryAnswerer::Name_, {});
+}
+
+TEST_F(DocumentTest, HasPrivateTokenInvalidArgument) {
+  V8TestingScope scope(KURL("https://secure.example"));
+
+  MockTrustTokenQueryAnswerer answerer(
+      MockTrustTokenQueryAnswerer::kInvalidArgument);
+
+  Document& document = scope.GetDocument();
+  document.GetFrame()->GetBrowserInterfaceBroker().SetBinderForTesting(
+      network::mojom::blink::TrustTokenQueryAnswerer::Name_,
+      WTF::BindRepeating(&MockTrustTokenQueryAnswerer::Bind,
+                         WTF::Unretained(&answerer)));
+
+  ScriptState* script_state = scope.GetScriptState();
+  ExceptionState exception_state(script_state->GetIsolate(),
+                                 v8::ExceptionContext::kOperation, "Document",
+                                 "hasPrivateToken");
+
+  auto promise = document.hasPrivateToken(
+      script_state, "https://issuer.example", exception_state);
+
+  ScriptPromiseTester promise_tester(script_state, promise);
+  promise_tester.WaitUntilSettled();
+  EXPECT_TRUE(promise_tester.IsRejected());
+  EXPECT_TRUE(IsDOMException(script_state, promise_tester.Value(),
+                             DOMExceptionCode::kOperationError));
+
+  document.GetFrame()->GetBrowserInterfaceBroker().SetBinderForTesting(
+      network::mojom::blink::TrustTokenQueryAnswerer::Name_, {});
+}
+
+TEST_F(DocumentTest, HasPrivateTokenResourceExhausted) {
+  V8TestingScope scope(KURL("https://secure.example"));
+
+  MockTrustTokenQueryAnswerer answerer(
+      MockTrustTokenQueryAnswerer::kResourceExhausted);
+
+  Document& document = scope.GetDocument();
+  document.GetFrame()->GetBrowserInterfaceBroker().SetBinderForTesting(
+      network::mojom::blink::TrustTokenQueryAnswerer::Name_,
+      WTF::BindRepeating(&MockTrustTokenQueryAnswerer::Bind,
+                         WTF::Unretained(&answerer)));
+
+  ScriptState* script_state = scope.GetScriptState();
+  ExceptionState exception_state(script_state->GetIsolate(),
+                                 v8::ExceptionContext::kOperation, "Document",
+                                 "hasPrivateToken");
+
+  auto promise = document.hasPrivateToken(
+      script_state, "https://issuer.example", exception_state);
 
   ScriptPromiseTester promise_tester(script_state, promise);
   promise_tester.WaitUntilSettled();
@@ -1331,7 +1546,7 @@ TEST_F(DocumentTest, HasRedemptionRecordSuccess) {
 
   ScriptState* script_state = scope.GetScriptState();
   ExceptionState exception_state(script_state->GetIsolate(),
-                                 ExceptionState::kExecutionContext, "Document",
+                                 v8::ExceptionContext::kOperation, "Document",
                                  "hasRedemptionRecord");
 
   auto promise = document.hasRedemptionRecord(
@@ -1359,8 +1574,8 @@ TEST_F(DocumentTest, HasRedemptionRecordSuccessWithFalseValue) {
 
   ScriptState* script_state = scope.GetScriptState();
   ExceptionState exception_state(script_state->GetIsolate(),
-                                 ExceptionState::kExecutionContext, "Document",
-                                 "hasTrustToken");
+                                 v8::ExceptionContext::kOperation, "Document",
+                                 "hasRedemptionRecord");
 
   auto promise = document.hasRedemptionRecord(
       script_state, "https://issuer.example", exception_state);
@@ -1387,7 +1602,37 @@ TEST_F(DocumentTest, HasRedemptionRecordOperationError) {
 
   ScriptState* script_state = scope.GetScriptState();
   ExceptionState exception_state(script_state->GetIsolate(),
-                                 ExceptionState::kExecutionContext, "Document",
+                                 v8::ExceptionContext::kOperation, "Document",
+                                 "hasRedemptionRecord");
+
+  auto promise = document.hasRedemptionRecord(
+      script_state, "https://issuer.example", exception_state);
+
+  ScriptPromiseTester promise_tester(script_state, promise);
+  promise_tester.WaitUntilSettled();
+  EXPECT_TRUE(promise_tester.IsRejected());
+  EXPECT_TRUE(IsDOMException(script_state, promise_tester.Value(),
+                             DOMExceptionCode::kOperationError));
+
+  document.GetFrame()->GetBrowserInterfaceBroker().SetBinderForTesting(
+      network::mojom::blink::TrustTokenQueryAnswerer::Name_, {});
+}
+
+TEST_F(DocumentTest, HasRedemptionRecordInvalidArgument) {
+  V8TestingScope scope(KURL("https://secure.example"));
+
+  MockTrustTokenQueryAnswerer answerer(
+      MockTrustTokenQueryAnswerer::kInvalidArgument);
+
+  Document& document = scope.GetDocument();
+  document.GetFrame()->GetBrowserInterfaceBroker().SetBinderForTesting(
+      network::mojom::blink::TrustTokenQueryAnswerer::Name_,
+      WTF::BindRepeating(&MockTrustTokenQueryAnswerer::Bind,
+                         WTF::Unretained(&answerer)));
+
+  ScriptState* script_state = scope.GetScriptState();
+  ExceptionState exception_state(script_state->GetIsolate(),
+                                 v8::ExceptionContext::kOperation, "Document",
                                  "hasRedemptionRecord");
 
   auto promise = document.hasRedemptionRecord(
@@ -1415,9 +1660,6 @@ TEST_F(DocumentTest, HandlesDisconnectDuringHasRedemptionRecord) {
                                               "https://issuer.example",
                                               scope.GetExceptionState());
   DocumentTest::SimulateTrustTokenQueryAnswererConnectionError(&document);
-
-  ASSERT_TRUE(promise.IsAssociatedWith(scope.GetScriptState()));
-
   ScriptPromiseTester promise_tester(scope.GetScriptState(), promise);
   promise_tester.WaitUntilSettled();
   EXPECT_TRUE(promise_tester.IsRejected());
@@ -1434,17 +1676,15 @@ TEST_F(DocumentTest,
   Document& document = scope.GetDocument();
   ScriptState* script_state = scope.GetScriptState();
   ExceptionState exception_state(script_state->GetIsolate(),
-                                 ExceptionState::kExecutionContext, "Document",
+                                 v8::ExceptionContext::kOperation, "Document",
                                  "hasRedemptionRecord");
 
   auto promise = document.hasRedemptionRecord(
       script_state, "https://issuer.example", exception_state);
-
-  ScriptPromiseTester promise_tester(script_state, promise);
-  promise_tester.WaitUntilSettled();
-  EXPECT_TRUE(promise_tester.IsRejected());
-  EXPECT_TRUE(IsDOMException(script_state, promise_tester.Value(),
-                             DOMExceptionCode::kNotAllowedError));
+  EXPECT_TRUE(promise.IsEmpty());
+  EXPECT_TRUE(exception_state.HadException());
+  EXPECT_EQ(exception_state.CodeAs<DOMExceptionCode>(),
+            DOMExceptionCode::kNotAllowedError);
 }
 
 /**
@@ -1560,10 +1800,8 @@ TEST_F(DocumentSimTest, LastModified) {
 }
 
 TEST_F(DocumentSimTest, DuplicatedDocumentPolicyViolationsAreIgnored) {
-  blink::ScopedDocumentPolicyForTest scoped_document_policy(true);
   SimRequest::Params params;
-  params.response_http_headers = {
-      {"Document-Policy", "lossless-images-max-bpp=1.0"}};
+  params.response_http_headers = {{"Document-Policy", "force-load-at-top=?0"}};
   SimRequest main_resource("https://example.com", "text/html", params);
   LoadURL("https://example.com");
   main_resource.Finish();
@@ -1575,14 +1813,14 @@ TEST_F(DocumentSimTest, DuplicatedDocumentPolicyViolationsAreIgnored) {
                                           mock_reporting_context);
 
   EXPECT_FALSE(execution_context->IsFeatureEnabled(
-      mojom::blink::DocumentPolicyFeature::kLosslessImagesMaxBpp,
-      PolicyValue::CreateDecDouble(1.1), ReportOptions::kReportOnFailure));
+      mojom::blink::DocumentPolicyFeature::kForceLoadAtTop,
+      PolicyValue::CreateBool(true), ReportOptions::kReportOnFailure));
 
   EXPECT_EQ(mock_reporting_context->report_count, 1u);
 
   EXPECT_FALSE(execution_context->IsFeatureEnabled(
-      mojom::blink::DocumentPolicyFeature::kLosslessImagesMaxBpp,
-      PolicyValue::CreateDecDouble(1.1), ReportOptions::kReportOnFailure));
+      mojom::blink::DocumentPolicyFeature::kForceLoadAtTop,
+      PolicyValue::CreateBool(true), ReportOptions::kReportOnFailure));
 
   EXPECT_EQ(mock_reporting_context->report_count, 1u);
 }
@@ -1590,8 +1828,8 @@ TEST_F(DocumentSimTest, DuplicatedDocumentPolicyViolationsAreIgnored) {
 // Tests getting the unassociated listed elements.
 class UnassociatedListedElementTest : public DocumentTest {
  protected:
-  ListedElement* GetElement(AtomicString id) {
-    Element* element = GetDocument().getElementById(id);
+  ListedElement* GetElement(const char* id) {
+    Element* element = GetElementById(id);
     return ListedElement::From(*element);
   }
 };
@@ -1632,49 +1870,53 @@ TEST_F(UnassociatedListedElementTest, GetUnassociatedListedElements) {
 
   // Add unassociated form-associated custom element.
   Element* unassociated_custom_element =
-      CreateElement("input").WithIsValue("a-b");
-  unassociated_custom_element->SetIdAttribute("unassociated_custom_element");
+      CreateElement(AtomicString("input")).WithIsValue(AtomicString("a-b"));
+  unassociated_custom_element->SetIdAttribute(
+      AtomicString("unassociated_custom_element"));
   GetDocument().body()->AppendChild(unassociated_custom_element);
-  ASSERT_TRUE(GetDocument().getElementById("unassociated_custom_element"));
+  ASSERT_TRUE(GetDocument().getElementById(
+      AtomicString("unassociated_custom_element")));
 
   // Add associated form-associated custom element.
   Element* associated_custom_element =
-      CreateElement("input").WithIsValue("a-b");
-  associated_custom_element->SetIdAttribute("associated_custom_element");
-  GetDocument().getElementById("form")->AppendChild(associated_custom_element);
-  ASSERT_TRUE(GetDocument().getElementById("associated_custom_element"));
+      CreateElement(AtomicString("input")).WithIsValue(AtomicString("a-b"));
+  associated_custom_element->SetIdAttribute(
+      AtomicString("associated_custom_element"));
+  GetDocument()
+      .getElementById(AtomicString("form"))
+      ->AppendChild(associated_custom_element);
+  ASSERT_TRUE(
+      GetDocument().getElementById(AtomicString("associated_custom_element")));
 
-  ListedElement::List expected_elements;
-  expected_elements.push_back(GetElement(u"unassociated_button"));
-  expected_elements.push_back(GetElement(u"unassociated_fieldset"));
-  expected_elements.push_back(GetElement(u"unassociated_input"));
-  expected_elements.push_back(GetElement(u"unassociated_textarea"));
-  expected_elements.push_back(GetElement(u"unassociated_output"));
-  expected_elements.push_back(GetElement(u"unassociated_select"));
-  expected_elements.push_back(GetElement(u"unassociated_object"));
-  expected_elements.push_back(GetElement(u"unassociated_custom_element"));
-
-  ListedElement::List listed_elements =
-      GetDocument().UnassociatedListedElements();
-  EXPECT_THAT(listed_elements, ElementsAreArray(expected_elements));
+  auto expected_elements = [&] {
+    return ElementsAre(
+        GetElement("unassociated_button"), GetElement("unassociated_fieldset"),
+        GetElement("unassociated_input"), GetElement("unassociated_textarea"),
+        GetElement("unassociated_output"), GetElement("unassociated_select"),
+        /*Button inside <object> Shadow DOM*/ _,
+        GetElement("unassociated_custom_element"));
+  };
+  EXPECT_THAT(GetDocument().UnassociatedListedElements(), expected_elements());
 
   // Try getting the cached unassociated listed elements again (calling
   // UnassociatedListedElements() again will not re-extract them).
-  listed_elements = GetDocument().UnassociatedListedElements();
-  EXPECT_THAT(listed_elements, ElementsAreArray(expected_elements));
+  EXPECT_THAT(GetDocument().UnassociatedListedElements(), expected_elements());
 }
 
-// We don't extract unassociated listed element in a shadow DOM.
+// We extract unassociated listed element in a shadow DOM.
 TEST_F(UnassociatedListedElementTest,
        GetUnassociatedListedElementsFromShadowTree) {
   ShadowRoot& shadow_root =
-      GetDocument().body()->AttachShadowRootInternal(ShadowRootType::kOpen);
-  HTMLInputElement* input = MakeGarbageCollected<HTMLInputElement>(
-      GetDocument(), CreateElementFlags::ByCreateElement());
+      GetDocument().body()->AttachShadowRootForTesting(ShadowRootMode::kOpen);
+  HTMLInputElement* input =
+      MakeGarbageCollected<HTMLInputElement>(GetDocument());
+  input->SetIdAttribute(AtomicString("unassociated_input"));
   shadow_root.AppendChild(input);
   ListedElement::List listed_elements =
       GetDocument().UnassociatedListedElements();
-  EXPECT_EQ(0u, listed_elements.size());
+  EXPECT_THAT(listed_elements,
+              ElementsAre(ListedElement::From(*shadow_root.getElementById(
+                  AtomicString("unassociated_input")))));
 }
 
 // Check if the dynamically added unassociated listed element is properly
@@ -1691,9 +1933,8 @@ TEST_F(UnassociatedListedElementTest,
       GetDocument().UnassociatedListedElements();
   EXPECT_EQ(0u, listed_elements.size());
 
-  auto* input = MakeGarbageCollected<HTMLInputElement>(
-      GetDocument(), CreateElementFlags::ByCreateElement());
-  input->SetIdAttribute("unassociated_input");
+  auto* input = MakeGarbageCollected<HTMLInputElement>(GetDocument());
+  input->SetIdAttribute(AtomicString("unassociated_input"));
   GetDocument().body()->AppendChild(input);
 
   listed_elements = GetDocument().UnassociatedListedElements();
@@ -1713,7 +1954,7 @@ TEST_F(UnassociatedListedElementTest,
       GetDocument().UnassociatedListedElements();
   EXPECT_THAT(listed_elements, ElementsAre(GetElement("input_id")));
 
-  GetDocument().getElementById("input_id")->remove();
+  GetDocument().getElementById(AtomicString("input_id"))->remove();
   listed_elements = GetDocument().UnassociatedListedElements();
   EXPECT_EQ(0u, listed_elements.size());
 }
@@ -1733,8 +1974,8 @@ TEST_F(UnassociatedListedElementTest,
   EXPECT_THAT(listed_elements, ElementsAre(GetElement("input_id")));
 
   GetDocument()
-      .getElementById("input_id")
-      ->setAttribute(html_names::kFormAttr, "form_id");
+      .getElementById(AtomicString("input_id"))
+      ->setAttribute(html_names::kFormAttr, AtomicString("form_id"));
   listed_elements = GetDocument().UnassociatedListedElements();
   EXPECT_EQ(0u, listed_elements.size());
 }
@@ -1753,7 +1994,7 @@ TEST_F(UnassociatedListedElementTest,
   EXPECT_EQ(0u, listed_elements.size());
 
   GetDocument()
-      .getElementById("input_id")
+      .getElementById(AtomicString("input_id"))
       ->removeAttribute(html_names::kFormAttr);
   listed_elements = GetDocument().UnassociatedListedElements();
   EXPECT_THAT(listed_elements, ElementsAre(GetElement("input_id")));
@@ -1772,8 +2013,8 @@ TEST_F(UnassociatedListedElementTest,
   EXPECT_EQ(0u, listed_elements.size());
 
   GetDocument()
-      .getElementById("input_id")
-      ->setAttribute(html_names::kFormAttr, "nonexistent_id");
+      .getElementById(AtomicString("input_id"))
+      ->setAttribute(html_names::kFormAttr, AtomicString("nonexistent_id"));
   listed_elements = GetDocument().UnassociatedListedElements();
   EXPECT_THAT(listed_elements, ElementsAre(GetElement("input_id")));
 }
@@ -1789,8 +2030,8 @@ TEST_F(UnassociatedListedElementTest,
   EXPECT_EQ(0u, listed_elements.size());
 
   HTMLDivElement* div = MakeGarbageCollected<HTMLDivElement>(GetDocument());
-  HTMLInputElement* input = MakeGarbageCollected<HTMLInputElement>(
-      GetDocument(), CreateElementFlags::ByCreateElement());
+  HTMLInputElement* input =
+      MakeGarbageCollected<HTMLInputElement>(GetDocument());
   div->AppendChild(input);
   listed_elements = GetDocument().UnassociatedListedElements();
   EXPECT_EQ(0u, listed_elements.size());
@@ -1807,8 +2048,8 @@ TEST_F(UnassociatedListedElementTest,
   EXPECT_EQ(0u, listed_elements.size());
 
   HTMLDivElement* div = MakeGarbageCollected<HTMLDivElement>(GetDocument());
-  HTMLInputElement* input = MakeGarbageCollected<HTMLInputElement>(
-      GetDocument(), CreateElementFlags::ByCreateElement());
+  HTMLInputElement* input =
+      MakeGarbageCollected<HTMLInputElement>(GetDocument());
   div->AppendChild(input);
   GetDocument().body()->AppendChild(div);
   listed_elements = GetDocument().UnassociatedListedElements();
@@ -1825,10 +2066,119 @@ TEST_F(UnassociatedListedElementTest,
       GetDocument().UnassociatedListedElements();
   EXPECT_THAT(listed_elements, ElementsAre(GetElement("input_id")));
 
-  auto* div = GetDocument().getElementById("div_id");
+  auto* div = GetDocument().getElementById(AtomicString("div_id"));
   div->remove();
   listed_elements = GetDocument().UnassociatedListedElements();
   EXPECT_EQ(0u, listed_elements.size());
+}
+
+class TopLevelFormsListTest : public DocumentTest {
+ public:
+  HTMLFormElement* GetFormElement(const char* id) {
+    return DynamicTo<HTMLFormElement>(GetElementById(id));
+  }
+  HTMLFormElement* GetFormElement(const char* id, ShadowRoot& shadow_root) {
+    return DynamicTo<HTMLFormElement>(
+        shadow_root.getElementById(AtomicString(id)));
+  }
+};
+
+// Tests that `GetTopLevelForms` correctly lists forms in the light DOM.
+TEST_F(TopLevelFormsListTest, FormsInLightDom) {
+  SetHtmlInnerHTML(R"HTML(
+    <form id="f1">
+      <input type="text">
+    </form>
+    <div>
+      <form id="f2">
+        <input type="text">
+      </form>
+    </div>
+  )HTML");
+  EXPECT_THAT(GetDocument().GetTopLevelForms(),
+              ElementsAre(GetFormElement("f1"), GetFormElement("f2")));
+  // A second call has the same result.
+  EXPECT_THAT(GetDocument().GetTopLevelForms(),
+              ElementsAre(GetFormElement("f1"), GetFormElement("f2")));
+}
+
+// Tests that `GetTopLevelForms` functions correctly after dynamic form element
+// insertion and removal.
+TEST_F(TopLevelFormsListTest, FormsInLightDomInsertionAndRemoval) {
+  SetHtmlInnerHTML(R"HTML(
+    <form id="f1">
+      <input type="text">
+    </form>
+    <div>
+      <form id="f2">
+        <input type="text">
+      </form>
+    </div>
+  )HTML");
+  EXPECT_THAT(GetDocument().GetTopLevelForms(),
+              ElementsAre(GetFormElement("f1"), GetFormElement("f2")));
+
+  // Adding a new form element invalidates the cache.
+  Element* new_form = CreateElement(AtomicString("form"));
+  new_form->SetIdAttribute(AtomicString("f3"));
+  EXPECT_THAT(GetDocument().GetTopLevelForms(),
+              ElementsAre(GetFormElement("f1"), GetFormElement("f2")));
+  GetDocument().body()->AppendChild(new_form);
+  EXPECT_THAT(GetDocument().GetTopLevelForms(),
+              ElementsAre(GetFormElement("f1"), GetFormElement("f3"),
+                          GetFormElement("f2")));
+
+  // Removing a form element invalidates the cache.
+  GetFormElement("f2")->remove();
+  EXPECT_THAT(GetDocument().GetTopLevelForms(),
+              ElementsAre(GetFormElement("f1"), GetFormElement("f3")));
+}
+
+// Tests that top level forms inside shadow DOM are listed correctly and
+// insertion and removal updates the cache.
+TEST_F(TopLevelFormsListTest, FormsInShadowDomInsertionAndRemoval) {
+  GetDocument().body()->setHTMLUnsafe(R"HTML(
+    <form id="f1">
+      <input type="text">
+    </form>
+    <div id="d">
+      <template shadowrootmode=open>
+        <form id="f2">
+          <input type="text">
+        </form>
+      </template>
+    </div>
+  )HTML");
+  HTMLFormElement* f2 =
+      GetFormElement("f2", *GetElementById("d")->GetShadowRoot());
+  EXPECT_THAT(GetDocument().GetTopLevelForms(),
+              ElementsAre(GetFormElement("f1"), f2));
+
+  // Removing f1 updates the cache.
+  GetFormElement("f1")->remove();
+  EXPECT_THAT(GetDocument().GetTopLevelForms(), ElementsAre(f2));
+
+  // Removing f2 also updates the cache.
+  f2->remove();
+  EXPECT_THAT(GetDocument().GetTopLevelForms(), IsEmpty());
+}
+
+// Tests that nested forms across shadow DOM are ignored by `GetTopLevelForms`.
+TEST_F(TopLevelFormsListTest, GetTopLevelFormsIgnoresNestedChildren) {
+  GetDocument().body()->setHTMLUnsafe(R"HTML(
+    <form id="f1">
+      <input type="text">
+      <div id="d">
+        <template shadowrootmode=open>
+          <form id="f2">
+            <input type="text">
+          </form>
+        </template>
+      </div>
+    </form>
+  )HTML");
+  EXPECT_THAT(GetDocument().GetTopLevelForms(),
+              ElementsAre(GetFormElement("f1")));
 }
 
 TEST_F(DocumentTest, DocumentDefiningElementWithMultipleBodies) {
@@ -1964,7 +2314,7 @@ TEST_F(DocumentSimTest, HeaderPreloadRemoveReaddClient) {
 
   // Remove and garbage-collect the pending stylesheet link element, which will
   // remove it from the list of ResourceClients of the Resource being preloaded.
-  GetDocument().QuerySelector("link")->remove();
+  GetDocument().QuerySelector(AtomicString("link"))->remove();
   ThreadState::Current()->CollectAllGarbageForTesting();
 
   // Removing the ResourceClient should not affect the preloading.
@@ -1977,8 +2327,143 @@ TEST_F(DocumentSimTest, HeaderPreloadRemoveReaddClient) {
     <div class="target"></div>
   )HTML");
 
-  Element* target = GetDocument().QuerySelector(".target");
+  Element* target = GetDocument().QuerySelector(AtomicString(".target"));
   EXPECT_EQ(100, target->OffsetWidth());
 }
+
+TEST_F(DocumentTest, ActiveModalDialog) {
+  SetHtmlInnerHTML(R"HTML(
+    <dialog id="modal"></dialog>
+    <dialog popover id="popover"></dialog>
+  )HTML");
+
+  HTMLDialogElement* modal = DynamicTo<HTMLDialogElement>(
+      GetDocument().getElementById(AtomicString("modal")));
+  HTMLDialogElement* popover = DynamicTo<HTMLDialogElement>(
+      GetDocument().getElementById(AtomicString("popover")));
+
+  ASSERT_TRUE(modal);
+  ASSERT_TRUE(popover);
+
+  EXPECT_EQ(GetDocument().ActiveModalDialog(), nullptr);
+
+  NonThrowableExceptionState exception_state;
+  modal->showModal(exception_state);
+
+  EXPECT_EQ(GetDocument().ActiveModalDialog(), modal);
+  ASSERT_FALSE(GetDocument().TopLayerElements().empty());
+  EXPECT_EQ(GetDocument().TopLayerElements().back(), modal);
+
+  popover->showPopover(exception_state);
+
+  // The popover is the last of the top layer elements, but it's not modal.
+  ASSERT_FALSE(GetDocument().TopLayerElements().empty());
+  EXPECT_EQ(GetDocument().TopLayerElements().back(), popover);
+  EXPECT_EQ(GetDocument().ActiveModalDialog(), modal);
+}
+
+TEST_F(DocumentTest, LifecycleState_DirtyStyle_NoBody) {
+  GetDocument().body()->remove();
+  UpdateAllLifecyclePhasesForTest();
+  GetDocument().documentElement()->setAttribute(html_names::kStyleAttr,
+                                                AtomicString("color:pink"));
+  EXPECT_TRUE(GetDocument().NeedsLayoutTreeUpdate());
+  EXPECT_EQ(GetDocument().Lifecycle().GetState(),
+            DocumentLifecycle::kVisualUpdatePending);
+}
+
+class TestPaymentLinkHandler
+    : public payments::facilitated::mojom::blink::PaymentLinkHandler {
+ public:
+  void HandlePaymentLink(const KURL& url) override {
+    ++payment_link_handled_counter_;
+    handled_url_ = url;
+    std::move(on_link_handled_callback_).Run();
+  }
+
+  int get_payment_link_handled_counter() const {
+    return payment_link_handled_counter_;
+  }
+
+  const KURL& get_handled_url() const { return handled_url_; }
+
+  void Bind(mojo::ScopedMessagePipeHandle handle) {
+    receiver_.Bind(mojo::PendingReceiver<
+                   payments::facilitated::mojom::blink::PaymentLinkHandler>(
+        std::move(handle)));
+  }
+
+  void set_on_link_handled_callback(
+      base::OnceClosure on_link_handled_callback) {
+    on_link_handled_callback_ = std::move(on_link_handled_callback);
+  }
+
+ private:
+  int payment_link_handled_counter_ = 0;
+  KURL handled_url_;
+  mojo::Receiver<payments::facilitated::mojom::blink::PaymentLinkHandler>
+      receiver_{this};
+  base::OnceClosure on_link_handled_callback_;
+};
+
+#if BUILDFLAG(IS_ANDROID)
+TEST_F(DocumentTest, PaymentLinkHandling_SinglePaymentLink) {
+  TestPaymentLinkHandler test_payment_link_handler;
+  base::RunLoop run_loop;
+  test_payment_link_handler.set_on_link_handled_callback(
+      run_loop.QuitClosure());
+
+  GetDocument().GetFrame()->GetBrowserInterfaceBroker().SetBinderForTesting(
+      payments::facilitated::mojom::blink::PaymentLinkHandler::Name_,
+      base::BindRepeating(&TestPaymentLinkHandler::Bind,
+                          base::Unretained(&test_payment_link_handler)));
+
+  ScopedPaymentLinkDetectionForTest payment_link_detection(true);
+
+  SetHtmlInnerHTML(R"HTML(
+    <head>
+      <link rel="payment" href="upi://payment_link_1">
+    </head>
+  )HTML");
+
+  // Run the message loop to ensure Mojo messages are dispatched.
+  run_loop.Run();
+
+  // Check if the correct payment link was handled.
+  EXPECT_EQ(test_payment_link_handler.get_payment_link_handled_counter(), 1);
+  EXPECT_EQ(test_payment_link_handler.get_handled_url(),
+            KURL("upi://payment_link_1"));
+}
+
+TEST_F(DocumentTest, PaymentLinkHandling_MultiplePaymentLink) {
+  TestPaymentLinkHandler test_payment_link_handler;
+  base::RunLoop run_loop;
+  test_payment_link_handler.set_on_link_handled_callback(
+      run_loop.QuitClosure());
+
+  GetDocument().GetFrame()->GetBrowserInterfaceBroker().SetBinderForTesting(
+      payments::facilitated::mojom::blink::PaymentLinkHandler::Name_,
+      base::BindRepeating(&TestPaymentLinkHandler::Bind,
+                          base::Unretained(&test_payment_link_handler)));
+
+  ScopedPaymentLinkDetectionForTest payment_link_detection(true);
+
+  SetHtmlInnerHTML(R"HTML(
+    <head>
+      <link rel="payment" href="upi://payment_link_1">
+      <link rel="payment" href="upi://payment_link_2">
+    </head>
+  )HTML");
+
+  // Run the message loop to ensure Mojo messages are dispatched.
+  run_loop.Run();
+
+  // Check if the correct payment link was handled and the payment link handling
+  // was invoked only once.
+  EXPECT_EQ(test_payment_link_handler.get_payment_link_handled_counter(), 1);
+  EXPECT_EQ(test_payment_link_handler.get_handled_url(),
+            KURL("upi://payment_link_1"));
+}
+#endif  // BUILDFLAG(IS_ANDROID)
 
 }  // namespace blink

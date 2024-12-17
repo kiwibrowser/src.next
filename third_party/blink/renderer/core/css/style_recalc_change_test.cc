@@ -1,10 +1,11 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/css/style_recalc_change.h"
 
 #include "third_party/blink/renderer/core/css/container_query_data.h"
+#include "third_party/blink/renderer/core/css/properties/longhands.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_token_list.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
@@ -17,17 +18,7 @@ namespace blink {
 
 class StyleRecalcChangeTest : public PageTestBase {};
 
-class StyleRecalcChangeTestCQ
-    : public StyleRecalcChangeTest,
-      private ScopedCSSContainerQueriesForTest,
-      private ScopedCSSContainerSkipStyleRecalcForTest,
-      private ScopedLayoutNGForTest {
- public:
-  StyleRecalcChangeTestCQ()
-      : ScopedCSSContainerQueriesForTest(true),
-        ScopedCSSContainerSkipStyleRecalcForTest(true),
-        ScopedLayoutNGForTest(true) {}
-};
+class StyleRecalcChangeTestCQ : public StyleRecalcChangeTest {};
 
 TEST_F(StyleRecalcChangeTest, SuppressRecalc) {
   SetBodyInnerHTML(R"HTML(
@@ -37,9 +28,9 @@ TEST_F(StyleRecalcChangeTest, SuppressRecalc) {
     <div id=element></div>
   )HTML");
 
-  Element* element = GetDocument().getElementById("element");
+  Element* element = GetDocument().getElementById(AtomicString("element"));
   ASSERT_TRUE(element);
-  element->classList().Add("foo");
+  element->classList().Add(AtomicString("foo"));
 
   EXPECT_TRUE(StyleRecalcChange().ShouldRecalcStyleFor(*element));
   EXPECT_FALSE(
@@ -79,10 +70,10 @@ TEST_F(StyleRecalcChangeTestCQ, SkipStyleRecalcForContainer) {
   )HTML",
                                      ASSERT_NO_EXCEPTION);
 
-  Element* outer = GetDocument().getElementById("outer");
-  Element* container = GetDocument().getElementById("container");
-  Element* affected = GetDocument().getElementById("affected");
-  Element* flip = GetDocument().getElementById("flip");
+  Element* outer = GetDocument().getElementById(AtomicString("outer"));
+  Element* container = GetDocument().getElementById(AtomicString("container"));
+  Element* affected = GetDocument().getElementById(AtomicString("affected"));
+  Element* flip = GetDocument().getElementById(AtomicString("flip"));
 
   ASSERT_TRUE(outer);
   ASSERT_TRUE(container);
@@ -122,8 +113,8 @@ TEST_F(StyleRecalcChangeTestCQ, SkipStyleRecalcForContainer) {
   // will not cause #container to be marked for layout, the style recalc can not
   // be blocked because we do not know for sure #container will be reached
   // during layout.
-  outer->classList().Add("narrow");
-  flip->classList().Add("flip");
+  outer->classList().Add(AtomicString("narrow"));
+  flip->classList().Add(AtomicString("flip"));
 
   GetDocument().UpdateStyleAndLayoutTreeForThisDocument();
   EXPECT_TRUE(outer->GetLayoutObject());
@@ -154,8 +145,8 @@ TEST_F(StyleRecalcChangeTestCQ, SkipStyleRecalcForContainer) {
 
   // Change the #container width directly to 100px which will means it will be
   // marked for layout and we can skip the style recalc.
-  container->classList().Add("narrow");
-  flip->classList().Remove("flip");
+  container->classList().Add(AtomicString("narrow"));
+  flip->classList().Remove(AtomicString("flip"));
 
   GetDocument().UpdateStyleAndLayoutTreeForThisDocument();
   EXPECT_TRUE(outer->GetLayoutObject());
@@ -204,9 +195,9 @@ TEST_F(StyleRecalcChangeTestCQ, SkipStyleRecalcForContainerCleanSubtree) {
 
   UpdateAllLifecyclePhasesForTest();
 
-  Element* container = GetDocument().getElementById("container");
+  Element* container = GetDocument().getElementById(AtomicString("container"));
   ASSERT_TRUE(container);
-  container->classList().Add("narrow");
+  container->classList().Add(AtomicString("narrow"));
   GetDocument().UpdateStyleAndLayoutTreeForThisDocument();
 
   ASSERT_TRUE(container->GetContainerQueryData());
@@ -234,14 +225,14 @@ TEST_F(StyleRecalcChangeTestCQ, SkipAttachLayoutTreeForContainer) {
 
   UpdateAllLifecyclePhasesForTest();
 
-  Element* container = GetDocument().getElementById("container");
-  Element* affected = GetDocument().getElementById("affected");
+  Element* container = GetDocument().getElementById(AtomicString("container"));
+  Element* affected = GetDocument().getElementById(AtomicString("affected"));
   ASSERT_TRUE(container);
   ASSERT_TRUE(affected);
   EXPECT_TRUE(container->GetLayoutObject());
   EXPECT_TRUE(affected->GetLayoutObject());
 
-  container->classList().Add("narrow");
+  container->classList().Add(AtomicString("narrow"));
   GetDocument().UpdateStyleAndLayoutTreeForThisDocument();
 
   ASSERT_TRUE(container->GetContainerQueryData());
@@ -254,7 +245,7 @@ TEST_F(StyleRecalcChangeTestCQ, SkipAttachLayoutTreeForContainer) {
 TEST_F(StyleRecalcChangeTestCQ, DontSkipLayoutRoot) {
   GetDocument().body()->setInnerHTML(R"HTML(
     <style>
-      #outer, #inner { container-type: size; }
+      #outer, #inner { container-type: size; contain: layout; }
     </style>
     <div id="outer">
       <div id="inner">
@@ -267,10 +258,12 @@ TEST_F(StyleRecalcChangeTestCQ, DontSkipLayoutRoot) {
 
   UpdateAllLifecyclePhasesForTest();
 
-  Element* outer = GetDocument().getElementById("outer");
-  Element* inner = GetDocument().getElementById("inner");
-  Element* outer_child = GetDocument().getElementById("outer_child");
-  Element* inner_child = GetDocument().getElementById("inner_child");
+  Element* outer = GetDocument().getElementById(AtomicString("outer"));
+  Element* inner = GetDocument().getElementById(AtomicString("inner"));
+  Element* outer_child =
+      GetDocument().getElementById(AtomicString("outer_child"));
+  Element* inner_child =
+      GetDocument().getElementById(AtomicString("inner_child"));
 
   inner_child->GetLayoutObject()->SetNeedsLayout("test");
   outer_child->GetLayoutObject()->SetNeedsLayout("test");

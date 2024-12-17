@@ -6,16 +6,22 @@
 
 #include <utility>
 
-#include "base/debug/dump_without_crashing.h"
 #include "base/memory/ref_counted.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "content/browser/background_sync/background_sync_scheduler.h"
 #include "content/browser/browsing_data/browsing_data_remover_impl.h"
 #include "content/browser/download/download_manager_impl.h"
+#include "content/browser/in_memory_federated_permission_context.h"
 #include "content/browser/permissions/permission_controller_impl.h"
 #include "content/browser/preloading/prefetch/prefetch_service.h"
+#include "content/browser/renderer_host/navigation_transitions/navigation_entry_screenshot_cache.h"
+#include "content/browser/renderer_host/navigation_transitions/navigation_entry_screenshot_manager.h"
+#include "content/browser/renderer_host/navigation_transitions/navigation_transition_config.h"
+#include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/speech/tts_controller_impl.h"
+#include "content/browser/storage_partition_impl.h"
 #include "content/browser/storage_partition_impl_map.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -35,15 +41,9 @@ namespace content {
 
 namespace {
 
-void ShutdownServiceWorkerContext(StoragePartition* partition) {
-  ServiceWorkerContextWrapper* wrapper =
-      static_cast<ServiceWorkerContextWrapper*>(
-          partition->GetServiceWorkerContext());
-  wrapper->process_manager()->Shutdown();
-}
-
-void ShutdownSharedWorkerContext(StoragePartition* partition) {
-  partition->GetSharedWorkerService()->Shutdown();
+void NotifyContextWillBeDestroyed(StoragePartition* partition) {
+  static_cast<StoragePartitionImpl*>(partition)
+      ->OnBrowserContextWillBeDestroyed();
 }
 
 void RegisterMediaLearningTask(
@@ -54,6 +54,12 @@ void RegisterMediaLearningTask(
   // (`feature_provider`).
   learning_session->RegisterTask(task);
 }
+
+// Kill switch that controls whether to cancel navigations as part of
+// BrowserContext shutdown. See https://crbug.com/40274462.
+BASE_FEATURE(kCancelNavigationsDuringBrowserContextShutdown,
+             "CancelNavigationsDuringBrowserContextShutdown",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 }  // namespace
 
@@ -74,8 +80,7 @@ BrowserContextImpl::~BrowserContextImpl() {
       << "StoragePartitionMap is not shut down properly";
 
   if (!will_be_destroyed_soon_) {
-    NOTREACHED();
-    base::debug::DumpWithoutCrashing();
+    NOTREACHED_IN_MIGRATION();
   }
 
   // Verify that there are no outstanding RenderProcessHosts that reference
@@ -95,11 +100,10 @@ BrowserContextImpl::~BrowserContextImpl() {
     }
   }
   if (!rph_crash_key_value.empty()) {
-    NOTREACHED() << "rph_with_bc_reference : " << rph_crash_key_value;
-
     SCOPED_CRASH_KEY_STRING256("BrowserContext", "dangling_rph",
                                rph_crash_key_value);
-    base::debug::DumpWithoutCrashing();
+    DUMP_WILL_BE_NOTREACHED()
+        << "rph_with_bc_reference : " << rph_crash_key_value;
   }
 
   // Clean up any isolated origins and other security state associated with this
@@ -110,6 +114,11 @@ BrowserContextImpl::~BrowserContextImpl() {
     download_manager_->Shutdown();
 
   TtsControllerImpl::GetInstance()->OnBrowserContextDestroyed(self_);
+
+  if (BrowserThread::IsThreadInitialized(BrowserThread::IO)) {
+    GetIOThreadTaskRunner({})->DeleteSoon(FROM_HERE,
+                                          std::move(resource_context_));
+  }
 
   TRACE_EVENT_NESTABLE_ASYNC_END1(
       "shutdown", "BrowserContextImpl::NotifyWillBeDestroyed() called.", this,
@@ -133,13 +142,14 @@ void BrowserContextImpl::NotifyWillBeDestroyed() {
     return;
   will_be_destroyed_soon_ = true;
 
-  // Shut down service worker and shared worker machinery because these can keep
-  // RenderProcessHosts and SiteInstances alive, and the codebase assumes these
-  // are destroyed before the BrowserContext is destroyed.
-  self_->ForEachStoragePartition(
-      base::BindRepeating(ShutdownServiceWorkerContext));
-  self_->ForEachStoragePartition(
-      base::BindRepeating(ShutdownSharedWorkerContext));
+  self_->ForEachLoadedStoragePartition(&NotifyContextWillBeDestroyed);
+
+  // Cancel navigations that are happening in the BrowserContext that's going
+  // away.
+  if (base::FeatureList::IsEnabled(
+          kCancelNavigationsDuringBrowserContextShutdown)) {
+    RenderFrameHostImpl::CancelAllNavigationsForBrowserContextShutdown(self_);
+  }
 
   // Also forcibly release keep alive refcounts on RenderProcessHosts, to ensure
   // they destruct before the BrowserContext does.
@@ -163,7 +173,7 @@ StoragePartitionImplMap* BrowserContextImpl::GetOrCreateStoragePartitionMap() {
   return storage_partition_map_.get();
 }
 
-BrowsingDataRemover* BrowserContextImpl::GetBrowsingDataRemover() {
+BrowsingDataRemoverImpl* BrowserContextImpl::GetBrowsingDataRemover() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (!browsing_data_remover_) {
@@ -180,7 +190,7 @@ media::learning::LearningSession* BrowserContextImpl::GetLearningSession() {
 
   if (!learning_session_) {
     learning_session_ = std::make_unique<media::learning::LearningSessionImpl>(
-        base::SequencedTaskRunnerHandle::Get());
+        base::SequencedTaskRunner::GetCurrentDefault());
 
     // Using base::Unretained is safe below, because the callback here will not
     // be called or retained after the Register method below returns.
@@ -202,7 +212,7 @@ media::VideoDecodePerfHistory* BrowserContextImpl::GetVideoDecodePerfHistory() {
 
 std::unique_ptr<media::WebrtcVideoPerfHistory>
 BrowserContextImpl::CreateWebrtcVideoPerfHistory() {
-  // TODO(https://crbug.com/1187565): Implement in memory path in
+  // TODO(crbug.com/40172952): Implement in memory path in
   // off_the_record_profile_impl.cc and web_engine_browser_context.cc
 
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -296,10 +306,39 @@ storage::ExternalMountPoints* BrowserContextImpl::GetMountPoints() {
 }
 
 PrefetchService* BrowserContextImpl::GetPrefetchService() {
-  if (!prefetch_service_)
-    prefetch_service_ = PrefetchService::CreateIfPossible(self_);
+  if (!prefetch_service_) {
+    prefetch_service_ = std::make_unique<PrefetchService>(self_);
+  }
 
   return prefetch_service_.get();
+}
+
+InMemoryFederatedPermissionContext*
+BrowserContextImpl::GetFederatedPermissionContext() {
+  if (!federated_permission_context_) {
+    federated_permission_context_ =
+        std::make_unique<InMemoryFederatedPermissionContext>();
+  }
+  return federated_permission_context_.get();
+}
+
+void BrowserContextImpl::ResetFederatedPermissionContext() {
+  federated_permission_context_.reset();
+}
+
+void BrowserContextImpl::SetPrefetchServiceForTesting(
+    std::unique_ptr<PrefetchService> prefetch_service) {
+  prefetch_service_ = std::move(prefetch_service);
+}
+
+NavigationEntryScreenshotManager*
+BrowserContextImpl::GetNavigationEntryScreenshotManager() {
+  if (!nav_entry_screenshot_manager_ &&
+      NavigationTransitionConfig::AreBackForwardTransitionsEnabled()) {
+    nav_entry_screenshot_manager_ =
+        std::make_unique<NavigationEntryScreenshotManager>();
+  }
+  return nav_entry_screenshot_manager_.get();
 }
 
 void BrowserContextImpl::WriteIntoTrace(

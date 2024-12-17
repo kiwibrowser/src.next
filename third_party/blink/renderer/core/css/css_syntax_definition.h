@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_syntax_component.h"
-#include "third_party/blink/renderer/core/css/parser/css_parser_token_range.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_copier.h"
 
 namespace blink {
@@ -17,7 +16,7 @@ class CSSValue;
 
 class CORE_EXPORT CSSSyntaxDefinition {
  public:
-  const CSSValue* Parse(CSSParserTokenRange,
+  const CSSValue* Parse(StringView,
                         const CSSParserContext&,
                         bool is_animation_tainted) const;
 
@@ -37,17 +36,19 @@ class CORE_EXPORT CSSSyntaxDefinition {
   }
 
   CSSSyntaxDefinition IsolatedCopy() const;
+  String ToString() const;
 
  private:
   friend class CSSSyntaxStringParser;
   friend class CSSSyntaxStringParserTest;
 
-  explicit CSSSyntaxDefinition(Vector<CSSSyntaxComponent>);
+  CSSSyntaxDefinition(Vector<CSSSyntaxComponent>, const String& original_text);
 
   // https://drafts.css-houdini.org/css-properties-values-api-1/#universal-syntax-descriptor
   static CSSSyntaxDefinition CreateUniversal();
 
   Vector<CSSSyntaxComponent> syntax_components_;
+  String original_text_;
 };
 
 }  // namespace blink
@@ -61,8 +62,9 @@ struct CrossThreadCopier<
   static Type Copy(const Type& value) {
     Type result;
     result.ReserveInitialCapacity(value.size());
-    for (const auto& element : value)
+    for (const auto& element : value) {
       result.push_back(element.IsolatedCopy());
+    }
     return result;
   }
 };

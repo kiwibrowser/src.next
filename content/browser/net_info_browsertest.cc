@@ -11,7 +11,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "build/build_config.h"
-#include "content/browser/net/network_quality_observer_impl.h"
+#include "content/browser/network/network_quality_observer_impl.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test.h"
@@ -145,23 +145,19 @@ class NetInfoBrowserTest : public content::ContentBrowserTest {
   }
 
   std::string RunScriptExtractString(const std::string& script) {
-    return EvalJs(shell(), script, content::EXECUTE_SCRIPT_USE_MANUAL_REPLY)
-        .ExtractString();
+    return EvalJs(shell(), script).ExtractString();
   }
 
   bool RunScriptExtractBool(const std::string& script) {
-    return EvalJs(shell(), script, content::EXECUTE_SCRIPT_USE_MANUAL_REPLY)
-        .ExtractBool();
+    return EvalJs(shell(), script).ExtractBool();
   }
 
   double RunScriptExtractDouble(const std::string& script) {
-    return EvalJs(shell(), script, content::EXECUTE_SCRIPT_USE_MANUAL_REPLY)
-        .ExtractDouble();
+    return EvalJs(shell(), script).ExtractDouble();
   }
 
   int RunScriptExtractInt(const std::string& script) {
-    return EvalJs(shell(), script, content::EXECUTE_SCRIPT_USE_MANUAL_REPLY)
-        .ExtractInt();
+    return EvalJs(shell(), script).ExtractInt();
   }
 
  private:
@@ -443,7 +439,8 @@ IN_PROC_BROWSER_TEST_F(NetInfoBrowserTest, NetworkQualityRandomized) {
       return;
     }
   }
-  NOTREACHED() << "Noise not added to the network quality estimates";
+  NOTREACHED_IN_MIGRATION()
+      << "Noise not added to the network quality estimates";
 }
 
 // Make sure the minor changes (<10%) in the network quality are not notified.

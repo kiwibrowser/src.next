@@ -7,14 +7,15 @@
 #include <algorithm>
 #include <memory>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/run_loop.h"
 #include "base/test/mock_callback.h"
 #include "chrome/browser/signin/chrome_signin_helper.h"
 #include "chrome/browser/signin/header_modification_delegate.h"
 #include "content/public/test/browser_task_environment.h"
 #include "mojo/public/cpp/bindings/receiver.h"
+#include "net/base/isolation_info.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "services/network/public/mojom/fetch_api.mojom-shared.h"
@@ -78,23 +79,26 @@ class ChromeSigninProxyingURLLoaderFactoryTest : public testing::Test {
     loader_ = network::SimpleURLLoader::Create(std::move(request),
                                                TRAFFIC_ANNOTATION_FOR_TESTS);
 
-    mojo::Remote<network::mojom::URLLoaderFactory> factory_remote;
-    auto factory_request = factory_remote.BindNewPipeAndPassReceiver();
+    auto delegate = std::make_unique<MockDelegate>();
+    base::WeakPtr<MockDelegate> delegate_weak = delegate->GetWeakPtr();
+
+    network::URLLoaderFactoryBuilder factory_builder;
+    proxying_factory_ = std::make_unique<ProxyingURLLoaderFactory>(
+        std::move(delegate), net::IsolationInfo(), NullWebContentsGetter(),
+        factory_builder,
+        base::BindOnce(&ChromeSigninProxyingURLLoaderFactoryTest::OnDisconnect,
+                       base::Unretained(this)));
+
+    mojo::Remote<network::mojom::URLLoaderFactory> factory_remote(
+        std::move(factory_builder)
+            .Finish<mojo::PendingRemote<network::mojom::URLLoaderFactory>>(
+                test_factory_receiver_.BindNewPipeAndPassRemote()));
+
     loader_->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
         factory_remote.get(),
         base::BindOnce(
             &ChromeSigninProxyingURLLoaderFactoryTest::OnDownloadComplete,
             base::Unretained(this)));
-
-    auto delegate = std::make_unique<MockDelegate>();
-    base::WeakPtr<MockDelegate> delegate_weak = delegate->GetWeakPtr();
-
-    proxying_factory_ = std::make_unique<ProxyingURLLoaderFactory>(
-        std::move(delegate), NullWebContentsGetter(),
-        std::move(factory_request),
-        test_factory_receiver_.BindNewPipeAndPassRemote(),
-        base::BindOnce(&ChromeSigninProxyingURLLoaderFactoryTest::OnDisconnect,
-                       base::Unretained(this)));
 
     return delegate_weak;
   }
@@ -217,7 +221,7 @@ TEST_F(ChromeSigninProxyingURLLoaderFactoryTest, ModifyHeaders) {
   // the redirect is received and again for the redirect response.
   EXPECT_CALL(*delegate, ProcessResponse(_, _))
       .WillOnce(Invoke([&](ResponseAdapter* adapter, const GURL& redirect_url) {
-        EXPECT_EQ(kTestURL, adapter->GetURL());
+        EXPECT_EQ(kTestURL, adapter->GetUrl());
         EXPECT_TRUE(adapter->IsOutermostMainFrame());
 
         adapter->SetUserData(kResponseUserDataKey,
@@ -233,7 +237,7 @@ TEST_F(ChromeSigninProxyingURLLoaderFactoryTest, ModifyHeaders) {
         EXPECT_EQ(kTestRedirectURL, redirect_url);
       }))
       .WillOnce(Invoke([&](ResponseAdapter* adapter, const GURL& redirect_url) {
-        EXPECT_EQ(kTestRedirectURL, adapter->GetURL());
+        EXPECT_EQ(kTestRedirectURL, adapter->GetUrl());
         EXPECT_TRUE(adapter->IsOutermostMainFrame());
 
         EXPECT_EQ(response_user_data_ptr,
@@ -296,7 +300,6 @@ TEST_F(ChromeSigninProxyingURLLoaderFactoryTest, ModifyHeaders) {
 }
 
 TEST_F(ChromeSigninProxyingURLLoaderFactoryTest, TargetFactoryFailure) {
-  mojo::Remote<network::mojom::URLLoaderFactory> factory_remote;
   mojo::PendingRemote<network::mojom::URLLoaderFactory>
       pending_target_factory_remote;
   auto target_factory_receiver =
@@ -306,10 +309,16 @@ TEST_F(ChromeSigninProxyingURLLoaderFactoryTest, TargetFactoryFailure) {
   auto delegate = std::make_unique<MockDelegate>();
   EXPECT_CALL(*delegate, ProcessRequest(_, _)).Times(0);
 
+  network::URLLoaderFactoryBuilder factory_builder;
+
   auto proxying_factory = std::make_unique<ProxyingURLLoaderFactory>(
-      std::move(delegate), NullWebContentsGetter(),
-      factory_remote.BindNewPipeAndPassReceiver(),
-      std::move(pending_target_factory_remote), base::DoNothing());
+      std::move(delegate), net::IsolationInfo(), NullWebContentsGetter(),
+      factory_builder, base::DoNothing());
+
+  mojo::Remote<network::mojom::URLLoaderFactory> factory_remote(
+      std::move(factory_builder)
+          .Finish<mojo::PendingRemote<network::mojom::URLLoaderFactory>>(
+              std::move(pending_target_factory_remote)));
 
   // Close |target_factory_receiver| instead of binding it to a
   // URLLoaderFactory. Spin the message loop so that the connection error

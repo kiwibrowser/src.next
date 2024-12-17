@@ -7,13 +7,16 @@
 #include <memory>
 
 #include "base/logging.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/no_destructor.h"
 #include "base/observer_list.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/timer/elapsed_timer.h"
+#include "components/input/native_web_keyboard_event.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/content_browser_client.h"
-#include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -32,19 +35,98 @@
 #include "extensions/browser/process_manager.h"
 #include "extensions/browser/view_type_utils.h"
 #include "extensions/common/extension.h"
-#include "extensions/common/extension_messages.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/feature_switch.h"
 #include "extensions/common/manifest_handlers/background_info.h"
 #include "third_party/blink/public/mojom/window_features/window_features.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/window_open_disposition.h"
+#include "ui/color/color_provider.h"
+#include "ui/color/color_provider_key.h"
+#include "ui/color/color_provider_source.h"
+#include "ui/color/color_provider_utils.h"
 
 using content::RenderProcessHost;
 using content::SiteInstance;
 using content::WebContents;
 
 namespace extensions {
+
+namespace {
+
+// NoOpColorProviderSource does not generate any color provider changes for
+// the UI-less extension background page.
+class NoOpColorProviderSource : public ui::ColorProviderSource {
+ public:
+  NoOpColorProviderSource() = default;
+  NoOpColorProviderSource(const NoOpColorProviderSource&) = delete;
+  NoOpColorProviderSource& operator=(const NoOpColorProviderSource&) = delete;
+  ~NoOpColorProviderSource() override = default;
+
+  static NoOpColorProviderSource* Get() {
+    static base::NoDestructor<NoOpColorProviderSource> instance;
+    return instance.get();
+  }
+
+ private:
+  // ui::ColorProviderSource:
+  const ui::ColorProvider* GetColorProvider() const override {
+    return &color_provider_;
+  }
+
+  ui::RendererColorMap GetRendererColorMap(
+      ui::ColorProviderKey::ColorMode color_mode,
+      ui::ColorProviderKey::ForcedColors forced_colors) const override {
+    return ui::CreateRendererColorMap(color_provider_);
+  }
+
+  ui::ColorProviderKey GetColorProviderKey() const override {
+    return ui::ColorProviderKey();
+  }
+
+  ui::ColorProvider color_provider_;
+};
+
+// Emit all event dispatch time related metrics.
+void EmitDispatchTimeMetrics(const EventDispatchSource& dispatch_source,
+                             base::TimeTicks dispatch_start_time,
+                             bool lazy_background_active_on_dispatch,
+                             const Extension* extension) {
+  // Only emit events that use the EventRouter::DispatchEventToProcess() event
+  // routing flow since EventRouter::DispatchEventToSender() uses a different
+  // flow that doesn't include dispatch start and service worker start time.
+  if (dispatch_source != EventDispatchSource::kDispatchEventToProcess) {
+    return;
+  }
+
+  if (BackgroundInfo::HasLazyBackgroundPage(extension)) {
+    base::UmaHistogramCustomMicrosecondsTimes(
+        "Extensions.Events.DispatchToAckTime.ExtensionEventPage3",
+        /*sample=*/base::TimeTicks::Now() - dispatch_start_time,
+        /*min=*/base::Microseconds(1), /*max=*/base::Minutes(5),
+        /*buckets=*/100);
+    const char* active_metric_name =
+        lazy_background_active_on_dispatch
+            ? "Extensions.Events.DispatchToAckTime.ExtensionEventPage3."
+              "Active"
+            : "Extensions.Events.DispatchToAckTime.ExtensionEventPage3."
+              "Inactive";
+    base::UmaHistogramCustomMicrosecondsTimes(
+        active_metric_name,
+        /*sample=*/base::TimeTicks::Now() - dispatch_start_time,
+        /*min=*/base::Microseconds(1), /*max=*/base::Minutes(5),
+        /*buckets=*/100);
+  } else if (BackgroundInfo::HasPersistentBackgroundPage(extension)) {
+    base::UmaHistogramCustomMicrosecondsTimes(
+        "Extensions.Events.DispatchToAckTime."
+        "ExtensionPersistentBackgroundPage",
+        /*sample=*/base::TimeTicks::Now() - dispatch_start_time,
+        /*min=*/base::Microseconds(1), /*max=*/base::Minutes(5),
+        /*buckets=*/100);
+  }
+}
+
+}  // namespace
 
 ExtensionHost::ExtensionHost(const Extension* extension,
                              SiteInstance* site_instance,
@@ -58,14 +140,19 @@ ExtensionHost::ExtensionHost(const Extension* extension,
       extension_host_type_(host_type) {
   DCHECK(host_type == mojom::ViewType::kExtensionBackgroundPage ||
          host_type == mojom::ViewType::kOffscreenDocument ||
-         host_type == mojom::ViewType::kExtensionDialog ||
-         host_type == mojom::ViewType::kExtensionPopup);
+         host_type == mojom::ViewType::kExtensionPopup ||
+         host_type == mojom::ViewType::kExtensionSidePanel);
   host_contents_ = WebContents::Create(
-      WebContents::CreateParams(browser_context_, site_instance)),
+      WebContents::CreateParams(browser_context_, site_instance));
+  host_contents_->SetOwnerLocationForDebug(FROM_HERE);
   content::WebContentsObserver::Observe(host_contents_.get());
   host_contents_->SetDelegate(this);
   SetViewType(host_contents_.get(), host_type);
   main_frame_host_ = host_contents_->GetPrimaryMainFrame();
+
+  if (host_type == mojom::ViewType::kExtensionBackgroundPage) {
+    host_contents_->SetColorProviderSource(NoOpColorProviderSource::Get());
+  }
 
   // Listen for when an extension is unloaded from the same profile, as it may
   // be the same extension that this points to.
@@ -76,6 +163,12 @@ ExtensionHost::ExtensionHost(const Extension* extension,
 
   ExtensionWebContentsObserver::GetForWebContents(host_contents())->
       dispatcher()->set_delegate(this);
+
+  // Create password reuse detection manager when new extension web contents are
+  // created.
+  ExtensionsBrowserClient::Get()->CreatePasswordReuseDetectionManager(
+      host_contents_.get());
+
   ExtensionHostRegistry::Get(browser_context_)->ExtensionHostCreated(this);
 }
 
@@ -164,10 +257,33 @@ void ExtensionHost::RemoveObserver(ExtensionHostObserver* observer) {
   observer_list_.RemoveObserver(observer);
 }
 
-void ExtensionHost::OnBackgroundEventDispatched(const std::string& event_name,
-                                                int event_id) {
+void ExtensionHost::OnBackgroundEventDispatched(
+    const std::string& event_name,
+    base::TimeTicks dispatch_start_time,
+    int event_id,
+    EventDispatchSource dispatch_source,
+    bool lazy_background_active_on_dispatch) {
+  // TODO(crbug.com/40909770): Make IsBackgroundPage() a real CHECK. It's
+  // effectively a DCHECK right now.
   CHECK(IsBackgroundPage());
-  unacked_messages_[event_id] = event_name;
+  CHECK(BackgroundInfo::HasBackgroundPage(extension()));
+  // See ExtensionHost::OnEventAck() for an explanation on the restriction to
+  // this event flow.
+  if (dispatch_source == EventDispatchSource::kDispatchEventToProcess) {
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
+        FROM_HERE,
+        base::BindOnce(&ExtensionHost::EmitLateAckedEventTask,
+                       weak_ptr_factory_.GetWeakPtr(), event_id),
+        kEventAckMetricTimeLimit);
+  }
+
+  // We don't expect unacked_messages to be written more than once per event_id
+  // since event_ids are supposed to be unique per event dispatch to each
+  // extension.
+  CHECK(unacked_messages_.count(event_id) == 0);
+  unacked_messages_[event_id] =
+      UnackedEventData{event_name, dispatch_start_time, dispatch_source,
+                       lazy_background_active_on_dispatch};
   for (auto& observer : observer_list_)
     observer.OnBackgroundEventDispatched(this, event_name, event_id);
 }
@@ -292,21 +408,25 @@ void ExtensionHost::CloseContents(WebContents* contents) {
   Close();
 }
 
-bool ExtensionHost::OnMessageReceived(const IPC::Message& message,
-                                      content::RenderFrameHost* host) {
-  bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP(ExtensionHost, message)
-    IPC_MESSAGE_HANDLER(ExtensionHostMsg_EventAck, OnEventAck)
-    IPC_MESSAGE_HANDLER(ExtensionHostMsg_IncrementLazyKeepaliveCount,
-                        OnIncrementLazyKeepaliveCount)
-    IPC_MESSAGE_HANDLER(ExtensionHostMsg_DecrementLazyKeepaliveCount,
-                        OnDecrementLazyKeepaliveCount)
-    IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP()
-  return handled;
+void ExtensionHost::EmitLateAckedEventTask(int event_id) {
+  // If the event is still present then we haven't received the ack yet in
+  // `ExtensionHost::OnEventAck()`.
+  if (unacked_messages_.contains(event_id)) {
+    const char* metric_name =
+        BackgroundInfo::HasLazyBackgroundPage(extension())
+            ? "Extensions.Events.DidDispatchToAckSucceed.ExtensionPage"
+            : "Extensions.Events.DidDispatchToAckSucceed."
+              "ExtensionPersistentPage";
+    // TODO(crbug.com/40277737): Update this histogram once we have a way to
+    // ack only for lazy background page events. Until then this could be
+    // slightly inaccurate and not perfectly comparable to the service worker
+    // version.
+    base::UmaHistogramBoolean(metric_name, false);
+  }
 }
 
-void ExtensionHost::OnEventAck(int event_id) {
+void ExtensionHost::OnEventAck(int event_id,
+                               bool event_has_listener_in_background_context) {
   // This should always be true since event acks are only sent by extensions
   // with lazy background pages but it doesn't hurt to be extra careful.
   const bool is_background_page = IsBackgroundPage();
@@ -319,7 +439,8 @@ void ExtensionHost::OnEventAck(int event_id) {
     // Kill this renderer.
     DCHECK(render_process_host());
     LOG(ERROR) << "Killing renderer for extension " << extension_id()
-               << " for sending an EventAck without a lazy background page.";
+               << " for sending an EventAck without a background page (lazy or "
+                  "non-lazy).";
     bad_message::ReceivedBadMessage(render_process_host(),
                                     bad_message::EH_BAD_EVENT_ID);
     return;
@@ -339,27 +460,57 @@ void ExtensionHost::OnEventAck(int event_id) {
     return;
   }
 
+  const UnackedEventData& unacked_message_data = it->second;
+
+  // From the browser side, we add an in-flight event (`unacked_messages_`) for
+  // every event that goes to an extension process for an extension with a
+  // (lazy or non-lazy; event page or persistent) background page, whether or
+  // not the event is going to be received by the background page. On the
+  // browser side, we can't easily determine if an event will be handled in the
+  // background page. Instead, here we rely on a signal from the renderer that
+  // the event ran in the background page and only emit background-related
+  // metrics if that's the case.
+  // TODO(crbug.com/40277737): Remove this condition once crbug.com/1470045
+  // allows us to only ack for lazy background page events.
+  if (event_has_listener_in_background_context) {
+    EmitDispatchTimeMetrics(
+        unacked_message_data.dispatch_source,
+        unacked_message_data.dispatch_start_time,
+        unacked_message_data.lazy_background_active_on_dispatch, extension());
+  }
+
+  // `DidDispatchToAckSucceed` is outside of the
+  // `event_has_listener_in_background_context` condition because we
+  // can't exclude non-script extensions page contexts (e.g. popup scripts) yet
+  // so we have to emit this for all events to remain proportionate to the
+  // `false` emits.
+  bool late_ack =
+      (base::TimeTicks::Now() - unacked_message_data.dispatch_start_time) >
+      kEventAckMetricTimeLimit;
+  if (!late_ack) {
+    // Emit only if we're within the expected event ack time limit. We'll take
+    // care of the emit for a late ack via a delayed task we started on event
+    // dispatch.
+    if (BackgroundInfo::HasLazyBackgroundPage(extension())) {
+      base::UmaHistogramBoolean(
+          "Extensions.Events.DidDispatchToAckSucceed.ExtensionPage", true);
+    } else if (BackgroundInfo::HasPersistentBackgroundPage(extension())) {
+      base::UmaHistogramBoolean(
+          "Extensions.Events.DidDispatchToAckSucceed.ExtensionPersistentPage",
+          true);
+    }
+  }
+
   EventRouter* router = EventRouter::Get(browser_context_);
   if (router)
-    router->OnEventAck(browser_context_, extension_id(), it->second);
+    router->OnEventAck(browser_context_, extension_id(),
+                       unacked_message_data.event_name);
 
   for (auto& observer : observer_list_)
     observer.OnBackgroundEventAcked(this, event_id);
 
   // Remove it.
   unacked_messages_.erase(it);
-}
-
-void ExtensionHost::OnIncrementLazyKeepaliveCount() {
-  ProcessManager::Get(browser_context_)
-      ->IncrementLazyKeepaliveCount(extension(), Activity::LIFECYCLE_MANAGEMENT,
-                                    Activity::kIPC);
-}
-
-void ExtensionHost::OnDecrementLazyKeepaliveCount() {
-  ProcessManager::Get(browser_context_)
-      ->DecrementLazyKeepaliveCount(extension(), Activity::LIFECYCLE_MANAGEMENT,
-                                    Activity::kIPC);
 }
 
 // content::WebContentsObserver
@@ -369,7 +520,7 @@ content::JavaScriptDialogManager* ExtensionHost::GetJavaScriptDialogManager(
   return delegate_->GetJavaScriptDialogManager();
 }
 
-void ExtensionHost::AddNewContents(
+content::WebContents* ExtensionHost::AddNewContents(
     WebContents* source,
     std::unique_ptr<WebContents> new_contents,
     const GURL& target_url,
@@ -395,13 +546,15 @@ void ExtensionHost::AddNewContents(
         delegate->AddNewContents(associated_contents, std::move(new_contents),
                                  target_url, disposition, window_features,
                                  user_gesture, was_blocked);
-        return;
+        return nullptr;
       }
     }
   }
 
   delegate_->CreateTab(std::move(new_contents), extension_id_, disposition,
-                       window_features.bounds, user_gesture);
+                       window_features, user_gesture);
+
+  return nullptr;
 }
 
 void ExtensionHost::RenderFrameCreated(content::RenderFrameHost* frame_host) {
@@ -455,7 +608,7 @@ void ExtensionHost::RequestMediaAccessPermission(
 
 bool ExtensionHost::CheckMediaAccessPermission(
     content::RenderFrameHost* render_frame_host,
-    const GURL& security_origin,
+    const url::Origin& security_origin,
     blink::mojom::MediaStreamType type) {
   return delegate_->CheckMediaAccessPermission(
       render_frame_host, security_origin, type, extension());
@@ -485,17 +638,12 @@ void ExtensionHost::RecordStopLoadingUMA() {
   CHECK(load_start_.get());
   if (extension_host_type_ == mojom::ViewType::kExtensionBackgroundPage) {
     if (extension_ && BackgroundInfo::HasLazyBackgroundPage(extension_)) {
-      UMA_HISTOGRAM_MEDIUM_TIMES("Extensions.EventPageLoadTime2",
-                                 load_start_->Elapsed());
+      DEPRECATED_UMA_HISTOGRAM_MEDIUM_TIMES("Extensions.EventPageLoadTime2",
+                                            load_start_->Elapsed());
     } else {
-      UMA_HISTOGRAM_MEDIUM_TIMES("Extensions.BackgroundPageLoadTime2",
-                                 load_start_->Elapsed());
+      DEPRECATED_UMA_HISTOGRAM_MEDIUM_TIMES(
+          "Extensions.BackgroundPageLoadTime2", load_start_->Elapsed());
     }
-  } else if (extension_host_type_ == mojom::ViewType::kExtensionPopup) {
-    UMA_HISTOGRAM_MEDIUM_TIMES("Extensions.PopupLoadTime2",
-                               load_start_->Elapsed());
-    UMA_HISTOGRAM_MEDIUM_TIMES("Extensions.PopupCreateTime",
-                               create_start_.Elapsed());
   }
 }
 

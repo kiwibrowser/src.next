@@ -9,13 +9,10 @@
 #include <map>
 
 #include "base/android/jni_string.h"
-#include "base/bind.h"
-#include "base/callback.h"
-#include "base/callback_helpers.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
+#include "base/functional/callback_helpers.h"
 #include "base/strings/string_util.h"
-#include "chrome/android/chrome_jni_headers/ContextMenuHelper_jni.h"
-#include "chrome/browser/performance_hints/performance_hints_observer.h"
-#include "chrome/browser/vr/vr_tab_helper.h"
 #include "components/embedder_support/android/contextmenu/context_menu_builder.h"
 #include "content/public/browser/context_menu_params.h"
 #include "content/public/browser/render_frame_host.h"
@@ -26,9 +23,11 @@
 #include "ui/gfx/geometry/size.h"
 #include "url/gurl.h"
 
+// Must come after all headers that specialize FromJniType() / ToJniType().
+#include "chrome/android/chrome_jni_headers/ContextMenuHelper_jni.h"
+
 using base::android::JavaParamRef;
 using base::android::JavaRef;
-using optimization_guide::proto::PerformanceClass;
 
 ContextMenuHelper::ContextMenuHelper(content::WebContents* web_contents)
     : content::WebContentsUserData<ContextMenuHelper>(*web_contents) {
@@ -48,22 +47,14 @@ ContextMenuHelper::~ContextMenuHelper() {
 void ContextMenuHelper::ShowContextMenu(
     content::RenderFrameHost& render_frame_host,
     const content::ContextMenuParams& params) {
-  // TODO(crbug.com/851495): support context menu in VR.
-  if (vr::VrTabHelper::IsUiSuppressedInVr(
-          &GetWebContents(), vr::UiSuppressedElement::kContextMenu)) {
-    GetWebContents().NotifyContextMenuClosed(params.link_followed);
-    return;
-  }
   JNIEnv* env = base::android::AttachCurrentThread();
   context_menu_params_ = params;
   gfx::NativeView view = GetWebContents().GetNativeView();
-  if (!params.link_url.is_empty()) {
-    performance_hints::PerformanceHintsObserver::RecordPerformanceUMAForURL(
-        &GetWebContents(), params.link_url);
-  }
   Java_ContextMenuHelper_showContextMenu(
       env, java_obj_,
-      context_menu::BuildJavaContextMenuParams(context_menu_params_),
+      context_menu::BuildJavaContextMenuParams(
+          context_menu_params_, render_frame_host.GetProcess()->GetID(),
+          render_frame_host.GetFrameToken().value()),
       render_frame_host.GetJavaRenderFrameHost(), view->GetContainerView(),
       view->content_offset() * view->GetDipScale());
 }

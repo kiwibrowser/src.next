@@ -7,7 +7,7 @@
 #include <memory>
 #include <string>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/test/test_browser_dialog.h"
@@ -28,7 +28,7 @@ class ScreenCaptureNotificationUiBrowserTest : public DialogBrowserTest {
   // TestBrowserUi:
   void ShowUi(const std::string& name) override {
     screen_capture_notification_ui_ = ScreenCaptureNotificationUI::Create(
-        std::u16string(u"ScreenCaptureNotificationUI Browser Test"));
+        std::u16string(u"ScreenCaptureNotificationUI Browser Test"), nullptr);
     on_started_result_ = screen_capture_notification_ui_->OnStarted(
         base::BindOnce(
             [](ScreenCaptureNotificationUiBrowserTest* test) {

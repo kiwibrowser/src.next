@@ -7,10 +7,11 @@
 
 #include "chrome/browser/signin/signin_ui_util.h"
 
-#include "base/callback_helpers.h"
+#include "base/functional/callback_helpers.h"
 #include "base/test/bind.h"
 #include "build/buildflag.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/profiles/delete_profile_helper.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -57,7 +58,7 @@ IN_PROC_BROWSER_TEST_F(DiceSigninUiUtilBrowserTest,
   // New profile should not have any browser windows.
   EXPECT_FALSE(chrome::FindBrowserWithProfile(new_profile));
 
-  ShowExtensionSigninPrompt(new_profile, /*enable_sync=*/true,
+  ShowExtensionSigninPrompt(new_profile, /*enable_sync=*/false,
                             /*email_hint=*/std::string());
   // `ShowExtensionSigninPrompt()` creates a new browser.
   Browser* browser = chrome::FindBrowserWithProfile(new_profile);
@@ -65,13 +66,16 @@ IN_PROC_BROWSER_TEST_F(DiceSigninUiUtilBrowserTest,
   EXPECT_EQ(1, browser->tab_strip_model()->count());
 
   // Profile deletion closes the browser.
-  g_browser_process->profile_manager()->ScheduleProfileForDeletion(
-      new_profile->GetPath(), base::DoNothing());
+  g_browser_process->profile_manager()
+      ->GetDeleteProfileHelper()
+      .MaybeScheduleProfileForDeletion(
+          new_profile->GetPath(), base::DoNothing(),
+          ProfileMetrics::DELETE_PROFILE_USER_MANAGER);
   ui_test_utils::WaitForBrowserToClose(browser);
   EXPECT_FALSE(chrome::FindBrowserWithProfile(new_profile));
 
   // `ShowExtensionSigninPrompt()` does nothing for deleted profile.
-  ShowExtensionSigninPrompt(new_profile, /*enable_sync=*/true,
+  ShowExtensionSigninPrompt(new_profile, /*enable_sync=*/false,
                             /*email_hint=*/std::string());
   EXPECT_FALSE(chrome::FindBrowserWithProfile(new_profile));
 }

@@ -5,7 +5,7 @@
 #include <memory>
 #include <utility>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -98,7 +98,7 @@ class ExtensionURLLoaderThrottleBrowserTest : public ExtensionBrowserTest {
   }
 
  private:
-  raw_ptr<const Extension> extension_;
+  raw_ptr<const Extension, DanglingUntriaged> extension_;
 };
 
 class ExtensionURLLoaderThrottleWithSplitCacheBrowserTest

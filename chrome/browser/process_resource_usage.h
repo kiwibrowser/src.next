@@ -7,8 +7,8 @@
 
 #include <stddef.h>
 
-#include "base/callback.h"
 #include "base/containers/circular_deque.h"
+#include "base/functional/callback.h"
 #include "base/threading/thread_checker.h"
 #include "content/public/common/resource_usage_reporter.mojom.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
@@ -49,8 +49,7 @@
 //         service.InitWithNewPipeAndPassReceiver();
 //     content::GetIOThreadTaskRunner({})->PostTask(
 //         FROM_HERE,
-//         base::BindOnce(&Foo::ConnectToService, this,
-//         base::Passed(&receiver)));
+//         base::BindOnce(&Foo::ConnectToService, this, std::move(receiver)));
 //     resource_usage_.reset(new ProcessResourceUsage(std::move(service)));
 //   ...
 //

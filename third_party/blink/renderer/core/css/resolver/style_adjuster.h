@@ -31,6 +31,7 @@ namespace blink {
 
 class Element;
 class ComputedStyle;
+class ComputedStyleBuilder;
 class StyleResolverState;
 
 // Certain CSS Properties/Values do not apply to certain elements
@@ -41,19 +42,20 @@ class StyleAdjuster {
 
  public:
   CORE_EXPORT static void AdjustComputedStyle(StyleResolverState&, Element*);
-  static void AdjustStyleForCombinedText(ComputedStyle&);
-  static void AdjustStyleForEditing(ComputedStyle&);
-  static void AdjustStyleForTextCombine(ComputedStyle&);
+  static void AdjustStyleForCombinedText(ComputedStyleBuilder&);
+  static void AdjustStyleForEditing(ComputedStyleBuilder&, Element*);
+  static void AdjustStyleForTextCombine(ComputedStyleBuilder&);
 
  private:
-  static bool IsEditableElement(Element*, const ComputedStyle&);
+  static bool IsEditableElement(Element*, const ComputedStyleBuilder&);
   static bool IsPasswordFieldWithUnrevealedPassword(Element*);
-  static void AdjustEffectiveTouchAction(ComputedStyle& style,
+  static void AdjustEffectiveTouchAction(ComputedStyleBuilder&,
                                          const ComputedStyle& parent_style,
                                          Element* element,
                                          bool is_svg_root);
-  static void AdjustOverflow(ComputedStyle& style, Element* element);
-  static void AdjustForForcedColorsMode(ComputedStyle& style);
+  static void AdjustOverflow(ComputedStyleBuilder&, Element* element);
+  static void AdjustForForcedColorsMode(ComputedStyleBuilder&, Document&);
+  static void AdjustForSVGTextElement(ComputedStyleBuilder&);
 };
 
 }  // namespace blink

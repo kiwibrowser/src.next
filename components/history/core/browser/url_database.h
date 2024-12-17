@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/time/time.h"
+#include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/keyword_id.h"
 #include "components/history/core/browser/url_row.h"
 #include "components/query_parser/query_parser.h"
@@ -30,7 +31,6 @@ namespace history {
 
 class KeywordSearchTermVisitEnumerator;
 struct KeywordSearchTermRow;
-struct KeywordSearchTermVisit;
 
 class VisitDatabase;  // For friend statement.
 
@@ -100,6 +100,10 @@ class URLDatabase {
   // The caller than adds the URLs it wants to preserve to the temporary table,
   // and then deletes everything else by calling CommitTemporaryURLTable().
   // Returns true on success.
+  //
+  // WARNING: if the temporary table already exists, it is dropped and a new
+  // one created. This is done as the temporary table is only intended to
+  // exist for a short amount of time before it's renamed.
   bool CreateTemporaryURLTable();
 
   // Adds a row to the temporary URL table. This must be called between
@@ -145,13 +149,13 @@ class URLDatabase {
     bool GetNextURL(URLRow* r);
   };
 
-  // Initializes the given enumerator to enumerator all URLs in the database.
+  // Initializes the given enumerator to enumerate all URLs in the database.
   bool InitURLEnumeratorForEverything(URLEnumerator* enumerator);
 
-  // Initializes the given enumerator to enumerator all URLs in the database
-  // that are historically significant: ones having their URL manually typed
-  // more than once, having been visited within 3 days, or having been visited
-  // more than 3 times in the order of the most significant ones first.
+  // Initializes the given enumerator to enumerate all URLs in the database that
+  // are historically significant: ones having their URL manually typed at least
+  // once, having been visited within 3 days, or having been visited at least 4
+  // times in the order of the most significant ones first.
   bool InitURLEnumeratorForSignificant(URLEnumerator* enumerator);
 
   // Autocomplete --------------------------------------------------------------
@@ -204,6 +208,13 @@ class URLDatabase {
                                    KeywordID keyword_id,
                                    const std::u16string& term);
 
+  // Retrieves aggregate values for a subset of fields across all URLs
+  // associated with the given `term`.
+  // Fills `url_info` with the relevant aggregate URL data.
+  // Returns true on success.
+  bool GetAggregateURLDataForKeywordSearchTerm(const std::u16string& term,
+                                               URLRow* url_info);
+
   // Looks up a keyword search term given a url id. Returns all the search terms
   // in `rows`. Returns true on success.
   bool GetKeywordSearchTermRow(URLID url_id, KeywordSearchTermRow* row);
@@ -217,40 +228,20 @@ class URLDatabase {
   // way of SetKeywordSearchTermsForURL.
   void DeleteAllSearchTermsForKeyword(KeywordID keyword_id);
 
-  // Returns up to max_count of the most recent search terms for the specified
-  // keyword.
-  // TODO(crbug.com/1119654): Remove this in favor of the enumerator-based
-  // function below after experimentation.
-  void GetMostRecentKeywordSearchTerms(
-      KeywordID keyword_id,
-      const std::u16string& prefix,
-      int max_count,
-      std::vector<std::unique_ptr<KeywordSearchTermVisit>>* visits);
-
   // Returns an enumerator to enumerate all the KeywordSearchTermVisits starting
-  // with `prefix` for the specified keyword. The visits are ordered first by
+  // with `prefix` for the given keyword. The visits are ordered first by
   // |normalized_term| and then by |last_visit_time| in ascending order, i.e.,
   // from the oldest to the newest.
   std::unique_ptr<KeywordSearchTermVisitEnumerator>
   CreateKeywordSearchTermVisitEnumerator(KeywordID keyword_id,
                                          const std::u16string& prefix);
 
-  // Returns the most recent (no older than `age_threshold`) search terms for
-  // the specified keyword.
-  // TODO(crbug.com/1119654): Remove this in favor of the enumerator-based
-  // function below after experimentation.
-  void GetMostRecentKeywordSearchTerms(
-      KeywordID keyword_id,
-      base::Time age_threshold,
-      std::vector<std::unique_ptr<KeywordSearchTermVisit>>* visits);
-
-  // Returns an enumerator to enumerate all the KeywordSearchTermVisits no older
-  // than `age_threshold` for the given keyword. The visits are ordered first by
-  // |normalized_term| and then by |last_visit_time| in ascending order, i.e.,
-  // from the oldest to the newest.
+  // Returns an enumerator to enumerate all the KeywordSearchTermVisits for the
+  // given keyword. The visits are ordered first by |normalized_term| and then
+  // by |last_visit_time| in ascending order, i.e.,from the oldest to the
+  // newest.
   std::unique_ptr<KeywordSearchTermVisitEnumerator>
-  CreateKeywordSearchTermVisitEnumerator(KeywordID keyword_id,
-                                         base::Time age_threshold);
+  CreateKeywordSearchTermVisitEnumerator(KeywordID keyword_id);
 
   // Deletes all searches matching `term`.
   bool DeleteKeywordSearchTerm(const std::u16string& term);
@@ -286,7 +277,8 @@ class URLDatabase {
   //
   // is_temporary is false when generating the "regular" URLs table. The expirer
   // sets this to true to generate the temporary table, which will have a
-  // different name but the same schema.
+  // different name but the same schema. See comment in
+  // CreateTemporaryURLTable() for details on temporary creation.
   bool CreateURLTable(bool is_temporary);
 
   // Creates the index over URLs so we can quickly look up based on URL.
@@ -317,8 +309,9 @@ class URLDatabase {
   bool URLTableContainsAutoincrement();
 
   // Convenience to fill a URLRow. Must be in sync with the fields in
-  // kHistoryURLRowFields.
-  static void FillURLRow(sql::Statement& s, URLRow* i);
+  // kHistoryURLRowFields. Returns true if the data was valid and |*i| was
+  // actually populated.
+  [[nodiscard]] static bool FillURLRow(sql::Statement& s, URLRow* i);
 
   // Returns the database for the functions in this interface. The descendant of
   // this class implements these functions to return its objects.

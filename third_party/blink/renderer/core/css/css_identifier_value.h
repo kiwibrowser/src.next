@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,6 +36,7 @@ class CORE_EXPORT CSSIdentifierValue : public CSSValue {
   }
 
   explicit CSSIdentifierValue(CSSValueID);
+  explicit CSSIdentifierValue(CSSValueID, bool was_quirky);
 
   // TODO(sashab): Remove this function, and update mapping methods to
   // specialize the create() method instead.
@@ -59,6 +60,8 @@ class CORE_EXPORT CSSIdentifierValue : public CSSValue {
       const {  // Overridden for special cases in CSSPrimitiveValueMappings.h
     return CssValueIDToPlatformEnum<T>(value_id_);
   }
+
+  bool WasQuirky() const { return was_quirky_; }
 
   void TraceAfterDispatch(blink::Visitor*) const;
 

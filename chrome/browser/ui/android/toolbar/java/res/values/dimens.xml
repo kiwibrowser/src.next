@@ -11,14 +11,22 @@ found in the LICENSE file.
 
     <!-- Tab Strip Dimensions -->
     <dimen name="tab_strip_height">0dp</dimen>
+    <dimen name="tab_strip_reserved_top_padding">0dp</dimen>
 
-    <!-- Negative vertical inset added to the search box bounds when modern is enabled. 4dp is added
-         to both the top and bottom bounds to bring the 48dp modern_toolbar_background_size to 56dp
-         (matches toolbar_height_no_shadow). -->
-    <dimen name="ntp_search_box_bounds_vertical_inset_modern">-4dp</dimen>
+    <dimen name="ntp_search_box_height">64dp</dimen>
 
-    <!-- Toolbar Phone - padding of the optional button when menu button is present -->
-    <dimen name="toolbar_phone_optional_button_padding">12dp</dimen>
+    <!-- Toolbar Phone - Optional toolbar button dimensions -->
+    <!-- Padding of button's background, only visible when showing a contextual action. -->
+    <dimen name="toolbar_phone_optional_button_background_padding">6dp</dimen>
+    <dimen name="toolbar_phone_optional_button_background_vertical_padding">8dp</dimen>
+    <!-- Padding of optional button, used to adjust button's icon within its clickable area. -->
+    <dimen name="toolbar_phone_optional_button_foreground_start_padding">14dp</dimen>
+    <dimen name="toolbar_phone_optional_button_foreground_vertical_padding">16dp</dimen>
+    <!-- Maximum width of optional button when expanded into an action chip. -->
+    <dimen name="toolbar_phone_optional_button_action_chip_max_width">175dp</dimen>
+    <!-- Width of optional toolbar button when not expanded into an action chip -->
+    <dimen name="toolbar_phone_optional_button_collapsed_state_width">52dp</dimen>
+    <dimen name="toolbar_phone_optional_button_expanded_state_extra_width">12dp</dimen>
 
     <!-- Home Button Menu dimensions-->
     <dimen name="home_button_list_menu_width">222dp</dimen>
@@ -36,12 +44,6 @@ found in the LICENSE file.
     <!-- Custom Tabs dimensions -->
     <dimen name="toolbar_icon_height">24dp</dimen>
 
-    <!-- Start surface toolbar dimensions -->
-    <dimen name="start_surface_toolbar_button_padding_to_button">8dp</dimen>
-    <dimen name="start_surface_toolbar_button_padding_to_edge">16dp</dimen>
-    <dimen name="start_surface_fake_search_box_top_margin">24dp</dimen>
-    <dimen name="identity_disc_button_margin_start">16dp</dimen>
-
     <!-- Navigation history popup dimensions -->
     <dimen name="navigation_popup_width">312dp</dimen>
     <dimen name="navigation_popup_item_height">56dp</dimen>
@@ -49,4 +51,6 @@ found in the LICENSE file.
     <dimen name="navigation_popup_top_padding">8dp</dimen>
     <dimen name="navigation_popup_favicon_bg_size">36dp</dimen>
 
+    <!-- Padding between rightmost button and strip end -->
+    <dimen name="button_end_padding">8dp</dimen>
 </resources>

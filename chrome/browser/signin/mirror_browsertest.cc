@@ -8,23 +8,22 @@
 #include <utility>
 
 #include "base/base_switches.h"
-#include "base/bind.h"
-#include "base/callback.h"
-#include "base/callback_helpers.h"
 #include "base/command_line.h"
-#include "base/containers/flat_map.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
+#include "base/functional/callback_helpers.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/strings/string_util.h"
 #include "base/test/bind.h"
+#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/extensions/api/identity/web_auth_flow.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/signin_util.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -36,18 +35,14 @@
 #include "components/signin/public/base/signin_pref_names.h"
 #include "content/public/common/content_client.h"
 #include "content/public/test/browser_test.h"
-#include "google_apis/gaia/gaia_switches.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/request_handler_util.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "third_party/blink/public/common/loader/url_loader_throttle.h"
 #include "url/gurl.h"
-
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-#include "chrome/browser/lacros/account_manager/fake_account_manager_ui_dialog_waiter.h"
-#endif
 
 namespace {
 
@@ -86,7 +81,8 @@ class ThrottleContentBrowserClient : public ChromeContentBrowserClient {
       content::BrowserContext* browser_context,
       const base::RepeatingCallback<content::WebContents*()>& wc_getter,
       content::NavigationUIData* navigation_ui_data,
-      int frame_tree_node_id) override {
+      content::FrameTreeNodeId frame_tree_node_id,
+      std::optional<int64_t> navigation_id) override {
     std::vector<std::unique_ptr<blink::URLLoaderThrottle>> throttles;
     if (request.url == watch_url_)
       throttles.push_back(std::make_unique<HeaderModifyingThrottle>());
@@ -100,34 +96,10 @@ class ThrottleContentBrowserClient : public ChromeContentBrowserClient {
 // Subclass of DiceManageAccountBrowserTest with Mirror enabled.
 class MirrorBrowserTest : public InProcessBrowserTest {
  protected:
-  void RunExtensionConsentTest(extensions::WebAuthFlow::Partition partition,
-                               bool expects_header) {
-    net::EmbeddedTestServer https_server(net::EmbeddedTestServer::TYPE_HTTPS);
-    https_server.AddDefaultHandlers(GetChromeTestDataDir());
-    const std::string kAuthPath = "/auth";
-    net::test_server::HttpRequest::HeaderMap headers;
-    base::RunLoop run_loop;
-    https_server.RegisterRequestMonitor(base::BindLambdaForTesting(
-        [&](const net::test_server::HttpRequest& request) {
-          if (request.GetURL().path() != kAuthPath)
-            return;
-
-          headers = request.headers;
-          run_loop.Quit();
-        }));
-    ASSERT_TRUE(https_server.Start());
-
-    auto web_auth_flow = std::make_unique<extensions::WebAuthFlow>(
-        nullptr, browser()->profile(),
-        https_server.GetURL("google.com", kAuthPath),
-        extensions::WebAuthFlow::INTERACTIVE, partition);
-
-    web_auth_flow->Start();
-    run_loop.Run();
-    EXPECT_EQ(!!headers.count(signin::kChromeConnectedHeader), expects_header);
-
-    web_auth_flow.release()->DetachDelegateAndDelete();
-    base::RunLoop().RunUntilIdle();
+  MirrorBrowserTest() {
+    // TODO(crbug.com/40248833): Use HTTPS URLs in tests to avoid having to
+    // disable this feature.
+    feature_list_.InitAndDisableFeature(features::kHttpsUpgrades);
   }
 
  private:
@@ -146,6 +118,8 @@ class MirrorBrowserTest : public InProcessBrowserTest {
     // https), but the test server runs on a random port.
     command_line->AppendSwitch(switches::kIgnoreGooglePortNumbers);
   }
+
+  base::test::ScopedFeatureList feature_list_;
 };
 
 // Verify the following items:
@@ -268,124 +242,5 @@ IN_PROC_BROWSER_TEST_F(MirrorBrowserTest, MirrorRequestHeader) {
     header_map.clear();
   }
 }
-
-// Verifies that requests originated from chrome.identity.launchWebAuthFlow()
-// API don't have Mirror headers attached.
-// This is a regression test for crbug.com/1077504.
-IN_PROC_BROWSER_TEST_F(MirrorBrowserTest,
-                       NoMirrorExtensionConsent_LaunchWebAuthFlow) {
-  RunExtensionConsentTest(extensions::WebAuthFlow::LAUNCH_WEB_AUTH_FLOW, false);
-}
-
-// Verifies that requests originated from chrome.identity.getAuthToken()
-// API have Mirror headers attached.
-IN_PROC_BROWSER_TEST_F(MirrorBrowserTest, MirrorExtensionConsent_GetAuthToken) {
-  RunExtensionConsentTest(extensions::WebAuthFlow::GET_AUTH_TOKEN, true);
-}
-
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-
-// Tests the behavior of Chrome when it receives a Mirror response from Gaia:
-// - listens to all network responses coming from Gaia with
-//   `signin::HeaderModificationDelegate`.
-// - parses the Mirror response header with
-// `signin::BuildManageAccountsParams()`
-// - triggers dialogs based on the action specified in the header, with
-//   `ProcessMirrorHeader`
-// The tests don't display real dialogs. Instead they use the
-// `FakeAccountManagerUI` and only check that the dialogs were triggered.
-class MirrorResponseBrowserTest : public InProcessBrowserTest {
- public:
-  MirrorResponseBrowserTest(const MirrorResponseBrowserTest&) = delete;
-  MirrorResponseBrowserTest& operator=(const MirrorResponseBrowserTest&) =
-      delete;
-
- protected:
-  ~MirrorResponseBrowserTest() override = default;
-
-  MirrorResponseBrowserTest()
-      : https_server_(net::EmbeddedTestServer::TYPE_HTTPS) {}
-
-  // Navigates to Gaia and receives a response with the specified
-  // "X-Chrome-Manage-Accounts" header.
-  void ReceiveManageAccountsHeader(
-      const base::flat_map<std::string, std::string>& header_params) {
-    std::vector<std::string> parts;
-    for (const auto& [key, value] : header_params) {
-      // "=" must be escaped as "%3D" for the embedded server.
-      const char kEscapedEquals[] = "%3D";
-      parts.push_back(key + kEscapedEquals + value);
-    }
-    std::string path = std::string("/set-header?X-Chrome-Manage-Accounts: ") +
-                       base::JoinString(parts, ",");
-    ASSERT_TRUE(
-        ui_test_utils::NavigateToURL(browser(), https_server_.GetURL(path)));
-  }
-
-  // InProcessBrowserTest:
-  void SetUp() override {
-    https_server_.AddDefaultHandlers(GetChromeTestDataDir());
-    ASSERT_TRUE(https_server_.InitializeAndListen());
-    InProcessBrowserTest::SetUp();
-  }
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    InProcessBrowserTest::SetUpCommandLine(command_line);
-    const GURL& base_url = https_server_.base_url();
-    command_line->AppendSwitchASCII(switches::kGaiaUrl, base_url.spec());
-    command_line->AppendSwitchASCII(switches::kGoogleApisUrl, base_url.spec());
-    command_line->AppendSwitchASCII(switches::kLsoUrl, base_url.spec());
-  }
-
-  void SetUpOnMainThread() override {
-    https_server_.StartAcceptingConnections();
-    InProcessBrowserTest::SetUpOnMainThread();
-  }
-
-  net::EmbeddedTestServer https_server_;
-  net::test_server::EmbeddedTestServerHandle https_server_handle_;
-};
-
-// Tests that the "Add Account" dialog is shown when receiving "ADDSESSION" from
-// Gaia.
-IN_PROC_BROWSER_TEST_F(MirrorResponseBrowserTest, AddSession) {
-  FakeAccountManagerUIDialogWaiter dialog_waiter(
-      GetFakeAccountManagerUI(),
-      FakeAccountManagerUIDialogWaiter::Event::kAddAccount);
-  ReceiveManageAccountsHeader({{"action", "ADDSESSION"}});
-  dialog_waiter.Wait();
-}
-
-// Tests that the "Settings"" dialog is shown when receiving "DEFAULT" from
-// Gaia.
-IN_PROC_BROWSER_TEST_F(MirrorResponseBrowserTest, Settings) {
-  FakeAccountManagerUIDialogWaiter dialog_waiter(
-      GetFakeAccountManagerUI(),
-      FakeAccountManagerUIDialogWaiter::Event::kSettings);
-  ReceiveManageAccountsHeader({{"action", "DEFAULT"}});
-  dialog_waiter.Wait();
-}
-
-// Tests that the "Reauth" dialog is shown when receiving an email from Gaia.
-IN_PROC_BROWSER_TEST_F(MirrorResponseBrowserTest, Reauth) {
-  FakeAccountManagerUIDialogWaiter dialog_waiter(
-      GetFakeAccountManagerUI(),
-      FakeAccountManagerUIDialogWaiter::Event::kReauth);
-  ReceiveManageAccountsHeader(
-      {{"action", "ADDSESSION"}, {"email", "user@example.com"}});
-  dialog_waiter.Wait();
-}
-
-// Tests that incognito browser is opened when receiving "INCOGNITO" from Gaia.
-IN_PROC_BROWSER_TEST_F(MirrorResponseBrowserTest, Incognito) {
-  ui_test_utils::BrowserChangeObserver browser_change_observer(
-      /*browser=*/nullptr,
-      ui_test_utils::BrowserChangeObserver::ChangeType::kAdded);
-  ReceiveManageAccountsHeader({{"action", "INCOGNITO"}});
-  Browser* incognito_browser = browser_change_observer.Wait();
-  EXPECT_TRUE(incognito_browser->profile()->IsIncognitoProfile());
-}
-
-#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
 
 }  // namespace

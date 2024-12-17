@@ -4,16 +4,17 @@
 
 #include "chrome/browser/extensions/extension_api_unittest.h"
 
-#include "base/values.h"
-#include "chrome/browser/extensions/extension_function_test_utils.h"
+#include <array>
+
 #include "chrome/browser/ui/browser.h"
+#include "extensions/browser/api_test_utils.h"
 #include "extensions/browser/extension_function.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_handlers/background_info.h"
 
-namespace utils = extension_function_test_utils;
+namespace utils = extensions::api_test_utils;
 
 namespace extensions {
 
@@ -25,52 +26,59 @@ void ExtensionApiUnittest::SetUp() {
   extension_ = ExtensionBuilder("Test").Build();
 }
 
-std::unique_ptr<base::Value> ExtensionApiUnittest::RunFunctionAndReturnValue(
-    ExtensionFunction* function,
+std::optional<base::Value> ExtensionApiUnittest::RunFunctionAndReturnValue(
+    scoped_refptr<ExtensionFunction> function,
     const std::string& args) {
   function->set_extension(extension());
-  return utils::RunFunctionAndReturnSingleResult(function, args, browser());
+  return utils::RunFunctionAndReturnSingleResult(std::move(function), args,
+                                                 browser()->profile());
 }
 
-std::unique_ptr<base::DictionaryValue>
+std::optional<base::Value::Dict>
 ExtensionApiUnittest::RunFunctionAndReturnDictionary(
-    ExtensionFunction* function,
+    scoped_refptr<ExtensionFunction> function,
     const std::string& args) {
-  base::Value* value = RunFunctionAndReturnValue(function, args).release();
-  base::DictionaryValue* dict = nullptr;
+  std::optional<base::Value> value =
+      RunFunctionAndReturnValue(std::move(function), args);
+  // We expect to either have successfully retrieved a dictionary from the
+  // value or the value to have been nullopt.
+  EXPECT_TRUE(!value || value->is_dict());
 
-  if (value && !value->GetAsDictionary(&dict))
-    delete value;
+  if (!value || !value->is_dict()) {
+    return std::nullopt;
+  }
 
-  // We expect to either have successfuly retrieved a dictionary from the value,
-  // or the value to have been NULL.
-  EXPECT_TRUE(dict || !value);
-  return std::unique_ptr<base::DictionaryValue>(dict);
+  return std::move(*value).TakeDict();
 }
 
-std::unique_ptr<base::Value> ExtensionApiUnittest::RunFunctionAndReturnList(
-    ExtensionFunction* function,
+std::optional<base::Value::List> ExtensionApiUnittest::RunFunctionAndReturnList(
+    scoped_refptr<ExtensionFunction> function,
     const std::string& args) {
-  base::Value* value = RunFunctionAndReturnValue(function, args).release();
-
-  if (value && !value->is_list())
-    delete value;
+  std::optional<base::Value> value =
+      RunFunctionAndReturnValue(std::move(function), args);
 
   // We expect to have successfully retrieved a list from the value.
-  EXPECT_TRUE(value && value->is_list());
-  return std::unique_ptr<base::Value>(value);
+  EXPECT_TRUE(!value || value->is_list());
+
+  if (!value || !value->is_list()) {
+    return std::nullopt;
+  }
+
+  return std::move(*value).TakeList();
 }
 
 std::string ExtensionApiUnittest::RunFunctionAndReturnError(
-    ExtensionFunction* function,
+    scoped_refptr<ExtensionFunction> function,
     const std::string& args) {
   function->set_extension(extension());
-  return utils::RunFunctionAndReturnError(function, args, browser());
+  return utils::RunFunctionAndReturnError(std::move(function), args,
+                                          browser()->profile());
 }
 
-void ExtensionApiUnittest::RunFunction(ExtensionFunction* function,
-                                       const std::string& args) {
-  RunFunctionAndReturnValue(function, args);
+void ExtensionApiUnittest::RunFunction(
+    scoped_refptr<ExtensionFunction> function,
+    const std::string& args) {
+  RunFunctionAndReturnValue(std::move(function), args);
 }
 
 }  // namespace extensions

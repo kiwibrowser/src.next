@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,9 @@
 
 #include <stdint.h>
 
-#include "base/callback.h"
+#include <optional>
+
+#include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "base/types/pass_key.h"
 #include "build/build_config.h"
@@ -22,10 +24,10 @@
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/viz/public/mojom/compositing/compositor_frame_sink.mojom-blink-forward.h"
 #include "services/viz/public/mojom/compositing/frame_sink_bundle.mojom-blink.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/frame_sinks/embedded_frame_sink.mojom-blink.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
+#include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -38,6 +40,23 @@ namespace blink {
 class PLATFORM_EXPORT VideoFrameSinkBundle
     : public viz::mojom::blink::FrameSinkBundleClient {
  public:
+  // Class for observing BeginFrame events and if BeginFrame events can be
+  // expected in the near future.
+  class PLATFORM_EXPORT BeginFrameObserver {
+   public:
+    virtual ~BeginFrameObserver() = default;
+
+    // Called at the end of each BeginFrame batch completion.
+    virtual void OnBeginFrameCompletion() = 0;
+
+    // Called whenever OnBeginFrameCompletion calls switch from enabled to
+    // disabled (or vice versa), and initially with the current state when the
+    // observer is registered with SetBeginFrameObserver. When `enabled` is
+    // true, there's least one bundled frame sink that wants OnBeginFrame
+    // notifications.
+    virtual void OnBeginFrameCompletionEnabled(bool enabled) = 0;
+  };
+
   VideoFrameSinkBundle(base::PassKey<VideoFrameSinkBundle>, uint32_t client_id);
 
   VideoFrameSinkBundle(const VideoFrameSinkBundle&) = delete;
@@ -61,6 +80,10 @@ class PLATFORM_EXPORT VideoFrameSinkBundle
   // tests. If null, any existing override is removed.
   static void SetFrameSinkProviderForTesting(
       mojom::blink::EmbeddedFrameSinkProvider* provider);
+
+  // Registers a BeginFrameObserver with the video frame sink bundle. Any old
+  // observer from a previous call is replaced with the new one.
+  void SetBeginFrameObserver(std::unique_ptr<BeginFrameObserver> observer);
 
   // Sets a callback to be invoked on disconnection. Used by tests to observe
   // fake Viz connection lifetime.
@@ -92,19 +115,20 @@ class PLATFORM_EXPORT VideoFrameSinkBundle
       uint32_t sink_id,
       viz::mojom::blink::CompositorFrameSinkType);
   void SetNeedsBeginFrame(uint32_t sink_id, bool needs_begin_frame);
+  void SetWantsBeginFrameAcks(uint32_t sink_id);
   void SubmitCompositorFrame(
       uint32_t sink_id,
       const viz::LocalSurfaceId& local_surface_id,
       viz::CompositorFrame frame,
-      absl::optional<viz::HitTestRegionList> hit_test_region_list,
+      std::optional<viz::HitTestRegionList> hit_test_region_list,
       uint64_t submit_time);
   void DidNotProduceFrame(uint32_t sink_id, const viz::BeginFrameAck& ack);
   void DidAllocateSharedBitmap(uint32_t sink_id,
                                base::ReadOnlySharedMemoryRegion region,
-                               const gpu::Mailbox& id);
-  void DidDeleteSharedBitmap(uint32_t sink_id, const gpu::Mailbox& id);
+                               const viz::SharedBitmapId& id);
+  void DidDeleteSharedBitmap(uint32_t sink_id, const viz::SharedBitmapId& id);
 #if BUILDFLAG(IS_ANDROID)
-  void SetThreadIds(uint32_t sink_id, const WTF::Vector<int32_t>& thread_ids);
+  void SetThreads(uint32_t sink_id, const WTF::Vector<viz::Thread>& threads);
 #endif
 
   // viz::mojom::blink::FrameSinkBundleClient implementation:
@@ -127,12 +151,13 @@ class PLATFORM_EXPORT VideoFrameSinkBundle
   mojo::Receiver<viz::mojom::blink::FrameSinkBundleClient> receiver_{this};
   WTF::HashMap<uint32_t, viz::mojom::blink::CompositorFrameSinkClient*>
       clients_;
+  WTF::HashSet<uint32_t> sinks_needing_begin_frames_;
 
   bool defer_submissions_ = false;
   WTF::Vector<viz::mojom::blink::BundledFrameSubmissionPtr> submission_queue_;
 
   base::OnceClosure disconnect_handler_for_testing_;
-
+  std::unique_ptr<BeginFrameObserver> begin_frame_observer_;
   base::WeakPtrFactory<VideoFrameSinkBundle> weak_ptr_factory_{this};
 };
 

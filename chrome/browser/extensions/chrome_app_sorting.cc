@@ -2,35 +2,42 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "chrome/browser/extensions/chrome_app_sorting.h"
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
 #include "base/feature_list.h"
-#include "base/threading/sequenced_task_runner_handle.h"
+#include "base/task/sequenced_task_runner.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/extension_sync_service.h"
 #include "chrome/browser/extensions/install_tracker.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/web_applications/web_app.h"
-#include "chrome/browser/web_applications/web_app_id.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/browser/web_applications/web_app_sync_bridge.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "components/app_constants/constants.h"
+#include "components/webapps/common/web_app_id.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_id.h"
+#include "extensions/common/manifest_handlers/app_display_info.h"
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "chrome/browser/chromeos/extensions/default_app_order.h"
-#include "chrome/browser/ui/app_list/page_break_constants.h"
+#if BUILDFLAG(IS_CHROMEOS)
+#include "chrome/browser/ash/extensions/default_app_order.h"
 #endif
 
 namespace extensions {
@@ -66,11 +73,11 @@ const char kPrefPageOrdinal[] = "page_ordinal";
 ////////////////////////////////////////////////////////////////////////////////
 // ChromeAppSorting::AppOrdinals
 
-ChromeAppSorting::AppOrdinals::AppOrdinals() {}
+ChromeAppSorting::AppOrdinals::AppOrdinals() = default;
 
 ChromeAppSorting::AppOrdinals::AppOrdinals(const AppOrdinals& other) = default;
 
-ChromeAppSorting::AppOrdinals::~AppOrdinals() {}
+ChromeAppSorting::AppOrdinals::~AppOrdinals() = default;
 
 ////////////////////////////////////////////////////////////////////////////////
 // ChromeAppSorting
@@ -78,8 +85,9 @@ ChromeAppSorting::AppOrdinals::~AppOrdinals() {}
 ChromeAppSorting::ChromeAppSorting(content::BrowserContext* browser_context)
     : browser_context_(browser_context),
       default_ordinals_created_(false) {
-  ExtensionIdList extensions;
-  ExtensionPrefs::Get(browser_context_)->GetExtensions(&extensions);
+  const ExtensionIdList extensions =
+      ExtensionPrefs::Get(browser_context_)->GetExtensions();
+  registry_observation_.Observe(ExtensionRegistry::Get(browser_context_));
   InitializePageOrdinalMap(extensions);
   MigrateAppIndex(extensions);
 }
@@ -101,8 +109,7 @@ void ChromeAppSorting::CreateOrdinalsIfNecessary(size_t minimum_size) {
   }
 }
 
-void ChromeAppSorting::MigrateAppIndex(
-    const extensions::ExtensionIdList& extension_ids) {
+void ChromeAppSorting::MigrateAppIndex(const ExtensionIdList& extension_ids) {
   if (extension_ids.empty())
     return;
 
@@ -111,8 +118,9 @@ void ChromeAppSorting::MigrateAppIndex(
   // Convert all the page index values to page ordinals. If there are any
   // app launch values that need to be migrated, inserted them into a sorted
   // set to be dealt with later.
-  typedef std::map<syncer::StringOrdinal, std::map<int, const std::string*>,
-                   syncer::StringOrdinal::LessThanFn> AppPositionToIdMapping;
+  typedef std::map<syncer::StringOrdinal, std::map<int, const ExtensionId*>,
+                   syncer::StringOrdinal::LessThanFn>
+      AppPositionToIdMapping;
   AppPositionToIdMapping app_launches_to_convert;
   for (auto ext_id = extension_ids.begin(); ext_id != extension_ids.end();
        ++ext_id) {
@@ -134,7 +142,8 @@ void ChromeAppSorting::MigrateAppIndex(
 
       page = PageIntegerAsStringOrdinal(old_page_index);
       SetPageOrdinal(*ext_id, page);
-      prefs->UpdateExtensionPref(*ext_id, kPrefPageIndexDeprecated, nullptr);
+      prefs->UpdateExtensionPref(*ext_id, kPrefPageIndexDeprecated,
+                                 std::nullopt);
     }
 
     int old_app_launch_index = 0;
@@ -150,7 +159,7 @@ void ChromeAppSorting::MigrateAppIndex(
         app_launches_to_convert[page][old_app_launch_index] = &*ext_id;
 
       prefs->UpdateExtensionPref(*ext_id, kPrefAppLaunchIndexDeprecated,
-                                 nullptr);
+                                 std::nullopt);
     }
   }
 
@@ -193,9 +202,9 @@ void ChromeAppSorting::InitializePageOrdinalMapFromWebApps() {
   if (!web_app_provider)
     return;
 
-  web_app_registrar_ = &web_app_provider->registrar();
-  web_app_sync_bridge_ = &web_app_provider->sync_bridge();
-  app_registrar_observation_.Observe(&web_app_provider->registrar());
+  web_app_registrar_ = &web_app_provider->registrar_unsafe();
+  web_app_sync_bridge_ = &web_app_provider->sync_bridge_unsafe();
+  app_registrar_observation_.Observe(&web_app_provider->registrar_unsafe());
   install_manager_observation_.Observe(&web_app_provider->install_manager());
   InitializePageOrdinalMap(web_app_registrar_->GetAppIds());
 }
@@ -222,7 +231,7 @@ void ChromeAppSorting::FixNTPOrdinalCollisions() {
       // Note - this iteration doesn't change app_launch_it->first, this just
       // iterates through the value list in the multimap (as it only iterates
       // |app_count| times)
-      std::vector<std::string> conflicting_ids;
+      std::vector<ExtensionId> conflicting_ids;
       for (int i = 0; i < app_count; ++i, ++app_launch_it)
         conflicting_ids.push_back(app_launch_it->second);
       std::sort(conflicting_ids.begin(), conflicting_ids.end());
@@ -250,11 +259,11 @@ void ChromeAppSorting::FixNTPOrdinalCollisions() {
       }
     }
   }
-  InstallTracker::Get(browser_context_)->OnAppsReordered(absl::nullopt);
+  InstallTracker::Get(browser_context_)->OnAppsReordered(std::nullopt);
 }
 
 void ChromeAppSorting::EnsureValidOrdinals(
-    const std::string& extension_id,
+    const ExtensionId& extension_id,
     const syncer::StringOrdinal& suggested_page) {
   syncer::StringOrdinal page_ordinal = GetPageOrdinal(extension_id);
   if (!page_ordinal.IsValid()) {
@@ -285,7 +294,7 @@ void ChromeAppSorting::EnsureValidOrdinals(
 }
 
 bool ChromeAppSorting::GetDefaultOrdinals(
-    const std::string& extension_id,
+    const ExtensionId& extension_id,
     syncer::StringOrdinal* page_ordinal,
     syncer::StringOrdinal* app_launch_ordinal) {
   CreateDefaultOrdinals();
@@ -301,9 +310,9 @@ bool ChromeAppSorting::GetDefaultOrdinals(
 }
 
 void ChromeAppSorting::OnExtensionMoved(
-    const std::string& moved_extension_id,
-    const std::string& predecessor_extension_id,
-    const std::string& successor_extension_id) {
+    const ExtensionId& moved_extension_id,
+    const ExtensionId& predecessor_extension_id,
+    const ExtensionId& successor_extension_id) {
   // We only need to change the StringOrdinal if there are neighbours.
   if (!predecessor_extension_id.empty() || !successor_extension_id.empty()) {
     if (predecessor_extension_id.empty()) {
@@ -333,7 +342,7 @@ void ChromeAppSorting::OnExtensionMoved(
 }
 
 syncer::StringOrdinal ChromeAppSorting::GetAppLaunchOrdinal(
-    const std::string& extension_id) const {
+    const ExtensionId& extension_id) const {
   if (web_app_registrar_ && web_app_registrar_->IsInstalled(extension_id))
     return web_app_registrar_->GetAppById(extension_id)->user_launch_ordinal();
 
@@ -347,7 +356,7 @@ syncer::StringOrdinal ChromeAppSorting::GetAppLaunchOrdinal(
 }
 
 void ChromeAppSorting::SetAppLaunchOrdinal(
-    const std::string& extension_id,
+    const ExtensionId& extension_id,
     const syncer::StringOrdinal& new_app_launch_ordinal) {
   // No work is required if the old and new values are the same.
   if (new_app_launch_ordinal.EqualsOrBothInvalid(
@@ -366,11 +375,11 @@ void ChromeAppSorting::SetAppLaunchOrdinal(
     return;
   }
 
-  std::unique_ptr<base::Value> new_value =
-      new_app_launch_ordinal.IsValid()
-          ? std::make_unique<base::Value>(
-                new_app_launch_ordinal.ToInternalValue())
-          : nullptr;
+  std::optional<base::Value> new_value;
+  if (new_app_launch_ordinal.IsValid()) {
+    new_value = base::Value(new_app_launch_ordinal.ToInternalValue());
+  }
+
   ExtensionPrefs::Get(browser_context_)
       ->UpdateExtensionPref(extension_id, kPrefAppLaunchOrdinal,
                             std::move(new_value));
@@ -423,7 +432,7 @@ syncer::StringOrdinal ChromeAppSorting::GetNaturalAppPageOrdinal() const {
 }
 
 syncer::StringOrdinal ChromeAppSorting::GetPageOrdinal(
-    const std::string& extension_id) const {
+    const ExtensionId& extension_id) const {
   if (web_app_registrar_ && web_app_registrar_->IsInstalled(extension_id))
     return web_app_registrar_->GetAppById(extension_id)->user_page_ordinal();
 
@@ -436,7 +445,7 @@ syncer::StringOrdinal ChromeAppSorting::GetPageOrdinal(
 }
 
 void ChromeAppSorting::SetPageOrdinal(
-    const std::string& extension_id,
+    const ExtensionId& extension_id,
     const syncer::StringOrdinal& new_page_ordinal) {
   // No work is required if the old and new values are the same.
   if (new_page_ordinal.EqualsOrBothInvalid(GetPageOrdinal(extension_id)))
@@ -452,10 +461,10 @@ void ChromeAppSorting::SetPageOrdinal(
     return;
   }
 
-  std::unique_ptr<base::Value> new_value =
-      new_page_ordinal.IsValid()
-          ? std::make_unique<base::Value>(new_page_ordinal.ToInternalValue())
-          : nullptr;
+  std::optional<base::Value> new_value;
+  if (new_page_ordinal.IsValid()) {
+    new_value = base::Value(new_page_ordinal.ToInternalValue());
+  }
 
   ExtensionPrefs::Get(browser_context_)
       ->UpdateExtensionPref(extension_id, kPrefPageOrdinal,
@@ -463,14 +472,14 @@ void ChromeAppSorting::SetPageOrdinal(
   SyncIfNeeded(extension_id);
 }
 
-void ChromeAppSorting::ClearOrdinals(const std::string& extension_id) {
+void ChromeAppSorting::ClearOrdinals(const ExtensionId& extension_id) {
   RemoveOrdinalMapping(extension_id,
                        GetPageOrdinal(extension_id),
                        GetAppLaunchOrdinal(extension_id));
 
   ExtensionPrefs* prefs = ExtensionPrefs::Get(browser_context_);
-  prefs->UpdateExtensionPref(extension_id, kPrefPageOrdinal, nullptr);
-  prefs->UpdateExtensionPref(extension_id, kPrefAppLaunchOrdinal, nullptr);
+  prefs->UpdateExtensionPref(extension_id, kPrefPageOrdinal, std::nullopt);
+  prefs->UpdateExtensionPref(extension_id, kPrefAppLaunchOrdinal, std::nullopt);
 }
 
 int ChromeAppSorting::PageStringOrdinalAsInteger(
@@ -495,7 +504,7 @@ syncer::StringOrdinal ChromeAppSorting::PageIntegerAsStringOrdinal(
   return ntp_ordinal_map_.rbegin()->first;
 }
 
-void ChromeAppSorting::SetExtensionVisible(const std::string& extension_id,
+void ChromeAppSorting::SetExtensionVisible(const ExtensionId& extension_id,
                                            bool visible) {
   if (visible)
     ntp_hidden_extensions_.erase(extension_id);
@@ -503,7 +512,7 @@ void ChromeAppSorting::SetExtensionVisible(const std::string& extension_id,
     ntp_hidden_extensions_.insert(extension_id);
 }
 
-void ChromeAppSorting::OnWebAppInstalled(const web_app::AppId& app_id) {
+void ChromeAppSorting::OnWebAppInstalled(const webapps::AppId& app_id) {
   const web_app::WebApp* web_app = web_app_registrar_->GetAppById(app_id);
   // There seems to be a racy bug where |web_app| can be a nullptr. Until that
   // bug is solved, check for that here. https://crbug.com/1101668
@@ -556,7 +565,7 @@ void ChromeAppSorting::OnWebAppsWillBeUpdatedFromSync(
   // returned from GetPageOrdinal() and GetAppLaunchOrdinal() match what is in
   // the internal map representation in this class.
   if (fix_ntp) {
-    base::SequencedTaskRunnerHandle::Get()->PostTask(
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE, base::BindOnce(&ChromeAppSorting::FixNTPOrdinalCollisions,
                                   weak_factory_.GetWeakPtr()));
   }
@@ -590,7 +599,7 @@ syncer::StringOrdinal ChromeAppSorting::GetMinOrMaxAppLaunchOrdinalsOnPage(
 }
 
 void ChromeAppSorting::InitializePageOrdinalMap(
-    const extensions::ExtensionIdList& extension_ids) {
+    const ExtensionIdList& extension_ids) {
   for (auto ext_it = extension_ids.begin(); ext_it != extension_ids.end();
        ++ext_it) {
     AddOrdinalMapping(*ext_it,
@@ -599,17 +608,15 @@ void ChromeAppSorting::InitializePageOrdinalMap(
 
     // Ensure that the web store app still isn't found in this list, since
     // it is added after this loop.
-    DCHECK(*ext_it != extensions::kWebStoreAppId);
+    DCHECK(*ext_it != kWebStoreAppId);
     DCHECK(*ext_it != app_constants::kChromeAppId);
   }
 
   // Include the Web Store App since it is displayed on the NTP.
-  syncer::StringOrdinal web_store_app_page =
-      GetPageOrdinal(extensions::kWebStoreAppId);
+  syncer::StringOrdinal web_store_app_page = GetPageOrdinal(kWebStoreAppId);
   if (web_store_app_page.IsValid()) {
-    AddOrdinalMapping(extensions::kWebStoreAppId,
-                      web_store_app_page,
-                      GetAppLaunchOrdinal(extensions::kWebStoreAppId));
+    AddOrdinalMapping(kWebStoreAppId, web_store_app_page,
+                      GetAppLaunchOrdinal(kWebStoreAppId));
   }
   // Include the Chrome App since it is displayed in the app launcher.
   syncer::StringOrdinal chrome_app_page =
@@ -621,7 +628,7 @@ void ChromeAppSorting::InitializePageOrdinalMap(
 }
 
 void ChromeAppSorting::AddOrdinalMapping(
-    const std::string& extension_id,
+    const ExtensionId& extension_id,
     const syncer::StringOrdinal& page_ordinal,
     const syncer::StringOrdinal& app_launch_ordinal) {
   if (!page_ordinal.IsValid() || !app_launch_ordinal.IsValid())
@@ -643,7 +650,7 @@ void ChromeAppSorting::AddOrdinalMapping(
 }
 
 void ChromeAppSorting::RemoveOrdinalMapping(
-    const std::string& extension_id,
+    const ExtensionId& extension_id,
     const syncer::StringOrdinal& page_ordinal,
     const syncer::StringOrdinal& app_launch_ordinal) {
   if (!page_ordinal.IsValid() || !app_launch_ordinal.IsValid())
@@ -664,7 +671,7 @@ void ChromeAppSorting::RemoveOrdinalMapping(
   }
 }
 
-void ChromeAppSorting::SyncIfNeeded(const std::string& extension_id) {
+void ChromeAppSorting::SyncIfNeeded(const ExtensionId& extension_id) {
   // Can be null in tests.
   if (!browser_context_)
     return;
@@ -683,13 +690,13 @@ void ChromeAppSorting::CreateDefaultOrdinals() {
   default_ordinals_created_ = true;
 
   // The following defines the default order of apps.
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   std::vector<std::string> app_ids;
   chromeos::default_app_order::Get(&app_ids);
 #else
   const char* const kDefaultAppOrder[] = {
       app_constants::kChromeAppId,
-      extensions::kWebStoreAppId,
+      kWebStoreAppId,
   };
   const std::vector<const char*> app_ids(
       kDefaultAppOrder, kDefaultAppOrder + std::size(kDefaultAppOrder));
@@ -699,19 +706,10 @@ void ChromeAppSorting::CreateDefaultOrdinals() {
   syncer::StringOrdinal app_launch_ordinal =
       CreateFirstAppLaunchOrdinal(page_ordinal);
   for (size_t i = 0; i < app_ids.size(); ++i) {
-    const std::string extension_id = app_ids[i];
+    const ExtensionId extension_id = app_ids[i];
     default_ordinals_[extension_id].page_ordinal = page_ordinal;
     default_ordinals_[extension_id].app_launch_ordinal = app_launch_ordinal;
     app_launch_ordinal = app_launch_ordinal.CreateAfter();
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-    // Default page breaks are installed by default for first-time users so that
-    // we can make default apps span multiple pages in the Launcher without
-    // fully filling those pages. If |extension_id| is of a default page break,
-    // then apps that follow it in the order should have an incremented page
-    // ordinal.
-    if (app_list::IsDefaultPageBreakItem(extension_id))
-      page_ordinal = page_ordinal.CreateAfter();
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
   }
 }
 
@@ -748,11 +746,23 @@ size_t ChromeAppSorting::CountItemsVisibleOnNtp(
     const AppLaunchOrdinalMap& m) const {
   size_t result = 0;
   for (auto it = m.begin(); it != m.end(); ++it) {
-    const std::string& id = it->second;
+    const ExtensionId& id = it->second;
     if (ntp_hidden_extensions_.count(id) == 0)
       result++;
   }
   return result;
+}
+
+void ChromeAppSorting::OnExtensionLoaded(
+    content::BrowserContext* browser_context,
+    const Extension* extension) {
+  if (!AppDisplayInfo::RequiresSortOrdinal(*extension)) {
+    return;
+  }
+
+  SetExtensionVisible(extension->id(),
+                      AppDisplayInfo::ShouldDisplayInNewTabPage(*extension));
+  EnsureValidOrdinals(extension->id(), syncer::StringOrdinal());
 }
 
 }  // namespace extensions

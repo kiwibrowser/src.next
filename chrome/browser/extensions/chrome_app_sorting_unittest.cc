@@ -158,22 +158,19 @@ class ChromeAppSortingInitialize : public PrefsPrepopulatedTestBase {
 
     // Setup the deprecated preferences.
     prefs()->UpdateExtensionPref(extension1()->id(),
-                                 kPrefAppLaunchIndexDeprecated,
-                                 std::make_unique<base::Value>(0));
+                                 kPrefAppLaunchIndexDeprecated, base::Value(0));
     prefs()->UpdateExtensionPref(extension1()->id(), kPrefPageIndexDeprecated,
-                                 std::make_unique<base::Value>(0));
+                                 base::Value(0));
 
     prefs()->UpdateExtensionPref(extension2()->id(),
-                                 kPrefAppLaunchIndexDeprecated,
-                                 std::make_unique<base::Value>(1));
+                                 kPrefAppLaunchIndexDeprecated, base::Value(1));
     prefs()->UpdateExtensionPref(extension2()->id(), kPrefPageIndexDeprecated,
-                                 std::make_unique<base::Value>(0));
+                                 base::Value(0));
 
     prefs()->UpdateExtensionPref(extension3()->id(),
-                                 kPrefAppLaunchIndexDeprecated,
-                                 std::make_unique<base::Value>(0));
+                                 kPrefAppLaunchIndexDeprecated, base::Value(0));
     prefs()->UpdateExtensionPref(extension3()->id(), kPrefPageIndexDeprecated,
-                                 std::make_unique<base::Value>(1));
+                                 base::Value(1));
 
     // We insert the ids in reverse order so that we have to deal with the
     // element on the 2nd page before the 1st page is seen.
@@ -216,21 +213,18 @@ class ChromeAppSortingInitializeWithNoApps : public PrefsPrepopulatedTestBase {
     // Make sure that the web store has valid ordinals.
     syncer::StringOrdinal initial_ordinal =
         syncer::StringOrdinal::CreateInitialOrdinal();
-    app_sorting()->SetPageOrdinal(extensions::kWebStoreAppId,
-                                  initial_ordinal);
-    app_sorting()->SetAppLaunchOrdinal(extensions::kWebStoreAppId,
-                                       initial_ordinal);
+    app_sorting()->SetPageOrdinal(kWebStoreAppId, initial_ordinal);
+    app_sorting()->SetAppLaunchOrdinal(kWebStoreAppId, initial_ordinal);
   }
   void Verify() override {
-    syncer::StringOrdinal page =
-        app_sorting()->GetPageOrdinal(extensions::kWebStoreAppId);
+    syncer::StringOrdinal page = app_sorting()->GetPageOrdinal(kWebStoreAppId);
     EXPECT_TRUE(page.IsValid());
 
     auto page_it = app_sorting()->ntp_ordinal_map_.find(page);
     EXPECT_TRUE(page_it != app_sorting()->ntp_ordinal_map_.end());
 
     syncer::StringOrdinal app_launch =
-        app_sorting()->GetPageOrdinal(extensions::kWebStoreAppId);
+        app_sorting()->GetPageOrdinal(kWebStoreAppId);
     EXPECT_TRUE(app_launch.IsValid());
 
     auto app_launch_it = page_it->second.find(app_launch);
@@ -258,10 +252,9 @@ class ChromeAppSortingMigrateAppIndexInvalid
 
     // Setup the deprecated preference.
     prefs()->UpdateExtensionPref(extension1()->id(),
-                                 kPrefAppLaunchIndexDeprecated,
-                                 std::make_unique<base::Value>(0));
+                                 kPrefAppLaunchIndexDeprecated, base::Value(0));
     prefs()->UpdateExtensionPref(extension1()->id(), kPrefPageIndexDeprecated,
-                                 std::make_unique<base::Value>(-1));
+                                 base::Value(-1));
   }
   void Verify() override {
     // Make sure that the invalid page_index wasn't converted over.
@@ -582,10 +575,10 @@ TEST_F(ChromeAppSortingPageOrdinalMapping,
 class ChromeAppSortingPreinstalledAppsBase : public PrefsPrepopulatedTestBase {
  public:
   ChromeAppSortingPreinstalledAppsBase() {
-    base::DictionaryValue simple_dict;
-    simple_dict.SetStringPath(keys::kVersion, "1.0.0.0");
-    simple_dict.SetStringPath(keys::kName, "unused");
-    simple_dict.SetStringPath(keys::kLaunchLocalPath, "fake.html");
+    base::Value::Dict simple_dict;
+    simple_dict.Set(keys::kVersion, "1.0.0.0");
+    simple_dict.Set(keys::kName, "unused");
+    simple_dict.SetByDottedPath(keys::kLaunchLocalPath, "fake.html");
 
     std::string error;
     app1_scoped_ = Extension::Create(prefs_.temp_dir().AppendASCII("app1_"),
@@ -611,8 +604,8 @@ class ChromeAppSortingPreinstalledAppsBase : public PrefsPrepopulatedTestBase {
 
  protected:
   // Weak references, for convenience.
-  raw_ptr<Extension> app1_;
-  raw_ptr<Extension> app2_;
+  raw_ptr<Extension, DanglingUntriaged> app1_;
+  raw_ptr<Extension, DanglingUntriaged> app2_;
 
  private:
   scoped_refptr<Extension> app1_scoped_;
@@ -750,10 +743,10 @@ class ChromeAppSortingDefaultOrdinalsBase : public ExtensionPrefsTest {
 
  protected:
   scoped_refptr<Extension> CreateApp(const std::string& name) {
-    base::DictionaryValue simple_dict;
-    simple_dict.SetStringPath(keys::kVersion, "1.0.0.0");
-    simple_dict.SetStringPath(keys::kName, name);
-    simple_dict.SetStringPath(keys::kLaunchLocalPath, "fake.html");
+    base::Value::Dict simple_dict;
+    simple_dict.Set(keys::kVersion, "1.0.0.0");
+    simple_dict.Set(keys::kName, name);
+    simple_dict.SetByDottedPath(keys::kLaunchLocalPath, "fake.html");
 
     std::string errors;
     scoped_refptr<Extension> app = Extension::Create(

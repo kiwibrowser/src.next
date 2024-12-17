@@ -1,6 +1,11 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
+#pragma allow_unsafe_buffers
+#endif
 
 #include <memory>
 #include <utility>
@@ -11,9 +16,11 @@
 #include "third_party/blink/renderer/core/css/css_selector_list.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
-#include "third_party/blink/renderer/core/css/parser/css_parser_selector.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/html/html_document.h"
+#include "third_party/blink/renderer/core/html/html_element.h"
+#include "third_party/blink/renderer/core/testing/null_execution_context.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 
 namespace blink {
@@ -30,6 +37,7 @@ class CheckPseudoHasCacheScopeContextTest : public PageTestBase {
     const char* element_query;
     CheckPseudoHasResult cached_result;
     ExpectedCheckPseudoHasResult expected_result;
+    const char* shadow_host_id = nullptr;
   };
 
   static CheckPseudoHasResult GetResult(
@@ -54,6 +62,15 @@ class CheckPseudoHasCacheScopeContextTest : public PageTestBase {
            kCheckPseudoHasResultChecked;
   }
 
+  static ContainerNode* GetQueryRoot(Document* document,
+                                     const char* shadow_host_id) {
+    if (shadow_host_id) {
+      return document->getElementById(AtomicString(shadow_host_id))
+          ->GetShadowRoot();
+    }
+    return document;
+  }
+
   static String TestResultToString(CheckPseudoHasResult test_result) {
     return String::Format(
         "0b%c%c%c%c",
@@ -73,21 +90,21 @@ class CheckPseudoHasCacheScopeContextTest : public PageTestBase {
       unsigned expected_result_cache_count,
       const ExpectedResultCacheEntry (&expected_result_cache_entries)[length],
       unsigned expected_fast_reject_filter_cache_count,
-      unsigned expected_bloom_filter_allocation_count) const {
-    Arena arena;
-    CSSSelectorVector</*UseArena=*/true> selector_vector =
-        CSSParser::ParseSelector</*UseArena=*/true>(
-            MakeGarbageCollected<CSSParserContext>(
-                *document, NullURL(), true /* origin_clean */, Referrer(),
-                WTF::TextEncoding(), CSSParserContext::kSnapshotProfile),
-            nullptr, selector_text, arena);
-    CSSSelectorList selector_list =
-        CSSSelectorList::AdoptSelectorVector</*UseArena=*/true>(
-            selector_vector);
+      unsigned expected_bloom_filter_allocation_count,
+      bool match_in_shadow_tree) const {
+    HeapVector<CSSSelector> arena;
+    base::span<CSSSelector> selector_vector = CSSParser::ParseSelector(
+        MakeGarbageCollected<CSSParserContext>(
+            *document, NullURL(), true /* origin_clean */, Referrer()),
+        CSSNestingType::kNone,
+        /*parent_rule_for_nesting=*/nullptr, /*is_within_scope=*/false, nullptr,
+        selector_text, arena);
+    CSSSelectorList* selector_list =
+        CSSSelectorList::AdoptSelectorVector(selector_vector);
     const CSSSelector* selector = nullptr;
-    for (selector = selector_list.First();
+    for (selector = selector_list->First();
          selector && selector->GetPseudoType() != CSSSelector::kPseudoHas;
-         selector = selector->TagHistory()) {
+         selector = selector->NextSimpleSelector()) {
     }
     if (!selector) {
       ADD_FAILURE() << "Failed : " << query_name << " (Cannot find :has() in "
@@ -96,7 +113,8 @@ class CheckPseudoHasCacheScopeContextTest : public PageTestBase {
     }
     const CSSSelector* argument_selector = selector->SelectorList()->First();
 
-    CheckPseudoHasArgumentContext argument_context(argument_selector);
+    CheckPseudoHasArgumentContext argument_context(argument_selector,
+                                                   match_in_shadow_tree);
     CheckPseudoHasCacheScope::Context cache_scope_context(document,
                                                           argument_context);
 
@@ -110,7 +128,9 @@ class CheckPseudoHasCacheScopeContextTest : public PageTestBase {
           String::Format("[%s] cache result of %s", query_name.Utf8().c_str(),
                          expected_result_cache_entry.element_query);
       Element* element =
-          document->QuerySelector(expected_result_cache_entry.element_query);
+          GetQueryRoot(document, expected_result_cache_entry.shadow_host_id)
+              ->QuerySelector(
+                  AtomicString(expected_result_cache_entry.element_query));
       DCHECK(element) << "Failed to get `"
                       << expected_result_cache_entry.element_query << "'";
 
@@ -157,63 +177,70 @@ class CheckPseudoHasCacheScopeContextTest : public PageTestBase {
                    const ExpectedResultCacheEntry (
                        &expected_result_cache_entries)[cache_size],
                    unsigned expected_fast_reject_filter_cache_count,
-                   unsigned expected_bloom_filter_allocation_count) const {
+                   unsigned expected_bloom_filter_allocation_count,
+                   const char* shadow_host_id = nullptr) const {
     Element* query_scope_element =
-        document->getElementById(query_scope_element_id);
+        GetQueryRoot(document, shadow_host_id)
+            ->getElementById(AtomicString(query_scope_element_id));
     ASSERT_TRUE(query_scope_element);
 
-    CheckPseudoHasCacheScope cache_scope(document);
+    CheckPseudoHasCacheScope cache_scope(document,
+                                         /*within_selector_checking=*/false);
 
     String query_name = String::Format("#%s.matches('%s')",
                                        query_scope_element_id, selector_text);
 
     EXPECT_EQ(expected_match_result,
-              query_scope_element->matches(selector_text))
+              query_scope_element->matches(AtomicString(selector_text)))
         << "Failed : " << query_name;
 
     CheckCacheResults(
         document, query_name, selector_text, expected_result_cache_count,
         expected_result_cache_entries, expected_fast_reject_filter_cache_count,
-        expected_bloom_filter_allocation_count);
+        expected_bloom_filter_allocation_count, !!shadow_host_id);
   }
 
   template <unsigned query_result_size, unsigned cache_size>
-  void TestQuerySelectorAll(
-      Document* document,
-      const char* query_scope_element_id,
-      const char* selector_text,
-      const String (&expected_results)[query_result_size],
-      unsigned expected_result_cache_count,
-      const ExpectedResultCacheEntry (
-          &expected_result_cache_entries)[cache_size],
-      unsigned expected_fast_reject_filter_cache_count,
-      unsigned expected_bloom_filter_allocation_count) const {
-    Element* query_scope_element =
-        document->getElementById(query_scope_element_id);
-    ASSERT_TRUE(query_scope_element);
+  void TestQuerySelectorAll(Document* document,
+                            const char* query_scope_element_id,
+                            const char* selector_text,
+                            const String (&expected_results)[query_result_size],
+                            unsigned expected_result_cache_count,
+                            const ExpectedResultCacheEntry (
+                                &expected_result_cache_entries)[cache_size],
+                            unsigned expected_fast_reject_filter_cache_count,
+                            unsigned expected_bloom_filter_allocation_count,
+                            const char* shadow_host_id = nullptr) const {
+    ContainerNode* query_scope_node = GetQueryRoot(document, shadow_host_id);
+    if (query_scope_element_id) {
+      query_scope_node = query_scope_node->getElementById(
+          AtomicString(query_scope_element_id));
+    }
+    ASSERT_TRUE(query_scope_node);
 
-    CheckPseudoHasCacheScope cache_scope(document);
+    CheckPseudoHasCacheScope cache_scope(document,
+                                         /*within_selector_checking=*/false);
 
     String query_name = String::Format("#%s.querySelectorAll('%s')",
                                        query_scope_element_id, selector_text);
 
     StaticElementList* result =
-        query_scope_element->QuerySelectorAll(selector_text);
+        query_scope_node->QuerySelectorAll(AtomicString(selector_text));
 
     EXPECT_EQ(query_result_size, result->length()) << "Failed : " << query_name;
     unsigned size_max = query_result_size > result->length() ? query_result_size
                                                              : result->length();
     for (unsigned i = 0; i < size_max; ++i) {
-      EXPECT_EQ(
-          (i < query_result_size ? expected_results[i] : "<null>"),
-          (i < result->length() ? result->item(i)->GetIdAttribute() : "<null>"))
+      EXPECT_EQ((i < query_result_size ? expected_results[i] : "<null>"),
+                (i < result->length() ? result->item(i)->GetIdAttribute()
+                                      : AtomicString()))
           << "Failed :" << query_name << " result at index " << i;
     }
 
     CheckCacheResults(
         document, query_name, selector_text, expected_result_cache_count,
         expected_result_cache_entries, expected_fast_reject_filter_cache_count,
-        expected_bloom_filter_allocation_count);
+        expected_bloom_filter_allocation_count, !!shadow_host_id);
   }
 };
 
@@ -221,7 +248,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest,
        Case1StartsWithDescendantCombinator) {
   // CheckPseudoHasArgumentTraversalScope::kSubtree
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -397,7 +426,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest,
 TEST_F(CheckPseudoHasCacheScopeContextTest, Case1StartsWithChildCombinator) {
   // CheckPseudoHasArgumentTraversalScope::kSubtree
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -628,7 +659,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest, Case1StartsWithChildCombinator) {
 TEST_F(CheckPseudoHasCacheScopeContextTest, Case2StartsWithIndirectAdjacent) {
   // CheckPseudoHasArgumentTraversalScope::kAllNextSiblings
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -732,7 +765,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest, Case2StartsWithIndirectAdjacent) {
 TEST_F(CheckPseudoHasCacheScopeContextTest, Case2StartsWithDirectAdjacent) {
   // CheckPseudoHasArgumentTraversalScope::kAllNextSiblings
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -926,7 +961,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest, Case2StartsWithDirectAdjacent) {
 TEST_F(CheckPseudoHasCacheScopeContextTest, Case3) {
   // CheckPseudoHasArgumentTraversalScope::kOneNextSiblingSubtree
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -1144,7 +1181,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest, Case3) {
 TEST_F(CheckPseudoHasCacheScopeContextTest, Case4) {
   // CheckPseudoHasArgumentTraversalScope::kAllNextSiblingSubtrees
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -1451,7 +1490,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest,
        QuerySelectorAllCase1StartsWithDescendantCombinator) {
   // CheckPseudoHasArgumentTraversalScope::kSubtree
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -1685,7 +1726,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest,
        QuerySelectorAllCase1StartsWithChildCombinator) {
   // CheckPseudoHasArgumentTraversalScope::kSubtree
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -1785,7 +1828,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest,
        QuerySelectorAllCase1StartsWithChildCombinatorNonSubjectHas) {
   // CheckPseudoHasArgumentTraversalScope::kSubtree
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -1952,7 +1997,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest,
        QuerySelectorAllCase2NonSubjectHas) {
   // CheckPseudoHasArgumentTraversalScope::kAllNextSiblings
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -2072,7 +2119,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest,
        QuerySelectorAllCase3NonSubjectHas) {
   // CheckPseudoHasArgumentTraversalScope::kOneNextSiblingSubtree
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -2164,7 +2213,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest,
        QuerySelectorAllCase4NonSubjectHas) {
   // CheckPseudoHasArgumentTraversalScope::kAllNextSiblingSubtrees
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -2261,7 +2312,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest,
        QuerySelectorAllCase4StartsWithDirectAdjacentCombinator) {
   // CheckPseudoHasArgumentTraversalScope::kAllNextSiblingSubtrees
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -2459,7 +2512,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest,
 TEST_F(CheckPseudoHasCacheScopeContextTest, QuerySelectorAllCase5) {
   // CheckPseudoHasArgumentTraversalScope::kOneNextSibling
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -2542,7 +2597,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest, QuerySelectorAllCase5) {
 TEST_F(CheckPseudoHasCacheScopeContextTest, QuerySelectorAllCase6) {
   // CheckPseudoHasArgumentTraversalScope::kFixedDepthDescendants
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -2645,7 +2702,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest, QuerySelectorAllCase6) {
 TEST_F(CheckPseudoHasCacheScopeContextTest, QuerySelectorAllCase7) {
   // CheckPseudoHasArgumentTraversalScope::kOneNextSiblingFixedDepthDescendants
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -2724,7 +2783,9 @@ TEST_F(CheckPseudoHasCacheScopeContextTest, QuerySelectorAllCase7) {
 TEST_F(CheckPseudoHasCacheScopeContextTest, QuerySelectorAllCase8) {
   // CheckPseudoHasArgumentTraversalScope::kAllNextSiblingsFixedDepthDescendants
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -2837,6 +2898,213 @@ TEST_F(CheckPseudoHasCacheScopeContextTest, QuerySelectorAllCase8) {
        {"#div33", kCheckPseudoHasResultNotCached, kNotYetChecked}},
       /* expected_fast_reject_filter_cache_count */ 0,
       /* expected_bloom_filter_allocation_count */ 0);
+}
+
+TEST_F(CheckPseudoHasCacheScopeContextTest, QuerySelectorAllCase9) {
+  // CheckPseudoHasArgumentTraversalScope::kShadowRootSubtree
+
+  // TODO(blee@igalia.com) Need cache support for this case - :has() checks a
+  // relationship between shadow root and its descendant. (e.g. :host:has(.a))
+
+  Document* document = &GetDocument();
+  document->body()->setHTMLUnsafe(R"HTML(
+    <!DOCTYPE html>
+    <main id="main">
+      <div id="host">
+        <template shadowrootmode="open">
+          <div id="div1" class="b">
+            <div id="div11"></div>
+          </div>
+          <div id="div2">
+            <div id="div21"></div>
+            <div id="div22" class="a">
+              <div id="div221" class="b"></div>
+            </div>
+            <div id="div23"></div>
+          </div>
+          <div id="div3">
+            <div id="div31" class="b"></div>
+          </div>
+        </template>
+      </div>
+    </main>
+  )HTML");
+
+  UpdateAllLifecyclePhasesForTest();
+
+  TestMatches(
+      document, "div1", ":host:has(.a) .b", /* expected_match_result */ true,
+      /* expected_result_cache_count */ 0,
+      {{"#main", kCheckPseudoHasResultNotCached, kNotYetChecked},
+       {"#host", kCheckPseudoHasResultNotCached, kNotYetChecked},
+       {"#div1", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div11", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div2", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div21", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div22", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div221", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div23", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div3", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div31", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"}},
+      /* expected_fast_reject_filter_cache_count */ 0,
+      /* expected_bloom_filter_allocation_count */ 0,
+      /* shadow_host_id */ "host");
+
+  TestMatches(
+      document, "div221", ":host:has(.a) .b", /* expected_match_result */ true,
+      /* expected_result_cache_count */ 0,
+      {{"#main", kCheckPseudoHasResultNotCached, kNotYetChecked},
+       {"#host", kCheckPseudoHasResultNotCached, kNotYetChecked},
+       {"#div1", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div11", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div2", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div21", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div22", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div221", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div23", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div3", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div31", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"}},
+      /* expected_fast_reject_filter_cache_count */ 0,
+      /* expected_bloom_filter_allocation_count */ 0,
+      /* shadow_host_id */ "host");
+
+  TestMatches(
+      document, "div31", ":host:has(.a) .b", /* expected_match_result */ true,
+      /* expected_result_cache_count */ 0,
+      {{"#main", kCheckPseudoHasResultNotCached, kNotYetChecked},
+       {"#host", kCheckPseudoHasResultNotCached, kNotYetChecked},
+       {"#div1", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div11", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div2", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div21", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div22", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div221", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div23", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div3", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div31", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"}},
+      /* expected_fast_reject_filter_cache_count */ 0,
+      /* expected_bloom_filter_allocation_count */ 0,
+      /* shadow_host_id */ "host");
+
+  TestQuerySelectorAll(
+      document, nullptr, ":host:has(.a) .b", {"div1", "div221", "div31"},
+      /* expected_result_cache_count */ 0,
+      {{"#main", kCheckPseudoHasResultNotCached, kNotYetChecked},
+       {"#host", kCheckPseudoHasResultNotCached, kNotYetChecked},
+       {"#div1", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div11", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div2", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div21", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div22", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div221", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div23", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div3", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div31", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"}},
+      /* expected_fast_reject_filter_cache_count */ 0,
+      /* expected_bloom_filter_allocation_count */ 0,
+      /* shadow_host_id */ "host");
+}
+
+TEST_F(CheckPseudoHasCacheScopeContextTest, QuerySelectorAllCase10) {
+  // CheckPseudoHasArgumentTraversalScope::kShadowRootFixedDepthDescendants
+
+  Document* document = &GetDocument();
+  document->body()->setHTMLUnsafe(R"HTML(
+    <!DOCTYPE html>
+    <main id="main">
+      <div id="host">
+        <template shadowrootmode="open">
+          <div id="div1" class="b">
+            <div id="div11"></div>
+          </div>
+          <div id="div2">
+            <div id="div21"></div>
+            <div id="div22" class="a">
+              <div id="div221" class="b"></div>
+            </div>
+            <div id="div23"></div>
+          </div>
+          <div id="div3">
+            <div id="div31" class="b"></div>
+          </div>
+        </template>
+      </div>
+    </main>
+  )HTML");
+
+  UpdateAllLifecyclePhasesForTest();
+
+  TestMatches(
+      document, "div1", ":host:has(> div > .a) .b",
+      /* expected_match_result */ true, /* expected_result_cache_count */ 0,
+      {{"#main", kCheckPseudoHasResultNotCached, kNotYetChecked},
+       {"#host", kCheckPseudoHasResultNotCached, kNotYetChecked},
+       {"#div1", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div11", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div2", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div21", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div22", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div221", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div23", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div3", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div31", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"}},
+      /* expected_fast_reject_filter_cache_count */ 0,
+      /* expected_bloom_filter_allocation_count */ 0,
+      /* shadow_host_id */ "host");
+
+  TestMatches(
+      document, "div221", ":host:has(> div > .a) .b",
+      /* expected_match_result */ true, /* expected_result_cache_count */ 0,
+      {{"#main", kCheckPseudoHasResultNotCached, kNotYetChecked},
+       {"#host", kCheckPseudoHasResultNotCached, kNotYetChecked},
+       {"#div1", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div11", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div2", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div21", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div22", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div221", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div23", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div3", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div31", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"}},
+      /* expected_fast_reject_filter_cache_count */ 0,
+      /* expected_bloom_filter_allocation_count */ 0,
+      /* shadow_host_id */ "host");
+
+  TestMatches(
+      document, "div31", ":host:has(> div > .a) .b",
+      /* expected_match_result */ true, /* expected_result_cache_count */ 0,
+      {{"#main", kCheckPseudoHasResultNotCached, kNotYetChecked},
+       {"#host", kCheckPseudoHasResultNotCached, kNotYetChecked},
+       {"#div1", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div11", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div2", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div21", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div22", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div221", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div23", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div3", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div31", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"}},
+      /* expected_fast_reject_filter_cache_count */ 0,
+      /* expected_bloom_filter_allocation_count */ 0,
+      /* shadow_host_id */ "host");
+
+  TestQuerySelectorAll(
+      document, nullptr, ":host:has(> div > .a) .b",
+      {"div1", "div221", "div31"}, /* expected_result_cache_count */ 0,
+      {{"#main", kCheckPseudoHasResultNotCached, kNotYetChecked},
+       {"#host", kCheckPseudoHasResultNotCached, kNotYetChecked},
+       {"#div1", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div11", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div2", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div21", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div22", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div221", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div23", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div3", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"},
+       {"#div31", kCheckPseudoHasResultNotCached, kNotYetChecked, "host"}},
+      /* expected_fast_reject_filter_cache_count */ 0,
+      /* expected_bloom_filter_allocation_count */ 0,
+      /* shadow_host_id */ "host");
 }
 
 }  // namespace blink

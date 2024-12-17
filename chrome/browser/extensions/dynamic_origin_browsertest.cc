@@ -3,8 +3,10 @@
 // found in the LICENSE file.
 
 #include "base/memory/raw_ptr.h"
+#include "base/memory/raw_ref.h"
 #include "chrome/browser/extensions/chrome_test_extension_loader.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/version_info/channel.h"
 #include "content/public/common/referrer.h"
@@ -19,6 +21,8 @@ namespace extensions {
 
 namespace {
 
+// Test dynamic origins in web accessible resources.
+// TODO(crbug.com/352267920): Move to web_accessible_resources_browsertest.cc?
 class DynamicOriginBrowserTest : public ExtensionBrowserTest {
  public:
   DynamicOriginBrowserTest() {
@@ -62,13 +66,13 @@ class DynamicOriginBrowserTest : public ExtensionBrowserTest {
     DCHECK(extension_);
   }
 
-  raw_ptr<const Extension> extension_ = nullptr;
+  raw_ptr<const Extension, DanglingUntriaged> extension_ = nullptr;
   TestExtensionDir dir_;
   base::test::ScopedFeatureList feature_list_;
   ScopedCurrentChannel current_channel_{version_info::Channel::CANARY};
 };
 
-// Web Accessible Resources.
+// Test a dynamic url as a web accessible resource.
 IN_PROC_BROWSER_TEST_F(DynamicOriginBrowserTest, DynamicUrl) {
   auto* extension = GetExtension();
 
@@ -108,7 +112,7 @@ IN_PROC_BROWSER_TEST_F(DynamicOriginBrowserTest,
     EXPECT_EQ(status, nav_observer.last_net_error_code());
   };
 
-  auto random_guid = base::GUID::GenerateRandomV4().AsLowercaseString();
+  auto random_guid = base::Uuid::GenerateRandomV4().AsLowercaseString();
   GURL random_url =
       Extension::GetBaseURLFromExtensionId(random_guid).Resolve("ok.html");
   GURL dynamic_url = extension->dynamic_url().Resolve("ok.html");
@@ -134,47 +138,44 @@ IN_PROC_BROWSER_TEST_F(DynamicOriginBrowserTest, FetchGuidFromFrame) {
     EXPECT_EQ(expected_frame_url,
               web_contents->GetPrimaryMainFrame()->GetLastCommittedURL());
 
-    std::string result;
     constexpr char kFetchScriptTemplate[] =
         R"(
         fetch($1).then(result => {
           return result.text();
-        }).then(text => {
-          domAutomationController.send(text);
         }).catch(err => {
-          domAutomationController.send(String(err));
+          return String(err);
         });)";
-    EXPECT_TRUE(content::ExecuteScriptAndExtractString(
-        web_contents,
-        content::JsReplace(kFetchScriptTemplate, fetch_url.spec()), &result));
-    EXPECT_EQ(expected_fetch_url_contents, result);
+    EXPECT_EQ(
+        expected_fetch_url_contents,
+        content::EvalJs(web_contents, content::JsReplace(kFetchScriptTemplate,
+                                                         fetch_url.spec())));
   };
 
-  // clang-format off
-  struct {
-    const GURL& frame_url;
-    const GURL& expected_frame_url;
-    const GURL& fetch_url;
+  const struct {
+    const char* title;
+    GURL frame_url;
+    GURL expected_frame_url;
+    GURL fetch_url;
     const char* expected_fetch_url_contents;
   } test_cases[] = {
-    // Fetch web accessible resource from extension resource.
-    {
-      extension->url().Resolve("extension_resource.html"),
-      extension->url().Resolve("extension_resource.html"),
-      extension->url().Resolve("web_accessible_resource.html"),
-      "web_accessible_resource.html"
-    },
-    // Fetch dynamic web accessible resource from extension resource.
-    {
-      extension->url().Resolve("extension_resource.html"),
-      extension->url().Resolve("extension_resource.html"),
-      extension->dynamic_url().Resolve("web_accessible_resource.html"),
-      "web_accessible_resource.html"
-    },
+      {
+          "Fetch web accessible resource from extension resource.",
+          extension->url().Resolve("extension_resource.html"),
+          extension->url().Resolve("extension_resource.html"),
+          extension->url().Resolve("web_accessible_resource.html"),
+          "web_accessible_resource.html",
+      },
+      {
+          "Fetch dynamic web accessible resource from extension resource.",
+          extension->url().Resolve("extension_resource.html"),
+          extension->url().Resolve("extension_resource.html"),
+          extension->dynamic_url().Resolve("web_accessible_resource.html"),
+          "web_accessible_resource.html",
+      },
   };
-  // clang-format on
 
   for (const auto& test_case : test_cases) {
+    SCOPED_TRACE(testing::Message() << test_case.title);
     test_frame_with_fetch(test_case.frame_url, test_case.expected_frame_url,
                           test_case.fetch_url,
                           test_case.expected_fetch_url_contents);

@@ -14,35 +14,13 @@
 #include "base/time/time.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_export.h"
+#include "net/http/alternate_protocol_usage.h"
 #include "net/quic/quic_http_utils.h"
 #include "net/socket/next_proto.h"
+#include "net/third_party/quiche/src/quiche/http2/core/spdy_protocol.h"
 #include "net/third_party/quiche/src/quiche/quic/core/quic_versions.h"
-#include "net/third_party/quiche/src/quiche/spdy/core/spdy_protocol.h"
 
 namespace net {
-
-enum AlternateProtocolUsage {
-  // Alternate Protocol was used without racing a normal connection.
-  ALTERNATE_PROTOCOL_USAGE_NO_RACE = 0,
-  // Alternate Protocol was used by winning a race with a normal connection.
-  ALTERNATE_PROTOCOL_USAGE_WON_RACE = 1,
-  // Alternate Protocol was not used by losing a race with a normal connection.
-  ALTERNATE_PROTOCOL_USAGE_MAIN_JOB_WON_RACE = 2,
-  // Alternate Protocol was not used because no Alternate-Protocol information
-  // was available when the request was issued, but an Alternate-Protocol header
-  // was present in the response.
-  ALTERNATE_PROTOCOL_USAGE_MAPPING_MISSING = 3,
-  // Alternate Protocol was not used because it was marked broken.
-  ALTERNATE_PROTOCOL_USAGE_BROKEN = 4,
-  // HTTPS DNS protocol upgrade job was used without racing with a normal
-  // connection and an Alternate Protocol job.
-  ALTERNATE_PROTOCOL_USAGE_DNS_ALPN_H3_JOB_WON_WITHOUT_RACE = 5,
-  // HTTPS DNS protocol upgrade job won a race with a normal connection and
-  // an Alternate Protocol job.
-  ALTERNATE_PROTOCOL_USAGE_DNS_ALPN_H3_JOB_WON_RACE = 6,
-  // Maximum value for the enum.
-  ALTERNATE_PROTOCOL_USAGE_MAX,
-};
 
 // Log a histogram to reflect |usage|.
 NET_EXPORT void HistogramAlternateProtocolUsage(AlternateProtocolUsage usage,
@@ -50,7 +28,7 @@ NET_EXPORT void HistogramAlternateProtocolUsage(AlternateProtocolUsage usage,
 
 enum BrokenAlternateProtocolLocation {
   BROKEN_ALTERNATE_PROTOCOL_LOCATION_HTTP_STREAM_FACTORY_JOB = 0,
-  BROKEN_ALTERNATE_PROTOCOL_LOCATION_QUIC_STREAM_FACTORY = 1,
+  BROKEN_ALTERNATE_PROTOCOL_LOCATION_QUIC_SESSION_POOL = 1,
   BROKEN_ALTERNATE_PROTOCOL_LOCATION_HTTP_STREAM_FACTORY_JOB_ALT = 2,
   BROKEN_ALTERNATE_PROTOCOL_LOCATION_HTTP_STREAM_FACTORY_JOB_MAIN = 3,
   BROKEN_ALTERNATE_PROTOCOL_LOCATION_QUIC_HTTP_STREAM = 4,
@@ -168,8 +146,9 @@ class NET_EXPORT_PRIVATE AlternativeServiceInfo {
 
   void set_advertised_versions(
       const quic::ParsedQuicVersionVector& advertised_versions) {
-    if (alternative_service_.protocol != kProtoQUIC)
+    if (alternative_service_.protocol != kProtoQUIC) {
       return;
+    }
 
     advertised_versions_ = advertised_versions;
     std::sort(advertised_versions_.begin(), advertised_versions_.end(),

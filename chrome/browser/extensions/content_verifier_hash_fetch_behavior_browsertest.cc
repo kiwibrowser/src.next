@@ -5,14 +5,15 @@
 #include <memory>
 #include <string>
 
-#include "base/bind.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
 #include "base/test/bind.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/browsertest_util.h"
 #include "chrome/browser/extensions/chrome_content_verifier_delegate.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
@@ -77,7 +78,7 @@ class ContentVerifierHashTest
 
   void TearDown() override {
     ExtensionBrowserTest::TearDown();
-    ChromeContentVerifierDelegate::SetDefaultModeForTesting(absl::nullopt);
+    ChromeContentVerifierDelegate::SetDefaultModeForTesting(std::nullopt);
   }
 
   void TearDownOnMainThread() override {
@@ -223,9 +224,8 @@ class ContentVerifierHashTest
   }
 
   bool ExtensionIsDisabledForCorruption() {
-    const Extension* extension = extensions::ExtensionRegistry::Get(profile())
-                                     ->disabled_extensions()
-                                     .GetByID(id());
+    const Extension* extension =
+        ExtensionRegistry::Get(profile())->disabled_extensions().GetByID(id());
     if (!extension)
       return false;
 
@@ -237,9 +237,8 @@ class ContentVerifierHashTest
   }
 
   bool ExtensionIsEnabled() {
-    return extensions::ExtensionRegistry::Get(profile())
-        ->enabled_extensions()
-        .Contains(id());
+    return ExtensionRegistry::Get(profile())->enabled_extensions().Contains(
+        id());
   }
 
   bool HasValidComputedHashes() {
@@ -247,7 +246,7 @@ class ContentVerifierHashTest
     ComputedHashes::Status computed_hashes_status;
     return ComputedHashes::CreateFromFile(
                file_util::GetComputedHashesPath(info_->extension_root),
-               &computed_hashes_status) != absl::nullopt;
+               &computed_hashes_status) != std::nullopt;
   }
 
   bool HasValidVerifiedContents() {
@@ -482,7 +481,7 @@ IN_PROC_BROWSER_TEST_P(ContentVerifierHashTest,
 
 // Tests that tampering a resource that will be requested by the extension and
 // tampering computed_hashes.json will always disable the extension.
-// TODO(crbug.com/1278994): Flaky.
+// TODO(crbug.com/40810537): Flaky.
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 #define MAYBE_TamperRequestedResourceTamperComputedHashes \
   DISABLED_TamperRequestedResourceTamperComputedHashes
@@ -793,7 +792,7 @@ IN_PROC_BROWSER_TEST_P(
 // Tests the behavior of loading a default resource extension with tampering
 // an extension resource that is not requested by default and tampering
 // computed_hashes.json.
-// TODO(crbug.com/1279323): Flaky.
+// TODO(crbug.com/40810776): Flaky.
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 #define MAYBE_DefaultRequestExtensionTamperNotRequestedResourceTamperComputedHashes \
   DISABLED_DefaultRequestExtensionTamperNotRequestedResourceTamperComputedHashes

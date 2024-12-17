@@ -26,6 +26,7 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/bindings/v8_binding.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -48,6 +49,8 @@ class CORE_EXPORT CSSStyleDeclaration : public ScriptWrappable,
   ~CSSStyleDeclaration() override;
 
   void Trace(Visitor* visitor) const override;
+
+  virtual bool IsAbstractPropertySet() const { return false; }
 
   virtual CSSRule* parentRule() const = 0;
   String cssFloat() { return GetPropertyValueInternal(CSSPropertyID::kFloat); }
@@ -93,7 +96,7 @@ class CORE_EXPORT CSSStyleDeclaration : public ScriptWrappable,
                                              unsigned index) = 0;
   virtual void SetPropertyInternal(CSSPropertyID,
                                    const String& property_value,
-                                   const String& value,
+                                   StringView value,
                                    bool important,
                                    SecureContextMode,
                                    ExceptionState&) = 0;
@@ -107,13 +110,25 @@ class CORE_EXPORT CSSStyleDeclaration : public ScriptWrappable,
   // an argument (see bug 829408).
   NamedPropertySetterResult AnonymousNamedSetter(ScriptState*,
                                                  const AtomicString& name,
-                                                 const ScriptValue& value);
+                                                 v8::Local<v8::Value> value);
   NamedPropertyDeleterResult AnonymousNamedDeleter(const AtomicString& name);
   void NamedPropertyEnumerator(Vector<String>& names, ExceptionState&);
   bool NamedPropertyQuery(const AtomicString&, ExceptionState&);
 
  protected:
   explicit CSSStyleDeclaration(ExecutionContext* context);
+
+ private:
+  // Fast path for when we know the value given from the script
+  // is a number, not a string; saves the round-tripping to and from
+  // strings in V8.
+  //
+  // Returns true if the fast path succeeded (in which case we need to
+  // go through the normal string path).
+  virtual bool FastPathSetProperty(CSSPropertyID unresolved_property,
+                                   double value) {
+    return false;
+  }
 };
 
 }  // namespace blink

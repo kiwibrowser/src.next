@@ -65,19 +65,20 @@ String Navigator::platform() const {
     return NavigatorBase::platform();
   const String& platform_override =
       DomWindow()->GetFrame()->GetSettings()->GetNavigatorPlatformOverride();
-  return platform_override.IsEmpty() ? NavigatorBase::platform()
-                                     : platform_override;
+  return platform_override.empty() ? NavigatorBase::platform()
+                                   : platform_override;
 }
 
 bool Navigator::cookieEnabled() const {
   if (!DomWindow())
     return false;
 
-  Settings* settings = DomWindow()->GetFrame()->GetSettings();
-  if (!settings || !settings->GetCookieEnabled())
-    return false;
+  if (DomWindow()->GetStorageKey().IsThirdPartyContext()) {
+    DomWindow()->CountUse(WebFeature::kNavigatorCookieEnabledThirdParty);
+  }
 
-  return DomWindow()->document()->CookiesEnabled();
+  Settings* settings = DomWindow()->GetFrame()->GetSettings();
+  return settings && settings->GetCookieEnabled();
 }
 
 bool Navigator::webdriver() const {

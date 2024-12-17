@@ -7,16 +7,16 @@
 #include <algorithm>
 #include <utility>
 
-#include "base/bind.h"
 #include "base/check.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
 #include "base/i18n/file_util_icu.h"
 #include "base/location.h"
 #include "base/notreached.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/task_runner.h"
 #include "base/task/thread_pool.h"
-#include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread_restrictions.h"
 #include "net/base/net_errors.h"
 
@@ -34,10 +34,13 @@ bool IsDotDot(const base::FilePath& path) {
 bool CompareAlphaDirsFirst(const DirectoryLister::DirectoryListerData& a,
                            const DirectoryLister::DirectoryListerData& b) {
   // Parent directory before all else.
-  if (IsDotDot(a.info.GetName()))
-    return true;
-  if (IsDotDot(b.info.GetName()))
+
+  if (IsDotDot(b.info.GetName())) {
     return false;
+  }
+  if (IsDotDot(a.info.GetName())) {
+    return true;
+  }
 
   // Directories before regular files.
   bool a_is_directory = a.info.IsDirectory();
@@ -57,7 +60,7 @@ void SortData(std::vector<DirectoryLister::DirectoryListerData>* data,
     std::sort(data->begin(), data->end(), CompareAlphaDirsFirst);
   } else if (listing_type != DirectoryLister::NO_SORT &&
              listing_type != DirectoryLister::NO_SORT_RECURSIVE) {
-    NOTREACHED();
+    NOTREACHED_IN_MIGRATION();
   }
 }
 
@@ -96,7 +99,7 @@ DirectoryLister::Core::Core(const base::FilePath& dir,
                             DirectoryLister* lister)
     : dir_(dir),
       type_(type),
-      origin_task_runner_(base::SequencedTaskRunnerHandle::Get().get()),
+      origin_task_runner_(base::SequencedTaskRunner::GetCurrentDefault().get()),
       lister_(lister) {
   DCHECK(lister_);
 }

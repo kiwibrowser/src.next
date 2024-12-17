@@ -6,14 +6,13 @@
 
 #import <Foundation/Foundation.h>
 
-#include "base/mac/foundation_util.h"
-#include "base/mac/scoped_nsobject.h"
+#include "base/apple/foundation_util.h"
 #include "base/memory/scoped_policy.h"
 #include "base/supports_user_data.h"
 #include "base/time/time.h"
 #import "chrome/browser/ui/cocoa/dock_icon.h"
 #include "components/download/public/common/download_item.h"
-#import "net/base/mac/url_conversions.h"
+#import "net/base/apple/url_conversions.h"
 
 namespace {
 
@@ -23,16 +22,16 @@ class CrNSProgressUserData : public base::SupportsUserData::Data {
  public:
   CrNSProgressUserData(NSProgress* progress, const base::FilePath& target)
       : target_(target) {
-    progress_.reset(progress, base::scoped_policy::RETAIN);
+    progress_ = progress;
   }
-  ~CrNSProgressUserData() override { [progress_.get() unpublish]; }
+  ~CrNSProgressUserData() override { [progress_ unpublish]; }
 
-  NSProgress* progress() const { return progress_.get(); }
+  NSProgress* progress() const { return progress_; }
   base::FilePath target() const { return target_; }
   void setTarget(const base::FilePath& target) { target_ = target; }
 
  private:
-  base::scoped_nsobject<NSProgress> progress_;
+  NSProgress* __strong progress_;
   base::FilePath target_;
 };
 
@@ -53,7 +52,7 @@ CrNSProgressUserData* CreateOrGetNSProgress(download::DownloadItem* download) {
     return progress_data;
 
   base::FilePath destination_path = download->GetFullPath();
-  NSURL* destination_url = base::mac::FilePathToNSURL(destination_path);
+  NSURL* destination_url = base::apple::FilePathToNSURL(destination_path);
 
   NSProgress* progress = [NSProgress progressWithTotalUnitCount:-1];
   progress.kind = NSProgressKindFile;
@@ -102,7 +101,7 @@ void UpdateNSProgress(download::DownloadItem* download) {
   base::FilePath download_path = download->GetFullPath();
   if (progress_data->target() != download_path) {
     progress_data->setTarget(download_path);
-    NSURL* download_url = base::mac::FilePathToNSURL(download_path);
+    NSURL* download_url = base::apple::FilePathToNSURL(download_path);
     progress.fileURL = download_url;
   }
 }
@@ -146,15 +145,15 @@ void DownloadStatusUpdater::UpdateAppIconDownloadProgress(
   if (download->GetState() != download::DownloadItem::IN_PROGRESS &&
       !download->GetTargetFilePath().empty()) {
     NSString* download_path =
-        base::mac::FilePathToNSString(download->GetTargetFilePath());
+        base::apple::FilePathToNSString(download->GetTargetFilePath());
     if (download->GetState() == download::DownloadItem::COMPLETE) {
       // Bounce the dock icon.
-      [[NSDistributedNotificationCenter defaultCenter]
+      [NSDistributedNotificationCenter.defaultCenter
           postNotificationName:@"com.apple.DownloadFileFinished"
                         object:download_path];
     }
 
     // Notify the Finder.
-    [[NSWorkspace sharedWorkspace] noteFileSystemChanged:download_path];
+    [NSWorkspace.sharedWorkspace noteFileSystemChanged:download_path];
   }
 }

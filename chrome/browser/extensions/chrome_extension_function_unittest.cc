@@ -4,8 +4,8 @@
 
 #include <memory>
 
-#include "base/bind.h"
 #include "base/dcheck_is_on.h"
+#include "base/functional/bind.h"
 #include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
@@ -24,7 +24,8 @@ namespace {
 void SuccessCallback(bool* did_respond,
                      ExtensionFunction::ResponseType type,
                      base::Value::List results,
-                     const std::string& error) {
+                     const std::string& error,
+                     mojom::ExtraResponseDataPtr) {
   EXPECT_EQ(ExtensionFunction::ResponseType::SUCCEEDED, type);
   *did_respond = true;
 }
@@ -32,7 +33,8 @@ void SuccessCallback(bool* did_respond,
 void FailCallback(bool* did_respond,
                   ExtensionFunction::ResponseType type,
                   base::Value::List results,
-                  const std::string& error) {
+                  const std::string& error,
+                  mojom::ExtraResponseDataPtr) {
   EXPECT_EQ(ExtensionFunction::ResponseType::FAILED, type);
   *did_respond = true;
 }
@@ -61,21 +63,21 @@ class ValidationFunction : public ExtensionFunction {
 
 using ChromeExtensionFunctionUnitTest = ExtensionServiceTestBase;
 
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)
 #define MAYBE_SimpleFunctionTest DISABLED_SimpleFunctionTest
 #else
 #define MAYBE_SimpleFunctionTest SimpleFunctionTest
 #endif
 TEST_F(ChromeExtensionFunctionUnitTest, MAYBE_SimpleFunctionTest) {
   scoped_refptr<ValidationFunction> function(new ValidationFunction(true));
-  function->RunWithValidation()->Execute();
+  function->RunWithValidation().Execute();
   EXPECT_TRUE(function->did_respond());
 }
 
 TEST_F(ChromeExtensionFunctionUnitTest, BrowserShutdownValidationFunctionTest) {
   TestingBrowserProcess::GetGlobal()->SetShuttingDown(true);
   scoped_refptr<ValidationFunction> function(new ValidationFunction(false));
-  function->RunWithValidation()->Execute();
+  function->RunWithValidation().Execute();
   TestingBrowserProcess::GetGlobal()->SetShuttingDown(false);
   EXPECT_TRUE(function->did_respond());
 }
@@ -106,7 +108,12 @@ using ChromeExtensionFunctionDeathTest = ChromeExtensionFunctionUnitTest;
 
 // Verify that destroying the extension function without responding causes a
 // DCHECK failure.
-TEST_F(ChromeExtensionFunctionDeathTest, DestructionWithoutResponse) {
+#if BUILDFLAG(IS_WIN)
+#define MAYBE_DestructionWithoutResponse DISABLED_DestructionWithoutResponse
+#else
+#define MAYBE_DestructionWithoutResponse DestructionWithoutResponse
+#endif
+TEST_F(ChromeExtensionFunctionDeathTest, MAYBE_DestructionWithoutResponse) {
   ASSERT_DEATH(
       {
         InitializeEmptyExtensionService();

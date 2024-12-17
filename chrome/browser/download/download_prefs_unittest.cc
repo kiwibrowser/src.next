@@ -5,18 +5,21 @@
 #include "chrome/browser/download/download_prefs.h"
 
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/json/values_util.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/download/download_prompt_status.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/download/public/common/download_features.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/safe_browsing/content/common/file_type_policies.h"
+#include "components/safe_browsing/core/common/features.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -25,12 +28,15 @@
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "base/test/scoped_running_on_chromeos.h"
 #include "chrome/browser/ash/drive/drive_integration_service.h"
-#include "chrome/browser/ash/file_manager/fake_disk_mount_manager.h"
 #include "chrome/browser/ash/file_manager/path_util.h"
+#include "chrome/browser/ash/file_manager/volume_manager.h"
 #include "chrome/browser/ash/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/ash/profiles/profile_helper.h"
 #include "chromeos/ash/components/dbus/cros_disks/cros_disks_client.h"
+#include "chromeos/ash/components/disks/disk_mount_manager.h"
+#include "chromeos/ash/components/disks/fake_disk_mount_manager.h"
 #include "components/drive/drive_pref_names.h"
+#include "components/user_manager/scoped_user_manager.h"
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
@@ -40,6 +46,10 @@
 #include "chrome/common/chrome_paths_lacros.h"
 #include "components/account_id/account_id.h"
 #endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
+
+#if BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/flags/android/chrome_feature_list.h"
+#endif
 
 using safe_browsing::FileTypePolicies;
 
@@ -185,8 +195,8 @@ TEST(DownloadPrefsTest, AutoOpenSetByPolicy) {
 
   content::BrowserTaskEnvironment task_environment_;
   TestingProfile profile;
-  ListPrefUpdate update(profile.GetPrefs(),
-                        prefs::kDownloadExtensionsToOpenByPolicy);
+  ScopedListPrefUpdate update(profile.GetPrefs(),
+                              prefs::kDownloadExtensionsToOpenByPolicy);
   update->Append("txt");
   DownloadPrefs prefs(&profile);
 
@@ -203,8 +213,8 @@ TEST(DownloadPrefsTest, IsAutoOpenByPolicy) {
 
   content::BrowserTaskEnvironment task_environment_;
   TestingProfile profile;
-  ListPrefUpdate update(profile.GetPrefs(),
-                        prefs::kDownloadExtensionsToOpenByPolicy);
+  ScopedListPrefUpdate update(profile.GetPrefs(),
+                              prefs::kDownloadExtensionsToOpenByPolicy);
   update->Append("exe");
   DownloadPrefs prefs(&profile);
   EXPECT_TRUE(prefs.EnableAutoOpenByUserBasedOnExtension(kFilePathType1));
@@ -222,8 +232,8 @@ TEST(DownloadPrefsTest, AutoOpenSetByPolicyDangerousType) {
 
   content::BrowserTaskEnvironment task_environment_;
   TestingProfile profile;
-  ListPrefUpdate update(profile.GetPrefs(),
-                        prefs::kDownloadExtensionsToOpenByPolicy);
+  ScopedListPrefUpdate update(profile.GetPrefs(),
+                              prefs::kDownloadExtensionsToOpenByPolicy);
   update->Append("swf");
   DownloadPrefs prefs(&profile);
 
@@ -249,17 +259,17 @@ TEST(DownloadPrefsTest, AutoOpenSetByPolicyDynamicUpdates) {
 
   // Update the policy preference.
   {
-    ListPrefUpdate update(profile.GetPrefs(),
-                          prefs::kDownloadExtensionsToOpenByPolicy);
+    ScopedListPrefUpdate update(profile.GetPrefs(),
+                                prefs::kDownloadExtensionsToOpenByPolicy);
     update->Append("swf");
   }
   EXPECT_TRUE(prefs.IsAutoOpenEnabled(kURL, kDangerousFilePath));
 
   // Remove the policy and ensure the file stops auto-opening.
   {
-    ListPrefUpdate update(profile.GetPrefs(),
-                          prefs::kDownloadExtensionsToOpenByPolicy);
-    update->ClearList();
+    ScopedListPrefUpdate update(profile.GetPrefs(),
+                                prefs::kDownloadExtensionsToOpenByPolicy);
+    update->clear();
   }
   EXPECT_FALSE(prefs.IsAutoOpenEnabled(kURL, kDangerousFilePath));
 }
@@ -271,11 +281,11 @@ TEST(DownloadPrefsTest, AutoOpenSetByPolicyAllowedURLs) {
 
   content::BrowserTaskEnvironment task_environment_;
   TestingProfile profile;
-  ListPrefUpdate update_type(profile.GetPrefs(),
-                             prefs::kDownloadExtensionsToOpenByPolicy);
+  ScopedListPrefUpdate update_type(profile.GetPrefs(),
+                                   prefs::kDownloadExtensionsToOpenByPolicy);
   update_type->Append("txt");
-  ListPrefUpdate update_url(profile.GetPrefs(),
-                            prefs::kDownloadAllowedURLsForOpenByPolicy);
+  ScopedListPrefUpdate update_url(profile.GetPrefs(),
+                                  prefs::kDownloadAllowedURLsForOpenByPolicy);
   update_url->Append("basic.com");
   DownloadPrefs prefs(&profile);
 
@@ -291,8 +301,8 @@ TEST(DownloadPrefsTest, AutoOpenSetByPolicyAllowedURLsDynamicUpdates) {
 
   content::BrowserTaskEnvironment task_environment_;
   TestingProfile profile;
-  ListPrefUpdate update_type(profile.GetPrefs(),
-                             prefs::kDownloadExtensionsToOpenByPolicy);
+  ScopedListPrefUpdate update_type(profile.GetPrefs(),
+                                   prefs::kDownloadExtensionsToOpenByPolicy);
   update_type->Append("txt");
   DownloadPrefs prefs(&profile);
 
@@ -302,8 +312,8 @@ TEST(DownloadPrefsTest, AutoOpenSetByPolicyAllowedURLsDynamicUpdates) {
 
   // Update the policy preference to only allow |kAllowedURL|.
   {
-    ListPrefUpdate update_url(profile.GetPrefs(),
-                              prefs::kDownloadAllowedURLsForOpenByPolicy);
+    ScopedListPrefUpdate update_url(profile.GetPrefs(),
+                                    prefs::kDownloadAllowedURLsForOpenByPolicy);
     update_url->Append("basic.com");
   }
 
@@ -312,9 +322,9 @@ TEST(DownloadPrefsTest, AutoOpenSetByPolicyAllowedURLsDynamicUpdates) {
 
   // Remove the policy and ensure both auto-open again.
   {
-    ListPrefUpdate update_url(profile.GetPrefs(),
-                              prefs::kDownloadAllowedURLsForOpenByPolicy);
-    update_url->ClearList();
+    ScopedListPrefUpdate update_url(profile.GetPrefs(),
+                                    prefs::kDownloadAllowedURLsForOpenByPolicy);
+    update_url->clear();
   }
   EXPECT_TRUE(prefs.IsAutoOpenByPolicy(kAllowedURL, kFilePath));
   EXPECT_TRUE(prefs.IsAutoOpenByPolicy(kDisallowedURL, kFilePath));
@@ -332,8 +342,8 @@ TEST(DownloadPrefsTest, AutoOpenSetByPolicyBlobURL) {
 
   content::BrowserTaskEnvironment task_environment_;
   TestingProfile profile;
-  ListPrefUpdate update_type(profile.GetPrefs(),
-                             prefs::kDownloadExtensionsToOpenByPolicy);
+  ScopedListPrefUpdate update_type(profile.GetPrefs(),
+                                   prefs::kDownloadExtensionsToOpenByPolicy);
   update_type->Append("txt");
   DownloadPrefs prefs(&profile);
 
@@ -345,8 +355,8 @@ TEST(DownloadPrefsTest, AutoOpenSetByPolicyBlobURL) {
 
   // Update the policy preference to only allow |kAllowedURL|.
   {
-    ListPrefUpdate update_url(profile.GetPrefs(),
-                              prefs::kDownloadAllowedURLsForOpenByPolicy);
+    ScopedListPrefUpdate update_url(profile.GetPrefs(),
+                                    prefs::kDownloadAllowedURLsForOpenByPolicy);
     update_url->Append("basic.com");
   }
 
@@ -358,13 +368,7 @@ TEST(DownloadPrefsTest, AutoOpenSetByPolicyBlobURL) {
   EXPECT_FALSE(prefs.IsAutoOpenByPolicy(kBlobDisallowedURL, kFilePath));
 }
 
-// TODO(crbug.com/1326319): Flaky on Win.
-#if BUILDFLAG(IS_WIN)
-#define MAYBE_Pdf DISABLED_Pdf
-#else
-#define MAYBE_Pdf Pdf
-#endif
-TEST(DownloadPrefsTest, MAYBE_Pdf) {
+TEST(DownloadPrefsTest, Pdf) {
   const base::FilePath kPdfFile(FILE_PATH_LITERAL("abcd.pdf"));
   const GURL kURL("http://basic.com");
 
@@ -555,9 +559,10 @@ TEST(DownloadPrefsTest, DownloadDirSanitization) {
   base::FilePath preinstalled_web_app_config_dir;
   base::FilePath preinstalled_web_app_extra_config_dir;
   chrome::SetLacrosDefaultPaths(
-      documents_path, default_dir, drivefs_dir, removable_media_dir,
-      android_files_dir, linux_files_dir, ash_resources_dir, share_cache_dir,
-      preinstalled_web_app_config_dir, preinstalled_web_app_extra_config_dir);
+      documents_path, default_dir, drivefs_dir, /*onedrive=*/base::FilePath(),
+      removable_media_dir, android_files_dir, linux_files_dir,
+      ash_resources_dir, share_cache_dir, preinstalled_web_app_config_dir,
+      preinstalled_web_app_extra_config_dir);
 #endif
 
   // Test a valid subdirectory of downloads.
@@ -612,12 +617,11 @@ TEST(DownloadPrefsTest, DownloadDirSanitization) {
     TestingProfile profile2(base::FilePath("/home/chronos/u-0123456789abcdef"));
     DownloadPrefs prefs2(&profile2);
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-    ash::FakeChromeUserManager user_manager;
-    const auto* user = user_manager.AddUser(account_id);
+    user_manager::TypedScopedUserManager<ash::FakeChromeUserManager>
+        user_manager{std::make_unique<ash::FakeChromeUserManager>()};
+    const auto* user = user_manager->AddUser(account_id);
     ash::ProfileHelper::Get()->SetUserToProfileMappingForTesting(user,
                                                                  &profile2);
-    ash::ProfileHelper::Get()->SetProfileToUserMappingForTesting(
-        const_cast<user_manager::User*>(user));
     profile2.GetPrefs()->SetString(drive::prefs::kDriveFsProfileSalt,
                                    drivefs_profile_salt);
     auto* integration_service =
@@ -646,6 +650,18 @@ TEST(DownloadPrefsTest, DownloadDirSanitization) {
                                    "/media/fuse/drivefs-something-else/root");
     EXPECT_EQ(prefs2.DownloadPath(), default_dir2);
   }
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  // Temp for OneDrive.
+  {
+    base::test::ScopedFeatureList scoped_feature_list;
+    scoped_feature_list.InitAndEnableFeature(features::kSkyVault);
+
+    base::FilePath temp_path;
+    base::GetTempDir(&temp_path);
+    ExpectValidDownloadDir(&profile, &prefs, temp_path);
+  }
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 }
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -655,8 +671,8 @@ TEST(DownloadPrefsTest, DownloadPathWithMigrationFromOldFormat) {
   base::FilePath default_download_dir =
       DownloadPrefs::GetDefaultDownloadDirectory();
   base::FilePath path_from_pref = default_download_dir.Append("a").Append("b");
-  ash::disks::DiskMountManager::InitializeForTesting(
-      new file_manager::FakeDiskMountManager);
+  ash::disks::FakeDiskMountManager disk_mount_manager;
+  ash::disks::DiskMountManager::InitializeForTesting(&disk_mount_manager);
 
   TestingProfile profile(base::FilePath("/home/chronos/u-0123456789abcdef"));
   base::test::ScopedRunningOnChromeOS running_on_chromeos;
@@ -673,8 +689,8 @@ TEST(DownloadPrefsTest, DownloadPathWithMigrationFromOldFormat) {
 // Tests that default download path pref is migrated from old format.
 TEST(DownloadPrefsTest, DefaultDownloadPathPrefMigrationFromOldFormat) {
   content::BrowserTaskEnvironment task_environment;
-  ash::disks::DiskMountManager::InitializeForTesting(
-      new file_manager::FakeDiskMountManager);
+  ash::disks::FakeDiskMountManager disk_mount_manager;
+  ash::disks::DiskMountManager::InitializeForTesting(&disk_mount_manager);
 
   TestingProfile profile(base::FilePath("/home/chronos/u-0123456789abcdef"));
   base::test::ScopedRunningOnChromeOS running_on_chromeos;
@@ -690,7 +706,7 @@ TEST(DownloadPrefsTest, DefaultDownloadPathPrefMigrationFromOldFormat) {
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
 #if BUILDFLAG(IS_ANDROID)
-// Verfies the returned value of PromptForDownload()
+// Verifies the returned value of PromptForDownload()
 // when prefs::kPromptForDownload is managed by enterprise policy,
 TEST(DownloadPrefsTest, ManagedPromptForDownload) {
   content::BrowserTaskEnvironment task_environment_;
@@ -708,7 +724,6 @@ TEST(DownloadPrefsTest, ManagedPromptForDownload) {
       prefs::kPromptForDownload, std::make_unique<base::Value>(false));
   EXPECT_FALSE(prefs.PromptForDownload());
 }
-
 #endif  // BUILDFLAG(IS_ANDROID)
 
 }  // namespace

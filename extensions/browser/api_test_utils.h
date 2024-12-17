@@ -6,17 +6,14 @@
 #define EXTENSIONS_BROWSER_API_TEST_UTILS_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 
-#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/run_loop.h"
+#include "base/values.h"
 #include "extensions/browser/extension_function.h"
-
-namespace base {
-class DictionaryValue;
-class ListValue;
-class Value;
-}
+#include "third_party/abseil-cpp/absl/types/variant.h"
 
 namespace content {
 class BrowserContext;
@@ -25,11 +22,6 @@ class BrowserContext;
 namespace extensions {
 class ExtensionFunctionDispatcher;
 
-// TODO(yoz): crbug.com/394840: Remove duplicate functionality in
-// chrome/browser/extensions/extension_function_test_utils.h.
-//
-// TODO(ckehoe): Accept args as std::unique_ptr<base::Value>,
-// and migrate existing users to the new API.
 namespace api_test_utils {
 
 // A helper class to handle waiting for a function response.
@@ -54,17 +46,18 @@ class SendResponseHelper {
   // Response handler.
   void OnResponse(ExtensionFunction::ResponseType response,
                   base::Value::List results,
-                  const std::string& error);
+                  const std::string& error,
+                  mojom::ExtraResponseDataPtr);
 
   base::RunLoop run_loop_;
   std::unique_ptr<bool> response_;
 };
 
-enum RunFunctionFlags { NONE = 0, INCLUDE_INCOGNITO = 1 << 0 };
-
-// Parse JSON and return as the specified type, or NULL if the JSON is invalid
-// or not the specified type.
-std::unique_ptr<base::DictionaryValue> ParseDictionary(const std::string& data);
+// The mode a function is supposed to be run with.
+enum class FunctionMode {
+  kNone,
+  kIncognito,
+};
 
 // Get |key| from |val| as the specified type. If |key| does not exist, or is
 // not of the specified type, adds a failure to the current test and returns
@@ -75,42 +68,39 @@ std::string GetString(const base::Value::Dict& val, const std::string& key);
 base::Value::List GetList(const base::Value::Dict& val, const std::string& key);
 base::Value::Dict GetDict(const base::Value::Dict& val, const std::string& key);
 
+// If |val| is a dictionary, return it as one, otherwise create an empty one.
+base::Value::Dict ToDict(std::optional<base::ValueView> val);
+// If |val| is a list, return it as one, otherwise create an empty one.
+base::Value::List ToList(std::optional<base::ValueView> val);
+
+// Currently, we allow either a string for the args, which is parsed to a list,
+// or an already-constructed list.
+using ArgsType = absl::variant<std::string, base::Value::List>;
+
 // Run |function| with |args| and return the result. Adds an error to the
 // current test if |function| returns an error. Takes ownership of
 // |function|. The caller takes ownership of the result.
-std::unique_ptr<base::Value> RunFunctionWithDelegateAndReturnSingleResult(
+std::optional<base::Value> RunFunctionWithDelegateAndReturnSingleResult(
     scoped_refptr<ExtensionFunction> function,
-    const std::string& args,
+    ArgsType args,
     std::unique_ptr<ExtensionFunctionDispatcher> dispatcher,
-    RunFunctionFlags flags);
-std::unique_ptr<base::Value> RunFunctionWithDelegateAndReturnSingleResult(
-    scoped_refptr<ExtensionFunction> function,
-    std::unique_ptr<base::ListValue> args,
-    std::unique_ptr<ExtensionFunctionDispatcher> dispatcher,
-    RunFunctionFlags flags);
+    FunctionMode mode);
 
 // RunFunctionWithDelegateAndReturnSingleResult, except with a NULL
 // implementation of the Delegate.
-std::unique_ptr<base::Value> RunFunctionAndReturnSingleResult(
-    ExtensionFunction* function,
-    const std::string& args,
-    content::BrowserContext* context);
-std::unique_ptr<base::Value> RunFunctionAndReturnSingleResult(
-    ExtensionFunction* function,
-    const std::string& args,
+std::optional<base::Value> RunFunctionAndReturnSingleResult(
+    scoped_refptr<ExtensionFunction> function,
+    ArgsType args,
     content::BrowserContext* context,
-    RunFunctionFlags flags);
+    FunctionMode mode = FunctionMode::kNone);
 
 // Run |function| with |args| and return the resulting error. Adds an error to
 // the current test if |function| returns a result. Takes ownership of
 // |function|.
-std::string RunFunctionAndReturnError(ExtensionFunction* function,
-                                      const std::string& args,
+std::string RunFunctionAndReturnError(scoped_refptr<ExtensionFunction> function,
+                                      ArgsType args,
                                       content::BrowserContext* context,
-                                      RunFunctionFlags flags);
-std::string RunFunctionAndReturnError(ExtensionFunction* function,
-                                      const std::string& args,
-                                      content::BrowserContext* context);
+                                      FunctionMode mode = FunctionMode::kNone);
 
 // Create and run |function| with |args|. Works with both synchronous and async
 // functions. Ownership of |function| remains with the caller.
@@ -122,17 +112,14 @@ std::string RunFunctionAndReturnError(ExtensionFunction* function,
 // TODO(aa): I'm concerned that this style won't scale to all the bits and bobs
 // we're going to need to frob for all the different extension functions. But
 // we can refactor when we see what is needed.
-bool RunFunction(ExtensionFunction* function,
-                 const std::string& args,
-                 content::BrowserContext* context);
-bool RunFunction(ExtensionFunction* function,
-                 const std::string& args,
+bool RunFunction(scoped_refptr<ExtensionFunction> function,
+                 ArgsType args,
+                 content::BrowserContext* context,
+                 FunctionMode mode = FunctionMode::kNone);
+bool RunFunction(scoped_refptr<ExtensionFunction> function,
+                 ArgsType args,
                  std::unique_ptr<ExtensionFunctionDispatcher> dispatcher,
-                 RunFunctionFlags flags);
-bool RunFunction(ExtensionFunction* function,
-                 std::unique_ptr<base::ListValue> args,
-                 std::unique_ptr<ExtensionFunctionDispatcher> dispatcher,
-                 RunFunctionFlags flags);
+                 FunctionMode mode);
 
 }  // namespace api_test_utils
 }  // namespace extensions

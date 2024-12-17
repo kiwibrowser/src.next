@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,6 +26,13 @@ NavigatorUAData* NavigatorUA::userAgentData() {
   ua_data->SetBitness(String::FromUTF8(metadata.bitness));
   ua_data->SetFullVersionList(metadata.brand_full_version_list);
   ua_data->SetWoW64(metadata.wow64);
+  Vector<String> form_factors;
+  form_factors.reserve(
+      base::checked_cast<wtf_size_t>(metadata.form_factors.size()));
+  for (auto& ff : metadata.form_factors) {
+    form_factors.push_back(String::FromUTF8(ff));
+  }
+  ua_data->SetFormFactors(std::move(form_factors));
 
   return ua_data;
 }

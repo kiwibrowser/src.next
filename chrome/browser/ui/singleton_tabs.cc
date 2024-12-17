@@ -11,6 +11,7 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
+#include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_url_handler.h"
@@ -30,30 +31,55 @@ bool CompareURLsWithReplacements(const GURL& url,
 
 }  // namespace
 
+void ShowSingletonTab(Profile* profile, const GURL& url) {
+  chrome::ScopedTabbedBrowserDisplayer displayer(profile);
+  NavigateParams params(
+      GetSingletonTabNavigateParams(displayer.browser(), url));
+  Navigate(&params);
+}
+
 void ShowSingletonTab(Browser* browser, const GURL& url) {
   NavigateParams params(GetSingletonTabNavigateParams(browser, url));
   Navigate(&params);
 }
 
-void ShowSingletonTabOverwritingNTP(Browser* browser, NavigateParams* params) {
-  DCHECK(browser);
+void ShowSingletonTabOverwritingNTP(
+    Profile* profile,
+    const GURL& url,
+    NavigateParams::PathBehavior path_behavior) {
+  chrome::ScopedTabbedBrowserDisplayer displayer(profile);
+  NavigateParams params(
+      GetSingletonTabNavigateParams(displayer.browser(), url));
+  params.path_behavior = path_behavior;
+  ShowSingletonTabOverwritingNTP(&params);
+}
+
+void ShowSingletonTabOverwritingNTP(
+    Browser* browser,
+    const GURL& url,
+    NavigateParams::PathBehavior path_behavior) {
+  NavigateParams params(GetSingletonTabNavigateParams(browser, url));
+  params.path_behavior = path_behavior;
+  ShowSingletonTabOverwritingNTP(&params);
+}
+
+void ShowSingletonTabOverwritingNTP(NavigateParams* params) {
   DCHECK_EQ(params->disposition, WindowOpenDisposition::SINGLETON_TAB);
   content::WebContents* contents =
-      browser->tab_strip_model()->GetActiveWebContents();
+      params->browser->tab_strip_model()->GetActiveWebContents();
   if (contents) {
     const GURL& contents_url = contents->GetVisibleURL();
     if (contents_url == chrome::kChromeUINewTabURL ||
         search::IsInstantNTP(contents) || contents_url == url::kAboutBlankURL) {
-      int tab_index = GetIndexOfExistingTab(browser, *params);
+      int tab_index = GetIndexOfExistingTab(params->browser, *params);
       if (tab_index < 0) {
         params->disposition = WindowOpenDisposition::CURRENT_TAB;
       } else {
         params->switch_to_singleton_tab =
-            browser->tab_strip_model()->GetWebContentsAt(tab_index);
+            params->browser->tab_strip_model()->GetWebContentsAt(tab_index);
       }
     }
   }
-
   Navigate(params);
 }
 
@@ -126,14 +152,9 @@ int GetIndexOfExistingTab(Browser* browser, const NavigateParams& params) {
 std::pair<Browser*, int> GetIndexAndBrowserOfExistingTab(
     Profile* profile,
     const NavigateParams& params) {
-  for (auto browser_it =
-           BrowserList::GetInstance()->begin_browsers_ordered_by_activation();
-       browser_it !=
-       BrowserList::GetInstance()->end_browsers_ordered_by_activation();
-       ++browser_it) {
-    Browser* browser = *browser_it;
+  for (Browser* browser : BrowserList::GetInstance()->OrderedByActivation()) {
     // When tab switching, only look at same profile and anonymity level.
-    if (profile == browser->profile()) {
+    if (profile == browser->profile() && !browser->is_delete_scheduled()) {
       int index = GetIndexOfExistingTab(browser, params);
       if (index >= 0)
         return {browser, index};

@@ -55,7 +55,8 @@ content::BrowserContext* ExtensionHostRegistryFactory::GetBrowserContextToUse(
   // LazyBackgroundTaskQueue!) rely on this, and are set up to be redirect to
   // the original context. This makes it quite challenging to let this have its
   // own incognito context.
-  return ExtensionsBrowserClient::Get()->GetOriginalContext(context);
+  return ExtensionsBrowserClient::Get()->GetContextRedirectedToOriginal(
+      context, /*force_guest_profile=*/true);
 }
 
 KeyedService* ExtensionHostRegistryFactory::BuildServiceInstanceFor(
@@ -157,8 +158,9 @@ std::vector<ExtensionHost*> ExtensionHostRegistry::GetHostsForExtension(
     const ExtensionId& extension_id) {
   std::vector<ExtensionHost*> hosts;
   for (ExtensionHost* host : extension_hosts_) {
-    if (host->extension_id() == extension_id)
+    if (host->extension_id() == extension_id) {
       hosts.push_back(host);
+    }
   }
   return hosts;
 }
@@ -169,8 +171,9 @@ ExtensionHost* ExtensionHostRegistry::GetExtensionHostForPrimaryMainFrame(
       << "GetExtensionHostForPrimaryMainFrame() should only be called with "
       << "the primary main frame.";
   for (ExtensionHost* host : extension_hosts_) {
-    if (host->main_frame_host() == render_frame_host)
+    if (host->main_frame_host() == render_frame_host) {
       return host;
+    }
   }
   return nullptr;
 }
@@ -181,6 +184,12 @@ void ExtensionHostRegistry::AddObserver(Observer* observer) {
 
 void ExtensionHostRegistry::RemoveObserver(Observer* observer) {
   observers_.RemoveObserver(observer);
+}
+
+void ExtensionHostRegistry::Shutdown() {
+  for (Observer& observer : observers_) {
+    observer.OnExtensionHostRegistryShutdown(this);
+  }
 }
 
 }  // namespace extensions

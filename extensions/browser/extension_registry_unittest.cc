@@ -21,8 +21,9 @@ typedef testing::Test ExtensionRegistryTest;
 testing::AssertionResult HasSingleExtension(
     const ExtensionList& list,
     const scoped_refptr<const Extension>& extension) {
-  if (list.empty())
+  if (list.empty()) {
     return testing::AssertionFailure() << "No extensions in list";
+  }
   if (list.size() > 1) {
     return testing::AssertionFailure() << list.size()
                                        << " extensions, expected 1";
@@ -181,50 +182,34 @@ TEST_F(ExtensionRegistryTest, GetExtensionById) {
   // Enabled is part of everything and the enabled list.
   EXPECT_TRUE(
       registry.GetExtensionById(enabled->id(), ExtensionRegistry::EVERYTHING));
-  EXPECT_TRUE(
-      registry.GetExtensionById(enabled->id(), ExtensionRegistry::ENABLED));
-  EXPECT_FALSE(
-      registry.GetExtensionById(enabled->id(), ExtensionRegistry::DISABLED));
-  EXPECT_FALSE(
-      registry.GetExtensionById(enabled->id(), ExtensionRegistry::TERMINATED));
-  EXPECT_FALSE(
-      registry.GetExtensionById(enabled->id(), ExtensionRegistry::BLOCKLISTED));
+  EXPECT_TRUE(registry.enabled_extensions().GetByID(enabled->id()));
+  EXPECT_FALSE(registry.disabled_extensions().GetByID(enabled->id()));
+  EXPECT_FALSE(registry.terminated_extensions().GetByID(enabled->id()));
+  EXPECT_FALSE(registry.blocklisted_extensions().GetByID(enabled->id()));
 
   // Disabled is part of everything and the disabled list.
   EXPECT_TRUE(
       registry.GetExtensionById(disabled->id(), ExtensionRegistry::EVERYTHING));
-  EXPECT_FALSE(
-      registry.GetExtensionById(disabled->id(), ExtensionRegistry::ENABLED));
-  EXPECT_TRUE(
-      registry.GetExtensionById(disabled->id(), ExtensionRegistry::DISABLED));
-  EXPECT_FALSE(
-      registry.GetExtensionById(disabled->id(), ExtensionRegistry::TERMINATED));
-  EXPECT_FALSE(registry.GetExtensionById(disabled->id(),
-                                         ExtensionRegistry::BLOCKLISTED));
+  EXPECT_FALSE(registry.enabled_extensions().GetByID(disabled->id()));
+  EXPECT_TRUE(registry.disabled_extensions().GetByID(disabled->id()));
+  EXPECT_FALSE(registry.terminated_extensions().GetByID(disabled->id()));
+  EXPECT_FALSE(registry.blocklisted_extensions().GetByID(disabled->id()));
 
   // Terminated is part of everything and the terminated list.
   EXPECT_TRUE(registry.GetExtensionById(terminated->id(),
                                         ExtensionRegistry::EVERYTHING));
-  EXPECT_FALSE(
-      registry.GetExtensionById(terminated->id(), ExtensionRegistry::ENABLED));
-  EXPECT_FALSE(
-      registry.GetExtensionById(terminated->id(), ExtensionRegistry::DISABLED));
-  EXPECT_TRUE(registry.GetExtensionById(terminated->id(),
-                                        ExtensionRegistry::TERMINATED));
-  EXPECT_FALSE(registry.GetExtensionById(terminated->id(),
-                                         ExtensionRegistry::BLOCKLISTED));
+  EXPECT_FALSE(registry.enabled_extensions().GetByID(terminated->id()));
+  EXPECT_FALSE(registry.disabled_extensions().GetByID(terminated->id()));
+  EXPECT_TRUE(registry.terminated_extensions().GetByID(terminated->id()));
+  EXPECT_FALSE(registry.blocklisted_extensions().GetByID(terminated->id()));
 
   // Blocklisted is part of everything and the blocklisted list.
   EXPECT_TRUE(registry.GetExtensionById(blocklisted->id(),
                                         ExtensionRegistry::EVERYTHING));
-  EXPECT_FALSE(
-      registry.GetExtensionById(blocklisted->id(), ExtensionRegistry::ENABLED));
-  EXPECT_FALSE(registry.GetExtensionById(blocklisted->id(),
-                                         ExtensionRegistry::DISABLED));
-  EXPECT_FALSE(registry.GetExtensionById(blocklisted->id(),
-                                         ExtensionRegistry::TERMINATED));
-  EXPECT_TRUE(registry.GetExtensionById(blocklisted->id(),
-                                        ExtensionRegistry::BLOCKLISTED));
+  EXPECT_FALSE(registry.enabled_extensions().GetByID(blocklisted->id()));
+  EXPECT_FALSE(registry.disabled_extensions().GetByID(blocklisted->id()));
+  EXPECT_FALSE(registry.terminated_extensions().GetByID(blocklisted->id()));
+  EXPECT_TRUE(registry.blocklisted_extensions().GetByID(blocklisted->id()));
 
   // Enabled can be found with multiple flags set.
   EXPECT_TRUE(registry.GetExtensionById(
@@ -280,17 +265,15 @@ TEST_F(ExtensionRegistryTest, TerminatedExtensionStoredVersion) {
   ExtensionRegistry registry(nullptr);
   scoped_refptr<const Extension> extension =
       ExtensionBuilder()
-          .SetManifest(DictionaryBuilder()
+          .SetManifest(base::Value::Dict()
                            .Set("name", "Test")
                            .Set("version", kVersionString)
-                           .Set("manifest_version", 2)
-                           .Build())
+                           .Set("manifest_version", 2))
           .Build();
   const ExtensionId extension_id = extension->id();
 
   EXPECT_TRUE(registry.AddEnabled(extension));
-  EXPECT_FALSE(
-      registry.GetExtensionById(extension_id, ExtensionRegistry::TERMINATED));
+  EXPECT_FALSE(registry.terminated_extensions().GetByID(extension_id));
   {
     base::Version version = registry.GetStoredVersion(extension_id);
     ASSERT_TRUE(version.IsValid());
@@ -301,8 +284,7 @@ TEST_F(ExtensionRegistryTest, TerminatedExtensionStoredVersion) {
   // Simulate terminating |extension|.
   EXPECT_TRUE(registry.RemoveEnabled(extension_id));
   EXPECT_TRUE(registry.AddTerminated(extension));
-  EXPECT_TRUE(
-      registry.GetExtensionById(extension_id, ExtensionRegistry::TERMINATED));
+  EXPECT_TRUE(registry.terminated_extensions().GetByID(extension_id));
   {
     base::Version version = registry.GetStoredVersion(extension_id);
     ASSERT_TRUE(version.IsValid());

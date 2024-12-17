@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,8 @@ namespace blink {
 
 class LayoutObject;
 
-// Put data inside a forward-declared struct, to avoid including LayoutObject.h.
+// Put data inside a forward-declared struct, to avoid including
+// layout_object.h.
 class DepthOrderedLayoutObjectListData;
 
 struct LayoutObjectWithDepth {
@@ -33,7 +34,7 @@ struct LayoutObjectWithDepth {
   unsigned depth = 0u;
 
   LayoutObject& operator*() const { return *object; }
-  LayoutObject* operator->() const { return object; }
+  LayoutObject* operator->() const { return object.Get(); }
 
   bool operator<(const LayoutObjectWithDepth& other) const {
     return depth > other.depth;

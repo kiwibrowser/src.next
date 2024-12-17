@@ -50,15 +50,15 @@ typedef (HTMLScriptElement or SVGScriptElement) HTMLOrSVGScriptElement;
     [Affects=Nothing] HTMLCollection getElementsByTagNameNS(DOMString? namespaceURI, DOMString localName);
     [Affects=Nothing] HTMLCollection getElementsByClassName(DOMString classNames);
 
-    [NewObject, DoNotTestNewObject, PerWorldBindings, RaisesException, ImplementedAs=CreateElementForBinding] Element createElement(DOMString localName);
-    [NewObject, DoNotTestNewObject, RaisesException] Element createElementNS(DOMString? namespaceURI, DOMString qualifiedName);
+    [NewObject, PerWorldBindings, RaisesException, ImplementedAs=CreateElementForBinding] Element createElement(DOMString localName);
+    [NewObject, RaisesException] Element createElementNS(DOMString? namespaceURI, DOMString qualifiedName);
     [NewObject] DocumentFragment createDocumentFragment();
     [NewObject] Text createTextNode(DOMString data);
     [NewObject, RaisesException] CDATASection createCDATASection(DOMString data);
     [NewObject] Comment createComment(DOMString data);
     [NewObject, RaisesException] ProcessingInstruction createProcessingInstruction(DOMString target, DOMString data);
 
-    [NewObject, DoNotTestNewObject, CEReactions, RaisesException] Node importNode(Node node, optional boolean deep = false);
+    [NewObject, CEReactions, RaisesException] Node importNode(Node node, optional boolean deep = false);
     [RaisesException, CEReactions] Node adoptNode(Node node);
 
     [NewObject, RaisesException, MeasureAs=DocumentCreateAttribute] Attr createAttribute(DOMString localName);
@@ -79,6 +79,9 @@ typedef (HTMLScriptElement or SVGScriptElement) HTMLOrSVGScriptElement;
 
     // HTML
     // https://html.spec.whatwg.org/C/#the-document-object
+
+    // https://github.com/whatwg/html/pull/9538
+    [CallWith=ExecutionContext,MeasureAs=ParseHTMLUnsafe] static Document parseHTMLUnsafe(HTMLString html);
 
     // resource metadata management
 
@@ -139,11 +142,11 @@ typedef (HTMLScriptElement or SVGScriptElement) HTMLOrSVGScriptElement;
     [Measure] readonly attribute HTMLCollection anchors;
     [Measure] readonly attribute HTMLCollection applets;
 
-    [CEReactions] attribute [TreatNullAs=EmptyString] DOMString fgColor;
-    [CEReactions] attribute [TreatNullAs=EmptyString] DOMString linkColor;
-    [CEReactions] attribute [TreatNullAs=EmptyString] DOMString vlinkColor;
-    [CEReactions] attribute [TreatNullAs=EmptyString] DOMString alinkColor;
-    [CEReactions] attribute [TreatNullAs=EmptyString] DOMString bgColor;
+    [CEReactions] attribute [LegacyNullToEmptyString] DOMString fgColor;
+    [CEReactions] attribute [LegacyNullToEmptyString] DOMString linkColor;
+    [CEReactions] attribute [LegacyNullToEmptyString] DOMString vlinkColor;
+    [CEReactions] attribute [LegacyNullToEmptyString] DOMString alinkColor;
+    [CEReactions] attribute [LegacyNullToEmptyString] DOMString bgColor;
 
     [MeasureAs=DocumentClear] void clear();
     [MeasureAs=DocumentCaptureEvents] void captureEvents();
@@ -172,7 +175,7 @@ typedef (HTMLScriptElement or SVGScriptElement) HTMLOrSVGScriptElement;
     readonly attribute boolean wasDiscarded;
 
     // https://wicg.github.io/nav-speculation/prerendering.html#dom-document-prerendering
-    [RuntimeEnabled=Prerender2RelatedFeatures, Measure] readonly attribute boolean prerendering;
+    [Measure] readonly attribute boolean prerendering;
 
     // Non-exposed API, used to evaluate and test soft navigation heuristics
     [RuntimeEnabled=SoftNavigationHeuristics] readonly attribute unsigned long softNavigations;
@@ -180,10 +183,8 @@ typedef (HTMLScriptElement or SVGScriptElement) HTMLOrSVGScriptElement;
     // Non-standard APIs
     [MeasureAs=DocumentCaretRangeFromPoint] Range caretRangeFromPoint(optional long x = 0, optional long y = 0);
 
-    // Storage Access API
-    [CallWith=ScriptState, NewObject, RuntimeEnabled=StorageAccessAPI, MeasureAs=StorageAccessAPI_HasStorageAccess_Method] Promise<boolean> hasStorageAccess();
-    [CallWith=ScriptState, NewObject, RuntimeEnabled=StorageAccessAPI, MeasureAs=StorageAccessAPI_requestStorageAccess_Method] Promise<void> requestStorageAccess();
-    [CallWith=ScriptState, NewObject, RuntimeEnabled=StorageAccessAPIForSiteExtension, MeasureAs=StorageAccessAPI_requestStorageAccessForSite_Method] Promise<void> requestStorageAccessForSite(USVString site);
+    // https://www.w3.org/TR/cssom-view/#dom-document-caretpositionfrompoint
+    [NewObject, MeasureAs=CaretPositionFromPoint, RuntimeEnabled=CaretPositionFromPoint] CaretPosition? caretPositionFromPoint(float x, float y, optional CaretPositionFromPointOptions options = {});
 
     // Text fragment directive API
     // https://wicg.github.io/scroll-to-text-fragment/#feature-detectability
@@ -198,21 +199,31 @@ typedef (HTMLScriptElement or SVGScriptElement) HTMLOrSVGScriptElement;
     [MeasureAs=PrefixedPageVisibility, ImplementedAs=visibilityState] readonly attribute DOMString webkitVisibilityState;
     [MeasureAs=PrefixedPageVisibility, ImplementedAs=hidden] readonly attribute boolean webkitHidden;
 
-    // Trust Token API (https://github.com/wicg/trust-token-api)
-    [CallWith=ScriptState, Measure, RaisesException, NewObject, SecureContext, RuntimeEnabled=TrustTokens] Promise<boolean> hasTrustToken(USVString issuer);
+    // Private Token API (https://github.com/wicg/trust-token-api)
+    [CallWith=ScriptState, Measure, RaisesException, NewObject, SecureContext, RuntimeEnabled=PrivateStateTokens] Promise<boolean> hasPrivateToken(USVString issuer);
 
-    // Trust Token API (https://github.com/wicg/trust-token-api)
-    [CallWith=ScriptState, Measure, RaisesException, NewObject, SecureContext, RuntimeEnabled=TrustTokens] Promise<boolean> hasRedemptionRecord(USVString issuer);
+    [CallWith=ScriptState, Measure, RaisesException, NewObject, SecureContext, RuntimeEnabled=PrivateStateTokens] Promise<boolean> hasRedemptionRecord(USVString issuer);
+
+    // ARIA Notify API
+    // https://github.com/WICG/aom/blob/gh-pages/notification-api.md
+    [RuntimeEnabled=AriaNotify] void ariaNotify(DOMString announcement, optional AriaNotificationOptions options = {});
+
+    // The (experimental) DOM Parts API.
+    [RuntimeEnabled=DOMPartsAPI] DocumentPartRoot getPartRoot();
 
     // Event handler attributes
     attribute EventHandler onbeforecopy;
     attribute EventHandler onbeforecut;
     attribute EventHandler onbeforepaste;
     attribute EventHandler onfreeze;
-    [RuntimeEnabled=Prerender2RelatedFeatures, Measure] attribute EventHandler onprerenderingchange;
+    [Measure] attribute EventHandler onprerenderingchange;
     attribute EventHandler onresume;
     attribute EventHandler onsearch;
     attribute EventHandler onvisibilitychange;
+
+    // Proposed setter for focus navigation starting point
+    // https://github.com/whatwg/html/issues/5326
+    [RuntimeEnabled=SetSequentialFocusStartingPoint, ImplementedAs=SetSequentialFocusNavigationStartingPoint] void setSequentialFocusStartingPoint(Element element);
 };
 
 Document includes GlobalEventHandlers;

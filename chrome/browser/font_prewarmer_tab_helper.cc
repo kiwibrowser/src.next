@@ -4,6 +4,7 @@
 
 #include "chrome/browser/font_prewarmer_tab_helper.h"
 
+#include <optional>
 #include <set>
 #include <string>
 
@@ -13,7 +14,6 @@
 #include "build/build_config.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history_clusters/history_clusters_tab_helper.h"
-#include "chrome/browser/preloading/prefetch/no_state_prefetch/no_state_prefetch_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/common/font_prewarmer.mojom.h"
@@ -24,23 +24,20 @@
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "components/search_engines/template_url_service.h"
+#include "content/public/browser/child_process_host.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_process_host_observer.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/child_process_host.h"
 #include "mojo/public/cpp/bindings/remote.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 
 namespace {
 
-const char kSearchResultsPagePrimaryFontsPref[] =
-    "cached_fonts.search_results_page.primary";
-const char kSearchResultsPageFallbackFontsPref[] =
-    "cached_fonts.search_results_page.fallback";
+const char kSearchResultsPageFontsPref[] =
+    "cached_fonts.search_results_page.fonts";
 
 // Key used to associate FontPrewarmerProfileState with BrowserContext.
 const void* const kUserDataKey = &kUserDataKey;
@@ -113,17 +110,15 @@ class FontPrewarmerCoordinator : public base::SupportsUserData::Data,
     prewarmed_hosts_.insert(rph);
     rph->AddObserver(this);
 
-    std::vector<std::string> primary_font_names = GetFontNamesFromPrefsForKey(
-        profile_, kSearchResultsPagePrimaryFontsPref);
-    std::vector<std::string> fallback_font_names = GetFontNamesFromPrefsForKey(
-        profile_, kSearchResultsPageFallbackFontsPref);
-    if (primary_font_names.empty() && fallback_font_names.empty())
+    std::vector<std::string> font_names =
+        GetFontNamesFromPrefsForKey(profile_, kSearchResultsPageFontsPref);
+    if (font_names.empty()) {
       return;
+    }
 
     RemoteFontPrewarmer remote_font_prewarmer;
     rph->BindReceiver(remote_font_prewarmer.BindNewPipeAndPassReceiver());
-    remote_font_prewarmer->PrewarmFonts(std::move(primary_font_names),
-                                        std::move(fallback_font_names));
+    remote_font_prewarmer->PrewarmFonts(std::move(font_names));
   }
 
   // Requests the set of fonts needed to display a search page from `rfh`.
@@ -143,14 +138,10 @@ class FontPrewarmerCoordinator : public base::SupportsUserData::Data,
   void OnGotFontsForFrame(
       mojo::AssociatedRemote<chrome::mojom::RenderFrameFontFamilyAccessor>
           font_family_accessor,
-      const std::vector<std::string>& primary_family_names,
-      const std::vector<std::string>& fallback_family_names) {
+      const std::vector<std::string>& font_names) {
     // TODO(sky): add some metrics here so that we know how often the
     // fonts change.
-    SaveFontNamesToPref(profile_, kSearchResultsPagePrimaryFontsPref,
-                        primary_family_names);
-    SaveFontNamesToPref(profile_, kSearchResultsPageFallbackFontsPref,
-                        fallback_family_names);
+    SaveFontNamesToPref(profile_, kSearchResultsPageFontsPref, font_names);
   }
 
   // content::RenderProcessHostObserver:
@@ -161,7 +152,8 @@ class FontPrewarmerCoordinator : public base::SupportsUserData::Data,
 
   raw_ptr<Profile> profile_;
   // Set of hosts that were requested to be prewarmed.
-  std::set<content::RenderProcessHost*> prewarmed_hosts_;
+  std::set<raw_ptr<content::RenderProcessHost, SetExperimental>>
+      prewarmed_hosts_;
   base::WeakPtrFactory<FontPrewarmerCoordinator> weak_factory_{this};
 };
 
@@ -170,8 +162,7 @@ class FontPrewarmerCoordinator : public base::SupportsUserData::Data,
 // static
 void FontPrewarmerTabHelper::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterListPref(kSearchResultsPagePrimaryFontsPref);
-  registry->RegisterListPref(kSearchResultsPageFallbackFontsPref);
+  registry->RegisterListPref(kSearchResultsPageFontsPref);
 }
 
 FontPrewarmerTabHelper::~FontPrewarmerTabHelper() = default;
@@ -182,15 +173,14 @@ FontPrewarmerTabHelper::FontPrewarmerTabHelper(
       content::WebContentsUserData<FontPrewarmerTabHelper>(*web_contents) {}
 
 // static
-std::string FontPrewarmerTabHelper::GetSearchResultsPagePrimaryFontsPref() {
-  return kSearchResultsPagePrimaryFontsPref;
+std::string FontPrewarmerTabHelper::GetSearchResultsPageFontsPref() {
+  return kSearchResultsPageFontsPref;
 }
 
 // static
-std::vector<std::string> FontPrewarmerTabHelper::GetPrimaryFontNames(
+std::vector<std::string> FontPrewarmerTabHelper::GetFontNames(
     Profile* profile) {
-  return GetFontNamesFromPrefsForKey(profile,
-                                     kSearchResultsPagePrimaryFontsPref);
+  return GetFontNamesFromPrefsForKey(profile, kSearchResultsPageFontsPref);
 }
 
 Profile* FontPrewarmerTabHelper::GetProfile() {

@@ -4,7 +4,8 @@
 
 #include "chrome/browser/autocomplete/remote_suggestions_service_factory.h"
 
-#include "base/memory/singleton.h"
+#include "base/no_destructor.h"
+#include "chrome/browser/autocomplete/document_suggestions_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/omnibox/browser/remote_suggestions_service.h"
 #include "content/public/browser/storage_partition.h"
@@ -20,18 +21,33 @@ RemoteSuggestionsService* RemoteSuggestionsServiceFactory::GetForProfile(
 // static
 RemoteSuggestionsServiceFactory*
 RemoteSuggestionsServiceFactory::GetInstance() {
-  return base::Singleton<RemoteSuggestionsServiceFactory>::get();
+  static base::NoDestructor<RemoteSuggestionsServiceFactory> instance;
+  return instance.get();
 }
 
-KeyedService* RemoteSuggestionsServiceFactory::BuildServiceInstanceFor(
+std::unique_ptr<KeyedService>
+RemoteSuggestionsServiceFactory::BuildServiceInstanceForBrowserContext(
     content::BrowserContext* context) const {
   Profile* profile = Profile::FromBrowserContext(context);
-  return new RemoteSuggestionsService(
+  return std::make_unique<RemoteSuggestionsService>(
+      DocumentSuggestionsServiceFactory::GetForProfile(
+          profile, /*create_if_necessary=*/true),
       profile->GetDefaultStoragePartition()
           ->GetURLLoaderFactoryForBrowserProcess());
 }
 
 RemoteSuggestionsServiceFactory::RemoteSuggestionsServiceFactory()
-    : ProfileKeyedServiceFactory("RemoteSuggestionsService") {}
+    : ProfileKeyedServiceFactory(
+          "RemoteSuggestionsService",
+          ProfileSelections::Builder()
+              // Service is needed in OTR profiles (Incognito and Guest).
+              .WithRegular(ProfileSelection::kOwnInstance)
+              .WithGuest(ProfileSelection::kOwnInstance)
+              // TODO(crbug.com/41488885): Check if this service is needed for
+              // Ash Internals.
+              .WithAshInternals(ProfileSelection::kOriginalOnly)
+              .Build()) {
+  DependsOn(DocumentSuggestionsServiceFactory::GetInstance());
+}
 
-RemoteSuggestionsServiceFactory::~RemoteSuggestionsServiceFactory() {}
+RemoteSuggestionsServiceFactory::~RemoteSuggestionsServiceFactory() = default;

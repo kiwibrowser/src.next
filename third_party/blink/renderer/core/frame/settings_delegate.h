@@ -53,7 +53,7 @@ class CORE_EXPORT SettingsDelegate {
   enum class ChangeType {
     kStyle,
     kViewportDescription,
-    kViewportRule,
+    kViewportStyle,
     kViewportPaintProperties,
     kDNSPrefetching,
     kImageLoading,
@@ -70,9 +70,9 @@ class CORE_EXPORT SettingsDelegate {
     kPaint,
     kScrollbarLayout,
     kColorScheme,
-    kSpatialNavigation,
     kUniversalAccess,
     kVisionDeficiency,
+    kForcedColors,
   };
 
   virtual void SettingsChanged(ChangeType) = 0;

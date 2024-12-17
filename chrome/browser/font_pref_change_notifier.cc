@@ -4,8 +4,8 @@
 
 #include "chrome/browser/font_pref_change_notifier.h"
 
-#include "base/bind.h"
 #include "base/check.h"
+#include "base/functional/bind.h"
 #include "base/observer_list.h"
 #include "base/strings/string_util.h"
 #include "chrome/common/pref_names_util.h"
@@ -59,10 +59,11 @@ void FontPrefChangeNotifier::RemoveRegistrar(Registrar* registrar) {
 }
 
 void FontPrefChangeNotifier::OnPreferenceChanged(PrefService* pref_service,
-                                                 const std::string& pref_name) {
+                                                 std::string_view pref_name) {
   if (base::StartsWith(pref_name, pref_names_util::kWebKitFontPrefPrefix,
                        base::CompareCase::SENSITIVE)) {
+    const std::string pref_name_string(pref_name);
     for (auto& reg : registrars_)
-      reg.callback_.Run(pref_name);
+      reg.callback_.Run(pref_name_string);
   }
 }

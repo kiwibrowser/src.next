@@ -102,10 +102,8 @@ class PLATFORM_EXPORT Image : public ThreadSafeRefCounted<Image> {
                                          sk_sp<SkColorSpace> color_space);
 
   virtual bool IsSVGImage() const { return false; }
-  virtual bool IsSVGImageForContainer() const { return false; }
   virtual bool IsBitmapImage() const { return false; }
   virtual bool IsStaticBitmapImage() const { return false; }
-  virtual bool IsPlaceholderImage() const { return false; }
 
   virtual bool CurrentFrameKnownToBeOpaque() = 0;
 
@@ -182,7 +180,7 @@ class PLATFORM_EXPORT Image : public ThreadSafeRefCounted<Image> {
 
   virtual bool GetHotSpot(gfx::Point&) const { return false; }
 
-  enum SizeAvailability {
+  enum SizeAvailability : uint8_t {
     kSizeUnavailable,
     kSizeAvailableAndLoadingAsynchronously,
     kSizeAvailable,
@@ -201,8 +199,11 @@ class PLATFORM_EXPORT Image : public ThreadSafeRefCounted<Image> {
     return kSizeUnavailable;
   }
 
-  // null string if unknown
+  // Returns null string if unknown.
   virtual String FilenameExtension() const;
+
+  // Returns WTF::g_null_atom if unknown.
+  virtual const AtomicString& MimeType() const;
 
   virtual void DestroyDecodedData() = 0;
 
@@ -276,7 +277,7 @@ class PLATFORM_EXPORT Image : public ThreadSafeRefCounted<Image> {
         return PaintImage::DecodingMode::kAsync;
     }
 
-    NOTREACHED();
+    NOTREACHED_IN_MIGRATION();
     return PaintImage::DecodingMode::kUnspecified;
   }
 

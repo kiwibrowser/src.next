@@ -37,18 +37,22 @@
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_text_area_element.h"
 #include "third_party/blink/renderer/core/html/html_area_element.h"
+#include "third_party/blink/renderer/core/html/html_embed_element.h"
 #include "third_party/blink/renderer/core/html/html_image_element.h"
 #include "third_party/blink/renderer/core/html/html_map_element.h"
+#include "third_party/blink/renderer/core/html/html_object_element.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/core/html/media/media_source_handle.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
+#include "third_party/blink/renderer/core/layout/hit_test_location.h"
 #include "third_party/blink/renderer/core/layout/layout_block.h"
 #include "third_party/blink/renderer/core/layout/layout_embedded_content.h"
 #include "third_party/blink/renderer/core/layout/layout_image.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
-#include "third_party/blink/renderer/core/layout/ng/ng_physical_box_fragment.h"
+#include "third_party/blink/renderer/core/layout/physical_box_fragment.h"
+#include "third_party/blink/renderer/core/layout/svg/layout_svg_image.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/scrolling/top_document_root_scroller_controller.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar.h"
@@ -57,6 +61,37 @@
 #include "ui/gfx/geometry/rect_conversions.h"
 
 namespace blink {
+
+using mojom::blink::FormControlType;
+
+namespace {
+
+bool HasImageSourceURL(const Node& node) {
+  // Always return a url for image elements and input elements with type=image,
+  // even if they don't have a LayoutImage (e.g. because the image didn't load
+  // and we are using an alt container). For other elements we don't create alt
+  // containers so ensure they contain a loaded image.
+  auto* html_input_element = DynamicTo<HTMLInputElement>(node);
+  if (IsA<HTMLImageElement>(node) ||
+      (html_input_element &&
+       html_input_element->FormControlType() == FormControlType::kInputImage)) {
+    return true;
+  }
+  const LayoutObject* layout_object = node.GetLayoutObject();
+  if (!layout_object) {
+    return false;
+  }
+  if (layout_object->IsImage() &&
+      (IsA<HTMLEmbedElement>(node) || IsA<HTMLObjectElement>(node))) {
+    return true;
+  }
+  if (layout_object->IsSVGImage()) {
+    return true;
+  }
+  return false;
+}
+
+}  // namespace
 
 HitTestResult::HitTestResult()
     : hit_test_request_(HitTestRequest::kReadOnly | HitTestRequest::kActive),
@@ -81,7 +116,8 @@ HitTestResult::HitTestResult(const HitTestResult& other)
       inner_url_element_(other.URLElement()),
       scrollbar_(other.GetScrollbar()),
       is_over_embedded_content_view_(other.IsOverEmbeddedContentView()),
-      canvas_region_id_(other.CanvasRegionId()) {
+      is_over_resizer_(other.is_over_resizer_),
+      is_over_scroll_corner_(other.is_over_scroll_corner_) {
   // Only copy the NodeSet in case of list hit test.
   list_based_test_result_ =
       other.list_based_test_result_
@@ -126,7 +162,8 @@ void HitTestResult::PopulateFromCachedResult(const HitTestResult& other) {
 
   is_over_embedded_content_view_ = other.IsOverEmbeddedContentView();
   cacheable_ = other.cacheable_;
-  canvas_region_id_ = other.CanvasRegionId();
+  is_over_resizer_ = other.IsOverResizer();
+  is_over_scroll_corner_ = other.IsOverScrollCorner();
 
   // Only copy the NodeSet in case of list hit test.
   list_based_test_result_ =
@@ -145,10 +182,9 @@ void HitTestResult::Trace(Visitor* visitor) const {
   visitor->Trace(list_based_test_result_);
 }
 
-void HitTestResult::SetNodeAndPosition(
-    Node* node,
-    const NGPhysicalBoxFragment* box_fragment,
-    const PhysicalOffset& position) {
+void HitTestResult::SetNodeAndPosition(Node* node,
+                                       const PhysicalBoxFragment* box_fragment,
+                                       const PhysicalOffset& position) {
   if (box_fragment) {
     local_point_ = position + box_fragment->OffsetFromOwnerLayoutBox();
   } else {
@@ -221,7 +257,7 @@ PositionWithAffinity HitTestResult::GetPositionForInnerNodeOrImageMapImage()
   return position;
 }
 
-void HitTestResult::SetToShadowHostIfInRestrictedShadowRoot() {
+void HitTestResult::SetToShadowHostIfInUAShadowRoot() {
   Node* node = InnerNode();
   if (!node)
     return;
@@ -231,9 +267,7 @@ void HitTestResult::SetToShadowHostIfInRestrictedShadowRoot() {
 
   // Consider a closed shadow tree of SVG's <use> element as a special
   // case so that a toolip title in the shadow tree works.
-  while (containing_shadow_root &&
-         (containing_shadow_root->IsUserAgent() ||
-          IsA<SVGUseElement>(containing_shadow_root->host()))) {
+  while (containing_shadow_root && containing_shadow_root->IsUserAgent()) {
     shadow_host = &containing_shadow_root->host();
     containing_shadow_root = shadow_host->ContainingShadowRoot();
     // TODO(layout-dev): Not updating local_point_ here seems like a mistake?
@@ -246,9 +280,7 @@ void HitTestResult::SetToShadowHostIfInRestrictedShadowRoot() {
 }
 
 CompositorElementId HitTestResult::GetScrollableContainer() const {
-  DCHECK(InnerNode());
-  // TODO(1303411): Some users encounter InnerNode() == null here, but we don't
-  // know why. Return an invalid element ID in this case, which we check for in
+  // If no node was found, return an invalid element ID, which we check for in
   // InputHandlerProxy::ContinueScrollBeginAfterMainThreadHitTest.
   if (!InnerNode())
     return CompositorElementId();
@@ -261,9 +293,9 @@ CompositorElementId HitTestResult::GetScrollableContainer() const {
   // browser control movement and overscroll glow.
   while (cur_box) {
     if (cur_box->IsGlobalRootScroller() ||
-        cur_box->NeedsScrollNode(CompositingReason::kNone)) {
-      return CompositorElementIdFromUniqueObjectId(
-          cur_box->UniqueId(), CompositorElementIdNamespace::kScroll);
+        (cur_box->IsScrollContainer() &&
+         cur_box->GetScrollableArea()->ScrollsOverflow())) {
+      return cur_box->GetScrollableArea()->GetScrollElementId();
     }
 
     if (IsA<LayoutView>(cur_box))
@@ -384,16 +416,24 @@ Image* HitTestResult::GetImage() const {
 }
 
 Image* HitTestResult::GetImage(const Node* node) {
-  if (!node)
+  if (!node) {
     return nullptr;
-
-  LayoutObject* layout_object = node->GetLayoutObject();
-  if (layout_object && layout_object->IsImage()) {
-    auto* image = To<LayoutImage>(layout_object);
-    if (image->CachedImage() && !image->CachedImage()->ErrorOccurred())
-      return image->CachedImage()->GetImage();
   }
-
+  const LayoutObject* layout_object = node->GetLayoutObject();
+  if (!layout_object) {
+    return nullptr;
+  }
+  const LayoutImageResource* layout_image_resource = nullptr;
+  if (layout_object->IsImage()) {
+    layout_image_resource = To<LayoutImage>(layout_object)->ImageResource();
+  } else if (auto* svg_image = DynamicTo<LayoutSVGImage>(layout_object)) {
+    layout_image_resource = svg_image->ImageResource();
+  }
+  const ImageResourceContent* image_content =
+      layout_image_resource ? layout_image_resource->CachedImage() : nullptr;
+  if (image_content && !image_content->ErrorOccurred()) {
+    return image_content->GetImage();
+  }
   return nullptr;
 }
 
@@ -407,26 +447,13 @@ gfx::Rect HitTestResult::ImageRect() const {
 }
 
 KURL HitTestResult::AbsoluteImageURL(const Node* node) {
-  if (!node)
+  if (!node || !HasImageSourceURL(*node)) {
     return KURL();
-
-  AtomicString url_string;
-  // Always return a url for image elements and input elements with type=image,
-  // even if they don't have a LayoutImage (e.g. because the image didn't load
-  // and we are using an alt container). For other elements we don't create alt
-  // containers so ensure they contain a loaded image.
-  auto* html_input_element = DynamicTo<HTMLInputElement>(node);
-  if (IsA<HTMLImageElement>(*node) ||
-      (html_input_element &&
-       html_input_element->type() == input_type_names::kImage))
-    url_string = To<Element>(*node).ImageSourceURL();
-  else if ((node->GetLayoutObject() && node->GetLayoutObject()->IsImage()) &&
-           (IsA<HTMLEmbedElement>(*node) || IsA<HTMLObjectElement>(*node) ||
-            IsA<SVGImageElement>(*node)))
-    url_string = To<Element>(*node).ImageSourceURL();
-  if (url_string.IsEmpty())
+  }
+  AtomicString url_string = To<Element>(*node).ImageSourceURL();
+  if (url_string.empty()) {
     return KURL();
-
+  }
   return node->GetDocument().CompleteURL(
       StripLeadingAndTrailingHTMLSpaces(url_string));
 }
@@ -526,9 +553,15 @@ HitTestResult::AddNodeToListBasedTestResultInternal(
     return std::make_tuple(false, kContinueHitTesting);
 
   MutableListBasedTestResult().insert(node);
-
-  if (GetHitTestRequest().PenetratingList())
-    return std::make_tuple(false, kContinueHitTesting);
+  if (GetHitTestRequest().PenetratingList()) {
+    ListBasedHitTestBehavior behavior = kContinueHitTesting;
+    if (GetHitTestRequest().UseHitNodeCb()) {
+      LocalFrameView::InvalidationDisallowedScope invalidation_disallowed(
+          *node->GetDocument().View());
+      behavior = GetHitTestRequest().RunHitNodeCb(*node);
+    }
+    return std::make_tuple(false, behavior);
+  }
 
   // The second argument will be ignored.
   return std::make_tuple(true, kContinueHitTesting);
@@ -592,7 +625,8 @@ void HitTestResult::Append(const HitTestResult& other) {
     point_in_inner_node_frame_ = other.point_in_inner_node_frame_;
     inner_url_element_ = other.URLElement();
     is_over_embedded_content_view_ = other.IsOverEmbeddedContentView();
-    canvas_region_id_ = other.CanvasRegionId();
+    is_over_resizer_ = other.IsOverResizer();
+    is_over_scroll_corner_ = other.is_over_scroll_corner_;
   }
 
   if (other.list_based_test_result_) {

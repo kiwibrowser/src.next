@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,8 +22,9 @@ CSSContentDistributionValue::CSSContentDistributionValue(
 String CSSContentDistributionValue::CustomCSSText() const {
   CSSValueList* list = CSSValueList::CreateSpaceSeparated();
 
-  if (IsValidCSSValueID(distribution_))
+  if (IsValidCSSValueID(distribution_)) {
     list->Append(*CSSIdentifierValue::Create(distribution_));
+  }
   if (IsValidCSSValueID(position_)) {
     if (position_ == CSSValueID::kFirstBaseline ||
         position_ == CSSValueID::kLastBaseline) {
@@ -33,8 +34,9 @@ String CSSContentDistributionValue::CustomCSSText() const {
       list->Append(*CSSIdentifierValue::Create(preference));
       list->Append(*CSSIdentifierValue::Create(CSSValueID::kBaseline));
     } else {
-      if (IsValidCSSValueID(overflow_))
+      if (IsValidCSSValueID(overflow_)) {
         list->Append(*CSSIdentifierValue::Create(overflow_));
+      }
       list->Append(*CSSIdentifierValue::Create(position_));
     }
   }

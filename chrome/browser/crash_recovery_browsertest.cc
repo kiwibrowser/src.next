@@ -5,9 +5,9 @@
 #include <utility>
 
 #include "base/base_switches.h"
-#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/functional/bind.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
@@ -19,8 +19,6 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -50,7 +48,8 @@ void SimulateRendererCrash(Browser* browser) {
       content::RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
   browser->OpenURL(OpenURLParams(GURL(blink::kChromeUICrashURL), Referrer(),
                                  WindowOpenDisposition::CURRENT_TAB,
-                                 ui::PAGE_TRANSITION_TYPED, false));
+                                 ui::PAGE_TRANSITION_TYPED, false),
+                   /*navigation_handle_callback=*/{});
   crash_observer.Wait();
 }
 
@@ -117,14 +116,16 @@ IN_PROC_BROWSER_TEST_F(CrashRecoveryBrowserTest, Reload) {
   EXPECT_NE(title_before_crash, title_after_crash);
   ASSERT_TRUE(
       GetActiveWebContents()->GetPrimaryMainFrame()->GetView()->IsShowing());
-  ASSERT_FALSE(GetActiveWebContents()
-                   ->GetPrimaryMainFrame()
-                   ->GetProcess()
-                   ->IsProcessBackgrounded());
+  ASSERT_NE(base::Process::Priority::kBestEffort, GetActiveWebContents()
+                                                      ->GetPrimaryMainFrame()
+                                                      ->GetProcess()
+                                                      ->GetPriority());
 }
 
 // Test that reload after a crash forces a cache revalidation.
-IN_PROC_BROWSER_TEST_F(CrashRecoveryBrowserTest, ReloadCacheRevalidate) {
+// TODO(crbug.com/323792317): Times out flakily.
+IN_PROC_BROWSER_TEST_F(CrashRecoveryBrowserTest,
+                       DISABLED_ReloadCacheRevalidate) {
   const char kTestPath[] = "/test";
 
   // Use the test server so as not to bypass cache behavior. The title of the
@@ -153,7 +154,12 @@ IN_PROC_BROWSER_TEST_F(CrashRecoveryBrowserTest, ReloadCacheRevalidate) {
 // There was an earlier bug (1270510) in process-per-site in which the max page
 // ID of the RenderProcessHost was stale, so the NavigationEntry in the new tab
 // was not committed.  This prevents regression of that bug.
-IN_PROC_BROWSER_TEST_F(CrashRecoveryBrowserTest, LoadInNewTab) {
+#if BUILDFLAG(IS_WIN)
+#define MAYBE_LoadInNewTab DISABLED_LoadInNewTab
+#else
+#define MAYBE_LoadInNewTab LoadInNewTab
+#endif
+IN_PROC_BROWSER_TEST_F(CrashRecoveryBrowserTest, MAYBE_LoadInNewTab) {
   const base::FilePath::CharType kTitle2File[] =
       FILE_PATH_LITERAL("title2.html");
 

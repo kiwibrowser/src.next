@@ -25,6 +25,7 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_style_declaration.h"
 #include "third_party/blink/renderer/core/css/properties/css_property.h"
+#include "third_party/blink/renderer/core/dom/document_lifecycle.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
@@ -33,12 +34,12 @@
 
 namespace blink {
 
+class ComputedStyle;
+class Element;
 class ExceptionState;
 class ExecutionContext;
 class LayoutObject;
 class MutableCSSPropertyValueSet;
-class Node;
-class ComputedStyle;
 
 class CORE_EXPORT CSSComputedStyleDeclaration final
     : public CSSStyleDeclaration {
@@ -46,9 +47,21 @@ class CORE_EXPORT CSSComputedStyleDeclaration final
   static const Vector<const CSSProperty*>& ComputableProperties(
       const ExecutionContext*);
 
-  CSSComputedStyleDeclaration(Node*,
-                              bool allow_visited_style = false,
-                              const String& = String());
+  class ScopedCleanStyleForAllProperties {
+    STACK_ALLOCATED();
+
+   public:
+    ScopedCleanStyleForAllProperties(CSSComputedStyleDeclaration*);
+    ~ScopedCleanStyleForAllProperties();
+
+   private:
+    std::optional<DocumentLifecycle::DisallowTransitionScope> disallow_scope_;
+    CSSComputedStyleDeclaration* declaration_;
+  };
+
+  explicit CSSComputedStyleDeclaration(Element*,
+                                       bool allow_visited_style = false,
+                                       const String& = String());
   ~CSSComputedStyleDeclaration() override;
 
   String GetPropertyValue(CSSPropertyID) const;
@@ -75,12 +88,9 @@ class CORE_EXPORT CSSComputedStyleDeclaration final
   void Trace(Visitor*) const override;
 
  private:
-  // The styled node is either the node passed into getComputedStyle, or the
-  // PseudoElement for :before and :after if they exist.
-  // FIXME: This should be styledElement since in JS getComputedStyle only works
-  // on Elements, but right now editing creates these for text nodes. We should
-  // fix that.
-  Node* StyledNode() const;
+  // The styled element is either the element passed into getComputedStyle, or
+  // the PseudoElement for the ::before, ::after, etc if they exist.
+  Element* StyledElement() const;
 
   // The styled layout object is the layout object corresponding to the node
   // being queried, if any.
@@ -89,8 +99,12 @@ class CORE_EXPORT CSSComputedStyleDeclaration final
   // If we are updating the style/layout-tree/layout with the intent to
   // retrieve the computed value of a property, the appropriate
   // property name/instance must be provided.
-  void UpdateStyleAndLayoutTreeIfNeeded(const CSSPropertyName*) const;
-  void UpdateStyleAndLayoutIfNeeded(const CSSProperty*) const;
+  // Setting `for_all_properties` will ensure style/layout-tree/layout is up to
+  // date to retrieve the computed value for any property.
+  void UpdateStyleAndLayoutTreeIfNeeded(const CSSPropertyName*,
+                                        bool for_all_properties) const;
+  void UpdateStyleAndLayoutIfNeeded(const CSSProperty*,
+                                    bool for_all_properties) const;
 
   // CSSOM functions.
   CSSRule* parentRule() const override;
@@ -123,17 +137,18 @@ class CORE_EXPORT CSSComputedStyleDeclaration final
                                      unsigned index) override;
   void SetPropertyInternal(CSSPropertyID,
                            const String& custom_property_name,
-                           const String& value,
+                           StringView value,
                            bool important,
                            SecureContextMode,
                            ExceptionState&) override;
 
   bool CssPropertyMatches(CSSPropertyID, const CSSValue&) const override;
 
-  Member<Node> node_;
-  PseudoId pseudo_element_specifier_;
   AtomicString pseudo_argument_;
+  Member<Element> element_;
+  PseudoId pseudo_element_specifier_;
   bool allow_visited_style_;
+  bool guaranteed_style_clean_;
 };
 
 }  // namespace blink

@@ -1,7 +1,8 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/test/metrics/histogram_tester.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/scheme_registry.h"
 #include "third_party/blink/public/mojom/use_counter/metrics/css_property_id.mojom-blink.h"
@@ -17,11 +18,12 @@
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
-#include "third_party/blink/renderer/platform/testing/histogram_tester.h"
-#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace {
 const char kExtensionFeaturesHistogramName[] =
@@ -30,8 +32,9 @@ const char kExtensionFeaturesHistogramName[] =
 const char kExtensionUrl[] = "chrome-extension://dummysite/";
 
 int GetPageVisitsBucketforHistogram(const std::string& histogram_name) {
-  if (histogram_name.find("CSS") == std::string::npos)
+  if (histogram_name.find("CSS") == std::string::npos) {
     return static_cast<int>(blink::mojom::WebFeature::kPageVisits);
+  }
   // For CSS histograms, the page visits bucket should be 1.
   return static_cast<int>(
       blink::mojom::blink::CSSSampleId::kTotalPagesMeasured);
@@ -75,14 +78,42 @@ class UseCounterImplTest : public testing::Test {
     return CSSProperty::Get(property).IsInternal();
   }
 
+  // Returns all alternative properties. In other words, a set of of all
+  // properties marked with 'alternative_of' in css_properties.json5.
+  //
+  // This is useful for checking whether or not a given CSSPropertyID is an
+  // an alternative property.
+  HashSet<CSSPropertyID> GetAlternatives() const {
+    HashSet<CSSPropertyID> alternatives;
+
+    for (CSSPropertyID property : CSSPropertyIDList()) {
+      if (CSSPropertyID alternative_id =
+              CSSUnresolvedProperty::Get(property).GetAlternative();
+          alternative_id != CSSPropertyID::kInvalid) {
+        alternatives.insert(alternative_id);
+      }
+    }
+
+    for (CSSPropertyID property : kCSSPropertyAliasList) {
+      if (CSSPropertyID alternative_id =
+              CSSUnresolvedProperty::Get(property).GetAlternative();
+          alternative_id != CSSPropertyID::kInvalid) {
+        alternatives.insert(alternative_id);
+      }
+    }
+
+    return alternatives;
+  }
+
  protected:
   LocalFrame* GetFrame() { return &dummy_->GetFrame(); }
   void SetIsViewSource() { dummy_->GetDocument().SetIsViewSource(true); }
   void SetURL(const KURL& url) { dummy_->GetDocument().SetURL(url); }
   Document& GetDocument() { return dummy_->GetDocument(); }
 
+  test::TaskEnvironment task_environment_;
   std::unique_ptr<DummyPageHolder> dummy_;
-  HistogramTester histogram_tester_;
+  base::HistogramTester histogram_tester_;
 
   void UpdateAllLifecyclePhases(Document& document) {
     document.View()->UpdateAllLifecyclePhasesForTest();
@@ -257,6 +288,21 @@ TEST_F(UseCounterImplTest, CSSSelectorPseudoDir) {
   EXPECT_TRUE(document.IsUseCounted(feature));
 }
 
+TEST_F(UseCounterImplTest, CSSSelectorNthChildOfSelector) {
+  auto dummy_page_holder =
+      std::make_unique<DummyPageHolder>(gfx::Size(800, 600));
+  Page::InsertOrdinaryPageForTesting(&dummy_page_holder->GetPage());
+  Document& document = dummy_page_holder->GetDocument();
+  WebFeature feature = WebFeature::kCSSSelectorNthChildOfSelector;
+  EXPECT_FALSE(document.IsUseCounted(feature));
+  document.documentElement()->setInnerHTML(
+      "<style>.a:nth-child(3) { color: red; }</style>");
+  EXPECT_FALSE(document.IsUseCounted(feature));
+  document.documentElement()->setInnerHTML(
+      "<style>.a:nth-child(3 of .b) { color: red; }</style>");
+  EXPECT_TRUE(document.IsUseCounted(feature));
+}
+
 TEST_F(UseCounterImplTest, CSSGridLayoutPercentageColumnIndefiniteWidth) {
   auto dummy_page_holder =
       std::make_unique<DummyPageHolder>(gfx::Size(800, 600));
@@ -298,8 +344,8 @@ TEST_F(UseCounterImplTest, CSSFlexibleBoxInline) {
 }
 
 TEST_F(UseCounterImplTest, CSSFlexibleBoxButton) {
-  // LayoutButton is a subclass of LayoutFlexibleBox, however we don't want it
-  // to be counted as usage of flexboxes as it's an implementation detail.
+  // LayoutButton is a subclass of LayoutFlexibleBox, however we don't want
+  // it to be counted as usage of flexboxes as it's an implementation detail.
   auto dummy_page_holder =
       std::make_unique<DummyPageHolder>(gfx::Size(800, 600));
   Page::InsertOrdinaryPageForTesting(&dummy_page_holder->GetPage());
@@ -362,6 +408,7 @@ class DeprecationTest : public testing::Test {
  protected:
   LocalFrame* GetFrame() { return &dummy_->GetFrame(); }
 
+  test::TaskEnvironment task_environment_;
   std::unique_ptr<DummyPageHolder> dummy_;
   Deprecation& deprecation_;
   UseCounterImpl& use_counter_;
@@ -425,10 +472,10 @@ TEST_F(UseCounterImplTest, CSSSelectorHostContextInLiveProfile) {
     </div>
   )HTML");
 
-  Element* host = document.getElementById("host");
+  Element* host = document.getElementById(AtomicString("host"));
   ASSERT_TRUE(host);
   ShadowRoot& shadow_root =
-      host->AttachShadowRootInternal(ShadowRootType::kOpen);
+      host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
   UpdateAllLifecyclePhases(document);
   EXPECT_FALSE(document.IsUseCounted(feature));
 
@@ -458,10 +505,10 @@ TEST_F(UseCounterImplTest, CSSSelectorHostContextInSnapshotProfile) {
     </div>
   )HTML");
 
-  Element* host = document.getElementById("host");
+  Element* host = document.getElementById(AtomicString("host"));
   ASSERT_TRUE(host);
   ShadowRoot& shadow_root =
-      host->AttachShadowRootInternal(ShadowRootType::kOpen);
+      host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
   UpdateAllLifecyclePhases(document);
   EXPECT_FALSE(document.IsUseCounted(feature));
 
@@ -469,7 +516,8 @@ TEST_F(UseCounterImplTest, CSSSelectorHostContextInSnapshotProfile) {
   UpdateAllLifecyclePhases(document);
   EXPECT_FALSE(document.IsUseCounted(feature));
 
-  Element* span = shadow_root.QuerySelector(":host-context(#parent) span");
+  Element* span =
+      shadow_root.QuerySelector(AtomicString(":host-context(#parent) span"));
   EXPECT_TRUE(span);
   EXPECT_TRUE(document.IsUseCounted(feature));
 }
@@ -477,14 +525,27 @@ TEST_F(UseCounterImplTest, CSSSelectorHostContextInSnapshotProfile) {
 TEST_F(UseCounterImplTest, UniqueCSSSampleIds) {
   HashSet<int> ids;
 
+  HashSet<CSSPropertyID> alternatives = GetAlternatives();
+
   for (CSSPropertyID property : CSSPropertyIDList()) {
-    if (IsInternal(property))
+    if (IsInternal(property)) {
       continue;
+    }
+    if (alternatives.Contains(property)) {
+      // Alternative properties should use the same CSSSampleId as the
+      // corresponding main property.
+      continue;
+    }
     EXPECT_FALSE(ids.Contains(ToSampleId(property)));
     ids.insert(ToSampleId(property));
   }
 
   for (CSSPropertyID property : kCSSPropertyAliasList) {
+    if (alternatives.Contains(property)) {
+      // Alternative properties should use the same CSSSampleId as the
+      // corresponding main property.
+      continue;
+    }
     EXPECT_FALSE(ids.Contains(ToSampleId(property)));
     ids.insert(ToSampleId(property));
   }
@@ -494,13 +555,15 @@ TEST_F(UseCounterImplTest, MaximumCSSSampleId) {
   int max_sample_id = 0;
 
   for (CSSPropertyID property : CSSPropertyIDList()) {
-    if (IsInternal(property))
+    if (IsInternal(property)) {
       continue;
+    }
     max_sample_id = std::max(max_sample_id, ToSampleId(property));
   }
 
-  for (CSSPropertyID property : kCSSPropertyAliasList)
+  for (CSSPropertyID property : kCSSPropertyAliasList) {
     max_sample_id = std::max(max_sample_id, ToSampleId(property));
+  }
 
   EXPECT_EQ(static_cast<int>(mojom::blink::CSSSampleId::kMaxValue),
             max_sample_id);
@@ -558,6 +621,102 @@ TEST_F(UseCounterImplTest, CSSMarkerPseudoElementAuthor) {
   )HTML");
   UpdateAllLifecyclePhases(document);
   EXPECT_TRUE(document.IsUseCounted(feature));
+}
+
+TEST_F(UseCounterImplTest, BackgroundClip) {
+  auto dummy_page_holder =
+      std::make_unique<DummyPageHolder>(gfx::Size(800, 600));
+  Page::InsertOrdinaryPageForTesting(&dummy_page_holder->GetPage());
+  Document& document = dummy_page_holder->GetDocument();
+
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
+
+  document.documentElement()->setInnerHTML(
+      "<style>html{background-clip: border-box;}</style>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
+
+  document.documentElement()->setInnerHTML(
+      "<style>html{background-clip: content-box;}</style>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
+
+  document.documentElement()->setInnerHTML(
+      "<style>html{background-clip: padding-box;}</style>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
+
+  document.documentElement()->setInnerHTML(
+      "<style>html{-webkit-background-clip: border-box;}</style>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
+
+  document.documentElement()->setInnerHTML(
+      "<style>html{-webkit-background-clip: content-box;}</style>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
+
+  document.documentElement()->setInnerHTML(
+      "<style>html{-webkit-background-clip: padding-box;}</style>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
+
+  document.documentElement()->setInnerHTML(
+      "<style>html{-webkit-background-clip: text;}</style>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
+
+  // We dropped the support for keywords without suffix.
+  document.documentElement()->setInnerHTML(
+      "<style>html{-webkit-background-clip: border;}</style>");
+  UpdateAllLifecyclePhases(document);
+  if (RuntimeEnabledFeatures::CSSBackgroundClipUnprefixEnabled()) {
+    EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  } else {
+    EXPECT_TRUE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  }
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
+
+  document.ClearUseCounterForTesting(WebFeature::kCSSBackgroundClipBorder);
+  document.documentElement()->setInnerHTML(
+      "<style>html{-webkit-background-clip: content;}</style>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  if (RuntimeEnabledFeatures::CSSBackgroundClipUnprefixEnabled()) {
+    EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  } else {
+    EXPECT_TRUE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  }
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
+
+  document.ClearUseCounterForTesting(WebFeature::kCSSBackgroundClipContent);
+  document.documentElement()->setInnerHTML(
+      "<style>html{-webkit-background-clip: padding;}</style>");
+  UpdateAllLifecyclePhases(document);
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipBorder));
+  EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipContent));
+  if (RuntimeEnabledFeatures::CSSBackgroundClipUnprefixEnabled()) {
+    EXPECT_FALSE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
+  } else {
+    EXPECT_TRUE(document.IsUseCounted(WebFeature::kCSSBackgroundClipPadding));
+  }
 }
 
 TEST_F(UseCounterImplTest, H1UserAgentFontSizeInSectionApplied) {

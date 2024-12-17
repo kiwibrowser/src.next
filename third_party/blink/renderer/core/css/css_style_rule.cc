@@ -21,12 +21,13 @@
 
 #include "third_party/blink/renderer/core/css/css_style_rule.h"
 
+#include "third_party/blink/renderer/core/css/css_grouping_rule.h"
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
+#include "third_party/blink/renderer/core/css/css_rule_list.h"
 #include "third_party/blink/renderer/core/css/css_selector.h"
 #include "third_party/blink/renderer/core/css/css_style_sheet.h"
 #include "third_party/blink/renderer/core/css/cssom/declared_style_property_map.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
-#include "third_party/blink/renderer/core/css/parser/css_selector_parser.h"
 #include "third_party/blink/renderer/core/css/style_rule.h"
 #include "third_party/blink/renderer/core/css/style_rule_css_style_declaration.h"
 #include "third_party/blink/renderer/core/css/style_sheet_contents.h"
@@ -50,7 +51,9 @@ CSSStyleRule::CSSStyleRule(StyleRule* style_rule,
     : CSSRule(parent),
       style_rule_(style_rule),
       style_map_(MakeGarbageCollected<DeclaredStylePropertyMap>(this)),
-      position_hint_(position_hint) {}
+      position_hint_(position_hint),
+      child_rule_cssom_wrappers_(
+          style_rule->ChildRules() ? style_rule->ChildRules()->size() : 0) {}
 
 CSSStyleRule::~CSSStyleRule() = default;
 
@@ -84,19 +87,34 @@ void CSSStyleRule::setSelectorText(const ExecutionContext* execution_context,
       ParserContext(execution_context->GetSecureContextMode()));
   StyleSheetContents* parent_contents =
       parentStyleSheet() ? parentStyleSheet()->Contents() : nullptr;
-  Arena arena;
-  CSSSelectorVector</*UseArena=*/true> selector_vector =
-      CSSParser::ParseSelector</*UseArena=*/true>(context, parent_contents,
-                                                  selector_text, arena);
-  if (selector_vector.IsEmpty())
+  HeapVector<CSSSelector> arena;
+  StyleRule* parent_rule_for_nesting =
+      FindClosestParentStyleRuleOrNull(parentRule());
+  CSSNestingType nesting_type = parent_rule_for_nesting
+                                    ? CSSNestingType::kNesting
+                                    : CSSNestingType::kNone;
+  base::span<CSSSelector> selector_vector = CSSParser::ParseSelector(
+      context, nesting_type, parent_rule_for_nesting, /*is_within_scope=*/false,
+      parent_contents, selector_text, arena);
+  if (selector_vector.empty()) {
     return;
+  }
 
-  Member<StyleRule> new_style_rule = StyleRule::Create</*UseArena=*/true>(
-      selector_vector, std::move(*style_rule_));
+  StyleRule* new_style_rule =
+      StyleRule::Create(selector_vector, std::move(*style_rule_));
   if (parent_contents) {
     position_hint_ = parent_contents->ReplaceRuleIfExists(
         style_rule_, new_style_rule, position_hint_);
   }
+
+  // If we have any nested rules, update their parent selector(s) to point to
+  // our newly created StyleRule instead of the old one.
+  if (new_style_rule->ChildRules()) {
+    for (StyleRuleBase* child_rule : *new_style_rule->ChildRules()) {
+      child_rule->Reparent(new_style_rule);
+    }
+  }
+
   style_rule_ = new_style_rule;
 
   if (HasCachedSelectorText()) {
@@ -106,29 +124,165 @@ void CSSStyleRule::setSelectorText(const ExecutionContext* execution_context,
 }
 
 String CSSStyleRule::cssText() const {
+  // Referring to https://drafts.csswg.org/cssom-1/#serialize-a-css-rule:
+
+  // Step 1.
   StringBuilder result;
   result.Append(selectorText());
-  result.Append(" { ");
+  result.Append(" {");
+
+  // Step 2.
   String decls = style_rule_->Properties().AsText();
-  result.Append(decls);
-  if (!decls.IsEmpty())
+
+  // Step 3.
+  StringBuilder rules;
+  unsigned size = length();
+  for (unsigned i = 0; i < size; ++i) {
+    // Step 6.2 for rules.
+    String item_text = ItemInternal(i)->cssText();
+    if (!item_text.empty()) {
+      rules.Append("\n  ");
+      rules.Append(item_text);
+    }
+  }
+
+  // Step 4.
+  if (decls.empty() && rules.empty()) {
+    result.Append(" }");
+    return result.ReleaseString();
+  }
+
+  // Step 5.
+  if (rules.empty()) {
     result.Append(' ');
-  result.Append('}');
+    result.Append(decls);
+    result.Append(" }");
+    return result.ReleaseString();
+  }
+
+  // Step 6.
+  if (!decls.empty()) {
+    // Step 6.2 for decls (we don't do 6.1 explicitly).
+    result.Append("\n  ");
+    result.Append(decls);
+  }
+
+  // Step 6.2 for rules was done above.
+  result.Append(rules);
+
+  result.Append("\n}");
   return result.ReleaseString();
 }
 
 void CSSStyleRule::Reattach(StyleRuleBase* rule) {
   DCHECK(rule);
   style_rule_ = To<StyleRule>(rule);
-  if (properties_cssom_wrapper_)
+  if (properties_cssom_wrapper_) {
     properties_cssom_wrapper_->Reattach(style_rule_->MutableProperties());
+  }
+  for (unsigned i = 0; i < child_rule_cssom_wrappers_.size(); ++i) {
+    if (child_rule_cssom_wrappers_[i]) {
+      child_rule_cssom_wrappers_[i]->Reattach(
+          (*style_rule_->ChildRules())[i].Get());
+    }
+  }
 }
 
 void CSSStyleRule::Trace(Visitor* visitor) const {
   visitor->Trace(style_rule_);
   visitor->Trace(properties_cssom_wrapper_);
   visitor->Trace(style_map_);
+  visitor->Trace(child_rule_cssom_wrappers_);
+  visitor->Trace(rule_list_cssom_wrapper_);
   CSSRule::Trace(visitor);
+}
+
+unsigned CSSStyleRule::length() const {
+  if (style_rule_->ChildRules()) {
+    return style_rule_->ChildRules()->size();
+  } else {
+    return 0;
+  }
+}
+
+CSSRule* CSSStyleRule::Item(unsigned index, bool trigger_use_counters) const {
+  if (index >= length()) {
+    return nullptr;
+  }
+  DCHECK_EQ(child_rule_cssom_wrappers_.size(),
+            style_rule_->ChildRules()->size());
+  Member<CSSRule>& rule = child_rule_cssom_wrappers_[index];
+  if (!rule) {
+    rule = (*style_rule_->ChildRules())[index]->CreateCSSOMWrapper(
+        index, const_cast<CSSStyleRule*>(this), trigger_use_counters);
+  }
+  return rule.Get();
+}
+
+CSSRuleList* CSSStyleRule::cssRules() const {
+  if (!rule_list_cssom_wrapper_) {
+    rule_list_cssom_wrapper_ =
+        MakeGarbageCollected<LiveCSSRuleList<CSSStyleRule>>(
+            const_cast<CSSStyleRule*>(this));
+  }
+  return rule_list_cssom_wrapper_.Get();
+}
+
+unsigned CSSStyleRule::insertRule(const ExecutionContext* execution_context,
+                                  const String& rule_string,
+                                  unsigned index,
+                                  ExceptionState& exception_state) {
+  if (style_rule_->ChildRules() == nullptr) {
+    // Implicitly zero rules.
+    if (index > 0) {
+      exception_state.ThrowDOMException(
+          DOMExceptionCode::kIndexSizeError,
+          "the index " + String::Number(index) +
+              " must be less than or equal to the length of the rule list.");
+      return 0;
+    }
+    style_rule_->EnsureChildRules();
+  }
+
+  DCHECK_EQ(child_rule_cssom_wrappers_.size(),
+            style_rule_->ChildRules()->size());
+
+  StyleRuleBase* new_rule = ParseRuleForInsert(
+      execution_context, rule_string, index, style_rule_->ChildRules()->size(),
+      *this, exception_state);
+
+  if (new_rule == nullptr) {
+    // Already raised an exception above.
+    return 0;
+  } else {
+    CSSStyleSheet::RuleMutationScope mutation_scope(this);
+    style_rule_->WrapperInsertRule(index, new_rule);
+    child_rule_cssom_wrappers_.insert(index, Member<CSSRule>(nullptr));
+    return index;
+  }
+}
+
+void CSSStyleRule::deleteRule(unsigned index, ExceptionState& exception_state) {
+  if (style_rule_->ChildRules() == nullptr ||
+      index >= style_rule_->ChildRules()->size()) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kIndexSizeError,
+        "the index " + String::Number(index) +
+            " is greated than the length of the rule list.");
+    return;
+  }
+
+  DCHECK_EQ(child_rule_cssom_wrappers_.size(),
+            style_rule_->ChildRules()->size());
+
+  CSSStyleSheet::RuleMutationScope mutation_scope(this);
+
+  style_rule_->WrapperRemoveRule(index);
+
+  if (child_rule_cssom_wrappers_[index]) {
+    child_rule_cssom_wrappers_[index]->SetParentRule(nullptr);
+  }
+  child_rule_cssom_wrappers_.EraseAt(index);
 }
 
 }  // namespace blink

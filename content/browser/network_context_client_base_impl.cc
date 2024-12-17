@@ -4,7 +4,8 @@
 
 #include "content/browser/network_context_client_base_impl.h"
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/task_runner.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
@@ -16,11 +17,8 @@
 #include "content/public/browser/network_context_client_base.h"
 #include "content/public/common/content_client.h"
 #include "mojo/public/cpp/bindings/remote.h"
+#include "net/base/net_errors.h"
 #include "services/network/public/mojom/trust_tokens.mojom.h"
-
-#if BUILDFLAG(IS_ANDROID)
-#include "base/android/content_uri_utils.h"
-#endif
 
 namespace content {
 
@@ -46,15 +44,7 @@ void HandleFileUploadRequest(
                                     std::vector<base::File>()));
       return;
     }
-#if BUILDFLAG(IS_ANDROID)
-    if (file_path.IsContentUri()) {
-      files.push_back(base::OpenContentUriForRead(file_path));
-    } else {
-      files.emplace_back(file_path, file_flags);
-    }
-#else
     files.emplace_back(file_path, file_flags);
-#endif
     if (!files.back().IsValid()) {
       task_runner->PostTask(
           FROM_HERE,
@@ -77,11 +67,15 @@ void OnScopedFilesAccessAcquired(
     network::mojom::NetworkContextClient::OnFileUploadRequestedCallback
         callback,
     file_access::ScopedFileAccess scoped_file_access) {
+  if (!scoped_file_access.is_allowed()) {
+    std::move(callback).Run(net::Error::ERR_ACCESS_DENIED, /*files=*/{});
+    return;
+  }
   base::ThreadPool::PostTask(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
       base::BindOnce(&HandleFileUploadRequest, process_id, async, file_paths,
                      std::move(callback),
-                     base::SequencedTaskRunnerHandle::Get(),
+                     base::SequencedTaskRunner::GetCurrentDefault(),
                      std::move(scoped_file_access)));
 }
 
@@ -138,20 +132,13 @@ void NetworkContextClientBase::OnGenerateHttpNegotiateAuthToken(
 void NetworkContextClientBase::OnTrustAnchorUsed() {}
 #endif
 
-void NetworkContextClientBase::OnTrustTokenIssuanceDivertedToSystem(
-    network::mojom::FulfillTrustTokenIssuanceRequestPtr request,
-    OnTrustTokenIssuanceDivertedToSystemCallback callback) {
-  auto response = network::mojom::FulfillTrustTokenIssuanceAnswer::New();
-  response->status =
-      network::mojom::FulfillTrustTokenIssuanceAnswer::Status::kNotFound;
-  std::move(callback).Run(std::move(response));
-}
-
+#if BUILDFLAG(IS_CT_SUPPORTED)
 void NetworkContextClientBase::OnCanSendSCTAuditingReport(
     OnCanSendSCTAuditingReportCallback callback) {
   std::move(callback).Run(false);
 }
 
 void NetworkContextClientBase::OnNewSCTAuditingReportSent() {}
+#endif
 
 }  // namespace content

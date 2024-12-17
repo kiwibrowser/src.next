@@ -39,7 +39,6 @@
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 #include "third_party/blink/renderer/platform/wtf/thread_safe_ref_counted.h"
-#include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkSize.h"
@@ -68,10 +67,12 @@ class PLATFORM_EXPORT ImageFrameGenerator final
   static scoped_refptr<ImageFrameGenerator> Create(
       const SkISize& full_size,
       bool is_multi_frame,
-      const ColorBehavior& color_behavior,
+      ColorBehavior color_behavior,
+      cc::AuxImage aux_image,
       Vector<SkISize> supported_sizes) {
-    return base::AdoptRef(new ImageFrameGenerator(
-        full_size, is_multi_frame, color_behavior, std::move(supported_sizes)));
+    return base::AdoptRef(new ImageFrameGenerator(full_size, is_multi_frame,
+                                                  color_behavior, aux_image,
+                                                  std::move(supported_sizes)));
   }
 
   ImageFrameGenerator(const ImageFrameGenerator&) = delete;
@@ -85,10 +86,7 @@ class PLATFORM_EXPORT ImageFrameGenerator final
   bool DecodeAndScale(SegmentReader*,
                       bool all_data_received,
                       wtf_size_t index,
-                      const SkImageInfo&,
-                      void* pixels,
-                      size_t row_bytes,
-                      ImageDecoder::AlphaOption,
+                      const SkPixmap&,
                       cc::PaintImage::GeneratorClientId);
 
   // Decodes YUV components directly into the provided memory planes. Must not
@@ -146,7 +144,8 @@ class PLATFORM_EXPORT ImageFrameGenerator final
 
   ImageFrameGenerator(const SkISize& full_size,
                       bool is_multi_frame,
-                      const ColorBehavior&,
+                      ColorBehavior,
+                      cc::AuxImage,
                       Vector<SkISize> supported_sizes);
 
   friend class ImageFrameGeneratorTest;
@@ -166,6 +165,7 @@ class PLATFORM_EXPORT ImageFrameGenerator final
   const SkISize full_size_;
   // Parameters used to create internal ImageDecoder objects.
   const ColorBehavior decoder_color_behavior_;
+  const cc::AuxImage aux_image_;
   const bool is_multi_frame_;
   const Vector<SkISize> supported_sizes_;
 
@@ -185,8 +185,7 @@ class PLATFORM_EXPORT ImageFrameGenerator final
   // insertions into the map.
   HashMap<cc::PaintImage::GeneratorClientId,
           std::unique_ptr<ClientLock>,
-          WTF::IntHash<cc::PaintImage::GeneratorClientId>,
-          WTF::UnsignedWithZeroKeyHashTraits<cc::PaintImage::GeneratorClientId>>
+          IntWithZeroKeyHashTraits<cc::PaintImage::GeneratorClientId>>
       lock_map_ GUARDED_BY(generator_lock_);
 
   std::unique_ptr<ImageDecoderFactory> image_decoder_factory_;

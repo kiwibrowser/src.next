@@ -8,6 +8,10 @@
 #include "base/memory/raw_ptr.h"
 #include "components/variations/platform_field_trials.h"
 
+#if BUILDFLAG(IS_ANDROID)
+#include "components/variations/variations_associated_data.h"
+#endif
+
 class PrefService;
 
 namespace base {
@@ -24,20 +28,18 @@ class ChromeBrowserFieldTrials : public variations::PlatformFieldTrials {
   ~ChromeBrowserFieldTrials() override;
 
   // variations::PlatformFieldTrials:
-  void SetUpFieldTrials() override;
-  void SetUpFeatureControllingFieldTrials(
+  void SetUpClientSideFieldTrials(
       bool has_seed,
-      const base::FieldTrial::EntropyProvider* low_entropy_provider,
+      const variations::EntropyProviders& entropy_providers,
       base::FeatureList* feature_list) override;
   void RegisterSyntheticTrials() override;
+#if BUILDFLAG(IS_LINUX)
+  void RegisterFeatureOverrides(base::FeatureList* feature_list) override;
+#endif
 
  private:
-  // Instantiates dynamic trials by querying their state, to ensure they get
-  // reported as used.
-  void InstantiateDynamicTrials();
-
   // Weak pointer to the local state prefs store.
-  const raw_ptr<PrefService> local_state_;
+  const raw_ptr<PrefService, AcrossTasksDanglingUntriaged> local_state_;
 };
 
 #endif  // CHROME_BROWSER_CHROME_BROWSER_FIELD_TRIALS_H_

@@ -14,36 +14,43 @@ import androidx.annotation.StringRes;
 
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.components.security_state.ConnectionSecurityLevel;
+import org.chromium.url.GURL;
 
-/**
- * Interface defining a provider for data needed by the {@link LocationBar}.
- */
-// TODO(crbug.com/1142887): Refine split between LocationBar properties and sub-component
+/** Interface defining a provider for data needed by the {@link LocationBar}. */
+// TODO(crbug.com/40154848): Refine split between LocationBar properties and sub-component
 // properties, e.g. security state, which is only used by the status icon.
 public interface LocationBarDataProvider {
     /**
-     * Observer interface for consumers who wish to subscribe to updates of LocationBarData.
-     * Since LocationBarDataProvider data is typically calculated lazily, individual observer
-     * methods don't directly supply the updated value. Instead, the expectation is that the
-     * consumer will query the data it cares about.
+     * Observer interface for consumers who wish to subscribe to updates of LocationBarData. Since
+     * LocationBarDataProvider data is typically calculated lazily, individual observer methods
+     * don't directly supply the updated value. Instead, the expectation is that the consumer will
+     * query the data it cares about.
      */
     interface Observer {
-        default void onIncognitoStateChanged(){};
-        default void onNtpStartedLoading(){};
+        default void onIncognitoStateChanged() {}
+
+        default void onNtpStartedLoading() {}
 
         /**
          * Notifies about a possible change of the value of {@link #getPrimaryColor()}, or {@link
          * #isUsingBrandColor()}.
          */
-        default void onPrimaryColorChanged(){};
+        default void onPrimaryColorChanged() {}
 
         /** Notifies about possible changes to values affecting the status icon. */
-        default void onSecurityStateChanged(){};
+        default void onSecurityStateChanged() {}
 
-        default void onTitleChanged(){};
-        default void onUrlChanged(){};
+        /** Notifies when the page stopped loading. */
+        default void onPageLoadStopped() {}
 
-        default void hintZeroSuggestRefresh(){};
+        default void onTitleChanged() {}
+
+        default void onUrlChanged() {}
+
+        default void hintZeroSuggestRefresh() {}
+
+        /** Notifies when the tab crashes. */
+        default void onTabCrashed() {}
     }
 
     /** Adds an observer of changes to LocationBarDataProvider's data. */
@@ -52,9 +59,12 @@ public interface LocationBarDataProvider {
     /** Removes an observer of changes to LocationBarDataProvider's data. */
     void removeObserver(Observer observer);
 
-    /** Returns The url for the currently active page.*/
+    /**
+     * Returns the url of the current tab, represented as a GURL. Returns an empty GURL when there
+     * is no tab.
+     */
     @NonNull
-    String getCurrentUrl();
+    GURL getCurrentGurl();
 
     /** Returns the delegate for the NewTabPage shown for the current tab. */
     @NonNull
@@ -62,13 +72,33 @@ public interface LocationBarDataProvider {
 
     /** Returns whether the currently active page is loading. */
     default boolean isLoading() {
-        if (isInOverviewAndShowingOmnibox()) return false;
         Tab tab = getTab();
         return tab != null && tab.isLoading();
     }
 
-    /** Returns whether the current page is in an incognito browser context. */
+    /**
+     * TODO(crbug.com/350654700): clean up usages and remove isIncognito.
+     *
+     * <p>Returns whether the current page is in an incognito browser context.
+     *
+     * @deprecated Use {@link #isIncognitoBranded()} or {@link #isOffTheRecord()}.
+     */
+    @Deprecated
     boolean isIncognito();
+
+    /**
+     * Returns whether the current page is in an incognito branded browser context.
+     *
+     * @see {@link Profile#isIncognitoBranded()}
+     */
+    boolean isIncognitoBranded();
+
+    /**
+     * Returns whether the current page is in an off the record browser context.
+     *
+     * @see {@link Profile#isOffTheRecord()}
+     */
+    boolean isOffTheRecord();
 
     /** Returns the currently active tab, if there is one. */
     @Nullable
@@ -77,12 +107,6 @@ public interface LocationBarDataProvider {
     /** Returns whether the LocationBarDataProvider currently has an active tab. */
     boolean hasTab();
 
-    /**
-     * Returns whether the LocationBar's embedder is currently being displayed in overview mode and
-     * showing the omnibox.
-     */
-    boolean isInOverviewAndShowingOmnibox();
-
     /** Returns the contents of the {@link UrlBar}. */
     UrlBarData getUrlBarData();
 
@@ -90,7 +114,7 @@ public interface LocationBarDataProvider {
     @NonNull
     String getTitle();
 
-    /** Returns the primary color to use for the background.*/
+    /** Returns the primary color to use for the background. */
     int getPrimaryColor();
 
     /** Returns whether the current primary color is a brand color. */
@@ -111,10 +135,10 @@ public interface LocationBarDataProvider {
     /**
      * Returns the current page classification.
      *
-     * @param isFocusedFromFakebox If the omnibox focus originated from the fakebox.
+     * @param isPrefetch If the page classification for prefetching is requested.
      * @return Integer value representing the {@code OmniboxEventProto.PageClassification}.
      */
-    int getPageClassification(boolean isFocusedFromFakebox);
+    int getPageClassification(boolean isPrefetch);
 
     /**
      * Returns the resource ID of the icon that should be displayed or 0 if no icon should be shown.
@@ -131,16 +155,4 @@ public interface LocationBarDataProvider {
     /** Returns the resource ID of the content description for the security icon. */
     @StringRes
     int getSecurityIconContentDescriptionResourceId();
-
-    /** Returns the standard color to use for the suggestrions dropdown background.*/
-    int getDropdownStandardBackgroundColor();
-
-    /** Returns the incognito color to use for the suggestrions dropdown background.*/
-    int getDropdownIncognitoBackgroundColor();
-
-    /** Returns the standard color to use for each individual suggestion background.*/
-    int getSuggestionStandardBackgroundColor();
-
-    /** Returns the incognito color to use for each individual suggestion background.*/
-    int getSuggestionIncognitoBackgroundColor();
 }

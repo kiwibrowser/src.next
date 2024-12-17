@@ -29,6 +29,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/html/canvas/canvas_rendering_context.h"
 #include "third_party/blink/renderer/core/html/canvas/html_canvas_element.h"
+#include "third_party/blink/renderer/core/layout/layout_replaced.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/paint/html_canvas_painter.h"
@@ -36,20 +37,24 @@
 namespace blink {
 
 LayoutHTMLCanvas::LayoutHTMLCanvas(HTMLCanvasElement* element)
-    : LayoutReplaced(element, LayoutSize(element->Size())) {
+    : LayoutReplaced(element, PhysicalSize(element->Size())) {
   View()->GetFrameView()->SetIsVisuallyNonEmpty();
 }
 
 void LayoutHTMLCanvas::PaintReplaced(const PaintInfo& paint_info,
                                      const PhysicalOffset& paint_offset) const {
   NOT_DESTROYED();
+  if (ChildPaintBlockedByDisplayLock()) {
+    return;
+  }
   HTMLCanvasPainter(*this).PaintReplaced(paint_info, paint_offset);
 }
 
 void LayoutHTMLCanvas::CanvasSizeChanged() {
   NOT_DESTROYED();
   gfx::Size canvas_size = To<HTMLCanvasElement>(GetNode())->Size();
-  LayoutSize zoomed_size = LayoutSize(canvas_size) * StyleRef().EffectiveZoom();
+  PhysicalSize zoomed_size = PhysicalSize(canvas_size);
+  zoomed_size.Scale(StyleRef().EffectiveZoom());
 
   if (zoomed_size == IntrinsicSize())
     return;
@@ -101,6 +106,19 @@ void LayoutHTMLCanvas::WillBeDestroyed() {
   NOT_DESTROYED();
   LayoutReplaced::WillBeDestroyed();
   To<HTMLCanvasElement>(GetNode())->LayoutObjectDestroyed();
+}
+
+void LayoutHTMLCanvas::Trace(Visitor* visitor) const {
+  visitor->Trace(children_);
+  LayoutReplaced::Trace(visitor);
+}
+
+bool LayoutHTMLCanvas::IsChildAllowed(LayoutObject* child,
+                                      const ComputedStyle& style) const {
+  NOT_DESTROYED();
+  return IsA<Element>(GetNode()) && !child->IsText() &&
+         To<HTMLCanvasElement>(GetNode())->HasPlacedElements() &&
+         RuntimeEnabledFeatures::CanvasPlaceElementEnabled();
 }
 
 }  // namespace blink

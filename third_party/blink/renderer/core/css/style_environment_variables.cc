@@ -1,9 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/css/style_environment_variables.h"
 
+#include "base/containers/contains.h"
 #include "third_party/blink/renderer/core/css/parser/css_tokenizer.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 namespace blink {
@@ -42,26 +43,15 @@ void SetDefaultEnvironmentVariables(StyleEnvironmentVariables* instance) {
 
 }  // namespace.
 
-// This owns the static root instance.
-class StyleEnvironmentVariables::RootOwner {
- public:
-  StyleEnvironmentVariables& GetRoot() {
-    if (!instance_) {
-      instance_ = base::AdoptRef(new StyleEnvironmentVariables());
-      SetDefaultEnvironmentVariables(instance_.get());
-    }
-
-    return *instance_.get();
-  }
-
- private:
-  scoped_refptr<StyleEnvironmentVariables> instance_;
-};
+StyleEnvironmentVariables::StyleEnvironmentVariables() : parent_(nullptr) {
+  SetDefaultEnvironmentVariables(this);
+}
 
 // static
 StyleEnvironmentVariables& StyleEnvironmentVariables::GetRootInstance() {
-  static auto* instance = new StyleEnvironmentVariables::RootOwner();
-  return instance->GetRoot();
+  DEFINE_STATIC_LOCAL(Persistent<StyleEnvironmentVariables>, instance,
+                      (MakeGarbageCollected<StyleEnvironmentVariables>()));
+  return *instance;
 }
 
 // static
@@ -70,46 +60,38 @@ const AtomicString StyleEnvironmentVariables::GetVariableName(
     const FeatureContext* feature_context) {
   switch (variable) {
     case UADefinedVariable::kSafeAreaInsetTop:
-      return "safe-area-inset-top";
+      return AtomicString("safe-area-inset-top");
     case UADefinedVariable::kSafeAreaInsetLeft:
-      return "safe-area-inset-left";
+      return AtomicString("safe-area-inset-left");
     case UADefinedVariable::kSafeAreaInsetBottom:
-      return "safe-area-inset-bottom";
+      return AtomicString("safe-area-inset-bottom");
     case UADefinedVariable::kSafeAreaInsetRight:
-      return "safe-area-inset-right";
+      return AtomicString("safe-area-inset-right");
     case UADefinedVariable::kKeyboardInsetTop:
-      return "keyboard-inset-top";
+      return AtomicString("keyboard-inset-top");
     case UADefinedVariable::kKeyboardInsetLeft:
-      return "keyboard-inset-left";
+      return AtomicString("keyboard-inset-left");
     case UADefinedVariable::kKeyboardInsetBottom:
-      return "keyboard-inset-bottom";
+      return AtomicString("keyboard-inset-bottom");
     case UADefinedVariable::kKeyboardInsetRight:
-      return "keyboard-inset-right";
+      return AtomicString("keyboard-inset-right");
     case UADefinedVariable::kKeyboardInsetWidth:
-      return "keyboard-inset-width";
+      return AtomicString("keyboard-inset-width");
     case UADefinedVariable::kKeyboardInsetHeight:
-      return "keyboard-inset-height";
+      return AtomicString("keyboard-inset-height");
     case UADefinedVariable::kTitlebarAreaX:
-      DCHECK(RuntimeEnabledFeatures::WebAppWindowControlsOverlayEnabled(
-          feature_context));
-      return "titlebar-area-x";
+      return AtomicString("titlebar-area-x");
     case UADefinedVariable::kTitlebarAreaY:
-      DCHECK(RuntimeEnabledFeatures::WebAppWindowControlsOverlayEnabled(
-          feature_context));
-      return "titlebar-area-y";
+      return AtomicString("titlebar-area-y");
     case UADefinedVariable::kTitlebarAreaWidth:
-      DCHECK(RuntimeEnabledFeatures::WebAppWindowControlsOverlayEnabled(
-          feature_context));
-      return "titlebar-area-width";
+      return AtomicString("titlebar-area-width");
     case UADefinedVariable::kTitlebarAreaHeight:
-      DCHECK(RuntimeEnabledFeatures::WebAppWindowControlsOverlayEnabled(
-          feature_context));
-      return "titlebar-area-height";
+      return AtomicString("titlebar-area-height");
     default:
       break;
   }
 
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
 }
 
 const AtomicString StyleEnvironmentVariables::GetVariableName(
@@ -117,66 +99,35 @@ const AtomicString StyleEnvironmentVariables::GetVariableName(
     const FeatureContext* feature_context) {
   switch (variable) {
     case UADefinedTwoDimensionalVariable::kViewportSegmentTop:
-      DCHECK(RuntimeEnabledFeatures::CSSFoldablesEnabled());
-      return "viewport-segment-top";
+      DCHECK(RuntimeEnabledFeatures::ViewportSegmentsEnabled(feature_context));
+      return AtomicString("viewport-segment-top");
     case UADefinedTwoDimensionalVariable::kViewportSegmentRight:
-      DCHECK(RuntimeEnabledFeatures::CSSFoldablesEnabled());
-      return "viewport-segment-right";
+      DCHECK(RuntimeEnabledFeatures::ViewportSegmentsEnabled(feature_context));
+      return AtomicString("viewport-segment-right");
     case UADefinedTwoDimensionalVariable::kViewportSegmentBottom:
-      DCHECK(RuntimeEnabledFeatures::CSSFoldablesEnabled());
-      return "viewport-segment-bottom";
+      DCHECK(RuntimeEnabledFeatures::ViewportSegmentsEnabled(feature_context));
+      return AtomicString("viewport-segment-bottom");
     case UADefinedTwoDimensionalVariable::kViewportSegmentLeft:
-      DCHECK(RuntimeEnabledFeatures::CSSFoldablesEnabled());
-      return "viewport-segment-left";
+      DCHECK(RuntimeEnabledFeatures::ViewportSegmentsEnabled(feature_context));
+      return AtomicString("viewport-segment-left");
     case UADefinedTwoDimensionalVariable::kViewportSegmentWidth:
-      DCHECK(RuntimeEnabledFeatures::CSSFoldablesEnabled());
-      return "viewport-segment-width";
+      DCHECK(RuntimeEnabledFeatures::ViewportSegmentsEnabled(feature_context));
+      return AtomicString("viewport-segment-width");
     case UADefinedTwoDimensionalVariable::kViewportSegmentHeight:
-      DCHECK(RuntimeEnabledFeatures::CSSFoldablesEnabled());
-      return "viewport-segment-height";
+      DCHECK(RuntimeEnabledFeatures::ViewportSegmentsEnabled(feature_context));
+      return AtomicString("viewport-segment-height");
     default:
       break;
   }
 
-  NOTREACHED();
-}
-
-// static
-scoped_refptr<StyleEnvironmentVariables> StyleEnvironmentVariables::Create(
-    StyleEnvironmentVariables& parent) {
-  scoped_refptr<StyleEnvironmentVariables> obj =
-      base::AdoptRef(new StyleEnvironmentVariables());
-
-  // Add a reference to this instance from the parent.
-  obj->BindToParent(parent);
-
-  return obj;
-}
-
-StyleEnvironmentVariables::~StyleEnvironmentVariables() {
-  // Remove a reference to this instance from the parent.
-  if (parent_) {
-    auto it = parent_->children_.Find(this);
-    DCHECK(it != kNotFound);
-    parent_->children_.EraseAt(it);
-  }
+  NOTREACHED_IN_MIGRATION();
 }
 
 void StyleEnvironmentVariables::SetVariable(const AtomicString& name,
                                             const String& value) {
-  CSSTokenizer tokenizer(value);
-  Vector<CSSParserToken> tokens;
-  tokens.AppendVector(tokenizer.TokenizeToEOF());
-
-  Vector<String> backing_strings;
-  backing_strings.push_back(value);
-
-  scoped_refptr<CSSVariableData> variable_data =
-      CSSVariableData::CreateResolved(
-          std::move(tokens), std::move(backing_strings),
-          false /* is_animation_tainted */, false /* has_font_units */,
-          false /* has_root_font_units*/, g_null_atom, WTF::TextEncoding());
-  data_.Set(name, std::move(variable_data));
+  data_.Set(name,
+            CSSVariableData::Create(value, false /* is_animation_tainted */,
+                                    false /* needs_variable_resolution */));
   InvalidateVariable(name);
 }
 
@@ -186,26 +137,19 @@ void StyleEnvironmentVariables::SetVariable(const AtomicString& name,
                                             const String& value) {
   base::CheckedNumeric<unsigned> first_dimension_size = first_dimension;
   ++first_dimension_size;
-  if (!first_dimension_size.IsValid())
+  if (!first_dimension_size.IsValid()) {
     return;
+  }
 
   base::CheckedNumeric<unsigned> second_dimension_size = second_dimension;
   ++second_dimension_size;
-  if (!second_dimension_size.IsValid())
+  if (!second_dimension_size.IsValid()) {
     return;
+  }
 
-  CSSTokenizer tokenizer(value);
-  Vector<CSSParserToken> tokens;
-  tokens.AppendVector(tokenizer.TokenizeToEOF());
-
-  Vector<String> backing_strings;
-  backing_strings.push_back(value);
-
-  scoped_refptr<CSSVariableData> variable_data =
-      CSSVariableData::CreateResolved(
-          std::move(tokens), std::move(backing_strings),
-          false /* is_animation_tainted */, false /* has_font_units */,
-          false /* has_root_font_units*/, g_null_atom, WTF::TextEncoding());
+  CSSVariableData* variable_data =
+      CSSVariableData::Create(value, false /* is_animation_tainted */,
+                              false /* needs_variable_resolution */);
 
   TwoDimensionVariableValues* values_to_set = nullptr;
   auto it = two_dimension_data_.find(name);
@@ -216,8 +160,9 @@ void StyleEnvironmentVariables::SetVariable(const AtomicString& name,
     values_to_set = &it->value;
   }
 
-  if (first_dimension_size.ValueOrDie() > values_to_set->size())
+  if (first_dimension_size.ValueOrDie() > values_to_set->size()) {
     values_to_set->Grow(first_dimension_size.ValueOrDie());
+  }
 
   if (second_dimension_size.ValueOrDie() >
       (*values_to_set)[first_dimension].size()) {
@@ -237,8 +182,9 @@ void StyleEnvironmentVariables::SetVariable(
     UADefinedTwoDimensionalVariable variable,
     unsigned first_dimension,
     unsigned second_dimension,
-    const String& value) {
-  SetVariable(GetVariableName(variable, GetFeatureContext()), first_dimension,
+    const String& value,
+    const FeatureContext* feature_context) {
+  SetVariable(GetVariableName(variable, feature_context), first_dimension,
               second_dimension, value);
 }
 
@@ -248,8 +194,9 @@ void StyleEnvironmentVariables::RemoveVariable(UADefinedVariable variable) {
 }
 
 void StyleEnvironmentVariables::RemoveVariable(
-    UADefinedTwoDimensionalVariable variable) {
-  const AtomicString name = GetVariableName(variable, GetFeatureContext());
+    UADefinedTwoDimensionalVariable variable,
+    const FeatureContext* feature_context) {
+  const AtomicString name = GetVariableName(variable, feature_context);
   RemoveVariable(name);
 }
 
@@ -264,25 +211,29 @@ CSSVariableData* StyleEnvironmentVariables::ResolveVariable(
     WTF::Vector<unsigned> indices) {
   if (indices.size() == 0u) {
     auto result = data_.find(name);
-    if (result == data_.end() && parent_)
+    if (result == data_.end() && parent_) {
       return parent_->ResolveVariable(name, std::move(indices));
-    if (result == data_.end())
+    }
+    if (result == data_.end()) {
       return nullptr;
-    return result->value.get();
+    }
+    return result->value.Get();
   } else if (indices.size() == 2u) {
     auto result = two_dimension_data_.find(name);
-    if (result == two_dimension_data_.end() && parent_)
+    if (result == two_dimension_data_.end() && parent_) {
       return parent_->ResolveVariable(name, std::move(indices));
+    }
 
     unsigned first_dimension = indices[0];
     unsigned second_dimension = indices[1];
-    if (result == two_dimension_data_.end())
+    if (result == two_dimension_data_.end()) {
       return nullptr;
+    }
     if (first_dimension >= result->value.size() ||
         second_dimension >= result->value[first_dimension].size()) {
       return nullptr;
     }
-    return result->value[first_dimension][second_dimension].get();
+    return result->value[first_dimension][second_dimension].Get();
   }
 
   return nullptr;
@@ -293,8 +244,9 @@ void StyleEnvironmentVariables::DetachFromParent() {
 
   // Remove any reference the |parent| has to |this|.
   auto it = parent_->children_.Find(this);
-  if (it != kNotFound)
+  if (it != kNotFound) {
     parent_->children_.EraseAt(it);
+  }
 
   parent_ = nullptr;
 }
@@ -311,30 +263,25 @@ void StyleEnvironmentVariables::ClearForTesting() {
   data_.clear();
 
   // If we are the root then we should re-apply the default variables.
-  if (!parent_)
+  if (!parent_) {
     SetDefaultEnvironmentVariables(this);
-}
-
-void StyleEnvironmentVariables::BindToParent(
-    StyleEnvironmentVariables& parent) {
-  DCHECK_EQ(nullptr, parent_);
-  parent_ = &parent;
-  parent.children_.push_back(this);
+  }
 }
 
 void StyleEnvironmentVariables::ParentInvalidatedVariable(
     const AtomicString& name) {
   // If we have not overridden the variable then we should invalidate it
   // locally.
-  if (data_.find(name) == data_.end() &&
-      two_dimension_data_.find(name) == two_dimension_data_.end()) {
+  if (!base::Contains(data_, name) &&
+      !base::Contains(two_dimension_data_, name)) {
     InvalidateVariable(name);
   }
 }
 
 void StyleEnvironmentVariables::InvalidateVariable(const AtomicString& name) {
-  for (auto& it : children_)
+  for (auto& it : children_) {
     it->ParentInvalidatedVariable(name);
+  }
 }
 
 }  // namespace blink

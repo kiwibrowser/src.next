@@ -34,11 +34,9 @@ const GURL& ManifestURL::Get(const Extension* extension,
 }
 
 // static
-const GURL ManifestURL::GetHomepageURL(const Extension* extension) {
+GURL ManifestURL::GetHomepageURL(const Extension* extension) {
   const GURL& homepage_url = Get(extension, keys::kHomepageURL);
-  if (homepage_url.is_valid())
-    return homepage_url;
-  return GetWebStoreURL(extension);
+  return homepage_url.is_valid() ? homepage_url : GetWebStoreURL(extension);
 }
 
 // static
@@ -47,19 +45,19 @@ bool ManifestURL::SpecifiedHomepageURL(const Extension* extension) {
 }
 
 // static
-const GURL ManifestURL::GetManifestHomePageURL(const Extension* extension) {
+const GURL& ManifestURL::GetManifestHomePageURL(const Extension* extension) {
   const GURL& homepage_url = Get(extension, keys::kHomepageURL);
   return homepage_url.is_valid() ? homepage_url : GURL::EmptyGURL();
 }
 
 // static
-const GURL ManifestURL::GetWebStoreURL(const Extension* extension) {
+GURL ManifestURL::GetWebStoreURL(const Extension* extension) {
   bool use_webstore_url = UpdatesFromGallery(extension) &&
                           !SharedModuleInfo::IsSharedModule(extension);
   return use_webstore_url
              ? GURL(extension_urls::GetWebstoreItemDetailURLPrefix() +
                     extension->id())
-             : GURL::EmptyGURL();
+             : GURL();
 }
 
 // static
@@ -73,23 +71,16 @@ bool ManifestURL::UpdatesFromGallery(const Extension* extension) {
 }
 
 // static
-bool ManifestURL::UpdatesFromGallery(const base::DictionaryValue* manifest) {
-  if (const std::string* url = manifest->FindStringKey(keys::kUpdateURL)) {
-    return extension_urls::IsWebstoreUpdateUrl(GURL(*url));
-  }
-  return false;
-}
-
-// static
 const GURL& ManifestURL::GetAboutPage(const Extension* extension) {
   return Get(extension, keys::kAboutPage);
 }
 
 // static
-const GURL ManifestURL::GetDetailsURL(const Extension* extension) {
-  return extension->from_webstore() ?
-      GURL(extension_urls::GetWebstoreItemDetailURLPrefix() + extension->id()) :
-      GURL::EmptyGURL();
+GURL ManifestURL::GetDetailsURL(const Extension* extension) {
+  return extension->from_webstore()
+             ? GURL(extension_urls::GetWebstoreItemDetailURLPrefix() +
+                    extension->id())
+             : GURL();
 }
 
 HomepageURLHandler::HomepageURLHandler() {

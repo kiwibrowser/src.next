@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <inttypes.h>
 
 #include "base/containers/span.h"
-#include "components/power_scheduler/power_mode_voter.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/frame/web_feature_forward.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_load_observer.h"
@@ -46,15 +45,14 @@ class CORE_EXPORT ResourceLoadObserverForFrame final
                           const Resource* resource,
                           ResponseSource) override;
   void DidReceiveData(uint64_t identifier,
-                      base::span<const char> chunk) override;
+                      base::SpanOrSize<const char> chunk) override;
   void DidReceiveTransferSizeUpdate(uint64_t identifier,
                                     int transfer_size_diff) override;
   void DidDownloadToBlob(uint64_t identifier, BlobDataHandle*) override;
   void DidFinishLoading(uint64_t identifier,
                         base::TimeTicks finish_time,
                         int64_t encoded_data_length,
-                        int64_t decoded_body_length,
-                        bool should_report_corb_blocking) override;
+                        int64_t decoded_body_length) override;
   void DidFailLoading(const KURL&,
                       uint64_t identifier,
                       const ResourceError&,
@@ -62,22 +60,18 @@ class CORE_EXPORT ResourceLoadObserverForFrame final
                       IsInternalRequest) override;
   void DidChangeRenderBlockingBehavior(Resource* resource,
                                        const FetchParameters& params) override;
+  bool InterestedInAllRequests() override;
   void Trace(Visitor*) const override;
 
  private:
   CoreProbeSink* GetProbe();
   void CountUsage(WebFeature);
 
-  void UpdatePowerModeVote();
-
   // There are some overlap between |document_loader_|, |document_| and
   // |fetcher_properties_|. Use |fetcher_properties_| whenever possible.
   const Member<DocumentLoader> document_loader_;
   const Member<Document> document_;
   const Member<const ResourceFetcherProperties> fetcher_properties_;
-
-  std::unique_ptr<power_scheduler::PowerModeVoter> power_mode_voter_;
-  bool power_mode_vote_is_loading_ = false;
 };
 
 }  // namespace blink

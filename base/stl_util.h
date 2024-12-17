@@ -21,21 +21,10 @@ namespace internal {
 
 template <typename Iter>
 constexpr bool IsRandomAccessIter =
-    std::is_same<typename std::iterator_traits<Iter>::iterator_category,
-                 std::random_access_iterator_tag>::value;
+    std::is_same_v<typename std::iterator_traits<Iter>::iterator_category,
+                   std::random_access_iterator_tag>;
 
 }  // namespace internal
-
-// Implementation of C++23's std::to_underlying.
-//
-// Note: This has an additional `std::is_enum<EnumT>` requirement to be SFINAE
-// friendly prior to C++20.
-//
-// Reference: https://en.cppreference.com/w/cpp/utility/to_underlying
-template <typename EnumT, typename = std::enable_if_t<std::is_enum<EnumT>{}>>
-constexpr std::underlying_type_t<EnumT> to_underlying(EnumT e) noexcept {
-  return static_cast<std::underlying_type_t<EnumT>>(e);
-}
 
 // Returns a const reference to the underlying container of a container adapter.
 // Works for std::priority_queue, std::queue, and std::stack.
@@ -57,55 +46,6 @@ void STLClearObject(T* obj) {
   // Sometimes "T tmp" allocates objects with memory (arena implementation?).
   // Hence using additional reserve(0) even if it doesn't always work.
   obj->reserve(0);
-}
-
-// Counts the number of instances of val in a container.
-template <typename Container, typename T>
-typename std::iterator_traits<
-    typename Container::const_iterator>::difference_type
-STLCount(const Container& container, const T& val) {
-  return std::count(container.begin(), container.end(), val);
-}
-
-// O(1) implementation of const casting an iterator for any sequence,
-// associative or unordered associative container in the STL.
-//
-// Reference: https://stackoverflow.com/a/10669041
-template <typename Container,
-          typename ConstIter,
-          std::enable_if_t<!internal::IsRandomAccessIter<ConstIter>>* = nullptr>
-constexpr auto ConstCastIterator(Container& c, ConstIter it) {
-  return c.erase(it, it);
-}
-
-// Explicit overload for std::forward_list where erase() is named erase_after().
-template <typename T, typename Allocator>
-constexpr auto ConstCastIterator(
-    std::forward_list<T, Allocator>& c,
-    typename std::forward_list<T, Allocator>::const_iterator it) {
-// The erase_after(it, it) trick used below does not work for libstdc++ [1],
-// thus we need a different way.
-// TODO(crbug.com/972541): Remove this workaround once libstdc++ is fixed on all
-// platforms.
-//
-// [1] https://gcc.gnu.org/bugzilla/show_bug.cgi?id=90857
-#if defined(__GLIBCXX__)
-  return c.insert_after(it, {});
-#else
-  return c.erase_after(it, it);
-#endif
-}
-
-// Specialized O(1) const casting for random access iterators. This is
-// necessary, because erase() is either not available (e.g. array-like
-// containers), or has O(n) complexity (e.g. std::deque or std::vector).
-template <typename Container,
-          typename ConstIter,
-          std::enable_if_t<internal::IsRandomAccessIter<ConstIter>>* = nullptr>
-constexpr auto ConstCastIterator(Container& c, ConstIter it) {
-  using std::begin;
-  using std::cbegin;
-  return begin(c) + (it - cbegin(c));
 }
 
 // Returns a new ResultType containing the difference of two sorted containers.

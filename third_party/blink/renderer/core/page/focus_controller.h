@@ -29,7 +29,6 @@
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/geometry/layout_rect.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
@@ -43,6 +42,7 @@ class Document;
 class Element;
 class FocusChangedObserver;
 class Frame;
+class HTMLElement;
 class HTMLFrameOwnerElement;
 class InputDeviceCapabilities;
 class LocalFrame;
@@ -87,7 +87,17 @@ class CORE_EXPORT FocusController final
       LocalFrame* to,
       InputDeviceCapabilities* source_capabilities = nullptr);
   static Element* FindFocusableElementInShadowHost(const Element& shadow_host);
-  Element* NextFocusableElementForIME(Element*, mojom::blink::FocusType);
+  static HTMLElement* FindScopeOwnerSlotOrReadingFlowContainer(const Element&);
+
+  // Returns the next focusable element (likely an <input> field) after the
+  // given element in focus traversal and within the enclosing <form> that
+  // requires user input before submitting the form (all <form>less <input>s are
+  // considered as one virtual form). Used by an Android virtual keyboard and
+  // Autofill to infer whether the enclosing <form> is ready for auto-submission
+  // after filling the given element or focus should be firstly moved to the
+  // next focusable element.
+  Element* NextFocusableElementForImeAndAutofill(Element*,
+                                                 mojom::blink::FocusType);
   Element* FindFocusableElementAfter(Element& element, mojom::blink::FocusType);
 
   bool SetFocusedElement(Element*, Frame*, const FocusParams&);
@@ -104,6 +114,8 @@ class CORE_EXPORT FocusController final
   void SetFocusEmulationEnabled(bool);
 
   void RegisterFocusChangedObserver(FocusChangedObserver*);
+
+  static int AdjustedTabIndex(const Element&);
 
   void Trace(Visitor*) const;
 

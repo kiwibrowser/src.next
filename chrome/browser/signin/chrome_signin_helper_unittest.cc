@@ -12,6 +12,7 @@
 #include "build/buildflag.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/privacy_sandbox/privacy_sandbox_prefs.h"
 #include "components/signin/core/browser/signin_header_helper.h"
 #include "components/signin/public/base/account_consistency_method.h"
 #include "components/signin/public/base/signin_buildflags.h"
@@ -27,6 +28,7 @@
 #include "net/url_request/url_request_filter.h"
 #include "net/url_request/url_request_interceptor.h"
 #include "net/url_request/url_request_test_job.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -82,7 +84,14 @@ class TestResponseAdapter : public signin::ResponseAdapter,
   bool IsOutermostMainFrame() const override {
     return is_outermost_main_frame_;
   }
-  GURL GetURL() const override { return GURL("https://accounts.google.com"); }
+  GURL GetUrl() const override { return GURL("https://accounts.google.com"); }
+  std::optional<url::Origin> GetRequestInitiator() const override {
+    // Pretend the request came from the same origin.
+    return url::Origin::Create(GetUrl());
+  }
+  const url::Origin* GetRequestTopFrameOrigin() const override {
+    return &request_top_frame_origin_;
+  }
   const net::HttpResponseHeaders* GetHeaders() const override {
     return headers_.get();
   }
@@ -103,6 +112,7 @@ class TestResponseAdapter : public signin::ResponseAdapter,
 
  private:
   bool is_outermost_main_frame_;
+  const url::Origin request_top_frame_origin_{url::Origin::Create(GetUrl())};
   scoped_refptr<net::HttpResponseHeaders> headers_;
 };
 
@@ -166,12 +176,18 @@ TEST_F(ChromeSigninHelperTest, FixAccountConsistencyRequestHeader) {
   sync_preferences::TestingPrefServiceSyncable prefs;
   content_settings::CookieSettings::RegisterProfilePrefs(prefs.registry());
   HostContentSettingsMap::RegisterProfilePrefs(prefs.registry());
+  privacy_sandbox::RegisterProfilePrefs(prefs.registry());
   scoped_refptr<HostContentSettingsMap> settings_map =
       new HostContentSettingsMap(&prefs, /*is_off_the_record=*/false,
                                  /*store_last_modified=*/false,
-                                 /*restore_session=*/false);
+                                 /*restore_session=*/false,
+                                 /*should_record_metrics=*/false);
   scoped_refptr<content_settings::CookieSettings> cookie_settings =
-      new content_settings::CookieSettings(settings_map.get(), &prefs, false);
+      new content_settings::CookieSettings(
+          settings_map.get(), &prefs,
+          /*tracking_protection_settings=*/nullptr, /*is_incognito=*/false,
+          content_settings::CookieSettings::NoFedCmSharingPermissionsCallback(),
+          /*tpcd_metadata_manager=*/nullptr);
 
   {
     // Non-elligible request, no header.
@@ -181,9 +197,9 @@ TEST_F(ChromeSigninHelperTest, FixAccountConsistencyRequestHeader) {
         /*incognito_availability=*/0, signin::AccountConsistencyMethod::kDice,
         "gaia_id", /*is_child_account=*/signin::Tribool::kFalse,
         /*is_sync_enabled=*/true, "device_id", cookie_settings.get());
-    std::string managed_account_header;
-    EXPECT_FALSE(request.modified_headers().GetHeader(
-        signin::kChromeConnectedHeader, &managed_account_header));
+    EXPECT_EQ(
+        request.modified_headers().GetHeader(signin::kChromeConnectedHeader),
+        std::nullopt);
   }
 
   {
@@ -194,13 +210,12 @@ TEST_F(ChromeSigninHelperTest, FixAccountConsistencyRequestHeader) {
         /*incognito_availability=*/0, signin::AccountConsistencyMethod::kDice,
         "gaia_id", /*is_child_account=*/signin::Tribool::kFalse,
         /*is_sync_enabled=*/true, "device_id", cookie_settings.get());
-    std::string managed_account_header;
-    EXPECT_TRUE(request.modified_headers().GetHeader(
-        signin::kChromeConnectedHeader, &managed_account_header));
     std::string expected_header =
         "source=Chrome,id=gaia_id,mode=0,enable_account_consistency=false,"
         "supervised=false,consistency_enabled_by_default=false";
-    EXPECT_EQ(managed_account_header, expected_header);
+    EXPECT_THAT(
+        request.modified_headers().GetHeader(signin::kChromeConnectedHeader),
+        testing::Optional(expected_header));
   }
 
   // Tear down the test environment.

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,13 +25,16 @@ Element& LayoutTreeRebuildRoot::RootElement() const {
   if (IsSingleRoot() || root_node->IsDirtyForRebuildLayoutTree() ||
       !root_node->GetLayoutObject()) {
     Element* root_element = root_node->GetReattachParent();
-    while (root_element && !root_element->GetLayoutObject())
+    while (root_element && !root_element->GetLayoutObject()) {
       root_element = root_element->GetReattachParent();
-    if (root_element)
+    }
+    if (root_element) {
       return *root_element;
+    }
   }
-  if (Element* element = DynamicTo<Element>(root_node))
+  if (Element* element = DynamicTo<Element>(root_node)) {
     return *element;
+  }
   return *root_node->GetDocument().documentElement();
 }
 
@@ -50,10 +53,12 @@ bool LayoutTreeRebuildRoot::IsDirty(const Node& node) const {
 }
 
 void LayoutTreeRebuildRoot::SubtreeModified(ContainerNode& parent) {
-  if (!GetRootNode())
+  if (!GetRootNode()) {
     return;
-  if (GetRootNode()->isConnected())
+  }
+  if (GetRootNode()->isConnected()) {
     return;
+  }
   // LayoutTreeRebuildRoot is only used for marking for layout tree rebuild
   // during style recalc. We do not allow DOM modifications during style recalc
   // or the layout tree rebuild that happens right after. The only time we
@@ -64,7 +69,7 @@ void LayoutTreeRebuildRoot::SubtreeModified(ContainerNode& parent) {
   Element* ancestor = DynamicTo<Element>(parent);
   if (!ancestor) {
     // The parent should be the pseudo element's originating element.
-    NOTREACHED();
+    NOTREACHED_IN_MIGRATION();
     ancestor = parent.ParentOrShadowHostElement();
   }
   for (; ancestor; ancestor = ancestor->GetReattachParent()) {

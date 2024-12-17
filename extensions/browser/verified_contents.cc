@@ -5,7 +5,9 @@
 #include "extensions/browser/verified_contents.h"
 
 #include <stddef.h>
+
 #include <algorithm>
+#include <string_view>
 
 #include "base/base64url.h"
 #include "base/containers/contains.h"
@@ -20,7 +22,6 @@
 #include "components/crx_file/id_util.h"
 #include "crypto/signature_verifier.h"
 #include "extensions/browser/content_verifier/content_verifier_utils.h"
-#include "extensions/browser/content_verifier/scoped_uma_recorder.h"
 #include "extensions/common/extension.h"
 
 namespace {
@@ -47,25 +48,19 @@ const char kWebstoreKId[] = "webstore";
 
 // Helper function to iterate over a list of dictionaries, returning the
 // dictionary that has |key| -> |value| in it, if any, or null.
-const base::Value* FindDictionaryWithValue(const base::Value& list,
-                                           const std::string& key,
-                                           const std::string& value) {
-  DCHECK(list.is_list());
-  for (const base::Value& item : list.GetList()) {
+const base::Value::Dict* FindDictionaryWithValue(const base::Value::List& list,
+                                                 const std::string& key,
+                                                 const std::string& value) {
+  for (const base::Value& item : list) {
     if (!item.is_dict())
       continue;
     // Finds a path because the |key| may include '.'.
-    const std::string* found_value = item.FindStringPath(key);
+    const std::string* found_value = item.GetDict().FindStringByDottedPath(key);
     if (found_value && *found_value == value)
-      return &item;
+      return &item.GetDict();
   }
   return nullptr;
 }
-
-const char kUMAVerifiedContentsInitResult[] =
-    "Extensions.ContentVerification.VerifiedContentsInitResult";
-const char kUMAVerifiedContentsInitTime[] =
-    "Extensions.ContentVerification.VerifiedContentsInitTime";
 
 }  // namespace
 
@@ -110,28 +105,26 @@ std::unique_ptr<VerifiedContents> VerifiedContents::CreateFromFile(
 
 std::unique_ptr<VerifiedContents> VerifiedContents::Create(
     base::span<const uint8_t> public_key,
-    base::StringPiece contents) {
-  ScopedUMARecorder<kUMAVerifiedContentsInitTime,
-                    kUMAVerifiedContentsInitResult>
-      uma_recorder;
+    std::string_view contents) {
   // Note: VerifiedContents constructor is private.
   auto verified_contents = base::WrapUnique(new VerifiedContents(public_key));
   std::string payload;
   if (!verified_contents->GetPayload(contents, &payload))
     return nullptr;
 
-  absl::optional<base::Value> dictionary = base::JSONReader::Read(payload);
-  if (!dictionary || !dictionary->is_dict())
+  std::optional<base::Value> dictionary_value = base::JSONReader::Read(payload);
+  if (!dictionary_value || !dictionary_value->is_dict()) {
     return nullptr;
+  }
 
-  const std::string* item_id = dictionary->FindStringKey(kItemIdKey);
+  base::Value::Dict& dictionary = dictionary_value->GetDict();
+  const std::string* item_id = dictionary.FindString(kItemIdKey);
   if (!item_id || !crx_file::id_util::IdIsValid(*item_id))
     return nullptr;
 
   verified_contents->extension_id_ = *item_id;
 
-  const std::string* version_string =
-      dictionary->FindStringKey(kItemVersionKey);
+  const std::string* version_string = dictionary.FindString(kItemVersionKey);
   if (!version_string)
     return nullptr;
 
@@ -139,20 +132,23 @@ std::unique_ptr<VerifiedContents> VerifiedContents::Create(
   if (!verified_contents->version_.IsValid())
     return nullptr;
 
-  const base::Value* hashes_list = dictionary->FindListKey(kContentHashesKey);
+  const base::Value::List* hashes_list = dictionary.FindList(kContentHashesKey);
   if (!hashes_list)
     return nullptr;
 
-  for (const base::Value& hashes : hashes_list->GetList()) {
-    if (!hashes.is_dict())
+  for (const base::Value& hashes : *hashes_list) {
+    const base::Value::Dict* hashes_dict = hashes.GetIfDict();
+    if (!hashes_dict) {
       return nullptr;
+    }
 
-    const std::string* format = hashes.FindStringKey(kFormatKey);
+    const std::string* format = hashes_dict->FindString(kFormatKey);
     if (!format || *format != kTreeHash)
       continue;
 
-    absl::optional<int> block_size = hashes.FindIntKey(kBlockSizeKey);
-    absl::optional<int> hash_block_size = hashes.FindIntKey(kHashBlockSizeKey);
+    std::optional<int> block_size = hashes_dict->FindInt(kBlockSizeKey);
+    std::optional<int> hash_block_size =
+        hashes_dict->FindInt(kHashBlockSizeKey);
     if (!block_size || !hash_block_size)
       return nullptr;
 
@@ -163,16 +159,19 @@ std::unique_ptr<VerifiedContents> VerifiedContents::Create(
     if (verified_contents->block_size_ != *hash_block_size)
       return nullptr;
 
-    const base::Value* files = hashes.FindListKey(kFilesKey);
+    const base::Value::List* files = hashes_dict->FindList(kFilesKey);
     if (!files)
       return nullptr;
 
-    for (const base::Value& data : files->GetList()) {
-      if (!data.is_dict())
+    for (const base::Value& data : *files) {
+      const base::Value::Dict* data_dict = data.GetIfDict();
+      if (!data_dict) {
         return nullptr;
+      }
 
-      const std::string* file_path_string = data.FindStringKey(kPathKey);
-      const std::string* encoded_root_hash = data.FindStringKey(kRootHashKey);
+      const std::string* file_path_string = data_dict->FindString(kPathKey);
+      const std::string* encoded_root_hash =
+          data_dict->FindString(kRootHashKey);
       std::string root_hash;
       if (!file_path_string || !encoded_root_hash ||
           !base::IsStringUTF8(*file_path_string) ||
@@ -192,7 +191,6 @@ std::unique_ptr<VerifiedContents> VerifiedContents::Create(
 
     break;
   }
-  uma_recorder.RecordSuccess();
   return verified_contents;
 }
 
@@ -251,9 +249,9 @@ bool VerifiedContents::TreeHashRootEquals(const base::FilePath& relative_path,
 // that it is for a given extension), but in the future we may validate using
 // the extension's key too (eg for non-webstore hosted extensions such as
 // enterprise installs).
-bool VerifiedContents::GetPayload(base::StringPiece contents,
+bool VerifiedContents::GetPayload(std::string_view contents,
                                   std::string* payload) {
-  absl::optional<base::Value> top_list = base::JSONReader::Read(contents);
+  std::optional<base::Value> top_list = base::JSONReader::Read(contents);
   if (!top_list || !top_list->is_list())
     return false;
 
@@ -267,29 +265,30 @@ bool VerifiedContents::GetPayload(base::StringPiece contents,
   //     }
   //   }
   // ]
-  const base::Value* dictionary =
-      FindDictionaryWithValue(*top_list, kDescriptionKey, kTreeHashPerFile);
+  const base::Value::Dict* dictionary = FindDictionaryWithValue(
+      top_list->GetList(), kDescriptionKey, kTreeHashPerFile);
   if (!dictionary)
     return false;
 
-  const base::Value* signed_content =
-      dictionary->FindDictKey(kSignedContentKey);
+  const base::Value::Dict* signed_content =
+      dictionary->FindDict(kSignedContentKey);
   if (!signed_content)
     return false;
 
-  const base::Value* signatures = signed_content->FindListKey(kSignaturesKey);
+  const base::Value::List* signatures =
+      signed_content->FindList(kSignaturesKey);
   if (!signatures)
     return false;
 
-  const base::Value* signature_dict =
+  const base::Value::Dict* signature_dict =
       FindDictionaryWithValue(*signatures, kHeaderKidKey, kWebstoreKId);
   if (!signature_dict)
     return false;
 
   const std::string* protected_value =
-      signature_dict->FindStringKey(kProtectedKey);
+      signature_dict->FindString(kProtectedKey);
   const std::string* encoded_signature =
-      signature_dict->FindStringKey(kSignatureKey);
+      signature_dict->FindString(kSignatureKey);
   std::string decoded_signature;
   if (!protected_value || !encoded_signature ||
       !base::Base64UrlDecode(*encoded_signature,
@@ -297,8 +296,7 @@ bool VerifiedContents::GetPayload(base::StringPiece contents,
                              &decoded_signature))
     return false;
 
-  const std::string* encoded_payload =
-      signed_content->FindStringKey(kPayloadKey);
+  const std::string* encoded_payload = signed_content->FindString(kPayloadKey);
   if (!encoded_payload)
     return false;
 

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,9 +31,7 @@ class CORE_EXPORT FontFaceSetWorker final
   FontFaceSetWorker& operator=(const FontFaceSetWorker&) = delete;
   ~FontFaceSetWorker() override;
 
-  ScriptPromise ready(ScriptState*) override;
-
-  AtomicString status() const override;
+  ScriptPromise<FontFaceSet> ready(ScriptState*) override;
 
   WorkerGlobalScope* GetWorker() const;
 

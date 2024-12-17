@@ -7,15 +7,15 @@
 #include <memory>
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "net/base/auth.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/io_buffer.h"
+#include "net/base/proxy_chain.h"
 #include "net/base/proxy_delegate.h"
-#include "net/base/proxy_server.h"
 #include "net/http/http_basic_stream.h"
 #include "net/http/http_log_util.h"
 #include "net/http/http_network_session.h"
@@ -35,25 +35,25 @@ HttpProxyClientSocket::HttpProxyClientSocket(
     std::unique_ptr<StreamSocket> socket,
     const std::string& user_agent,
     const HostPortPair& endpoint,
-    const ProxyServer& proxy_server,
+    const ProxyChain& proxy_chain,
+    size_t proxy_chain_index,
     scoped_refptr<HttpAuthController> http_auth_controller,
     ProxyDelegate* proxy_delegate,
     const NetworkTrafficAnnotationTag& traffic_annotation)
     : io_callback_(base::BindRepeating(&HttpProxyClientSocket::OnIOComplete,
                                        base::Unretained(this))),
+      user_agent_(user_agent),
       socket_(std::move(socket)),
       endpoint_(endpoint),
       auth_(std::move(http_auth_controller)),
-      proxy_server_(proxy_server),
+      proxy_chain_(proxy_chain),
+      proxy_chain_index_(proxy_chain_index),
       proxy_delegate_(proxy_delegate),
       traffic_annotation_(traffic_annotation),
       net_log_(socket_->NetLog()) {
   // Synthesize the bits of a request that are actually used.
   request_.url = GURL("https://" + endpoint.ToString());
   request_.method = "CONNECT";
-  if (!user_agent.empty())
-    request_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent,
-                                     user_agent);
 }
 
 HttpProxyClientSocket::~HttpProxyClientSocket() {
@@ -127,13 +127,7 @@ const NetLogWithSource& HttpProxyClientSocket::NetLog() const {
 bool HttpProxyClientSocket::WasEverUsed() const {
   if (socket_)
     return socket_->WasEverUsed();
-  NOTREACHED();
-  return false;
-}
-
-bool HttpProxyClientSocket::WasAlpnNegotiated() const {
-  // Do not delegate to `socket_`. While `socket_` may negotiate ALPN with the
-  // proxy, this object represents the tunneled TCP connection to the origin.
+  NOTREACHED_IN_MIGRATION();
   return false;
 }
 
@@ -224,7 +218,7 @@ int HttpProxyClientSocket::PrepareForAuthRestart() {
   // If the auth request had a body, need to drain it before reusing the socket.
   if (!http_stream_parser_->IsResponseBodyComplete()) {
     next_state_ = STATE_DRAIN_BODY;
-    drain_buf_ = base::MakeRefCounted<IOBuffer>(kDrainBodyBufferSize);
+    drain_buf_ = base::MakeRefCounted<IOBufferWithSize>(kDrainBodyBufferSize);
     return OK;
   }
 
@@ -313,7 +307,7 @@ int HttpProxyClientSocket::DoLoop(int last_io_result) {
       case STATE_DONE:
         break;
       default:
-        NOTREACHED() << "bad state";
+        NOTREACHED_IN_MIGRATION() << "bad state";
         rv = ERR_UNEXPECTED;
         break;
     }
@@ -352,17 +346,16 @@ int HttpProxyClientSocket::DoSendRequest() {
 
     if (proxy_delegate_) {
       HttpRequestHeaders proxy_delegate_headers;
-      proxy_delegate_->OnBeforeTunnelRequest(proxy_server_,
-                                             &proxy_delegate_headers);
+      int result = proxy_delegate_->OnBeforeTunnelRequest(
+          proxy_chain_, proxy_chain_index_, &proxy_delegate_headers);
+      if (result < 0) {
+        return result;
+      }
+
       extra_headers.MergeFrom(proxy_delegate_headers);
     }
 
-    std::string user_agent;
-    if (!request_.extra_headers.GetHeader(HttpRequestHeaders::kUserAgent,
-                                          &user_agent)) {
-      user_agent.clear();
-    }
-    BuildTunnelRequest(endpoint_, extra_headers, user_agent, &request_line_,
+    BuildTunnelRequest(endpoint_, extra_headers, user_agent_, &request_line_,
                        &request_headers_);
 
     NetLogRequestHeaders(net_log_,
@@ -372,7 +365,8 @@ int HttpProxyClientSocket::DoSendRequest() {
 
   parser_buf_ = base::MakeRefCounted<GrowableIOBuffer>();
   http_stream_parser_ = std::make_unique<HttpStreamParser>(
-      socket_.get(), is_reused_, &request_, parser_buf_.get(), net_log_);
+      socket_.get(), is_reused_, request_.url, request_.method,
+      /*upload_data_stream=*/nullptr, parser_buf_.get(), net_log_);
   return http_stream_parser_->SendRequest(request_line_, request_headers_,
                                           traffic_annotation_, &response_,
                                           io_callback_);
@@ -404,8 +398,8 @@ int HttpProxyClientSocket::DoReadHeadersComplete(int result) {
       response_.headers.get());
 
   if (proxy_delegate_) {
-    int rv = proxy_delegate_->OnTunnelHeadersReceived(proxy_server_,
-                                                      *response_.headers);
+    int rv = proxy_delegate_->OnTunnelHeadersReceived(
+        proxy_chain_, proxy_chain_index_, *response_.headers);
     if (rv != OK) {
       DCHECK_NE(ERR_IO_PENDING, rv);
       return rv;

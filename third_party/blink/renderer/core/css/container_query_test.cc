@@ -1,37 +1,35 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/css/container_query.h"
 
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include <optional>
+
 #include "third_party/blink/renderer/core/animation/document_animations.h"
 #include "third_party/blink/renderer/core/animation/element_animations.h"
 #include "third_party/blink/renderer/core/css/css_container_rule.h"
 #include "third_party/blink/renderer/core/css/css_test_helpers.h"
+#include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
 #include "third_party/blink/renderer/core/css/post_style_update_scope.h"
 #include "third_party/blink/renderer/core/css/properties/css_property_ref.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
+#include "third_party/blink/renderer/core/css/style_sheet_contents.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
+#include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
-#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/text/writing_mode.h"
 
 namespace blink {
 
-class ContainerQueryTest : public PageTestBase,
-                           private ScopedCSSContainerQueriesForTest,
-                           private ScopedLayoutNGForTest {
+class ContainerQueryTest : public PageTestBase {
  public:
-  ContainerQueryTest()
-      : ScopedCSSContainerQueriesForTest(true), ScopedLayoutNGForTest(true) {}
-
   bool HasUnknown(StyleRuleContainer* rule) {
     return rule && rule->GetContainerQuery().Query().HasUnknown();
   }
@@ -48,8 +46,9 @@ class ContainerQueryTest : public PageTestBase,
       UnknownHandling unknown_handling = UnknownHandling::kError) {
     auto* rule = DynamicTo<StyleRuleContainer>(
         css_test_helpers::ParseRule(GetDocument(), rule_string));
-    if ((unknown_handling == UnknownHandling::kError) && HasUnknown(rule))
+    if ((unknown_handling == UnknownHandling::kError) && HasUnknown(rule)) {
       return nullptr;
+    }
     return rule;
   }
 
@@ -58,31 +57,35 @@ class ContainerQueryTest : public PageTestBase,
       UnknownHandling unknown_handling = UnknownHandling::kError) {
     String rule = "@container " + query + " {}";
     StyleRuleContainer* container = ParseAtContainer(rule, unknown_handling);
-    if (!container)
+    if (!container) {
       return nullptr;
+    }
     return &container->GetContainerQuery();
   }
 
-  absl::optional<MediaQueryExpNode::FeatureFlags> FeatureFlagsFrom(
+  std::optional<MediaQueryExpNode::FeatureFlags> FeatureFlagsFrom(
       String query_string) {
     ContainerQuery* query =
         ParseContainerQuery(query_string, UnknownHandling::kAllow);
-    if (!query)
-      return absl::nullopt;
+    if (!query) {
+      return std::nullopt;
+    }
     return GetInnerQuery(*query).CollectFeatureFlags();
   }
 
   ContainerSelector ContainerSelectorFrom(String query_string) {
     ContainerQuery* query =
         ParseContainerQuery(query_string, UnknownHandling::kAllow);
-    if (!query)
+    if (!query) {
       return ContainerSelector();
+    }
     return ContainerSelector(g_null_atom, GetInnerQuery(*query));
   }
 
   String SerializeCondition(StyleRuleContainer* container) {
-    if (!container)
+    if (!container) {
       return "";
+    }
     return container->GetContainerQuery().ToString();
   }
 
@@ -96,20 +99,22 @@ class ContainerQueryTest : public PageTestBase,
     return ref.GetProperty().CSSValueFromComputedStyle(
         element->ComputedStyleRef(),
         /* layout_object */ nullptr,
-        /* allow_visited_style */ false);
+        /* allow_visited_style */ false, CSSValuePhase::kComputedValue);
   }
 
   String ComputedValueString(Element* element, String property_name) {
-    if (const CSSValue* value = ComputedValue(element, property_name))
+    if (const CSSValue* value = ComputedValue(element, property_name)) {
       return value->CssText();
+    }
     return g_null_atom;
   }
 
   // Get animations count for a specific element without force-updating
   // style and layout-tree.
   size_t GetAnimationsCount(Element* element) {
-    if (auto* element_animations = element->GetElementAnimations())
+    if (auto* element_animations = element->GetElementAnimations()) {
       return element_animations->Animations().size();
+    }
     return 0;
   }
 
@@ -119,7 +124,12 @@ class ContainerQueryTest : public PageTestBase,
     PostStyleUpdateScope post_style_update_scope(GetDocument());
     SetBodyInnerHTML(html);
     DCHECK(PostStyleUpdateScope::CurrentAnimationData());
-    return PostStyleUpdateScope::CurrentAnimationData()->old_styles_.size();
+    size_t old_styles_count =
+        PostStyleUpdateScope::CurrentAnimationData()->old_styles_.size();
+    // We don't care about the effects of this Apply call, except that it
+    // silences a DCHECK in ~PostStyleUpdateScope.
+    post_style_update_scope.Apply();
+    return old_styles_count;
   }
 };
 
@@ -146,8 +156,8 @@ TEST_F(ContainerQueryTest, PreludeParsing) {
       "(width < 300px)",
       SerializeCondition(ParseAtContainer("@container (width < 300px) {}")));
 
-  EXPECT_EQ("not (width)", SerializeCondition(ParseAtContainer(
-                               "@container somename not (width) {}")));
+  EXPECT_EQ("somename not (width)", SerializeCondition(ParseAtContainer(
+                                        "@container somename not (width) {}")));
 
   EXPECT_EQ("(width) and (height)", SerializeCondition(ParseAtContainer(
                                         "@container (width) and (height) {}")));
@@ -155,7 +165,17 @@ TEST_F(ContainerQueryTest, PreludeParsing) {
   EXPECT_EQ("(width) or (height)", SerializeCondition(ParseAtContainer(
                                        "@container (width) or (height) {}")));
 
+  EXPECT_EQ("test_name (width) or (height)",
+            SerializeCondition(ParseAtContainer(
+                "@container test_name (width) or (height) {}")));
+
+  EXPECT_EQ("test_name ((max-width: 500px) or (max-height: 500px))",
+            SerializeCondition(
+                ParseAtContainer("@container test_name ((max-width: 500px) "
+                                 "or (max-height: 500px)) {}")));
+
   // Invalid:
+  EXPECT_FALSE(ParseAtContainer("@container test_name {}"));
   EXPECT_FALSE(ParseAtContainer("@container 100px {}"));
   EXPECT_FALSE(ParseAtContainer("@container calc(1) {}"));
   EXPECT_FALSE(ParseAtContainer("@container {}"));
@@ -175,13 +195,18 @@ TEST_F(ContainerQueryTest, ValidFeatures) {
   EXPECT_TRUE(ParseAtContainer("@container (min-aspect-ratio: 1/2) {}"));
   EXPECT_TRUE(ParseAtContainer("@container (max-aspect-ratio: 1/2) {}"));
   EXPECT_TRUE(ParseAtContainer("@container (orientation: portrait) {}"));
+  EXPECT_TRUE(
+      ParseAtContainer("@container test_name (orientation: portrait) {}"));
 
   EXPECT_FALSE(ParseAtContainer("@container (color) {}"));
+  EXPECT_FALSE(ParseAtContainer("@container test_name (color) {}"));
   EXPECT_FALSE(ParseAtContainer("@container (color-index) {}"));
   EXPECT_FALSE(ParseAtContainer("@container (color-index >= 1) {}"));
   EXPECT_FALSE(ParseAtContainer("@container (grid) {}"));
   EXPECT_FALSE(ParseAtContainer("@container (resolution: 150dpi) {}"));
+  EXPECT_FALSE(ParseAtContainer("@container (resolution: calc(6x / 3)) {}"));
   EXPECT_FALSE(ParseAtContainer("@container size(width) {}"));
+  EXPECT_FALSE(ParseAtContainer("@container test_name size(width) {}"));
 }
 
 TEST_F(ContainerQueryTest, FeatureFlags) {
@@ -189,6 +214,8 @@ TEST_F(ContainerQueryTest, FeatureFlags) {
             FeatureFlagsFrom("(width: 100gil)"));
   EXPECT_EQ(MediaQueryExpNode::kFeatureWidth,
             FeatureFlagsFrom("(width: 100px)"));
+  EXPECT_EQ(MediaQueryExpNode::kFeatureWidth,
+            FeatureFlagsFrom("test_name (width: 100px)"));
   EXPECT_EQ(MediaQueryExpNode::kFeatureHeight,
             FeatureFlagsFrom("(height < 100px)"));
   EXPECT_EQ(MediaQueryExpNode::kFeatureInlineSize,
@@ -262,14 +289,37 @@ TEST_F(ContainerQueryTest, ImplicitContainerSelector) {
             orientation.Type(WritingMode::kVerticalRl));
 }
 
+TEST_F(ContainerQueryTest, ScrollStateContainerSelector) {
+  ContainerSelector stuck_right =
+      ContainerSelectorFrom("scroll-state(stuck: right)");
+  EXPECT_EQ(kContainerTypeScrollState,
+            stuck_right.Type(WritingMode::kHorizontalTb));
+
+  ContainerSelector stuck_and_style =
+      ContainerSelectorFrom("scroll-state(stuck: right) and style(--foo: bar)");
+  EXPECT_EQ(kContainerTypeScrollState,
+            stuck_and_style.Type(WritingMode::kHorizontalTb));
+
+  ContainerSelector stuck_and_inline_size = ContainerSelectorFrom(
+      "scroll-state(stuck: block-end) or (inline-size > 10px)");
+  EXPECT_EQ((kContainerTypeScrollState | kContainerTypeInlineSize),
+            stuck_and_inline_size.Type(WritingMode::kHorizontalTb));
+
+  ContainerSelector stuck_and_block_size =
+      ContainerSelectorFrom("scroll-state(stuck: block-end) and (height)");
+  EXPECT_EQ((kContainerTypeScrollState | kContainerTypeBlockSize),
+            stuck_and_block_size.Type(WritingMode::kHorizontalTb));
+}
+
 TEST_F(ContainerQueryTest, RuleParsing) {
   StyleRuleContainer* container = ParseAtContainer(R"CSS(
-    @container (min-width: 100px) {
+    @container test_name (min-width: 100px) {
       div { width: 100px; }
       span { height: 100px; }
     }
   )CSS");
   ASSERT_TRUE(container);
+  ASSERT_EQ("test_name", container->GetContainerQuery().Selector().Name());
 
   CSSStyleSheet* sheet = css_test_helpers::CreateStyleSheet(GetDocument());
   auto* rule = DynamicTo<CSSContainerRule>(
@@ -303,8 +353,8 @@ TEST_F(ContainerQueryTest, RuleCopy) {
   EXPECT_NE(container, copy);
 
   // The rules should be copied.
-  auto rules = container->ChildRules();
-  auto rules_copy = copy->ChildRules();
+  auto& rules = container->ChildRules();
+  auto& rules_copy = copy->ChildRules();
   ASSERT_EQ(1u, rules.size());
   ASSERT_EQ(1u, rules_copy.size());
   EXPECT_NE(rules[0], rules_copy[0]);
@@ -343,24 +393,24 @@ TEST_F(ContainerQueryTest, ContainerQueryEvaluation) {
       <div id=div></div>
     </div>
   )HTML");
-  Element* div = GetDocument().getElementById("div");
+  Element* div = GetDocument().getElementById(AtomicString("div"));
   ASSERT_TRUE(div);
   EXPECT_EQ(2, div->ComputedStyleRef().ZIndex());
 
   // Check that dependent elements are responsive to changes:
-  Element* container = GetDocument().getElementById("container");
+  Element* container = GetDocument().getElementById(AtomicString("container"));
   ASSERT_TRUE(container);
-  container->setAttribute(html_names::kClassAttr, "adjust");
+  container->setAttribute(html_names::kClassAttr, AtomicString("adjust"));
   UpdateAllLifecyclePhasesForTest();
   EXPECT_EQ(3, div->ComputedStyleRef().ZIndex());
 
-  container->setAttribute(html_names::kClassAttr, "");
+  container->setAttribute(html_names::kClassAttr, g_empty_atom);
   UpdateAllLifecyclePhasesForTest();
   EXPECT_EQ(2, div->ComputedStyleRef().ZIndex());
 }
 
 TEST_F(ContainerQueryTest, QueryZoom) {
-  GetFrame().SetPageZoomFactor(2.0f);
+  GetFrame().SetLayoutZoomFactor(2.0f);
 
   SetBodyInnerHTML(R"HTML(
     <style>
@@ -395,24 +445,32 @@ TEST_F(ContainerQueryTest, QueryZoom) {
     </div>
   )HTML");
 
-  Element* target1 = GetDocument().getElementById("target1");
-  Element* target2 = GetDocument().getElementById("target2");
+  Element* target1 = GetDocument().getElementById(AtomicString("target1"));
+  Element* target2 = GetDocument().getElementById(AtomicString("target2"));
   ASSERT_TRUE(target1);
   ASSERT_TRUE(target2);
 
-  EXPECT_TRUE(target1->ComputedStyleRef().GetVariableData("--w100"));
-  EXPECT_TRUE(target1->ComputedStyleRef().GetVariableData("--h200"));
-  EXPECT_FALSE(target1->ComputedStyleRef().GetVariableData("--w200"));
-  EXPECT_FALSE(target1->ComputedStyleRef().GetVariableData("--h400"));
+  EXPECT_TRUE(
+      target1->ComputedStyleRef().GetVariableData(AtomicString("--w100")));
+  EXPECT_TRUE(
+      target1->ComputedStyleRef().GetVariableData(AtomicString("--h200")));
+  EXPECT_FALSE(
+      target1->ComputedStyleRef().GetVariableData(AtomicString("--w200")));
+  EXPECT_FALSE(
+      target1->ComputedStyleRef().GetVariableData(AtomicString("--h400")));
 
-  EXPECT_FALSE(target2->ComputedStyleRef().GetVariableData("--w100"));
-  EXPECT_FALSE(target2->ComputedStyleRef().GetVariableData("--h200"));
-  EXPECT_TRUE(target2->ComputedStyleRef().GetVariableData("--w200"));
-  EXPECT_TRUE(target2->ComputedStyleRef().GetVariableData("--h400"));
+  EXPECT_FALSE(
+      target2->ComputedStyleRef().GetVariableData(AtomicString("--w100")));
+  EXPECT_FALSE(
+      target2->ComputedStyleRef().GetVariableData(AtomicString("--h200")));
+  EXPECT_TRUE(
+      target2->ComputedStyleRef().GetVariableData(AtomicString("--w200")));
+  EXPECT_TRUE(
+      target2->ComputedStyleRef().GetVariableData(AtomicString("--h400")));
 }
 
 TEST_F(ContainerQueryTest, QueryFontRelativeWithZoom) {
-  GetFrame().SetPageZoomFactor(2.0f);
+  GetFrame().SetLayoutZoomFactor(2.0f);
 
   SetBodyInnerHTML(R"HTML(
     <style>
@@ -454,22 +512,23 @@ TEST_F(ContainerQueryTest, QueryFontRelativeWithZoom) {
     </div>
   )HTML");
 
-  Element* em_target = GetDocument().getElementById("em-target");
-  Element* ex_target = GetDocument().getElementById("ex-target");
-  Element* ch_target = GetDocument().getElementById("ch-target");
+  Element* em_target = GetDocument().getElementById(AtomicString("em-target"));
+  Element* ex_target = GetDocument().getElementById(AtomicString("ex-target"));
+  Element* ch_target = GetDocument().getElementById(AtomicString("ch-target"));
   ASSERT_TRUE(em_target);
   ASSERT_TRUE(ex_target);
   ASSERT_TRUE(ch_target);
 
-  EXPECT_TRUE(em_target->ComputedStyleRef().GetVariableData("--em"));
-  EXPECT_TRUE(ex_target->ComputedStyleRef().GetVariableData("--ex"));
-  EXPECT_TRUE(ch_target->ComputedStyleRef().GetVariableData("--ch"));
+  EXPECT_TRUE(
+      em_target->ComputedStyleRef().GetVariableData(AtomicString("--em")));
+  EXPECT_TRUE(
+      ex_target->ComputedStyleRef().GetVariableData(AtomicString("--ex")));
+  EXPECT_TRUE(
+      ch_target->ComputedStyleRef().GetVariableData(AtomicString("--ch")));
 }
 
 TEST_F(ContainerQueryTest, ContainerUnitsViewportFallback) {
   using css_test_helpers::RegisterProperty;
-
-  ScopedCSSContainerRelativeUnitsForTest feature(true);
 
   RegisterProperty(GetDocument(), "--cqw", "<length>", "0px", false);
   RegisterProperty(GetDocument(), "--cqi", "<length>", "0px", false);
@@ -515,7 +574,8 @@ TEST_F(ContainerQueryTest, ContainerUnitsViewportFallback) {
     </div>
   )HTML");
 
-  Element* inline_target = GetDocument().getElementById("inline_target");
+  Element* inline_target =
+      GetDocument().getElementById(AtomicString("inline_target"));
   ASSERT_TRUE(inline_target);
   EXPECT_EQ(ComputedValueString(inline_target, "--cqw"), "10px");
   EXPECT_EQ(ComputedValueString(inline_target, "--cqi"), "10px");
@@ -528,7 +588,8 @@ TEST_F(ContainerQueryTest, ContainerUnitsViewportFallback) {
   EXPECT_EQ(ComputedValueString(inline_target, "--cqmax"),
             ComputedValueString(inline_target, "--fallback-max-cqi-vh"));
 
-  Element* size_target = GetDocument().getElementById("size_target");
+  Element* size_target =
+      GetDocument().getElementById(AtomicString("size_target"));
   ASSERT_TRUE(size_target);
   EXPECT_EQ(ComputedValueString(size_target, "--cqw"), "10px");
   EXPECT_EQ(ComputedValueString(size_target, "--cqi"), "10px");
@@ -567,8 +628,8 @@ TEST_F(ContainerQueryTest, OldStyleForTransitions) {
     </div>
   )HTML");
 
-  Element* container = GetDocument().getElementById("container");
-  target = GetDocument().getElementById("target");
+  Element* container = GetDocument().getElementById(AtomicString("container"));
+  target = GetDocument().getElementById(AtomicString("target"));
   ASSERT_TRUE(target);
   ASSERT_TRUE(container);
 
@@ -581,13 +642,13 @@ TEST_F(ContainerQueryTest, OldStyleForTransitions) {
 
     // Should transition between [10px, 20px]. (Intermediate round).
     GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
-        *container, LogicalSize(120, -1), kLogicalAxisInline);
+        *container, LogicalSize(120, -1), kLogicalAxesInline);
     EXPECT_EQ("15px", ComputedValueString(target, "height"));
     EXPECT_EQ(0u, GetAnimationsCount(target));
 
     // Should transition between [10px, 30px]. (Intermediate round).
     GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
-        *container, LogicalSize(130, -1), kLogicalAxisInline);
+        *container, LogicalSize(130, -1), kLogicalAxesInline);
     EXPECT_EQ("20px", ComputedValueString(target, "height"));
     EXPECT_EQ(0u, GetAnimationsCount(target));
 
@@ -596,9 +657,11 @@ TEST_F(ContainerQueryTest, OldStyleForTransitions) {
     UpdateAllLifecyclePhasesForTest();
     EXPECT_EQ("25px", ComputedValueString(target, "height"));
     EXPECT_EQ(0u, GetAnimationsCount(target));
+
+    EXPECT_FALSE(post_style_update_scope.Apply());
   }
 
-  // PostStyleUpdateScope going out of scope applies the update.
+  // Animation count should be updated after PostStyleUpdateScope::Apply.
   EXPECT_EQ(1u, GetAnimationsCount(target));
 
   // Verify that the newly-updated Animation produces the correct value.
@@ -636,8 +699,8 @@ TEST_F(ContainerQueryTest, TransitionAppearingInFinalPass) {
     </div>
   )HTML");
 
-  Element* container = GetDocument().getElementById("container");
-  Element* target = GetDocument().getElementById("target");
+  Element* container = GetDocument().getElementById(AtomicString("container"));
+  Element* target = GetDocument().getElementById(AtomicString("target"));
   ASSERT_TRUE(target);
   ASSERT_TRUE(container);
 
@@ -650,13 +713,13 @@ TEST_F(ContainerQueryTest, TransitionAppearingInFinalPass) {
 
     // No transition property present. (Intermediate round).
     GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
-        *container, LogicalSize(120, -1), kLogicalAxisInline);
+        *container, LogicalSize(120, -1), kLogicalAxesInline);
     EXPECT_EQ("20px", ComputedValueString(target, "height"));
     EXPECT_EQ(0u, GetAnimationsCount(target));
 
     // Still no transition property present. (Intermediate round).
     GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
-        *container, LogicalSize(130, -1), kLogicalAxisInline);
+        *container, LogicalSize(130, -1), kLogicalAxesInline);
     EXPECT_EQ("30px", ComputedValueString(target, "height"));
     EXPECT_EQ(0u, GetAnimationsCount(target));
 
@@ -665,9 +728,11 @@ TEST_F(ContainerQueryTest, TransitionAppearingInFinalPass) {
     UpdateAllLifecyclePhasesForTest();
     EXPECT_EQ("25px", ComputedValueString(target, "height"));
     EXPECT_EQ(0u, GetAnimationsCount(target));
+
+    EXPECT_FALSE(post_style_update_scope.Apply());
   }
 
-  // PostStyleUpdateScope going out of scope applies the update.
+  // Animation count should be updated after PostStyleUpdateScope::Apply.
   EXPECT_EQ(1u, GetAnimationsCount(target));
 
   // Verify that the newly-updated Animation produces the correct value.
@@ -705,8 +770,8 @@ TEST_F(ContainerQueryTest, TransitionTemporarilyAppearing) {
     </div>
   )HTML");
 
-  Element* container = GetDocument().getElementById("container");
-  Element* target = GetDocument().getElementById("target");
+  Element* container = GetDocument().getElementById(AtomicString("container"));
+  Element* target = GetDocument().getElementById(AtomicString("target"));
   ASSERT_TRUE(target);
   ASSERT_TRUE(container);
 
@@ -719,13 +784,13 @@ TEST_F(ContainerQueryTest, TransitionTemporarilyAppearing) {
 
     // No transition property present yet. (Intermediate round).
     GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
-        *container, LogicalSize(120, -1), kLogicalAxisInline);
+        *container, LogicalSize(120, -1), kLogicalAxesInline);
     EXPECT_EQ("20px", ComputedValueString(target, "height"));
     EXPECT_EQ(0u, GetAnimationsCount(target));
 
     // Transition between [10px, 90px]. (Intermediate round).
     GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
-        *container, LogicalSize(130, -1), kLogicalAxisInline);
+        *container, LogicalSize(130, -1), kLogicalAxesInline);
     EXPECT_EQ("50px", ComputedValueString(target, "height"));
     EXPECT_EQ(0u, GetAnimationsCount(target));
 
@@ -734,9 +799,11 @@ TEST_F(ContainerQueryTest, TransitionTemporarilyAppearing) {
     UpdateAllLifecyclePhasesForTest();
     EXPECT_EQ("40px", ComputedValueString(target, "height"));
     EXPECT_EQ(0u, GetAnimationsCount(target));
+
+    EXPECT_FALSE(post_style_update_scope.Apply());
   }
 
-  // PostStyleUpdateScope going out of scope applies the update.
+  // Animation count should be updated after PostStyleUpdateScope::Apply.
   // We ultimately ended up with no transition, hence we should have no
   // Animations on the element.
   EXPECT_EQ(0u, GetAnimationsCount(target));
@@ -775,8 +842,8 @@ TEST_F(ContainerQueryTest, RedefiningAnimations) {
     </div>
   )HTML");
 
-  Element* container = GetDocument().getElementById("container");
-  Element* target = GetDocument().getElementById("target");
+  Element* container = GetDocument().getElementById(AtomicString("container"));
+  Element* target = GetDocument().getElementById(AtomicString("target"));
   ASSERT_TRUE(target);
   ASSERT_TRUE(container);
 
@@ -788,13 +855,13 @@ TEST_F(ContainerQueryTest, RedefiningAnimations) {
 
     // Animation at 20%. (Intermediate round).
     GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
-        *container, LogicalSize(120, -1), kLogicalAxisInline);
+        *container, LogicalSize(120, -1), kLogicalAxesInline);
     EXPECT_EQ("20px", ComputedValueString(target, "height"));
     EXPECT_EQ(0u, GetAnimationsCount(target));
 
     // Animation at 30%. (Intermediate round).
     GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
-        *container, LogicalSize(130, -1), kLogicalAxisInline);
+        *container, LogicalSize(130, -1), kLogicalAxesInline);
     EXPECT_EQ("30px", ComputedValueString(target, "height"));
     EXPECT_EQ(0u, GetAnimationsCount(target));
 
@@ -803,9 +870,11 @@ TEST_F(ContainerQueryTest, RedefiningAnimations) {
     UpdateAllLifecyclePhasesForTest();
     EXPECT_EQ("40px", ComputedValueString(target, "height"));
     EXPECT_EQ(0u, GetAnimationsCount(target));
+
+    EXPECT_FALSE(post_style_update_scope.Apply());
   }
 
-  // PostStyleUpdateScope going out of scope applies the update.
+  // Animation count should be updated after PostStyleUpdateScope::Apply.
   EXPECT_EQ(1u, GetAnimationsCount(target));
 
   // Verify that the newly-updated Animation produces the correct value.
@@ -840,8 +909,8 @@ TEST_F(ContainerQueryTest, UnsetAnimation) {
     </div>
   )HTML");
 
-  Element* container = GetDocument().getElementById("container");
-  Element* target = GetDocument().getElementById("target");
+  Element* container = GetDocument().getElementById(AtomicString("container"));
+  Element* target = GetDocument().getElementById(AtomicString("target"));
   ASSERT_TRUE(target);
   ASSERT_TRUE(container);
 
@@ -855,7 +924,7 @@ TEST_F(ContainerQueryTest, UnsetAnimation) {
 
     // Animation should appear to be canceled. (Intermediate round).
     GetDocument().GetStyleEngine().UpdateStyleAndLayoutTreeForContainer(
-        *container, LogicalSize(130, -1), kLogicalAxisInline);
+        *container, LogicalSize(130, -1), kLogicalAxesInline);
     EXPECT_EQ("auto", ComputedValueString(target, "height"));
     EXPECT_EQ(1u, GetAnimationsCount(target));
 
@@ -864,9 +933,11 @@ TEST_F(ContainerQueryTest, UnsetAnimation) {
     UpdateAllLifecyclePhasesForTest();
     EXPECT_EQ("20px", ComputedValueString(target, "height"));
     EXPECT_EQ(1u, GetAnimationsCount(target));
+
+    EXPECT_FALSE(post_style_update_scope.Apply());
   }
 
-  // PostStyleUpdateScope going out of scope applies the update.
+  // Animation count should be updated after PostStyleUpdateScope::Apply.
   // (Although since we didn't cancel, there is nothing to update).
   EXPECT_EQ(1u, GetAnimationsCount(target));
 
@@ -1088,11 +1159,11 @@ TEST_F(ContainerQueryTest, CQDependentContentVisibilityHidden) {
 
   UpdateAllLifecyclePhasesForTest();
 
-  Element* ancestor = GetDocument().getElementById("ancestor");
+  Element* ancestor = GetDocument().getElementById(AtomicString("ancestor"));
   ancestor->SetInlineStyleProperty(CSSPropertyID::kWidth, "200px");
 
-  Element* locker = GetDocument().getElementById("locker");
-  locker->setAttribute(html_names::kClassAttr, "locked");
+  Element* locker = GetDocument().getElementById(AtomicString("locker"));
+  locker->setAttribute(html_names::kClassAttr, AtomicString("locked"));
   locker->setInnerHTML("<span>Visible?</span>");
 
   UpdateAllLifecyclePhasesForTest();
@@ -1100,7 +1171,7 @@ TEST_F(ContainerQueryTest, CQDependentContentVisibilityHidden) {
   ASSERT_TRUE(locker->GetDisplayLockContext());
   EXPECT_TRUE(locker->GetDisplayLockContext()->IsLocked());
 
-  EXPECT_TRUE(locker->firstChild()->GetComputedStyle())
+  EXPECT_TRUE(locker->firstElementChild()->GetComputedStyle())
       << "The #locker element does not get content-visibility:hidden on the "
          "first pass over its children during the lifecycle update because we "
          "do not have the container laid out at that point. This is not a spec "
@@ -1109,31 +1180,7 @@ TEST_F(ContainerQueryTest, CQDependentContentVisibilityHidden) {
          "is fine too.";
 }
 
-TEST_F(ContainerQueryTest, NoContainerQueryEvaluatorWhenDisabled) {
-  ScopedCSSContainerQueriesForTest scope(false);
-
-  SetBodyInnerHTML(R"HTML(
-    <style>
-      #container {
-        container-type: size;
-      }
-      @container (min-width: 200px) {
-        span { color: pink; }
-      }
-    </style>
-    <div id="container">
-      <span></span>
-    </div>
-  )HTML");
-
-  UpdateAllLifecyclePhasesForTest();
-  EXPECT_FALSE(
-      GetDocument().getElementById("container")->GetContainerQueryEvaluator());
-}
-
 TEST_F(ContainerQueryTest, QueryViewportDependency) {
-  ScopedCSSViewportUnits4ForTest viewport_units(true);
-
   SetBodyInnerHTML(R"HTML(
     <style>
       #container {
@@ -1162,10 +1209,10 @@ TEST_F(ContainerQueryTest, QueryViewportDependency) {
 
   UpdateAllLifecyclePhasesForTest();
 
-  Element* target1 = GetDocument().getElementById("target1");
-  Element* target2 = GetDocument().getElementById("target2");
-  Element* target3 = GetDocument().getElementById("target3");
-  Element* target4 = GetDocument().getElementById("target4");
+  Element* target1 = GetDocument().getElementById(AtomicString("target1"));
+  Element* target2 = GetDocument().getElementById(AtomicString("target2"));
+  Element* target3 = GetDocument().getElementById(AtomicString("target3"));
+  Element* target4 = GetDocument().getElementById(AtomicString("target4"));
 
   ASSERT_TRUE(target1);
   ASSERT_TRUE(target2);
@@ -1185,30 +1232,76 @@ TEST_F(ContainerQueryTest, QueryViewportDependency) {
   EXPECT_TRUE(target4->ComputedStyleRef().HasDynamicViewportUnits());
 }
 
-TEST_F(ContainerQueryTest, NoStyleQueryWhenDisabled) {
-  ScopedCSSStyleQueriesForTest scope(false);
-
-  SetBodyInnerHTML(R"HTML(
-    <style>
-      @container style(--foo: bar) {
-        span { display: block }
+TEST_F(ContainerQueryTest, TreeScopedReferenceUserOrigin) {
+  StyleSheetKey user_sheet_key("user_sheet");
+  auto* parsed_user_sheet = MakeGarbageCollected<StyleSheetContents>(
+      MakeGarbageCollected<CSSParserContext>(GetDocument()));
+  parsed_user_sheet->ParseString(R"HTML(
+      @container author-container (width >= 0) {
+        div > span {
+          z-index: 13;
+        }
       }
-      @container (width > 0px) and (not style(--no: match)) {
-        span { vertical-align: middle }
+      .user_container {
+        container: user-container / inline-size;
+      }
+  )HTML");
+  GetStyleEngine().InjectSheet(user_sheet_key, parsed_user_sheet,
+                               WebCssOrigin::kUser);
+
+  GetDocument().body()->setHTMLUnsafe(R"HTML(
+    <style>
+      @container user-container (width >= 0) {
+        div > span {
+          z-index: 17;
+        }
+      }
+      .author_container {
+        container: author-container / inline-size;
       }
     </style>
-    <div style="container-type: inline-size; --foo: bar">
-      <span id="span"></span>
+    <div class="author_container">
+      <span id="author_target"></span>
+    </div>
+    <div class="user_container">
+      <span id="user_target"></span>
+    </div>
+    <div id="host">
+      <template shadowrootmode="open">
+        <style>
+          @container user-container (width >= 0) {
+            div > span {
+              z-index: 29;
+            }
+          }
+          .author_container {
+            container: author-container / inline-size;
+          }
+        </style>
+        <div class="author_container">
+          <span id="shadow_author_target"></span>
+        </div>
+        <div class="user_container">
+          <span id="shadow_user_target"></span>
+        </div>
+      </template>
     </div>
   )HTML");
 
   UpdateAllLifecyclePhasesForTest();
-  const ComputedStyle& style =
-      GetDocument().getElementById("span")->ComputedStyleRef();
-  EXPECT_EQ(style.Display(), EDisplay::kInline)
-      << "style() should not match when disabled";
-  EXPECT_EQ(style.VerticalAlign(), EVerticalAlign::kBaseline)
-      << "style() should be unknown when disabled";
+
+  Element* author_target = GetElementById("author_target");
+  Element* user_target = GetElementById("user_target");
+  ShadowRoot* shadow_root = GetElementById("host")->GetShadowRoot();
+  Element* shadow_author_target =
+      shadow_root->getElementById(AtomicString("shadow_author_target"));
+  Element* shadow_user_target =
+      shadow_root->getElementById(AtomicString("shadow_user_target"));
+
+  EXPECT_EQ(author_target->ComputedStyleRef().ZIndex(), 13);
+  EXPECT_EQ(shadow_author_target->ComputedStyleRef().ZIndex(), 13);
+  EXPECT_EQ(user_target->ComputedStyleRef().ZIndex(), 17);
+  EXPECT_EQ(shadow_user_target->ComputedStyleRef().ZIndex(), 29);
 }
 
 }  // namespace blink

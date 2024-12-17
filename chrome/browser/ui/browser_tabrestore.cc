@@ -32,10 +32,6 @@
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/range/range.h"
 
-#if defined(TOOLKIT_VIEWS)
-#include "chrome/browser/ui/side_search/side_search_utils.h"
-#endif  // defined(TOOLKIT_VIEWS)
-
 using content::NavigationEntry;
 using content::RestoreType;
 using content::WebContents;
@@ -46,16 +42,13 @@ namespace chrome {
 
 namespace {
 
-// TODO(https://crbug.com/1119368): Consider making CreateRestoredTab public and
-// separate AddRestoredTab from CreateRestoredTab to distinguish the cases where
-// a tab doesn't need to be created when it can be restored from the cache. At
-// that point, there would be no need for the AddRestoredTabFromCache method.
 std::unique_ptr<WebContents> CreateRestoredTab(
     Browser* browser,
     const std::vector<SerializedNavigationEntry>& navigations,
     int selected_navigation,
     const std::string& extension_app_id,
-    base::TimeTicks last_active_time,
+    base::TimeTicks last_active_time_ticks,
+    base::Time last_active_time,
     content::SessionStorageNamespace* session_storage_namespace,
     const sessions::SerializedUserAgentOverride& user_agent_override,
     const std::map<std::string, std::string>& extra_data,
@@ -76,12 +69,14 @@ std::unique_ptr<WebContents> CreateRestoredTab(
   create_params.initially_hidden = initially_hidden;
   create_params.desired_renderer_state =
       WebContents::CreateParams::kNoRendererProcess;
+  create_params.last_active_time_ticks = last_active_time_ticks;
   create_params.last_active_time = last_active_time;
   std::unique_ptr<WebContents> web_contents =
       WebContents::CreateWithSessionStorage(create_params,
                                             session_storage_namespace_map);
-  if (from_session_restore)
+  if (from_session_restore) {
     SessionRestore::OnWillRestoreTab(web_contents.get());
+  }
   apps::SetAppIdForWebContents(browser->profile(), web_contents.get(),
                                extension_app_id);
 
@@ -98,13 +93,6 @@ std::unique_ptr<WebContents> CreateRestoredTab(
                                         RestoreType::kRestored, &entries);
   DCHECK_EQ(0u, entries.size());
 
-#if defined(TOOLKIT_VIEWS)
-  if (IsSideSearchEnabled(browser->profile())) {
-    side_search::SetSideSearchTabStateFromRestoreData(web_contents.get(),
-                                                      extra_data);
-  }
-#endif  // defined(TOOLKIT_VIEWS)
-
   return web_contents;
 }
 
@@ -118,8 +106,9 @@ std::unique_ptr<WebContents> CreateRestoredTab(
 // cross-platform expectations about events it observes.
 void LoadRestoredTabIfVisible(Browser* browser,
                               content::WebContents* web_contents) {
-  if (web_contents->GetVisibility() != content::Visibility::VISIBLE)
+  if (web_contents->GetVisibility() != content::Visibility::VISIBLE) {
     return;
+  }
 
   DCHECK_EQ(browser->tab_strip_model()->GetActiveWebContents(), web_contents);
   // A layout should already have been performed to determine the contents size.
@@ -136,10 +125,11 @@ void LoadRestoredTabIfVisible(Browser* browser,
 WebContents* AddRestoredTabImpl(std::unique_ptr<WebContents> web_contents,
                                 Browser* browser,
                                 int tab_index,
-                                absl::optional<tab_groups::TabGroupId> group,
+                                std::optional<tab_groups::TabGroupId> group,
                                 bool select,
                                 bool pin,
-                                bool from_session_restore) {
+                                bool from_session_restore,
+                                std::optional<bool> is_active_browser) {
   TabStripModel* const tab_strip_model = browser->tab_strip_model();
 
   int add_types = select ? AddTabTypes::ADD_ACTIVE : AddTabTypes::ADD_NONE;
@@ -149,43 +139,66 @@ WebContents* AddRestoredTabImpl(std::unique_ptr<WebContents> web_contents,
     add_types |= AddTabTypes::ADD_PINNED;
   }
 
-  const absl::optional<tab_groups::TabGroupId> surrounding_group =
-      tab_strip_model->GetSurroundingTabGroup(tab_index);
+  if (tab_strip_model->group_model()) {
+    const std::optional<tab_groups::TabGroupId> surrounding_group =
+        tab_strip_model->GetSurroundingTabGroup(tab_index);
 
-  // If inserting at |tab_index| would put the tab within a different
-  // group, adjust the index to put it outside.
-  if (surrounding_group && surrounding_group != group) {
-    tab_index = tab_strip_model->group_model()
-                    ->GetTabGroup(*surrounding_group)
-                    ->ListTabs()
-                    .end();
+    // If inserting at |tab_index| would put the tab within a different
+    // group, adjust the index to put it outside.
+    if (surrounding_group && surrounding_group != group) {
+      tab_index = tab_strip_model->group_model()
+                      ->GetTabGroup(*surrounding_group)
+                      ->ListTabs()
+                      .end();
+    }
+
+    // `tab_index` should respect group contiguity.
+    if (group.has_value() &&
+        tab_strip_model->group_model()->ContainsTabGroup(group.value())) {
+      gfx::Range group_indices = tab_strip_model->group_model()
+                                     ->GetTabGroup(group.value())
+                                     ->ListTabs();
+      tab_index = std::clamp(tab_index, static_cast<int>(group_indices.start()),
+                             static_cast<int>(group_indices.end()));
+    }
   }
 
   WebContents* raw_web_contents = web_contents.get();
-  const int actual_index = tab_strip_model->InsertWebContentsAt(
-      tab_index, std::move(web_contents), add_types);
 
-  if (group.has_value()) {
+  // The two cases we could run into are -
+  // 1. Tab was a part of a group that is no longer present.
+  // 2. Tab is added to a group that is present in the tabstrip model or is an
+  // ungrouped tab.
+  if (group.has_value() && tab_strip_model->group_model() &&
+      !tab_strip_model->group_model()->ContainsTabGroup(group.value())) {
+    // Insert as a ungrouped tab and then add it to the new group.
+    const int actual_index = tab_strip_model->InsertWebContentsAt(
+        tab_index, std::move(web_contents), add_types);
     tab_strip_model->AddToGroupForRestore({actual_index}, group.value());
+  } else {
+    tab_strip_model->InsertWebContentsAt(tab_index, std::move(web_contents),
+                                         add_types, group);
   }
+
+  // We set the size of the view here, before Blink does its initial layout.
+  // If we don't, the initial layout of background tabs will be performed
+  // with a view width of 0, which may cause script outputs and anchor link
+  // location calculations to be incorrect even after a new layout with
+  // proper view dimensions. TabStripModel::AddWebContents() contains similar
+  // logic.
+  //
+  // TODO(crbug.com/40113932): There should be a way to ask the browser
+  // to perform a layout so that size of the WebContents is right.
+  gfx::Size size = browser->window()->GetContentsSize();
+  // Fallback to the restore bounds if it's empty as the window is not shown
+  // yet and the bounds may not be available on all platforms.
+  if (size.IsEmpty()) {
+    size = browser->window()->GetRestoredBounds().size();
+  }
+  raw_web_contents->Resize(gfx::Rect(size));
 
   const bool initially_hidden = !select || browser->window()->IsMinimized();
   if (initially_hidden) {
-    // We set the size of the view here, before Blink does its initial layout.
-    // If we don't, the initial layout of background tabs will be performed
-    // with a view width of 0, which may cause script outputs and anchor link
-    // location calculations to be incorrect even after a new layout with
-    // proper view dimensions. TabStripModel::AddWebContents() contains similar
-    // logic.
-    //
-    // TODO(https://crbug.com/1040221): There should be a way to ask the browser
-    // to perform a layout so that size of the hidden WebContents is right.
-    gfx::Size size = browser->window()->GetContentsSize();
-    // Fallback to the restore bounds if it's empty as the window is not shown
-    // yet and the bounds may not be available on all platforms.
-    if (size.IsEmpty())
-      size = browser->window()->GetRestoredBounds().size();
-    raw_web_contents->Resize(gfx::Rect(size));
     raw_web_contents->WasHidden();
   } else {
     const bool should_activate =
@@ -199,22 +212,34 @@ WebContents* AddRestoredTabImpl(std::unique_ptr<WebContents> web_contents,
 #else
         true;
 #endif
-    if (should_activate)
+    if (should_activate) {
       browser->window()->Activate();
+    }
   }
 
   SessionServiceBase* session_service =
       GetAppropriateSessionServiceIfExisting(browser);
-  if (session_service)
+  if (session_service) {
     session_service->TabRestored(raw_web_contents, pin);
+  }
 
-// On OS_MAC, app restorations take longer than the normal browser window to
-// be restored and that will cause LoadRestoredTabIfVisible() to fail.
-// Skip LoadRestoreTabIfVisible if OS_MAC && the browser is an app browser.
+  // Immediate load if the browser activeness is true or unknown. That is, do
+  // not do immediate load for browsers that are known to be inactive.
+  bool should_load = is_active_browser.value_or(true);
+
+// On OS_MAC, `LoadRestoredTabIfVisible` by default so that its tab loading
+// behaves like other platforms to make FirstWebContentsProfiler wor
+// properly. However, app restorations take longer than the normal browser
+// window to be restored and that will cause `LoadRestoredTabIfVisible()` to
+// fail. Skip LoadRestoredTabIfVisible if OS_MAC && the browser is an app
+// browser.
 #if BUILDFLAG(IS_MAC)
-  if (browser->type() != Browser::Type::TYPE_APP)
+  should_load = (browser->type() != Browser::Type::TYPE_APP);
 #endif  // BUILDFLAG(IS_MAC)
+
+  if (should_load) {
     LoadRestoredTabIfVisible(browser, raw_web_contents);
+  }
 
   return raw_web_contents;
 }
@@ -227,49 +252,25 @@ WebContents* AddRestoredTab(
     int tab_index,
     int selected_navigation,
     const std::string& extension_app_id,
-    absl::optional<tab_groups::TabGroupId> group,
+    std::optional<tab_groups::TabGroupId> group,
     bool select,
     bool pin,
-    base::TimeTicks last_active_time,
+    base::TimeTicks last_active_time_ticks,
+    base::Time last_active_time,
     content::SessionStorageNamespace* session_storage_namespace,
     const sessions::SerializedUserAgentOverride& user_agent_override,
     const std::map<std::string, std::string>& extra_data,
-    bool from_session_restore) {
+    bool from_session_restore,
+    std::optional<bool> is_active_browser) {
   const bool initially_hidden = !select || browser->window()->IsMinimized();
   std::unique_ptr<WebContents> web_contents = CreateRestoredTab(
       browser, navigations, selected_navigation, extension_app_id,
-      last_active_time, session_storage_namespace, user_agent_override,
-      extra_data, initially_hidden, from_session_restore);
+      last_active_time_ticks, last_active_time, session_storage_namespace,
+      user_agent_override, extra_data, initially_hidden, from_session_restore);
 
   return AddRestoredTabImpl(std::move(web_contents), browser, tab_index, group,
-                            select, pin, from_session_restore);
-}
-
-WebContents* AddRestoredTabFromCache(
-    std::unique_ptr<WebContents> web_contents,
-    Browser* browser,
-    int tab_index,
-    absl::optional<tab_groups::TabGroupId> group,
-    bool select,
-    bool pin,
-    const sessions::SerializedUserAgentOverride& user_agent_override,
-    const std::map<std::string, std::string>& extra_data) {
-  // TODO(crbug.com/1227397): Check whether |ua_override| has changed for the
-  // tab we're trying to restore from ClosedTabCache. Don't restore if the
-  // values differ.
-  blink::UserAgentOverride ua_override;
-  ua_override.ua_string_override = user_agent_override.ua_string_override;
-  ua_override.ua_metadata_override = blink::UserAgentMetadata::Demarshal(
-      user_agent_override.opaque_ua_metadata_override);
-  web_contents->SetUserAgentOverride(ua_override, false);
-
-#if defined(TOOLKIT_VIEWS)
-  side_search::SetSideSearchTabStateFromRestoreData(web_contents.get(),
-                                                    extra_data);
-#endif  // defined(TOOLKIT_VIEWS)
-
-  return AddRestoredTabImpl(std::move(web_contents), browser, tab_index, group,
-                            select, pin, /*from_session_restore=*/false);
+                            select, pin, from_session_restore,
+                            is_active_browser);
 }
 
 WebContents* ReplaceRestoredTab(
@@ -283,8 +284,8 @@ WebContents* ReplaceRestoredTab(
     bool from_session_restore) {
   std::unique_ptr<WebContents> web_contents = CreateRestoredTab(
       browser, navigations, selected_navigation, extension_app_id,
-      base::TimeTicks(), session_storage_namespace, user_agent_override,
-      extra_data, false, from_session_restore);
+      base::TimeTicks(), base::Time(), session_storage_namespace,
+      user_agent_override, extra_data, false, from_session_restore);
   WebContents* raw_web_contents = web_contents.get();
 
   // ReplaceWebContentsAt won't animate in the restoration, so manually do the

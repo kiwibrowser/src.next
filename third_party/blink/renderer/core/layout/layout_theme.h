@@ -27,20 +27,21 @@
 #include "third_party/blink/public/mojom/frame/color_scheme.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
+#include "third_party/blink/renderer/core/html/forms/input_type.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
 #include "third_party/blink/renderer/platform/theme_types.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
+#include "ui/color/color_provider.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace blink {
 
 class ComputedStyle;
-class Document;
+class ComputedStyleBuilder;
 class Element;
 class File;
-class FontDescription;
 class LocalFrame;
 class Node;
 class ThemePainter;
@@ -65,10 +66,10 @@ class CORE_EXPORT LayoutTheme : public RefCounted<LayoutTheme> {
   // selection of control size based off the font, the disabling of appearance
   // when certain other properties like "border" are set, or if the appearance
   // is not supported by the theme.
-  void AdjustStyle(const Element*, ComputedStyle&);
+  void AdjustStyle(const Element*, ComputedStyleBuilder&);
 
   // The remaining methods should be implemented by the platform-specific
-  // portion of the theme, e.g., LayoutThemeMac.cpp for Mac OS X.
+  // portion of the theme, e.g., layout_theme_mac.mm for macOS.
 
   // These methods return the theme's extra style sheets rules, to let each
   // platform adjust the default CSS rules in html.css or quirks.css
@@ -77,13 +78,14 @@ class CORE_EXPORT LayoutTheme : public RefCounted<LayoutTheme> {
 
   // Whether or not the control has been styled enough by the author to disable
   // the native appearance.
-  virtual bool IsControlStyled(ControlPart part, const ComputedStyle&) const;
+  virtual bool IsControlStyled(ControlPart part,
+                               const ComputedStyleBuilder&) const;
 
   bool ShouldDrawDefaultFocusRing(const Node*, const ComputedStyle&) const;
 
   // A method asking if the platform is able to show a calendar picker for a
   // given input type.
-  virtual bool SupportsCalendarPicker(const AtomicString&) const;
+  virtual bool SupportsCalendarPicker(InputType::Type) const;
 
   // Text selection colors.
   Color ActiveSelectionBackgroundColor(
@@ -117,9 +119,15 @@ class CORE_EXPORT LayoutTheme : public RefCounted<LayoutTheme> {
   // Highlight and text colors for TextMatches.
   Color PlatformTextSearchHighlightColor(
       bool active_match,
-      mojom::blink::ColorScheme color_scheme) const;
+      bool in_forced_colors,
+      mojom::blink::ColorScheme color_scheme,
+      const ui::ColorProvider* color_provider,
+      bool is_in_web_app_scope) const;
   Color PlatformTextSearchColor(bool active_match,
-                                mojom::blink::ColorScheme color_scheme) const;
+                                bool in_forced_colors,
+                                mojom::blink::ColorScheme color_scheme,
+                                const ui::ColorProvider* color_provider,
+                                bool is_in_web_app_scope) const;
 
   virtual Color FocusRingColor(mojom::blink::ColorScheme color_scheme) const;
   virtual Color PlatformFocusRingColor() const { return Color(0, 0, 0); }
@@ -139,12 +147,13 @@ class CORE_EXPORT LayoutTheme : public RefCounted<LayoutTheme> {
   void SetCaretBlinkInterval(base::TimeDelta);
   virtual base::TimeDelta CaretBlinkInterval() const;
 
-  // System fonts and colors for CSS.
-  void SystemFont(CSSValueID system_font_id, FontDescription&, const Document*);
+  // System colors for CSS.
   virtual Color SystemColor(CSSValueID,
-                            mojom::blink::ColorScheme color_scheme) const;
+                            mojom::blink::ColorScheme color_scheme,
+                            const ui::ColorProvider* color_provider,
+                            bool is_in_web_app_scope) const;
 
-  virtual void AdjustSliderThumbSize(ComputedStyle&) const;
+  virtual void AdjustSliderThumbSize(ComputedStyleBuilder&) const;
 
   virtual int PopupInternalPaddingStart(const ComputedStyle&) const {
     return 0;
@@ -177,17 +186,29 @@ class CORE_EXPORT LayoutTheme : public RefCounted<LayoutTheme> {
   virtual bool SupportsSelectionForegroundColors() const { return true; }
 
   // Adjust style as per platform selection.
-  virtual void AdjustControlPartStyle(ComputedStyle&);
+  virtual void AdjustControlPartStyle(ComputedStyleBuilder&);
 
   virtual bool IsAccentColorCustomized(
-      mojom::blink::ColorScheme color_scheme) const {
-    return false;
-  }
-  virtual Color GetAccentColor(mojom::blink::ColorScheme color_scheme) const {
-    return Color();
-  }
+      mojom::blink::ColorScheme color_scheme) const;
 
-  bool InForcedColorsMode() const { return in_forced_colors_mode_; }
+  // GetSystemAccentColor returns transparent unless there is a special value
+  // from the OS color scheme.
+  virtual Color GetSystemAccentColor(
+      mojom::blink::ColorScheme color_scheme) const;
+
+  // GetAccentColorOrDefault will return GetAccentColor if there is a value from
+  // the OS and if it is within an installed WebApp scope, otherwise it will
+  // return the default accent color.
+  Color GetAccentColorOrDefault(mojom::blink::ColorScheme color_scheme,
+                                bool is_in_web_app_scope) const;
+  // GetAccentColorText returns black or white depending on which can be
+  // rendered with enough contrast on the result of GetAccentColorOrDefault.
+  Color GetAccentColorText(mojom::blink::ColorScheme color_scheme,
+                           bool is_in_web_app_scope) const;
+
+  virtual Color SystemHighlightFromColorProvider(
+      mojom::blink::ColorScheme color_scheme,
+      const ui::ColorProvider* color_provider) const;
 
  protected:
   // The platform selection color.
@@ -210,37 +231,42 @@ class CORE_EXPORT LayoutTheme : public RefCounted<LayoutTheme> {
       mojom::blink::ColorScheme color_scheme) const;
 
   // Methods for each appearance value.
-  virtual void AdjustCheckboxStyle(ComputedStyle&) const;
-  virtual void AdjustRadioStyle(ComputedStyle&) const;
+  virtual void AdjustCheckboxStyle(ComputedStyleBuilder&) const;
+  virtual void AdjustRadioStyle(ComputedStyleBuilder&) const;
 
-  virtual void AdjustButtonStyle(ComputedStyle&) const;
-  virtual void AdjustInnerSpinButtonStyle(ComputedStyle&) const;
+  virtual void AdjustButtonStyle(ComputedStyleBuilder&) const;
+  virtual void AdjustInnerSpinButtonStyle(ComputedStyleBuilder&) const;
 
-  virtual void AdjustMenuListStyle(ComputedStyle&) const;
-  virtual void AdjustMenuListButtonStyle(ComputedStyle&) const;
-  virtual void AdjustSliderContainerStyle(const Element&, ComputedStyle&) const;
-  virtual void AdjustSliderThumbStyle(ComputedStyle&) const;
-  virtual void AdjustSearchFieldCancelButtonStyle(ComputedStyle&) const;
+  virtual void AdjustMenuListStyle(ComputedStyleBuilder&) const;
+  virtual void AdjustMenuListButtonStyle(ComputedStyleBuilder&) const;
+  virtual void AdjustSliderContainerStyle(const Element&,
+                                          ComputedStyleBuilder&) const;
+  virtual void AdjustSliderThumbStyle(ComputedStyleBuilder&) const;
+  virtual void AdjustSearchFieldCancelButtonStyle(ComputedStyleBuilder&) const;
 
   bool HasCustomFocusRingColor() const;
   Color GetCustomFocusRingColor() const;
 
   Color DefaultSystemColor(CSSValueID,
-                           mojom::blink::ColorScheme color_scheme) const;
-  Color SystemColorFromNativeTheme(
-      CSSValueID,
-      mojom::blink::ColorScheme color_scheme) const;
+                           mojom::blink::ColorScheme color_scheme,
+                           const ui::ColorProvider* color_provider,
+                           bool is_in_web_app_scope) const;
+  Color SystemColorFromColorProvider(CSSValueID,
+                                     mojom::blink::ColorScheme color_scheme,
+                                     const ui::ColorProvider* color_provider,
+                                     bool is_in_web_app_scope) const;
 
  private:
   // This function is to be implemented in your platform-specific theme
   // implementation to hand back the appropriate platform theme.
   static LayoutTheme& NativeTheme();
 
-  ControlPart AdjustAppearanceWithAuthorStyle(ControlPart part,
-                                              const ComputedStyle& style);
+  ControlPart AdjustAppearanceWithAuthorStyle(
+      ControlPart part,
+      const ComputedStyleBuilder& style);
 
-  ControlPart AdjustAppearanceWithElementType(const ComputedStyle& style,
-                                              const Element* element);
+  ControlPart AdjustAppearanceWithElementType(const ComputedStyleBuilder&,
+                                              const Element*);
 
   void UpdateForcedColorsState();
 
@@ -249,7 +275,6 @@ class CORE_EXPORT LayoutTheme : public RefCounted<LayoutTheme> {
   base::TimeDelta caret_blink_interval_ = base::Milliseconds(500);
 
   bool delegates_menu_list_rendering_ = false;
-  bool in_forced_colors_mode_ = false;
 
   // This color is expected to be drawn on a semi-transparent overlay,
   // making it more transparent than its alpha value indicates.

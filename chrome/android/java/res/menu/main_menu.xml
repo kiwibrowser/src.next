@@ -5,7 +5,7 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
 
-<!-- TODO(crbug.com/1119550): explore replacing with a programmatically created
+<!-- TODO(crbug.com/40145539): explore replacing with a programmatically created
      menu.  -->
 
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
@@ -22,7 +22,7 @@ found in the LICENSE file.
               <item android:id="@+id/bookmark_this_page_id"
                 android:title="@string/accessibility_menu_bookmark"
                 android:titleCondensed="@string/menu_bookmark"
-                android:icon="@drawable/btn_star"/>
+                android:icon="@drawable/star_outline_24dp"/>
               <item android:id="@+id/offline_page_id"
                 android:title="@string/download_page"
                 android:titleCondensed="@string/menu_download"
@@ -60,6 +60,14 @@ found in the LICENSE file.
         <item android:id="@+id/open_history_menu_id"
             android:title="@string/menu_history"
             android:icon="@drawable/ic_history_googblue_24dp" />
+        <item android:id="@+id/tinker_tank_menu_id"
+            android:title="@string/menu_tinker_tank"
+            android:icon="@drawable/ic_add_box_rounded_corner" />
+        <item android:id="@+id/quick_delete_menu_id"
+            android:title="@string/menu_quick_delete"
+            android:icon="@drawable/material_ic_delete_24dp"/>
+        <item android:id="@+id/quick_delete_divider_line_id"
+            android:title="@null" />
         <item android:id="@+id/downloads_menu_id"
             android:title="@string/menu_downloads"
             android:icon="@drawable/infobar_download_complete" />
@@ -71,6 +79,9 @@ found in the LICENSE file.
             android:icon="@drawable/devices_black_24dp" />
         <item android:id="@id/divider_line_id"
             android:title="@null" />
+        <item android:id="@+id/page_zoom_id"
+            android:title="@string/page_zoom_menu_title"
+            android:icon="@drawable/ic_zoom" />
         <item android:id="@+id/share_row_menu_id"
             android:title="@null">
           <menu>
@@ -81,18 +92,6 @@ found in the LICENSE file.
                 android:title="@null" />
           </menu>
         </item>
-        <item android:id="@+id/add_bookmark_menu_id"
-            android:title="@string/menu_add_bookmark"
-            android:icon="@drawable/btn_star"/>
-        <item android:id="@+id/edit_bookmark_menu_id"
-            android:title="@string/menu_edit_bookmark"
-            android:icon="@drawable/btn_star_filled"/>
-        <item android:id="@+id/add_to_reading_list_menu_id"
-            android:title="@string/menu_add_to_reading_list"
-            android:icon="@drawable/ic_reading_list_folder_24dp" />
-        <item android:id="@+id/delete_from_reading_list_menu_id"
-            android:title="@string/menu_delete_from_reading_list"
-            android:icon="@drawable/ic_reading_list_folder_24dp" />
         <item android:id="@+id/enable_price_tracking_menu_id"
             android:title="@string/enable_price_tracking_menu_item"
             android:icon="@drawable/price_tracking_disabled" />
@@ -105,12 +104,15 @@ found in the LICENSE file.
         <item android:id="@+id/translate_id"
             android:title="@string/menu_translate"
             android:icon="@drawable/ic_translate" />
-        <item android:id="@+id/add_to_homescreen_id"
+        <item android:id="@+id/readaloud_menu_id"
+            android:title="@string/menu_listen_to_this_page"
+            android:icon="@drawable/ic_play_circle" />
+        <item android:id="@+id/universal_install"
             android:title="@string/menu_add_to_homescreen"
             android:icon="@drawable/ic_add_to_home_screen" />
         <item android:id="@+id/open_webapk_id"
             android:title="@string/menu_open_webapk"
-            android:icon="@drawable/ic_add_to_home_screen" />
+            android:icon="@drawable/ic_open_webapk" />
         <item android:id="@+id/request_desktop_site_row_menu_id"
             android:title="@null">
           <menu>
@@ -133,9 +135,6 @@ found in the LICENSE file.
                 android:checkable="true" />
           </menu>
         </item>
-        <item android:id="@+id/page_zoom_id"
-            android:title="@string/page_zoom_title"
-            android:icon="@drawable/ic_zoom" />
         <item android:id="@+id/paint_preview_show_id"
             android:title="@string/menu_paint_preview_show"
             android:icon="@drawable/ic_photo_camera" />
@@ -153,9 +152,6 @@ found in the LICENSE file.
         <item android:id="@+id/help_id"
             android:title="@string/menu_help"
             android:icon="@drawable/help_outline" />
-        <item android:id="@+id/enter_vr_id"
-            android:title="@string/enter_vr"
-            android:icon="@drawable/gm_filled_cardboard_24" />
         <item android:id="@+id/managed_by_divider_line_id"
             android:title="@null" />
         <item android:id="@+id/managed_by_menu_id"
@@ -171,19 +167,22 @@ found in the LICENSE file.
             android:icon="@drawable/ic_add_box_rounded_corner" />
         <item android:id="@id/new_incognito_tab_menu_id"
             android:title="@string/menu_new_incognito_tab"
-            android:icon="@drawable/incognito_simple" />
+            android:icon="@drawable/ic_incognito" />
         <item android:id="@+id/close_all_tabs_menu_id"
             android:title="@string/menu_close_all_tabs"
             android:icon="@drawable/btn_close_white" />
         <item android:id="@+id/close_all_incognito_tabs_menu_id"
             android:title="@string/menu_close_all_incognito_tabs"
-            android:icon="@drawable/btn_close_white" />
-        <item android:id="@+id/menu_group_tabs"
-            android:title="@string/menu_group_tabs"
-            android:icon="@drawable/ic_widgets" />
-        <item android:id="@+id/track_prices_row_menu_id"
-            android:title="@string/menu_track_prices"
-            android:icon="@drawable/ic_trending_down_black" />
+            android:icon="@drawable/ic_close_all_tabs" />
+        <item android:id="@id/tinker_tank_menu_id"
+            android:title="@string/menu_tinker_tank"
+            android:icon="@drawable/ic_add_box_rounded_corner" />
+        <item android:id="@+id/menu_select_tabs"
+            android:title="@string/menu_select_tabs"
+            android:icon="@drawable/ic_select_check_box_24dp" />
+        <item android:id="@id/quick_delete_menu_id"
+            android:title="@string/menu_quick_delete"
+            android:icon="@drawable/material_ic_delete_24dp"/>
         <item android:id="@id/preferences_id"
             android:title="@string/menu_settings"
             android:icon="@drawable/settings_cog" />
@@ -201,5 +200,8 @@ found in the LICENSE file.
         <item android:id="@id/preferences_id"
             android:title="@string/menu_settings"
             android:icon="@drawable/settings_cog" />
+        <item android:id="@id/quick_delete_menu_id"
+            android:title="@string/menu_quick_delete"
+            android:icon="@drawable/material_ic_delete_24dp"/>
     </group>
 </menu>

@@ -7,13 +7,11 @@
 
 #include <stdint.h>
 
-#include <string>
+#include <string_view>
 
 #include "base/time/time.h"
 #include "net/base/hash_value.h"
 #include "net/base/net_export.h"
-
-class GURL;
 
 namespace net {
 
@@ -23,10 +21,6 @@ const uint32_t kMaxHSTSAgeSecs = 86400 * 365;  // 1 year
 // http://tools.ietf.org/html/rfc7469#section-4.1
 const uint32_t kMaxHPKPAgeSecs = 86400 * 60;  // 60 days
 
-// https://tools.ietf.org/html/draft-ietf-httpbis-expect-ct-00 suggests a
-// conservative maximum max-age, at least while Expect-CT is new.
-const uint32_t kMaxExpectCTAgeSecs = 86400 * 30;  // 30 days
-
 // Parses |value| as a Strict-Transport-Security header value. If successful,
 // returns true and sets |*max_age| and |*include_subdomains|.
 // Otherwise returns false and leaves the output parameters unchanged.
@@ -35,24 +29,9 @@ const uint32_t kMaxExpectCTAgeSecs = 86400 * 30;  // 30 days
 //
 // "Strict-Transport-Security" ":"
 //     [ directive ]  *( ";" [ directive ] )
-bool NET_EXPORT_PRIVATE ParseHSTSHeader(const std::string& value,
+bool NET_EXPORT_PRIVATE ParseHSTSHeader(std::string_view value,
                                         base::TimeDelta* max_age,
                                         bool* include_subdomains);
-
-// Parses |value| as an Expect-CT header value. If successful, returns true and
-// populates the |*max_age|, |*enforce|, and |*report_uri| values. Otherwise
-// returns false and leaves the output parameters unchanged.
-//
-// |value| is the right-hand side of:
-// "Expect-CT" ":"
-//     "max-age" "=" delta-seconds
-//     [ "," "enforce" ]
-//     [ "," "report-uri" "=" uri-reference ]
-//
-bool NET_EXPORT_PRIVATE ParseExpectCTHeader(const std::string& value,
-                                            base::TimeDelta* max_age,
-                                            bool* enforce,
-                                            GURL* report_uri);
 
 }  // namespace net
 

@@ -48,16 +48,16 @@ class CSSToStyleMap {
                                 FillLayer*,
                                 const CSSValue&);
   static void MapFillClip(StyleResolverState&, FillLayer*, const CSSValue&);
-  static void MapFillComposite(StyleResolverState&,
-                               FillLayer*,
-                               const CSSValue&);
+  static void MapFillCompositingOperator(StyleResolverState&,
+                                         FillLayer*,
+                                         const CSSValue&);
   static void MapFillBlendMode(StyleResolverState&,
                                FillLayer*,
                                const CSSValue&);
   static void MapFillOrigin(StyleResolverState&, FillLayer*, const CSSValue&);
   static void MapFillImage(StyleResolverState&, FillLayer*, const CSSValue&);
-  static void MapFillRepeatX(StyleResolverState&, FillLayer*, const CSSValue&);
-  static void MapFillRepeatY(StyleResolverState&, FillLayer*, const CSSValue&);
+  static void MapFillRepeat(StyleResolverState&, FillLayer*, const CSSValue&);
+  static void MapFillMaskMode(StyleResolverState&, FillLayer*, const CSSValue&);
   static void MapFillSize(StyleResolverState&, FillLayer*, const CSSValue&);
   static void MapFillPositionX(StyleResolverState&,
                                FillLayer*,
@@ -66,18 +66,42 @@ class CSSToStyleMap {
                                FillLayer*,
                                const CSSValue&);
 
-  static double MapAnimationDelay(const CSSValue&);
-  static Timing::PlaybackDirection MapAnimationDirection(const CSSValue&);
-  static double MapAnimationDuration(const CSSValue&);
-  static Timing::FillMode MapAnimationFillMode(const CSSValue&);
-  static double MapAnimationIterationCount(const CSSValue&);
-  static AtomicString MapAnimationName(const CSSValue&);
-  static StyleTimeline MapAnimationTimeline(const CSSValue&);
-  static EAnimPlayState MapAnimationPlayState(const CSSValue&);
-  static CSSTransitionData::TransitionProperty MapAnimationProperty(
+  static Timing::Delay MapAnimationDelayStart(StyleResolverState&,
+                                              const CSSValue&);
+  static Timing::Delay MapAnimationDelayEnd(const CSSValue&);
+  static Timing::Delay MapAnimationDelayEnd(StyleResolverState&,
+                                            const CSSValue&);
+  static Timing::PlaybackDirection MapAnimationDirection(StyleResolverState&,
+                                                         const CSSValue&);
+  static std::optional<double> MapAnimationDuration(StyleResolverState&,
+                                                    const CSSValue&);
+  static Timing::FillMode MapAnimationFillMode(StyleResolverState&,
+                                               const CSSValue&);
+  static double MapAnimationIterationCount(StyleResolverState&,
+                                           const CSSValue&);
+  static AtomicString MapAnimationName(StyleResolverState&, const CSSValue&);
+  static CSSTransitionData::TransitionBehavior MapAnimationBehavior(
+      StyleResolverState&,
       const CSSValue&);
-
+  static StyleTimeline MapAnimationTimeline(StyleResolverState&,
+                                            const CSSValue&);
+  static EAnimPlayState MapAnimationPlayState(StyleResolverState&,
+                                              const CSSValue&);
+  static std::optional<TimelineOffset> MapAnimationRangeStart(
+      StyleResolverState&,
+      const CSSValue&);
+  static std::optional<TimelineOffset> MapAnimationRangeEnd(StyleResolverState&,
+                                                            const CSSValue&);
+  static EffectModel::CompositeOperation MapAnimationComposition(
+      StyleResolverState&,
+      const CSSValue&);
+  static CSSTransitionData::TransitionProperty MapAnimationProperty(
+      StyleResolverState&,
+      const CSSValue&);
   static scoped_refptr<TimingFunction> MapAnimationTimingFunction(
+      const CSSValue&);
+  static scoped_refptr<TimingFunction> MapAnimationTimingFunction(
+      StyleResolverState&,
       const CSSValue&);
 
   static void MapNinePieceImage(StyleResolverState&,

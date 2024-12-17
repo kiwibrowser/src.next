@@ -1,10 +1,11 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
 
 #include <memory>
+#include <string>
 
 #include "cc/layers/picture_layer.h"
 #include "cc/layers/scrollbar_layer_base.h"
@@ -18,7 +19,6 @@
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/public/common/widget/device_emulation_params.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
-#include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/public/web/web_ax_context.h"
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
@@ -44,6 +44,7 @@
 #include "third_party/blink/renderer/core/paint/paint_and_raster_invalidation_test.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
+#include "third_party/blink/renderer/core/scroll/scroll_into_view_util.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme_overlay_mobile.h"
 #include "third_party/blink/renderer/core/scroll/smooth_scroll_sequencer.h"
 #include "third_party/blink/renderer/core/testing/color_scheme_helper.h"
@@ -56,12 +57,11 @@
 #include "third_party/blink/renderer/platform/testing/paint_property_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/paint_test_configurations.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
+#include "third_party/blink/renderer/platform/testing/url_loader_mock_factory.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 #include "ui/accessibility/ax_mode.h"
 #include "ui/gfx/geometry/test/geometry_util.h"
 #include "ui/gfx/geometry/vector2d_conversions.h"
-
-#include <string>
 
 using testing::_;
 using testing::PrintToString;
@@ -78,14 +78,6 @@ namespace blink {
 
 namespace {
 
-void ConfigureAndroidCompositing(WebSettings* settings) {
-  settings->SetPreferCompositingToLCDTextEnabled(true);
-  settings->SetViewportMetaEnabled(true);
-  settings->SetViewportEnabled(true);
-  settings->SetMainFrameResizesAreOrientationChanges(true);
-  settings->SetShrinksViewportContentToFit(true);
-}
-
 const cc::EffectNode* GetEffectNode(const cc::Layer* layer) {
   return layer->layer_tree_host()->property_trees()->effect_tree().Node(
       layer->effect_tree_index());
@@ -96,11 +88,8 @@ class VisualViewportTest : public testing::Test,
  public:
   VisualViewportTest() : base_url_("http://www.test.com/") {}
 
-  void InitializeWithDesktopSettings(
-      void (*override_settings_func)(WebSettings*) = nullptr) {
-    if (!override_settings_func)
-      override_settings_func = &ConfigureSettings;
-    helper_.Initialize(nullptr, nullptr, override_settings_func);
+  void InitializeWithDesktopSettings() {
+    helper_.InitializeWithSettings(&ConfigureSettings);
     WebView()->SetDefaultPageScaleLimits(1, 4);
   }
 
@@ -108,7 +97,7 @@ class VisualViewportTest : public testing::Test,
       void (*override_settings_func)(WebSettings*) = nullptr) {
     if (!override_settings_func)
       override_settings_func = &ConfigureAndroidSettings;
-    helper_.Initialize(nullptr, nullptr, override_settings_func);
+    helper_.InitializeWithSettings(override_settings_func);
     WebView()->SetDefaultPageScaleLimits(0.25f, 5);
   }
 
@@ -159,15 +148,13 @@ class VisualViewportTest : public testing::Test,
 
   static void ConfigureSettings(WebSettings* settings) {
     settings->SetJavaScriptEnabled(true);
-    settings->SetPreferCompositingToLCDTextEnabled(true);
+    settings->SetLCDTextPreference(LCDTextPreference::kIgnored);
   }
 
   static void ConfigureAndroidSettings(WebSettings* settings) {
     ConfigureSettings(settings);
-    settings->SetViewportEnabled(true);
-    settings->SetViewportMetaEnabled(true);
-    settings->SetShrinksViewportContentToFit(true);
-    settings->SetMainFrameResizesAreOrientationChanges(true);
+    frame_test_helpers::WebViewHelper::UpdateAndroidCompositingSettings(
+        settings);
   }
 
   const DisplayItemClient& ScrollingBackgroundClient(const Document* document) {
@@ -177,6 +164,7 @@ class VisualViewportTest : public testing::Test,
   }
 
  protected:
+  test::TaskEnvironment task_environment_;
   std::string base_url_;
   frame_test_helpers::WebViewHelper helper_;
 };
@@ -219,16 +207,10 @@ TEST_P(VisualViewportTest, TestResize) {
   EXPECT_EQ(new_viewport_size, visual_viewport.Size());
 }
 
-#if BUILDFLAG(IS_FUCHSIA)
-// TODO(crbug.com/1313284): Fix this test on Fuchsia and re-enable.
-#define MAYBE_TestVisibleContentRect DISABLED_TestVisibleContentRect
-#else
-#define MAYBE_TestVisibleContentRect TestVisibleContentRect
-#endif
 // Make sure that the visibleContentRect method acurately reflects the scale and
 // scroll location of the viewport with and without scrollbars.
-TEST_P(VisualViewportTest, MAYBE_TestVisibleContentRect) {
-  USE_NON_OVERLAY_SCROLLBARS();
+TEST_P(VisualViewportTest, TestVisibleContentRect) {
+  USE_NON_OVERLAY_SCROLLBARS_OR_QUIT();
   InitializeWithDesktopSettings();
 
   RegisterMockedHttpURLLoad("200-by-300.html");
@@ -368,15 +350,16 @@ TEST_P(VisualViewportTest, TestResizeAfterVerticalScroll) {
   // Verify the paint property nodes and GeometryMapper cache.
   {
     UpdateAllLifecyclePhases();
-    EXPECT_EQ(TransformationMatrix().Scale(2),
+    EXPECT_EQ(gfx::Transform::MakeScale(2),
               visual_viewport.GetPageScaleNode()->Matrix());
     EXPECT_EQ(gfx::Vector2dF(0, -300),
-              visual_viewport.GetScrollTranslationNode()->Translation2D());
-    EXPECT_EQ(TransformationMatrix().Scale(2).Translate(0, -300),
+              visual_viewport.GetScrollTranslationNode()->Get2dTranslation());
+    auto expected_projection = gfx::Transform::MakeScale(2);
+    expected_projection.Translate(0, -300);
+    EXPECT_EQ(expected_projection,
               GeometryMapper::SourceToDestinationProjection(
                   *visual_viewport.GetScrollTranslationNode(),
-                  TransformPaintPropertyNode::Root())
-                  .Matrix());
+                  TransformPaintPropertyNode::Root()));
   }
 
   // Perform the resizing
@@ -392,15 +375,16 @@ TEST_P(VisualViewportTest, TestResizeAfterVerticalScroll) {
   // Verify the paint property nodes and GeometryMapper cache.
   {
     UpdateAllLifecyclePhases();
-    EXPECT_EQ(TransformationMatrix().Scale(4),
+    EXPECT_EQ(gfx::Transform::MakeScale(4),
               visual_viewport.GetPageScaleNode()->Matrix());
     EXPECT_EQ(gfx::Vector2dF(0, -75),
-              visual_viewport.GetScrollTranslationNode()->Translation2D());
-    EXPECT_EQ(TransformationMatrix().Scale(4).Translate(0, -75),
+              visual_viewport.GetScrollTranslationNode()->Get2dTranslation());
+    auto expected_projection = gfx::Transform::MakeScale(4);
+    expected_projection.Translate(0, -75);
+    EXPECT_EQ(expected_projection,
               GeometryMapper::SourceToDestinationProjection(
                   *visual_viewport.GetScrollTranslationNode(),
-                  TransformPaintPropertyNode::Root())
-                  .Matrix());
+                  TransformPaintPropertyNode::Root()));
   }
 }
 
@@ -455,15 +439,16 @@ TEST_P(VisualViewportTest, TestResizeAfterHorizontalScroll) {
   // Verify the paint property nodes and GeometryMapper cache.
   {
     UpdateAllLifecyclePhases();
-    EXPECT_EQ(TransformationMatrix().Scale(2),
+    EXPECT_EQ(gfx::Transform::MakeScale(2),
               visual_viewport.GetPageScaleNode()->Matrix());
     EXPECT_EQ(gfx::Vector2dF(-150, 0),
-              visual_viewport.GetScrollTranslationNode()->Translation2D());
-    EXPECT_EQ(TransformationMatrix().Scale(2).Translate(-150, 0),
+              visual_viewport.GetScrollTranslationNode()->Get2dTranslation());
+    auto expected_projection = gfx::Transform::MakeScale(2);
+    expected_projection.Translate(-150, 0);
+    EXPECT_EQ(expected_projection,
               GeometryMapper::SourceToDestinationProjection(
                   *visual_viewport.GetScrollTranslationNode(),
-                  TransformPaintPropertyNode::Root())
-                  .Matrix());
+                  TransformPaintPropertyNode::Root()));
   }
 
   WebView()->MainFrameViewWidget()->Resize(gfx::Size(200, 100));
@@ -478,15 +463,16 @@ TEST_P(VisualViewportTest, TestResizeAfterHorizontalScroll) {
   // Verify the paint property nodes and GeometryMapper cache.
   {
     UpdateAllLifecyclePhases();
-    EXPECT_EQ(TransformationMatrix().Scale(4),
+    EXPECT_EQ(gfx::Transform::MakeScale(4),
               visual_viewport.GetPageScaleNode()->Matrix());
     EXPECT_EQ(gfx::Vector2dF(-150, 0),
-              visual_viewport.GetScrollTranslationNode()->Translation2D());
-    EXPECT_EQ(TransformationMatrix().Scale(4).Translate(-150, 0),
+              visual_viewport.GetScrollTranslationNode()->Get2dTranslation());
+    auto expected_projection = gfx::Transform::MakeScale(4);
+    expected_projection.Translate(-150, 0);
+    EXPECT_EQ(expected_projection,
               GeometryMapper::SourceToDestinationProjection(
                   *visual_viewport.GetScrollTranslationNode(),
-                  TransformPaintPropertyNode::Root())
-                  .Matrix());
+                  TransformPaintPropertyNode::Root()));
   }
 }
 
@@ -1034,21 +1020,18 @@ TEST_P(VisualViewportTest, TestWebViewResizeCausesViewportConstrainedLayout) {
   RegisterMockedHttpURLLoad("pinch-viewport-fixed-pos.html");
   NavigateTo(base_url_ + "pinch-viewport-fixed-pos.html");
 
-  LayoutObject* navbar =
-      GetFrame()->GetDocument()->getElementById("navbar")->GetLayoutObject();
-
-  EXPECT_FALSE(navbar->NeedsLayout());
+  LayoutObject* layout_view = GetFrame()->GetDocument()->GetLayoutView();
+  EXPECT_FALSE(layout_view->NeedsLayout());
 
   GetFrame()->View()->Resize(gfx::Size(500, 200));
-
-  EXPECT_TRUE(navbar->NeedsLayout());
+  EXPECT_TRUE(layout_view->NeedsLayout());
 }
 
 class VisualViewportMockWebFrameClient
     : public frame_test_helpers::TestWebFrameClient {
  public:
   MOCK_METHOD2(UpdateContextMenuDataForTesting,
-               void(const ContextMenuData&, const absl::optional<gfx::Point>&));
+               void(const ContextMenuData&, const std::optional<gfx::Point>&));
   MOCK_METHOD0(DidChangeScrollOffset, void());
 };
 
@@ -1170,7 +1153,8 @@ TEST_P(VisualViewportTest, ScrollIntoViewFractionalOffset) {
   LocalFrameView& frame_view = *WebView()->MainFrameImpl()->GetFrameView();
   ScrollableArea* layout_viewport_scrollable_area = frame_view.LayoutViewport();
   VisualViewport& visual_viewport = GetFrame()->GetPage()->GetVisualViewport();
-  Element* inputBox = GetFrame()->GetDocument()->getElementById("box");
+  Element* inputBox =
+      GetFrame()->GetDocument()->getElementById(AtomicString("box"));
 
   WebView()->SetPageScaleFactor(2);
 
@@ -1588,7 +1572,7 @@ TEST_P(VisualViewportTest, TestTopControlHidingResizeDoesntClampMainFrame) {
   EXPECT_EQ(500, frame_view.LayoutViewport()->GetScrollOffset().y());
 }
 
-static void configureHiddenScrollbarsSettings(WebSettings* settings) {
+static void ConfigureHiddenScrollbarsSettings(WebSettings* settings) {
   VisualViewportTest::ConfigureAndroidSettings(settings);
   settings->SetHideScrollbars(true);
 }
@@ -1597,7 +1581,7 @@ static void configureHiddenScrollbarsSettings(WebSettings* settings) {
 // layer when hideScrollbars WebSetting is true.
 TEST_P(VisualViewportTest,
        TestScrollbarsNotAttachedWhenHideScrollbarsSettingIsTrue) {
-  InitializeWithAndroidSettings(configureHiddenScrollbarsSettings);
+  InitializeWithAndroidSettings(ConfigureHiddenScrollbarsSettings);
   WebView()->MainFrameViewWidget()->Resize(gfx::Size(100, 150));
   NavigateTo("about:blank");
 
@@ -1696,26 +1680,10 @@ TEST_P(VisualViewportTest, ElementBoundsInWidgetSpaceAccountsForViewport) {
   EXPECT_EQ(expected_bounds.size(), bounds_in_viewport.size());
 }
 
-TEST_P(VisualViewportTest, ElementVisibleBoundsInVisualViewport) {
-  InitializeWithAndroidSettings();
-  WebView()->MainFrameViewWidget()->Resize(gfx::Size(640, 1080));
-  RegisterMockedHttpURLLoad("viewport-select.html");
-  NavigateTo(base_url_ + "viewport-select.html");
-
-  ASSERT_EQ(2.0f, WebView()->PageScaleFactor());
-  To<LocalFrame>(WebView()->GetPage()->MainFrame())->SetInitialFocus(false);
-  Element* element = WebView()->FocusedElement();
-  EXPECT_FALSE(element->VisibleBoundsInVisualViewport().IsEmpty());
-
-  WebView()->SetPageScaleFactor(4.0);
-  EXPECT_TRUE(element->VisibleBoundsInVisualViewport().IsEmpty());
-}
-
 // Test that the various window.scroll and document.body.scroll properties and
 // methods don't change with the visual viewport.
 TEST_P(VisualViewportTest, visualViewportIsInert) {
-  WebViewImpl* web_view_impl =
-      helper_.InitializeWithSettings(&ConfigureAndroidCompositing);
+  WebViewImpl* web_view_impl = helper_.InitializeWithAndroidSettings();
 
   web_view_impl->MainFrameViewWidget()->Resize(gfx::Size(200, 300));
 
@@ -1853,59 +1821,6 @@ TEST_P(VisualViewportTest, MaxScrollOffsetAtScale) {
             visual_viewport.MaximumScrollOffsetAtScale(2.0));
 }
 
-// Tests that the slow scrolling after an impl scroll on the visual viewport is
-// continuous. crbug.com/453460 was caused by the impl-path not updating the
-// ScrollAnimatorBase class.
-TEST_P(VisualViewportTest, SlowScrollAfterImplScroll) {
-  // This test is not relevant after scroll unification, because it is not
-  // possible to apply a scroll delta to the visual viewport from the main
-  // thread. The test case in crbug.com/453460 will use the composited scrolling
-  // codepath which is extensively tested (including pinch interactions) in
-  // cc/trees/layer_tree_host_unittest.cc and
-  // cc/trees/layer_tree_host_unittest_scroll.cc.
-  if (base::FeatureList::IsEnabled(::features::kScrollUnification))
-    return;
-
-  InitializeWithDesktopSettings();
-  WebView()->MainFrameViewWidget()->Resize(gfx::Size(800, 600));
-  NavigateTo("about:blank");
-
-  VisualViewport& visual_viewport = GetFrame()->GetPage()->GetVisualViewport();
-
-  // Apply some scroll and scale from the impl-side.
-  WebView()->MainFrameViewWidget()->ApplyViewportChangesForTesting(
-      {gfx::Vector2dF(300, 200), gfx::Vector2dF(0, 0), 2, false, 0, 0,
-       cc::BrowserControlsState::kBoth});
-
-  EXPECT_EQ(ScrollOffset(300, 200), visual_viewport.GetScrollOffset());
-
-  // Send a scroll event on the main thread path.
-  WebGestureEvent gsb(
-      WebInputEvent::Type::kGestureScrollBegin, WebInputEvent::kNoModifiers,
-      WebInputEvent::GetStaticTimeStampForTests(), WebGestureDevice::kTouchpad);
-  gsb.SetFrameScale(1);
-  gsb.data.scroll_begin.delta_x_hint = -50;
-  gsb.data.scroll_begin.delta_x_hint = -60;
-  gsb.data.scroll_begin.delta_hint_units =
-      ui::ScrollGranularity::kScrollByPrecisePixel;
-  GetFrame()->GetEventHandler().HandleGestureEvent(gsb);
-
-  WebGestureEvent gsu(
-      WebInputEvent::Type::kGestureScrollUpdate, WebInputEvent::kNoModifiers,
-      WebInputEvent::GetStaticTimeStampForTests(), WebGestureDevice::kTouchpad);
-  gsu.SetFrameScale(1);
-  gsu.data.scroll_update.delta_x = -50;
-  gsu.data.scroll_update.delta_y = -60;
-  gsu.data.scroll_update.delta_units = ui::ScrollGranularity::kScrollByPrecisePixel;
-  gsu.data.scroll_update.velocity_x = 1;
-  gsu.data.scroll_update.velocity_y = 1;
-
-  GetFrame()->GetEventHandler().HandleGestureEvent(gsu);
-
-  // The scroll sent from the impl-side must not be overwritten.
-  EXPECT_EQ(ScrollOffset(350, 260), visual_viewport.GetScrollOffset());
-}
-
 TEST_P(VisualViewportTest, AccessibilityHitTestWhileZoomedIn) {
   InitializeWithDesktopSettings();
 
@@ -1994,7 +1909,8 @@ TEST_P(VisualViewportTest, WindowDimensionsOnLoad) {
   WebView()->MainFrameViewWidget()->Resize(gfx::Size(800, 600));
   NavigateTo(base_url_ + "window_dimensions.html");
 
-  Element* output = GetFrame()->GetDocument()->getElementById("output");
+  Element* output =
+      GetFrame()->GetDocument()->getElementById(AtomicString("output"));
   DCHECK(output);
   EXPECT_EQ("1600x1200", output->innerHTML());
 }
@@ -2009,7 +1925,8 @@ TEST_P(VisualViewportTest, WindowDimensionsOnLoadWideContent) {
   WebView()->MainFrameViewWidget()->Resize(gfx::Size(800, 600));
   NavigateTo(base_url_ + "window_dimensions_wide_div.html");
 
-  Element* output = GetFrame()->GetDocument()->getElementById("output");
+  Element* output =
+      GetFrame()->GetDocument()->getElementById(AtomicString("output"));
   DCHECK(output);
   EXPECT_EQ("2000x1500", output->innerHTML());
 }
@@ -2034,8 +1951,7 @@ TEST_P(VisualViewportTest, ResizeWithScrollAnchoring) {
 // Make sure a composited background-attachment:fixed background gets resized
 // by browser controls.
 TEST_P(VisualViewportTest, ResizeCompositedAndFixedBackground) {
-  WebViewImpl* web_view_impl =
-      helper_.InitializeWithSettings(&ConfigureAndroidCompositing);
+  WebViewImpl* web_view_impl = helper_.InitializeWithAndroidSettings();
 
   int page_width = 640;
   int page_height = 480;
@@ -2096,19 +2012,16 @@ TEST_P(VisualViewportTest, ResizeCompositedAndFixedBackground) {
   EXPECT_EQ(page_height, background_layer->bounds().height());
 }
 
-static void ConfigureAndroidNonCompositing(WebSettings* settings) {
-  settings->SetPreferCompositingToLCDTextEnabled(false);
-  settings->SetViewportMetaEnabled(true);
-  settings->SetViewportEnabled(true);
-  settings->SetMainFrameResizesAreOrientationChanges(true);
-  settings->SetShrinksViewportContentToFit(true);
+static void ConfigureViewportNonCompositing(WebSettings* settings) {
+  frame_test_helpers::WebViewHelper::UpdateAndroidCompositingSettings(settings);
+  settings->SetLCDTextPreference(LCDTextPreference::kStronglyPreferred);
 }
 
 // Make sure a non-composited background-attachment:fixed background gets
 // resized by browser controls.
 TEST_P(VisualViewportTest, ResizeNonCompositedAndFixedBackground) {
   WebViewImpl* web_view_impl =
-      helper_.InitializeWithSettings(&ConfigureAndroidNonCompositing);
+      helper_.InitializeWithSettings(&ConfigureViewportNonCompositing);
 
   int page_width = 640;
   int page_height = 480;
@@ -2184,8 +2097,7 @@ TEST_P(VisualViewportTest, ResizeNonCompositedAndFixedBackground) {
 // Make sure a browser control resize with background-attachment:not-fixed
 // background doesn't cause invalidation or layout.
 TEST_P(VisualViewportTest, ResizeNonFixedBackgroundNoLayoutOrInvalidation) {
-  WebViewImpl* web_view_impl =
-      helper_.InitializeWithSettings(&ConfigureAndroidCompositing);
+  WebViewImpl* web_view_impl = helper_.InitializeWithAndroidSettings();
 
   int page_width = 640;
   int page_height = 480;
@@ -2218,7 +2130,7 @@ TEST_P(VisualViewportTest, ResizeNonFixedBackgroundNoLayoutOrInvalidation) {
 
   // A resize will do a layout synchronously so manually check that we don't
   // setNeedsLayout from viewportSizeChanged.
-  document->View()->ViewportSizeChanged(false, true);
+  document->View()->ViewportSizeChanged();
   unsigned needs_layout_objects = 0;
   unsigned total_objects = 0;
   bool is_subtree = false;
@@ -2245,8 +2157,7 @@ TEST_P(VisualViewportTest, ResizeNonFixedBackgroundNoLayoutOrInvalidation) {
 }
 
 TEST_P(VisualViewportTest, InvalidateLayoutViewWhenDocumentSmallerThanView) {
-  WebViewImpl* web_view_impl =
-      helper_.InitializeWithSettings(&ConfigureAndroidCompositing);
+  WebViewImpl* web_view_impl = helper_.InitializeWithAndroidSettings();
 
   int page_width = 320;
   int page_height = 590;
@@ -2257,7 +2168,10 @@ TEST_P(VisualViewportTest, InvalidateLayoutViewWhenDocumentSmallerThanView) {
                                            browser_controls_height, 0, true);
   UpdateAllLifecyclePhases();
 
-  frame_test_helpers::LoadFrame(web_view_impl->MainFrameImpl(), "about:blank");
+  WebURL base_url = url_test_helpers::ToKURL("http://example.com/");
+  frame_test_helpers::LoadHTMLString(web_view_impl->MainFrameImpl(),
+                                     "<div style='height: 20px'>Text</div>",
+                                     base_url);
   UpdateAllLifecyclePhases();
   Document* document =
       To<LocalFrame>(web_view_impl->GetPage()->MainFrame())->GetDocument();
@@ -2313,10 +2227,6 @@ TEST_P(VisualViewportTest, EnsureOverscrollElasticityTransformNode) {
             !!visual_viewport.GetOverscrollElasticityTransformNode());
 
   visual_viewport.SetOverscrollTypeForTesting(OverscrollType::kNone);
-  UpdateAllLifecyclePhases();
-  EXPECT_FALSE(visual_viewport.GetOverscrollElasticityTransformNode());
-
-  visual_viewport.SetOverscrollTypeForTesting(OverscrollType::kFilter);
   UpdateAllLifecyclePhases();
   EXPECT_FALSE(visual_viewport.GetOverscrollElasticityTransformNode());
 
@@ -2435,14 +2345,8 @@ class VisualViewportSimTest : public SimTest {
 
   void SetUp() override {
     SimTest::SetUp();
-
-    // Use settings that resemble the Android configuration.
-    WebView().GetSettings()->SetViewportEnabled(true);
-    WebView().GetSettings()->SetPreferCompositingToLCDTextEnabled(true);
-    WebView().GetSettings()->SetViewportMetaEnabled(true);
-    WebView().GetSettings()->SetViewportEnabled(true);
-    WebView().GetSettings()->SetMainFrameResizesAreOrientationChanges(true);
-    WebView().GetSettings()->SetShrinksViewportContentToFit(true);
+    frame_test_helpers::WebViewHelper::UpdateAndroidCompositingSettings(
+        WebView().GetSettings());
     WebView().SetDefaultPageScaleLimits(0.25f, 5);
   }
 };
@@ -2485,9 +2389,16 @@ TEST_F(VisualViewportSimTest, ScrollingContentsSmallerThanContainer) {
             visual_viewport.GetScrollNode()->ContentsRect());
 }
 
-class VisualViewportScrollIntoViewTest : public VisualViewportSimTest {
+class VisualViewportScrollIntoViewTest
+    : public VisualViewportSimTest,
+      public ::testing::WithParamInterface<
+          std::vector<base::test::FeatureRef>> {
  public:
-  VisualViewportScrollIntoViewTest() {}
+  VisualViewportScrollIntoViewTest() {
+    feature_list_.InitWithFeatures(
+        GetParam(),
+        /*disabled_features=*/std::vector<base::test::FeatureRef>());
+  }
 
   void SetUp() override {
     VisualViewportSimTest::SetUp();
@@ -2518,43 +2429,44 @@ class VisualViewportScrollIntoViewTest : public VisualViewportSimTest {
     WebView().ResizeVisualViewport(gfx::Size(400, 600 - 100));
   }
 
-  // Scrolls an element by the given name into view in the |visual_viewport|
-  // using params that optionally apply to a scroll sequence.
-  void ScrollIntoView(const WebString& element_name,
-                      bool is_for_scroll_sequence) {
-    WebDocument web_doc = WebView().MainFrameImpl()->GetDocument();
-    Element* bottom_element = web_doc.GetElementById(element_name);
-    auto scroll_params = ScrollAlignment::CreateScrollIntoViewParams(
-        ScrollAlignment::ToEdgeIfNeeded(), ScrollAlignment::ToEdgeIfNeeded(),
-        mojom::blink::ScrollType::kProgrammatic,
-        /*make_visible_in_visual_viewport=*/true,
-        mojom::blink::ScrollBehavior::kInstant, is_for_scroll_sequence);
-    WebView().GetPage()->GetVisualViewport().ScrollIntoView(
-        bottom_element->BoundingBox(), scroll_params);
-  }
+ private:
+  base::test::ScopedFeatureList feature_list_;
 };
 
-TEST_F(VisualViewportScrollIntoViewTest,
-       ScrollingToFixedWithScrollSequenceAnimationShort) {
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    VisualViewportScrollIntoViewTest,
+    testing::Values(std::vector<base::test::FeatureRef>{},
+                    std::vector<base::test::FeatureRef>{
+                        features::kMultiSmoothScrollIntoView}));
+
+TEST_P(VisualViewportScrollIntoViewTest, ScrollingToFixed) {
   VisualViewport& visual_viewport = WebView().GetPage()->GetVisualViewport();
   EXPECT_EQ(0.f, visual_viewport.GetScrollOffset().y());
-  ScrollIntoView("bottom", true);
-  visual_viewport.GetSmoothScrollSequencer()->RunQueuedAnimations();
+  WebDocument web_doc = WebView().MainFrameImpl()->GetDocument();
+  Element* bottom_element = web_doc.GetElementById("bottom");
+  bool is_for_scroll_sequence =
+      !RuntimeEnabledFeatures::MultiSmoothScrollIntoViewEnabled();
+  auto scroll_params = scroll_into_view_util::CreateScrollIntoViewParams(
+      ScrollAlignment::ToEdgeIfNeeded(), ScrollAlignment::ToEdgeIfNeeded(),
+      mojom::blink::ScrollType::kProgrammatic,
+      /*make_visible_in_visual_viewport=*/true,
+      mojom::blink::ScrollBehavior::kInstant, is_for_scroll_sequence);
+  if (is_for_scroll_sequence) {
+    GetDocument().GetFrame()->CreateNewSmoothScrollSequence();
+  }
+  WebView().GetPage()->GetVisualViewport().ScrollIntoView(
+      bottom_element->BoundingBox(), PhysicalBoxStrut(), scroll_params);
+  if (is_for_scroll_sequence) {
+    visual_viewport.GetSmoothScrollSequencer()->RunQueuedAnimations();
+  }
   EXPECT_EQ(100.f, visual_viewport.GetScrollOffset().y());
 }
 
-TEST_F(VisualViewportScrollIntoViewTest,
-       ScrollingToFixedWithoutScrollSequenceAnimationShort) {
+TEST_P(VisualViewportScrollIntoViewTest, ScrollingToFixedFromJavascript) {
   VisualViewport& visual_viewport = WebView().GetPage()->GetVisualViewport();
   EXPECT_EQ(0.f, visual_viewport.GetScrollOffset().y());
-  ScrollIntoView("bottom", false);
-  EXPECT_EQ(100.f, visual_viewport.GetScrollOffset().y());
-}
-
-TEST_F(VisualViewportScrollIntoViewTest, ScrollingToFixedFromJavascript) {
-  VisualViewport& visual_viewport = WebView().GetPage()->GetVisualViewport();
-  EXPECT_EQ(0.f, visual_viewport.GetScrollOffset().y());
-  GetDocument().getElementById("bottom")->scrollIntoView();
+  GetDocument().getElementById(AtomicString("bottom"))->scrollIntoView();
   EXPECT_EQ(100.f, visual_viewport.GetScrollOffset().y());
 }
 
@@ -2591,8 +2503,8 @@ TEST_P(VisualViewportTest, DeviceEmulation) {
   EXPECT_TRUE(
       GetFrame()->View()->VisualViewportOrOverlayNeedsRepaintForTesting());
   ASSERT_TRUE(visual_viewport.GetDeviceEmulationTransformNode());
-  EXPECT_EQ(TransformationMatrix().Translate(-params.viewport_offset.x(),
-                                             -params.viewport_offset.y()),
+  EXPECT_EQ(gfx::Transform::MakeTranslation(-params.viewport_offset.x(),
+                                            -params.viewport_offset.y()),
             visual_viewport.GetDeviceEmulationTransformNode()->Matrix());
   UpdateAllLifecyclePhases();
   EXPECT_FALSE(
@@ -2607,7 +2519,7 @@ TEST_P(VisualViewportTest, DeviceEmulation) {
   EXPECT_FALSE(
       GetFrame()->View()->VisualViewportOrOverlayNeedsRepaintForTesting());
   ASSERT_TRUE(visual_viewport.GetDeviceEmulationTransformNode());
-  EXPECT_EQ(TransformationMatrix().Scale(1.5f),
+  EXPECT_EQ(gfx::Transform::MakeScale(1.5f),
             visual_viewport.GetDeviceEmulationTransformNode()->Matrix());
   UpdateAllLifecyclePhases();
   EXPECT_FALSE(
@@ -2641,10 +2553,11 @@ TEST_P(VisualViewportTest, PaintScrollbar) {
 
   auto check_scrollbar = [](const cc::Layer* scrollbar, float scale) {
     EXPECT_TRUE(scrollbar->draws_content());
-    EXPECT_FALSE(scrollbar->HitTestable());
+    EXPECT_EQ(cc::HitTestOpaqueness::kTransparent,
+              scrollbar->hit_test_opaqueness());
     EXPECT_TRUE(scrollbar->IsScrollbarLayerForTesting());
     EXPECT_EQ(
-        cc::ScrollbarOrientation::VERTICAL,
+        cc::ScrollbarOrientation::kVertical,
         static_cast<const cc::ScrollbarLayerBase*>(scrollbar)->orientation());
     EXPECT_EQ(gfx::Size(7, 393), scrollbar->bounds());
     EXPECT_EQ(gfx::Vector2dF(393, 0), scrollbar->offset_to_transform_parent());
@@ -2764,7 +2677,7 @@ TEST_F(VisualViewportSimTest, UsedColorSchemeFromRootElement) {
       WebView().GetPage()->GetVisualViewport();
 
   EXPECT_EQ(mojom::blink::ColorScheme::kLight,
-            visual_viewport.UsedColorScheme());
+            visual_viewport.UsedColorSchemeScrollbars());
 
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
@@ -2777,7 +2690,28 @@ TEST_F(VisualViewportSimTest, UsedColorSchemeFromRootElement) {
   Compositor().BeginFrame();
 
   EXPECT_EQ(mojom::blink::ColorScheme::kDark,
-            visual_viewport.UsedColorScheme());
+            visual_viewport.UsedColorSchemeScrollbars());
+}
+
+TEST_F(VisualViewportSimTest, ScrollbarThumbColorFromRootElement) {
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(400, 600));
+
+  const VisualViewport& visual_viewport =
+      WebView().GetPage()->GetVisualViewport();
+
+  EXPECT_EQ(std::nullopt, visual_viewport.CSSScrollbarThumbColor());
+
+  SimRequest request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  request.Complete(R"HTML(
+          <!DOCTYPE html>
+          <style>
+            html { scrollbar-color: rgb(255 0 0) transparent }
+          </style>
+      )HTML");
+  Compositor().BeginFrame();
+
+  EXPECT_EQ(blink::Color(255, 0, 0), visual_viewport.CSSScrollbarThumbColor());
 }
 
 TEST_P(VisualViewportTest, SetLocationBeforePrePaint) {
@@ -2861,14 +2795,14 @@ TEST_F(VisualViewportSimTest, PreferredOverlayScrollbarColorTheme) {
 
   const VisualViewport& visual_viewport =
       WebView().GetPage()->GetVisualViewport();
-  EXPECT_EQ(ScrollbarOverlayColorTheme::kScrollbarOverlayColorThemeLight,
-            visual_viewport.GetScrollbarOverlayColorTheme());
+  EXPECT_EQ(mojom::blink::ColorScheme::kDark,
+            visual_viewport.GetOverlayScrollbarColorScheme());
 
   color_scheme_helper.SetPreferredColorScheme(
       mojom::blink::PreferredColorScheme::kLight);
   Compositor().BeginFrame();
-  EXPECT_EQ(ScrollbarOverlayColorTheme::kScrollbarOverlayColorThemeDark,
-            visual_viewport.GetScrollbarOverlayColorTheme());
+  EXPECT_EQ(mojom::blink::ColorScheme::kLight,
+            visual_viewport.GetOverlayScrollbarColorScheme());
 }
 
 }  // namespace

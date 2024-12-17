@@ -8,9 +8,19 @@
 #include "components/prefs/pref_service.h"
 #include "extensions/browser/extension_pref_value_map.h"
 #include "extensions/browser/extension_prefs.h"
+#include "extensions/browser/extension_prefs_helper_factory.h"
 #include "extensions/browser/pref_names.h"
+#include "extensions/common/api/types.h"
+#include "extensions/common/extension_id.h"
 
 namespace extensions {
+
+using content::BrowserContext;
+
+// static
+ExtensionPrefsHelper* ExtensionPrefsHelper::Get(BrowserContext* context) {
+  return ExtensionPrefsHelperFactory::GetForBrowserContext(context);
+}
 
 ExtensionPrefsHelper::ExtensionPrefsHelper(ExtensionPrefs* prefs,
                                            ExtensionPrefValueMap* value_map)
@@ -19,9 +29,9 @@ ExtensionPrefsHelper::ExtensionPrefsHelper(ExtensionPrefs* prefs,
 ExtensionPrefsHelper::~ExtensionPrefsHelper() = default;
 
 void ExtensionPrefsHelper::SetExtensionControlledPref(
-    const std::string& extension_id,
+    const ExtensionId& extension_id,
     const std::string& pref_key,
-    ExtensionPrefsScope scope,
+    ChromeSettingScope scope,
     base::Value value) {
 #ifndef NDEBUG
   const PrefService::Preference* pref =
@@ -40,16 +50,15 @@ void ExtensionPrefsHelper::SetExtensionControlledPref(
     ExtensionPrefs::ScopedDictionaryUpdate update(prefs_, extension_id,
                                                   scope_string);
     auto preference = update.Create();
-    preference->SetWithoutPathExpansion(
-        pref_key, base::Value::ToUniquePtrValue(value.Clone()));
+    preference->SetWithoutPathExpansion(pref_key, value.Clone());
   }
   value_map_->SetExtensionPref(extension_id, pref_key, scope, std::move(value));
 }
 
 void ExtensionPrefsHelper::RemoveExtensionControlledPref(
-    const std::string& extension_id,
+    const ExtensionId& extension_id,
     const std::string& pref_key,
-    ExtensionPrefsScope scope) {
+    ChromeSettingScope scope) {
   DCHECK(prefs_->pref_service()->FindPreference(pref_key))
       << "Extension controlled preference key " << pref_key
       << " not registered.";
@@ -59,14 +68,15 @@ void ExtensionPrefsHelper::RemoveExtensionControlledPref(
     ExtensionPrefs::ScopedDictionaryUpdate update(prefs_, extension_id,
                                                   scope_string);
     auto preference = update.Get();
-    if (preference)
+    if (preference) {
       preference->RemoveWithoutPathExpansion(pref_key, nullptr);
+    }
   }
   value_map_->RemoveExtensionPref(extension_id, pref_key, scope);
 }
 
 bool ExtensionPrefsHelper::CanExtensionControlPref(
-    const std::string& extension_id,
+    const ExtensionId& extension_id,
     const std::string& pref_key,
     bool incognito) {
   DCHECK(prefs_->pref_service()->FindPreference(pref_key))
@@ -77,7 +87,7 @@ bool ExtensionPrefsHelper::CanExtensionControlPref(
 }
 
 bool ExtensionPrefsHelper::DoesExtensionControlPref(
-    const std::string& extension_id,
+    const ExtensionId& extension_id,
     const std::string& pref_key,
     bool* from_incognito) {
   DCHECK(prefs_->pref_service()->FindPreference(pref_key))

@@ -6,18 +6,16 @@
 #define CHROME_BROWSER_EXTENSIONS_WEBSTORE_INSTALL_HELPER_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
+#include "base/values.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher_delegate.h"
 #include "services/data_decoder/public/cpp/data_decoder.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "url/gurl.h"
-
-namespace base {
-class DictionaryValue;
-}
 
 class BitmapFetcher;
 
@@ -38,18 +36,13 @@ class WebstoreInstallHelper : public base::RefCounted<WebstoreInstallHelper>,
  public:
   class Delegate {
    public:
-    enum InstallHelperResultCode {
-      UNKNOWN_ERROR,
-      ICON_ERROR,
-      MANIFEST_ERROR
-    };
+    enum InstallHelperResultCode { UNKNOWN_ERROR, ICON_ERROR, kManifestError };
 
     // Called when we've successfully parsed the manifest and decoded the icon
     // in the utility process.
-    virtual void OnWebstoreParseSuccess(
-        const std::string& id,
-        const SkBitmap& icon,
-        std::unique_ptr<base::DictionaryValue> parsed_manifest) = 0;
+    virtual void OnWebstoreParseSuccess(const std::string& id,
+                                        const SkBitmap& icon,
+                                        base::Value::Dict parsed_manifest) = 0;
 
     // Called to indicate a parse failure. The |result_code| parameter should
     // indicate whether the problem was with the manifest or icon.
@@ -83,7 +76,7 @@ class WebstoreInstallHelper : public base::RefCounted<WebstoreInstallHelper>,
   void ReportResultsIfComplete();
 
   // The client who we'll report results back to.
-  raw_ptr<Delegate> delegate_;
+  raw_ptr<Delegate, DanglingUntriaged> delegate_;
 
   // The extension id of the manifest we're parsing.
   std::string id_;
@@ -102,7 +95,7 @@ class WebstoreInstallHelper : public base::RefCounted<WebstoreInstallHelper>,
 
   // The results of successful decoding/parsing.
   SkBitmap icon_;
-  std::unique_ptr<base::DictionaryValue> parsed_manifest_;
+  std::optional<base::Value::Dict> parsed_manifest_;
 
   // A details string for keeping track of any errors.
   std::string error_;

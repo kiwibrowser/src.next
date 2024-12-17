@@ -40,8 +40,7 @@ android_library("java") {
 
 android_resources("java_resources") {
   sources = [
-    "java/res/drawable-v23/menu_action_bar_bg.xml",
-    "java/res/drawable-v31/menu_action_bar_bg.xml",
+    "java/res/drawable/menu_action_bar_bg.xml",
     "java/res/layout/icon_row_menu_item.xml",
     "java/res/layout/menu_item.xml",
     "java/res/layout/menu_item_start_with_icon.xml",
@@ -82,16 +81,17 @@ android_library("unit_device_javatests") {
     "//components/browser_ui/widget/android:java",
     "//components/browser_ui/widget/android:test_support_java",
     "//content/public/test/android:content_java_test_support",
-    "//third_party/android_support_test_runner:rules_java",
-    "//third_party/android_support_test_runner:runner_java",
     "//third_party/androidx:androidx_annotation_annotation_java",
     "//third_party/androidx:androidx_appcompat_appcompat_resources_java",
+    "//third_party/androidx:androidx_test_rules_java",
     "//third_party/androidx:androidx_test_runner_java",
+    "//third_party/hamcrest:hamcrest_java",
     "//third_party/hamcrest:hamcrest_library_java",
     "//third_party/junit",
     "//third_party/mockito:mockito_java",
     "//ui/android:ui_full_java",
     "//ui/android:ui_java_test_support",
+    "//ui/android:ui_utils_java",
   ]
 }
 

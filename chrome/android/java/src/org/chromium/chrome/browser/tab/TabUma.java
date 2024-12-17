@@ -5,13 +5,11 @@
 package org.chromium.chrome.browser.tab;
 
 import android.os.SystemClock;
-import android.text.format.DateUtils;
 
 import androidx.annotation.Nullable;
 
 import org.chromium.base.UserData;
 import org.chromium.base.metrics.RecordHistogram;
-import org.chromium.chrome.browser.tab.state.CriticalPersistedTabData;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.net.NetError;
 import org.chromium.ui.base.WindowAndroid;
@@ -34,24 +32,12 @@ public class TabUma extends EmptyTabObserver implements UserData {
     static final int TAB_STATUS_LAZY_LOAD_FOR_BG_TAB = 8;
     static final int TAB_STATUS_LIM = 9;
 
-    // The enum values for the Tab.RestoreResult histogram. The unusual order is to
-    // keep compatibility with the previous instance of the histogram that was using
-    // a boolean.
-    //
-    // Defined in tools/metrics/histograms/histograms.xml.
-    private static final int TAB_RESTORE_RESULT_FAILURE_OTHER = 0;
-    private static final int TAB_RESTORE_RESULT_SUCCESS = 1;
-    private static final int TAB_RESTORE_RESULT_FAILURE_NETWORK_CONNECTIVITY = 2;
-    private static final int TAB_RESTORE_RESULT_COUNT = 3;
-
     // TAB_STATE_* are for TabStateTransferTime and TabTransferTarget histograms.
     // TabState defined in tools/metrics/histograms/histograms.xml.
     private static final int TAB_STATE_INITIAL = 0;
     private static final int TAB_STATE_ACTIVE = 1;
     private static final int TAB_STATE_INACTIVE = 2;
-    private static final int TAB_STATE_DETACHED = 3;
     private static final int TAB_STATE_CLOSED = 4;
-    private static final int TAB_STATE_MAX = TAB_STATE_CLOSED;
 
     // Counter of tab shows (as per onShow()) for all tabs.
     private static long sAllTabsShowCount;
@@ -64,17 +50,15 @@ public class TabUma extends EmptyTabObserver implements UserData {
     // Timestamp of the beginning of the current tab restore.
     private long mRestoreStartedAtMillis = -1;
 
-    private long mLastTabStateChangeMillis = -1;
     private int mLastTabState = TAB_STATE_INITIAL;
 
     /**
-     * Creates {@link TabUma} instance optionally. Creates one only when tab creation type
-     * is non-null.
+     * Creates {@link TabUma} instance optionally. Creates one only when tab creation type is
+     * non-null.
      */
     static void createForTab(Tab tab) {
         assert tab.getUserDataHost().getUserData(USER_DATA_KEY) == null;
-        @TabCreationState
-        Integer creationState = ((TabImpl) tab).getCreationState();
+        @TabCreationState Integer creationState = ((TabImpl) tab).getCreationState();
         if (creationState != null) {
             tab.getUserDataHost().setUserData(USER_DATA_KEY, new TabUma(tab, creationState));
         }
@@ -82,11 +66,11 @@ public class TabUma extends EmptyTabObserver implements UserData {
 
     /**
      * Constructs a new UMA tracker for a specific tab.
+     *
      * @param tab Tab this UMA tracker is created for.
      * @param creationState In what state the tab was created.
      */
     private TabUma(Tab tab, @TabCreationState int creationState) {
-        mLastTabStateChangeMillis = System.currentTimeMillis();
         mTabCreationState = creationState;
         switch (mTabCreationState) {
             case TabCreationState.LIVE_IN_FOREGROUND:
@@ -102,53 +86,17 @@ public class TabUma extends EmptyTabObserver implements UserData {
 
     /**
      * Records the tab restore result into several UMA histograms.
-     * @param time The time taken to perform the tab restore.
      * @param perceivedTime The perceived time taken to perform the tab restore.
      * @param errorCode The error code, NetError.OK on success.
      */
-    private void recordTabRestoreResult(long time, long perceivedTime, @NetError int errorCode) {
+    private void recordTabRestoreResult(long perceivedTime, @NetError int errorCode) {
         if (errorCode == NetError.OK) {
-            RecordHistogram.recordEnumeratedHistogram(
-                    "Tab.RestoreResult", TAB_RESTORE_RESULT_SUCCESS, TAB_RESTORE_RESULT_COUNT);
-            RecordHistogram.recordCount1MHistogram("Tab.RestoreTime", (int) time);
             RecordHistogram.recordCount1MHistogram("Tab.PerceivedRestoreTime", (int) perceivedTime);
-        } else {
-            switch (errorCode) {
-                case NetError.ERR_INTERNET_DISCONNECTED:
-                case NetError.ERR_NAME_RESOLUTION_FAILED:
-                case NetError.ERR_DNS_TIMED_OUT:
-                    RecordHistogram.recordEnumeratedHistogram("Tab.RestoreResult",
-                            TAB_RESTORE_RESULT_FAILURE_NETWORK_CONNECTIVITY,
-                            TAB_RESTORE_RESULT_COUNT);
-                    break;
-                default:
-                    RecordHistogram.recordEnumeratedHistogram("Tab.RestoreResult",
-                            TAB_RESTORE_RESULT_FAILURE_OTHER, TAB_RESTORE_RESULT_COUNT);
-            }
         }
     }
 
     /**
-     * Record the tab state transition into histograms.
-     * @param prevState Previous state of the tab.
-     * @param newState New state of the tab.
-     * @param delta Time elapsed from the last state transition in milliseconds.
-     */
-    private void recordTabStateTransition(int prevState, int newState, long delta) {
-        if (prevState == TAB_STATE_INITIAL) {
-            RecordHistogram.recordEnumeratedHistogram("Tabs.StateTransfer.Target_Initial", newState,
-                    TAB_STATE_MAX);
-        } else if (prevState == TAB_STATE_ACTIVE) {
-            RecordHistogram.recordEnumeratedHistogram("Tabs.StateTransfer.Target_Active", newState,
-                    TAB_STATE_MAX);
-        } else if (prevState == TAB_STATE_INACTIVE) {
-            RecordHistogram.recordEnumeratedHistogram("Tabs.StateTransfer.Target_Inactive",
-                    newState, TAB_STATE_MAX);
-        }
-    }
-
-    /**
-     * Updates saved TabState and its timestamp. Records the state transition into the histogram.
+     * Updates saved TabState and its timestamp.
      * @param newState New state of the tab.
      */
     private void updateTabState(int newState) {
@@ -156,8 +104,6 @@ public class TabUma extends EmptyTabObserver implements UserData {
             return;
         }
         long now = System.currentTimeMillis();
-        recordTabStateTransition(mLastTabState, newState, now - mLastTabStateChangeMillis);
-        mLastTabStateChangeMillis = now;
         mLastTabState = newState;
     }
 
@@ -165,7 +111,6 @@ public class TabUma extends EmptyTabObserver implements UserData {
 
     @Override
     public void onShown(Tab tab, @TabSelectionType int selectionType) {
-        long previousTimestampMillis = CriticalPersistedTabData.from(tab).getTimestampMillis();
         long now = SystemClock.elapsedRealtime();
 
         // Do not collect the tab switching data for the first switch to a tab after the cold start
@@ -178,8 +123,9 @@ public class TabUma extends EmptyTabObserver implements UserData {
 
         increaseTabShowCount();
         boolean isOnBrowserStartup = sAllTabsShowCount == 1;
-        boolean performsLazyLoad = mTabCreationState == TabCreationState.FROZEN_FOR_LAZY_LOAD
-                && mLastShownTimestamp == -1;
+        boolean performsLazyLoad =
+                mTabCreationState == TabCreationState.FROZEN_FOR_LAZY_LOAD
+                        && mLastShownTimestamp == -1;
 
         int status;
         if (mRestoreStartedAtMillis == -1 && !performsLazyLoad) {
@@ -209,19 +155,6 @@ public class TabUma extends EmptyTabObserver implements UserData {
         if (selectionType == TabSelectionType.FROM_USER) {
             RecordHistogram.recordEnumeratedHistogram(
                     "Tab.StatusWhenSwitchedBackToForeground", status, TAB_STATUS_LIM);
-        }
-
-        // Record "tab age upon first display" metrics. previousTimestampMillis is persisted through
-        // cold starts.
-        if (mLastShownTimestamp == -1 && previousTimestampMillis > 0) {
-            long duration = System.currentTimeMillis() - previousTimestampMillis;
-            if (isOnBrowserStartup) {
-                RecordHistogram.recordCount1MHistogram("Tabs.ForegroundTabAgeAtStartup",
-                        (int) (duration / DateUtils.MINUTE_IN_MILLIS));
-            } else if (selectionType == TabSelectionType.FROM_USER) {
-                RecordHistogram.recordCount1MHistogram("Tab.AgeUponRestoreFromColdStart",
-                        (int) (duration / DateUtils.MINUTE_IN_MILLIS));
-            }
         }
 
         mLastShownTimestamp = now;
@@ -270,9 +203,8 @@ public class TabUma extends EmptyTabObserver implements UserData {
         // reflected in Tab.StatusWhenSwitchedBackToForeground metric.
         if (mRestoreStartedAtMillis != -1 && mLastShownTimestamp >= mRestoreStartedAtMillis) {
             long now = SystemClock.elapsedRealtime();
-            long restoreTime = now - mRestoreStartedAtMillis;
             long perceivedRestoreTime = now - mLastShownTimestamp;
-            recordTabRestoreResult(restoreTime, perceivedRestoreTime, NetError.OK);
+            recordTabRestoreResult(perceivedRestoreTime, NetError.OK);
         }
         mRestoreStartedAtMillis = -1;
     }
@@ -283,7 +215,7 @@ public class TabUma extends EmptyTabObserver implements UserData {
         if (mRestoreStartedAtMillis != -1 && mLastShownTimestamp >= mRestoreStartedAtMillis) {
             // Load time is ignored for failed loads.
             assert errorCode != NetError.OK;
-            recordTabRestoreResult(-1, -1, errorCode);
+            recordTabRestoreResult(-1, errorCode);
         }
         mRestoreStartedAtMillis = -1;
     }
@@ -291,11 +223,7 @@ public class TabUma extends EmptyTabObserver implements UserData {
     /** Called when the renderer of the corresponding tab crashes. */
     @Override
     public void onCrash(Tab tab) {
-        if (mRestoreStartedAtMillis != -1) {
-            // TODO(ppi): Add a bucket in Tab.RestoreResult for restores failed due to
-            //            renderer crashes and start to track that.
-            mRestoreStartedAtMillis = -1;
-        }
+        mRestoreStartedAtMillis = -1;
     }
 
     @Override

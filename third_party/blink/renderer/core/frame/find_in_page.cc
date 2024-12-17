@@ -63,7 +63,7 @@ FindInPage::FindInPage(WebLocalFrameImpl& frame,
 void FindInPage::Find(int request_id,
                       const String& search_text,
                       mojom::blink::FindOptionsPtr options) {
-  DCHECK(!search_text.IsEmpty());
+  DCHECK(!search_text.empty());
 
   // Record the fact that we have a find-in-page request.
   frame_->GetFrame()->GetDocument()->MarkHasFindInPageRequest();
@@ -86,7 +86,7 @@ void FindInPage::Find(int request_id,
   }
 
   // Send "no results" if this frame has no visible content.
-  if (!frame_->HasVisibleContent() && !options->force) {
+  if (!frame_->HasVisibleContent()) {
     ReportFindInPageMatchCount(request_id, 0 /* count */,
                                true /* final_update */);
     return;
@@ -166,7 +166,7 @@ bool WebLocalFrameImpl::FindForTesting(int identifier,
 }
 
 bool FindInPage::FindInternal(int identifier,
-                              const WebString& search_text,
+                              const String& search_text,
                               const mojom::blink::FindOptions& options,
                               bool wrap_within_frame,
                               bool* active_now) {
@@ -220,7 +220,8 @@ void FindInPage::SetClient(
   // TODO(crbug.com/984878): Having to call reset() to try to bind a remote that
   // might be bound is questionable behavior and suggests code may be buggy.
   client_.reset();
-  client_.Bind(std::move(remote));
+  client_.Bind(std::move(remote),
+               frame_->GetTaskRunner(blink::TaskType::kInternalDefault));
 }
 
 #if BUILDFLAG(IS_ANDROID)
@@ -274,20 +275,24 @@ void WebLocalFrameImpl::SetTickmarks(const WebElement& target,
   find_in_page_->SetTickmarks(target, tickmarks);
 }
 
-void FindInPage::SetTickmarks(const WebElement& target,
-                              const WebVector<gfx::Rect>& tickmarks) {
-  Vector<gfx::Rect> tickmarks_converted(
-      base::checked_cast<wtf_size_t>(tickmarks.size()));
-  for (wtf_size_t i = 0; i < tickmarks.size(); ++i)
-    tickmarks_converted[i] = tickmarks[i];
-
+void FindInPage::SetTickmarks(
+    const WebElement& target,
+    const WebVector<gfx::Rect>& tickmarks_in_layout_space) {
   LayoutBox* box;
   if (target.IsNull())
     box = frame_->GetFrame()->ContentLayoutObject();
   else
     box = target.ConstUnwrap<Element>()->GetLayoutBoxForScrolling();
-  if (box)
-    box->OverrideTickmarks(std::move(tickmarks_converted));
+
+  if (!box)
+    return;
+
+  Vector<gfx::Rect> tickmarks_converted(
+      base::checked_cast<wtf_size_t>(tickmarks_in_layout_space.size()));
+  for (wtf_size_t i = 0; i < tickmarks_in_layout_space.size(); ++i)
+    tickmarks_converted[i] = tickmarks_in_layout_space[i];
+
+  box->OverrideTickmarks(std::move(tickmarks_converted));
 }
 
 TextFinder* WebLocalFrameImpl::GetTextFinder() const {
@@ -295,7 +300,7 @@ TextFinder* WebLocalFrameImpl::GetTextFinder() const {
 }
 
 TextFinder* FindInPage::GetTextFinder() const {
-  return text_finder_;
+  return text_finder_.Get();
 }
 
 TextFinder& WebLocalFrameImpl::EnsureTextFinder() {

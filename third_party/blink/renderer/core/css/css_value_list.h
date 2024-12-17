@@ -27,13 +27,17 @@
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
+namespace WTF {
+class String;
+}  // namespace WTF
+
 namespace blink {
 
 class CORE_EXPORT CSSValueList : public CSSValue {
-
  public:
-  using iterator = HeapVector<Member<const CSSValue>, 4>::iterator;
   using const_iterator = HeapVector<Member<const CSSValue>, 4>::const_iterator;
+  using const_reverse_iterator =
+      HeapVector<Member<const CSSValue>, 4>::const_reverse_iterator;
 
   static CSSValueList* CreateCommaSeparated() {
     return MakeGarbageCollected<CSSValueList>(kCommaSeparator);
@@ -51,25 +55,30 @@ class CORE_EXPORT CSSValueList : public CSSValue {
 
   CSSValueList(ClassType, ValueListSeparator);
   explicit CSSValueList(ValueListSeparator);
+  CSSValueList(ValueListSeparator, HeapVector<Member<const CSSValue>, 4>);
   CSSValueList(const CSSValueList&) = delete;
   CSSValueList& operator=(const CSSValueList&) = delete;
 
-  iterator begin() { return values_.begin(); }
-  iterator end() { return values_.end(); }
   const_iterator begin() const { return values_.begin(); }
   const_iterator end() const { return values_.end(); }
+  const_reverse_iterator rbegin() const { return values_.rbegin(); }
+  const_reverse_iterator rend() const { return values_.rend(); }
 
   wtf_size_t length() const { return values_.size(); }
   const CSSValue& Item(wtf_size_t index) const { return *values_[index]; }
+  const CSSValue& First() const { return *values_.front(); }
   const CSSValue& Last() const { return *values_.back(); }
 
-  void Append(const CSSValue& value) { values_.push_back(value); }
+  void Append(const CSSValue& value);
   bool RemoveAll(const CSSValue&);
   bool HasValue(const CSSValue&) const;
   CSSValueList* Copy() const;
 
-  String CustomCSSText() const;
+  WTF::String CustomCSSText() const;
   bool Equals(const CSSValueList&) const;
+
+  const CSSValue* UntaintedCopy() const;
+  const CSSValueList& PopulateWithTreeScope(const TreeScope*) const;
 
   bool HasFailedOrCanceledSubresources() const;
 

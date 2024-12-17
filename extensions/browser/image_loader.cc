@@ -10,10 +10,10 @@
 #include <utility>
 #include <vector>
 
-#include "base/bind.h"
-#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/thread_pool.h"
 #include "content/public/browser/browser_thread.h"
@@ -23,8 +23,8 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_handlers/icons_handler.h"
 #include "skia/ext/image_operations.h"
-#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/resource/resource_scale_factor.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -51,7 +51,7 @@ bool ShouldResizeImageRepresentation(
     case ImageLoader::ImageRepresentation::NEVER_RESIZE:
       return false;
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       return false;
   }
 }
@@ -184,24 +184,26 @@ std::vector<ImageLoader::LoadResult> LoadImagesBlocking(
     const ImageLoader::ImageRepresentation& image = info_list[i];
 
     // If we don't have a path there isn't anything we can do, just skip it.
-    if (image.resource.relative_path().empty())
+    if (image.resource.relative_path().empty()) {
       continue;
+    }
 
     SkBitmap bitmap;
-    if (bitmaps[i].isNull())
+    if (bitmaps[i].isNull()) {
       LoadImageBlocking(image, &bitmap);
-    else
+    } else {
       bitmap = bitmaps[i];
+    }
 
     // If the image failed to load, skip it.
-    if (bitmap.isNull() || bitmap.empty())
+    if (bitmap.isNull() || bitmap.empty()) {
       continue;
+    }
 
     gfx::Size original_size(bitmap.width(), bitmap.height());
     bitmap = ResizeIfNeeded(bitmap, image);
 
-    load_result.push_back(
-        ImageLoader::LoadResult(bitmap, original_size, image));
+    load_result.emplace_back(bitmap, original_size, image);
   }
 
   return load_result;
@@ -212,7 +214,7 @@ std::vector<ImageLoader::LoadResult> LoadImagesBlocking(
 ////////////////////////////////////////////////////////////////////////////////
 // ImageLoader
 
-ImageLoader::ImageLoader() {}
+ImageLoader::ImageLoader() = default;
 
 ImageLoader::~ImageLoader() {
 }
@@ -239,8 +241,9 @@ void ImageLoader::LoadImageAtEveryScaleFactorAsync(
   std::vector<ImageRepresentation> info_list;
 
   std::set<float> scales;
-  for (auto scale : ui::GetSupportedResourceScaleFactors())
+  for (const auto scale : ui::GetSupportedResourceScaleFactors()) {
     scales.insert(ui::GetScaleForResourceScaleFactor(scale));
+  }
 
   // There may not be a screen in unit tests.
   auto* screen = display::Screen::GetScreen();
@@ -249,12 +252,12 @@ void ImageLoader::LoadImageAtEveryScaleFactorAsync(
       scales.insert(display.device_scale_factor());
   }
 
-  for (auto scale : scales) {
+  for (const auto scale : scales) {
     const gfx::Size px_size = gfx::ScaleToFlooredSize(dip_size, scale);
     ExtensionResource image = IconsInfo::GetIconResource(
-        extension, px_size.width(), ExtensionIconSet::MATCH_BIGGER);
-    info_list.push_back(ImageRepresentation(
-        image, ImageRepresentation::ALWAYS_RESIZE, px_size, scale));
+        extension, px_size.width(), ExtensionIconSet::Match::kBigger);
+    info_list.emplace_back(image, ImageRepresentation::ALWAYS_RESIZE, px_size,
+                           scale);
   }
   LoadImagesAsync(extension, info_list, std::move(callback));
 }

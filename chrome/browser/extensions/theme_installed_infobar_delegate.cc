@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/theme_installed_infobar_delegate.h"
 
 #include <stddef.h>
+
 #include <string>
 #include <utility>
 
@@ -13,15 +14,39 @@
 #include "build/build_config.h"
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/infobars/confirm_infobar_creator.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/infobars/content/content_infobar_manager.h"
 #include "components/infobars/core/infobar.h"
 #include "extensions/browser/extension_system.h"
 #include "ui/base/l10n/l10n_util.h"
+
+// static
+void ThemeInstalledInfoBarDelegate::CreateForLastActiveTab(
+    Profile* profile,
+    const std::string& theme_name,
+    const std::string& theme_id,
+    std::unique_ptr<ThemeService::ThemeReinstaller> prev_theme_reinstaller) {
+  // FindTabbedBrowser() is called with |match_original_profiles| true because
+  // a theme install in either a normal or incognito window for a profile
+  // affects all normal and incognito windows for that profile.
+  Browser* browser =
+      chrome::FindTabbedBrowser(profile, /*match_original_profiles=*/true);
+  if (browser) {
+    content::WebContents* web_contents =
+        browser->tab_strip_model()->GetActiveWebContents();
+    if (web_contents) {
+      ThemeInstalledInfoBarDelegate::Create(
+          infobars::ContentInfoBarManager::FromWebContents(web_contents),
+          ThemeServiceFactory::GetForProfile(profile), theme_name, theme_id,
+          std::move(prev_theme_reinstaller));
+    }
+  }
+}
 
 // static
 void ThemeInstalledInfoBarDelegate::Create(
@@ -39,8 +64,7 @@ void ThemeInstalledInfoBarDelegate::Create(
 
   // If there's a previous theme infobar, just replace that instead of adding a
   // new one.
-  for (size_t i = 0; i < infobar_manager->infobar_count(); ++i) {
-    infobars::InfoBar* old_infobar = infobar_manager->infobar_at(i);
+  for (infobars::InfoBar* old_infobar : infobar_manager->infobars()) {
     ThemeInstalledInfoBarDelegate* theme_infobar =
         old_infobar->delegate()->AsThemePreviewInfobarDelegate();
     if (theme_infobar) {
@@ -107,14 +131,16 @@ std::u16string ThemeInstalledInfoBarDelegate::GetButtonLabel(
 }
 
 bool ThemeInstalledInfoBarDelegate::Cancel() {
-  if (prev_theme_reinstaller_)
+  if (prev_theme_reinstaller_) {
     prev_theme_reinstaller_->Reinstall();
+  }
   return false;  // The theme change will close us.
 }
 
 void ThemeInstalledInfoBarDelegate::OnThemeChanged() {
   // If the new theme is different from what this info bar is associated with,
   // close this info bar since it is no longer relevant.
-  if (theme_id_ != theme_service_->GetThemeID())
+  if (theme_id_ != theme_service_->GetThemeID()) {
     infobar()->RemoveSelf();
+  }
 }

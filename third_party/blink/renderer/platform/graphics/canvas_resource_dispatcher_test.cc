@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,10 +12,13 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/frame_sinks/embedded_frame_sink.mojom-blink.h"
+#include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_resource.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_provider.h"
 #include "third_party/blink/renderer/platform/graphics/test/mock_compositor_frame_sink.h"
 #include "third_party/blink/renderer/platform/graphics/test/mock_embedded_frame_sink_provider.h"
+#include "third_party/blink/renderer/platform/graphics/test/test_webgraphics_shared_image_interface_provider.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/skia/include/core/SkSurface.h"
@@ -46,12 +49,15 @@ viz::ResourceId NextId(viz::ResourceId id) {
 class MockCanvasResourceDispatcher : public CanvasResourceDispatcher {
  public:
   MockCanvasResourceDispatcher()
-      : CanvasResourceDispatcher(nullptr /* client */,
-                                 base::ThreadTaskRunnerHandle::Get(),
-                                 kClientId,
-                                 kSinkId,
-                                 0 /* placeholder_canvas_id* */,
-                                 {kWidth, kHeight} /* canvas_size */) {}
+      : CanvasResourceDispatcher(
+            /*client=*/nullptr,
+            /*task_runner=*/scheduler::GetSingleThreadTaskRunnerForTesting(),
+            /*agent_group_scheduler_compositor_task_runner=*/
+            scheduler::GetSingleThreadTaskRunnerForTesting(),
+            kClientId,
+            kSinkId,
+            /*placeholder_canvas_id=*/0,
+            /*canvas_size=*/{kWidth, kHeight}) {}
 
   MOCK_METHOD2(PostImageToPlaceholder,
                void(scoped_refptr<CanvasResource>&&,
@@ -66,7 +72,7 @@ class CanvasResourceDispatcherTest
  public:
   scoped_refptr<CanvasResource> DispatchOneFrame() {
     scoped_refptr<CanvasResource> canvas_resource =
-        resource_provider_->ProduceCanvasResource();
+        resource_provider_->ProduceCanvasResource(FlushReason::kTesting);
     auto canvas_resource_extra = canvas_resource;
     dispatcher_->DispatchFrame(
         std::move(canvas_resource), base::TimeTicks(), SkIRect::MakeEmpty(),
@@ -92,24 +98,36 @@ class CanvasResourceDispatcherTest
 
   const gfx::Size& GetSize() const { return dispatcher_->size_; }
 
+  base::WeakPtr<WebGraphicsSharedImageInterfaceProvider>
+  shared_image_interface_provider() {
+    return test_web_shared_image_interface_provider_->GetWeakPtr();
+  }
+
  protected:
   CanvasResourceDispatcherTest() = default;
 
   void CreateCanvasResourceDispatcher() {
+    test_web_shared_image_interface_provider_ =
+        TestWebGraphicsSharedImageInterfaceProvider::Create();
+
     dispatcher_ = std::make_unique<MockCanvasResourceDispatcher>();
     resource_provider_ = CanvasResourceProvider::CreateSharedBitmapProvider(
         SkImageInfo::MakeN32Premul(kWidth, kHeight),
         cc::PaintFlags::FilterQuality::kLow,
         CanvasResourceProvider::ShouldInitialize::kCallClear,
-        dispatcher_->GetWeakPtr());
+        dispatcher_->GetWeakPtr(),
+        test_web_shared_image_interface_provider_.get());
   }
 
   MockCanvasResourceDispatcher* Dispatcher() { return dispatcher_.get(); }
 
  private:
   scoped_refptr<StaticBitmapImage> PrepareStaticBitmapImage();
+  test::TaskEnvironment task_environment_;
   std::unique_ptr<MockCanvasResourceDispatcher> dispatcher_;
   std::unique_ptr<CanvasResourceProvider> resource_provider_;
+  std::unique_ptr<WebGraphicsSharedImageInterfaceProvider>
+      test_web_shared_image_interface_provider_;
 };
 
 TEST_F(CanvasResourceDispatcherTest, PlaceholderRunsNormally) {
@@ -164,15 +182,21 @@ TEST_F(CanvasResourceDispatcherTest, PlaceholderBeingBlocked) {
   /* When main thread is blocked, attempting to post more than 3 frames will
    * result in only 3 PostImageToPlaceholder. The latest unposted image will
    * be saved. */
-  EXPECT_CALL(*(Dispatcher()), PostImageToPlaceholder(_, _)).Times(3);
+  EXPECT_CALL(*(Dispatcher()), PostImageToPlaceholder(_, _))
+      .Times(CanvasResourceDispatcher::kMaxUnreclaimedPlaceholderFrames);
 
-  // Attempt to post 4 times
+  // Attempt to post kMaxUnreclaimedPlaceholderFrames+1 times
   auto frame1 = DispatchOneFrame();
   auto frame2 = DispatchOneFrame();
-  DispatchOneFrame();
-  DispatchOneFrame();
-  viz::ResourceId post_resource_id(4u);
-  EXPECT_EQ(3u, GetNumUnreclaimedFramesPosted());
+  for (unsigned i = 0;
+       i < CanvasResourceDispatcher::kMaxUnreclaimedPlaceholderFrames - 1;
+       i++) {
+    DispatchOneFrame();
+  }
+  viz::ResourceId post_resource_id(
+      CanvasResourceDispatcher::kMaxUnreclaimedPlaceholderFrames + 1);
+  EXPECT_EQ(CanvasResourceDispatcher::kMaxUnreclaimedPlaceholderFrames,
+            GetNumUnreclaimedFramesPosted());
   EXPECT_EQ(NextId(post_resource_id), PeekNextResourceId());
   EXPECT_TRUE(GetLatestUnpostedImage());
   EXPECT_EQ(post_resource_id, GetLatestUnpostedResourceId());
@@ -180,7 +204,8 @@ TEST_F(CanvasResourceDispatcherTest, PlaceholderBeingBlocked) {
   // Attempt to post the 5th time. The latest unposted image will be replaced.
   post_resource_id = NextId(post_resource_id);
   DispatchOneFrame();
-  EXPECT_EQ(3u, GetNumUnreclaimedFramesPosted());
+  EXPECT_EQ(CanvasResourceDispatcher::kMaxUnreclaimedPlaceholderFrames,
+            GetNumUnreclaimedFramesPosted());
   EXPECT_EQ(NextId(post_resource_id), PeekNextResourceId());
   EXPECT_TRUE(GetLatestUnpostedImage());
   EXPECT_EQ(post_resource_id, GetLatestUnpostedResourceId());
@@ -194,7 +219,8 @@ TEST_F(CanvasResourceDispatcherTest, PlaceholderBeingBlocked) {
   EXPECT_CALL(*(Dispatcher()), PostImageToPlaceholder(_, post_resource_id));
   Dispatcher()->ReclaimResource(reclaim_resource_id, std::move(frame1));
   // Reclaim 1 frame and post 1 frame, so numPostImagesUnresponded remains as 3
-  EXPECT_EQ(3u, GetNumUnreclaimedFramesPosted());
+  EXPECT_EQ(CanvasResourceDispatcher::kMaxUnreclaimedPlaceholderFrames,
+            GetNumUnreclaimedFramesPosted());
   // Not generating new resource Id
   EXPECT_EQ(NextId(post_resource_id), PeekNextResourceId());
   EXPECT_FALSE(GetLatestUnpostedImage());
@@ -204,7 +230,8 @@ TEST_F(CanvasResourceDispatcherTest, PlaceholderBeingBlocked) {
   EXPECT_CALL(*(Dispatcher()), PostImageToPlaceholder(_, _)).Times(0);
   reclaim_resource_id = NextId(reclaim_resource_id);
   Dispatcher()->ReclaimResource(reclaim_resource_id, std::move(frame2));
-  EXPECT_EQ(2u, GetNumUnreclaimedFramesPosted());
+  EXPECT_EQ(CanvasResourceDispatcher::kMaxUnreclaimedPlaceholderFrames - 1,
+            GetNumUnreclaimedFramesPosted());
   Mock::VerifyAndClearExpectations(Dispatcher());
 }
 
@@ -232,7 +259,8 @@ TEST_P(CanvasResourceDispatcherTest, DispatchFrame) {
 
   auto canvas_resource = CanvasResourceSharedBitmap::Create(
       SkImageInfo::MakeN32Premul(GetSize().width(), GetSize().height()),
-      nullptr /* provider */, cc::PaintFlags::FilterQuality::kLow);
+      /*provider=*/nullptr, shared_image_interface_provider(),
+      cc::PaintFlags::FilterQuality::kLow);
   EXPECT_TRUE(!!canvas_resource);
   EXPECT_EQ(canvas_resource->Size(), GetSize());
 
@@ -269,8 +297,6 @@ TEST_P(CanvasResourceDispatcherTest, DispatchFrame) {
             EXPECT_TRUE(texture_quad->premultiplied_alpha);
             EXPECT_EQ(texture_quad->uv_top_left, gfx::PointF(0.0f, 0.0f));
             EXPECT_EQ(texture_quad->uv_bottom_right, gfx::PointF(1.0f, 1.0f));
-            EXPECT_THAT(texture_quad->vertex_opacity,
-                        ::testing::ElementsAre(1.f, 1.f, 1.f, 1.f));
             // |y_flipped| should follow |vertical_flip| on GPU compositing; but
             // we don't have that in unit tests, so it's always false.
             EXPECT_FALSE(texture_quad->y_flipped);

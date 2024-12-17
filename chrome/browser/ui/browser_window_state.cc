@@ -2,10 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "chrome/browser/ui/browser_window_state.h"
 
 #include <stddef.h>
 
+#include <string_view>
 #include <utility>
 
 #include "base/command_line.h"
@@ -13,7 +19,6 @@
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/buildflags.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_service_base.h"
 #include "chrome/browser/sessions/session_service_lookup.h"
 #include "chrome/browser/ui/browser.h"
@@ -23,6 +28,7 @@
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
+#include "ui/base/mojom/window_show_state.mojom.h"
 
 namespace chrome {
 namespace {
@@ -31,49 +37,14 @@ namespace {
 bool ParseCommaSeparatedIntegers(const std::string& str,
                                  int* ret_num1,
                                  int* ret_num2) {
-  size_t num1_size = str.find_first_of(',');
-  if (num1_size == std::string::npos)
+  const size_t comma = str.find(',');
+  if (comma == std::string::npos) {
     return false;
-
-  size_t num2_pos = num1_size + 1;
-  size_t num2_size = str.size() - num2_pos;
-  int num1 = 0;
-  int num2 = 0;
-  if (!base::StringToInt(str.substr(0, num1_size), &num1) ||
-      !base::StringToInt(str.substr(num2_pos, num2_size), &num2))
-    return false;
-
-  *ret_num1 = num1;
-  *ret_num2 = num2;
-  return true;
-}
-
-class WindowPlacementPrefUpdate : public DictionaryPrefUpdate {
- public:
-  WindowPlacementPrefUpdate(PrefService* service,
-                            const std::string& window_name)
-      : DictionaryPrefUpdate(service, prefs::kAppWindowPlacement),
-        window_name_(window_name) {}
-
-  WindowPlacementPrefUpdate(const WindowPlacementPrefUpdate&) = delete;
-  WindowPlacementPrefUpdate& operator=(const WindowPlacementPrefUpdate&) =
-      delete;
-
-  ~WindowPlacementPrefUpdate() override {}
-
-  base::Value* Get() override {
-    base::Value* all_apps_dict = DictionaryPrefUpdate::Get();
-    base::Value* this_app_dict = all_apps_dict->FindDictPath(window_name_);
-    if (!this_app_dict) {
-      this_app_dict = all_apps_dict->SetPath(
-          window_name_, base::Value(base::Value::Type::DICTIONARY));
-    }
-    return this_app_dict;
   }
-
- private:
-  const std::string window_name_;
-};
+  auto view = std::string_view(str);
+  return base::StringToInt(view.substr(0, comma), ret_num1) &&
+         base::StringToInt(view.substr(comma + 1), ret_num2);
+}
 
 }  // namespace
 
@@ -95,15 +66,32 @@ std::string GetWindowName(const Browser* browser) {
   }
 }
 
-std::unique_ptr<DictionaryPrefUpdate> GetWindowPlacementDictionaryReadWrite(
+base::Value::Dict& GetWindowPlacementDictionaryReadWrite(
     const std::string& window_name,
-    PrefService* prefs) {
+    PrefService* prefs,
+    std::unique_ptr<ScopedDictPrefUpdate>& scoped_update) {
   DCHECK(!window_name.empty());
-  // A normal DictionaryPrefUpdate will suffice for non-app windows.
+  // Non-app window placements each use their own per-window-name dictionary
+  // preference, so can make a ScopedDictPrefUpdate for the relevant preference,
+  // and return its dictionary directly.
   if (prefs->FindPreference(window_name)) {
-    return std::make_unique<DictionaryPrefUpdate>(prefs, window_name);
+    scoped_update = std::make_unique<ScopedDictPrefUpdate>(prefs, window_name);
+    return scoped_update->Get();
   }
-  return std::make_unique<WindowPlacementPrefUpdate>(prefs, window_name);
+
+  // The window placements for all apps are stored in a single dictionary
+  // preference, with per-window-name nested dictionaries, so need to make
+  // ScopedDictPrefUpdate and then find the relevant dictionary within it, based
+  // on window name.
+  scoped_update =
+      std::make_unique<ScopedDictPrefUpdate>(prefs, prefs::kAppWindowPlacement);
+  base::Value::Dict* this_app_dict =
+      (*scoped_update)->FindDictByDottedPath(window_name);
+  if (this_app_dict)
+    return *this_app_dict;
+  return (*scoped_update)
+      ->SetByDottedPath(window_name, base::Value::Dict())
+      ->GetDict();
 }
 
 const base::Value::Dict* GetWindowPlacementDictionaryReadOnly(
@@ -136,7 +124,7 @@ bool SavedBoundsAreContentBounds(const Browser* browser) {
 
 void SaveWindowPlacement(const Browser* browser,
                          const gfx::Rect& bounds,
-                         ui::WindowShowState show_state) {
+                         ui::mojom::WindowShowState show_state) {
   // Save to the session storage service, used when reloading a past session.
   // Note that we don't want to be the ones who cause lazy initialization of
   // the session service. This function gets called during initial window
@@ -163,7 +151,7 @@ void SaveWindowVisibleOnAllWorkspaces(const Browser* browser,
 
 void GetSavedWindowBoundsAndShowState(const Browser* browser,
                                       gfx::Rect* bounds,
-                                      ui::WindowShowState* show_state) {
+                                      ui::mojom::WindowShowState* show_state) {
   DCHECK(browser);
   DCHECK(bounds);
   DCHECK(show_state);
@@ -183,7 +171,7 @@ namespace internal {
 void UpdateWindowBoundsAndShowStateFromCommandLine(
     const base::CommandLine& command_line,
     gfx::Rect* bounds,
-    ui::WindowShowState* show_state) {
+    ui::mojom::WindowShowState* show_state) {
   // Allow command-line flags to override the window size and position. If
   // either of these is specified then set the show state to NORMAL so that
   // they are immediately respected.
@@ -192,7 +180,7 @@ void UpdateWindowBoundsAndShowStateFromCommandLine(
     int width, height;
     if (ParseCommaSeparatedIntegers(str, &width, &height)) {
       bounds->set_size(gfx::Size(width, height));
-      *show_state = ui::SHOW_STATE_NORMAL;
+      *show_state = ui::mojom::WindowShowState::kNormal;
     }
   }
   if (command_line.HasSwitch(switches::kWindowPosition)) {
@@ -201,7 +189,7 @@ void UpdateWindowBoundsAndShowStateFromCommandLine(
     int x, y;
     if (ParseCommaSeparatedIntegers(str, &x, &y)) {
       bounds->set_origin(gfx::Point(x, y));
-      *show_state = ui::SHOW_STATE_NORMAL;
+      *show_state = ui::mojom::WindowShowState::kNormal;
     }
   }
 }

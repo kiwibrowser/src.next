@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,13 @@ namespace blink {
 
 CascadeLayer* CascadeLayer::FindDirectSubLayer(const AtomicString& name) const {
   // Anonymous layers are all distinct.
-  if (name == g_empty_atom)
+  if (name == g_empty_atom) {
     return nullptr;
+  }
   for (const auto& sub_layer : direct_sub_layers_) {
-    if (sub_layer->GetName() == name)
-      return sub_layer;
+    if (sub_layer->GetName() == name) {
+      return sub_layer.Get();
+    }
   }
   return nullptr;
 }
@@ -42,13 +44,21 @@ String CascadeLayer::ToStringForTesting() const {
 void CascadeLayer::ToStringInternal(StringBuilder& result,
                                     const String& prefix) const {
   for (const auto& sub_layer : direct_sub_layers_) {
-    AtomicString name =
-        sub_layer->name_.length() ? sub_layer->name_ : "(anonymous)";
-    if (result.length())
+    String name =
+        sub_layer->name_.length() ? sub_layer->name_ : String("(anonymous)");
+    if (result.length()) {
       result.Append(",");
+    }
     result.Append(prefix);
     result.Append(name);
     sub_layer->ToStringInternal(result, prefix + name + ".");
+  }
+}
+
+void CascadeLayer::Merge(const CascadeLayer& other, LayerMap& mapping) {
+  mapping.insert(&other, this);
+  for (CascadeLayer* sub_layer : other.direct_sub_layers_) {
+    GetOrAddSubLayer({sub_layer->GetName()})->Merge(*sub_layer, mapping);
   }
 }
 

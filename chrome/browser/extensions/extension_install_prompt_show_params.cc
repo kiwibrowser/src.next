@@ -9,29 +9,46 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/native_window_tracker.h"
 #include "content/public/browser/web_contents.h"
+#include "ui/views/native_window_tracker.h"
+
+#if defined(USE_AURA)
+#include "ui/aura/window.h"
+#endif
 
 namespace {
 
-gfx::NativeWindow NativeWindowForWebContents(content::WebContents* contents) {
-  if (!contents)
-    return nullptr;
+#if defined(USE_AURA)
+bool g_root_checking_enabled = true;
+#endif
 
-  return contents->GetTopLevelNativeWindow();
+bool RootCheck(gfx::NativeWindow window) {
+#if defined(USE_AURA)
+  // If the window is not contained in a root window, then it's not connected
+  // to a display and can't be used as the context. To do otherwise results in
+  // checks later on assuming context has a root.
+  return !g_root_checking_enabled || (window->GetRootWindow() != nullptr);
+#else
+  return true;
+#endif
 }
-
 }  // namespace
 
 ExtensionInstallPromptShowParams::ExtensionInstallPromptShowParams(
     content::WebContents* contents)
-    : profile_(contents
-                   ? Profile::FromBrowserContext(contents->GetBrowserContext())
-                   : nullptr),
-      parent_web_contents_(contents ? contents->GetWeakPtr() : nullptr),
-      parent_window_(NativeWindowForWebContents(contents)) {
-  if (parent_window_)
-    native_window_tracker_ = NativeWindowTracker::Create(parent_window_);
+    : profile_(Profile::FromBrowserContext(contents->GetBrowserContext())),
+      parent_web_contents_(contents->GetWeakPtr()) {
+  DCHECK(profile_);
+  DCHECK(parent_web_contents_);
+
+  if (!parent_web_contents_->GetTopLevelNativeWindow()) {
+    // WebContents were created without a top-level window. This can happen when
+    // the callers pass a dummy WebContents, or in some tests. There is no
+    // window to track in this case. Reset the WebContents pointer and just keep
+    // the profile. If we keep web contents in this case, WasParentDestroyed()
+    // will always return true, even though there is no real window to check.
+    parent_web_contents_.reset();
+  }
 }
 
 ExtensionInstallPromptShowParams::ExtensionInstallPromptShowParams(
@@ -40,8 +57,10 @@ ExtensionInstallPromptShowParams::ExtensionInstallPromptShowParams(
     : profile_(profile),
       parent_web_contents_(nullptr),
       parent_window_(parent_window) {
-  if (parent_window_)
-    native_window_tracker_ = NativeWindowTracker::Create(parent_window_);
+  DCHECK(profile);
+  if (parent_window_) {
+    native_window_tracker_ = views::NativeWindowTracker::Create(parent_window_);
+  }
 }
 
 ExtensionInstallPromptShowParams::~ExtensionInstallPromptShowParams() = default;
@@ -51,16 +70,57 @@ content::WebContents* ExtensionInstallPromptShowParams::GetParentWebContents() {
 }
 
 gfx::NativeWindow ExtensionInstallPromptShowParams::GetParentWindow() {
-  return (native_window_tracker_ &&
-          !native_window_tracker_->WasNativeWindowClosed())
-             ? parent_window_
-             : nullptr;
+  if (WasParentDestroyed()) {
+    return nullptr;
+  }
+
+  if (WasConfiguredForWebContents()) {
+    return parent_web_contents_->GetTopLevelNativeWindow();
+  }
+
+  return parent_window_;
 }
 
 bool ExtensionInstallPromptShowParams::WasParentDestroyed() {
-  const bool parent_web_contents_destroyed =
-      parent_web_contents_.WasInvalidated();
-  return parent_web_contents_destroyed ||
-         (native_window_tracker_ &&
-          native_window_tracker_->WasNativeWindowClosed());
+  if (profile_->ShutdownStarted()) {
+    return true;
+  }
+
+  if (WasConfiguredForWebContents()) {
+    return !parent_web_contents_ || parent_web_contents_->IsBeingDestroyed() ||
+           !parent_web_contents_->GetTopLevelNativeWindow() ||
+           !RootCheck(parent_web_contents_->GetTopLevelNativeWindow());
+  }
+
+  if (native_window_tracker_) {
+    return native_window_tracker_->WasNativeWindowDestroyed() ||
+           !RootCheck(parent_window_);
+  }
+
+  return false;
 }
+
+bool ExtensionInstallPromptShowParams::WasConfiguredForWebContents() {
+  // If we ever had a valid web contents, it means we were configured for it.
+  return parent_web_contents_ || parent_web_contents_.WasInvalidated();
+}
+
+namespace test {
+
+ScopedDisableRootChecking::ScopedDisableRootChecking() {
+#if defined(USE_AURA)
+  // There should be no need to support multiple ScopedDisableRootCheckings
+  // at a time.
+  DCHECK(g_root_checking_enabled);
+  g_root_checking_enabled = false;
+#endif
+}
+
+ScopedDisableRootChecking::~ScopedDisableRootChecking() {
+#if defined(USE_AURA)
+  DCHECK(!g_root_checking_enabled);
+  g_root_checking_enabled = true;
+#endif
+}
+
+}  // namespace test

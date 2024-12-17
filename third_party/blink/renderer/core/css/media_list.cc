@@ -20,15 +20,16 @@
 #include "third_party/blink/renderer/core/css/media_list.h"
 
 #include <memory>
+#include "third_party/blink/renderer/core/css/css_style_rule.h"
 #include "third_party/blink/renderer/core/css/css_style_sheet.h"
 #include "third_party/blink/renderer/core/css/media_query_exp.h"
 #include "third_party/blink/renderer/core/css/media_query_set_owner.h"
 #include "third_party/blink/renderer/core/css/parser/media_query_parser.h"
+#include "third_party/blink/renderer/core/css/style_sheet_contents.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -64,8 +65,9 @@ MediaQuerySet::MediaQuerySet(HeapVector<Member<const MediaQuery>> queries)
 MediaQuerySet* MediaQuerySet::Create(
     const String& media_string,
     const ExecutionContext* execution_context) {
-  if (media_string.IsEmpty())
+  if (media_string.empty()) {
     return MediaQuerySet::Create();
+  }
 
   return MediaQueryParser::ParseMediaQuerySet(media_string, execution_context);
 }
@@ -83,8 +85,9 @@ const MediaQuerySet* MediaQuerySet::CopyAndAdd(
   MediaQuerySet* result = Create(query_string, execution_context);
 
   // Only continue if exactly one media query is found, as described above.
-  if (result->queries_.size() != 1)
+  if (result->queries_.size() != 1) {
     return nullptr;
+  }
 
   const MediaQuery* new_query = result->queries_[0].Get();
   DCHECK(new_query);
@@ -93,8 +96,9 @@ const MediaQuerySet* MediaQuerySet::CopyAndAdd(
   // queries returns true terminate these steps.
   for (wtf_size_t i = 0; i < queries_.size(); ++i) {
     const MediaQuery& query = *queries_[i];
-    if (query == *new_query)
+    if (query == *new_query) {
       return nullptr;
+    }
   }
 
   HeapVector<Member<const MediaQuery>> new_queries = queries_;
@@ -112,8 +116,9 @@ const MediaQuerySet* MediaQuerySet::CopyAndRemove(
   MediaQuerySet* result = Create(query_string_to_remove, execution_context);
 
   // Only continue if exactly one media query is found, as described above.
-  if (result->queries_.size() != 1)
+  if (result->queries_.size() != 1) {
     return this;
+  }
 
   const MediaQuery* new_query = result->queries_[0];
   DCHECK(new_query);
@@ -132,8 +137,9 @@ const MediaQuerySet* MediaQuerySet::CopyAndRemove(
     }
   }
 
-  if (!found)
+  if (!found) {
     return nullptr;
+  }
 
   return MakeGarbageCollected<MediaQuerySet>(std::move(new_queries));
 }
@@ -143,21 +149,14 @@ String MediaQuerySet::MediaText() const {
 
   bool first = true;
   for (wtf_size_t i = 0; i < queries_.size(); ++i) {
-    if (!first)
+    if (!first) {
       text.Append(", ");
-    else
+    } else {
       first = false;
+    }
     text.Append(queries_[i]->CssText());
   }
   return text.ReleaseString();
-}
-
-bool MediaQuerySet::HasUnknown() const {
-  for (const auto& media_query : QueryVector()) {
-    if (media_query->HasUnknown())
-      return true;
-  }
-  return false;
 }
 
 MediaList::MediaList(CSSStyleSheet* parent_sheet)
@@ -171,8 +170,6 @@ MediaList::MediaList(CSSRule* parent_rule)
 }
 
 String MediaList::mediaText(ExecutionContext* execution_context) const {
-  if (Queries()->HasUnknown())
-    UseCounter::Count(execution_context, WebFeature::kCSSMediaListUnknown);
   return MediaTextInternal();
 }
 
@@ -182,15 +179,15 @@ void MediaList::setMediaText(const ExecutionContext* execution_context,
 
   Owner()->SetMediaQueries(MediaQuerySet::Create(value, execution_context));
 
-  if (parent_style_sheet_)
-    parent_style_sheet_->DidMutate(CSSStyleSheet::Mutation::kSheet);
+  NotifyMutation();
 }
 
 String MediaList::item(unsigned index) const {
   const HeapVector<Member<const MediaQuery>>& queries =
       Queries()->QueryVector();
-  if (index < queries.size())
+  if (index < queries.size()) {
     return queries[index]->CssText();
+  }
   return String();
 }
 
@@ -207,8 +204,8 @@ void MediaList::deleteMedium(const ExecutionContext* execution_context,
     return;
   }
   Owner()->SetMediaQueries(new_media_queries);
-  if (parent_style_sheet_)
-    parent_style_sheet_->DidMutate(CSSStyleSheet::Mutation::kSheet);
+
+  NotifyMutation();
 }
 
 void MediaList::appendMedium(const ExecutionContext* execution_context,
@@ -217,12 +214,12 @@ void MediaList::appendMedium(const ExecutionContext* execution_context,
 
   const MediaQuerySet* new_media_queries =
       Queries()->CopyAndAdd(medium, execution_context);
-  if (!new_media_queries)
+  if (!new_media_queries) {
     return;
+  }
   Owner()->SetMediaQueries(new_media_queries);
 
-  if (parent_style_sheet_)
-    parent_style_sheet_->DidMutate(CSSStyleSheet::Mutation::kSheet);
+  NotifyMutation();
 }
 
 const MediaQuerySet* MediaList::Queries() const {
@@ -238,6 +235,22 @@ void MediaList::Trace(Visitor* visitor) const {
 MediaQuerySetOwner* MediaList::Owner() const {
   return parent_rule_ ? parent_rule_->GetMediaQuerySetOwner()
                       : parent_style_sheet_.Get();
+}
+
+void MediaList::NotifyMutation() {
+  if (parent_rule_ && parent_rule_->parentStyleSheet()) {
+    StyleSheetContents* parent_contents =
+        parent_rule_->parentStyleSheet()->Contents();
+    if (parent_rule_->GetType() == CSSRule::kStyleRule) {
+      parent_contents->NotifyRuleChanged(
+          static_cast<CSSStyleRule*>(parent_rule_.Get())->GetStyleRule());
+    } else {
+      parent_contents->NotifyDiffUnrepresentable();
+    }
+  }
+  if (parent_style_sheet_) {
+    parent_style_sheet_->DidMutate(CSSStyleSheet::Mutation::kSheet);
+  }
 }
 
 }  // namespace blink

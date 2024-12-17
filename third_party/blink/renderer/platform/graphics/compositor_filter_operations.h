@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,7 +34,7 @@ class PLATFORM_EXPORT CompositorFilterOperations {
   void AppendOpacityFilter(float amount);
   void AppendBlurFilter(float amount,
                         SkTileMode tile_mode = SkTileMode::kDecal);
-  void AppendDropShadowFilter(gfx::Point offset,
+  void AppendDropShadowFilter(gfx::Vector2d offset,
                               float std_deviation,
                               const Color& color);
   void AppendColorMatrixFilter(const cc::FilterOperation::Matrix&);

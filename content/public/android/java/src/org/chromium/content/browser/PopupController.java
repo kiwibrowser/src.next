@@ -13,15 +13,11 @@ import org.chromium.content_public.browser.WebContents;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Controls all the popup views on content view.
- */
+/** Controls all the popup views on content view. */
 public class PopupController implements UserData {
     /** Interface for popup views that expose a method for hiding itself. */
     public interface HideablePopup {
-        /**
-         * Called when the popup needs to be hidden.
-         */
+        /** Called when the popup needs to be hidden. */
         void hide();
     }
 
@@ -54,8 +50,9 @@ public class PopupController implements UserData {
      */
     public static void hidePopupsAndClearSelection(WebContents webContents) {
         if (webContents == null) return;
+
         SelectionPopupControllerImpl controller =
-                SelectionPopupControllerImpl.fromWebContents(webContents);
+                SelectionPopupControllerImpl.fromWebContentsNoCreate(webContents);
         if (controller != null) controller.destroyActionModeAndUnselect();
         PopupController.hideAll(webContents);
     }

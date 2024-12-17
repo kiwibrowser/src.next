@@ -6,9 +6,9 @@
 #define NET_BASE_DATA_URL_H_
 
 #include <string>
+#include <string_view>
 
 #include "base/memory/scoped_refptr.h"
-#include "base/strings/string_piece.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_export.h"
 
@@ -17,6 +17,12 @@ class GURL;
 namespace net {
 
 class HttpResponseHeaders;
+
+// This command line switch provides a means to disable data URL whitespace
+// kKeepWhitespaceForDataUrls feature flag. This is set part of an enterprise
+// policy and is intended as a kill switch.
+inline constexpr std::string_view kRemoveWhitespaceForDataURLs =
+    "remove-keep-whitespace-for-data-urls";
 
 // See RFC 2397 for a complete description of the 'data' URL scheme.
 //
@@ -74,7 +80,7 @@ class NET_EXPORT DataURL {
   // strings, and |*headers| must be nullptr. Returns net::OK on success.
   [[nodiscard]] static Error BuildResponse(
       const GURL& url,
-      base::StringPiece method,
+      std::string_view method,
       std::string* mime_type,
       std::string* charset,
       std::string* data,

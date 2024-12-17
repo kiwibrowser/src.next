@@ -8,16 +8,15 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
-#include "chrome/browser/extensions/extension_action_icon_factory.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
-#include "chrome/browser/extensions/site_permissions_helper.h"
+#include "chrome/browser/extensions/permissions/site_permissions_helper.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_hover_card_types.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
+#include "extensions/browser/extension_action_icon_factory.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_host_observer.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_id.h"
-#include "ui/gfx/image/image.h"
 
 class Browser;
 class ExtensionActionPlatformDelegate;
@@ -32,6 +31,10 @@ class ExtensionAction;
 class ExtensionRegistry;
 class ExtensionViewHost;
 class SitePermissionsHelper;
+}  // namespace extensions
+
+namespace ui {
+class ImageModel;
 }
 
 // The platform-independent controller for an ExtensionAction that is shown on
@@ -41,7 +44,7 @@ class SitePermissionsHelper;
 // members (see also comments above ExtensionIsValid()).
 class ExtensionActionViewController
     : public ToolbarActionViewController,
-      public ExtensionActionIconFactory::Observer,
+      public extensions::ExtensionActionIconFactory::Observer,
       public extensions::ExtensionContextMenuModel::PopupDelegate,
       public extensions::ExtensionHostObserver {
  public:
@@ -64,9 +67,11 @@ class ExtensionActionViewController
   // ToolbarActionViewController:
   std::string GetId() const override;
   void SetDelegate(ToolbarActionViewDelegate* delegate) override;
-  gfx::Image GetIcon(content::WebContents* web_contents,
-                     const gfx::Size& size) override;
+  ui::ImageModel GetIcon(content::WebContents* web_contents,
+                         const gfx::Size& size) override;
   std::u16string GetActionName() const override;
+  std::u16string GetActionTitle(
+      content::WebContents* web_contents) const override;
   std::u16string GetAccessibleName(
       content::WebContents* web_contents) const override;
   std::u16string GetTooltip(content::WebContents* web_contents) const override;
@@ -76,15 +81,15 @@ class ExtensionActionViewController
       content::WebContents* web_contents) const override;
   bool IsEnabled(content::WebContents* web_contents) const override;
   bool IsShowingPopup() const override;
-  bool IsRequestingSiteAccess(
-      content::WebContents* web_contents) const override;
   void HidePopup() override;
   gfx::NativeView GetPopupNativeView() override;
   ui::MenuModel* GetContextMenu(
       extensions::ExtensionContextMenuModel::ContextMenuSource
           context_menu_source) override;
-  void OnContextMenuShown() override;
-  void OnContextMenuClosed() override;
+  void OnContextMenuShown(
+      extensions::ExtensionContextMenuModel::ContextMenuSource source) override;
+  void OnContextMenuClosed(
+      extensions::ExtensionContextMenuModel::ContextMenuSource source) override;
   void ExecuteUserAction(InvocationSource source) override;
   void TriggerPopupForAPI(ShowPopupCallback callback) override;
   void UpdateState() override;
@@ -95,6 +100,9 @@ class ExtensionActionViewController
 
   // ExtensionContextMenuModel::PopupDelegate:
   void InspectPopup() override;
+
+  // Trigger an extension popup as a result of API call.
+  void TriggerPopupForAPI();
 
   // Populates |command| with the command associated with |extension|, if one
   // exists. Returns true if |command| was populated.
@@ -118,7 +126,6 @@ class ExtensionActionViewController
   std::unique_ptr<IconWithBadgeImageSource> GetIconImageSourceForTesting(
       content::WebContents* web_contents,
       const gfx::Size& size);
-  bool HasBeenBlockedForTesting(content::WebContents* web_contents) const;
 
  private:
   // New instances should be instantiated with Create().
@@ -129,7 +136,7 @@ class ExtensionActionViewController
       extensions::ExtensionRegistry* extension_registry,
       ExtensionsContainer* extensions_container);
 
-  // ExtensionActionIconFactory::Observer:
+  // extensions::ExtensionActionIconFactory::Observer:
   void OnIconUpdated() override;
 
   // ExtensionHostObserver:
@@ -157,7 +164,7 @@ class ExtensionActionViewController
 
   // Shows the popup with the given |host|.
   void ShowPopup(std::unique_ptr<extensions::ExtensionViewHost> host,
-                 bool grant_tab_permissions,
+                 bool by_user,
                  PopupShowAction show_action,
                  ShowPopupCallback callback);
 
@@ -177,7 +184,8 @@ class ExtensionActionViewController
 
   // The browser action this view represents. The ExtensionAction is not owned
   // by this class.
-  const raw_ptr<extensions::ExtensionAction> extension_action_;
+  const raw_ptr<extensions::ExtensionAction, DanglingUntriaged>
+      extension_action_;
 
   // The corresponding ExtensionsContainer on the toolbar.
   const raw_ptr<ExtensionsContainer> extensions_container_;
@@ -204,7 +212,7 @@ class ExtensionActionViewController
   // It may load the icon asynchronously (in which case the initial icon
   // returned by the factory will be transparent), so we have to observe it for
   // updates to the icon.
-  ExtensionActionIconFactory icon_factory_;
+  extensions::ExtensionActionIconFactory icon_factory_;
 
   // The associated ExtensionRegistry; cached for quick checking.
   raw_ptr<extensions::ExtensionRegistry> extension_registry_;

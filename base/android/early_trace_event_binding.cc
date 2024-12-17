@@ -8,10 +8,12 @@
 
 #include "base/android/jni_string.h"
 #include "base/android/trace_event_binding.h"
-#include "base/base_jni_headers/EarlyTraceEvent_jni.h"
 #include "base/time/time.h"
 #include "base/trace_event/base_tracing.h"
 #include "base/tracing_buildflags.h"
+
+// Must come after all headers that specialize FromJniType() / ToJniType().
+#include "base/tasks_jni/EarlyTraceEvent_jni.h"
 
 namespace base {
 namespace android {
@@ -103,33 +105,30 @@ static void JNI_EarlyTraceEvent_RecordEarlyAsyncBeginEvent(
     const JavaParamRef<jstring>& jname,
     jlong id,
     jlong time_ns) {
-  std::string name = ConvertJavaStringToUTF8(env, jname);
   TRACE_EVENT_BEGIN(internal::kJavaTraceCategory, nullptr,
                     perfetto::Track(static_cast<uint64_t>(id)),
                     TimeTicks::FromJavaNanoTime(time_ns),
                     [&](::perfetto::EventContext& ctx) {
+                      std::string name = ConvertJavaStringToUTF8(env, jname);
                       ctx.event()->set_name(name.c_str());
                     });
 }
 
-static void JNI_EarlyTraceEvent_RecordEarlyAsyncEndEvent(
-    JNIEnv* env,
-    const JavaParamRef<jstring>& jname,
-    jlong id,
-    jlong time_ns) {
-  std::string name = ConvertJavaStringToUTF8(env, jname);
+static void JNI_EarlyTraceEvent_RecordEarlyAsyncEndEvent(JNIEnv* env,
+                                                         jlong id,
+                                                         jlong time_ns) {
   TRACE_EVENT_END(internal::kJavaTraceCategory,
                   perfetto::Track(static_cast<uint64_t>(id)));
 }
 
 bool GetBackgroundStartupTracingFlag() {
-  JNIEnv* env = base::android::AttachCurrentThread();
+  JNIEnv* env = jni_zero::AttachCurrentThread();
   return base::android::Java_EarlyTraceEvent_getBackgroundStartupTracingFlag(
       env);
 }
 
 void SetBackgroundStartupTracingFlag(bool enabled) {
-  JNIEnv* env = base::android::AttachCurrentThread();
+  JNIEnv* env = jni_zero::AttachCurrentThread();
   base::android::Java_EarlyTraceEvent_setBackgroundStartupTracingFlag(env,
                                                                       enabled);
 }

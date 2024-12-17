@@ -4,6 +4,7 @@
 
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_feature_list.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/web_contents.h"
@@ -14,11 +15,12 @@
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/features.h"
 
 namespace content {
 
-// TODO(crbug.com/1317431): WebSQL does not work on Fuchsia.
-#if BUILDFLAG(IS_FUCHSIA)
+// WebSQL is disabled everywhere except Android WebView (crbug.com/333756088).
+#if !BUILDFLAG(IS_ANDROID)
 #define MAYBE_DatabaseTest DISABLED_DatabaseTest
 #else
 #define MAYBE_DatabaseTest DatabaseTest
@@ -27,11 +29,17 @@ class MAYBE_DatabaseTest : public ContentBrowserTest {
  public:
   MAYBE_DatabaseTest() {}
 
+  void SetUp() override {
+    // WebSQL is disabled by default as of M119 (crbug/695592). Enable feature
+    // in tests during deprecation trial and enterprise policy support.
+    base::test::ScopedFeatureList feature_list{blink::features::kWebSQLAccess};
+    ContentBrowserTest::SetUp();
+  }
+
   void RunScriptAndCheckResult(Shell* shell,
                                const std::string& script,
                                const std::string& result) {
-    ASSERT_EQ(result, EvalJs(shell->web_contents(), script,
-                             EXECUTE_SCRIPT_USE_MANUAL_REPLY));
+    ASSERT_EQ(result, EvalJs(shell->web_contents(), script));
   }
 
   void Navigate(Shell* shell) {
@@ -63,9 +71,7 @@ class MAYBE_DatabaseTest : public ContentBrowserTest {
   }
 
   bool HasTable(Shell* shell) {
-    std::string data =
-        EvalJs(shell, "getRecords()", EXECUTE_SCRIPT_USE_MANUAL_REPLY)
-            .ExtractString();
+    std::string data = EvalJs(shell, "getRecords()").ExtractString();
     return data != "getRecords error: [object SQLError]";
   }
 };

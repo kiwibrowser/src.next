@@ -2,10 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// This interface is for managing the global services of the application. Each
-// service is lazily created when requested the first time. The service getters
-// will return NULL if the service is not available, so callers must check for
-// this condition.
+// This class is misnamed. Conceptually, this class owns features which are
+// scoped to the entire process. The features must span multiple profiles. If a
+// feature is scoped to a single profile it should instead be added as a
+// BrowserContextKeyedServiceFactory.
+//
+// Historically, members of this class were lazily instantiated. Furthermore,
+// some members would not be created in tests, resulting in production code
+// adding nullptr checks to make tests pass. This is an anti-pattern and should
+// be avoided. This is not making a statement about lazy initialization (e.g.
+// performing non-trivial setup). This is about having precise lifetime
+// semantics.
+//
+// New members should be added to GlobalFeatures, and be unconditionally
+// instantiated.
 
 #ifndef CHROME_BROWSER_BROWSER_PROCESS_H_
 #define CHROME_BROWSER_BROWSER_PROCESS_H_
@@ -15,7 +25,7 @@
 #include <memory>
 #include <string>
 
-#include "base/callback_forward.h"
+#include "base/functional/callback_forward.h"
 #include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
@@ -27,8 +37,8 @@ class BrowserProcessPlatformPart;
 class BuildState;
 class DownloadRequestLimiter;
 class DownloadStatusUpdater;
+class GlobalFeatures;
 class GpuModeManager;
-class HidPolicyAllowedDevices;
 class IconManager;
 class MediaFileSystemRegistry;
 class NotificationPlatformBridge;
@@ -42,11 +52,13 @@ class SystemNetworkContextManager;
 class WebRtcLogUploader;
 
 #if !BUILDFLAG(IS_ANDROID)
+class HidSystemTrayIcon;
+class UsbSystemTrayIcon;
 class IntranetRedirectDetector;
 #endif
 
-namespace breadcrumbs {
-class BreadcrumbPersistentStorageManager;
+namespace embedder_support {
+class OriginTrialsSettingsStorage;
 }
 
 namespace network {
@@ -56,6 +68,10 @@ class SharedURLLoaderFactory;
 
 namespace safe_browsing {
 class SafeBrowsingService;
+}
+
+namespace signin {
+class ActivePrimaryAccountsMetricsRecorder;
 }
 
 namespace subresource_filter {
@@ -68,10 +84,6 @@ class VariationsService;
 
 namespace component_updater {
 class ComponentUpdateService;
-}
-
-namespace extensions {
-class EventRouterForwarder;
 }
 
 namespace gcm {
@@ -88,6 +100,11 @@ class MetricsServicesManager;
 
 namespace network_time {
 class NetworkTimeTracker;
+}
+
+namespace os_crypt_async {
+class KeyProvider;
+class OSCryptAsync;
 }
 
 namespace policy {
@@ -132,18 +149,21 @@ class BrowserProcess {
   virtual metrics_services_manager::MetricsServicesManager*
   GetMetricsServicesManager() = 0;
 
-  // Services: any of these getters may return NULL
+  // Gets the OriginTrialsSettingsStorage, constructing it if necessary.
+  virtual embedder_support::OriginTrialsSettingsStorage*
+  GetOriginTrialsSettingsStorage() = 0;
+
+  // Services: any of these getters may return null.
   virtual metrics::MetricsService* metrics_service() = 0;
   virtual ProfileManager* profile_manager() = 0;
   virtual PrefService* local_state() = 0;
   virtual scoped_refptr<network::SharedURLLoaderFactory>
   shared_url_loader_factory() = 0;
+  virtual signin::ActivePrimaryAccountsMetricsRecorder*
+  active_primary_accounts_metrics_recorder() = 0;
   virtual variations::VariationsService* variations_service() = 0;
 
   virtual BrowserProcessPlatformPart* platform_part() = 0;
-
-  virtual extensions::EventRouterForwarder*
-      extension_event_router_forwarder() = 0;
 
   // Returns the manager for desktop notifications.
   // TODO(miguelg) This is in the process of being deprecated in favour of
@@ -188,10 +208,13 @@ class BrowserProcess {
   virtual IntranetRedirectDetector* intranet_redirect_detector() = 0;
 #endif
 
-  // Returns the locale used by the application. It is the IETF language tag,
-  // defined in BCP 47. The region subtag is not included when it adds no
+  // Sets or gets the locale used by the application. It is the IETF language
+  // tag, defined in BCP 47. The region subtag is not included when it adds no
   // distinguishing information to the language tag (e.g. both "en-US" and "fr"
   // are correct here).
+  //
+  // Setting the locale updates a few core places where this information is
+  // stored, but does not reload any resources or refresh any UI.
   virtual const std::string& GetApplicationLocale() = 0;
   virtual void SetApplicationLocale(const std::string& actual_locale) = 0;
 
@@ -218,11 +241,16 @@ class BrowserProcess {
   virtual subresource_filter::RulesetService*
   subresource_filter_ruleset_service() = 0;
 
+  // Returns the service providing versioned storage for rules used by the
+  // Fingerprinting Protection subresource filter.
+  virtual subresource_filter::RulesetService*
+  fingerprinting_protection_ruleset_service() = 0;
+
   // Returns the StartupData which owns any pre-created objects in //chrome
   // before the full browser starts.
   virtual StartupData* startup_data() = 0;
 
-// TODO(crbug.com/1052397): Revisit once build flag switch of lacros-chrome is
+// TODO(crbug.com/40118868): Revisit once build flag switch of lacros-chrome is
 // complete.
 #if BUILDFLAG(IS_WIN) || (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS))
   // This will start a timer that, if Chrome is in persistent mode, will check
@@ -261,17 +289,31 @@ class BrowserProcess {
   // through the policy engine.
   virtual SerialPolicyAllowedPorts* serial_policy_allowed_ports() = 0;
 
-  // Returns the object which keeps track of Human Interface Device (HID)
-  // permissions configured through the policy engine.
-  virtual HidPolicyAllowedDevices* hid_policy_allowed_devices() = 0;
+  // Returns the object which maintains Human Interface Device (HID) system tray
+  // icon.
+  virtual HidSystemTrayIcon* hid_system_tray_icon() = 0;
+
+  // Returns the object which maintains Universal Serial Bus (USB) system tray
+  // icon.
+  virtual UsbSystemTrayIcon* usb_system_tray_icon() = 0;
 #endif
 
-  virtual BuildState* GetBuildState() = 0;
+  // Obtain the browser instance of OSCryptAsync, which should be used for data
+  // encryption.
+  virtual os_crypt_async::OSCryptAsync* os_crypt_async() = 0;
 
-  // Returns the BreadcrumbPersistentStorageManager writing breadcrumbs to disk,
-  // or nullptr if breadcrumbs logging is disabled.
-  virtual breadcrumbs::BreadcrumbPersistentStorageManager*
-  GetBreadcrumbPersistentStorageManager() = 0;
+  // Add an additional OSCryptAsync provider for use in tests. Should only be
+  // called once, during startup.
+  virtual void set_additional_os_crypt_async_provider_for_test(
+      size_t precedence,
+      std::unique_ptr<os_crypt_async::KeyProvider> provider) = 0;
+
+  virtual BuildState* GetBuildState() = 0;
+  // Returns the feature controllers scoped to this browser process.
+  virtual GlobalFeatures* GetFeatures() = 0;
+
+  // Do not add new members to this class. Instead use GlobalFeatures. See file
+  // level comment for details.
 };
 
 extern BrowserProcess* g_browser_process;

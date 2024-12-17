@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,6 +39,15 @@ AtomicString CreateVisionDeficiencyFilterUrl(
   // Honolulu, HI, 2017. pp. 6750-6758.
   // https://openaccess.thecvf.com/content_cvpr_2017/papers/Nguyen_Why_You_Should_CVPR_2017_paper.pdf
   switch (vision_deficiency) {
+    case VisionDeficiency::kBlurredVision:
+      return CreateFilterDataUrl("<feGaussianBlur stdDeviation=\"2\"/>");
+    case VisionDeficiency::kReducedContrast:
+      return CreateFilterDataUrl(
+          "<feComponentTransfer>"
+          "  <feFuncR type=\"gamma\" offset=\"0.5\"/>"
+          "  <feFuncG type=\"gamma\" offset=\"0.5\"/>"
+          "  <feFuncB type=\"gamma\" offset=\"0.5\"/>"
+          "</feComponentTransfer>");
     case VisionDeficiency::kAchromatopsia:
       return CreateFilterDataUrl(
           "<feColorMatrix values=\""
@@ -47,8 +56,6 @@ AtomicString CreateVisionDeficiencyFilterUrl(
           "0.213  0.715  0.072  0.000  0.000 "
           "0.000  0.000  0.000  1.000  0.000 "
           "\"/>");
-    case VisionDeficiency::kBlurredVision:
-      return CreateFilterDataUrl("<feGaussianBlur stdDeviation=\"2\"/>");
     case VisionDeficiency::kDeuteranopia:
       return CreateFilterDataUrl(
           "<feColorMatrix values=\""
@@ -74,8 +81,8 @@ AtomicString CreateVisionDeficiencyFilterUrl(
           " 0.000  0.000  0.000  1.000  0.000 "
           "\"/>");
     case VisionDeficiency::kNoVisionDeficiency:
-      NOTREACHED();
-      return "";
+      NOTREACHED_IN_MIGRATION();
+      return g_empty_atom;
   }
 }
 

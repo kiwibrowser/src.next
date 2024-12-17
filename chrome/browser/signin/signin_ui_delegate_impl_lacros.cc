@@ -4,7 +4,7 @@
 
 #include "chrome/browser/signin/signin_ui_delegate_impl_lacros.h"
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -12,6 +12,7 @@
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/signin/signin_ui_chromeos_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/webui/signin/turn_sync_on_helper.h"
 #include "components/account_manager_core/account_manager_facade.h"
@@ -20,66 +21,9 @@
 #include "components/signin/public/base/signin_metrics.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "google_apis/gaia/core_account_id.h"
+#include "google_apis/gaia/gaia_auth_util.h"
 
 namespace signin_ui_util {
-namespace {
-
-account_manager::AccountManagerFacade::AccountAdditionSource
-GetAddAccountSourceFromAccessPoint(signin_metrics::AccessPoint access_point) {
-  switch (access_point) {
-    case signin_metrics::AccessPoint::ACCESS_POINT_SETTINGS:
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
-          kChromeSettingsTurnOnSyncButton;
-    case signin_metrics::AccessPoint::ACCESS_POINT_AVATAR_BUBBLE_SIGN_IN:
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
-          kAvatarBubbleTurnOnSyncAddAccount;
-    case signin_metrics::AccessPoint::ACCESS_POINT_EXTENSIONS:
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
-          kChromeExtensionAddAccount;
-    case signin_metrics::AccessPoint::ACCESS_POINT_BOOKMARK_BUBBLE:
-    case signin_metrics::AccessPoint::ACCESS_POINT_PASSWORD_BUBBLE:
-    case signin_metrics::AccessPoint::ACCESS_POINT_EXTENSION_INSTALL_BUBBLE:
-    case signin_metrics::AccessPoint::ACCESS_POINT_RECENT_TABS:
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
-          kChromeSyncPromoAddAccount;
-    default:
-      NOTREACHED() << "Add account is requested from an unknown access point "
-                   << static_cast<int>(access_point);
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
-          kMaxValue;
-  }
-}
-
-account_manager::AccountManagerFacade::AccountAdditionSource
-GetAccountReauthSourceFromAccessPoint(
-    signin_metrics::AccessPoint access_point) {
-  switch (access_point) {
-    case signin_metrics::AccessPoint::ACCESS_POINT_SETTINGS:
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
-          kChromeSettingsReauthAccountButton;
-    case signin_metrics::AccessPoint::ACCESS_POINT_AVATAR_BUBBLE_SIGN_IN:
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
-          kAvatarBubbleReauthAccountButton;
-    case signin_metrics::AccessPoint::ACCESS_POINT_EXTENSIONS:
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
-          kChromeExtensionReauth;
-    case signin_metrics::AccessPoint::ACCESS_POINT_BOOKMARK_BUBBLE:
-    case signin_metrics::AccessPoint::ACCESS_POINT_PASSWORD_BUBBLE:
-    case signin_metrics::AccessPoint::ACCESS_POINT_EXTENSION_INSTALL_BUBBLE:
-    case signin_metrics::AccessPoint::ACCESS_POINT_RECENT_TABS:
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
-          kChromeSyncPromoReauth;
-    case signin_metrics::AccessPoint::ACCESS_POINT_WEB_SIGNIN:
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
-          kContentAreaReauth;
-    default:
-      NOTREACHED() << "Reauth is requested from an unknown access point "
-                   << static_cast<int>(access_point);
-      return account_manager::AccountManagerFacade::AccountAdditionSource::
-          kMaxValue;
-  }
-}
-}  // namespace
 
 void SigninUiDelegateImplLacros::ShowSigninUI(
     Profile* profile,
@@ -120,7 +64,7 @@ void SigninUiDelegateImplLacros::ShowReauthUI(
 
   AccountReconcilor* account_reconcilor =
       AccountReconcilorFactory::GetForProfile(profile);
-  base::OnceClosure reauth_completed_closure =
+  auto reauth_completed_closure =
       base::BindOnce(&SigninUiDelegateImplLacros::OnReauthComplete,
                      // base::Unretained() is fine because
                      // SigninUiDelegateImplLacros is a singleton.
@@ -154,13 +98,11 @@ void SigninUiDelegateImplLacros::OnAccountAdded(
   if (!browser)
     return;
 
-  ShowTurnSyncOnUI(profile, access_point, promo_action,
-                   is_reauth ? signin_metrics::Reason::kReauthentication
-                             : signin_metrics::Reason::kSigninPrimaryAccount,
-                   account_id,
+  ShowTurnSyncOnUI(profile, access_point, promo_action, account_id,
                    is_reauth
                        ? TurnSyncOnHelper::SigninAbortedMode::KEEP_ACCOUNT
-                       : TurnSyncOnHelper::SigninAbortedMode::REMOVE_ACCOUNT);
+                       : TurnSyncOnHelper::SigninAbortedMode::REMOVE_ACCOUNT,
+                   /*is_sync_promo=*/false);
 }
 
 void SigninUiDelegateImplLacros::OnReauthComplete(
@@ -169,7 +111,27 @@ void SigninUiDelegateImplLacros::OnReauthComplete(
     const base::FilePath& profile_path,
     signin_metrics::AccessPoint access_point,
     signin_metrics::PromoAction promo_action,
-    const std::string& email) {
+    const std::string& email,
+    const account_manager::AccountUpsertionResult& result) {
+  if (result.status() !=
+          account_manager::AccountUpsertionResult::Status::kSuccess &&
+      result.status() != account_manager::AccountUpsertionResult::Status::
+                             kIncompatibleMojoVersions) {
+    // Don't early return in case of incompatime mojo versions, to preserve the
+    // original behavior.
+    // TODO(b/275687807): Remove this in later Lacros version.
+    return;
+  }
+
+  if (result.account().has_value() &&
+      !gaia::AreEmailsSame(result.account()->raw_email, email)) {
+    // User has changed account, and didn't complete the reauthentication
+    // requested for `email`.
+    LOG(WARNING) << "User reauthenticated different account, don't show the "
+                    "sync UI flow";
+    return;
+  }
+
   Profile* profile =
       g_browser_process->profile_manager()->GetProfileByPath(profile_path);
   if (!profile)

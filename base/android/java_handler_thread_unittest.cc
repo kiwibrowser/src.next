@@ -64,7 +64,7 @@ class DummyTaskObserver : public TaskObserver {
 
 void PostNTasks(int posts_remaining) {
   if (posts_remaining > 1) {
-    ThreadTaskRunnerHandle::Get()->PostTask(
+    SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE, BindOnce(&PostNTasks, posts_remaining - 1));
   }
 }
@@ -134,9 +134,9 @@ TEST_F(JavaHandlerThreadTest, RunTasksWhileShuttingDownJavaThread) {
           java_thread->state()->sequence_manager.get());
 
   java_thread->task_runner()->PostTask(
-      FROM_HERE, BindLambdaForTesting([&]() {
+      FROM_HERE, BindLambdaForTesting([&] {
         sequence_manager->AddTaskObserver(&observer);
-        ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
             FROM_HERE, MakeExpectedNotRunClosure(FROM_HERE), Days(1));
         java_thread->StopSequenceManagerForTesting();
         PostNTasks(kNumPosts);

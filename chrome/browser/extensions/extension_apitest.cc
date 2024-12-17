@@ -7,18 +7,20 @@
 #include <stddef.h>
 
 #include <memory>
+#include <string_view>
 #include <utility>
 
 #include "base/base_switches.h"
-#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
+#include "base/functional/bind.h"
 #include "base/path_service.h"
 #include "base/strings/escape.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/test/scoped_run_loop_timeout.h"
 #include "build/build_config.h"
 #include "chrome/browser/apps/app_service/app_launch_params.h"
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
@@ -70,15 +72,15 @@ ExtensionApiTest::~ExtensionApiTest() = default;
 void ExtensionApiTest::SetUpOnMainThread() {
   ExtensionBrowserTest::SetUpOnMainThread();
   DCHECK(!test_config_.get()) << "Previous test did not clear config state.";
-  test_config_ = std::make_unique<base::DictionaryValue>();
-  test_config_->SetStringPath(kTestDataDirectory,
-                              net::FilePathToFileURL(test_data_dir_).spec());
+  test_config_ = std::make_unique<base::Value::Dict>();
+  test_config_->Set(kTestDataDirectory,
+                    net::FilePathToFileURL(test_data_dir_).spec());
 
   if (embedded_test_server()->Started()) {
     // InitializeEmbeddedTestServer was called before |test_config_| was set.
     // Set the missing port key.
-    test_config_->SetIntPath(kEmbeddedTestServerPort,
-                             embedded_test_server()->port());
+    test_config_->SetByDottedPath(kEmbeddedTestServerPort,
+                                  embedded_test_server()->port());
   }
 
   TestGetConfigFunction::set_test_config_state(test_config_.get());
@@ -116,7 +118,8 @@ bool ExtensionApiTest::RunExtensionTest(const base::FilePath& extension_path,
   // only valid with other options.
   CHECK(!(run_options.extension_url && run_options.page_url))
       << "'extension_url' and 'page_url' are mutually exclusive.";
-  CHECK(!run_options.open_in_incognito || run_options.page_url)
+  CHECK(!run_options.open_in_incognito || run_options.page_url ||
+        run_options.extension_url)
       << "'open_in_incognito' is only allowed if specifiying 'page_url'";
   CHECK(!(run_options.launch_as_platform_app && run_options.page_url))
       << "'launch_as_platform_app' and 'page_url' are mutually exclusive.";
@@ -134,14 +137,16 @@ bool ExtensionApiTest::RunExtensionTest(const base::FilePath& extension_path,
   GURL url_to_open;
   if (run_options.page_url) {
     url_to_open = GURL(run_options.page_url);
+    DCHECK(url_to_open.has_scheme() && url_to_open.has_host());
     // Note: We use is_valid() here in the expectation that the provided url
     // may lack a scheme & host and thus be a relative url within the loaded
     // extension.
-    // TODO(https://crbug.com/1284691): Update callers passing relative paths
+    // TODO(crbug.com/40210201): Update callers passing relative paths
     // for page URLs to instead use extension_url.
     if (!url_to_open.is_valid())
       url_to_open = extension->GetResourceURL(run_options.page_url);
   } else if (run_options.extension_url) {
+    DCHECK(!url_to_open.has_scheme() && !url_to_open.has_host());
     url_to_open = extension->GetResourceURL(run_options.extension_url);
   }
 
@@ -158,9 +163,19 @@ bool ExtensionApiTest::RunExtensionTest(const base::FilePath& extension_path,
         ->LaunchAppWithParamsForTesting(std::move(params));
   }
 
-  if (!catcher.GetNextResult()) {
-    message_ = catcher.message();
-    return false;
+  {
+    base::test::ScopedRunLoopTimeout timeout(
+        FROM_HERE, std::nullopt,
+        base::BindRepeating(
+            [](const base::FilePath& extension_path) {
+              return "GetNextResult timeout while RunExtensionTest: " +
+                     extension_path.MaybeAsASCII();
+            },
+            extension_path));
+    if (!catcher.GetNextResult()) {
+      message_ = catcher.message();
+      return false;
+    }
   }
 
   return true;
@@ -235,8 +250,8 @@ bool ExtensionApiTest::InitializeEmbeddedTestServer() {
   // access the test server and local file system.  Tests can see these values
   // using the extension API function chrome.test.getConfig().
   if (test_config_) {
-    test_config_->SetIntPath(kEmbeddedTestServerPort,
-                             embedded_test_server()->port());
+    test_config_->SetByDottedPath(kEmbeddedTestServerPort,
+                                  embedded_test_server()->port());
   }
   // else SetUpOnMainThread has not been called yet. Possibly because the
   // caller needs a valid port in an overridden SetUpCommandLine method.
@@ -258,14 +273,14 @@ bool ExtensionApiTest::StartWebSocketServer(
   if (!websocket_server_->Start())
     return false;
 
-  test_config_->SetIntPath(kTestWebSocketPort,
-                           websocket_server_->host_port_pair().port());
+  test_config_->Set(kTestWebSocketPort,
+                    websocket_server_->host_port_pair().port());
 
   return true;
 }
 
-void ExtensionApiTest::SetCustomArg(base::StringPiece custom_arg) {
-  test_config_->SetKey(kTestCustomArg, base::Value(custom_arg));
+void ExtensionApiTest::SetCustomArg(std::string_view custom_arg) {
+  test_config_->Set(kTestCustomArg, base::Value(custom_arg));
 }
 
 void ExtensionApiTest::SetUpCommandLine(base::CommandLine* command_line) {

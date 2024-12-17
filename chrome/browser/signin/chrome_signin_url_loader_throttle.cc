@@ -6,6 +6,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/memory/raw_ptr.h"
+#include "base/types/optional_util.h"
 #include "chrome/browser/signin/chrome_signin_helper.h"
 #include "chrome/browser/signin/header_modification_delegate.h"
 #include "components/signin/core/browser/signin_header_helper.h"
@@ -79,7 +80,15 @@ class URLLoaderThrottle::ThrottleResponseAdapter : public ResponseAdapter {
     return throttle_->is_outermost_main_frame_;
   }
 
-  GURL GetURL() const override { return throttle_->request_url_; }
+  GURL GetUrl() const override { return throttle_->request_url_; }
+
+  std::optional<url::Origin> GetRequestInitiator() const override {
+    return throttle_->request_initiator_;
+  }
+
+  const url::Origin* GetRequestTopFrameOrigin() const override {
+    return base::OptionalToPtr(throttle_->request_top_frame_origin_);
+  }
 
   const net::HttpResponseHeaders* GetHeaders() const override {
     return headers_;
@@ -124,6 +133,11 @@ void URLLoaderThrottle::WillStartRequest(network::ResourceRequest* request,
                                          bool* defer) {
   request_url_ = request->url;
   request_referrer_ = request->referrer;
+  request_initiator_ = request->request_initiator;
+  if (request->trusted_params) {
+    request_top_frame_origin_ =
+        request->trusted_params->isolation_info.top_frame_origin();
+  }
   request_destination_ = request->destination;
   is_outermost_main_frame_ = request->is_outermost_main_frame;
   request_is_fetch_like_api_ = request->is_fetch_like_api;
@@ -143,8 +157,8 @@ void URLLoaderThrottle::WillStartRequest(network::ResourceRequest* request,
   // We need to keep a full copy of the request headers for later calls to
   // FixAccountConsistencyRequestHeader. Perhaps this could be replaced with
   // more specific per-request state.
-  request_headers_.CopyFrom(request->headers);
-  request_cors_exempt_headers_.CopyFrom(request->cors_exempt_headers);
+  request_headers_ = request->headers;
+  request_cors_exempt_headers_ = request->cors_exempt_headers;
 }
 
 void URLLoaderThrottle::WillRedirectRequest(

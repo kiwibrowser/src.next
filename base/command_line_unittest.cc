@@ -2,27 +2,53 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "base/command_line.h"
 
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "base/debug/debugging_buildflags.h"
 #include "base/files/file_path.h"
 #include "base/strings/strcat.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+#if BUILDFLAG(IS_WIN)
+#include <windows.h>
+
+#include <shellapi.h>
+
+#include "base/win/scoped_localalloc.h"
+#endif  // BUILDFLAG(IS_WIN)
+
+#if BUILDFLAG(ENABLE_COMMANDLINE_SEQUENCE_CHECKS)
+#include "base/run_loop.h"
+#include "base/task/thread_pool.h"
+#include "base/test/bind.h"
+#include "base/test/task_environment.h"
+#endif  // BUILDFLAG(ENABLE_COMMANDLINE_SEQUENCE_CHECKS)
+
 namespace base {
 
+#if BUILDFLAG(IS_WIN)
 // To test Windows quoting behavior, we use a string that has some backslashes
 // and quotes.
 // Consider the command-line argument: q\"bs1\bs2\\bs3q\\\"
 // Here it is with C-style escapes.
 static const CommandLine::StringType kTrickyQuoted =
     FILE_PATH_LITERAL("q\\\"bs1\\bs2\\\\bs3q\\\\\\\"");
+#endif
+
 // It should be parsed by Windows as: q"bs1\bs2\\bs3q\"
 // Here that is with C-style escapes.
 static const CommandLine::StringType kTricky =
@@ -103,6 +129,17 @@ TEST(CommandLineTest, CommandLineConstructor) {
   EXPECT_EQ(FILE_PATH_LITERAL("unquoted arg-with-space"), *iter);
   ++iter;
   EXPECT_TRUE(iter == args.end());
+}
+
+TEST(CommandLineTest, CommandLineFromArgvWithoutProgram) {
+  CommandLine::StringVector argv = {FILE_PATH_LITERAL("--switch1"),
+                                    FILE_PATH_LITERAL("--switch2=value2")};
+
+  CommandLine cl = CommandLine::FromArgvWithoutProgram(argv);
+
+  EXPECT_EQ(base::FilePath(), cl.GetProgram());
+  EXPECT_TRUE(cl.HasSwitch("switch1"));
+  EXPECT_EQ("value2", cl.GetSwitchValueASCII("switch2"));
 }
 
 TEST(CommandLineTest, CommandLineFromString) {
@@ -290,28 +327,97 @@ TEST(CommandLineTest, AppendSwitches) {
 }
 
 TEST(CommandLineTest, AppendSwitchesDashDash) {
- const CommandLine::CharType* raw_argv[] = { FILE_PATH_LITERAL("prog"),
-                                             FILE_PATH_LITERAL("--"),
-                                             FILE_PATH_LITERAL("--arg1") };
- CommandLine cl(std::size(raw_argv), raw_argv);
+  const CommandLine::CharType* const raw_argv[] = {FILE_PATH_LITERAL("prog"),
+                                                   FILE_PATH_LITERAL("--"),
+                                                   FILE_PATH_LITERAL("--arg1")};
+  CommandLine cl(std::size(raw_argv), raw_argv);
 
- cl.AppendSwitch("switch1");
- cl.AppendSwitchASCII("switch2", "foo");
+  cl.AppendSwitch("switch1");
+  cl.AppendSwitchASCII("switch2", "foo");
 
- cl.AppendArg("--arg2");
+  cl.AppendArg("--arg2");
 
- EXPECT_EQ(FILE_PATH_LITERAL("prog --switch1 --switch2=foo -- --arg1 --arg2"),
-           cl.GetCommandLineString());
- CommandLine::StringVector cl_argv = cl.argv();
- EXPECT_EQ(FILE_PATH_LITERAL("prog"), cl_argv[0]);
- EXPECT_EQ(FILE_PATH_LITERAL("--switch1"), cl_argv[1]);
- EXPECT_EQ(FILE_PATH_LITERAL("--switch2=foo"), cl_argv[2]);
- EXPECT_EQ(FILE_PATH_LITERAL("--"), cl_argv[3]);
- EXPECT_EQ(FILE_PATH_LITERAL("--arg1"), cl_argv[4]);
- EXPECT_EQ(FILE_PATH_LITERAL("--arg2"), cl_argv[5]);
+  EXPECT_EQ(FILE_PATH_LITERAL("prog --switch1 --switch2=foo -- --arg1 --arg2"),
+            cl.GetCommandLineString());
+  CommandLine::StringVector cl_argv = cl.argv();
+  EXPECT_EQ(FILE_PATH_LITERAL("prog"), cl_argv[0]);
+  EXPECT_EQ(FILE_PATH_LITERAL("--switch1"), cl_argv[1]);
+  EXPECT_EQ(FILE_PATH_LITERAL("--switch2=foo"), cl_argv[2]);
+  EXPECT_EQ(FILE_PATH_LITERAL("--"), cl_argv[3]);
+  EXPECT_EQ(FILE_PATH_LITERAL("--arg1"), cl_argv[4]);
+  EXPECT_EQ(FILE_PATH_LITERAL("--arg2"), cl_argv[5]);
 }
 
 #if BUILDFLAG(IS_WIN)
+struct CommandLineQuoteTestCase {
+  const wchar_t* const input_arg;
+  const wchar_t* const expected_output_arg;
+};
+
+class CommandLineQuoteTest
+    : public ::testing::TestWithParam<CommandLineQuoteTestCase> {};
+
+INSTANTIATE_TEST_SUITE_P(
+    CommandLineQuoteTestCases,
+    CommandLineQuoteTest,
+    ::testing::ValuesIn(std::vector<CommandLineQuoteTestCase>{
+        {L"", L""},
+        {L"abc = xyz", LR"("abc = xyz")"},
+        {LR"(C:\AppData\Local\setup.exe)", LR"("C:\AppData\Local\setup.exe")"},
+        {LR"(C:\Program Files\setup.exe)", LR"("C:\Program Files\setup.exe")"},
+        {LR"("C:\Program Files\setup.exe")",
+         LR"("\"C:\Program Files\setup.exe\"")"},
+    }));
+
+TEST_P(CommandLineQuoteTest, TestCases) {
+  EXPECT_EQ(CommandLine::QuoteForCommandLineToArgvW(GetParam().input_arg),
+            GetParam().expected_output_arg);
+}
+
+struct CommandLineQuoteAfterTestCase {
+  const std::vector<std::wstring> input_args;
+  const wchar_t* const expected_output;
+};
+
+class CommandLineQuoteAfterTest
+    : public ::testing::TestWithParam<CommandLineQuoteAfterTestCase> {};
+
+INSTANTIATE_TEST_SUITE_P(
+    CommandLineQuoteAfterTestCases,
+    CommandLineQuoteAfterTest,
+    ::testing::ValuesIn(std::vector<CommandLineQuoteAfterTestCase>{
+        {{L"abc=1"}, L"abc=1"},
+        {{L"abc=1", L"xyz=2"}, L"abc=1 xyz=2"},
+        {{L"abc=1", L"xyz=2", L"q"}, L"abc=1 xyz=2 q"},
+        {{L" abc=1  ", L"  xyz=2", L"q "}, L"abc=1 xyz=2 q"},
+        {{LR"("abc = 1")"}, LR"("abc = 1")"},
+        {{LR"(abc" = "1)", L"xyz=2"}, LR"("abc = 1" xyz=2)"},
+        {{LR"(abc" = "1)"}, LR"("abc = 1")"},
+        {{LR"(\\)", LR"(\\\")"}, LR"("\\\\" "\\\"")"},
+    }));
+
+TEST_P(CommandLineQuoteAfterTest, TestCases) {
+  std::wstring input_command_line =
+      base::StrCat({LR"(c:\test\process.exe )",
+                    base::JoinString(GetParam().input_args, L" ")});
+  int num_args = 0;
+  base::win::ScopedLocalAllocTyped<wchar_t*> argv(
+      ::CommandLineToArgvW(&input_command_line[0], &num_args));
+  ASSERT_EQ(num_args - 1U, GetParam().input_args.size());
+
+  std::wstring recreated_command_line;
+  for (int i = 1; i < num_args; ++i) {
+    recreated_command_line.append(
+        CommandLine::QuoteForCommandLineToArgvW(argv.get()[i]));
+
+    if (i + 1 < num_args) {
+      recreated_command_line.push_back(L' ');
+    }
+  }
+
+  EXPECT_EQ(recreated_command_line, GetParam().expected_output);
+}
+
 TEST(CommandLineTest, GetCommandLineStringForShell) {
   CommandLine cl = CommandLine::FromString(
       FILE_PATH_LITERAL("program --switch /switch2 --"));
@@ -328,6 +434,30 @@ TEST(CommandLineTest, GetCommandLineStringWithUnsafeInsertSequences) {
   EXPECT_EQ(FILE_PATH_LITERAL("program --switch=%1 --%2 %3"),
             cl.GetCommandLineStringWithUnsafeInsertSequences());
 }
+
+TEST(CommandLineTest, HasSingleArgument) {
+  CommandLine cl(FilePath(FILE_PATH_LITERAL("Program")));
+  cl.AppendSwitchASCII("switch2", "foo");
+  EXPECT_FALSE(cl.HasSingleArgumentSwitch());
+  CommandLine cl_for_shell(
+      CommandLine::FromString(cl.GetCommandLineStringForShell()));
+  EXPECT_TRUE(cl_for_shell.HasSingleArgumentSwitch());
+}
+
+// Test that creating a new command line from the string version of a single
+// argument command line maintains the single argument switch, and the
+// argument.
+TEST(CommandLineTest, MaintainSingleArgument) {
+  // Putting a space in the file name will force escaping of the argument.
+  static const CommandLine::StringType kCommandLine =
+      FILE_PATH_LITERAL("program --switch --single-argument foo bar.html");
+  CommandLine cl = CommandLine::FromString(kCommandLine);
+  CommandLine cl_for_shell = CommandLine::FromString(cl.GetCommandLineString());
+  EXPECT_TRUE(cl_for_shell.HasSingleArgumentSwitch());
+  // Verify that we command line survives the round trip with an escaped arg.
+  EXPECT_EQ(kCommandLine, cl_for_shell.GetCommandLineString());
+}
+
 #endif  // BUILDFLAG(IS_WIN)
 
 // Tests that when AppendArguments is called that the program is set correctly
@@ -388,10 +518,9 @@ TEST(CommandLineTest, Init) {
   EXPECT_EQ(initial, current);
 }
 
-// Test that copies of CommandLine have a valid StringPiece map.
+// Test that copies of CommandLine have a valid std::string_view map.
 TEST(CommandLineTest, Copy) {
-  std::unique_ptr<CommandLine> initial(
-      new CommandLine(CommandLine::NO_PROGRAM));
+  auto initial = std::make_unique<CommandLine>(CommandLine::NO_PROGRAM);
   initial->AppendSwitch("a");
   initial->AppendSwitch("bbbbbbbbbbbbbbb");
   initial->AppendSwitch("c");
@@ -403,6 +532,65 @@ TEST(CommandLineTest, Copy) {
     EXPECT_TRUE(copy_constructed.HasSwitch(pair.first));
   for (const auto& pair : switch_map)
     EXPECT_TRUE(assigned.HasSwitch(pair.first));
+}
+
+TEST(CommandLineTest, CopySwitches) {
+  CommandLine source(CommandLine::NO_PROGRAM);
+  source.AppendSwitch("a");
+  source.AppendSwitch("bbbb");
+  source.AppendSwitch("c");
+  EXPECT_THAT(source.argv(), testing::ElementsAre(FILE_PATH_LITERAL(""),
+                                                  FILE_PATH_LITERAL("--a"),
+                                                  FILE_PATH_LITERAL("--bbbb"),
+                                                  FILE_PATH_LITERAL("--c")));
+
+  CommandLine cl(CommandLine::NO_PROGRAM);
+  EXPECT_THAT(cl.argv(), testing::ElementsAre(FILE_PATH_LITERAL("")));
+
+  cl.CopySwitchesFrom(source, {});
+  EXPECT_THAT(cl.argv(), testing::ElementsAre(FILE_PATH_LITERAL("")));
+
+  static const char* const kSwitchesToCopy[] = {"a", "nosuch", "c"};
+  cl.CopySwitchesFrom(source, kSwitchesToCopy);
+  EXPECT_THAT(cl.argv(), testing::ElementsAre(FILE_PATH_LITERAL(""),
+                                              FILE_PATH_LITERAL("--a"),
+                                              FILE_PATH_LITERAL("--c")));
+}
+
+TEST(CommandLineTest, Move) {
+  static constexpr std::string_view kSwitches[] = {
+      "a",
+      "bbbbbbbbb",
+      "c",
+  };
+  static constexpr CommandLine::StringViewType kArgs[] = {
+      FILE_PATH_LITERAL("beebop"),
+      FILE_PATH_LITERAL("alouie"),
+  };
+  CommandLine initial(CommandLine::NO_PROGRAM);
+  for (auto a_switch : kSwitches) {
+    initial.AppendSwitch(a_switch);
+  }
+  for (auto an_arg : kArgs) {
+    initial.AppendArgNative(an_arg);
+  }
+
+  // Move construct and verify.
+  CommandLine move_constructed(std::move(initial));
+  initial = CommandLine(CommandLine::NO_PROGRAM);
+  for (auto a_switch : kSwitches) {
+    EXPECT_TRUE(move_constructed.HasSwitch(a_switch));
+  }
+  EXPECT_THAT(move_constructed.GetArgs(),
+              ::testing::ElementsAre(kArgs[0], kArgs[1]));
+
+  // Move assign and verify
+  initial = std::move(move_constructed);
+  move_constructed = CommandLine(CommandLine::NO_PROGRAM);
+  for (auto a_switch : kSwitches) {
+    EXPECT_TRUE(initial.HasSwitch(a_switch));
+  }
+  EXPECT_THAT(initial.GetArgs(), ::testing::ElementsAre(kArgs[0], kArgs[1]));
 }
 
 TEST(CommandLineTest, PrependSimpleWrapper) {
@@ -577,16 +765,16 @@ class MergeDuplicateFoosSemicolon : public DuplicateSwitchHandler {
  public:
   ~MergeDuplicateFoosSemicolon() override;
 
-  void ResolveDuplicate(base::StringPiece key,
-                        CommandLine::StringPieceType new_value,
+  void ResolveDuplicate(std::string_view key,
+                        CommandLine::StringViewType new_value,
                         CommandLine::StringType& out_value) override;
 };
 
 MergeDuplicateFoosSemicolon::~MergeDuplicateFoosSemicolon() = default;
 
 void MergeDuplicateFoosSemicolon::ResolveDuplicate(
-    base::StringPiece key,
-    CommandLine::StringPieceType new_value,
+    std::string_view key,
+    CommandLine::StringViewType new_value,
     CommandLine::StringType& out_value) {
   if (key != "mergeable-foo") {
     out_value = CommandLine::StringType(new_value);
@@ -645,4 +833,23 @@ TEST(CommandLineTest, ParseAsSingleArgument) {
 }
 #endif  // BUILDFLAG(IS_WIN)
 
-} // namespace base
+#if BUILDFLAG(ENABLE_COMMANDLINE_SEQUENCE_CHECKS)
+TEST(CommandLineDeathTest, ThreadChecks) {
+  test::TaskEnvironment task_environment;
+  RunLoop run_loop;
+  EXPECT_DEATH_IF_SUPPORTED(
+      {
+        ThreadPool::PostTask(FROM_HERE, BindLambdaForTesting([&run_loop] {
+                               auto* command_line =
+                                   CommandLine::ForCurrentProcess();
+                               command_line->AppendSwitch("test");
+                               run_loop.Quit();
+                             }));
+
+        run_loop.Run();
+      },
+      "");
+}
+#endif  // BUILDFLAG(ENABLE_COMMANDLINE_SEQUENCE_CHECKS)
+
+}  // namespace base

@@ -31,7 +31,7 @@ class HTMLProgressElement;
 
 class CORE_EXPORT LayoutProgress : public LayoutBlockFlow {
  public:
-  explicit LayoutProgress(ContainerNode*);
+  explicit LayoutProgress(HTMLProgressElement&);
   ~LayoutProgress() override;
 
   void Trace(Visitor* visitor) const override {
@@ -52,14 +52,14 @@ class CORE_EXPORT LayoutProgress : public LayoutBlockFlow {
 
   const char* GetName() const override {
     NOT_DESTROYED();
-    return "LayoutProgress";
+    return "LayoutNGProgress";
   }
 
  protected:
   void WillBeDestroyed() override;
-  bool IsOfType(LayoutObjectType type) const override {
+  bool IsProgress() const final {
     NOT_DESTROYED();
-    return type == kLayoutObjectProgress || LayoutBlockFlow::IsOfType(type);
+    return true;
   }
 
   bool IsAnimating() const;

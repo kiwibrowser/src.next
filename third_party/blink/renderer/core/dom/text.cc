@@ -29,11 +29,14 @@
 #include "third_party/blink/renderer/core/dom/first_letter_pseudo_element.h"
 #include "third_party/blink/renderer/core/dom/layout_tree_builder.h"
 #include "third_party/blink/renderer/core/dom/layout_tree_builder_traversal.h"
+#include "third_party/blink/renderer/core/dom/node_cloning_data.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/node_traversal.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
+#include "third_party/blink/renderer/core/dom/text_diff_range.h"
 #include "third_party/blink/renderer/core/dom/whitespace_attacher.h"
-#include "third_party/blink/renderer/core/layout/layout_object_factory.h"
+#include "third_party/blink/renderer/core/execution_context/agent.h"
+#include "third_party/blink/renderer/core/html/html_html_element.h"
 #include "third_party/blink/renderer/core/layout/layout_text.h"
 #include "third_party/blink/renderer/core/layout/layout_text_fragment.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_inline_text.h"
@@ -47,6 +50,10 @@ namespace blink {
 
 Text* Text::Create(Document& document, const String& data) {
   return MakeGarbageCollected<Text>(document, data, kCreateText);
+}
+
+Text* Text::Create(Document& document, String&& data) {
+  return MakeGarbageCollected<Text>(document, std::move(data), kCreateText);
 }
 
 Text* Text::CreateEditingText(Document& document, const String& data) {
@@ -80,17 +87,20 @@ Node* Text::MergeNextSiblingNodesIfPossible() {
     String next_text_data = next_text->data();
     String old_text_data = data();
     SetDataWithoutUpdate(data() + next_text_data);
-    UpdateTextLayoutObject(old_text_data.length(), 0);
+    UpdateTextLayoutObject(
+        TextDiffRange::Insert(old_text_data.length(), next_text_data.length()));
 
     GetDocument().DidMergeTextNodes(*this, *next_text, offset);
 
     // Empty nextText for layout update.
     next_text->SetDataWithoutUpdate(g_empty_string);
-    next_text->UpdateTextLayoutObject(0, next_text_data.length());
+    next_text->UpdateTextLayoutObject(
+        TextDiffRange::Delete(0, next_text_data.length()));
 
     // Restore nextText for mutation event.
     next_text->SetDataWithoutUpdate(next_text_data);
-    next_text->UpdateTextLayoutObject(0, 0);
+    next_text->UpdateTextLayoutObject(
+        TextDiffRange::Insert(0, next_text_data.length()));
 
     GetDocument().IncDOMTreeVersion();
     DidModifyData(old_text_data, CharacterData::kUpdateFromNonParser);
@@ -113,7 +123,8 @@ Text* Text::splitText(unsigned offset, ExceptionState& exception_state) {
 
   EventQueueScope scope;
   String old_str = data();
-  Text* new_text = CloneWithData(GetDocument(), old_str.Substring(offset));
+  Text* new_text =
+      To<Text>(CloneWithData(GetDocument(), old_str.Substring(offset)));
   SetDataWithoutUpdate(old_str.Substring(0, offset));
 
   DidModifyData(old_str, CharacterData::kUpdateFromNonParser);
@@ -123,11 +134,22 @@ Text* Text::splitText(unsigned offset, ExceptionState& exception_state) {
   if (exception_state.HadException())
     return nullptr;
 
-  if (GetLayoutObject()) {
-    GetLayoutObject()->SetTextWithOffset(DataImpl(), 0, old_str.length());
-    if (ContainsOnlyWhitespaceOrEmpty()) {
+  if (LayoutText* layout_text = GetLayoutObject()) {
+    if (RuntimeEnabledFeatures::TextDiffSplitFixEnabled()) {
       // To avoid |LayoutText| has empty text, we rebuild layout tree.
-      SetForceReattachLayoutTree();
+      if (ContainsOnlyWhitespaceOrEmpty()) {
+        SetForceReattachLayoutTree();
+      } else {
+        layout_text->SetTextWithOffset(
+            data(), TextDiffRange::Delete(offset, old_str.length() - offset));
+      }
+    } else {
+      layout_text->SetTextWithOffset(
+          data(), TextDiffRange::Delete(0, old_str.length()));
+      if (ContainsOnlyWhitespaceOrEmpty()) {
+        // To avoid |LayoutText| has empty text, we rebuild layout tree.
+        SetForceReattachLayoutTree();
+      }
     }
   }
 
@@ -138,8 +160,8 @@ Text* Text::splitText(unsigned offset, ExceptionState& exception_state) {
 
   // [NewObject] must always create a new wrapper.  Check that a wrapper
   // does not exist yet.
-  DCHECK(
-      DOMDataStore::GetWrapper(new_text, v8::Isolate::GetCurrent()).IsEmpty());
+  DCHECK(DOMDataStore::GetWrapper(GetDocument().GetAgent().isolate(), new_text)
+             .IsEmpty());
 
   return new_text;
 }
@@ -226,7 +248,7 @@ Text* Text::ReplaceWholeText(const String& new_text) {
     }
   }
 
-  if (new_text.IsEmpty()) {
+  if (new_text.empty()) {
     if (parent && parentNode() == parent)
       parent->RemoveChild(this, IGNORE_EXCEPTION_FOR_TESTING);
     return nullptr;
@@ -240,14 +262,6 @@ String Text::nodeName() const {
   return "#text";
 }
 
-Node::NodeType Text::getNodeType() const {
-  return kTextNode;
-}
-
-Node* Text::Clone(Document& factory, CloneChildrenFlag) const {
-  return CloneWithData(factory, data());
-}
-
 static inline bool EndsWithWhitespace(const String& text) {
   return text.length() && IsASCIISpace(text[text.length() - 1]);
 }
@@ -256,23 +270,17 @@ static inline bool CanHaveWhitespaceChildren(
     const ComputedStyle& style,
     const Text::AttachContext& context) {
   const LayoutObject& parent = *context.parent;
-  // <button> and <fieldset> should allow whitespace even though
-  // LayoutFlexibleBox doesn't.
-  if (parent.IsButtonIncludingNG() || parent.IsFieldset())
-    return true;
-
   if (parent.IsTable() || parent.IsTableRow() || parent.IsTableSection() ||
-      parent.IsLayoutTableCol() || parent.IsFrameSetIncludingNG() ||
-      parent.IsFlexibleBoxIncludingNG() || parent.IsLayoutGridIncludingNG() ||
-      parent.IsSVGRoot() || parent.IsSVGContainer() || parent.IsSVGImage() ||
-      parent.IsSVGShape()) {
+      parent.IsLayoutTableCol() || parent.IsFrameSet() ||
+      parent.IsFlexibleBox() || parent.IsLayoutGrid() || parent.IsSVGRoot() ||
+      parent.IsSVGContainer() || parent.IsSVGImage() || parent.IsSVGShape()) {
     if (!context.use_previous_in_flow || !context.previous_in_flow ||
         !context.previous_in_flow->IsText())
       return false;
 
-    return style.PreserveNewline() ||
+    return style.ShouldPreserveBreaks() ||
            !EndsWithWhitespace(
-               To<LayoutText>(context.previous_in_flow)->GetText());
+               To<LayoutText>(context.previous_in_flow)->TransformedText());
   }
   return true;
 }
@@ -299,12 +307,15 @@ bool Text::TextLayoutObjectIsNeeded(const AttachContext& context,
     return false;
 
   // pre-wrap in SVG never makes layoutObject.
-  if (style.WhiteSpace() == EWhiteSpace::kPreWrap && parent.IsSVG())
+  if (style.ShouldPreserveWhiteSpaces() && style.ShouldWrapLine() &&
+      parent.IsSVG()) {
     return false;
+  }
 
   // pre/pre-wrap/pre-line always make layoutObjects.
-  if (style.PreserveNewline())
+  if (style.ShouldPreserveBreaks()) {
     return true;
+  }
 
   if (!context.use_previous_in_flow)
     return false;
@@ -314,7 +325,7 @@ bool Text::TextLayoutObjectIsNeeded(const AttachContext& context,
 
   if (context.previous_in_flow->IsText()) {
     return !EndsWithWhitespace(
-        To<LayoutText>(context.previous_in_flow)->GetText());
+        To<LayoutText>(context.previous_in_flow)->TransformedText());
   }
 
   return context.previous_in_flow->IsInline() &&
@@ -328,29 +339,21 @@ static bool IsSVGText(Text* text) {
          !IsA<SVGForeignObjectElement>(*parent_or_shadow_host_node);
 }
 
-LayoutText* Text::CreateTextLayoutObject(const ComputedStyle& style,
-                                         LegacyLayout legacy) {
+LayoutText* Text::CreateTextLayoutObject() {
   if (IsSVGText(this))
-    return MakeGarbageCollected<LayoutSVGInlineText>(this, DataImpl());
-
-  if (style.HasTextCombine())
-    return LayoutObjectFactory::CreateTextCombine(this, DataImpl(), legacy);
-
-  return LayoutObjectFactory::CreateText(this, DataImpl(), legacy);
+    return MakeGarbageCollected<LayoutSVGInlineText>(this, data());
+  return MakeGarbageCollected<LayoutText>(this, data());
 }
 
 void Text::AttachLayoutTree(AttachContext& context) {
   if (context.parent) {
-    ContainerNode* style_parent = LayoutTreeBuilderTraversal::Parent(*this);
-    if (style_parent) {
-      // To handle <body> to <html> writing-mode propagation, we should use
-      // style in layout object instead of |Node::GetComputedStyle()|.
-      // See http://crbug.com/988585
+    if (Element* style_parent =
+            LayoutTreeBuilderTraversal::ParentElement(*this)) {
       const ComputedStyle* const style =
           IsA<HTMLHtmlElement>(style_parent) && style_parent->GetLayoutObject()
               ? style_parent->GetLayoutObject()->Style()
               : style_parent->GetComputedStyle();
-      DCHECK(style);
+      CHECK(style);
       if (TextLayoutObjectIsNeeded(context, *style)) {
         LayoutTreeBuilderForText(*this, context, style).CreateLayoutObject();
         context.previous_in_flow = GetLayoutObject();
@@ -362,11 +365,11 @@ void Text::AttachLayoutTree(AttachContext& context) {
 
 void Text::ReattachLayoutTreeIfNeeded(AttachContext& context) {
   bool layout_object_is_needed = false;
-  ContainerNode* style_parent = LayoutTreeBuilderTraversal::Parent(*this);
+  Element* style_parent = LayoutTreeBuilderTraversal::ParentElement(*this);
   if (style_parent && context.parent) {
-    DCHECK(style_parent->GetComputedStyle());
-    layout_object_is_needed =
-        TextLayoutObjectIsNeeded(context, *style_parent->GetComputedStyle());
+    const ComputedStyle* style = style_parent->GetComputedStyle();
+    CHECK(style);
+    layout_object_is_needed = TextLayoutObjectIsNeeded(context, *style);
   }
 
   if (layout_object_is_needed == !!GetLayoutObject())
@@ -380,7 +383,7 @@ void Text::ReattachLayoutTreeIfNeeded(AttachContext& context) {
     LayoutTreeBuilderForText(*this, context, style_parent->GetComputedStyle())
         .CreateLayoutObject();
   } else {
-    DetachLayoutTree(true /* performing_reattach*/);
+    DetachLayoutTree(/*performing_reattach=*/true);
   }
   CharacterData::AttachLayoutTree(reattach_context);
 }
@@ -388,13 +391,13 @@ void Text::ReattachLayoutTreeIfNeeded(AttachContext& context) {
 namespace {
 
 bool NeedsWhitespaceLayoutObject(const ComputedStyle& style) {
-  return style.PreserveNewline();
+  return style.ShouldPreserveBreaks();
 }
 
 }  // namespace
 
 void Text::RecalcTextStyle(const StyleRecalcChange change) {
-  scoped_refptr<const ComputedStyle> new_style =
+  const ComputedStyle* new_style =
       GetDocument().GetStyleResolver().StyleForText(this);
   if (LayoutText* layout_text = GetLayoutObject()) {
     const ComputedStyle* layout_parent_style =
@@ -406,9 +409,9 @@ void Text::RecalcTextStyle(const StyleRecalcChange change) {
       // display:contents text child changed.
       SetNeedsReattachLayoutTree();
     } else {
-      layout_text->SetStyle(std::move(new_style));
+      layout_text->SetStyle(new_style);
       if (NeedsStyleRecalc())
-        layout_text->SetTextIfNeeded(DataImpl());
+        layout_text->SetTextIfNeeded(data());
     }
   } else if (new_style && (NeedsStyleRecalc() || change.ReattachLayoutTree() ||
                            GetForceReattachLayoutTree() ||
@@ -462,11 +465,20 @@ static bool ShouldUpdateLayoutByReattaching(const Text& text_node,
   // editing with the combination of -webkit-text-security in author styles on
   // other elements in combination with ::first-letter.
   // See crbug.com/1240988
-  if (text_layout_object->IsSecure())
+  if (text_layout_object->IsSecure()) {
     return false;
+  }
+  FirstLetterPseudoElement::Punctuation punctuation1 =
+      FirstLetterPseudoElement::Punctuation::kNotSeen;
+  FirstLetterPseudoElement::Punctuation punctuation2 =
+      FirstLetterPseudoElement::Punctuation::kNotSeen;
+  bool preserve_breaks = ShouldPreserveBreaks(
+      text_layout_object->StyleRef().GetWhiteSpaceCollapse());
   if (!FirstLetterPseudoElement::FirstLetterLength(
-          text_layout_object->GetText()) &&
-      FirstLetterPseudoElement::FirstLetterLength(text_node.data())) {
+          text_layout_object->TransformedText(), preserve_breaks,
+          punctuation1) &&
+      FirstLetterPseudoElement::FirstLetterLength(
+          text_node.data(), preserve_breaks, punctuation2)) {
     // We did not previously apply ::first-letter styles to this |text_node|,
     // and if there was no first formatted letter, but now is, we may need to
     // reattach.
@@ -475,21 +487,19 @@ static bool ShouldUpdateLayoutByReattaching(const Text& text_node,
   return false;
 }
 
-void Text::UpdateTextLayoutObject(unsigned offset_of_replaced_data,
-                                  unsigned length_of_replaced_data) {
+void Text::UpdateTextLayoutObject(const TextDiffRange& diff) {
   if (!InActiveDocument())
     return;
   LayoutText* text_layout_object = GetLayoutObject();
   if (ShouldUpdateLayoutByReattaching(*this, text_layout_object)) {
     SetForceReattachLayoutTree();
-    return;
+  } else {
+    text_layout_object->SetTextWithOffset(data(), diff);
   }
-
-  text_layout_object->SetTextWithOffset(DataImpl(), offset_of_replaced_data,
-                                        length_of_replaced_data);
 }
 
-Text* Text::CloneWithData(Document& factory, const String& data) const {
+CharacterData* Text::CloneWithData(Document& factory,
+                                   const String& data) const {
   return Create(factory, data);
 }
 

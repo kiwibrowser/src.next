@@ -5,13 +5,16 @@
 #ifndef CHROME_BROWSER_SHELL_INTEGRATION_LINUX_H_
 #define CHROME_BROWSER_SHELL_INTEGRATION_LINUX_H_
 
+#include <optional>
 #include <string>
+#include <vector>
 
 #include "base/files/file_path.h"
+#include "base/files/safe_base_name.h"
 #include "build/chromeos_buildflags.h"
-#include "chrome/browser/web_applications/web_app_id.h"
 #include "chrome/common/buildflags.h"
 #include "components/services/app_service/public/cpp/file_handler.h"
+#include "components/webapps/common/web_app_id.h"
 #include "url/gurl.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -28,17 +31,6 @@ struct DesktopActionInfo;
 }
 
 namespace shell_integration_linux {
-
-// Get the path to write user-specific application data files to, as specified
-// in the XDG Base Directory Specification:
-// http://standards.freedesktop.org/basedir-spec/latest/
-base::FilePath GetDataWriteLocation(base::Environment* env);
-
-// Get the list of paths to search for application data files, in order of
-// preference, as specified in the XDG Base Directory Specification:
-// http://standards.freedesktop.org/basedir-spec/latest/
-// Called on the FILE thread.
-std::vector<base::FilePath> GetDataSearchLocations(base::Environment* env);
 
 // Gets the name for use as the res_name of the window's WM_CLASS property.
 std::string GetProgramClassName();
@@ -57,8 +49,15 @@ bool GetExistingShortcutContents(base::Environment* env,
                                  const base::FilePath& desktop_filename,
                                  std::string* output);
 
-// Returns filename for .desktop file based on |url|, sanitized for security.
-base::FilePath GetWebShortcutFilename(const GURL& url);
+// Returns the base name for .desktop file based on |name|, sanitized for
+// security with no whitespace, and ensures it will be a unique file in the
+// directory at base::DIR_USER_DESKTOP. This call is not thread-safe - multiple
+// callers from different threads with the same argument may get the same base
+// name.
+// Returns a std::nullopt if base::DIR_USER_DESKTOP is not defined or a unique
+// name could not be found.
+std::optional<base::SafeBaseName> GetUniqueWebShortcutFilename(
+    const std::string& name);
 
 // Returns a list of filenames for all existing .desktop files corresponding to
 // on |profile_path| in a given |directory|.
@@ -96,6 +95,17 @@ std::string GetDesktopFileContentsForCommand(
     bool no_display,
     std::set<web_app::DesktopActionInfo> action_info);
 
+// Returns contents for a .desktop file that launches chrome at the given url
+// using the given profile, referencing the given icon. The file has the given
+// title & icon.
+// This will CHECK-fail if the url is not valid, the profile path is empty, or
+// the icon path is empty.
+std::string GetDesktopFileContentsForUrlShortcut(
+    const std::string& title,
+    const GURL& url,
+    const base::FilePath& icon_path,
+    const base::FilePath& profile_path);
+
 // Returns contents for .directory file named |title| with icon |icon_name|. If
 // |icon_name| is empty, will use the Chrome icon.
 std::string GetDirectoryFileContents(const std::u16string& title,
@@ -106,7 +116,7 @@ std::string GetDirectoryFileContents(const std::u16string& title,
 // Linux.
 base::FilePath GetMimeTypesRegistrationFilename(
     const base::FilePath& profile_path,
-    const web_app::AppId& app_id);
+    const webapps::AppId& app_id);
 
 // Returns the contents of a .xml file as specified by |file_handlers|, which is
 // passed to `xdg-mime` to register one or more custom MIME types in Linux.
@@ -147,6 +157,13 @@ bool GetNoDisplayFromDesktopFile(const std::string& shortcut_contents);
 // Returns an empty path if the executable path could not be found, which should
 // never happen.
 base::FilePath GetChromeExePath();
+
+// Get the value of |key| from the [Desktop Entry] section of a .desktop file,
+// given in |shortcut_contents|. If the key is not found, returns an empty
+// string.
+std::string GetDesktopEntryStringValueFromFromDesktopFileForTest(
+    const std::string& key,
+    const std::string& shortcut_contents);
 
 }  // namespace internal
 

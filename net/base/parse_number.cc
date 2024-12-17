@@ -16,21 +16,21 @@ namespace {
 // consistent interface to StringToXXX() that calls the appropriate //base
 // version. This simplifies writing generic code with a template.
 
-bool StringToNumber(const base::StringPiece& input, int32_t* output) {
+bool StringToNumber(std::string_view input, int32_t* output) {
   // This assumes ints are 32-bits (will fail compile if that ever changes).
   return base::StringToInt(input, output);
 }
 
-bool StringToNumber(const base::StringPiece& input, uint32_t* output) {
+bool StringToNumber(std::string_view input, uint32_t* output) {
   // This assumes ints are 32-bits (will fail compile if that ever changes).
   return base::StringToUint(input, output);
 }
 
-bool StringToNumber(const base::StringPiece& input, int64_t* output) {
+bool StringToNumber(std::string_view input, int64_t* output) {
   return base::StringToInt64(input, output);
 }
 
-bool StringToNumber(const base::StringPiece& input, uint64_t* output) {
+bool StringToNumber(std::string_view input, uint64_t* output) {
   return base::StringToUint64(input, output);
 }
 
@@ -41,7 +41,7 @@ bool SetError(ParseIntError error, ParseIntError* optional_error) {
 }
 
 template <typename T>
-bool ParseIntHelper(const base::StringPiece& input,
+bool ParseIntHelper(std::string_view input,
                     ParseIntFormat format,
                     T* output,
                     ParseIntError* optional_error) {
@@ -50,12 +50,32 @@ bool ParseIntHelper(const base::StringPiece& input,
   if (input.empty())
     return SetError(ParseIntError::FAILED_PARSE, optional_error);
 
+  bool is_non_negative = (format == ParseIntFormat::NON_NEGATIVE ||
+                          format == ParseIntFormat::STRICT_NON_NEGATIVE);
+  bool is_strict = (format == ParseIntFormat::STRICT_NON_NEGATIVE ||
+                    format == ParseIntFormat::STRICT_OPTIONALLY_NEGATIVE);
+
   bool starts_with_negative = input[0] == '-';
   bool starts_with_digit = base::IsAsciiDigit(input[0]);
 
   if (!starts_with_digit) {
-    if (format == ParseIntFormat::NON_NEGATIVE || !starts_with_negative)
+    // The length() < 2 check catches "-". It's needed here to prevent reading
+    // beyond the end of the array on line 70.
+    if (is_non_negative || !starts_with_negative || input.length() < 2) {
       return SetError(ParseIntError::FAILED_PARSE, optional_error);
+    }
+    // If the first digit after the negative is a 0, then either the number is
+    // -0 or it has an unnecessary leading 0. Either way, it violates the
+    // requirements of being "strict", so fail if strict.
+    if (is_strict && input[1] == '0') {
+      return SetError(ParseIntError::FAILED_PARSE, optional_error);
+    }
+  } else {
+    // Fail if the first character is a zero and the string has more than 1
+    // digit.
+    if (is_strict && input[0] == '0' && input.length() > 1) {
+      return SetError(ParseIntError::FAILED_PARSE, optional_error);
+    }
   }
 
   // Dispatch to the appropriate flavor of base::StringToXXX() by calling one of
@@ -77,7 +97,7 @@ bool ParseIntHelper(const base::StringPiece& input,
   // as it has ambiguity with parse errors.
 
   // Strip any leading negative sign off the number.
-  base::StringPiece numeric_portion =
+  std::string_view numeric_portion =
       starts_with_negative ? input.substr(1) : input;
 
   // Test if |numeric_portion| is a valid non-negative integer.
@@ -95,32 +115,36 @@ bool ParseIntHelper(const base::StringPiece& input,
 
 }  // namespace
 
-bool ParseInt32(const base::StringPiece& input,
+bool ParseInt32(std::string_view input,
                 ParseIntFormat format,
                 int32_t* output,
                 ParseIntError* optional_error) {
   return ParseIntHelper(input, format, output, optional_error);
 }
 
-bool ParseInt64(const base::StringPiece& input,
+bool ParseInt64(std::string_view input,
                 ParseIntFormat format,
                 int64_t* output,
                 ParseIntError* optional_error) {
   return ParseIntHelper(input, format, output, optional_error);
 }
 
-bool ParseUint32(const base::StringPiece& input,
+bool ParseUint32(std::string_view input,
+                 ParseIntFormat format,
                  uint32_t* output,
                  ParseIntError* optional_error) {
-  return ParseIntHelper(input, ParseIntFormat::NON_NEGATIVE, output,
-                        optional_error);
+  CHECK(format == ParseIntFormat::NON_NEGATIVE ||
+        format == ParseIntFormat::STRICT_NON_NEGATIVE);
+  return ParseIntHelper(input, format, output, optional_error);
 }
 
-bool ParseUint64(const base::StringPiece& input,
+bool ParseUint64(std::string_view input,
+                 ParseIntFormat format,
                  uint64_t* output,
                  ParseIntError* optional_error) {
-  return ParseIntHelper(input, ParseIntFormat::NON_NEGATIVE, output,
-                        optional_error);
+  CHECK(format == ParseIntFormat::NON_NEGATIVE ||
+        format == ParseIntFormat::STRICT_NON_NEGATIVE);
+  return ParseIntHelper(input, format, output, optional_error);
 }
 
 }  // namespace net

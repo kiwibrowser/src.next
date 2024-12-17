@@ -2,10 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "components/history/core/browser/url_utils.h"
 
-#include <algorithm>
-
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_util.h"
 #include "url/gurl.h"
 
@@ -54,7 +58,7 @@ bool IsPathPrefix(const std::string& p1, const std::string& p2) {
   if (p1.length() > p2.length())
     return false;
   std::pair<std::string::const_iterator, std::string::const_iterator>
-      first_diff = std::mismatch(p1.begin(), p1.end(), p2.begin());
+      first_diff = base::ranges::mismatch(p1, p2);
   // Necessary condition: `p1` is a string prefix of `p2`.
   if (first_diff.first != p1.end())
     return false;  // E.g.: (`p1` = "/test", `p2` = "/exam") => false.
@@ -73,12 +77,13 @@ bool IsPathPrefix(const std::string& p1, const std::string& p2) {
 
 GURL ToggleHTTPAndHTTPS(const GURL& url) {
   std::string new_scheme;
-  if (url.SchemeIs("http"))
+  if (url.SchemeIs("http")) {
     new_scheme = "https";
-  else if (url.SchemeIs("https"))
+  } else if (url.SchemeIs("https")) {
     new_scheme = "http";
-  else
-    return GURL::EmptyGURL();
+  } else {
+    return GURL();
+  }
   GURL::Replacements replacement;
   replacement.SetSchemeStr(new_scheme);
   return url.ReplaceComponents(replacement);

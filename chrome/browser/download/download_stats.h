@@ -9,26 +9,10 @@
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/download/download_commands.h"
 #include "chrome/browser/download/download_prompt_status.h"
-#include "chrome/browser/profiles/profile.h"
 #include "components/download/public/common/download_danger_type.h"
 #include "components/download/public/common/download_path_reservation_tracker.h"
 
-// Used for counting UMA stats. Similar to content's
-// download_stats::DownloadCountTypes but from the chrome layer.
-enum ChromeDownloadCountTypes {
-  // Stale enum values left around os that values passed to UMA don't
-  // change.
-  CHROME_DOWNLOAD_COUNT_UNUSED_0 = 0,
-  CHROME_DOWNLOAD_COUNT_UNUSED_1,
-  CHROME_DOWNLOAD_COUNT_UNUSED_2,
-  CHROME_DOWNLOAD_COUNT_UNUSED_3,
-
-  // A download *would* have been initiated, but it was blocked
-  // by the DownloadThrottlingResourceHandler.
-  CHROME_DOWNLOAD_COUNT_BLOCKED_BY_THROTTLING,
-
-  CHROME_DOWNLOAD_COUNT_TYPES_LAST_ENTRY
-};
+class Profile;
 
 // Used for counting UMA stats. Similar to content's
 // download_stats::DownloadInitiattionSources but from the chrome layer.
@@ -74,6 +58,9 @@ enum ChromeDownloadOpenMethod {
   // The download was opened using a rename handler.
   DOWNLOAD_OPEN_METHOD_RENAME_HANDLER,
 
+  // The download was opened with the Media App on ChromeOS.
+  DOWNLOAD_OPEN_METHOD_MEDIA_APP,
+
   DOWNLOAD_OPEN_METHOD_LAST_ENTRY
 };
 
@@ -106,8 +93,8 @@ enum class DownloadCancelReason {
   kTargetConfirmationResult = 1,
   // Canceled due to no valid virtual path.
   kNoValidPath = 2,
-  // Canceled due to no mixed content.
-  kMixedContent = 3,
+  // Canceled due to no insecure download.
+  kInsecureDownload = 3,
   // Canceled due to failed path reservacation.
   kFailedPathReservation = 4,
   // Canceled due to empty local path.
@@ -115,22 +102,14 @@ enum class DownloadCancelReason {
   kMaxValue = kEmptyLocalPath
 };
 
-// Increment one of the above counts.
-void RecordDownloadCount(ChromeDownloadCountTypes type);
-
 // Record initiation of a download from a specific source.
 void RecordDownloadSource(ChromeDownloadSource source);
 
-// Record that a download warning was shown.
-void RecordDangerousDownloadWarningShown(
-    download::DownloadDangerType danger_type,
-    const base::FilePath& file_path,
-    bool is_https,
-    bool has_user_gesture);
-
-// Record that the user opened the confirmation dialog for a dangerous download.
-void RecordOpenedDangerousConfirmDialog(
-    download::DownloadDangerType danger_type);
+// Record that a download warning was shown, if the download was dangerous. To
+// avoid double-logging, it checks DownloadItemModel::WasUIWarningShown() first.
+// Also records the warning shown by setting WasUIWarningShown to true on the
+// model.
+void MaybeRecordDangerousDownloadWarningShown(DownloadUIModel& model);
 
 // Record that a download was opened.
 void RecordDownloadOpen(ChromeDownloadOpenMethod open_method,
@@ -178,11 +157,6 @@ void RecordDownloadStartPerProfileType(Profile* profile);
 void RecordDownloadPromptStatus(DownloadPromptStatus status);
 #endif  // BUILDFLAG(IS_ANDROID)
 
-#if BUILDFLAG(IS_CHROMEOS)
-// Records that a notification for a download was suppressed.
-void RecordDownloadNotificationSuppressed();
-#endif  // BUILDFLAG(IS_CHROMEOS)
-
 enum class DownloadShelfContextMenuAction {
   // Drop down button for download shelf context menu is visible
   kDropDownShown = 0,
@@ -210,8 +184,8 @@ enum class DownloadShelfContextMenuAction {
   kLearnMoreScanningClicked = 21,
   kLearnMoreInterruptedEnabled = 22,
   kLearnMoreInterruptedClicked = 23,
-  kLearnMoreMixedContentEnabled = 24,
-  kLearnMoreMixedContentClicked = 25,
+  kLearnMoreInsecureDownloadEnabled = 24,
+  kLearnMoreInsecureDownloadClicked = 25,
   kCopyToClipboardEnabled = 26,
   kCopyToClipboardClicked = 27,
   // kAnnotateEnabled = 28,

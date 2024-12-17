@@ -35,11 +35,13 @@ MutableCSSPropertyValueSet& InlineCSSStyleDeclaration::PropertySet() const {
 }
 
 void InlineCSSStyleDeclaration::DidMutate(MutationType type) {
-  if (type == kNoChanges)
+  if (type == kNoChanges) {
     return;
+  }
 
-  if (!parent_element_)
+  if (!parent_element_) {
     return;
+  }
 
   parent_element_->NotifyInlineStyleMutation();
   parent_element_->ClearMutableInlineStyleIfEmpty();
@@ -60,6 +62,7 @@ CSSStyleSheet* InlineCSSStyleDeclaration::ParentStyleSheet() const {
 void InlineCSSStyleDeclaration::Trace(Visitor* visitor) const {
   visitor->Trace(parent_element_);
   AbstractPropertySetCSSStyleDeclaration::Trace(visitor);
+  ElementRareDataField::Trace(visitor);
 }
 
 }  // namespace blink

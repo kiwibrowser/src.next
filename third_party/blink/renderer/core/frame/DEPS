@@ -1,6 +1,15 @@
+include_rules = {
+  "+cc/input/browser_controls_offset_tags_info.h",
+  "+base/metrics/histogram_functions.h",
+}
+
 specific_include_rules = {
   "ad_tracker_test\.cc": [
     "+base/run_loop.h",
+  ],
+  "attribution_src_loader(\.cc|\.h|_test\.cc)": [
+    "+components/attribution_reporting",
+    "+services/network/public/cpp/attribution_utils.h",
   ],
   "child_frame_compositing_helper\.h": [
     "+components/viz/common/surfaces/surface_id.h",
@@ -21,10 +30,14 @@ specific_include_rules = {
   "frame_test_helpers\.h": [
     "+components/viz/common/surfaces/frame_sink_id.h"
   ],
+  "history_util\.cc": [
+    "+url/url_util.h"
+  ],
   "local_frame_back_forward_cache_test\.cc": [
     "+base/run_loop.h",
   ],
   "local_frame\.h": [
+    "+ui/gfx/image/image_skia.h",
     "+ui/gfx/transform.h"
   ],
   "local_frame\.cc": [
@@ -38,7 +51,7 @@ specific_include_rules = {
   ],
   "local_frame_view\.cc": [
     "+base/timer/lap_timer.h",
-    "+cc/document_transition/document_transition_request.h",
+    "+cc/view_transition/view_transition_request.h",
     "+cc/tiles/frame_viewer_instrumentation.h",
     "+components/paint_preview/common/paint_preview_tracker.h",
   ],
@@ -64,14 +77,15 @@ specific_include_rules = {
   "web_frame_widget_impl\.cc": [
     "+cc/trees/swap_promise.h",
     "+cc/trees/compositor_commit_data.h",
+    "+ui/base/mojom/menu_source_type.mojom-blink-forward.h",
   ],
   "web_frame_widget_impl\.h": [
     "+services/viz/public/mojom/hit_test/input_target_client.mojom-blink.h",
-    "+ui/base/mojom/ui_base_types.mojom-shared.h",
+    "+ui/base/mojom/menu_source_type.mojom-blink-forward.h",
     "+ui/gfx/ca_layer_result.h",
   ],
   "web_frame_test\.cc": [
-    "+ui/base/mojom/ui_base_types.mojom-shared.h",
+    "+ui/base/mojom/menu_source_type.mojom-blink.h",
     "+ui/gfx/transform.h",
   ],
   "web_frame_widget_test\.cc": [

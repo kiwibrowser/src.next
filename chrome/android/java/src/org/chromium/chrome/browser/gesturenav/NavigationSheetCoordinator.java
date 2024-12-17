@@ -14,7 +14,6 @@ import android.widget.TextView;
 
 import androidx.annotation.DimenRes;
 
-import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.supplier.Supplier;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.gesturenav.NavigationSheetMediator.ItemProperties;
@@ -64,12 +63,13 @@ class NavigationSheetCoordinator implements BottomSheetContent, NavigationSheet 
     private final LayoutInflater mLayoutInflater;
     private final Supplier<BottomSheetController> mBottomSheetController;
     private final NavigationSheetMediator mMediator;
-    private final BottomSheetObserver mSheetObserver = new EmptyBottomSheetObserver() {
-        @Override
-        public void onSheetClosed(@StateChangeReason int reason) {
-            close(false);
-        }
-    };
+    private final BottomSheetObserver mSheetObserver =
+            new EmptyBottomSheetObserver() {
+                @Override
+                public void onSheetClosed(@StateChangeReason int reason) {
+                    close(false);
+                }
+            };
 
     private final Handler mHandler = new Handler();
     private final Runnable mOpenSheetRunnable;
@@ -104,55 +104,54 @@ class NavigationSheetCoordinator implements BottomSheetContent, NavigationSheet 
 
     private boolean mShowCloseIndicator;
 
-    // Metrics. True if sheet has ever been triggered (in peeked state) for an edge swipe.
-    private boolean mSheetTriggered;
-
     // Metrics. True if sheet was opened from long-press on back button.
     private boolean mOpenedAsPopup;
 
-    // Set to {@code true} for each trigger when the sheet should fully expand with
-    // no peek/half state.
-    private boolean mFullyExpand;
-
     private Profile mProfile;
 
-    /**
-     * Construct a new NavigationSheet.
-     */
-    NavigationSheetCoordinator(View parent, Context context,
-            Supplier<BottomSheetController> bottomSheetController, Profile profile) {
+    /** Construct a new NavigationSheet. */
+    NavigationSheetCoordinator(
+            View parent,
+            Context context,
+            Supplier<BottomSheetController> bottomSheetController,
+            Profile profile) {
         mParentView = parent;
         mBottomSheetController = bottomSheetController;
         mLayoutInflater = LayoutInflater.from(context);
         mToolbarView = mLayoutInflater.inflate(R.layout.navigation_sheet_toolbar, null);
         mProfile = profile;
-        mMediator = new NavigationSheetMediator(context, mModelList, profile, (position, index) -> {
-            mDelegate.navigateToIndex(index);
-            close(false);
-            if (mOpenedAsPopup) {
-                GestureNavMetrics.recordUserAction(
-                        (index == -1) ? "ShowFullHistory" : "HistoryClick" + (position + 1));
-            } else {
-                GestureNavMetrics.recordHistogram("GestureNavigation.Sheet.Used", mForward);
-
-                // Logs position of the clicked item. Back navigation has negative value,
-                // while forward positive. Show full history is zero.
-                RecordHistogram.recordSparseHistogram("GestureNavigation.Sheet.Selected",
-                        index == -1 ? 0 : (mForward ? position + 1 : -position - 1));
-            }
-        });
-        mModelAdapter.registerType(NAVIGATION_LIST_ITEM_TYPE_ID,
+        mMediator =
+                new NavigationSheetMediator(
+                        context,
+                        mModelList,
+                        profile,
+                        (position, index) -> {
+                            mDelegate.navigateToIndex(index);
+                            close(false);
+                            if (mOpenedAsPopup) {
+                                GestureNavMetrics.recordUserAction(
+                                        (index == -1)
+                                                ? "ShowFullHistory"
+                                                : "HistoryClick" + (position + 1));
+                            }
+                        });
+        mModelAdapter.registerType(
+                NAVIGATION_LIST_ITEM_TYPE_ID,
                 new LayoutViewBuilder(R.layout.navigation_popup_item),
                 NavigationItemViewBinder::bind);
-        mOpenSheetRunnable = () -> {
-            if (isHidden()) openSheet(true, true);
-        };
-        mLongSwipePeekThreshold = Math.min(
-                context.getResources().getDisplayMetrics().density * LONG_SWIPE_PEEK_THRESHOLD_DP,
-                parent.getWidth() / 2);
+        mOpenSheetRunnable =
+                () -> {
+                    if (isHidden()) openSheet(true);
+                };
+        mLongSwipePeekThreshold =
+                Math.min(
+                        context.getResources().getDisplayMetrics().density
+                                * LONG_SWIPE_PEEK_THRESHOLD_DP,
+                        parent.getWidth() / 2f);
         mItemHeight = getSizePx(context, R.dimen.navigation_popup_item_height);
-        mContentPadding = getSizePx(context, R.dimen.navigation_sheet_content_top_padding)
-                + getSizePx(context, R.dimen.navigation_sheet_content_bottom_padding);
+        mContentPadding =
+                getSizePx(context, R.dimen.navigation_sheet_content_top_padding)
+                        + getSizePx(context, R.dimen.navigation_sheet_content_bottom_padding);
     }
 
     private static int getSizePx(Context context, @DimenRes int id) {
@@ -160,10 +159,10 @@ class NavigationSheetCoordinator implements BottomSheetContent, NavigationSheet 
     }
 
     // Transition to either peeked or expanded state.
-    private boolean openSheet(boolean expandIfSmall, boolean animate) {
+    private boolean openSheet(boolean expandIfSmall) {
         mContentView =
                 (NavigationSheetView) mLayoutInflater.inflate(R.layout.navigation_sheet, null);
-        ListView listview = (ListView) mContentView.findViewById(R.id.navigation_entries);
+        ListView listview = mContentView.findViewById(R.id.navigation_entries);
         listview.setAdapter(mModelAdapter);
         NavigationHistory history = mDelegate.getHistory(mForward, mProfile.isOffTheRecord());
         // If there is no entry, the sheet should not be opened. This is the case when in a fresh
@@ -176,9 +175,7 @@ class NavigationSheetCoordinator implements BottomSheetContent, NavigationSheet 
             return false;
         }
         mBottomSheetController.get().addObserver(mSheetObserver);
-        mSheetTriggered = true;
         if (expandIfSmall && history.getEntryCount() <= SKIP_PEEK_COUNT) {
-            mFullyExpand = true;
             expandSheet();
         }
         return true;
@@ -186,7 +183,6 @@ class NavigationSheetCoordinator implements BottomSheetContent, NavigationSheet 
 
     private void expandSheet() {
         mBottomSheetController.get().expandSheet();
-        GestureNavMetrics.recordHistogram("GestureNavigation.Sheet.Viewed", mForward);
     }
 
     // NavigationSheet
@@ -201,8 +197,6 @@ class NavigationSheetCoordinator implements BottomSheetContent, NavigationSheet 
         if (mBottomSheetController.get() == null) return;
         mForward = forward;
         mShowCloseIndicator = showCloseIndicator;
-        mSheetTriggered = false;
-        mFullyExpand = false;
         mOpenedAsPopup = false;
     }
 
@@ -216,7 +210,7 @@ class NavigationSheetCoordinator implements BottomSheetContent, NavigationSheet 
         // Enter the expanded state by disabling peek/half state rather than
         // calling |expandSheet| explicilty. Otherwise it cause an extra
         // state transition (full -> full), which cancels the animation effect.
-        boolean opened = openSheet(/* expandIfSmall */ false, animate);
+        boolean opened = openSheet(/* expandIfSmall= */ false);
         if (opened) GestureNavMetrics.recordUserAction("Popup");
         return opened;
     }
@@ -247,9 +241,6 @@ class NavigationSheetCoordinator implements BottomSheetContent, NavigationSheet 
     public void release() {
         if (mBottomSheetController.get() == null) return;
         mHandler.removeCallbacks(mOpenSheetRunnable);
-        if (mSheetTriggered) {
-            GestureNavMetrics.recordHistogram("GestureNavigation.Sheet.Peeked", mForward);
-        }
 
         // Show navigation sheet if released at peek state.
         if (isPeeked()) expandSheet();
@@ -279,8 +270,7 @@ class NavigationSheetCoordinator implements BottomSheetContent, NavigationSheet 
     }
 
     private @SheetState int getTargetOrCurrentState() {
-        @SheetState
-        int state = mBottomSheetController.get().getTargetSheetState();
+        @SheetState int state = mBottomSheetController.get().getTargetSheetState();
         return state != BottomSheetController.SheetState.NONE
                 ? state
                 : mBottomSheetController.get().getSheetState();
@@ -352,11 +342,6 @@ class NavigationSheetCoordinator implements BottomSheetContent, NavigationSheet 
         int entryCount = mModelAdapter.getCount();
         return Math.min(maxHeight, entryCount * mItemHeight + mContentPadding)
                 / mParentView.getHeight();
-    }
-
-    @Override
-    public boolean hideOnScroll() {
-        return true;
     }
 
     @Override

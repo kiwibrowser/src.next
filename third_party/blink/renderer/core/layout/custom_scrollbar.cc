@@ -33,33 +33,37 @@
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/paint/custom_scrollbar_theme.h"
 #include "third_party/blink/renderer/core/paint/object_paint_invalidator.h"
+#include "third_party/blink/renderer/core/scroll/scroll_types.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 
 namespace blink {
 
 CustomScrollbar::CustomScrollbar(ScrollableArea* scrollable_area,
                                  ScrollbarOrientation orientation,
-                                 Element* style_source)
+                                 const LayoutObject* style_source,
+                                 bool suppress_use_counters)
     : Scrollbar(scrollable_area,
                 orientation,
                 style_source,
-                CustomScrollbarTheme::GetCustomScrollbarTheme()) {
+                CustomScrollbarTheme::GetCustomScrollbarTheme()),
+      suppress_use_counters_(suppress_use_counters) {
   DCHECK(style_source);
 }
 
 CustomScrollbar::~CustomScrollbar() {
   DCHECK(!scrollable_area_);
-  DCHECK(parts_.IsEmpty());
+  DCHECK(parts_.empty());
 }
 
 int CustomScrollbar::HypotheticalScrollbarThickness(
     const ScrollableArea* scrollable_area,
     ScrollbarOrientation orientation,
-    Element* style_source) {
+    const LayoutObject* style_source) {
   // Create a temporary scrollbar so that we can match style rules like
   // ::-webkit-scrollbar:horizontal according to the scrollbar's orientation.
   auto* scrollbar = MakeGarbageCollected<CustomScrollbar>(
-      const_cast<ScrollableArea*>(scrollable_area), orientation, style_source);
+      const_cast<ScrollableArea*>(scrollable_area), orientation, style_source,
+      /* suppress_use_counters */ true);
   scrollbar->UpdateScrollbarPart(kScrollbarBGPart);
   auto* part = scrollbar->GetPart(kScrollbarBGPart);
   int thickness = part ? part->ComputeThickness() : 0;
@@ -128,12 +132,12 @@ void CustomScrollbar::SetPressedPart(ScrollbarPart part,
   PositionScrollbarParts();
 }
 
-scoped_refptr<const ComputedStyle>
-CustomScrollbar::GetScrollbarPseudoElementStyle(ScrollbarPart part_type,
-                                                PseudoId pseudo_id) {
-  Element* element = StyleSource();
-  DCHECK(element);
-  Document& document = element->GetDocument();
+const ComputedStyle* CustomScrollbar::GetScrollbarPseudoElementStyle(
+    ScrollbarPart part_type,
+    PseudoId pseudo_id) {
+  const LayoutObject* layout_object = StyleSource();
+  DCHECK(layout_object);
+  Document& document = layout_object->GetDocument();
   if (!document.InStyleRecalc()) {
     // We are currently querying style for custom scrollbars on a style-dirty
     // tree outside style recalc. Update active style to make sure we don't
@@ -144,16 +148,16 @@ CustomScrollbar::GetScrollbarPseudoElementStyle(ScrollbarPart part_type,
     // scrollbar styles.
     document.GetStyleEngine().UpdateActiveStyle();
   }
-  if (!element->GetLayoutObject())
-    return nullptr;
-  const ComputedStyle* source_style = StyleSource()->GetLayoutObject()->Style();
-  scoped_refptr<const ComputedStyle> part_style =
-      element->UncachedStyleForPseudoElement(
-          StyleRequest(pseudo_id, this, part_type, source_style));
+  const ComputedStyle& source_style = layout_object->StyleRef();
+  const ComputedStyle* part_style =
+      layout_object->GetUncachedPseudoElementStyle(
+          StyleRequest(pseudo_id, this, part_type, &source_style));
   if (!part_style)
     return nullptr;
   if (part_style->DependsOnFontMetrics()) {
-    element->SetScrollbarPseudoElementStylesDependOnFontMetrics(true);
+    if (Element* element = DynamicTo<Element>(layout_object->GetNode())) {
+      element->SetScrollbarPseudoElementStylesDependOnFontMetrics(true);
+    }
   }
   return part_style;
 }
@@ -184,9 +188,7 @@ void CustomScrollbar::UpdateScrollbarParts() {
     SetFrameRect(gfx::Rect(
         Location(), gfx::Size(is_horizontal ? Width() : new_thickness,
                               is_horizontal ? new_thickness : Height())));
-    if (LayoutBox* box = GetScrollableArea()->GetLayoutBox()) {
-      if (auto* layout_block = DynamicTo<LayoutBlock>(box))
-        layout_block->NotifyScrollbarThicknessChanged();
+    if (LayoutBox* box = GetLayoutBox()) {
       box->SetChildNeedsLayout();
       // LayoutNG may attempt to reuse line-box fragments. It will do this even
       // if the |LayoutObject::ChildNeedsLayout| is true (set above).
@@ -202,7 +204,7 @@ void CustomScrollbar::UpdateScrollbarParts() {
   // If we didn't return above, it means that there is no change or the change
   // doesn't affect layout of the box. Update position to reflect the change if
   // any.
-  if (LayoutBox* box = GetScrollableArea()->GetLayoutBox()) {
+  if (LayoutBox* box = GetLayoutBox()) {
     // It's not ready to position scrollbar parts if the containing box has not
     // been inserted into the layout tree.
     if (box->IsLayoutView() || box->Parent())
@@ -230,7 +232,7 @@ static PseudoId PseudoForScrollbarPart(ScrollbarPart part) {
     case kAllParts:
       break;
   }
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
   return kPseudoIdScrollbar;
 }
 
@@ -239,9 +241,8 @@ void CustomScrollbar::UpdateScrollbarPart(ScrollbarPart part_type) {
   if (part_type == kNoPart)
     return;
 
-  scoped_refptr<const ComputedStyle> part_style =
-      GetScrollbarPseudoElementStyle(part_type,
-                                     PseudoForScrollbarPart(part_type));
+  const ComputedStyle* part_style = GetScrollbarPseudoElementStyle(
+      part_type, PseudoForScrollbarPart(part_type));
   bool need_layout_object =
       part_style && part_style->Display() != EDisplay::kNone;
 
@@ -270,7 +271,8 @@ void CustomScrollbar::UpdateScrollbarPart(ScrollbarPart part_type) {
       it != parts_.end() ? it->value : nullptr;
   if (!part_layout_object && need_layout_object && scrollable_area_) {
     part_layout_object = LayoutCustomScrollbarPart::CreateAnonymous(
-        &StyleSource()->GetDocument(), scrollable_area_, this, part_type);
+        &StyleSource()->GetDocument(), scrollable_area_, this, part_type,
+        suppress_use_counters_);
     parts_.Set(part_type, part_layout_object);
     SetNeedsPaintInvalidation(part_type);
   } else if (part_layout_object && !need_layout_object) {
@@ -281,7 +283,7 @@ void CustomScrollbar::UpdateScrollbarPart(ScrollbarPart part_type) {
   }
 
   if (part_layout_object)
-    part_layout_object->SetStyle(std::move(part_style));
+    part_layout_object->SetStyle(part_style);
 }
 
 gfx::Rect CustomScrollbar::ButtonRect(ScrollbarPart part_type) const {
@@ -316,7 +318,7 @@ gfx::Rect CustomScrollbar::ButtonRect(ScrollbarPart part_type) const {
       break;
     }
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
   }
   return button_rect;
 }
@@ -409,7 +411,7 @@ void CustomScrollbar::PositionScrollbarParts() {
         part_rect = FrameRect();
         break;
       default:
-        NOTREACHED();
+        NOTREACHED_IN_MIGRATION();
     }
     part.value->ClearNeedsLayoutWithoutPaintInvalidation();
     // The part's paint offset is relative to the box.
@@ -417,10 +419,31 @@ void CustomScrollbar::PositionScrollbarParts() {
     // when we support subpixel layout of overflow controls.
     part.value->GetMutableForPainting().FirstFragment().SetPaintOffset(
         PhysicalOffset(part_rect.origin()));
-    // The part's frame_rect is relative to the scrollbar.
-    part_rect.Offset(-Location().OffsetFromOrigin());
-    part.value->SetFrameRect(LayoutRect(part_rect));
+    part.value->SetOverriddenSize(PhysicalSize(part_rect.size()));
   }
+}
+
+const ComputedStyle* CustomScrollbar::GetScrollbarPartStyleForCursor(
+    ScrollbarPart part_type) const {
+  const LayoutCustomScrollbarPart* part_layout_object = GetPart(part_type);
+  if (part_layout_object) {
+    return part_layout_object->Style();
+  }
+  switch (part_type) {
+    case kBackButtonStartPart:
+    case kForwardButtonStartPart:
+    case kBackButtonEndPart:
+    case kForwardButtonEndPart:
+    case kTrackBGPart:
+    case kThumbPart:
+      return GetScrollbarPartStyleForCursor(kScrollbarBGPart);
+    case kBackTrackPart:
+    case kForwardTrackPart:
+      return GetScrollbarPartStyleForCursor(kTrackBGPart);
+    default:
+      break;
+  }
+  return nullptr;
 }
 
 void CustomScrollbar::InvalidateDisplayItemClientsOfScrollbarParts() {
@@ -435,6 +458,18 @@ void CustomScrollbar::InvalidateDisplayItemClientsOfScrollbarParts() {
 void CustomScrollbar::ClearPaintFlags() {
   for (auto& part : parts_)
     part.value->ClearPaintFlags();
+}
+
+void CustomScrollbar::Paint(GraphicsContext& context,
+                            const PhysicalOffset& paint_offset) const {
+  auto& theme = GetTheme();
+  // TODO(crbug.com/40105990): We should not round paint_offset but should
+  // consider subpixel accumulation when painting scrollbars.
+  gfx::Vector2d offset = ToRoundedVector2d(paint_offset);
+  theme.PaintTrackAndButtons(context, *this, FrameRect() + offset);
+  if (theme.HasThumb(*this)) {
+    theme.PaintThumb(context, *this, theme.ThumbRect(*this) + offset);
+  }
 }
 
 }  // namespace blink

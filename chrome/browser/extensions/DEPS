@@ -1,12 +1,17 @@
 include_rules = [
   "+components/app_constants/constants.h",
   "+components/crash/content/browser/error_reporting",
+  "+components/guest_view/common",
+  "+components/security_state/content",
   "+components/live_caption",
   "+extensions/strings/grit/extensions_strings.h",
   "+services/network/public",
 
   # For access to testing command line switches.
   "+ppapi/shared_impl",
+
+  # Fuzzer tests require ICU initialization.
+  "+third_party/icu/fuzzers/fuzzer_utils.h",
 
   # The extensions system should not depend on Chrome Platform Apps (or any
   # other component of the apps system).
@@ -21,9 +26,6 @@ specific_include_rules = {
     "+chrome/browser/apps/platform_apps/app_browsertest_util.h",
   ],
 
-  "content_script_apitest.cc": [
-    "+components/web_package",
-  ],
   "extension_protocols_unittest\.cc": [
     "+services/network/test",
   ],
@@ -41,18 +43,18 @@ specific_include_rules = {
   ],
 
   "chrome_extension_cookies\.h": [
-    # TODO(crbug.com/1049894): Remove.
+    # TODO(crbug.com/40672800): Remove.
     "+services/network/cookie_settings.h",
   ],
 
   "chrome_extension_cookies\.cc": [
-    # TODO(crbug.com/1049894): Remove.
+    # TODO(crbug.com/40672800): Remove.
     "+services/network/cookie_manager.h",
     "+services/network/restricted_cookie_manager.h",
   ],
 
   "webstore_private_apitest.cc" : [
-    # TODO(crbug/1095814): Remove this layering violation.
+    # TODO(crbug.com/40135906): Remove this layering violation.
     "+chrome/browser/ui/views/supervised_user/parent_permission_dialog_view.h",
   ],
 
@@ -99,4 +101,8 @@ specific_include_rules = {
     "+components/services/storage/privileged/mojom/indexed_db_control.mojom.h",
     "+components/services/storage/privileged/mojom/indexed_db_control_test.mojom.h",
   ],
+
+  "window_open_apitest\.cc": [
+    "+ash/wm/window_pin_util.h",
+  ]
 }

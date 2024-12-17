@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,32 +24,32 @@ class CheckPseudoHasFastRejectFilterTest : public PageTestBase {
     const char* attribute_value;
   };
 
-  template <unsigned length>
   void AddElementIdentifierHashes(
       CheckPseudoHasFastRejectFilter& filter,
-      const ElementInfo (&element_info_list)[length]) {
-    for (unsigned i = 0; i < length; i++) {
+      const base::span<const ElementInfo> element_info_list) {
+    for (const ElementInfo& element_info : element_info_list) {
       NonThrowableExceptionState no_exceptions;
       Element* element = GetDocument().CreateElementForBinding(
-          element_info_list[i].tag_name, nullptr, no_exceptions);
-      element->setAttribute(html_names::kIdAttr, element_info_list[i].id);
+          AtomicString(element_info.tag_name), nullptr, no_exceptions);
+      element->setAttribute(html_names::kIdAttr, AtomicString(element_info.id));
       element->setAttribute(html_names::kClassAttr,
-                            element_info_list[i].class_names);
-      element->setAttribute(element_info_list[i].attribute_name,
-                            element_info_list[i].attribute_value);
+                            AtomicString(element_info.class_names));
+      element->setAttribute(AtomicString(element_info.attribute_name),
+                            AtomicString(element_info.attribute_value));
       filter.AddElementIdentifierHashes(*element);
     }
   }
 
   bool CheckFastReject(CheckPseudoHasFastRejectFilter& filter,
                        const char* selector_text) {
-    CSSSelectorList selector_list =
+    CSSSelectorList* selector_list =
         css_test_helpers::ParseSelectorList(selector_text);
 
-    EXPECT_EQ(selector_list.First()->GetPseudoType(), CSSSelector::kPseudoHas);
+    EXPECT_EQ(selector_list->First()->GetPseudoType(), CSSSelector::kPseudoHas);
 
     CheckPseudoHasArgumentContext context(
-        selector_list.First()->SelectorList()->First());
+        selector_list->First()->SelectorList()->First(),
+        /* match_in_shadow_tree */ false);
 
     return filter.FastReject(context.GetPseudoHasArgumentHashes());
   }
@@ -62,15 +62,16 @@ TEST_F(CheckPseudoHasFastRejectFilterTest, CheckFastReject) {
   filter.AllocateBloomFilter();
   EXPECT_TRUE(filter.BloomFilterAllocated());
 
-  AddElementIdentifierHashes(
-      filter, {{/* tag_name */ "div", /* id */ "d1", /* class_names */ "a",
-                /* attribute_name */ "attr1", /* attribute_value */ "val1"},
-               {/* tag_name */ "div", /* id */ "d2", /* class_names */ "b",
-                /* attribute_name */ "attr2", /* attribute_value */ "val2"},
-               {/* tag_name */ "span", /* id */ "s1", /* class_names */ "c",
-                /* attribute_name */ "attr3", /* attribute_value */ "val3"},
-               {/* tag_name */ "span", /* id */ "s2", /* class_names */ "d",
-                /* attribute_name */ "attr4", /* attribute_value */ "val4"}});
+  const ElementInfo element_infos[] = {
+      {/* tag_name */ "div", /* id */ "d1", /* class_names */ "a",
+       /* attribute_name */ "attr1", /* attribute_value */ "val1"},
+      {/* tag_name */ "div", /* id */ "d2", /* class_names */ "b",
+       /* attribute_name */ "attr2", /* attribute_value */ "val2"},
+      {/* tag_name */ "span", /* id */ "s1", /* class_names */ "c",
+       /* attribute_name */ "attr3", /* attribute_value */ "val3"},
+      {/* tag_name */ "span", /* id */ "s2", /* class_names */ "d",
+       /* attribute_name */ "attr4", /* attribute_value */ "val4"}};
+  AddElementIdentifierHashes(filter, element_infos);
 
   EXPECT_FALSE(CheckFastReject(filter, ":has(div)"));
   EXPECT_FALSE(CheckFastReject(filter, ":has(span)"));

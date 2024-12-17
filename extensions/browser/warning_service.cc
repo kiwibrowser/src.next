@@ -8,6 +8,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/browser/warning_service_factory.h"
+#include "extensions/common/extension_id.h"
 #include "extensions/common/extension_set.h"
 
 using content::BrowserThread;
@@ -19,7 +20,8 @@ WarningService::WarningService(content::BrowserContext* browser_context)
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (browser_context_) {
     extension_registry_observation_.Observe(ExtensionRegistry::Get(
-        ExtensionsBrowserClient::Get()->GetOriginalContext(browser_context_)));
+        ExtensionsBrowserClient::Get()->GetContextRedirectedToOriginal(
+            browser_context_, /*force_guest_profile=*/true)));
   }
 }
 
@@ -49,8 +51,9 @@ void WarningService::ClearWarnings(
     NotifyWarningsChanged(affected_extensions);
 }
 
-std::set<Warning::WarningType> WarningService::
-    GetWarningTypesAffectingExtension(const std::string& extension_id) const {
+std::set<Warning::WarningType>
+WarningService::GetWarningTypesAffectingExtension(
+    const ExtensionId& extension_id) const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   std::set<Warning::WarningType> result;
   for (auto i = warnings_.cbegin(); i != warnings_.cend(); ++i) {
@@ -61,7 +64,7 @@ std::set<Warning::WarningType> WarningService::
 }
 
 std::vector<std::string> WarningService::GetWarningMessagesForExtension(
-    const std::string& extension_id) const {
+    const ExtensionId& extension_id) const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   std::vector<std::string> result;
 
@@ -88,18 +91,17 @@ void WarningService::AddWarnings(const WarningSet& warnings) {
 }
 
 // static
-void WarningService::NotifyWarningsOnUI(
-    void* profile_id,
-    const WarningSet& warnings) {
+void WarningService::NotifyWarningsOnUI(void* browser_context_id,
+                                        const WarningSet& warnings) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  content::BrowserContext* browser_context =
-      reinterpret_cast<content::BrowserContext*>(profile_id);
 
-  if (!browser_context ||
-      !ExtensionsBrowserClient::Get() ||
-      !ExtensionsBrowserClient::Get()->IsValidContext(browser_context)) {
+  if (!browser_context_id || !ExtensionsBrowserClient::Get() ||
+      !ExtensionsBrowserClient::Get()->IsValidContext(browser_context_id)) {
     return;
   }
+
+  content::BrowserContext* browser_context =
+      reinterpret_cast<content::BrowserContext*>(browser_context_id);
 
   WarningService* warning_service = WarningService::Get(browser_context);
 

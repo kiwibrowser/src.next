@@ -13,6 +13,7 @@
 
 #if BUILDFLAG(IS_WIN)
 #include <winsock2.h>
+
 #include "net/base/winsock_init.h"
 #endif
 
@@ -29,7 +30,7 @@ NetworkInterface::NetworkInterface(const std::string& name,
                                    const IPAddress& address,
                                    uint32_t prefix_length,
                                    int ip_address_attributes,
-                                   absl::optional<Eui48MacAddress> mac_address)
+                                   std::optional<Eui48MacAddress> mac_address)
     : name(name),
       friendly_name(friendly_name),
       interface_index(interface_index),

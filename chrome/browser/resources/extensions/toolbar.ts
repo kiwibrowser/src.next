@@ -5,19 +5,19 @@
 import 'chrome://resources/cr_elements/cr_button/cr_button.js';
 import 'chrome://resources/cr_elements/cr_toggle/cr_toggle.js';
 import 'chrome://resources/cr_elements/cr_toolbar/cr_toolbar.js';
-import 'chrome://resources/cr_elements/cr_hidden_style.css.js';
 import 'chrome://resources/cr_elements/policy/cr_tooltip_icon.js';
-import 'chrome://resources/cr_elements/cr_shared_vars.css.js';
-import 'chrome://resources/polymer/v3_0/paper-styles/color.js';
 import './pack_dialog.js';
 
 import {getToastManager} from 'chrome://resources/cr_elements/cr_toast/cr_toast_manager.js';
-import {CrToggleElement} from 'chrome://resources/cr_elements/cr_toggle/cr_toggle.js';
-import {I18nMixin} from 'chrome://resources/js/i18n_mixin.js';
-import {listenOnce} from 'chrome://resources/js/util.m.js';
-import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import type {CrToggleElement} from 'chrome://resources/cr_elements/cr_toggle/cr_toggle.js';
+import type {CrToolbarElement} from 'chrome://resources/cr_elements/cr_toolbar/cr_toolbar.js';
+import {I18nMixinLit} from 'chrome://resources/cr_elements/i18n_mixin_lit.js';
+import {listenOnce} from 'chrome://resources/js/util.js';
+import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
+import type {PropertyValues} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 
-import {getTemplate} from './toolbar.html.js';
+import {getCss} from './toolbar.css.js';
+import {getHtml} from './toolbar.html.js';
 
 export interface ToolbarDelegate {
   /**
@@ -33,103 +33,122 @@ export interface ToolbarDelegate {
       Promise<void>;
 }
 
+class DummyToolbarDelegate {
+  setProfileInDevMode(_inDevMode: boolean) {}
+  loadUnpacked() {
+    return Promise.resolve(true);
+  }
+  updateAllExtensions(_extensions: chrome.developerPrivate.ExtensionInfo[]) {
+    return Promise.resolve();
+  }
+}
+
 export interface ExtensionsToolbarElement {
   $: {
     devDrawer: HTMLElement,
     devMode: CrToggleElement,
     loadUnpacked: HTMLElement,
     packExtensions: HTMLElement,
+    toolbar: CrToolbarElement,
     updateNow: HTMLElement,
-
-    // <if expr="chromeos_ash">
-    kioskExtensions: HTMLElement,
-    // </if>
   };
 }
 
-const ExtensionsToolbarElementBase = I18nMixin(PolymerElement);
+const ExtensionsToolbarElementBase = I18nMixinLit(CrLitElement);
 
 export class ExtensionsToolbarElement extends ExtensionsToolbarElementBase {
   static get is() {
     return 'extensions-toolbar';
   }
 
-  static get template() {
-    return getTemplate();
+  static override get styles() {
+    return getCss();
   }
 
-  static get properties() {
+  override render() {
+    return getHtml.bind(this)();
+  }
+
+  static override get properties() {
     return {
-      extensions: Array,
-      delegate: Object,
+      extensions: {type: Array},
+      delegate: {type: Object},
 
       inDevMode: {
         type: Boolean,
-        value: false,
-        observer: 'onInDevModeChanged_',
-        reflectToAttribute: true,
+        reflect: true,
       },
 
-      devModeControlledByPolicy: Boolean,
-      isChildAccount: Boolean,
+      devModeControlledByPolicy: {type: Boolean},
+      isChildAccount: {type: Boolean},
 
-      // <if expr="chromeos_ash">
-      kioskEnabled: Boolean,
-      // </if>
+      narrow: {
+        type: Boolean,
+        notify: true,
+      },
 
-      canLoadUnpacked: Boolean,
+      canLoadUnpacked: {type: Boolean},
 
-      expanded_: Boolean,
-      showPackDialog_: Boolean,
+      expanded_: {type: Boolean},
+      showPackDialog_: {type: Boolean},
 
       /**
        * Prevents initiating update while update is in progress.
        */
-      isUpdating_: {type: Boolean, value: false},
+      isUpdating_: {type: Boolean},
     };
   }
 
-  extensions: chrome.developerPrivate.ExtensionInfo[];
-  delegate: ToolbarDelegate;
-  inDevMode: boolean;
-  devModeControlledByPolicy: boolean;
-  isChildAccount: boolean;
+  extensions: chrome.developerPrivate.ExtensionInfo[] = [];
+  delegate: ToolbarDelegate = new DummyToolbarDelegate();
+  inDevMode: boolean = false;
+  devModeControlledByPolicy: boolean = false;
+  isChildAccount: boolean = false;
 
-  // <if expr="chromeos_ash">
-  kioskEnabled: boolean;
-  // </if>
+  narrow: boolean = false;
+  canLoadUnpacked?: boolean;
 
-  canLoadUnpacked: boolean;
+  protected expanded_: boolean = false;
+  protected showPackDialog_: boolean = false;
+  private isUpdating_: boolean = false;
 
-  private expanded_: boolean;
-  private showPackDialog_: boolean;
-  private isUpdating_: boolean;
-
-  override ready() {
-    super.ready();
+  override firstUpdated(changedProperties: PropertyValues<this>) {
+    super.firstUpdated(changedProperties);
     this.setAttribute('role', 'banner');
   }
 
-  private fire_(eventName: string, detail?: any) {
-    this.dispatchEvent(
-        new CustomEvent(eventName, {bubbles: true, composed: true, detail}));
+  override updated(changedProperties: PropertyValues<this>) {
+    super.updated(changedProperties);
+
+    if (changedProperties.has('inDevMode')) {
+      const previous = changedProperties.get('inDevMode')!;
+      this.onInDevModeChanged_(this.inDevMode, previous);
+    }
   }
 
-  private shouldDisableDevMode_(): boolean {
+  focusSearchInput() {
+    this.$.toolbar.getSearchField().showAndFocus();
+  }
+
+  isSearchFocused(): boolean {
+    return this.$.toolbar.getSearchField().isSearchFocused();
+  }
+
+  protected shouldDisableDevMode_(): boolean {
     return this.devModeControlledByPolicy || this.isChildAccount;
   }
 
-  private getTooltipText_(): string {
+  protected getTooltipText_(): string {
     return this.i18n(
         this.isChildAccount ? 'controlledSettingChildRestriction' :
                               'controlledSettingPolicy');
   }
 
-  private getIcon_(): string {
+  protected getIcon_(): string {
     return this.isChildAccount ? 'cr20:kite' : 'cr20:domain';
   }
 
-  private onDevModeToggleChange_(e: CustomEvent<boolean>) {
+  protected onDevModeToggleChange_(e: CustomEvent<boolean>) {
     this.delegate.setProfileInDevMode(e.detail);
     chrome.metricsPrivate.recordUserAction(
         'Options_ToggleDeveloperMode_' + (e.detail ? 'Enabled' : 'Disabled'));
@@ -159,7 +178,7 @@ export class ExtensionsToolbarElement extends ExtensionsToolbarElementBase {
     this.expanded_ = !this.expanded_;
   }
 
-  private onLoadUnpackedTap_() {
+  protected onLoadUnpackedClick_() {
     this.delegate.loadUnpacked()
         .then((success) => {
           if (success) {
@@ -169,28 +188,22 @@ export class ExtensionsToolbarElement extends ExtensionsToolbarElementBase {
           }
         })
         .catch(loadError => {
-          this.fire_('load-error', loadError);
+          this.fire('load-error', loadError);
         });
     chrome.metricsPrivate.recordUserAction('Options_LoadUnpackedExtension');
   }
 
-  private onPackTap_() {
+  protected onPackClick_() {
     chrome.metricsPrivate.recordUserAction('Options_PackExtension');
     this.showPackDialog_ = true;
   }
 
-  private onPackDialogClose_() {
+  protected onPackDialogClose_() {
     this.showPackDialog_ = false;
     this.$.packExtensions.focus();
   }
 
-  // <if expr="chromeos_ash">
-  private onKioskTap_() {
-    this.fire_('kiosk-tap');
-  }
-  // </if>
-
-  private onUpdateNowTap_() {
+  protected onUpdateNowClick_() {
     // If already updating, do not initiate another update.
     if (this.isUpdating_) {
       return;
@@ -211,12 +224,23 @@ export class ExtensionsToolbarElement extends ExtensionsToolbarElementBase {
               this.isUpdating_ = false;
             },
             loadError => {
-              this.fire_('load-error', loadError);
+              this.fire('load-error', loadError);
               toastManager.hide();
               this.isUpdating_ = false;
             });
   }
+
+  protected onNarrowChanged_(e: CustomEvent<{value: boolean}>) {
+    this.narrow = e.detail.value;
+  }
+
+  protected canLoadUnpacked_() {
+    return this.canLoadUnpacked === undefined || this.canLoadUnpacked;
+  }
 }
+
+// Exported to be used in the autogenerated Lit template file
+export type ToolbarElement = ExtensionsToolbarElement;
 
 declare global {
   interface HTMLElementTagNameMap {

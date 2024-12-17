@@ -10,19 +10,19 @@ import android.content.pm.ResolveInfo;
 
 import androidx.annotation.Nullable;
 
+import org.jni_zero.CalledByNative;
+import org.jni_zero.JniType;
+import org.jni_zero.NativeMethods;
+
 import org.chromium.base.ContextUtils;
-import org.chromium.base.annotations.CalledByNative;
-import org.chromium.base.annotations.NativeMethods;
-import org.chromium.base.metrics.TimingMetric;
 import org.chromium.base.task.PostTask;
+import org.chromium.base.task.TaskTraits;
 import org.chromium.chrome.browser.browserservices.TrustedWebActivityClient;
 import org.chromium.chrome.browser.browserservices.intents.WebappConstants;
-import org.chromium.chrome.browser.browserservices.metrics.BrowserServicesTimingMetrics;
-import org.chromium.chrome.browser.notifications.WebPlatformNotificationMetrics;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.AsyncTabCreationParams;
-import org.chromium.chrome.browser.tabmodel.document.TabDelegate;
+import org.chromium.chrome.browser.tabmodel.document.ChromeAsyncTabLauncher;
 import org.chromium.chrome.browser.webapps.ChromeWebApkHost;
 import org.chromium.chrome.browser.webapps.WebappDataStorage;
 import org.chromium.chrome.browser.webapps.WebappRegistry;
@@ -30,7 +30,6 @@ import org.chromium.components.payments.PaymentRequestService;
 import org.chromium.components.webapk.lib.client.WebApkValidator;
 import org.chromium.components.webapps.ShortcutSource;
 import org.chromium.content_public.browser.LoadUrlParams;
-import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.common.Referrer;
 import org.chromium.content_public.common.ResourceRequestBody;
@@ -58,21 +57,25 @@ public class ServiceTabLauncher {
     /**
      * Launches the browser activity and launches a tab for |url|.
      *
-     * @param requestId      Id of the request for launching this tab.
-     * @param incognito      Whether the tab should be launched in incognito mode.
-     * @param url            The URL which should be launched in a tab.
-     * @param disposition    The disposition requested by the navigation source.
-     * @param referrerUrl    URL of the referrer which is opening the page.
+     * @param requestId Id of the request for launching this tab.
+     * @param incognito Whether the tab should be launched in incognito mode.
+     * @param url The URL which should be launched in a tab.
+     * @param disposition The disposition requested by the navigation source.
+     * @param referrerUrl URL of the referrer which is opening the page.
      * @param referrerPolicy The referrer policy to consider when applying the referrer.
-     * @param extraHeaders   Extra headers to apply when requesting the tab's URL.
-     * @param postData       Post-data to include in the tab URL's request body.
+     * @param extraHeaders Extra headers to apply when requesting the tab's URL.
+     * @param postData Post-data to include in the tab URL's request body.
      */
     @CalledByNative
-    public static void launchTab(final int requestId, boolean incognito, GURL url, int disposition,
-            String referrerUrl, int referrerPolicy, String extraHeaders,
+    public static void launchTab(
+            final int requestId,
+            boolean incognito,
+            GURL url,
+            int disposition,
+            @JniType("std::string") String referrerUrl,
+            int referrerPolicy,
+            @JniType("std::string") String extraHeaders,
             ResourceRequestBody postData) {
-        WebPlatformNotificationMetrics.getInstance().onNewTabLaunched();
-
         // Open popup window in custom tab.
         // Note that this is used by PaymentRequestEvent.openWindow().
         if (disposition == WindowOpenDisposition.NEW_POPUP) {
@@ -81,65 +84,96 @@ public class ServiceTabLauncher {
             if (paymentHandlerWebContent != null) {
                 onWebContentsForRequestAvailable(requestId, paymentHandlerWebContent);
             } else {
-                PostTask.postTask(UiThreadTaskTraits.DEFAULT,
+                PostTask.postTask(
+                        TaskTraits.UI_DEFAULT,
                         () -> onWebContentsForRequestAvailable(requestId, null));
             }
             return;
         }
 
-        dispatchLaunch(requestId, incognito, url.getSpec(), referrerUrl, referrerPolicy,
-                extraHeaders, postData);
+        dispatchLaunch(
+                requestId,
+                incognito,
+                url.getSpec(),
+                referrerUrl,
+                referrerPolicy,
+                extraHeaders,
+                postData);
     }
 
     /** Dispatches the launch event. */
-    private static void dispatchLaunch(final int requestId, final boolean incognito,
-            final String url, final String referrerUrl, final int referrerPolicy,
-            final String extraHeaders, final ResourceRequestBody postData) {
+    private static void dispatchLaunch(
+            final int requestId,
+            final boolean incognito,
+            final String url,
+            final String referrerUrl,
+            final int referrerPolicy,
+            final String extraHeaders,
+            final ResourceRequestBody postData) {
         Context context = ContextUtils.getApplicationContext();
 
-        List<ResolveInfo> resolveInfos;
-        try (TimingMetric t = TimingMetric.mediumUptime(
-                     BrowserServicesTimingMetrics.SERVICE_TAB_RESOLVE_TIME)) {
-            resolveInfos = WebApkValidator.resolveInfosForUrl(context, url);
-        }
+        List<ResolveInfo> resolveInfos = WebApkValidator.resolveInfosForUrl(context, url);
         String webApkPackageName = WebApkValidator.findFirstWebApkPackage(context, resolveInfos);
 
         if (webApkPackageName != null) {
             final List<ResolveInfo> resolveInfosFinal = resolveInfos;
             WebApkIdentityServiceClient.CheckBrowserBacksWebApkCallback callback =
                     (doesBrowserBackWebApk, browserPackageName) -> {
-                if (doesBrowserBackWebApk) {
-                    Intent intent = WebApkNavigationClient.createLaunchWebApkIntent(
-                            webApkPackageName, url, true /* forceNavigation */);
-                    intent.putExtra(WebappConstants.EXTRA_SOURCE, ShortcutSource.NOTIFICATION);
-                    ContextUtils.getApplicationContext().startActivity(intent);
-                    return;
-                }
-                launchTabOrWebapp(requestId, incognito, url, referrerUrl, referrerPolicy,
-                        extraHeaders, postData, resolveInfosFinal);
-            };
+                        if (doesBrowserBackWebApk) {
+                            Intent intent =
+                                    WebApkNavigationClient.createLaunchWebApkIntent(
+                                            webApkPackageName, url, /* forceNavigation= */ true);
+                            intent.putExtra(
+                                    WebappConstants.EXTRA_SOURCE, ShortcutSource.NOTIFICATION);
+                            ContextUtils.getApplicationContext().startActivity(intent);
+                            return;
+                        }
+                        launchTabOrWebapp(
+                                requestId,
+                                incognito,
+                                url,
+                                referrerUrl,
+                                referrerPolicy,
+                                extraHeaders,
+                                postData,
+                                resolveInfosFinal);
+                    };
             ChromeWebApkHost.checkChromeBacksWebApkAsync(webApkPackageName, callback);
             return;
         }
 
-        launchTabOrWebapp(requestId, incognito, url, referrerUrl, referrerPolicy, extraHeaders,
-                postData, resolveInfos);
+        launchTabOrWebapp(
+                requestId,
+                incognito,
+                url,
+                referrerUrl,
+                referrerPolicy,
+                extraHeaders,
+                postData,
+                resolveInfos);
     }
 
     /** Launches WebappActivity or a tab for the |url|. */
-    private static void launchTabOrWebapp(int requestId, boolean incognito, String url,
-            String referrerUrl, int referrerPolicy, String extraHeaders,
-            ResourceRequestBody postData, List<ResolveInfo> resolveInfosForUrl) {
+    private static void launchTabOrWebapp(
+            int requestId,
+            boolean incognito,
+            String url,
+            String referrerUrl,
+            int referrerPolicy,
+            String extraHeaders,
+            ResourceRequestBody postData,
+            List<ResolveInfo> resolveInfosForUrl) {
         // Launch WebappActivity if one matches the target URL and was opened recently.
         // Otherwise, open the URL in a tab.
         WebappDataStorage storage = WebappRegistry.getInstance().getWebappDataStorageForUrl(url);
-        TabDelegate tabDelegate = new TabDelegate(incognito);
+        ChromeAsyncTabLauncher chromeAsyncTabLauncher = new ChromeAsyncTabLauncher(incognito);
 
         // Launch into a TrustedWebActivity if one exists for the URL.
         Context appContext = ContextUtils.getApplicationContext();
         if (!incognito) {
-            Intent twaIntent = TrustedWebActivityClient
-                    .createLaunchIntentForTwa(appContext, url, resolveInfosForUrl);
+            Intent twaIntent =
+                    TrustedWebActivityClient.createLaunchIntentForTwa(
+                            appContext, url, resolveInfosForUrl);
 
             if (twaIntent != null) {
                 appContext.startActivity(twaIntent);
@@ -157,9 +191,10 @@ public class ServiceTabLauncher {
             loadUrlParams.setVerbatimHeaders(extraHeaders);
             loadUrlParams.setReferrer(new Referrer(referrerUrl, referrerPolicy));
 
-            AsyncTabCreationParams asyncParams = new AsyncTabCreationParams(loadUrlParams,
-                    requestId);
-            tabDelegate.createNewTab(asyncParams, TabLaunchType.FROM_CHROME_UI, Tab.INVALID_TAB_ID);
+            AsyncTabCreationParams asyncParams =
+                    new AsyncTabCreationParams(loadUrlParams, requestId);
+            chromeAsyncTabLauncher.launchNewTab(
+                    asyncParams, TabLaunchType.FROM_CHROME_UI, Tab.INVALID_TAB_ID);
         } else {
             // The URL is within the scope of a recently launched standalone-capable web app
             // on the home screen, so open it a standalone web app frame.
@@ -172,7 +207,7 @@ public class ServiceTabLauncher {
             intent.putExtra(WebappConstants.EXTRA_URL, url);
             intent.putExtra(WebappConstants.EXTRA_SOURCE, ShortcutSource.NOTIFICATION);
             intent.putExtra(WebappConstants.EXTRA_FORCE_NAVIGATION, true);
-            tabDelegate.createNewStandaloneFrame(intent);
+            chromeAsyncTabLauncher.launchNewStandaloneFrame(intent);
         }
     }
 

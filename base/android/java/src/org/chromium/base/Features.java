@@ -4,18 +4,17 @@
 
 package org.chromium.base;
 
-import org.chromium.base.annotations.JNINamespace;
-import org.chromium.base.annotations.NativeMethods;
-import org.chromium.build.annotations.MainDex;
+import org.jni_zero.JNINamespace;
+import org.jni_zero.JniType;
+import org.jni_zero.NativeMethods;
 
 /**
  * A class that serves as a bridge to native code to check the status of feature switches.
  *
- * Each subclass represents a set of related features. Each instance of such a class correlates to a
- * single C++ Feature.
+ * <p>Each subclass represents a set of related features. Each instance of such a class correlates
+ * to a single C++ Feature.
  */
 @JNINamespace("base::android")
-@MainDex
 public abstract class Features {
     private final String mName;
 
@@ -45,8 +44,20 @@ public abstract class Features {
      *         specified parameter does not exist or its string value is neither "true" nor "false".
      */
     public boolean getFieldTrialParamByFeatureAsBoolean(String paramName, boolean defaultValue) {
-        return FeaturesJni.get().getFieldTrialParamByFeatureAsBoolean(
-                getFeaturePointer(), paramName, defaultValue);
+        return FeaturesJni.get()
+                .getFieldTrialParamByFeatureAsBoolean(getFeaturePointer(), paramName, defaultValue);
+    }
+
+    /**
+     * Returns a field trial param as a string for the specified feature.
+     *
+     * @param paramName The name of the param.
+     * @return The parameter value as a String. Empty string if the feature does not exist or the
+     *     specified parameter does not exist.
+     */
+    public String getFieldTrialParamByFeatureAsString(String paramName) {
+        return FeaturesJni.get()
+                .getFieldTrialParamByFeatureAsString(getFeaturePointer(), paramName);
     }
 
     /** Returns a pointer to the native Feature object represented by this object instance. */
@@ -55,7 +66,14 @@ public abstract class Features {
     @NativeMethods
     interface Natives {
         boolean isEnabled(long featurePointer);
+
         boolean getFieldTrialParamByFeatureAsBoolean(
-                long featurePointer, String paramName, boolean defaultValue);
+                long featurePointer,
+                @JniType("std::string") String paramName,
+                boolean defaultValue);
+
+        @JniType("std::string")
+        String getFieldTrialParamByFeatureAsString(
+                long featurePointer, @JniType("std::string") String paramName);
     }
 }

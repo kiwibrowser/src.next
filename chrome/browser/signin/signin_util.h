@@ -5,28 +5,45 @@
 #ifndef CHROME_BROWSER_SIGNIN_SIGNIN_UTIL_H_
 #define CHROME_BROWSER_SIGNIN_SIGNIN_UTIL_H_
 
+#include <optional>
 #include <string>
 
 #include "base/containers/enum_set.h"
 #include "base/files/file_path.h"
+#include "base/functional/callback.h"
 #include "base/supports_user_data.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
+#include "components/policy/core/browser/signin/profile_separation_policies.h"
 #include "components/signin/public/base/signin_metrics.h"
+#include "components/signin/public/identity_manager/primary_account_mutator.h"
 #include "components/signin/public/identity_manager/tribool.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "net/cookies/canonical_cookie.h"
 
 class Profile;
+
+namespace signin {
+class IdentityManager;
+}
 
 namespace signin_util {
 
 enum class ProfileSeparationPolicyState {
   kEnforcedByExistingProfile,
   kEnforcedByInterceptedAccount,
-  kStrict,
   kEnforcedOnMachineLevel,
   kKeepsBrowsingData,
   kMaxValue = kKeepsBrowsingData
+};
+
+// Enum used to share the sign in state with the WebUI.
+enum class SignedInState {
+  kSignedOut = 0,
+  kSignedIn = 1,
+  kSyncing = 2,
+  kSignInPending = 3,
+  kWebOnlySignedIn = 4,
+  kSyncPaused = 5,
 };
 
 using ProfileSeparationPolicyStateSet =
@@ -34,34 +51,7 @@ using ProfileSeparationPolicyStateSet =
                   ProfileSeparationPolicyState::kEnforcedByExistingProfile,
                   ProfileSeparationPolicyState::kMaxValue>;
 
-// This class is used by cloud policy to indicate signout is disallowed for
-// cloud-managed enterprise accounts. Signout would require profile destruction
-// (See ChromeSigninClient::PreSignOut(),
-//      PrimaryAccountPolicyManager::EnsurePrimaryAccountAllowedForProfile()).
-// This class is also used on Android to disallow signout for supervised users.
-class UserSignoutSetting : public base::SupportsUserData::Data {
- public:
-  // Fetch from Profile. Make and store if not already present.
-  static UserSignoutSetting* GetForProfile(Profile* profile);
-
-  // Public as this class extends base::SupportsUserData::Data. Use
-  // |GetForProfile()| to get the instance associated with a profile.
-  UserSignoutSetting();
-  ~UserSignoutSetting() override;
-  UserSignoutSetting(const UserSignoutSetting&) = delete;
-  UserSignoutSetting& operator=(const UserSignoutSetting&) = delete;
-
-  signin::Tribool signout_allowed() const;
-  void SetSignoutAllowed(bool is_allowed);
-
- private:
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-  // `signout_allowed()` is always true for Lacros main profile despite of
-  // policies.
-  bool is_main_profile_ = false;
-#endif
-  signin::Tribool signout_allowed_ = signin::Tribool::kUnknown;
-};
+using PrimaryAccountError = signin::PrimaryAccountMutator::PrimaryAccountError;
 
 // This class calls ResetForceSigninForTesting when destroyed, so that
 // ForcedSigning doesn't leak across tests.
@@ -75,6 +65,40 @@ class ScopedForceSigninSetterForTesting {
       const ScopedForceSigninSetterForTesting&) = delete;
 };
 
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)
+// Utility class that moves cookies linked to a URL from one profile to the
+// other. This will be mostly used when a new profile is created after a
+// signin interception of an account linked a SAML signin.
+class CookiesMover {
+ public:
+  // Moves cookies related to `url` from `source_profile` to
+  // `destination_profile` and calls `callback` when it is done.
+  CookiesMover(base::WeakPtr<Profile> source_profile,
+               base::WeakPtr<Profile> destination_profile,
+               base::OnceCallback<void()> callback);
+
+  CookiesMover(const CookiesMover& copy) = delete;
+  CookiesMover& operator=(const CookiesMover&) = delete;
+  ~CookiesMover();
+
+  void StartMovingCookies();
+
+ private:
+  void OnCookiesReceived(
+      const std::vector<net::CookieWithAccessResult>& included,
+      const std::vector<net::CookieWithAccessResult>& excluded);
+
+  // Called when all the cookies have been moved.
+  void OnCookiesMoved();
+
+  GURL url_;
+  base::WeakPtr<Profile> source_profile_;
+  base::WeakPtr<Profile> destination_profile_;
+  base::OnceCallback<void()> callback_;
+  base::WeakPtrFactory<CookiesMover> weak_pointer_factory_{this};
+};
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS_ASH)
+
 // Return whether the force sign in policy is enabled or not.
 // The state of this policy will not be changed without relaunch Chrome.
 bool IsForceSigninEnabled();
@@ -87,52 +111,62 @@ void SetForceSigninForTesting(bool enable);
 // Reset force sign in to uninitialized state for testing.
 void ResetForceSigninForTesting();
 
-// Returns true if clearing the primary profile is allowed.
-bool IsUserSignoutAllowedForProfile(Profile* profile);
-
-// Sign-out is allowed by default, but some Chrome profiles (e.g. for cloud-
-// managed enterprise accounts) may wish to disallow user-initiated sign-out.
-// Note that this exempts sign-outs that are not user-initiated (e.g. sign-out
-// triggered when cloud policy no longer allows current email pattern). See
-// ChromeSigninClient::PreSignOut().
-void SetUserSignoutAllowedForProfile(Profile* profile, bool is_allowed);
-
-// Updates the user sign-out state to |true| if is was never initialized.
-// This should be called at the end of the flow to initialize a profile to
-// ensure that the signout allowed flag is updated.
-void EnsureUserSignoutAllowedIsInitializedForProfile(Profile* profile);
+// Returns true if profile deletion is allowed.
+bool IsProfileDeletionAllowed(Profile* profile);
 
 #if !BUILDFLAG(IS_ANDROID)
 #if !BUILDFLAG(IS_CHROMEOS)
-// Returns the state of profile separation on any account that would signin
-// inside `profile`. Returns an empty set if profile separation is not enforced
-// on accounts that will sign in the content area of `profile`.
-ProfileSeparationPolicyStateSet GetProfileSeparationPolicyState(
-    Profile* profile,
-    const absl::optional<std::string>& intercepted_account_level_policy_value =
-        absl::nullopt);
 
-// Returns true if profile separation must be enforced on an account signing in
-// the content area of `profile` by the ManagedAccountsSigninRestriction policy
-// for `profile` or if the value of 'intercepted_account_level_policy_value'
-// enforces profile separation for an intercepted account.
-// `intercepted_account_level_policy_value` has a value only in the case of an
-// account interception. This is used mainly in DiceWebSigninInterceptor to
-// determine if an intercepted account requires a new profile.
-bool ProfileSeparationEnforcedByPolicy(
+// Returns true if managed accounts signin are required to create a new profile
+// by policies set in `profile`. This will check the by default check the
+// ManagedAccountsSigninRestriction policy.
+// The optional `intercepted_account_email` will trigger a check to the
+// ProfileSeparationDomainExceptionList policy. Unless
+// `intercepted_account_email` is not available, it should always be passed.
+bool IsProfileSeparationEnforcedByProfile(
     Profile* profile,
-    const absl::optional<std::string>& intercepted_account_level_policy_value =
-        absl::nullopt);
+    const std::string& intercepted_account_email);
+
+// Returns true if profile separation is enforced by
+// `intercepted_account_separation_policies`.
+bool IsProfileSeparationEnforcedByPolicies(
+    const policy::ProfileSeparationPolicies&
+        intercepted_profile_separation_policies);
 
 bool ProfileSeparationAllowsKeepingUnmanagedBrowsingDataInManagedProfile(
     Profile* profile,
-    const std::string& intercepted_account_level_policy_value);
+    const policy::ProfileSeparationPolicies&
+        intercepted_profile_separation_policies);
+
+bool IsAccountExemptedFromEnterpriseProfileSeparation(Profile* profile,
+                                                      const std::string& email);
 #endif  // !BUILDFLAG(IS_CHROMEOS)
 // Records a UMA metric if the user accepts or not to create an enterprise
 // profile.
 void RecordEnterpriseProfileCreationUserChoice(bool enforced_by_policy,
                                                bool created);
 #endif  // !BUILDFLAG(IS_ANDROID)
+
+// TODO(b/339214136): Add a standalone unit for this function.
+// Add an account with `user_email` and `gaia_id` to `profile`, and then set it
+// as the primary account. A invalid refresh token will be set to mimic the
+// behavior of a signed-out user. It is expected that the user is not tracked
+// yet.
+PrimaryAccountError SetPrimaryAccountWithInvalidToken(
+    Profile* profile,
+    const std::string& user_email,
+    const std::string& gaia_id,
+    bool is_under_advanced_protection,
+    signin_metrics::AccessPoint access_point,
+    signin_metrics::SourceForRefreshTokenOperation source);
+
+// Returns true if the Chrome is signed into with an account that is in
+// persistent error state. Always return false for Syncing users, even if in
+// error state.
+bool IsSigninPending(signin::IdentityManager* identity_manager);
+
+// Returns the current state of the primary account that is used in Chrome.
+SignedInState GetSignedInState(signin::IdentityManager* identity_manager);
 
 }  // namespace signin_util
 

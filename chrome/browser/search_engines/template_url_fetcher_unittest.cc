@@ -2,15 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
+#pragma allow_unsafe_buffers
+#endif
+
 #include <stddef.h>
 
 #include <memory>
 #include <string>
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
@@ -32,8 +37,9 @@ namespace {
 constexpr int32_t kRequestID = 10;
 
 bool GetTestFilePath(const std::string& file_name, base::FilePath* path) {
-  if (!base::PathService::Get(base::DIR_SOURCE_ROOT, path))
+  if (!base::PathService::Get(base::DIR_SRC_TEST_DATA_ROOT, path)) {
     return false;
+  }
   *path = path->AppendASCII("components")
               .AppendASCII("test")
               .AppendASCII("data")
@@ -120,6 +126,7 @@ class TemplateURLFetcherTest : public testing::Test {
   // Is the code in WaitForDownloadToFinish in a message loop waiting for a
   // callback to finish?
   bool waiting_for_download_;
+  base::RunLoop loop_;
 };
 
 TemplateURLFetcherTest::TemplateURLFetcherTest()
@@ -133,7 +140,7 @@ TemplateURLFetcherTest::TemplateURLFetcherTest()
 void TemplateURLFetcherTest::RequestCompletedCallback() {
   requests_completed_++;
   if (waiting_for_download_)
-    base::RunLoop::QuitCurrentWhenIdleDeprecated();
+    loop_.QuitWhenIdle();
 }
 
 void TemplateURLFetcherTest::StartDownload(const std::u16string& keyword,
@@ -162,7 +169,7 @@ void TemplateURLFetcherTest::StartDownload(const std::u16string& keyword,
 void TemplateURLFetcherTest::WaitForDownloadToFinish() {
   ASSERT_FALSE(waiting_for_download_);
   waiting_for_download_ = true;
-  base::RunLoop().Run();
+  loop_.Run();
   waiting_for_download_ = false;
 }
 

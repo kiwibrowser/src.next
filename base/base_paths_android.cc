@@ -8,12 +8,15 @@
 #include <limits.h>
 #include <unistd.h>
 
+#include <ostream>
+
 #include "base/android/jni_android.h"
 #include "base/android/path_utils.h"
 #include "base/base_paths.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/notreached.h"
+#include "base/logging.h"
+#include "base/notimplemented.h"
 #include "base/process/process_metrics.h"
 
 namespace base {
@@ -23,7 +26,9 @@ bool PathProviderAndroid(int key, FilePath* result) {
     case base::FILE_EXE: {
       FilePath bin_dir;
       if (!ReadSymbolicLink(FilePath(kProcSelfExe), &bin_dir)) {
-        NOTREACHED() << "Unable to resolve " << kProcSelfExe << ".";
+        // This fails for some devices (maybe custom OEM selinux policy?)
+        // https://crbug.com/1416753
+        LOG(ERROR) << "Unable to resolve " << kProcSelfExe << ".";
         return false;
       }
       *result = bin_dir;
@@ -36,10 +41,10 @@ bool PathProviderAndroid(int key, FilePath* result) {
     case base::DIR_MODULE:
       return base::android::GetNativeLibraryDirectory(result);
     case base::DIR_SRC_TEST_DATA_ROOT:
-    case base::DIR_GEN_TEST_DATA_ROOT:
+    case base::DIR_OUT_TEST_DATA_ROOT:
       // These are only used by tests. In that context, they are overridden by
       // PathProviders in //base/test/test_support_android.cc.
-      NOTREACHED();
+      NOTIMPLEMENTED();
       return false;
     case base::DIR_USER_DESKTOP:
       // Android doesn't support GetUserDesktop.

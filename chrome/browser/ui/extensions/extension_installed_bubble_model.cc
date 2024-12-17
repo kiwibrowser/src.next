@@ -5,13 +5,13 @@
 #include "chrome/browser/ui/extensions/extension_installed_bubble_model.h"
 
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/extensions/api/commands/command_service.h"
+#include "chrome/browser/extensions/commands/command_service.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/signin_promo_util.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/sync/sync_promo_ui.h"
 #include "chrome/common/extensions/api/omnibox/omnibox_handler.h"
-#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/branded_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "extensions/common/api/extension_action/action_info.h"
 #include "extensions/common/command.h"
@@ -21,13 +21,13 @@
 
 namespace {
 
-absl::optional<extensions::Command> CommandForExtensionAction(
+std::optional<extensions::Command> CommandForExtensionAction(
     const extensions::Extension* extension,
     Profile* profile) {
   const auto* info = extensions::ActionInfo::GetExtensionActionInfo(extension);
 
   if (!info)
-    return absl::nullopt;
+    return std::nullopt;
 
   auto* service = extensions::CommandService::Get(profile);
   extensions::Command command;
@@ -38,23 +38,23 @@ absl::optional<extensions::Command> CommandForExtensionAction(
     return command;
   }
 
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 std::u16string MakeHowToUseText(const extensions::ActionInfo* action,
-                                absl::optional<extensions::Command> command,
+                                std::optional<extensions::Command> command,
                                 const std::string& keyword) {
   std::u16string extra;
   if (command.has_value())
     extra = command->accelerator().GetShortcutText();
 
   int message_id = 0;
-  if (action && action->type == extensions::ActionInfo::TYPE_BROWSER) {
+  if (action && action->type == extensions::ActionInfo::Type::kBrowser) {
     message_id =
         extra.empty()
             ? IDS_EXTENSION_INSTALLED_BROWSER_ACTION_INFO
             : IDS_EXTENSION_INSTALLED_BROWSER_ACTION_INFO_WITH_SHORTCUT;
-  } else if (action && action->type == extensions::ActionInfo::TYPE_PAGE) {
+  } else if (action && action->type == extensions::ActionInfo::Type::kPage) {
     message_id = extra.empty()
                      ? IDS_EXTENSION_INSTALLED_PAGE_ACTION_INFO
                      : IDS_EXTENSION_INSTALLED_PAGE_ACTION_INFO_WITH_SHORTCUT;
@@ -80,7 +80,7 @@ ExtensionInstalledBubbleModel::ExtensionInstalledBubbleModel(
       extension_id_(extension->id()),
       extension_name_(extension->name()) {
   const std::string& keyword = extensions::OmniboxInfo::GetKeyword(extension);
-  absl::optional<extensions::Command> command =
+  std::optional<extensions::Command> command =
       CommandForExtensionAction(extension, profile);
   const auto* action_info =
       extensions::ActionInfo::GetExtensionActionInfo(extension);
@@ -98,7 +98,7 @@ ExtensionInstalledBubbleModel::ExtensionInstalledBubbleModel(
   show_key_binding_ = command.has_value();
 
   show_sign_in_promo_ = extensions::util::ShouldSync(extension, profile) &&
-                        SyncPromoUI::ShouldShowSyncPromo(profile);
+                        signin::ShouldShowSyncPromo(*profile);
 
   if (show_how_to_use_)
     how_to_use_text_ = MakeHowToUseText(action_info, command, keyword);

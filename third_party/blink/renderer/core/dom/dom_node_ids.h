@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,8 +19,17 @@ class CORE_EXPORT DOMNodeIds {
   STATIC_ONLY(DOMNodeIds);
 
  public:
+  // Return a DOMNodeID or 0 if one hasn't been assigned.
   static DOMNodeId ExistingIdForNode(Node*);
+
+  // Return a DOMNodeID or 0 if one hasn't been assigned.
+  static DOMNodeId ExistingIdForNode(const Node*);
+
+  // Return the existing DOMNodeID if it has already been assigned, otherwise,
+  // assign a new DOMNodeID and return that.
   static DOMNodeId IdForNode(Node*);
+
+  // Return a node for the DOMNodeID or null if one hasn't been assigned.
   static Node* NodeForId(DOMNodeId);
 };
 

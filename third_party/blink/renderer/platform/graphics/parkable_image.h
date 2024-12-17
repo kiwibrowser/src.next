@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,17 +13,18 @@
 #include "base/time/time.h"
 #include "third_party/blink/public/platform/web_data.h"
 #include "third_party/blink/renderer/platform/disk_data_metadata.h"
-#include "third_party/blink/renderer/platform/graphics/rw_buffer.h"
+#include "third_party/blink/renderer/platform/image-decoders/rw_buffer.h"
 #include "third_party/blink/renderer/platform/image-decoders/segment_reader.h"
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
-#include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
 
 namespace blink {
 
 class SegmentReader;
 class ParkableImageManager;
+class ParkableImage;
+class ParkableImageSegmentReader;
 
-PLATFORM_EXPORT extern const base::Feature kDelayParkingImages;
+PLATFORM_EXPORT BASE_DECLARE_FEATURE(kDelayParkingImages);
 
 // Implementation of ParkableImage. See ParkableImage below.
 // We split ParkableImage like this because we want to avoid destroying the
@@ -38,6 +39,13 @@ class PLATFORM_EXPORT ParkableImageImpl final
   // Smallest encoded size that will actually be parked.
   static constexpr size_t kMinSizeToPark = 1024;  // 1 KiB
   // How long to wait before parking an image.
+  //
+  // Chosen arbitrarily, did not regress metrics in field trials in 2022. From
+  // local experiments, images are typically only decoded once, to raster the
+  // tile(s) they are a part of, then never used as long as the image decode
+  // cache is not emptied and the tiles are not re-rasterized. This is set to
+  // something longer than e.g. 1s in case there is a looping GIF for instance,
+  // and/or the decoded image cache is too small.
   static constexpr base::TimeDelta kParkingDelay = base::Seconds(30);
 
  private:
@@ -79,7 +87,8 @@ class PLATFORM_EXPORT ParkableImageImpl final
 
   // Attempt to park to disk. Returns false if it cannot be parked right now for
   // whatever reason, true if we will _attempt_ to park it to disk.
-  bool MaybePark() LOCKS_EXCLUDED(lock_);
+  bool MaybePark(scoped_refptr<base::SingleThreadTaskRunner> task_runner)
+      LOCKS_EXCLUDED(lock_);
 
   // Unpark the data from disk. This is blocking, on the same thread (since we
   // cannot expect to continue with anything that needs the data until we have
@@ -127,6 +136,7 @@ class PLATFORM_EXPORT ParkableImageImpl final
 
   std::unique_ptr<RWBuffer> rw_buffer_ GUARDED_BY(lock_);
 
+  std::unique_ptr<ReservedChunk> reserved_chunk_ GUARDED_BY(lock_);
   // Non-null iff we have the data from |rw_buffer_| saved to disk.
   std::unique_ptr<DiskDataMetadata> on_disk_metadata_ GUARDED_BY(lock_);
   // |size_| is only modified on the main thread.
@@ -176,6 +186,8 @@ class PLATFORM_EXPORT ParkableImage final
   // be called even if the image is currently parked, and will not unpark it.
   size_t size() const;
 
+  scoped_refptr<SegmentReader> CreateSegmentReader();
+
  private:
   friend class ThreadSafeRefCounted<ParkableImage>;
   template <typename T, typename... Args>
@@ -183,6 +195,7 @@ class PLATFORM_EXPORT ParkableImage final
   friend class ParkableImageManager;
   friend class ParkableImageBaseTest;
   friend class ParkableImageSegmentReader;
+  friend class ThreadSafeRefCounted<ParkableImageImpl>;
 
   explicit ParkableImage(size_t initial_capacity = 0);
   ~ParkableImage();

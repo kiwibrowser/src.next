@@ -8,14 +8,13 @@
 #include <iterator>
 #include <memory>
 
-#include "base/bind.h"
 #include "base/callback_list.h"
 #include "base/containers/contains.h"
+#include "base/functional/bind.h"
 #include "base/lazy_instance.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
 #include "base/task/single_thread_task_runner.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/blocklist_factory.h"
 #include "chrome/browser/extensions/blocklist_state_fetcher.h"
@@ -24,9 +23,11 @@
 #include "components/safe_browsing/buildflags.h"
 #include "components/safe_browsing/core/browser/db/database_manager.h"
 #include "components/safe_browsing/core/browser/db/util.h"
+#include "components/safe_browsing/core/common/features.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extension_prefs.h"
+#include "extensions/common/extension_id.h"
 
 using content::BrowserThread;
 using safe_browsing::SafeBrowsingDatabaseManager;
@@ -78,30 +79,28 @@ class SafeBrowsingClientImpl
       public base::RefCountedThreadSafe<SafeBrowsingClientImpl> {
  public:
   using OnResultCallback =
-      base::OnceCallback<void(const std::set<std::string>&)>;
+      base::OnceCallback<void(const std::set<ExtensionId>&)>;
 
   SafeBrowsingClientImpl(const SafeBrowsingClientImpl&) = delete;
   SafeBrowsingClientImpl& operator=(const SafeBrowsingClientImpl&) = delete;
 
   // Constructs a client to query the database manager for |extension_ids| and
   // run |callback| with the IDs of those which have been blocklisted.
-  static void Start(const std::set<std::string>& extension_ids,
+  static void Start(const std::set<ExtensionId>& extension_ids,
                     OnResultCallback callback) {
     auto safe_browsing_client = base::WrapRefCounted(
         new SafeBrowsingClientImpl(extension_ids, std::move(callback)));
-    content::GetIOThreadTaskRunner({})->PostTask(
-        FROM_HERE,
-        base::BindOnce(&SafeBrowsingClientImpl::StartCheck,
-                       safe_browsing_client, g_database_manager.Get().get(),
-                       extension_ids));
+    safe_browsing_client->StartCheck(g_database_manager.Get().get(),
+                                     extension_ids);
   }
 
  private:
   friend class base::RefCountedThreadSafe<SafeBrowsingClientImpl>;
 
-  SafeBrowsingClientImpl(const std::set<std::string>& extension_ids,
+  SafeBrowsingClientImpl(const std::set<ExtensionId>& extension_ids,
                          OnResultCallback callback)
-      : callback_task_runner_(base::ThreadTaskRunnerHandle::Get()),
+      : callback_task_runner_(
+            base::SingleThreadTaskRunner::GetCurrentDefault()),
         callback_(std::move(callback)) {}
 
   ~SafeBrowsingClientImpl() override {}
@@ -109,13 +108,13 @@ class SafeBrowsingClientImpl
   // Pass |database_manager| as a parameter to avoid touching
   // SafeBrowsingService on the IO thread.
   void StartCheck(scoped_refptr<SafeBrowsingDatabaseManager> database_manager,
-                  const std::set<std::string>& extension_ids) {
-    DCHECK_CURRENTLY_ON(BrowserThread::IO);
+                  const std::set<ExtensionId>& extension_ids) {
+    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
     if (database_manager->CheckExtensionIDs(extension_ids, this)) {
       // Definitely not blocklisted. Callback immediately.
       callback_task_runner_->PostTask(
           FROM_HERE,
-          base::BindOnce(std::move(callback_), std::set<std::string>()));
+          base::BindOnce(std::move(callback_), std::set<ExtensionId>()));
       return;
     }
     // Something might be blocklisted, response will come in
@@ -123,10 +122,9 @@ class SafeBrowsingClientImpl
     AddRef();  // Balanced in OnCheckExtensionsResult
   }
 
-  void OnCheckExtensionsResult(const std::set<std::string>& hits) override {
-    DCHECK_CURRENTLY_ON(BrowserThread::IO);
-    callback_task_runner_->PostTask(FROM_HERE,
-                                    base::BindOnce(std::move(callback_), hits));
+  void OnCheckExtensionsResult(const std::set<ExtensionId>& hits) override {
+    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+    std::move(callback_).Run(hits);
     Release();  // Balanced in StartCheck.
   }
 
@@ -143,7 +141,7 @@ void CheckOneExtensionState(Blocklist::IsBlocklistedCallback callback,
 void GetMalwareFromBlocklistStateMap(
     Blocklist::GetMalwareIDsCallback callback,
     const Blocklist::BlocklistStateMap& state_map) {
-  std::set<std::string> malware;
+  std::set<ExtensionId> malware;
   for (const auto& state_pair : state_map) {
     // TODO(oleg): UNKNOWN is treated as MALWARE for backwards compatibility.
     // In future GetMalwareIDs will be removed and the caller will have to
@@ -166,7 +164,7 @@ Blocklist::Observer::~Observer() {
   blocklist_->RemoveObserver(this);
 }
 
-Blocklist::Blocklist(ExtensionPrefs* prefs) {
+Blocklist::Blocklist() {
   auto& lazy_database_manager = g_database_manager.Get();
   // Using base::Unretained is safe because when this object goes away, the
   // subscription will automatically be destroyed.
@@ -184,12 +182,12 @@ Blocklist* Blocklist::Get(content::BrowserContext* context) {
   return BlocklistFactory::GetForBrowserContext(context);
 }
 
-void Blocklist::GetBlocklistedIDs(const std::set<std::string>& ids,
+void Blocklist::GetBlocklistedIDs(const std::set<ExtensionId>& ids,
                                   GetBlocklistedIDsCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (ids.empty() || !GetDatabaseManager().get()) {
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE, base::BindOnce(std::move(callback), BlocklistStateMap()));
     return;
   }
@@ -199,19 +197,19 @@ void Blocklist::GetBlocklistedIDs(const std::set<std::string>& ids,
   // extensions returned by SafeBrowsing will then be passed to
   // GetBlocklistStateIDs to get the particular BlocklistState for each id.
   SafeBrowsingClientImpl::Start(
-      ids, base::BindOnce(&Blocklist::GetBlocklistStateForIDs, AsWeakPtr(),
-                          std::move(callback)));
+      ids, base::BindOnce(&Blocklist::GetBlocklistStateForIDs,
+                          weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
 }
 
-void Blocklist::GetMalwareIDs(const std::set<std::string>& ids,
+void Blocklist::GetMalwareIDs(const std::set<ExtensionId>& ids,
                               GetMalwareIDsCallback callback) {
   GetBlocklistedIDs(ids, base::BindOnce(&GetMalwareFromBlocklistStateMap,
                                         std::move(callback)));
 }
 
-void Blocklist::IsBlocklisted(const std::string& extension_id,
+void Blocklist::IsBlocklisted(const ExtensionId& extension_id,
                               IsBlocklistedCallback callback) {
-  std::set<std::string> check;
+  std::set<ExtensionId> check;
   check.insert(extension_id);
   GetBlocklistedIDs(
       check, base::BindOnce(&CheckOneExtensionState, std::move(callback)));
@@ -219,10 +217,10 @@ void Blocklist::IsBlocklisted(const std::string& extension_id,
 
 void Blocklist::GetBlocklistStateForIDs(
     GetBlocklistedIDsCallback callback,
-    const std::set<std::string>& blocklisted_ids) {
+    const std::set<ExtensionId>& blocklisted_ids) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  std::set<std::string> ids_unknown_state;
+  std::set<ExtensionId> ids_unknown_state;
   BlocklistStateMap extensions_state;
   for (const auto& blocklisted_id : blocklisted_ids) {
     auto cache_it = blocklist_state_cache_.find(blocklisted_id);
@@ -245,14 +243,15 @@ void Blocklist::GetBlocklistStateForIDs(
     // these extensions.
     RequestExtensionsBlocklistState(
         ids_unknown_state,
-        base::BindOnce(&Blocklist::ReturnBlocklistStateMap, AsWeakPtr(),
-                       std::move(callback), blocklisted_ids));
+        base::BindOnce(&Blocklist::ReturnBlocklistStateMap,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback),
+                       blocklisted_ids));
   }
 }
 
 void Blocklist::ReturnBlocklistStateMap(
     GetBlocklistedIDsCallback callback,
-    const std::set<std::string>& blocklisted_ids) {
+    const std::set<ExtensionId>& blocklisted_ids) {
   BlocklistStateMap extensions_state;
   for (const auto& blocklisted_id : blocklisted_ids) {
     auto cache_it = blocklist_state_cache_.find(blocklisted_id);
@@ -266,22 +265,22 @@ void Blocklist::ReturnBlocklistStateMap(
 }
 
 void Blocklist::RequestExtensionsBlocklistState(
-    const std::set<std::string>& ids,
+    const std::set<ExtensionId>& ids,
     base::OnceClosure callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!state_fetcher_)
     state_fetcher_ = std::make_unique<BlocklistStateFetcher>();
 
-  state_requests_.emplace_back(std::vector<std::string>(ids.begin(), ids.end()),
+  state_requests_.emplace_back(std::vector<ExtensionId>(ids.begin(), ids.end()),
                                std::move(callback));
   for (const auto& id : ids) {
-    state_fetcher_->Request(
-        id,
-        base::BindOnce(&Blocklist::OnBlocklistStateReceived, AsWeakPtr(), id));
+    state_fetcher_->Request(id,
+                            base::BindOnce(&Blocklist::OnBlocklistStateReceived,
+                                           weak_ptr_factory_.GetWeakPtr(), id));
   }
 }
 
-void Blocklist::OnBlocklistStateReceived(const std::string& id,
+void Blocklist::OnBlocklistStateReceived(const ExtensionId& id,
                                          BlocklistState state) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   blocklist_state_cache_[id] = state;
@@ -290,7 +289,7 @@ void Blocklist::OnBlocklistStateReceived(const std::string& id,
   // for which we already got all the required blocklist states.
   auto requests_it = state_requests_.begin();
   while (requests_it != state_requests_.end()) {
-    const std::vector<std::string>& ids = requests_it->first;
+    const std::vector<ExtensionId>& ids = requests_it->first;
 
     bool have_all_in_cache = true;
     for (const auto& id_str : ids) {
@@ -342,20 +341,20 @@ void Blocklist::IsDatabaseReady(DatabaseReadyCallback callback) {
   if (!database_manager) {
     std::move(callback).Run(false);
     return;
-  } else {
-    // Check SB database manager IsDatabaseReady on IO thread and after that
-    // additionally check on UI thread if Blocklist is still alive.
-    content::GetIOThreadTaskRunner({})->PostTaskAndReplyWithResult(
-        FROM_HERE,
-        base::BindOnce(&SafeBrowsingDatabaseManager::IsDatabaseReady,
-                       database_manager),
-        base::BindOnce(
-            [](base::WeakPtr<Blocklist> blocklist_service,
-               DatabaseReadyCallback callback, bool is_ready) {
-              std::move(callback).Run(blocklist_service && is_ready);
-            },
-            AsWeakPtr(), std::move(callback)));
   }
+
+  // Need to post task to this thread because the safe browsing database is
+  // initialized after this point in startup.
+  content::GetUIThreadTaskRunner({})->PostTaskAndReplyWithResult(
+      FROM_HERE,
+      base::BindOnce(&SafeBrowsingDatabaseManager::IsDatabaseReady,
+                     database_manager),
+      base::BindOnce(
+          [](base::WeakPtr<Blocklist> blocklist_service,
+             DatabaseReadyCallback callback, bool is_ready) {
+            std::move(callback).Run(blocklist_service && is_ready);
+          },
+          weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
 }
 
 // static

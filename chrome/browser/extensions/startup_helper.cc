@@ -4,10 +4,11 @@
 
 #include "chrome/browser/extensions/startup_helper.h"
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
+#include "base/memory/raw_ref.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -110,11 +111,10 @@ class ValidateCrxHelper : public SandboxedUnpackerClient {
 
   void OnUnpackSuccess(const base::FilePath& temp_dir,
                        const base::FilePath& extension_root,
-                       std::unique_ptr<base::DictionaryValue> original_manifest,
+                       std::unique_ptr<base::Value::Dict> original_manifest,
                        const Extension* extension,
                        const SkBitmap& install_icon,
-                       declarative_net_request::RulesetInstallPrefs
-                           ruleset_install_prefs) override {
+                       base::Value::Dict ruleset_install_prefs) override {
     DCHECK(GetExtensionFileTaskRunner()->RunsTasksInCurrentSequence());
     success_ = true;
     content::GetUIThreadTaskRunner({})->PostTask(
@@ -138,15 +138,15 @@ class ValidateCrxHelper : public SandboxedUnpackerClient {
     DCHECK(GetExtensionFileTaskRunner()->RunsTasksInCurrentSequence());
     auto unpacker = base::MakeRefCounted<SandboxedUnpacker>(
         mojom::ManifestLocation::kInternal, 0, /* no special creation flags */
-        temp_dir_, GetExtensionFileTaskRunner().get(), this);
-    unpacker->StartWithCrx(crx_file_);
+        *temp_dir_, GetExtensionFileTaskRunner().get(), this);
+    unpacker->StartWithCrx(*crx_file_);
   }
 
   // The file being validated.
-  const CRXFileInfo& crx_file_;
+  const raw_ref<const CRXFileInfo> crx_file_;
 
   // The temporary directory where the sandboxed unpacker will do work.
-  const base::FilePath& temp_dir_;
+  const raw_ref<const base::FilePath> temp_dir_;
 
   // Closure called upon completion.
   base::OnceClosure quit_closure_;

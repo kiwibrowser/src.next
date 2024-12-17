@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -91,7 +91,7 @@ class CORE_EXPORT SynchronousMutationObserver : public GarbageCollectedMixin {
   // Call before clearing an observer list.
   void ObserverSetWillBeCleared();
 
-  Document* GetDocument() const { return document_; }
+  Document* GetDocument() const { return document_.Get(); }
   void SetDocument(Document*);
 
   void Trace(Visitor*) const override;

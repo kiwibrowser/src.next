@@ -6,15 +6,16 @@
 #define EXTENSIONS_BROWSER_API_UNITTEST_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 
-#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
+#include "extensions/browser/api_test_utils.h"
 #include "extensions/browser/extensions_test.h"
 
 namespace base {
 class Value;
-class DictionaryValue;
 }
 
 namespace content {
@@ -48,39 +49,25 @@ class ApiUnitTest : public ExtensionsTest {
   void SetUp() override;
   void TearDown() override;
 
-  // Creates a background page for |extension_|, and sets it for the WebContents
-  // to be used in API calls.
-  // If |contents_| is already set, this does nothing.
-  void CreateBackgroundPage();
+  // Creates a page for |extension_|, and sets it for the WebContents to be used
+  // in API calls. If |contents_| is already set, this does nothing.
+  void CreateExtensionPage();
 
   // Various ways of running an API function. These methods take ownership of
   // |function|. |args| should be in JSON format, wrapped in a list.
-  // See also the RunFunction* methods in extension_function_test_utils.h.
 
   // Return the function result as a base::Value.
-  std::unique_ptr<base::Value> RunFunctionAndReturnValue(
+  std::optional<base::Value> RunFunctionAndReturnValue(
       ExtensionFunction* function,
-      const std::string& args);
-
-  // Return the function result as a base::DictionaryValue, or NULL.
-  // This will EXPECT-fail if the result is not a DictionaryValue.
-  std::unique_ptr<base::DictionaryValue> RunFunctionAndReturnDictionary(
-      ExtensionFunction* function,
-      const std::string& args);
-
-  // Return the function result as a base::Value, or NULL.
-  // This will EXPECT-fail if the result Value is not a list.
-  std::unique_ptr<base::Value> RunFunctionAndReturnList(
-      ExtensionFunction* function,
-      const std::string& args);
+      api_test_utils::ArgsType args);
 
   // Return an error thrown from the function, if one exists.
   // This will EXPECT-fail if any result is returned from the function.
   std::string RunFunctionAndReturnError(ExtensionFunction* function,
-                                        const std::string& args);
+                                        api_test_utils::ArgsType args);
 
   // Run the function and ignore any result.
-  void RunFunction(ExtensionFunction* function, const std::string& args);
+  void RunFunction(ExtensionFunction* function, api_test_utils::ArgsType args);
 
  private:
   sync_preferences::TestingPrefServiceSyncable testing_pref_service_;

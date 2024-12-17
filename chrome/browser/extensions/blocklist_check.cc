@@ -4,7 +4,7 @@
 
 #include "chrome/browser/extensions/blocklist_check.h"
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "chrome/browser/extensions/blocklist.h"
 #include "extensions/common/extension.h"
 
@@ -28,10 +28,11 @@ void BlocklistCheck::Start(ResultCallback callback) {
 void BlocklistCheck::OnBlocklistedStateRetrieved(
     BlocklistState blocklist_state) {
   Errors errors;
-  if (blocklist_state == BlocklistState::BLOCKLISTED_MALWARE)
+  if (blocklist_state == BlocklistState::BLOCKLISTED_MALWARE) {
     errors.insert(PreloadCheck::Error::kBlocklistedId);
-  else if (blocklist_state == BlocklistState::BLOCKLISTED_UNKNOWN)
+  } else if (blocklist_state == BlocklistState::BLOCKLISTED_UNKNOWN) {
     errors.insert(PreloadCheck::Error::kBlocklistedUnknown);
+  }
   std::move(callback_).Run(errors);
 }
 

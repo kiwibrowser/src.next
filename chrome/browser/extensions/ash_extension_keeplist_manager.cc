@@ -16,6 +16,7 @@
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_id.h"
 
 namespace extensions {
 
@@ -44,10 +45,10 @@ void AshExtensionKeeplistManager::Init() {
 void AshExtensionKeeplistManager::ActivateKeeplistEnforcement() {
   DCHECK(should_enforce_keeplist_);
 
-  std::unique_ptr<ExtensionSet> all_extensions =
+  const ExtensionSet all_extensions =
       registry_->GenerateInstalledExtensionsSet();
 
-  for (const auto& extension : *all_extensions) {
+  for (const auto& extension : all_extensions) {
     if (ShouldDisable(extension.get()))
       Disable(extension->id());
   }
@@ -73,7 +74,7 @@ bool AshExtensionKeeplistManager::ShouldDisable(
   return false;
 }
 
-void AshExtensionKeeplistManager::Disable(const std::string& extension_id) {
+void AshExtensionKeeplistManager::Disable(const ExtensionId& extension_id) {
   DCHECK(should_enforce_keeplist_);
 
   extension_service_->DisableExtension(
@@ -92,12 +93,12 @@ void AshExtensionKeeplistManager::Disable(const std::string& extension_id) {
 void AshExtensionKeeplistManager::DeactivateKeeplistEnforcement() {
   DCHECK(!should_enforce_keeplist_);
 
-  std::unique_ptr<ExtensionSet> all_extensions =
+  const ExtensionSet all_extensions =
       registry_->GenerateInstalledExtensionsSet();
 
   // Find all extensions disabled by keeplist enforcement, remove the disable
   // reason.
-  for (const auto& extension : *all_extensions) {
+  for (const auto& extension : all_extensions) {
     if (extension_prefs_->HasDisableReason(
             extension->id(), disable_reason::DISABLE_NOT_ASH_KEEPLISTED)) {
       extension_service_->RemoveDisableReasonAndMaybeEnable(

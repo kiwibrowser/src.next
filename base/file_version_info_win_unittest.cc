@@ -2,6 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "base/file_version_info_win.h"
 
 #include <windows.h>
@@ -23,7 +28,7 @@ namespace {
 
 FilePath GetTestDataPath() {
   FilePath path;
-  base::PathService::Get(base::DIR_SOURCE_ROOT, &path);
+  base::PathService::Get(base::DIR_SRC_TEST_DATA_ROOT, &path);
   path = path.AppendASCII("base");
   path = path.AppendASCII("test");
   path = path.AppendASCII("data");
@@ -105,25 +110,25 @@ TYPED_TEST(FileVersionInfoTest, HardCodedProperties) {
 
   int j = 0;
   EXPECT_EQ(kExpectedValues[j++],
-            base::AsWStringPiece(version_info->company_name()));
+            base::AsWStringView(version_info->company_name()));
   EXPECT_EQ(kExpectedValues[j++],
-            base::AsWStringPiece(version_info->company_short_name()));
+            base::AsWStringView(version_info->company_short_name()));
   EXPECT_EQ(kExpectedValues[j++],
-            base::AsWStringPiece(version_info->product_name()));
+            base::AsWStringView(version_info->product_name()));
   EXPECT_EQ(kExpectedValues[j++],
-            base::AsWStringPiece(version_info->product_short_name()));
+            base::AsWStringView(version_info->product_short_name()));
   EXPECT_EQ(kExpectedValues[j++],
-            base::AsWStringPiece(version_info->internal_name()));
+            base::AsWStringView(version_info->internal_name()));
   EXPECT_EQ(kExpectedValues[j++],
-            base::AsWStringPiece(version_info->product_version()));
+            base::AsWStringView(version_info->product_version()));
   EXPECT_EQ(kExpectedValues[j++],
-            base::AsWStringPiece(version_info->special_build()));
+            base::AsWStringView(version_info->special_build()));
   EXPECT_EQ(kExpectedValues[j++],
-            base::AsWStringPiece(version_info->original_filename()));
+            base::AsWStringView(version_info->original_filename()));
   EXPECT_EQ(kExpectedValues[j++],
-            base::AsWStringPiece(version_info->file_description()));
+            base::AsWStringView(version_info->file_description()));
   EXPECT_EQ(kExpectedValues[j++],
-            base::AsWStringPiece(version_info->file_version()));
+            base::AsWStringView(version_info->file_version()));
 }
 
 TYPED_TEST(FileVersionInfoTest, CustomProperties) {

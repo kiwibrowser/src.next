@@ -21,6 +21,7 @@
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_util.h"
+#include "chrome/browser/extensions/scoped_test_mv2_enabler.h"
 #include "chrome/browser/prefs/chrome_pref_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -31,13 +32,13 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/public/browser/notification_details.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/extension_util.h"
 #include "extensions/browser/test_extension_registry_observer.h"
 #include "extensions/browser/user_script_loader.h"
 #include "extensions/browser/user_script_manager.h"
@@ -50,7 +51,7 @@
 #include "extensions/test/test_content_script_load_waiter.h"
 #include "net/base/filename_util.h"
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/ash/profiles/profile_helper.h"
 #endif
 
@@ -120,7 +121,8 @@ class ExtensionStartupTestBase : public InProcessBrowserTest {
           load_extensions_, base::FilePath::StringType(1, ','));
       command_line->AppendSwitchNative(extensions::switches::kLoadExtension,
                                        paths);
-      command_line->AppendSwitch(switches::kDisableExtensionsFileAccessCheck);
+      command_line->AppendSwitch(
+          extensions::switches::kDisableExtensionsFileAccessCheck);
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
     } else {
       // In Windows and MacOS builds, it is not possible to disable settings
@@ -239,21 +241,17 @@ class ExtensionStartupTestBase : public InProcessBrowserTest {
     ASSERT_TRUE(ui_test_utils::NavigateToURL(
         browser(), net::FilePathToFileURL(test_file)));
 
-    bool result = false;
-    ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-        browser()->tab_strip_model()->GetActiveWebContents(),
-        "window.domAutomationController.send("
-        "    document.defaultView.getComputedStyle(document.body, null)."
-        "    getPropertyValue('background-color') == 'rgb(245, 245, 220)')",
-        &result));
-    EXPECT_EQ(expect_css, result);
+    EXPECT_EQ(
+        expect_css,
+        content::EvalJs(
+            browser()->tab_strip_model()->GetActiveWebContents(),
+            "document.defaultView.getComputedStyle(document.body, null)."
+            "getPropertyValue('background-color') == 'rgb(245, 245, 220)'"));
 
-    result = false;
-    ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-        browser()->tab_strip_model()->GetActiveWebContents(),
-        "window.domAutomationController.send(document.title == 'Modified')",
-        &result));
-    EXPECT_EQ(expect_script, result);
+    EXPECT_EQ(
+        expect_script,
+        content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
+                        "document.title == 'Modified'"));
   }
 
   base::FilePath preferences_file_;
@@ -266,12 +264,16 @@ class ExtensionStartupTestBase : public InProcessBrowserTest {
   std::vector<base::FilePath::StringType> load_extensions_;
 
   int num_expected_extensions_;
+
+  // TODO(https://crbug.com/40804030): Remove when these tests use only MV3
+  // extensions.
+  extensions::ScopedTestMV2Enabler mv2_enabler_;
 };
 
 // ExtensionsStartupTest
 // Ensures that we can startup the browser with --enable-extensions and some
 // extensions installed and see them run and do basic things.
-typedef ExtensionStartupTestBase ExtensionStartupTest;
+using ExtensionStartupTest = ExtensionStartupTestBase;
 
 IN_PROC_BROWSER_TEST_F(ExtensionStartupTest, Test) {
   WaitForServicesToStart(num_expected_extensions_, true);
@@ -342,7 +344,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionsLoadTest, Test) {
   TestInjection(true, true);
 }
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
 
 IN_PROC_BROWSER_TEST_F(ExtensionsLoadTest,
                        SigninProfileCommandLineExtensionsDontLoad) {
@@ -352,7 +354,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionsLoadTest,
                    ash::ProfileHelper::GetSigninProfile()));
 }
 
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 // ExtensionsLoadMultipleTest
 // Ensures that we can startup the browser with multiple extensions

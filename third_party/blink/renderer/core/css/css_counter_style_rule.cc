@@ -1,9 +1,10 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/css/css_counter_style_rule.h"
 
+#include "third_party/blink/renderer/core/css/css_markup.h"
 #include "third_party/blink/renderer/core/css/css_style_sheet.h"
 #include "third_party/blink/renderer/core/css/parser/at_rule_descriptor_parser.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
@@ -27,7 +28,7 @@ CSSCounterStyleRule::~CSSCounterStyleRule() = default;
 String CSSCounterStyleRule::cssText() const {
   StringBuilder result;
   result.Append("@counter-style ");
-  result.Append(name());
+  SerializeIdentifier(name(), result);
   result.Append(" {");
 
   // Note: The exact serialization isn't well specified.
@@ -115,62 +116,72 @@ String CSSCounterStyleRule::name() const {
 }
 
 String CSSCounterStyleRule::system() const {
-  if (const CSSValue* value = counter_style_rule_->GetSystem())
+  if (const CSSValue* value = counter_style_rule_->GetSystem()) {
     return value->CssText();
+  }
   return String();
 }
 
 String CSSCounterStyleRule::symbols() const {
-  if (const CSSValue* value = counter_style_rule_->GetSymbols())
+  if (const CSSValue* value = counter_style_rule_->GetSymbols()) {
     return value->CssText();
+  }
   return String();
 }
 
 String CSSCounterStyleRule::additiveSymbols() const {
-  if (const CSSValue* value = counter_style_rule_->GetAdditiveSymbols())
+  if (const CSSValue* value = counter_style_rule_->GetAdditiveSymbols()) {
     return value->CssText();
+  }
   return String();
 }
 
 String CSSCounterStyleRule::negative() const {
-  if (const CSSValue* value = counter_style_rule_->GetNegative())
+  if (const CSSValue* value = counter_style_rule_->GetNegative()) {
     return value->CssText();
+  }
   return String();
 }
 
 String CSSCounterStyleRule::prefix() const {
-  if (const CSSValue* value = counter_style_rule_->GetPrefix())
+  if (const CSSValue* value = counter_style_rule_->GetPrefix()) {
     return value->CssText();
+  }
   return String();
 }
 
 String CSSCounterStyleRule::suffix() const {
-  if (const CSSValue* value = counter_style_rule_->GetSuffix())
+  if (const CSSValue* value = counter_style_rule_->GetSuffix()) {
     return value->CssText();
+  }
   return String();
 }
 
 String CSSCounterStyleRule::range() const {
-  if (const CSSValue* value = counter_style_rule_->GetRange())
+  if (const CSSValue* value = counter_style_rule_->GetRange()) {
     return value->CssText();
+  }
   return String();
 }
 
 String CSSCounterStyleRule::pad() const {
-  if (const CSSValue* value = counter_style_rule_->GetPad())
+  if (const CSSValue* value = counter_style_rule_->GetPad()) {
     return value->CssText();
+  }
   return String();
 }
 
 String CSSCounterStyleRule::speakAs() const {
-  if (const CSSValue* value = counter_style_rule_->GetSpeakAs())
+  if (const CSSValue* value = counter_style_rule_->GetSpeakAs()) {
     return value->CssText();
+  }
   return String();
 }
 
 String CSSCounterStyleRule::fallback() const {
-  if (const CSSValue* value = counter_style_rule_->GetFallback())
+  if (const CSSValue* value = counter_style_rule_->GetFallback()) {
     return value->CssText();
+  }
   return String();
 }
 
@@ -181,14 +192,13 @@ void CSSCounterStyleRule::SetterInternal(
   CSSStyleSheet* style_sheet = parentStyleSheet();
   auto& context = *MakeGarbageCollected<CSSParserContext>(
       ParserContext(execution_context->GetSecureContextMode()), style_sheet);
-  CSSTokenizer tokenizer(text);
-  auto tokens = tokenizer.TokenizeToEOF();
-  CSSParserTokenRange token_range(tokens);
+  CSSParserTokenStream stream(text);
   CSSValue* new_value = AtRuleDescriptorParser::ParseAtCounterStyleDescriptor(
-      descriptor_id, token_range, context);
+      descriptor_id, stream, context);
   if (!new_value ||
-      !counter_style_rule_->NewValueInvalidOrEqual(descriptor_id, new_value))
+      !counter_style_rule_->NewValueInvalidOrEqual(descriptor_id, new_value)) {
     return;
+  }
 
   // TODO(xiaochengh): RuleMutationScope causes all rules of the tree scope to
   // be re-collected and the entire CounterStyleMap rebuilt, while we only need
@@ -196,8 +206,9 @@ void CSSCounterStyleRule::SetterInternal(
   CSSStyleSheet::RuleMutationScope rule_mutation_scope(this);
 
   counter_style_rule_->SetDescriptorValue(descriptor_id, new_value);
-  if (Document* document = style_sheet->OwnerDocument())
+  if (Document* document = style_sheet->OwnerDocument()) {
     document->GetStyleEngine().MarkCounterStylesNeedUpdate();
+  }
 }
 
 void CSSCounterStyleRule::setName(const ExecutionContext* execution_context,
@@ -205,21 +216,21 @@ void CSSCounterStyleRule::setName(const ExecutionContext* execution_context,
   CSSStyleSheet* style_sheet = parentStyleSheet();
   auto& context = *MakeGarbageCollected<CSSParserContext>(
       ParserContext(execution_context->GetSecureContextMode()), style_sheet);
-  CSSTokenizer tokenizer(text);
-  auto tokens = tokenizer.TokenizeToEOF();
-  CSSParserTokenRange token_range(tokens);
+  CSSParserTokenStream stream(text);
   AtomicString name =
-      css_parsing_utils::ConsumeCounterStyleNameInPrelude(token_range, context);
-  if (!name || name == counter_style_rule_->GetName())
+      css_parsing_utils::ConsumeCounterStyleNameInPrelude(stream, context);
+  if (!name || name == counter_style_rule_->GetName() || !stream.AtEnd()) {
     return;
+  }
 
   // Changing name may affect cascade result, which requires re-collecting all
   // the rules and re-constructing the CounterStyleMap to handle.
   CSSStyleSheet::RuleMutationScope rule_mutation_scope(this);
 
   counter_style_rule_->SetName(name);
-  if (Document* document = style_sheet->OwnerDocument())
+  if (Document* document = style_sheet->OwnerDocument()) {
     document->GetStyleEngine().MarkCounterStylesNeedUpdate();
+  }
 }
 
 void CSSCounterStyleRule::setSystem(const ExecutionContext* execution_context,

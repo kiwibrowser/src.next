@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,7 +31,11 @@ class CORE_EXPORT ClipPathPaintImageGenerator
 
   virtual scoped_refptr<Image> Paint(float zoom,
                                      const gfx::RectF& reference_box,
+                                     const gfx::SizeF& clip_area_size,
                                      const Node&) = 0;
+  virtual gfx::RectF ClipAreaRect(const Node& node,
+                                  const gfx::RectF& reference_box,
+                                  float zoom) const = 0;
 };
 
 }  // namespace blink

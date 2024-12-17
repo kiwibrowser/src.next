@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <optional>
 #include <set>
 #include <string>
 
@@ -14,9 +15,10 @@
 #include "net/base/net_export.h"
 #include "net/base/network_delegate.h"
 #include "net/cookies/canonical_cookie.h"
-#include "net/first_party_sets/same_party_context.h"
+#include "net/cookies/cookie_setting_override.h"
+#include "net/first_party_sets/first_party_set_metadata.h"
+#include "net/first_party_sets/first_party_sets_cache_filter.h"
 #include "net/proxy_resolution/proxy_retry_info.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 class GURL;
 
@@ -27,6 +29,7 @@ class Origin;
 namespace net {
 
 class CookieOptions;
+class CookieInclusionStatus;
 class HttpRequestHeaders;
 class HttpResponseHeaders;
 class URLRequest;
@@ -54,9 +57,11 @@ class NET_EXPORT NetworkDelegateImpl : public NetworkDelegate {
       const HttpResponseHeaders* original_response_headers,
       scoped_refptr<HttpResponseHeaders>* override_response_headers,
       const IPEndPoint& endpoint,
-      absl::optional<GURL>* preserve_fragment_on_redirect_url) override;
+      std::optional<GURL>* preserve_fragment_on_redirect_url) override;
 
   void OnBeforeRedirect(URLRequest* request, const GURL& new_location) override;
+
+  void OnBeforeRetry(URLRequest* request) override;
 
   void OnResponseStarted(URLRequest* request, int net_error) override;
 
@@ -68,18 +73,25 @@ class NET_EXPORT NetworkDelegateImpl : public NetworkDelegate {
 
   bool OnAnnotateAndMoveUserBlockedCookies(
       const URLRequest& request,
+      const net::FirstPartySetMetadata& first_party_set_metadata,
       net::CookieAccessResultList& maybe_included_cookies,
       net::CookieAccessResultList& excluded_cookies) override;
 
-  bool OnCanSetCookie(const URLRequest& request,
-                      const net::CanonicalCookie& cookie,
-                      CookieOptions* options) override;
+  bool OnCanSetCookie(
+      const URLRequest& request,
+      const net::CanonicalCookie& cookie,
+      CookieOptions* options,
+      const net::FirstPartySetMetadata& first_party_set_metadata,
+      CookieInclusionStatus* inclusion_status) override;
+
+  std::optional<cookie_util::StorageAccessStatus> OnGetStorageAccessStatus(
+      const URLRequest& request) const override;
+
+  bool OnIsStorageAccessHeaderEnabled(const url::Origin* top_frame_origin,
+                                      const GURL& url) const override;
 
   NetworkDelegate::PrivacySetting OnForcePrivacyMode(
-      const GURL& url,
-      const SiteForCookies& site_for_cookies,
-      const absl::optional<url::Origin>& top_frame_origin,
-      SamePartyContext::Type same_party_context_type) const override;
+      const URLRequest& request) const override;
 
   bool OnCancelURLRequestWithPolicyViolatingReferrerHeader(
       const URLRequest& request,

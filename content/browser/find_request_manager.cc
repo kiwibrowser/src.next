@@ -4,15 +4,14 @@
 
 #include "content/browser/find_request_manager.h"
 
-#include <algorithm>
 #include <utility>
 
-#include "base/bind.h"
 #include "base/containers/contains.h"
 #include "base/containers/queue.h"
+#include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
-#include "base/metrics/histogram_macros.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/ranges/algorithm.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "content/browser/find_in_page_client.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
@@ -26,27 +25,20 @@ namespace content {
 namespace {
 
 // The following functions allow traversal over all RenderFrameHosts, including
-// those across WebContentses. Excludes portals as they are not relevant for
-// find-in-page.
+// those across WebContentses.
 //
 // An inner WebContents may be embedded in an outer WebContents via an inner
 // WebContentsTreeNode of the outer WebContents's WebContentsTreeNode.
-
-// Returns all child RenderFrameHosts of |rfh| except those in portals.
 std::vector<RenderFrameHostImpl*> GetChildren(RenderFrameHostImpl* rfh) {
   std::vector<RenderFrameHostImpl*> children;
   children.reserve(rfh->child_count());
   for (size_t i = 0; i != rfh->child_count(); ++i) {
     if (auto* contents = static_cast<WebContentsImpl*>(
             WebContentsImpl::FromOuterFrameTreeNode(rfh->child_at(i)))) {
-      // Portals can't receive keyboard events or be focused, so we don't return
-      // find results inside a portal.
-      if (!contents->IsPortal()) {
-        // If the child is used for an inner WebContents then add the inner
-        // WebContents.
-        children.push_back(
-            contents->GetPrimaryFrameTree().root()->current_frame_host());
-      }
+      // If the child is used for an inner WebContents then add the inner
+      // WebContents.
+      children.push_back(
+          contents->GetPrimaryFrameTree().root()->current_frame_host());
     } else {
       children.push_back(rfh->child_at(i)->current_frame_host());
     }
@@ -99,7 +91,7 @@ RenderFrameHostImpl* GetPreviousSibling(RenderFrameHostImpl* rfh) {
   // The previous sibling may be in another WebContents.
   if (RenderFrameHostImpl* parent = GetAncestor(rfh)) {
     auto children = GetChildren(parent);
-    auto it = std::find(children.begin(), children.end(), rfh);
+    auto it = base::ranges::find(children, rfh);
     // It is odd that this rfh may not be a child of its parent, but this is
     // actually possible during teardown, hence the need for the check for
     // "it != children.end()".
@@ -119,7 +111,7 @@ RenderFrameHostImpl* GetNextSibling(RenderFrameHostImpl* rfh) {
   // The next sibling may be in another WebContents.
   if (RenderFrameHostImpl* parent = GetAncestor(rfh)) {
     auto children = GetChildren(parent);
-    auto it = std::find(children.begin(), children.end(), rfh);
+    auto it = base::ranges::find(children, rfh);
     // It is odd that this RenderFrameHost may not be a child of its parent, but
     // this is actually possible during teardown, hence the need for the check
     // for "it != children.end()".
@@ -174,6 +166,15 @@ RenderFrameHostImpl* TraverseFrame(RenderFrameHostImpl* rfh,
 bool IsFindInPageDisabled(RenderFrameHost* rfh) {
   return rfh && GetContentClient()->browser()->IsFindInPageDisabledForOrigin(
                     rfh->GetLastCommittedOrigin());
+}
+
+bool IsUnattachedGuestView(RenderFrameHost* rfh) {
+  WebContentsImpl* web_contents =
+      static_cast<WebContentsImpl*>(WebContents::FromRenderFrameHost(rfh));
+  if (!web_contents->IsGuest())
+    return false;
+
+  return !web_contents->GetOuterWebContents();
 }
 
 // kMinKeystrokesWithoutDelay should be high enough that script in the page
@@ -314,24 +315,6 @@ void FindRequestManager::Find(int request_id,
   DCHECK_GT(request_id, current_request_.id);
   DCHECK_GT(request_id, current_session_id_);
 
-  // TODO(crbug.com/1250158): Remove this when we decide how long the
-  // find-in-page delay should be.
-  if (options->new_session) {
-    base::TimeTicks now = base::TimeTicks::Now();
-    if (!last_time_typed_.is_null() &&
-        base::StartsWith(search_text, last_searched_text_)) {
-      base::TimeDelta elapsed = now - last_time_typed_;
-      // If we waited more than 5 seconds, the user probably is searching for
-      // something else now.
-      if (elapsed.InSecondsF() <= 5.f) {
-        UMA_HISTOGRAM_TIMES("WebCore.FindInPage.DurationBetweenKeystrokes",
-                            elapsed);
-      }
-    }
-    last_time_typed_ = now;
-    last_searched_text_ = search_text;
-  }
-
   if (skip_delay) {
     delayed_find_task_.Cancel();
     EmitFindRequest(request_id, search_text, std::move(options));
@@ -353,7 +336,7 @@ void FindRequestManager::Find(int request_id,
     delayed_find_task_.Reset(base::BindOnce(
         &FindRequestManager::EmitFindRequest, weak_factory_.GetWeakPtr(),
         request_id, search_text, std::move(options)));
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE, delayed_find_task_.callback(), base::Milliseconds(kDelayMs));
     return;
   }
@@ -374,6 +357,8 @@ void FindRequestManager::EmitFindRequest(int request_id,
   find_request_queue_.emplace(request_id, search_text, std::move(options));
   if (find_request_queue_.size() == 1)
     FindInternal(find_request_queue_.front());
+  if (request_id == current_session_id_)
+    find_request_queue_.pop();
 }
 
 void FindRequestManager::ForEachAddedFindInPageRenderFrameHost(
@@ -382,9 +367,6 @@ void FindRequestManager::ForEachAddedFindInPageRenderFrameHost(
       [this, func_ref](RenderFrameHostImpl* rfh) {
         if (!CheckFrame(rfh))
           return;
-        // A Portal's RenderFrameHost can't reach here because we don't observe
-        // Portals WebContents (see FindRequestManager::FindInternal()).
-        DCHECK(!WebContents::FromRenderFrameHost(rfh)->IsPortal());
         DCHECK(rfh->IsRenderFrameLive());
         DCHECK(rfh->IsActive());
         func_ref(rfh);
@@ -497,22 +479,16 @@ void FindRequestManager::SetActiveMatchOrdinal(RenderFrameHostImpl* rfh,
 }
 
 void FindRequestManager::RemoveFrame(RenderFrameHost* rfh) {
-  if (current_session_id_ == kInvalidId ||
-      !base::Contains(find_in_page_clients_, rfh)) {
-    return;
-  }
-
-  // Make sure to always clear the highlighted selection. It is useful in case
-  // the user goes back to the same page using the BackForwardCache.
-  static_cast<RenderFrameHostImpl*>(rfh)->GetFindInPage()->StopFinding(
-      blink::mojom::StopFindAction::kStopFindActionClearSelection);
-
   // If matches are counted for the frame that is being removed, decrement the
   // match total before erasing that entry.
   auto it = find_in_page_clients_.find(rfh);
   if (it != find_in_page_clients_.end()) {
     number_of_matches_ -= it->second->number_of_matches();
     find_in_page_clients_.erase(it);
+  } else {
+    // If there's no FindInPageClient for `rfh`, the state related to it must
+    // have been cleared already.
+    return;
   }
 
   // If this is a primary main frame, then clear the search queue as well, since
@@ -546,6 +522,21 @@ void FindRequestManager::RemoveFrame(RenderFrameHost* rfh) {
   RemoveNearestFindResultPendingReply(rfh);
   RemoveFindMatchRectsPendingReply(rfh);
 #endif
+
+  if (current_session_id_ == kInvalidId) {
+    // Just remove `rfh` from things that might point to it, but don't trigger
+    // any extra processing as there is no current find session ongoing.
+    pending_initial_replies_.erase(rfh);
+    if (pending_find_next_reply_ == rfh) {
+      pending_find_next_reply_ = nullptr;
+    }
+    return;
+  }
+
+  // Make sure to always clear the highlighted selection. It is useful in case
+  // the user goes back to the same page using the BackForwardCache.
+  static_cast<RenderFrameHostImpl*>(rfh)->GetFindInPage()->StopFinding(
+      blink::mojom::StopFindAction::kStopFindActionClearSelection);
 
   // If no pending find replies are expected for the removed frame, then just
   // report the updated results.
@@ -703,11 +694,7 @@ void FindRequestManager::FindInternal(const FindRequest& request) {
   // AddFrame() for the frame.
   contents_->GetPrimaryMainFrame()->ForEachRenderFrameHost(
       [this](RenderFrameHostImpl* rfh) {
-        // Portals can't receive keyboard events or be focused, so we don't
-        // return find results inside a portal.
         auto* wc = WebContents::FromRenderFrameHost(rfh);
-        if (wc->IsPortal())
-          return;
         // Make sure each WebContents is only added once.
         if (rfh->IsInPrimaryMainFrame()) {
           frame_observers_.push_back(std::make_unique<FrameObserver>(wc, this));
@@ -747,7 +734,7 @@ void FindRequestManager::SendFindRequest(const FindRequest& request,
 
 void FindRequestManager::NotifyFindReply(int request_id, bool final_update) {
   if (request_id == kInvalidId) {
-    NOTREACHED();
+    NOTREACHED_IN_MIGRATION();
     return;
   }
 
@@ -816,8 +803,10 @@ RenderFrameHost* FindRequestManager::Traverse(RenderFrameHost* from_rfh,
 }
 
 void FindRequestManager::AddFrame(RenderFrameHost* rfh, bool force) {
-  if (!rfh || !rfh->IsRenderFrameLive() || !rfh->IsActive())
+  if (!rfh || !rfh->IsRenderFrameLive() || !rfh->IsActive() ||
+      IsUnattachedGuestView(rfh)) {
     return;
+  }
 
   // A frame that is already being searched should not normally be added again.
   DCHECK(force || !CheckFrame(rfh));
@@ -835,7 +824,7 @@ void FindRequestManager::AddFrame(RenderFrameHost* rfh, bool force) {
 }
 
 bool FindRequestManager::CheckFrame(RenderFrameHost* rfh) const {
-  // TODO(crbug.com/1245613): Convert IsFindInPageDisabled to a DCHECK when we
+  // TODO(crbug.com/40196212): Convert IsFindInPageDisabled to a DCHECK when we
   // replace DidFinishLoad with DidFinishNavigation in FrameObserver.
   if (!rfh || !base::Contains(find_in_page_clients_, rfh) ||
       IsFindInPageDisabled(rfh)) {

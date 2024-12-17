@@ -12,12 +12,13 @@
 
 #include "base/files/file_path.h"
 #include "base/memory/raw_ptr.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/utf_string_conversions.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/install_warning.h"
+#include "extensions/common/manifest_handler_registry.h"
 #include "extensions/common/scoped_testing_manifest_handler_registry.h"
-#include "extensions/common/value_builder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace extensions {
@@ -49,14 +50,14 @@ class ManifestHandlerTest : public testing::Test {
       size_t i_before = parsed_names_.size();
       size_t i_after = 0;
       for (size_t i = 0; i < parsed_names_.size(); ++i) {
-        if (parsed_names_[i] == name_before)
+        if (parsed_names_[i] == name_before) {
           i_before = i;
-        if (parsed_names_[i] == name_after)
+        }
+        if (parsed_names_[i] == name_after) {
           i_after = i;
+        }
       }
-      if (i_before < i_after)
-        return true;
-      return false;
+      return i_before < i_after;
     }
 
    private:
@@ -72,8 +73,7 @@ class ManifestHandlerTest : public testing::Test {
                         ParsingWatcher* watcher)
         : name_(name), keys_(keys), prereqs_(prereqs), watcher_(watcher) {
       keys_ptrs_.resize(keys_.size());
-      std::transform(keys_.begin(), keys_.end(), keys_ptrs_.begin(),
-                     [](const std::string& s) { return s.c_str(); });
+      base::ranges::transform(keys_, keys_ptrs_.begin(), &std::string::c_str);
     }
 
     bool Parse(Extension* extension, std::u16string* error) override {
@@ -130,8 +130,7 @@ class ManifestHandlerTest : public testing::Test {
           always_validate_(always_validate),
           keys_(keys) {
       keys_ptrs_.resize(keys_.size());
-      std::transform(keys_.begin(), keys_.end(), keys_ptrs_.begin(),
-                     [](const std::string& s) { return s.c_str(); });
+      base::ranges::transform(keys_, keys_ptrs_.begin(), &std::string::c_str);
     }
 
     bool Parse(Extension* extension, std::u16string* error) override {
@@ -160,8 +159,8 @@ class ManifestHandlerTest : public testing::Test {
 };
 
 TEST_F(ManifestHandlerTest, DependentHandlers) {
-  ScopedTestingManifestHandlerRegistry scoped_registry;
   ParsingWatcher watcher;
+  ScopedTestingManifestHandlerRegistry scoped_registry;
   std::vector<std::string> prereqs;
   ManifestHandlerRegistry* registry = ManifestHandlerRegistry::Get();
   registry->RegisterHandler(std::make_unique<TestManifestHandler>(
@@ -187,19 +186,16 @@ TEST_F(ManifestHandlerTest, DependentHandlers) {
 
   scoped_refptr<const Extension> extension =
       ExtensionBuilder()
-          .SetManifest(DictionaryBuilder()
-                           .Set("name", "no name")
-                           .Set("version", "0")
-                           .Set("manifest_version", 2)
-                           .Set("a", 1)
-                           .Set("b", 2)
-                           .Set("c", DictionaryBuilder()
-                                         .Set("d", 3)
-                                         .Set("e", 4)
-                                         .Set("f", 5)
-                                         .Build())
-                           .Set("g", 6)
-                           .Build())
+          .SetManifest(
+              base::Value::Dict()
+                  .Set("name", "no name")
+                  .Set("version", "0")
+                  .Set("manifest_version", 2)
+                  .Set("a", 1)
+                  .Set("b", 2)
+                  .Set("c",
+                       base::Value::Dict().Set("d", 3).Set("e", 4).Set("f", 5))
+                  .Set("g", 6))
           .Build();
 
   // A, B, C.EZ, C.D, K
@@ -210,26 +206,24 @@ TEST_F(ManifestHandlerTest, DependentHandlers) {
 }
 
 TEST_F(ManifestHandlerTest, FailingHandlers) {
+  ParsingWatcher watcher;
   ScopedTestingManifestHandlerRegistry scoped_registry;
   // Can't use ExtensionBuilder, because this extension will fail to
   // be parsed.
-  std::unique_ptr<base::DictionaryValue> manifest_a(
-      DictionaryBuilder()
-          .Set("name", "no name")
-          .Set("version", "0")
-          .Set("manifest_version", 2)
-          .Set("a", 1)
-          .Build());
+  base::Value::Dict manifest_a(base::Value::Dict()
+                                   .Set("name", "no name")
+                                   .Set("version", "0")
+                                   .Set("manifest_version", 2)
+                                   .Set("a", 1));
 
   // Succeeds when "a" is not recognized.
   std::string error;
   scoped_refptr<Extension> extension = Extension::Create(
-      base::FilePath(), mojom::ManifestLocation::kInvalidLocation, *manifest_a,
+      base::FilePath(), mojom::ManifestLocation::kInvalidLocation, manifest_a,
       Extension::NO_FLAGS, &error);
   EXPECT_TRUE(extension.get());
 
   // Register a handler for "a" that fails.
-  ParsingWatcher watcher;
   ManifestHandlerRegistry* registry = ManifestHandlerRegistry::Get();
   registry->RegisterHandler(std::make_unique<FailingTestManifestHandler>(
       "A", SingleKey("a"), std::vector<std::string>(), &watcher));
@@ -237,7 +231,7 @@ TEST_F(ManifestHandlerTest, FailingHandlers) {
 
   extension = Extension::Create(base::FilePath(),
                                 mojom::ManifestLocation::kInvalidLocation,
-                                *manifest_a, Extension::NO_FLAGS, &error);
+                                manifest_a, Extension::NO_FLAGS, &error);
   EXPECT_FALSE(extension.get());
   EXPECT_EQ("A", error);
 }
@@ -246,13 +240,12 @@ TEST_F(ManifestHandlerTest, Validate) {
   ScopedTestingManifestHandlerRegistry scoped_registry;
   scoped_refptr<const Extension> extension =
       ExtensionBuilder()
-          .SetManifest(DictionaryBuilder()
+          .SetManifest(base::Value::Dict()
                            .Set("name", "no name")
                            .Set("version", "0")
                            .Set("manifest_version", 2)
                            .Set("a", 1)
-                           .Set("b", 2)
-                           .Build())
+                           .Set("b", 2))
           .Build();
   EXPECT_TRUE(extension.get());
 

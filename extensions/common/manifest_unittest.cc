@@ -11,7 +11,6 @@
 #include "components/crx_file/id_util.h"
 #include "extensions/common/install_warning.h"
 #include "extensions/common/manifest_constants.h"
-#include "extensions/common/value_builder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using ManifestTest = testing::Test;
@@ -20,68 +19,52 @@ using extensions::mojom::ManifestLocation;
 namespace extensions {
 
 TEST(ManifestTest, ValidateWarnsOnDiffFingerprintKeyUnpacked) {
-  std::string error;
   std::vector<InstallWarning> warnings;
   Manifest(ManifestLocation::kUnpacked,
-           DictionaryBuilder()
-               .Set(manifest_keys::kDifferentialFingerprint, "")
-               .Build(),
+           base::Value::Dict().Set(manifest_keys::kDifferentialFingerprint, ""),
            crx_file::id_util::GenerateId("extid"))
-      .ValidateManifest(&error, &warnings);
-  EXPECT_EQ("", error);
+      .ValidateManifest(&warnings);
   EXPECT_EQ(1uL, warnings.size());
   EXPECT_EQ(manifest_errors::kHasDifferentialFingerprint, warnings[0].message);
 }
 
 TEST(ManifestTest, ValidateWarnsOnDiffFingerprintKeyCommandLine) {
-  std::string error;
   std::vector<InstallWarning> warnings;
   Manifest(ManifestLocation::kCommandLine,
-           DictionaryBuilder()
-               .Set(manifest_keys::kDifferentialFingerprint, "")
-               .Build(),
+           base::Value::Dict().Set(manifest_keys::kDifferentialFingerprint, ""),
            crx_file::id_util::GenerateId("extid"))
-      .ValidateManifest(&error, &warnings);
-  EXPECT_EQ("", error);
+      .ValidateManifest(&warnings);
   EXPECT_EQ(1uL, warnings.size());
   EXPECT_EQ(manifest_errors::kHasDifferentialFingerprint, warnings[0].message);
 }
 
 TEST(ManifestTest, ValidateSilentOnDiffFingerprintKeyInternal) {
-  std::string error;
   std::vector<InstallWarning> warnings;
   Manifest(ManifestLocation::kInternal,
-           DictionaryBuilder()
-               .Set(manifest_keys::kDifferentialFingerprint, "")
-               .Build(),
+           base::Value::Dict().Set(manifest_keys::kDifferentialFingerprint, ""),
            crx_file::id_util::GenerateId("extid"))
-      .ValidateManifest(&error, &warnings);
-  EXPECT_EQ("", error);
+      .ValidateManifest(&warnings);
   EXPECT_EQ(0uL, warnings.size());
 }
 
 TEST(ManifestTest, ValidateSilentOnNoDiffFingerprintKeyUnpacked) {
-  std::string error;
   std::vector<InstallWarning> warnings;
-  Manifest(ManifestLocation::kUnpacked, DictionaryBuilder().Build(),
+  Manifest(ManifestLocation::kUnpacked, base::Value::Dict(),
            crx_file::id_util::GenerateId("extid"))
-      .ValidateManifest(&error, &warnings);
-  EXPECT_EQ("", error);
+      .ValidateManifest(&warnings);
   EXPECT_EQ(0uL, warnings.size());
 }
 
 TEST(ManifestTest, ValidateSilentOnNoDiffFingerprintKeyInternal) {
-  std::string error;
   std::vector<InstallWarning> warnings;
-  Manifest(ManifestLocation::kInternal, DictionaryBuilder().Build(),
+  Manifest(ManifestLocation::kInternal, base::Value::Dict(),
            crx_file::id_util::GenerateId("extid"))
-      .ValidateManifest(&error, &warnings);
-  EXPECT_EQ("", error);
+      .ValidateManifest(&warnings);
   EXPECT_EQ(0uL, warnings.size());
 }
 
-// Tests `Manifest::available_values()` and whether it correctly filters keys
-// not available to the manifest.
+// Tests `Manifest::available_values()` and whether it correctly filters
+// keys not available to the manifest.
 TEST(ManifestTest, AvailableValues) {
   struct {
     const char* input_manifest;
@@ -137,21 +120,20 @@ TEST(ManifestTest, AvailableValues) {
   // clang-format on
 
   for (const auto& test_case : test_cases) {
-    absl::optional<base::Value> manifest_value =
+    std::optional<base::Value> manifest_value =
         base::JSONReader::Read(test_case.input_manifest);
     ASSERT_TRUE(manifest_value) << test_case.input_manifest;
     ASSERT_TRUE(manifest_value->is_dict()) << test_case.input_manifest;
 
     Manifest manifest(ManifestLocation::kInternal,
-                      base::DictionaryValue::From(base::Value::ToUniquePtrValue(
-                          std::move(*manifest_value))),
+                      std::move(*manifest_value).TakeDict(),
                       crx_file::id_util::GenerateId("extid"));
 
-    absl::optional<base::Value> expected_value =
+    std::optional<base::Value> expected_value =
         base::JSONReader::Read(test_case.expected_available_manifest);
     ASSERT_TRUE(expected_value) << test_case.expected_available_manifest;
-    EXPECT_EQ(*expected_value,
-              static_cast<const base::Value&>(manifest.available_values()));
+    ASSERT_TRUE(expected_value->is_dict());
+    EXPECT_EQ(expected_value->GetDict(), manifest.available_values());
   }
 }
 

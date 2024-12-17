@@ -4,11 +4,12 @@
 
 #include "chrome/browser/platform_util.h"
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/logging.h"
 #include "base/notreached.h"
 #include "chrome/browser/platform_util_internal.h"
 #include "chromeos/crosapi/mojom/file_manager.mojom.h"
+#include "chromeos/crosapi/mojom/url_handler.mojom.h"
 #include "chromeos/lacros/lacros_service.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -20,7 +21,7 @@ void OnOpenResult(const base::FilePath& path,
                   crosapi::mojom::OpenResult result) {
   if (result == crosapi::mojom::OpenResult::kSucceeded)
     return;
-  // TODO(https://crbug.com/1144316): Show error messages. This will require
+  // TODO(crbug.com/40728776): Show error messages. This will require
   // refactoring the existing file manager string files, or introducing new
   // lacros strings.
   LOG(ERROR) << "Unable to open " << path.AsUTF8Unsafe() << " " << result;
@@ -30,7 +31,7 @@ void OnOpenResult(const base::FilePath& path,
 void OpenItemOnUiThread(const base::FilePath& path, OpenItemType type) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   auto* service = chromeos::LacrosService::Get();
-  if (service->GetInterfaceVersion(crosapi::mojom::FileManager::Uuid_) < 1) {
+  if (service->GetInterfaceVersion<crosapi::mojom::FileManager>() < 1) {
     LOG(ERROR) << "Unsupported ash version.";
     return;
   }
@@ -62,7 +63,7 @@ void ShowItemInFolder(Profile* profile, const base::FilePath& full_path) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   auto* service = chromeos::LacrosService::Get();
   int interface_version =
-      service->GetInterfaceVersion(crosapi::mojom::FileManager::Uuid_);
+      service->GetInterfaceVersion<crosapi::mojom::FileManager>();
   if (interface_version < 1) {
     DLOG(ERROR) << "Unsupported ash version.";
     return;
@@ -71,10 +72,12 @@ void ShowItemInFolder(Profile* profile, const base::FilePath& full_path) {
       full_path, base::BindOnce(&OnOpenResult, full_path));
 }
 
-void OpenExternal(Profile* profile, const GURL& url) {
-  // TODO(https://crbug.com/1140585): Add crosapi for opening links with
-  // external protocol handlers.
-  NOTIMPLEMENTED();
+void OpenExternal(const GURL& url) {
+  chromeos::LacrosService* service = chromeos::LacrosService::Get();
+  if (service->GetInterfaceVersion<crosapi::mojom::UrlHandler>() >=
+      int{crosapi::mojom::UrlHandler::kOpenExternalMinVersion}) {
+    service->GetRemote<crosapi::mojom::UrlHandler>()->OpenExternal(url);
+  }
 }
 
 }  // namespace platform_util

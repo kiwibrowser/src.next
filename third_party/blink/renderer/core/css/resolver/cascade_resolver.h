@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,8 +51,9 @@ class CORE_EXPORT CascadeResolver {
   bool AllowSubstitution(CSSVariableData*) const;
 
   bool Rejects(const CSSProperty& property) {
-    if (!filter_.Rejects(property))
+    if (!filter_.Rejects(property)) {
       return false;
+    }
     rejected_flags_ |= property.GetFlags();
     return true;
   }

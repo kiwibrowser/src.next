@@ -8,15 +8,15 @@
 #include <stdint.h>
 
 #include <map>
+#include <optional>
 #include <set>
-#include <string>
 #include <vector>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
-#include "chrome/browser/extensions/site_permissions_helper.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "extensions/browser/blocked_action_type.h"
 #include "extensions/browser/extension_action.h"
@@ -28,7 +28,6 @@
 #include "extensions/common/mojom/run_location.mojom-shared.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/user_script.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace content {
 class BrowserContext;
@@ -60,30 +59,34 @@ class ExtensionActionRunner : public content::WebContentsObserver,
   static ExtensionActionRunner* GetForWebContents(
       content::WebContents* web_contents);
 
-  // Executes the action for the given |extension| and |grant_tab_permissions|
-  // if true. Returns any further action (like showing a popup) that should be
-  // taken.
+  // Runs the given extension action. This may trigger a number of different
+  // behaviors, depending on the extension and state, including:
+  // - Running blocked actions (if the extension had withheld permissions)
+  // - Firing the action.onClicked event for the extension
+  // - Determining that a UI action should be taken, indicated by the return
+  //   result.
+  // If `grant_tab_permissions` is true and the action is appropriate, this will
+  // grant tab permissions for the extension to the active tab. This may not
+  // happen in all cases (such as when showing a side panel).
   ExtensionAction::ShowAction RunAction(const Extension* extension,
                                         bool grant_tab_permissions);
 
-  // Grants activeTab to |extensions| (this should only be done if this is
-  // through a direct user action). If any extension needs a page refresh to
-  // run, this will show a dialog instead of immediately granting permissions.
+  // Runs any actions that were blocked for the given `extension`. As a
+  // requirement, this will grant activeTab permission to the extension.
+  void RunBlockedActions(const Extension* extension);
+
+  // Grants activeTab to `extensions` (this should only be done if this is
+  // through a direct user action). The permission will be applied immediately.
+  // If any extension needs a page refresh to run, this will show a dialog as
+  // well.
   void GrantTabPermissions(const std::vector<const Extension*>& extensions);
 
-  // Notifies the ExtensionActionRunner that the page access for |extension| has
-  // changed.
-  void HandlePageAccessModified(
-      const Extension* extension,
-      SitePermissionsHelper::SiteAccess current_access,
-      SitePermissionsHelper::SiteAccess new_access);
-
-  // Notifies the ExtensionActionRunner that the user site setting for `origin`
-  // with `action_ids` has changed.
-  void HandleUserSiteSettingModified(
-      const base::flat_set<ToolbarActionsModel::ActionId>& action_ids,
-      const url::Origin& origin,
-      PermissionsManager::UserSiteSetting new_site_settings);
+  // TODO(crbug.com/40883928): Move the reload bubble outside of
+  // `ExtensionActionRunner` as it is no longer tied to running an action. See
+  // if it can be merged with extensions dialogs utils `ShowReloadPageDialog`.
+  // Shows the bubble to prompt the user to refresh the page to run or not the
+  // action for the given `extension_ids`.
+  void ShowReloadPageBubble(const std::vector<ExtensionId>& extension_ids);
 
   // Notifies the ExtensionActionRunner that an extension has been granted
   // active tab permissions. This will run any pending injections for that
@@ -95,7 +98,7 @@ class ExtensionActionRunner : public content::WebContentsObserver,
 
   // Returns a bitmask of BlockedActionType for the actions that have been
   // blocked for the given extension.
-  int GetBlockedActions(const ExtensionId& extension_id);
+  int GetBlockedActions(const ExtensionId& extension_id) const;
 
   // Returns true if the given |extension| has any blocked actions.
   bool WantsToRun(const Extension* extension);
@@ -117,7 +120,7 @@ class ExtensionActionRunner : public content::WebContentsObserver,
   // Handles mojom::LocalFrameHost::RequestScriptInjectionPermission(). It
   // replies back with |callback|.
   void OnRequestScriptInjectionPermission(
-      const std::string& extension_id,
+      const ExtensionId& extension_id,
       mojom::InjectionType script_type,
       mojom::RunLocation run_location,
       mojom::LocalFrameHost::RequestScriptInjectionPermissionCallback callback);
@@ -141,9 +144,6 @@ class ExtensionActionRunner : public content::WebContentsObserver,
   }
 #endif  // defined(UNIT_TEST)
 
-  // The blocked actions that require a page refresh to run.
-  static const int kRefreshRequiredActionsMask;
-
  private:
   FRIEND_TEST_ALL_PREFIXES(ExtensionActionRunnerFencedFrameBrowserTest,
                            DoNotResetExtensionActionRunner);
@@ -163,7 +163,7 @@ class ExtensionActionRunner : public content::WebContentsObserver,
   };
 
   using PendingScriptList = std::vector<std::unique_ptr<PendingScript>>;
-  using PendingScriptMap = std::map<std::string, PendingScriptList>;
+  using PendingScriptMap = std::map<ExtensionId, PendingScriptList>;
 
   // Returns true if the extension requesting script injection requires
   // user consent. If this is true, the caller should then register a request
@@ -188,46 +188,8 @@ class ExtensionActionRunner : public content::WebContentsObserver,
   // Log metrics.
   void LogUMA() const;
 
-  // Shows the bubble to prompt the user to refresh the page to run or not the
-  // action for the given |extension_ids|. |callback| is invoked when the
-  // bubble is closed.
-  void ShowReloadPageBubble(const std::vector<ExtensionId>& extension_ids,
-                            base::OnceClosure callback);
-
-  // Called when the reload page bubble is accepted. Grants one time site access
-  // to `page_url` for each extension in `extension_ids`.
-  void OnReloadPageBubbleAcceptedForGrantTabPermissions(
-      const std::vector<ExtensionId>& extension_ids,
-      const GURL& page_url);
-
-  // Called when the reload page bubble is accepted. Updates site access of
-  // `extension_id` from `current_access` to `new_access` for `page_url`.
-  void OnReloadPageBubbleAcceptedForExtensionSiteAccessChange(
-      const ExtensionId& extension_id,
-      const GURL& page_url,
-      SitePermissionsHelper::SiteAccess current_access,
-      SitePermissionsHelper::SiteAccess new_access);
-
-  // Called when the reload page bubble is accepted. Updates user site setting
-  // of `origin` to `site_settings`.
-  void OnReloadPageBubbleAcceptedForUserSiteSettingsChange(
-      const url::Origin& origin,
-      extensions::PermissionsManager::UserSiteSetting site_settings);
-
-  // Handles permission changes necessary for page access modification of the
-  // |extension|.
-  void UpdatePageAccessSettings(
-      const Extension* extension,
-      SitePermissionsHelper::SiteAccess current_access,
-      SitePermissionsHelper::SiteAccess new_access);
-
-  // Runs any actions that were blocked for the given |extension|. As a
-  // requirement, this will grant activeTab permission to the extension.
-  void RunBlockedActions(const Extension* extension);
-
-  // Returns true if the given `extension` needs a page refresh to run a blocked
-  // action.
-  bool PageNeedsRefreshToRun(const Extension* extension);
+  // Reloads the current page.
+  void OnReloadPageBubbleAccepted();
 
   // content::WebContentsObserver implementation.
   void DidFinishNavigation(
@@ -261,13 +223,13 @@ class ExtensionActionRunner : public content::WebContentsObserver,
   PendingScriptMap pending_scripts_;
 
   // A set of ids for which the webRequest API was blocked on the page.
-  std::set<std::string> web_request_blocked_;
+  std::set<ExtensionId> web_request_blocked_;
 
   // The extensions which have been granted permission to run on the given page.
   // TODO(rdevlin.cronin): Right now, this just keeps track of extensions that
   // have been permitted to run on the page via this interface. Instead, it
   // should incorporate more fully with ActiveTab.
-  std::set<std::string> permitted_extensions_;
+  std::set<ExtensionId> permitted_extensions_;
 
   // If true, ignore active tab being granted rather than running pending
   // actions.
@@ -275,7 +237,7 @@ class ExtensionActionRunner : public content::WebContentsObserver,
 
   // If true, immediately accept the blocked action dialog by running the
   // callback.
-  absl::optional<bool> accept_bubble_for_testing_;
+  std::optional<bool> accept_bubble_for_testing_;
 
   raw_ptr<TestObserver> test_observer_;
 

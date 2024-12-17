@@ -97,14 +97,10 @@ class LayoutTreeAsText {
                                 const LayoutObject&,
                                 LayoutAsTextBehavior);
   static void WriteLayers(WTF::TextStream&,
-                          const PaintLayer* root_layer,
                           PaintLayer*,
                           int indent = 0,
                           LayoutAsTextBehavior = kLayoutAsTextBehaviorNormal,
                           const PaintLayer* marked_layer = nullptr);
-  static void WriteLineBoxTree(WTF::TextStream&,
-                               const LayoutBlockFlow&,
-                               int indent = 0);
 };
 
 // Helper function shared with SVGLayoutTreeAsText (so they are not exported).

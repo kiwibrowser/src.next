@@ -4,10 +4,14 @@
 
 #include "content/browser/field_trial_synchronizer.h"
 
-#include "base/bind.h"
 #include "base/check_op.h"
+#include "base/functional/bind.h"
+#include "base/metrics/field_trial.h"
+#include "base/metrics/field_trial_list_including_low_anonymity.h"
+#include "base/strings/strcat.h"
 #include "base/threading/thread.h"
 #include "components/metrics/persistent_system_profile.h"
+#include "components/variations/active_field_trials.h"
 #include "components/variations/variations_client.h"
 #include "content/common/renderer_variations_configuration.mojom.h"
 #include "content/public/browser/browser_context.h"
@@ -26,15 +30,27 @@ FieldTrialSynchronizer* g_instance = nullptr;
 // Notifies all renderer processes about the |group_name| that is finalized for
 // the given field trail (|field_trial_name|). This is called on UI thread.
 void NotifyAllRenderersOfFieldTrial(const std::string& field_trial_name,
-                                    const std::string& group_name) {
+                                    const std::string& group_name,
+                                    bool is_low_anonymity,
+                                    bool is_overridden) {
   // To iterate over RenderProcessHosts, or to send messages to the hosts, we
   // need to be on the UI thread.
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  // Note this in the persistent profile as it will take a while for a new
-  // "complete" profile to be generated.
-  metrics::GlobalPersistentSystemProfile::GetInstance()->AddFieldTrial(
-      field_trial_name, group_name);
+  // Low anonymity or overridden field trials must not be written to persistent
+  // data, otherwise they might end up being logged in metrics.
+  //
+  // TODO(crbug.com/40263398): split this out into a separate class that
+  // registers using |FieldTrialList::AddObserver()| (and so doesn't get told
+  // about low anonymity trials at all).
+  if (!is_low_anonymity) {
+    // Note this in the persistent profile as it will take a while for a new
+    // "complete" profile to be generated.
+    metrics::GlobalPersistentSystemProfile::GetInstance()->AddFieldTrial(
+        field_trial_name,
+        is_overridden ? base::StrCat({group_name, variations::kOverrideSuffix})
+                      : group_name);
+  }
 
   for (RenderProcessHost::iterator it(RenderProcessHost::AllHostsIterator());
        !it.IsAtEnd(); it.Advance()) {
@@ -61,7 +77,10 @@ void FieldTrialSynchronizer::CreateInstance() {
 }
 
 FieldTrialSynchronizer::FieldTrialSynchronizer() {
-  bool success = base::FieldTrialList::AddObserver(this);
+  // TODO(crbug.com/40263398): consider whether there is a need to exclude low
+  // anonymity field trials from non-browser processes (or to plumb through the
+  // anonymity property for more fine-grained access).
+  bool success = base::FieldTrialListIncludingLowAnonymity::AddObserver(this);
   // Ensure the observer was actually registered.
   DCHECK(success);
 
@@ -70,14 +89,20 @@ FieldTrialSynchronizer::FieldTrialSynchronizer() {
 }
 
 void FieldTrialSynchronizer::OnFieldTrialGroupFinalized(
-    const std::string& field_trial_name,
+    const base::FieldTrial& trial,
     const std::string& group_name) {
   if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    NotifyAllRenderersOfFieldTrial(field_trial_name, group_name);
+    NotifyAllRenderersOfFieldTrial(trial.trial_name(), group_name,
+                                   trial.is_low_anonymity(),
+                                   trial.IsOverridden());
   } else {
+    // Note that in some tests, `trial` may not be alive when the posted task is
+    // called.
     GetUIThreadTaskRunner({})->PostTask(
-        FROM_HERE, base::BindOnce(&NotifyAllRenderersOfFieldTrial,
-                                  field_trial_name, group_name));
+        FROM_HERE,
+        base::BindOnce(&NotifyAllRenderersOfFieldTrial, trial.trial_name(),
+                       group_name, trial.is_low_anonymity(),
+                       trial.IsOverridden()));
   }
 }
 
@@ -127,7 +152,7 @@ void FieldTrialSynchronizer::VariationIdsHeaderUpdated() {
 }
 
 FieldTrialSynchronizer::~FieldTrialSynchronizer() {
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
 }
 
 }  // namespace content

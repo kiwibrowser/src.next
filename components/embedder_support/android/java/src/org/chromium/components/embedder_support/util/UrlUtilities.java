@@ -10,13 +10,13 @@ import android.text.TextUtils;
 import androidx.annotation.NonNull;
 import androidx.core.text.BidiFormatter;
 
+import org.jni_zero.JNINamespace;
+import org.jni_zero.NativeMethods;
+
 import org.chromium.base.CollectionUtil;
-import org.chromium.base.annotations.JNINamespace;
-import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.components.url_formatter.UrlFormatter;
 import org.chromium.content_public.common.ContentUrlConstants;
-import org.chromium.net.GURLUtils;
 import org.chromium.url.GURL;
 
 import java.util.ArrayList;
@@ -35,26 +35,36 @@ import java.util.regex.Pattern;
  */
 @JNINamespace("embedder_support")
 public class UrlUtilities {
-    private static final String TAG = "UrlUtilities";
-
     /** Regular expression for prefixes to strip from publisher hostnames. */
     private static final Pattern HOSTNAME_PREFIX_PATTERN =
             Pattern.compile("^(www[0-9]*|web|ftp|wap|home|mobile|amp)\\.");
 
-    private static final List<String> SUPPORTED_SCHEMES = new ArrayList<String>(
-            Arrays.asList(ContentUrlConstants.ABOUT_SCHEME, UrlConstants.DATA_SCHEME,
-                    UrlConstants.FILE_SCHEME, UrlConstants.HTTP_SCHEME, UrlConstants.HTTPS_SCHEME,
-                    UrlConstants.INLINE_SCHEME, UrlConstants.JAVASCRIPT_SCHEME));
+    private static final List<String> SUPPORTED_SCHEMES =
+            new ArrayList<String>(
+                    Arrays.asList(
+                            ContentUrlConstants.ABOUT_SCHEME,
+                            UrlConstants.DATA_SCHEME,
+                            UrlConstants.FILE_SCHEME,
+                            UrlConstants.HTTP_SCHEME,
+                            UrlConstants.HTTPS_SCHEME,
+                            UrlConstants.INLINE_SCHEME,
+                            UrlConstants.JAVASCRIPT_SCHEME));
 
-    private static final List<String> DOWNLOADABLE_SCHEMES = new ArrayList<String>(Arrays.asList(
-            UrlConstants.DATA_SCHEME, UrlConstants.BLOB_SCHEME, UrlConstants.FILE_SCHEME,
-            UrlConstants.FILESYSTEM_SCHEME, UrlConstants.HTTP_SCHEME, UrlConstants.HTTPS_SCHEME));
+    private static final List<String> DOWNLOADABLE_SCHEMES =
+            new ArrayList<String>(
+                    Arrays.asList(
+                            UrlConstants.DATA_SCHEME,
+                            UrlConstants.BLOB_SCHEME,
+                            UrlConstants.FILE_SCHEME,
+                            UrlConstants.FILESYSTEM_SCHEME,
+                            UrlConstants.HTTP_SCHEME,
+                            UrlConstants.HTTPS_SCHEME));
 
-    /**
-     * URI schemes that are internal to Chrome.
-     */
+    /** URI schemes that are internal to Chrome. */
     private static final HashSet<String> INTERNAL_SCHEMES =
-            CollectionUtil.newHashSet(UrlConstants.CHROME_SCHEME, UrlConstants.CHROME_NATIVE_SCHEME,
+            CollectionUtil.newHashSet(
+                    UrlConstants.CHROME_SCHEME,
+                    UrlConstants.CHROME_NATIVE_SCHEME,
                     ContentUrlConstants.ABOUT_SCHEME);
 
     private static final String TEL_SCHEME = "tel";
@@ -78,17 +88,6 @@ public class UrlUtilities {
         if (GURL.isEmptyOrInvalid(gurl)) return "";
         if (!isTelScheme(gurl)) return "";
         return gurl.getPath();
-    }
-
-    /**
-     * @param uri A URI.
-     *
-     * @return True if the URI's scheme is one that ContentView can handle.
-     * @deprecated use {@link #isAcceptedScheme(GURL)} instead.
-     */
-    @Deprecated
-    public static boolean isAcceptedScheme(String uri) {
-        return isAcceptedScheme(new GURL(uri));
     }
 
     /**
@@ -118,6 +117,11 @@ public class UrlUtilities {
      */
     public static boolean isInternalScheme(@NonNull GURL gurl) {
         return INTERNAL_SCHEMES.contains(gurl.getScheme());
+    }
+
+    /** Returns whether the scheme represented by the given string is for a internal chrome page. */
+    public static boolean isInternalScheme(String scheme) {
+        return INTERNAL_SCHEMES.contains(scheme);
     }
 
     /**
@@ -171,16 +175,16 @@ public class UrlUtilities {
      */
     public static boolean sameDomainOrHost(
             String primaryUrl, String secondaryUrl, boolean includePrivateRegistries) {
-        return UrlUtilitiesJni.get().sameDomainOrHost(
-                primaryUrl, secondaryUrl, includePrivateRegistries);
+        return UrlUtilitiesJni.get()
+                .sameDomainOrHost(primaryUrl, secondaryUrl, includePrivateRegistries);
     }
 
     /**
      * Returns a new URL without the port in the hostname if it was present.
+     *
      * @param url The url to process.
-     * @return
      */
-    // TODO(crbug/783819): Expose GURL::Replacements to Java.
+    // TODO(crbug.com/40549331): Expose GURL::Replacements to Java.
     public static GURL clearPort(GURL url) {
         if (url == null || TextUtils.isEmpty(url.getPort())) return url;
         return UrlUtilitiesJni.get().clearPort(url);
@@ -191,14 +195,13 @@ public class UrlUtilities {
      *
      * @param uri A URI
      * @param includePrivateRegistries Whether or not to consider private registries.
-     *
      * @return The registered, organization-identifying host and all its registry information, but
-     * no subdomains, from the given URI. Returns an empty string if the URI is invalid, has no host
-     * (e.g. a file: URI), has multiple trailing dots, is an IP address, has only one subcomponent
-     * (i.e. no dots other than leading/trailing ones), or is itself a recognized registry
-     * identifier.
+     *     no subdomains, from the given URI. Returns an empty string if the URI is invalid, has no
+     *     host (e.g. a file: URI), has multiple trailing dots, is an IP address, has only one
+     *     subcomponent (i.e. no dots other than leading/trailing ones), or is itself a recognized
+     *     registry identifier.
      */
-    // TODO(crbug/783819): Convert to GURL.
+    // TODO(crbug.com/40549331): Convert to GURL.
     public static String getDomainAndRegistry(String uri, boolean includePrivateRegistries) {
         if (TextUtils.isEmpty(uri)) return uri;
         return UrlUtilitiesJni.get().getDomainAndRegistry(uri, includePrivateRegistries);
@@ -229,12 +232,15 @@ public class UrlUtilities {
         assert isHttpOrHttps(url);
         Uri parsed = Uri.parse(url);
 
-        return parsed.getScheme() + "://" + ((parsed.getHost() != null) ? parsed.getHost() : "")
+        return parsed.getScheme()
+                + "://"
+                + ((parsed.getHost() != null) ? parsed.getHost() : "")
                 + ((parsed.getPort() != -1) ? (":" + parsed.getPort()) : "");
     }
 
     /**
-     * TODO(https://crbug.com/783819): This should use UrlFormatter, or GURL machinery.
+     * TODO(crbug.com/40549331): This should use UrlFormatter, or GURL machinery.
+     *
      * @param url An HTTP or HTTPS URL.
      * @return The URL without the scheme.
      */
@@ -260,60 +266,62 @@ public class UrlUtilities {
     }
 
     /**
-     * This variation of #isNTPUrl is for already parsed URLs, not for direct use on user-provided
-     * url input. Do not do isNTPUrl(new GURL(user_string)), as this will not handle legacy schemes
-     * like about: correctly. You should use {@link #isNTPUrl(String)} instead, or call
-     * {@link UrlFormatter#fixupUrl(String)} to create the GURL instead.
+     * This variation of #isNtpUrl is for already parsed URLs, not for direct use on user-provided
+     * url input. Do not do isNtpUrl(new GURL(user_string)), as this will not handle legacy schemes
+     * like about: correctly. You should use {@link #isNtpUrl(String)} instead, or call {@link
+     * UrlFormatter#fixupUrl(String)} to create the GURL instead.
      *
      * @param gurl The GURL to check whether it is for the NTP.
      * @return Whether the passed in URL is used to render the NTP.
      */
-    public static boolean isNTPUrl(GURL gurl) {
+    public static boolean isNtpUrl(GURL gurl) {
         if (!gurl.isValid() || !isInternalScheme(gurl)) return false;
-        return UrlConstants.NTP_HOST.equals(gurl.getHost());
+        return UrlConstants.NTP_HOST.equals(gurl.getHost())
+                || UrlConstants.NEW_TAB_PAGE_URL_LEGACY.equals(gurl.getValidSpecOrEmpty());
     }
 
     /**
      * @param url The URL to check whether it is for the NTP.
      * @return Whether the passed in URL is used to render the NTP.
-     * @deprecated For URLs coming from c++, those URLs should passed around in Java as a GURL.
-     *     For URLs created in Java, coming from third parties or users, those URLs should be
-     *     parsed into a GURL at their source using {@link UrlFormatter#fixupUrl(String)}.
+     * @deprecated For URLs coming from c++, those URLs should passed around in Java as a GURL. For
+     *     URLs created in Java, coming from third parties or users, those URLs should be parsed
+     *     into a GURL at their source using {@link UrlFormatter#fixupUrl(String)}.
      */
     @Deprecated
-    public static boolean isNTPUrl(String url) {
+    public static boolean isNtpUrl(String url) {
         // Also handle the legacy chrome://newtab and about:newtab URLs since they will redirect to
         // chrome-native://newtab natively.
         if (TextUtils.isEmpty(url)) return false;
         // We need to fixup the URL to handle about: schemes and transform them into the equivalent
         // chrome:// scheme so that GURL parses the host correctly.
         GURL gurl = UrlFormatter.fixupUrl(url);
-        return isNTPUrl(gurl);
+        return isNtpUrl(gurl);
     }
 
     /**
-     * Returns whether the url matches an NTP URL exactly. This is used to support features
-     * showing the omnibox before native is loaded. Prefer using {@see #isNTPUrl(GURL gurl)} when
-     * native is loaded.
+     * Returns whether the url matches an NTP URL exactly. This is used to support features showing
+     * the omnibox before native is loaded. Prefer using {@see #isNtpUrl(GURL gurl)} when native is
+     * loaded.
+     *
      * @param url The current URL to compare.
      * @return Whether the given URL matches the NTP urls exactly.
      */
-    public static boolean isCanonicalizedNTPUrl(String url) {
-        // TODO(crbug.com/1267266): Let callers check if the library is initialized and make them
+    public static boolean isCanonicalizedNtpUrl(String url) {
+        // TODO(crbug.com/40204389): Let callers check if the library is initialized and make them
         // call this method only before native is initialized.
         // After native initialization, the homepage url could become
         // "chrome://newtab/#most_visited" on carrier phones. Simply comparing the text of the URL
-        // returns a wrong result, but isNTPUrl(url) which checks the host of the URL works. See
+        // returns a wrong result, but isNtpUrl(url) which checks the host of the URL works. See
         // https://crbug.com/1266625.
-        if (LibraryLoader.getInstance().isInitialized()) return isNTPUrl(url);
+        if (LibraryLoader.getInstance().isInitialized()) return isNtpUrl(url);
         return TextUtils.equals(url, UrlConstants.NTP_URL)
                 || TextUtils.equals(url, UrlConstants.NTP_NON_NATIVE_URL)
                 || TextUtils.equals(url, UrlConstants.NTP_ABOUT_URL);
     }
 
-    public static String extractPublisherFromPublisherUrl(String publisherUrl) {
+    public static String extractPublisherFromPublisherUrl(GURL publisherUrl) {
         String publisher =
-                UrlFormatter.formatUrlForDisplayOmitScheme(GURLUtils.getOrigin(publisherUrl));
+                UrlFormatter.formatUrlForDisplayOmitScheme(publisherUrl.getOrigin().getSpec());
 
         String trimmedPublisher = HOSTNAME_PREFIX_PATTERN.matcher(publisher).replaceFirst("");
         return BidiFormatter.getInstance().unicodeWrap(trimmedPublisher);
@@ -331,9 +339,7 @@ public class UrlUtilities {
         return UrlUtilitiesJni.get().getValueForKeyInQuery(url, key);
     }
 
-    /**
-     * @return true if |url|'s scheme is for an Android intent.
-     */
+    /** @return true if |url|'s scheme is for an Android intent. */
     public static boolean hasIntentScheme(GURL url) {
         return url.getScheme().equals(UrlConstants.APP_INTENT_SCHEME)
                 || url.getScheme().equals(UrlConstants.INTENT_SCHEME);
@@ -343,7 +349,9 @@ public class UrlUtilities {
     public interface Natives {
         boolean sameDomainOrHost(
                 String primaryUrl, String secondaryUrl, boolean includePrivateRegistries);
+
         String getDomainAndRegistry(String url, boolean includePrivateRegistries);
+
         /** Returns whether the given URL uses the Google.com domain. */
         boolean isGoogleDomainUrl(String url, boolean allowNonStandardPort);
 
@@ -357,10 +365,13 @@ public class UrlUtilities {
         boolean isGoogleHomePageUrl(String url);
 
         boolean isUrlWithinScope(String url, String scopeUrl);
+
         boolean urlsMatchIgnoringFragments(String url, String url2);
+
         boolean urlsFragmentsDiffer(String url, String url2);
 
         String escapeQueryParamValue(String url, boolean usePlus);
+
         String getValueForKeyInQuery(GURL url, String key);
 
         GURL clearPort(GURL url);

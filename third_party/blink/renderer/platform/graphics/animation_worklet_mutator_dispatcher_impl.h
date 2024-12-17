@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,14 @@
 #include <memory>
 #include <utility>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/time/tick_clock.h"
 #include "third_party/blink/renderer/platform/graphics/animation_worklet_mutator.h"
 #include "third_party/blink/renderer/platform/graphics/animation_worklet_mutator_dispatcher.h"
 #include "third_party/blink/renderer/platform/graphics/mutator_client.h"
-#include "third_party/blink/renderer/platform/heap/persistent.h"
+#include "third_party/blink/renderer/platform/heap/cross_thread_persistent.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/thread_safe_ref_counted.h"
 
@@ -137,7 +138,7 @@ class PLATFORM_EXPORT AnimationWorkletMutatorDispatcherImpl final
 
   // The MutatorClient owns (std::unique_ptr) us, so this pointer is
   // valid as long as this class exists.
-  MutatorClient* client_;
+  raw_ptr<MutatorClient> client_;
 
   // Map of mutator scope IDs to mutator input. The Mutate methods safeguards
   // against concurrent calls (important once async mutations are introduced) by

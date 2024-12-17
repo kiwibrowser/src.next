@@ -31,7 +31,9 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_DOCUMENT_INIT_H_
 
 #include "base/dcheck_is_on.h"
+#include "base/uuid.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
+#include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/execution_context/security_context.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
@@ -40,6 +42,7 @@
 
 namespace blink {
 
+class Agent;
 class Document;
 class ExecutionContext;
 class LocalDOMWindow;
@@ -89,16 +92,24 @@ class CORE_EXPORT DocumentInit final {
     kUnspecified
   };
 
-  DocumentInit& ForTest();
+  DocumentInit& ForTest(ExecutionContext& execution_context);
 
   // Actually constructs the Document based on the provided state.
   Document* CreateDocument() const;
 
   bool IsSrcdocDocument() const;
+  bool IsAboutBlankDocument() const;
+  const KURL& FallbackBaseURL() const;
   bool ShouldSetURL() const;
 
   DocumentInit& WithWindow(LocalDOMWindow*, Document* owner_document);
   LocalDOMWindow* GetWindow() const { return window_; }
+
+  DocumentInit& WithToken(const DocumentToken& token);
+  const std::optional<DocumentToken>& GetToken() const;
+
+  DocumentInit& WithAgent(Agent& agent);
+  Agent& GetAgent() const;
 
   DocumentInit& ForInitialEmptyDocument(bool empty);
   bool IsInitialEmptyDocument() const { return is_initial_empty_document_; }
@@ -130,12 +141,15 @@ class CORE_EXPORT DocumentInit final {
   const KURL& GetCookieUrl() const;
 
   DocumentInit& WithSrcdocDocument(bool is_srcdoc_document);
-
-  DocumentInit& WithWebBundleClaimedUrl(const KURL& web_bundle_claimed_url);
-  const KURL& GetWebBundleClaimedUrl() const { return web_bundle_claimed_url_; }
+  DocumentInit& WithFallbackBaseURL(const KURL& fallback_base_url);
+  DocumentInit& WithJavascriptURL(bool is_for_javascript_url);
+  DocumentInit& ForDiscard(bool is_for_discard);
 
   DocumentInit& WithUkmSourceId(ukm::SourceId ukm_source_id);
   ukm::SourceId UkmSourceId() const { return ukm_source_id_; }
+
+  DocumentInit& WithBaseAuctionNonce(base::Uuid base_auction_nonce);
+  base::Uuid BaseAuctionNonce() const { return base_auction_nonce_; }
 
  private:
   DocumentInit() = default;
@@ -147,22 +161,27 @@ class CORE_EXPORT DocumentInit final {
   bool is_initial_empty_document_ = false;
   String mime_type_;
   LocalDOMWindow* window_ = nullptr;
+  std::optional<DocumentToken> token_;
   ExecutionContext* execution_context_ = nullptr;
   KURL url_;
   Document* owner_document_ = nullptr;
+  Agent* agent_ = nullptr;
 
   // Whether we should treat the new document as "srcdoc" document. This
   // affects security checks, since srcdoc's content comes directly from
   // the parent document, not from loading a URL.
   bool is_srcdoc_document_ = false;
-
-  // The claimed URL inside Web Bundle file from which the document is loaded.
-  // This URL is used for window.location and document.URL and relative path
-  // computation in the document.
-  KURL web_bundle_claimed_url_;
+  KURL fallback_base_url_;
+  // True when the commit reason for this DocumentInit was a javascript: url.
+  bool is_for_javascript_url_ = false;
+  // True when the commit reason for this DocumentInit was a discard operation.
+  bool is_for_discard_ = false;
 
   // Source id to set on the Document to be created.
   ukm::SourceId ukm_source_id_ = ukm::kInvalidSourceId;
+
+  // Seed for all PAAPI Auction Nonces generated for this document.
+  base::Uuid base_auction_nonce_;
 
   bool is_for_external_handler_ = false;
 

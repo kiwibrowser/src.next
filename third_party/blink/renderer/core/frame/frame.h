@@ -29,21 +29,23 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_FRAME_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_FRAME_H_
 
+#include <optional>
+
 #include "base/check_op.h"
 #include "base/i18n/rtl.h"
 #include "base/unguessable_token.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-blink.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/common/fenced_frame/redacted_fenced_frame_config.h"
 #include "third_party/blink/public/common/frame/frame_ad_evidence.h"
 #include "third_party/blink/public/common/frame/user_activation_state.h"
 #include "third_party/blink/public/common/frame/user_activation_update_source.h"
 #include "third_party/blink/public/common/permissions_policy/document_policy_features.h"
 #include "third_party/blink/public/common/permissions_policy/permissions_policy_features.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
-#include "third_party/blink/public/mojom/fenced_frame/fenced_frame.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/frame/frame_owner_properties.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/frame/frame_policy.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/frame/remote_frame.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/input/scroll_direction.mojom-blink-forward.h"
@@ -57,6 +59,7 @@
 #include "third_party/blink/renderer/core/loader/frame_loader_types.h"
 #include "third_party/blink/renderer/core/page/frame_tree.h"
 #include "third_party/blink/renderer/platform/graphics/touch_action.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cancellable_task.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
@@ -79,6 +82,7 @@ class HTMLFrameOwnerElement;
 class LayoutEmbeddedContent;
 class LocalFrame;
 class Page;
+class Resource;
 class SecurityContext;
 class Settings;
 class WindowProxy;
@@ -149,7 +153,6 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   // the root Document in a WebContents). See content::Page for detailed
   // documentation.
   // This is false for main frames created for fenced-frames.
-  // TODO(khushalsagar) : Should also be the case for portals.
   bool IsOutermostMainFrame() const;
 
   // Returns true if and only if:
@@ -185,7 +188,7 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   void SetOwner(FrameOwner*);
   HTMLFrameOwnerElement* DeprecatedLocalOwner() const;
 
-  DOMWindow* DomWindow() const { return dom_window_; }
+  DOMWindow* DomWindow() const { return dom_window_.Get(); }
 
   FrameTree& Tree() const;
   ChromeClient& GetChromeClient() const;
@@ -217,16 +220,20 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   void SetIsLoading(bool is_loading) { is_loading_ = is_loading; }
   bool IsLoading() const { return is_loading_; }
 
-  // Determines if the frame should be allowed to pull focus from a JavaScript
-  // call.
-  bool ShouldAllowScriptFocus();
+  // Determines if the frame should be allowed to pull focus without receiving
+  // user activation. A frame cannot pull focus without user activation if
+  // doing so would cross a fenced frame boundary.
+  // Note: the only time focus can be pulled across a fence without the target
+  // frame having user activation is in the case of tab-focusing. In that case,
+  // this function is not called and focus is blanket allowed.
+  bool AllowFocusWithoutUserActivation();
 
   // Tells the frame to check whether its load has completed, based on the state
   // of its subframes, etc.
   virtual void CheckCompleted() = 0;
 
   WindowProxyManager* GetWindowProxyManager() const {
-    return window_proxy_manager_;
+    return window_proxy_manager_.Get();
   }
   WindowProxy* GetWindowProxy(DOMWrapperWorld&);
   WindowProxy* GetWindowProxyMaybeUninitialized(DOMWrapperWorld&);
@@ -247,6 +254,12 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   // nature.
   bool LastActivationWasRestricted() const {
     return user_activation_state_.LastActivationWasRestricted();
+  }
+
+  // Sets the sticky user activation state of this frame. This does not change
+  // the transient user activation state.
+  void SetStickyUserActivationState() {
+    user_activation_state_.SetHasBeenActive();
   }
 
   // Resets the user activation state of this frame.
@@ -292,10 +305,10 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   const base::UnguessableToken& GetDevToolsFrameToken() const {
     return devtools_frame_token_;
   }
-  const std::string& ToTraceValue();
+  const String& GetFrameIdForTracing();
 
   void SetEmbeddingToken(const base::UnguessableToken& embedding_token);
-  const absl::optional<base::UnguessableToken>& GetEmbeddingToken() const {
+  const std::optional<base::UnguessableToken>& GetEmbeddingToken() const {
     return embedding_token_;
   }
 
@@ -364,44 +377,37 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   void SetOpenerDoNotNotify(Frame* opener);
 
   // Returns the frame that opened this frame or null if there is none.
-  Frame* Opener() const { return opener_; }
+  Frame* Opener() const { return opener_.Get(); }
 
   // Returns the parent frame or null if this is the top-most frame.
-  // When `frame_tree_boundary` is `kFenced`, returns null if this is a fenced
-  // frame root.
-  Frame* Parent(FrameTreeBoundary frame_tree_boundary =
-                    FrameTreeBoundary::kIgnoreFence) const;
+  Frame* Parent() const;
 
   // Returns the top-most frame in the hierarchy containing this frame.
-  // When `frame_tree_boundary` is `kFenced`, does not traverse out of fenced
-  // frame root nodes.
-  Frame* Top(
-      FrameTreeBoundary frame_tree_boundary = FrameTreeBoundary::kIgnoreFence);
+  Frame* Top();
 
   // Returns the first child frame.
-  // When `frame_tree_boundary` is `kFenced`, skips over children that are
-  // fenced frame roots.
-  Frame* FirstChild(FrameTreeBoundary frame_tree_boundary =
-                        FrameTreeBoundary::kIgnoreFence) const;
+  Frame* FirstChild() const { return first_child_.Get(); }
 
   // Returns the previous sibling frame.
-  Frame* PreviousSibling() const { return previous_sibling_; }
+  Frame* PreviousSibling() const { return previous_sibling_.Get(); }
 
   // Returns the next sibling frame.
-  // When `frame_tree_boundary` is `kFenced`, skips over siblings that are
-  // fenced frame roots.
-  Frame* NextSibling(FrameTreeBoundary frame_tree_boundary =
-                         FrameTreeBoundary::kIgnoreFence) const;
+  Frame* NextSibling() const { return next_sibling_.Get(); }
 
   // Returns the last child frame.
-  Frame* LastChild() const { return last_child_; }
+  Frame* LastChild() const { return last_child_.Get(); }
 
   // TODO(dcheng): these should probably all have restricted visibility. They
   // are not intended for general usage.
   // Detaches a frame from its parent frame if it has one.
   void DetachFromParent();
 
-  // Swap out this frame for a new local frame.
+  // Swap out this frame for a new local frame. Note that this frame and the
+  // local frame can belong to different Pages in case of main frame
+  // LocalFrame <-> LocalFrame swaps. In that case, the frame actually being
+  // swapped in this frame's place in the old Page will be a placeholder
+  // RemoteFrame, while the new LocalFrame will get swapped in into a new Page.
+  // See comments in SwapImpl()'s implementation for more details.
   bool Swap(WebLocalFrame*);
 
   // Swap out this frame for a new remote frame. This method takes the
@@ -417,7 +423,7 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   // Removes the given child from this frame.
   void RemoveChild(Frame* child);
 
-  LocalFrame* ProvisionalFrame() const { return provisional_frame_; }
+  LocalFrame* ProvisionalFrame() const { return provisional_frame_.Get(); }
   void SetProvisionalFrame(LocalFrame* provisional_frame) {
     // There should only be null -> non-null or non-null -> null transitions
     // here. Anything else indicates a logic error in the code managing this
@@ -440,9 +446,13 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   bool IsFencedFrameRoot() const;
 
   // Returns the mode set on the fenced frame if the frame is inside a fenced
-  // frame tree. Otherwise returns `absl::nullopt`. This should not be called
+  // frame tree. Otherwise returns `std::nullopt`. This should not be called
   // on a detached frame.
-  absl::optional<mojom::blink::FencedFrameMode> GetFencedFrameMode() const;
+  std::optional<blink::FencedFrame::DeprecatedFencedFrameMode>
+  GetDeprecatedFencedFrameMode() const;
+
+  // Returns all the resources under the frame tree of this node.
+  HeapVector<Member<Resource>> AllResourcesUnderFrame();
 
  protected:
   // |inheriting_agent_factory| should basically be set to the parent frame or
@@ -478,15 +488,14 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   void ApplyFrameOwnerProperties(
       mojom::blink::FrameOwnerPropertiesPtr properties);
 
+  void NotifyUserActivationInFrameTreeStickyOnly();
   void NotifyUserActivationInFrameTree(
-      mojom::blink::UserActivationNotificationType notification_type);
+      mojom::blink::UserActivationNotificationType notification_type,
+      bool sticky_only = false);
   bool ConsumeTransientUserActivationInFrameTree();
   void ClearUserActivationInFrameTree();
 
   void RenderFallbackContent();
-  void RenderFallbackContentWithResourceTiming(
-      mojom::blink::ResourceTimingInfoPtr timing,
-      const String& server_timing_values);
 
   mutable FrameTree tree_node_;
 
@@ -509,12 +518,6 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   // null. The child frame's parent must be set in the constructor.
   void InsertAfter(Frame* new_child, Frame* previous_sibling);
 
-  // Returns true if this frame pulling focus will cause focus to traverse
-  // across a fenced frame boundary. This handles checking for focus entering
-  // a fenced frame, as well as focus leaving a fenced frames.
-  // Note: This is only called if fenced frames are enabled with ShadowDOM
-  bool FocusCrossesFencedBoundary();
-
   void CancelFormSubmissionWithVersion(uint64_t version);
 
   bool SwapImpl(WebFrame*,
@@ -522,6 +525,14 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
                     remote_frame_host,
                 mojo::PendingAssociatedReceiver<mojom::blink::RemoteFrame>
                     remote_frame_receiver);
+
+  // Notifies a specific frame that it now has user activation. Used to prevent
+  // duplicated logic in `NotifyUserActivationInFrameTree()`, which notifies
+  // various sets of Frames that they're now activated.
+  static void NotifyUserActivationInFrame(
+      Frame* node,
+      mojom::blink::UserActivationNotificationType notification_type,
+      bool sticky_only);
 
   Member<FrameClient> client_;
   const Member<WindowProxyManager> window_proxy_manager_;
@@ -555,13 +566,13 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   bool is_loading_;
   // Contains token to be used as a frame id in the devtools protocol.
   base::UnguessableToken devtools_frame_token_;
-  absl::optional<std::string> trace_value_;
+  std::optional<String> trace_value_;
 
   // Embedding token, if existing, associated to this frame. For local frames
   // this will only be valid if the frame has committed a navigation and will
   // change when a new document is committed. For remote frames this will only
   // be valid when owned by an HTMLFrameOwnerElement.
-  absl::optional<base::UnguessableToken> embedding_token_;
+  std::optional<base::UnguessableToken> embedding_token_;
 
   // The user activation state of the current frame.  See |UserActivationState|
   // for details on how this state is maintained.
@@ -606,11 +617,11 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
 };
 
 inline FrameClient* Frame::Client() const {
-  return client_;
+  return client_.Get();
 }
 
 inline FrameOwner* Frame::Owner() const {
-  return owner_;
+  return owner_.Get();
 }
 
 inline FrameTree& Frame::Tree() const {
@@ -624,9 +635,10 @@ DEFINE_COMPARISON_OPERATORS_WITH_REFERENCES(Frame)
 // This method should be used instead of Frame* pointer
 // in a TRACE_EVENT_XXX macro. Example:
 //
-// TRACE_EVENT1("category", "event_name", "frame", ToTraceValue(GetFrame()));
-static inline std::string ToTraceValue(Frame* frame) {
-  return frame ? frame->ToTraceValue() : std::string();
+// TRACE_EVENT1("category", "event_name", "frame",
+// GetFrameIdForTracing(GetFrame()));
+static inline const String& GetFrameIdForTracing(Frame* frame) {
+  return frame ? frame->GetFrameIdForTracing() : g_empty_string;
 }
 
 }  // namespace blink

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,12 @@
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
 #include "third_party/blink/renderer/core/html/html_image_element.h"
+#include "third_party/blink/renderer/core/layout/hit_test_location.h"
+#include "third_party/blink/renderer/core/layout/hit_test_result.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_object_inlines.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
-#include "third_party/blink/renderer/core/paint/paint_timing.h"
+#include "third_party/blink/renderer/core/paint/timing/paint_timing.h"
 #include "third_party/blink/renderer/core/scroll/scrollable_area.h"
 
 namespace blink {
@@ -70,7 +72,7 @@ void OverlayInterstitialAdDetector::MaybeFireDetection(
 
   // Skip any measurement before the FCP.
   if (PaintTiming::From(*outermost_main_frame->GetDocument())
-          .FirstContentfulPaint()
+          .FirstContentfulPaintIgnoringSoftNavigations()
           .is_null()) {
     return;
   }
@@ -126,7 +128,7 @@ void OverlayInterstitialAdDetector::MaybeFireDetection(
   if (!element)
     return;
 
-  DOMNodeId element_id = DOMNodeIds::IdForNode(element);
+  DOMNodeId element_id = element->GetDomNodeId();
 
   // Skip considering the overlay for a pop-up candidate if we haven't seen or
   // have just seen the first meaningful paint, or if the viewport size has just

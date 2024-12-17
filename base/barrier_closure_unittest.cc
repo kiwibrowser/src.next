@@ -4,9 +4,9 @@
 
 #include "base/barrier_closure.h"
 
-#include "base/bind.h"
-#include "base/callback.h"
-#include "base/callback_helpers.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "base/test/bind.h"
 #include "base/test/gtest_util.h"
@@ -17,7 +17,7 @@ namespace {
 TEST(BarrierClosureTest, RunImmediatelyForZeroClosures) {
   int count = 0;
   base::RepeatingClosure barrier_closure = base::BarrierClosure(
-      0, base::BindLambdaForTesting([&count]() { ++count; }));
+      0, base::BindLambdaForTesting([&count] { ++count; }));
   EXPECT_EQ(1, count);
 }
 
@@ -32,7 +32,7 @@ TEST(BarrierClosureTest, ChecksIfCalledForZeroClosures) {
 TEST(BarrierClosureTest, RunAfterNumClosures) {
   int count = 0;
   base::RepeatingClosure barrier_closure = base::BarrierClosure(
-      2, base::BindLambdaForTesting([&count]() { ++count; }));
+      2, base::BindLambdaForTesting([&count] { ++count; }));
   EXPECT_EQ(0, count);
 
   barrier_closure.Run();
@@ -78,7 +78,7 @@ TEST(BarrierClosureTest, ReleasesDoneClosureWhenDone) {
 TEST(BarrierClosureTest, KeepingClosureAliveUntilDone) {
   base::RepeatingClosure barrier_closure;
   barrier_closure =
-      base::BarrierClosure(1, base::BindLambdaForTesting([&barrier_closure]() {
+      base::BarrierClosure(1, base::BindLambdaForTesting([&barrier_closure] {
                              barrier_closure = base::RepeatingClosure();
                            }));
   barrier_closure.Run();

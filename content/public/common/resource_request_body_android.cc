@@ -11,9 +11,11 @@
 #include "base/android/jni_array.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/memory/ref_counted.h"
-#include "content/public/android/content_jni_headers/ResourceRequestBody_jni.h"
 #include "services/network/public/cpp/resource_request_body.h"
 #include "third_party/blink/public/common/page_state/page_state_serialization.h"
+
+// Must come after all headers that specialize FromJniType() / ToJniType().
+#include "content/public/android/public_common_jni/ResourceRequestBody_jni.h"
 
 using base::android::JavaParamRef;
 
@@ -26,8 +28,7 @@ JNI_ResourceRequestBody_ConvertResourceRequestBodyToJavaArray(
     JNIEnv* env,
     const network::ResourceRequestBody& body) {
   std::string encoded = blink::EncodeResourceRequestBody(body);
-  return base::android::ToJavaByteArray(
-      env, reinterpret_cast<const uint8_t*>(encoded.data()), encoded.size());
+  return base::android::ToJavaByteArray(env, encoded);
 }
 
 }  // namespace
@@ -80,8 +81,7 @@ ExtractResourceRequestBodyFromJavaObject(
   std::vector<uint8_t> encoded;
   base::android::JavaByteArrayToByteVector(env, j_encoded, &encoded);
 
-  return blink::DecodeResourceRequestBody(
-      reinterpret_cast<const char*>(encoded.data()), encoded.size());
+  return blink::DecodeResourceRequestBody(encoded);
 }
 
 }  // namespace content

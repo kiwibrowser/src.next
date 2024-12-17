@@ -282,17 +282,17 @@
   <release seq="1">
     <messages fallback_to_english="true">
       <part file="arc_strings.grdp" />
-      <part file="autofill_assistant_strings.grdp" />
       <part file="autofill_payments_strings.grdp" />
+      <part file="autofill_prediction_improvements_strings.grdp" />
       <part file="autofill_strings.grdp" />
       <part file="bookmark_bar_strings.grdp" />
       <part file="bookmark_component_strings.grdp" />
       <part file="blocked_content_strings.grdp" />
       <part file="browsing_data_strings.grdp" />
       <part file="commerce_strings.grdp" />
+      <part file="compose_strings.grdp" />
       <part file="live_caption_strings.grdp" />
       <part file="components_settings_strings.grdp" />
-      <part file="content_creation_strings.grdp" />
       <part file="crash_strings.grdp" />
       <part file="dialog_strings.grdp" />
       <part file="dom_distiller_strings.grdp" />
@@ -309,7 +309,6 @@
       <part file="management_strings.grdp" />
       <part file="media_message_center_strings.grdp" />
       <part file="new_or_sad_tab_strings.grdp" />
-      <part file="ntp_snippets_strings.grdp" />
       <part file="omnibox_strings.grdp" />
       <part file="page_info_strings.grdp" />
       <part file="paint_preview_strings.grdp" />
@@ -320,33 +319,31 @@
       <part file="policy_strings.grdp" />
       <part file="print_media_strings.grdp" />
       <part file="printing_component_strings.grdp" />
-      <part file="privacy_sandbox_strings.grdp" />
+      <part file="privacy_sandbox_chrome_strings.grdp" />
       <part file="protocol_handler_strings.grdp" />
       <part file="reset_password_strings.grdp" />
+      <part file="saved_tab_groups_strings.grdp" />
+      <part file="search_engine_choice_strings.grdp" />
       <part file="security_interstitials_strings.grdp" />
       <part file="send_tab_to_self_strings.grdp" />
       <part file="site_settings_strings.grdp" />
       <part file="sms_strings.grdp" />
-      <part file="soda_strings.grdp" />
       <part file="ssl_errors_strings.grdp" />
       <part file="subresource_filter_strings.grdp" />
+      <part file="supervised_user_strings.grdp" />
       <part file="sync_ui_strings.grdp" />
       <part file="translate_strings.grdp" />
       <part file="tab_groups_strings.grdp" />
+      <part file="tab_resume_strings.grdp" />
       <part file="undo_strings.grdp" />
       <part file="user_education_strings.grdp" />
       <part file="version_ui_strings.grdp" />
       <part file="webapps_strings.grdp" />
-
-      <if expr="not is_ios">
-        <part file="history_clusters_strings.grdp" />
-      </if>
+      <part file="history_clusters_strings.grdp" />
       <if expr="is_android">
         <part file="android_system_error_page_strings.grdp" />
         <part file="external_intents_strings.grdp" />
-      </if>
-      <if expr="is_ios">
-        <part file="management_ios_strings.grdp" />
+        <part file="facilitated_payments_strings.grdp" />
       </if>
       <if expr="enable_vr">
         <part file="webxr_strings.grdp" />
@@ -383,7 +380,7 @@
       <message name="IDS_SAVE" desc="Used on a button to save information you are editing.">
         Save
       </message>
-      <message name="IDS_MENU" desc="The accessible name for the Menu. This is used as the aria-roledescription for context menus.">
+      <message name="IDS_MENU" desc="The accessible name for the Menu. This is used as the aria-roledescription for context menus." formatter_data="android_java">
         Menu
       </message>
       <message name="IDS_INSTALL" desc="Text to be displayed when an action will trigger an installation (of a component, app from the Play Store, etc.).">
@@ -447,13 +444,25 @@
         </if>
       </if>
       <if expr="not use_titlecase">
+        <message name="IDS_RECENT_TABS" desc="The section header for the Recent Tabs section of the Recent Tabs menu.">
+          Recent tabs
+        </message>
         <message name="IDS_RECENTLY_CLOSED" desc="The section header for the Recently Closed section of the Recent Tabs menu.">
           Recently closed
         </message>
+        <message name="IDS_YOUR_DEVICES" desc="The section header for the Your Devices section of the Recent Tabs menu.">
+          Your devices
+        </message>
       </if>
       <if expr="use_titlecase">
+        <message name="IDS_RECENT_TABS" desc="The section header for the Recent Tabs section of the Recent Tabs menu.">
+          Recent Tabs
+        </message>
         <message name="IDS_RECENTLY_CLOSED" desc="In Title Case: The section header for the Recently Closed section of the Recent Tabs menu.">
           Recently Closed
+        </message>
+        <message name="IDS_YOUR_DEVICES" desc="In Title Case: The section header for the Your Devices section of the Recent Tabs menu.">
+          Your Devices
         </message>
       </if>
       <message name="IDS_CHOOSE" desc="Label for a button to choose something, like a shipping address for a payment request. [CHAR_LIMIT=20]" formatter_data="android_java">
@@ -485,6 +494,9 @@
       <message name="IDS_ACCNAME_OPEN" desc="The accessible name for the Open button.">
         Open
       </message>
+      <message name="IDS_ACCNAME_OPEN_IN_NEW_TAB" desc="The accessible name for the Open in New Tab button.">
+        Open in new tab
+      </message>
       <message name="IDS_ACCNAME_PREVIOUS" desc="The accessible name for the previous button.">
         Previous
       </message>
@@ -493,9 +505,6 @@
       </message>
       <message name="IDS_ACCNAME_LOCATION" desc="The accessible name for the editable-text portion of the omnibox.">
         Address and search bar
-      </message>
-      <message name="IDS_ACCNAME_PARTICLE_DISC" desc="The accessible name for the Account Consistency Disc on New Tab Page">
-        Google Account
       </message>
       <message name="IDS_ACCNAME_TAB_LIST" desc="The accessible name for the tab strip.">
         Tab list
@@ -527,9 +536,6 @@
       </message>
       <message name="IDS_PASSWORD_MANAGER_CSV_PASSWORD_PARSER_SERVICE_DISPLAY_NAME" desc="The display name (in the system task manager, etc) of the service process used for parsing a csv passwords file.">
         CSV Password Parser Service
-      </message>
-      <message name="IDS_PASSWORD_MANAGER_PASSWORD_STRENGTH_CALCULATOR_SERVICE_DISPLAY_NAME" desc="The display name (in the system task manager, etc) of the service process used for calculating the strength of a password.">
-        Password Strength Calculator
       </message>
       <message name="IDS_UNZIP_SERVICE_DISPLAY_NAME" desc="The display name (in the system task manager, etc) of the service process used for unzipping files.">
         Unzip Service

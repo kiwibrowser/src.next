@@ -1,10 +1,15 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "third_party/blink/renderer/platform/graphics/accelerated_static_bitmap_image.h"
 
-#include "base/callback_helpers.h"
+#include "base/functional/callback_helpers.h"
 #include "base/test/null_task_runner.h"
 #include "base/test/task_environment.h"
 #include "components/viz/common/resources/release_callback.h"
@@ -33,7 +38,7 @@ using testing::Test;
 
 class MockGLES2InterfaceWithSyncTokenSupport : public viz::TestGLES2Interface {
  public:
-  MOCK_METHOD1(GenUnverifiedSyncTokenCHROMIUM, void(GLbyte*));
+  MOCK_METHOD1(GenSyncTokenCHROMIUM, void(GLbyte*));
   MOCK_METHOD1(WaitSyncTokenCHROMIUM, void(const GLbyte*));
 };
 
@@ -49,11 +54,12 @@ gpu::SyncToken GenTestSyncToken(GLbyte id) {
 }
 
 scoped_refptr<StaticBitmapImage> CreateBitmap() {
-  auto mailbox = gpu::Mailbox::GenerateForSharedImage();
+  auto client_si = gpu::ClientSharedImage::CreateForTesting();
 
-  return AcceleratedStaticBitmapImage::CreateFromCanvasMailbox(
-      mailbox, GenTestSyncToken(100), 0, SkImageInfo::MakeN32Premul(100, 100),
-      GL_TEXTURE_2D, true, SharedGpuContext::ContextProviderWrapper(),
+  return AcceleratedStaticBitmapImage::CreateFromCanvasSharedImage(
+      std::move(client_si), GenTestSyncToken(100), 0,
+      SkImageInfo::MakeN32Premul(100, 100), GL_TEXTURE_2D, true,
+      SharedGpuContext::ContextProviderWrapper(),
       base::PlatformThread::CurrentRef(),
       base::MakeRefCounted<base::NullTaskRunner>(), base::DoNothing(),
       /*supports_display_compositing=*/true, /*is_overlay_candidate=*/true);
@@ -65,16 +71,16 @@ class AcceleratedStaticBitmapImageTest : public Test {
     auto gl = std::make_unique<MockGLES2InterfaceWithSyncTokenSupport>();
     gl_ = gl.get();
     context_provider_ = viz::TestContextProvider::Create(std::move(gl));
-    InitializeSharedGpuContext(context_provider_.get());
+    InitializeSharedGpuContextGLES2(context_provider_.get());
   }
   void TearDown() override {
     gl_ = nullptr;
-    SharedGpuContext::ResetForTesting();
+    SharedGpuContext::Reset();
   }
 
  protected:
   base::test::TaskEnvironment task_environment_;
-  MockGLES2InterfaceWithSyncTokenSupport* gl_;
+  raw_ptr<MockGLES2InterfaceWithSyncTokenSupport> gl_;
   scoped_refptr<viz::TestContextProvider> context_provider_;
 };
 
@@ -83,7 +89,7 @@ TEST_F(AcceleratedStaticBitmapImageTest, SkImageCached) {
 
   cc::PaintImage stored_image = bitmap->PaintImageForCurrentFrame();
   auto stored_image2 = bitmap->PaintImageForCurrentFrame();
-  EXPECT_EQ(stored_image, stored_image2);
+  EXPECT_TRUE(stored_image.IsSameForTesting(stored_image2));
 }
 
 TEST_F(AcceleratedStaticBitmapImageTest, CopyToTextureSynchronization) {
@@ -99,12 +105,13 @@ TEST_F(AcceleratedStaticBitmapImageTest, CopyToTextureSynchronization) {
   // Anterior synchronization. Wait on the sync token for the mailbox on the
   // dest context.
   EXPECT_CALL(destination_gl, WaitSyncTokenCHROMIUM(Pointee(SyncTokenMatcher(
-                                  bitmap->GetMailboxHolder().sync_token))));
+                                  bitmap->GetMailboxHolder().sync_token))))
+      .Times(testing::Between(1, 2));
 
   // Posterior synchronization. Generate a sync token on the destination context
   // to ensure mailbox is destroyed after the copy.
   const gpu::SyncToken sync_token2 = GenTestSyncToken(2);
-  EXPECT_CALL(destination_gl, GenUnverifiedSyncTokenCHROMIUM(_))
+  EXPECT_CALL(destination_gl, GenSyncTokenCHROMIUM(_))
       .WillOnce(SetArrayArgument<0>(
           sync_token2.GetConstData(),
           sync_token2.GetConstData() + sizeof(gpu::SyncToken)));

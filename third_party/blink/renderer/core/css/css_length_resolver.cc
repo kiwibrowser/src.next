@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -262,22 +262,43 @@ double CSSLengthResolver::ZoomedComputedPixels(
     // zoom factor.
     case CSSPrimitiveValue::UnitType::kEms:
     case CSSPrimitiveValue::UnitType::kQuirkyEms:
-      return value * EmFontSize();
+      return value * EmFontSize(Zoom());
 
     case CSSPrimitiveValue::UnitType::kExs:
-      return value * ExFontSize();
+      return value * ExFontSize(Zoom());
+
+    case CSSPrimitiveValue::UnitType::kRexs:
+      return value * RexFontSize(Zoom());
 
     case CSSPrimitiveValue::UnitType::kRems:
-      return value * RemFontSize();
+      return value * RemFontSize(Zoom());
 
     case CSSPrimitiveValue::UnitType::kChs:
-      return value * ChFontSize();
+      return value * ChFontSize(Zoom());
+
+    case CSSPrimitiveValue::UnitType::kRchs:
+      return value * RchFontSize(Zoom());
 
     case CSSPrimitiveValue::UnitType::kIcs:
-      return value * IcFontSize();
+      return value * IcFontSize(Zoom());
+
+    case CSSPrimitiveValue::UnitType::kRics:
+      return value * RicFontSize(Zoom());
+
+    case CSSPrimitiveValue::UnitType::kLhs:
+      return value * LineHeight(Zoom());
+
+    case CSSPrimitiveValue::UnitType::kRlhs:
+      return value * RootLineHeight(Zoom());
+
+    case CSSPrimitiveValue::UnitType::kCaps:
+      return value * CapFontSize(Zoom());
+
+    case CSSPrimitiveValue::UnitType::kRcaps:
+      return value * RcapFontSize(Zoom());
 
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       return 0;
   }
 }

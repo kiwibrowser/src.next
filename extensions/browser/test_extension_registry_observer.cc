@@ -7,13 +7,13 @@
 #include <memory>
 
 #include "base/run_loop.h"
+#include "extensions/common/extension_id.h"
 
 namespace extensions {
 
 class TestExtensionRegistryObserver::Waiter {
  public:
-  Waiter() : observed_(false), extension_(nullptr) {}
-
+  Waiter() = default;
   Waiter(const Waiter&) = delete;
   Waiter& operator=(const Waiter&) = delete;
 
@@ -30,8 +30,8 @@ class TestExtensionRegistryObserver::Waiter {
   }
 
  private:
-  bool observed_;
-  base::RunLoop run_loop_;
+  bool observed_ = false;
+  base::RunLoop run_loop_{base::RunLoop::Type::kNestableTasksAllowed};
   scoped_refptr<const Extension> extension_;
 };
 
@@ -42,7 +42,7 @@ TestExtensionRegistryObserver::TestExtensionRegistryObserver(
 
 TestExtensionRegistryObserver::TestExtensionRegistryObserver(
     ExtensionRegistry* registry,
-    const std::string& extension_id)
+    const ExtensionId& extension_id)
     : will_be_installed_waiter_(std::make_unique<Waiter>()),
       installed_waiter_(std::make_unique<Waiter>()),
       uninstalled_waiter_(std::make_unique<Waiter>()),

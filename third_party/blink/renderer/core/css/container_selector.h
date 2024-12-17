@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,14 +26,16 @@ class CORE_EXPORT ContainerSelector {
  public:
   ContainerSelector() = default;
   explicit ContainerSelector(WTF::HashTableDeletedValueType) {
-    WTF::HashTraits<AtomicString>::ConstructDeletedValue(
-        name_, false /* zero_value */);
+    WTF::HashTraits<AtomicString>::ConstructDeletedValue(name_);
   }
-  explicit ContainerSelector(AtomicString name) : name_(std::move(name)) {}
   explicit ContainerSelector(PhysicalAxes physical_axes)
       : physical_axes_(physical_axes) {}
-  ContainerSelector(AtomicString name, LogicalAxes physical_axes)
-      : name_(std::move(name)), logical_axes_(physical_axes) {}
+  ContainerSelector(AtomicString name,
+                    PhysicalAxes physical_axes,
+                    LogicalAxes logical_axes)
+      : name_(std::move(name)),
+        physical_axes_(physical_axes),
+        logical_axes_(logical_axes) {}
   ContainerSelector(AtomicString name, const MediaQueryExpNode&);
 
   bool IsHashTableDeletedValue() const {
@@ -43,7 +45,9 @@ class CORE_EXPORT ContainerSelector {
   bool operator==(const ContainerSelector& o) const {
     return (name_ == o.name_) && (physical_axes_ == o.physical_axes_) &&
            (logical_axes_ == o.logical_axes_) &&
-           (has_style_query_ == o.has_style_query_);
+           (has_style_query_ == o.has_style_query_) &&
+           (has_sticky_query_ == o.has_sticky_query_) &&
+           (has_snap_query_ == o.has_snap_query_);
   }
   bool operator!=(const ContainerSelector& o) const { return !(*this == o); }
 
@@ -56,17 +60,80 @@ class CORE_EXPORT ContainerSelector {
   unsigned Type(WritingMode) const;
 
   bool SelectsSizeContainers() const {
-    return physical_axes_ != kPhysicalAxisNone ||
-           logical_axes_ != kLogicalAxisNone;
+    return physical_axes_ != kPhysicalAxesNone ||
+           logical_axes_ != kLogicalAxesNone;
   }
 
   bool SelectsStyleContainers() const { return has_style_query_; }
+  bool SelectsStickyContainers() const { return has_sticky_query_; }
+  bool SelectsSnapContainers() const { return has_snap_query_; }
+  bool SelectsStateContainers() const {
+    return SelectsStickyContainers() || SelectsSnapContainers();
+  }
+  bool HasUnknownFeature() const { return has_unknown_feature_; }
+
+  PhysicalAxes GetPhysicalAxes() const { return physical_axes_; }
+  LogicalAxes GetLogicalAxes() const { return logical_axes_; }
 
  private:
   AtomicString name_;
-  PhysicalAxes physical_axes_{kPhysicalAxisNone};
-  LogicalAxes logical_axes_{kLogicalAxisNone};
+  PhysicalAxes physical_axes_{kPhysicalAxesNone};
+  LogicalAxes logical_axes_{kLogicalAxesNone};
   bool has_style_query_{false};
+  bool has_sticky_query_{false};
+  bool has_snap_query_{false};
+  bool has_unknown_feature_{false};
+};
+
+class CORE_EXPORT ScopedContainerSelector
+    : public GarbageCollected<ScopedContainerSelector> {
+ public:
+  ScopedContainerSelector(ContainerSelector selector,
+                          const TreeScope* tree_scope)
+      : selector_(selector), tree_scope_(tree_scope) {}
+
+  unsigned GetHash() const {
+    unsigned hash = selector_.GetHash();
+    WTF::AddIntToHash(hash, WTF::GetHash(tree_scope_.Get()));
+    return hash;
+  }
+
+  bool operator==(const ScopedContainerSelector& other) const {
+    return selector_ == other.selector_ && tree_scope_ == other.tree_scope_;
+  }
+
+  void Trace(Visitor* visitor) const;
+
+ private:
+  ContainerSelector selector_;
+  WeakMember<const TreeScope> tree_scope_;
+};
+
+struct ScopedContainerSelectorHashTraits
+    : WTF::MemberHashTraits<ScopedContainerSelector> {
+  static unsigned GetHash(
+      const Member<ScopedContainerSelector>& scoped_selector) {
+    return scoped_selector->GetHash();
+  }
+  static bool Equal(const Member<ScopedContainerSelector>& a,
+                    const Member<ScopedContainerSelector>& b) {
+    return *a == *b;
+  }
+  static constexpr bool kSafeToCompareToEmptyOrDeleted = false;
+};
+
+// Helper needed to allow calling Find() with a ScopedContainerSelector instead
+// of Member<ScopedContainerSelector>
+struct ScopedContainerSelectorHashTranslator {
+  STATIC_ONLY(ScopedContainerSelectorHashTranslator);
+
+  static unsigned GetHash(const ScopedContainerSelector& selector) {
+    return selector.GetHash();
+  }
+  static bool Equal(const Member<ScopedContainerSelector>& a,
+                    const ScopedContainerSelector& b) {
+    return a && *a == b;
+  }
 };
 
 }  // namespace blink
@@ -74,35 +141,23 @@ class CORE_EXPORT ContainerSelector {
 namespace WTF {
 
 template <>
-struct DefaultHash<blink::ContainerSelector> {
-  struct Hash {
-    STATIC_ONLY(Hash);
-    static unsigned GetHash(const blink::ContainerSelector& selector) {
-      return selector.GetHash();
-    }
-
-    static bool Equal(const blink::ContainerSelector& a,
-                      const blink::ContainerSelector& b) {
-      return a == b;
-    }
-
-    static const bool safe_to_compare_to_empty_or_deleted =
-        DefaultHash<AtomicString>::Hash::safe_to_compare_to_empty_or_deleted;
-  };
-};
-
-template <>
 struct HashTraits<blink::ContainerSelector>
     : SimpleClassHashTraits<blink::ContainerSelector> {
+  static unsigned GetHash(const blink::ContainerSelector& selector) {
+    return selector.GetHash();
+  }
+  static constexpr bool kSafeToCompareToEmptyOrDeleted =
+      HashTraits<AtomicString>::kSafeToCompareToEmptyOrDeleted;
   static const bool kEmptyValueIsZero = false;
-  static const bool kNeedsDestruction = true;
 };
 
 }  // namespace WTF
 
 namespace blink {
 
-using ContainerSelectorCache = HeapHashMap<ContainerSelector, Member<Element>>;
+using ContainerSelectorCache = HeapHashMap<Member<ScopedContainerSelector>,
+                                           Member<Element>,
+                                           ScopedContainerSelectorHashTraits>;
 
 }  // namespace blink
 

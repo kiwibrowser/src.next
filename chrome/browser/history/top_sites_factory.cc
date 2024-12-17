@@ -2,16 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "chrome/browser/history/top_sites_factory.h"
 
 #include <stddef.h>
 
 #include <memory>
 
-#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
-#include "base/memory/singleton.h"
+#include "base/functional/bind.h"
+#include "base/no_destructor.h"
 #include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/browser/engagement/site_engagement_service_factory.h"
@@ -20,13 +25,14 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/branded_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
 #include "chrome/grit/theme_resources.h"
 #include "components/grit/components_scaled_resources.h"
 #include "components/history/core/browser/history_constants.h"
 #include "components/history/core/browser/top_sites_impl.h"
+#include "components/policy/core/common/policy_pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "components/search/ntp_features.h"
@@ -71,7 +77,8 @@ void InitializePrepopulatedPageList(
 #if !BUILDFLAG(IS_ANDROID)
   DCHECK(prepopulated_pages);
   PrefService* pref_service = profile->GetPrefs();
-  bool hide_web_store_icon = pref_service->GetBoolean(prefs::kHideWebStoreIcon);
+  bool hide_web_store_icon =
+      pref_service->GetBoolean(policy::policy_prefs::kHideWebStoreIcon);
 
   prepopulated_pages->reserve(std::size(kRawPrepopulatedPages));
   for (size_t i = 0; i < std::size(kRawPrepopulatedPages); ++i) {
@@ -99,7 +106,8 @@ scoped_refptr<history::TopSites> TopSitesFactory::GetForProfile(
 
 // static
 TopSitesFactory* TopSitesFactory::GetInstance() {
-  return base::Singleton<TopSitesFactory>::get();
+  static base::NoDestructor<TopSitesFactory> instance;
+  return instance.get();
 }
 
 // static
@@ -120,7 +128,17 @@ scoped_refptr<history::TopSites> TopSitesFactory::BuildTopSites(
 }
 
 TopSitesFactory::TopSitesFactory()
-    : RefcountedProfileKeyedServiceFactory("TopSites") {
+    : RefcountedProfileKeyedServiceFactory(
+          "TopSites",
+          ProfileSelections::Builder()
+              .WithRegular(ProfileSelection::kOriginalOnly)
+              // TODO(crbug.com/40257657): Check if this service is needed in
+              // Guest mode.
+              .WithGuest(ProfileSelection::kOriginalOnly)
+              // TODO(crbug.com/41488885): Check if this service is needed for
+              // Ash Internals.
+              .WithAshInternals(ProfileSelection::kOriginalOnly)
+              .Build()) {
   DependsOn(HistoryServiceFactory::GetInstance());
   DependsOn(TemplateURLServiceFactory::GetInstance());
   // This dependency is only used when the experimental
@@ -128,8 +146,7 @@ TopSitesFactory::TopSitesFactory()
   DependsOn(site_engagement::SiteEngagementServiceFactory::GetInstance());
 }
 
-TopSitesFactory::~TopSitesFactory() {
-}
+TopSitesFactory::~TopSitesFactory() = default;
 
 scoped_refptr<RefcountedKeyedService> TopSitesFactory::BuildServiceInstanceFor(
     content::BrowserContext* context) const {

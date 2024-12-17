@@ -7,10 +7,11 @@
 
 #include <stdint.h>
 
+#include <optional>
 #include <set>
 #include <string>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/threading/thread_checker.h"
 #include "net/base/auth.h"
@@ -18,10 +19,12 @@
 #include "net/base/net_export.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_inclusion_status.h"
+#include "net/cookies/cookie_setting_override.h"
+#include "net/cookies/cookie_util.h"
 #include "net/cookies/site_for_cookies.h"
-#include "net/first_party_sets/same_party_context.h"
+#include "net/first_party_sets/first_party_set_metadata.h"
+#include "net/first_party_sets/first_party_sets_cache_filter.h"
 #include "net/proxy_resolution/proxy_retry_info.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 class GURL;
 
@@ -42,6 +45,7 @@ namespace net {
 // of net/base here, because we have a net_base library. Forward declarations
 // are ok.
 class CookieOptions;
+class CookieInclusionStatus;
 class HttpRequestHeaders;
 class HttpResponseHeaders;
 class IPEndPoint;
@@ -59,7 +63,7 @@ class NET_EXPORT NetworkDelegate {
                              CompletionOnceCallback callback,
                              GURL* new_url);
   using OnBeforeStartTransactionCallback =
-      base::OnceCallback<void(int, const absl::optional<HttpRequestHeaders>&)>;
+      base::OnceCallback<void(int, const std::optional<HttpRequestHeaders>&)>;
   int NotifyBeforeStartTransaction(URLRequest* request,
                                    const HttpRequestHeaders& headers,
                                    OnBeforeStartTransactionCallback callback);
@@ -69,20 +73,32 @@ class NET_EXPORT NetworkDelegate {
       const HttpResponseHeaders* original_response_headers,
       scoped_refptr<HttpResponseHeaders>* override_response_headers,
       const IPEndPoint& remote_endpoint,
-      absl::optional<GURL>* preserve_fragment_on_redirect_url);
+      std::optional<GURL>* preserve_fragment_on_redirect_url);
   void NotifyBeforeRedirect(URLRequest* request,
                             const GURL& new_location);
+  void NotifyBeforeRetry(URLRequest* request);
   void NotifyResponseStarted(URLRequest* request, int net_error);
   void NotifyCompleted(URLRequest* request, bool started, int net_error);
   void NotifyURLRequestDestroyed(URLRequest* request);
   void NotifyPACScriptError(int line_number, const std::u16string& error);
   bool AnnotateAndMoveUserBlockedCookies(
       const URLRequest& request,
+      const net::FirstPartySetMetadata& first_party_set_metadata,
       CookieAccessResultList& maybe_included_cookies,
       CookieAccessResultList& excluded_cookies);
   bool CanSetCookie(const URLRequest& request,
                     const net::CanonicalCookie& cookie,
-                    CookieOptions* options);
+                    CookieOptions* options,
+                    const net::FirstPartySetMetadata& first_party_set_metadata,
+                    CookieInclusionStatus* inclusion_status);
+
+  std::optional<cookie_util::StorageAccessStatus> GetStorageAccessStatus(
+      const URLRequest& request) const;
+
+  // Returns true if the `Sec-Fetch-Storage-Access` request header flow is
+  // enabled in the given context.
+  bool IsStorageAccessHeaderEnabled(const url::Origin* top_frame_origin,
+                                    const GURL& url) const;
 
   // PrivacySetting is kStateDisallowed iff the given |url| has to be
   // requested over connection that is not tracked by the server.
@@ -99,11 +115,7 @@ class NET_EXPORT NetworkDelegate {
     // First-party requests will never have this setting.
     kPartitionedStateAllowedOnly,
   };
-  PrivacySetting ForcePrivacyMode(
-      const GURL& url,
-      const SiteForCookies& site_for_cookies,
-      const absl::optional<url::Origin>& top_frame_origin,
-      SamePartyContext::Type same_party_context_type) const;
+  PrivacySetting ForcePrivacyMode(const URLRequest& request) const;
 
   bool CancelURLRequestWithPolicyViolatingReferrerHeader(
       const URLRequest& request,
@@ -124,6 +136,14 @@ class NET_EXPORT NetworkDelegate {
   // `mayble_included_cookies`, and moves the contents of
   // `maybe_included_cookies` to `excluded_cookies`.
   static void ExcludeAllCookies(
+      net::CookieInclusionStatus::ExclusionReason reason,
+      net::CookieAccessResultList& maybe_included_cookies,
+      net::CookieAccessResultList& excluded_cookies);
+
+  // Does the same as ExcludeAllCookies but will still include
+  // cookies that are partitioned if cookies are not disabled
+  // globally.
+  static void ExcludeAllCookiesExceptPartitioned(
       net::CookieInclusionStatus::ExclusionReason reason,
       net::CookieAccessResultList& maybe_included_cookies,
       net::CookieAccessResultList& excluded_cookies);
@@ -211,12 +231,14 @@ class NET_EXPORT NetworkDelegate {
       const HttpResponseHeaders* original_response_headers,
       scoped_refptr<HttpResponseHeaders>* override_response_headers,
       const IPEndPoint& remote_endpoint,
-      absl::optional<GURL>* preserve_fragment_on_redirect_url) = 0;
+      std::optional<GURL>* preserve_fragment_on_redirect_url) = 0;
 
   // Called right after a redirect response code was received. |new_location| is
   // only valid for the duration of the call.
   virtual void OnBeforeRedirect(URLRequest* request,
                                 const GURL& new_location) = 0;
+
+  virtual void OnBeforeRetry(URLRequest* request) = 0;
 
   // This corresponds to URLRequestDelegate::OnResponseStarted.
   virtual void OnResponseStarted(URLRequest* request, int net_error) = 0;
@@ -246,21 +268,26 @@ class NET_EXPORT NetworkDelegate {
   // otherwise.
   virtual bool OnAnnotateAndMoveUserBlockedCookies(
       const URLRequest& request,
+      const net::FirstPartySetMetadata& first_party_set_metadata,
       net::CookieAccessResultList& maybe_included_cookies,
       net::CookieAccessResultList& excluded_cookies) = 0;
 
   // Called when a cookie is set to allow the network delegate to block access
-  // to the cookie. This method will never be invoked when
+  // to the cookie. If the cookie is allowed, `inclusion_status` may be updated
+  // to include reason to warn about the given cookie according to the user
+  // cookie-blocking settings; Otherwise, `inclusion_status` may be updated with
+  // the proper exclusion reasons, if not then proper reasons need to be
+  // manually added in the caller. This method will never be invoked when
   // LOAD_DO_NOT_SAVE_COOKIES is specified.
-  virtual bool OnCanSetCookie(const URLRequest& request,
-                              const CanonicalCookie& cookie,
-                              CookieOptions* options) = 0;
+  virtual bool OnCanSetCookie(
+      const URLRequest& request,
+      const CanonicalCookie& cookie,
+      CookieOptions* options,
+      const net::FirstPartySetMetadata& first_party_set_metadata,
+      CookieInclusionStatus* inclusion_status) = 0;
 
   virtual PrivacySetting OnForcePrivacyMode(
-      const GURL& url,
-      const SiteForCookies& site_for_cookies,
-      const absl::optional<url::Origin>& top_frame_origin,
-      SamePartyContext::Type same_party_cookie_context_type) const = 0;
+      const URLRequest& request) const = 0;
 
   // Called when the |referrer_url| for requesting |target_url| during handling
   // of the |request| is does not comply with the referrer policy (e.g. a
@@ -284,6 +311,13 @@ class NET_EXPORT NetworkDelegate {
 
   virtual bool OnCanUseReportingClient(const url::Origin& origin,
                                        const GURL& endpoint) const = 0;
+
+  virtual std::optional<cookie_util::StorageAccessStatus>
+  OnGetStorageAccessStatus(const URLRequest& request) const = 0;
+
+  virtual bool OnIsStorageAccessHeaderEnabled(
+      const url::Origin* top_frame_origin,
+      const GURL& url) const = 0;
 };
 
 }  // namespace net

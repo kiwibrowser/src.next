@@ -2,6 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
+#pragma allow_unsafe_buffers
+#endif
+
 #include <memory>
 #include <string>
 
@@ -25,9 +30,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   std::unique_ptr<net::HttpAuthHandler> basic;
 
   net::HttpAuthHandlerBasic::Factory factory;
-  factory.CreateAuthHandlerFromString(challenge, net::HttpAuth::AUTH_SERVER,
-                                      null_ssl_info, net::NetworkIsolationKey(),
-                                      scheme_host_port, net::NetLogWithSource(),
-                                      host_resolver.get(), &basic);
+  factory.CreateAuthHandlerFromString(
+      challenge, net::HttpAuth::AUTH_SERVER, null_ssl_info,
+      net::NetworkAnonymizationKey(), scheme_host_port, net::NetLogWithSource(),
+      host_resolver.get(), &basic);
   return 0;
 }

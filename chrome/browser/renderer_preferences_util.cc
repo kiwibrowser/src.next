@@ -6,6 +6,7 @@
 
 #include <stdint.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -15,22 +16,23 @@
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/net/convert_explicitly_allowed_network_ports_pref.h"
+#include "chrome/browser/privacy_sandbox/tracking_protection_settings_factory.h"
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/ash/login/demo_mode/demo_session.h"
 #endif
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
 #include "components/language/core/browser/language_prefs.h"
 #include "components/language/core/browser/pref_names.h"
 #include "components/prefs/pref_service.h"
-#include "content/public/browser/browser_accessibility_state.h"
+#include "components/privacy_sandbox/tracking_protection_settings.h"
 #include "content/public/browser/renderer_preferences_util.h"
 #include "media/media_buildflags.h"
 #include "third_party/blink/public/common/peerconnection/webrtc_ip_handling_policy.h"
 #include "third_party/blink/public/common/renderer_preferences/renderer_preferences.h"
 #include "third_party/blink/public/public_buildflags.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/accessibility/platform/ax_platform.h"
 #include "ui/base/ui_base_features.h"
 
 #if defined(TOOLKIT_VIEWS)
@@ -44,6 +46,9 @@
 #endif
 
 namespace {
+
+constexpr char kPrefixedVideoFullscreenApiEnabled[] = "enabled";
+constexpr char kPrefixedVideoFullscreenApiDisabled[] = "disabled";
 
 // Parses a string |range| with a port range in the form "<min>-<max>".
 // If |range| is not in the correct format or contains an invalid range, zero
@@ -96,12 +101,6 @@ std::string GetLanguageListForProfile(Profile* profile,
     // In incognito mode return only the first language.
     return language::GetFirstLanguage(language_list);
   }
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  // On Chrome OS, if in demo mode, add the demo mode private language list.
-  if (ash::DemoSession::IsDeviceInDemoMode()) {
-    return language_list + "," + ash::DemoSession::GetAdditionalLanguageList();
-  }
-#endif
   return language_list;
 }
 
@@ -116,14 +115,15 @@ void UpdateFromSystemSettings(blink::RendererPreferences* prefs,
       profile, pref_service->GetString(language::prefs::kAcceptLanguages));
   prefs->enable_referrers = pref_service->GetBoolean(prefs::kEnableReferrers);
   prefs->enable_do_not_track =
-      pref_service->GetBoolean(prefs::kEnableDoNotTrack);
+      TrackingProtectionSettingsFactory::GetForProfile(profile)
+          ->IsDoNotTrackEnabled();
   prefs->enable_encrypted_media =
       pref_service->GetBoolean(prefs::kEnableEncryptedMedia);
   prefs->webrtc_ip_handling_policy = std::string();
 #if !BUILDFLAG(IS_ANDROID)
   prefs->caret_browsing_enabled =
       pref_service->GetBoolean(prefs::kCaretBrowsingEnabled);
-  content::BrowserAccessibilityState::GetInstance()->SetCaretBrowsingState(
+  ui::AXPlatform::GetInstance().SetCaretBrowsingState(
       prefs->caret_browsing_enabled);
 #endif
 
@@ -139,8 +139,6 @@ void UpdateFromSystemSettings(blink::RendererPreferences* prefs,
   const base::Value::List& allowed_urls =
       pref_service->GetList(prefs::kWebRtcLocalIpsAllowedUrls);
   prefs->webrtc_local_ips_allowed_urls = GetLocalIpsAllowedUrls(allowed_urls);
-  prefs->webrtc_allow_legacy_tls_protocols =
-      pref_service->GetBoolean(prefs::kWebRTCAllowLegacyTLSProtocols);
 #if defined(USE_AURA)
   prefs->focus_ring_color = SkColorSetRGB(0x4D, 0x90, 0xFE);
 #if BUILDFLAG(IS_CHROMEOS)
@@ -160,15 +158,15 @@ void UpdateFromSystemSettings(blink::RendererPreferences* prefs,
   auto* linux_ui_theme = ui::LinuxUiTheme::GetForProfile(profile);
   if (linux_ui_theme) {
     if (ThemeServiceFactory::GetForProfile(profile)->UsingSystemTheme()) {
-      prefs->focus_ring_color = linux_ui_theme->GetFocusRingColor();
-      prefs->active_selection_bg_color =
-          linux_ui_theme->GetActiveSelectionBgColor();
-      prefs->active_selection_fg_color =
-          linux_ui_theme->GetActiveSelectionFgColor();
-      prefs->inactive_selection_bg_color =
-          linux_ui_theme->GetInactiveSelectionBgColor();
-      prefs->inactive_selection_fg_color =
-          linux_ui_theme->GetInactiveSelectionFgColor();
+      linux_ui_theme->GetFocusRingColor(&prefs->focus_ring_color);
+      linux_ui_theme->GetActiveSelectionBgColor(
+          &prefs->active_selection_bg_color);
+      linux_ui_theme->GetActiveSelectionFgColor(
+          &prefs->active_selection_fg_color);
+      linux_ui_theme->GetInactiveSelectionBgColor(
+          &prefs->inactive_selection_bg_color);
+      linux_ui_theme->GetInactiveSelectionFgColor(
+          &prefs->inactive_selection_fg_color);
     }
   }
 
@@ -202,6 +200,18 @@ void UpdateFromSystemSettings(blink::RendererPreferences* prefs,
 #else
   prefs->focus_ring_color = SkColorSetRGB(0x10, 0x10, 0x10);
 #endif
+
+  std::string fullscreen_video_api_availability =
+      pref_service->GetString(prefs::kPrefixedVideoFullscreenApiAvailability);
+
+  if (fullscreen_video_api_availability == kPrefixedVideoFullscreenApiEnabled) {
+    prefs->prefixed_fullscreen_video_api_availability = true;
+  } else if (fullscreen_video_api_availability ==
+             kPrefixedVideoFullscreenApiDisabled) {
+    prefs->prefixed_fullscreen_video_api_availability = false;
+  } else {
+    prefs->prefixed_fullscreen_video_api_availability = std::nullopt;
+  }
 }
 
 }  // namespace renderer_preferences_util

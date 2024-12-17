@@ -38,6 +38,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
+#include "third_party/blink/renderer/core/html/html_span_element.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -80,7 +81,7 @@ SmartClipData SmartClip::DataForRect(const gfx::Rect& crop_rect_in_viewport) {
   HeapVector<Member<Node>> hit_nodes;
   CollectOverlappingChildNodes(best_node, crop_rect_in_viewport, hit_nodes);
 
-  if (hit_nodes.IsEmpty() || hit_nodes.size() == best_node->CountChildren()) {
+  if (hit_nodes.empty() || hit_nodes.size() == best_node->CountChildren()) {
     hit_nodes.clear();
     hit_nodes.push_back(best_node);
   }
@@ -205,9 +206,14 @@ bool SmartClip::ShouldSkipBackgroundImage(Node* node) {
   // or a width. On the other hand, if we've got a legit background image,
   // it's very likely the height or the width will be set to auto.
   LayoutObject* layout_object = node->GetLayoutObject();
-  if (layout_object && (layout_object->StyleRef().LogicalHeight().IsAuto() ||
-                        layout_object->StyleRef().LogicalWidth().IsAuto()))
+  if (layout_object && (layout_object->StyleRef()
+                            .LogicalHeight()
+                            .HasAutoOrContentOrIntrinsic() ||
+                        layout_object->StyleRef()
+                            .LogicalWidth()
+                            .HasAutoOrContentOrIntrinsic())) {
     return true;
+  }
 
   return false;
 }
@@ -235,31 +241,36 @@ String SmartClip::ExtractTextFromNode(Node* node) {
 
   StringBuilder result;
   for (Node& current_node : NodeTraversal::InclusiveDescendantsOf(*node)) {
-    const ComputedStyle* style = current_node.GetComputedStyle();
-    if (!style || style->UsedUserSelect() == EUserSelect::kNone)
+    LayoutObject* layout_object = current_node.GetLayoutObject();
+
+    if (!layout_object ||
+        layout_object->StyleRef().UsedUserSelect() == EUserSelect::kNone) {
       continue;
-
-    if (Node* node_from_frame = NodeInsideFrame(&current_node))
-      result.Append(ExtractTextFromNode(node_from_frame));
-
-    gfx::Rect node_rect = current_node.PixelSnappedBoundingBox();
-    if (current_node.GetLayoutObject() && !node_rect.IsEmpty()) {
-      if (current_node.IsTextNode()) {
-        String node_value = current_node.nodeValue();
-
-        // It's unclear why we disallowed solitary "\n" node values.
-        // Maybe we're trying to ignore <br> tags somehow?
-        if (node_value == "\n")
-          node_value = "";
-
-        if (node_rect.y() != prev_y_pos) {
-          prev_y_pos = node_rect.y();
-          result.Append('\n');
-        }
-
-        result.Append(node_value);
-      }
     }
+    if (Node* node_from_frame = NodeInsideFrame(&current_node)) {
+      result.Append(ExtractTextFromNode(node_from_frame));
+      continue;
+    }
+    if (!layout_object->IsText()) {
+      continue;
+    }
+    gfx::Rect node_rect = current_node.PixelSnappedBoundingBox();
+    if (node_rect.IsEmpty()) {
+      continue;
+    }
+
+    String node_value = current_node.nodeValue();
+
+    // It's unclear why we disallowed solitary "\n" node values.
+    // Maybe we're trying to ignore <br> tags somehow?
+    if (node_value == "\n") {
+      node_value = "";
+    }
+    if (node_rect.y() != prev_y_pos) {
+      prev_y_pos = node_rect.y();
+      result.Append('\n');
+    }
+    result.Append(node_value);
   }
 
   return result.ToString();

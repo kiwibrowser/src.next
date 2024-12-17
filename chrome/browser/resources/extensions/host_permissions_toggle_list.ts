@@ -4,22 +4,22 @@
 
 import 'chrome://resources/cr_elements/cr_shared_style.css.js';
 import 'chrome://resources/cr_elements/cr_shared_vars.css.js';
-import 'chrome://resources/cr_elements/icons.html.js';
-import 'chrome://resources/polymer/v3_0/iron-icon/iron-icon.js';
+import 'chrome://resources/cr_elements/icons_lit.html.js';
+import 'chrome://resources/cr_elements/cr_icon/cr_icon.js';
 import './restricted_sites_dialog.js';
 import './toggle_row.js';
 import './shared_style.css.js';
 import './strings.m.js';
 
-import {assert} from 'chrome://resources/js/assert_ts.js';
+import {assert} from 'chrome://resources/js/assert.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {getTemplate} from './host_permissions_toggle_list.html.js';
 import {UserAction} from './item_util.js';
-import {ExtensionsRestrictedSitesDialogElement} from './restricted_sites_dialog.js';
+import type {ExtensionsRestrictedSitesDialogElement} from './restricted_sites_dialog.js';
 import {getMatchingUserSpecifiedSites} from './runtime_hosts_dialog.js';
-import {SiteSettingsMixin} from './site_settings_mixin.js';
-import {ExtensionsToggleRowElement} from './toggle_row.js';
+import {SiteSettingsMixin} from './site_permissions/site_settings_mixin.js';
+import type {ExtensionsToggleRowElement} from './toggle_row.js';
 import {getFaviconUrl} from './url_util.js';
 
 

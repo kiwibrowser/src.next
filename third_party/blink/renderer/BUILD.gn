@@ -1,7 +1,8 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/buildflag_header.gni")
 import("//build/config/chromeos/ui_mode.gni")
 import("config.gni")
 if (is_clang) {
@@ -20,11 +21,6 @@ declare_args() {
   # Set to true to have the clang Blink GC plugin emit class graph (in JSON)
   # with typed pointer edges; for debugging or other (internal) uses.
   blink_gc_plugin_option_do_dump_graph = false
-
-  # Set to true to have the clang Blink GC plugin additionally check if
-  # a class has an empty destructor which would be unnecessarily invoked
-  # when finalized.
-  blink_gc_plugin_option_warn_unneeded_finalizer = false
 }
 
 # features ---------------------------------------------------------------------
@@ -104,6 +100,15 @@ config("config") {
     }
   }
 
+  if (is_clang && clang_use_chrome_plugins) {
+    cflags += [
+      "-Xclang",
+      "-plugin-arg-find-bad-constructs",
+      "-Xclang",
+      "check-blink-data-member-type",
+    ]
+  }
+
   if (is_clang && blink_gc_plugin && clang_use_chrome_plugins) {
     # The plugin is built directly into clang, so there's no need to load it
     # dynamically.
@@ -112,10 +117,6 @@ config("config") {
       "-add-plugin",
       "-Xclang",
       "blink-gc-plugin",
-      "-Xclang",
-      "-plugin-arg-blink-gc-plugin",
-      "-Xclang",
-      "fix-bugs-of-is-considered-abstract",
     ]
 
     # Add arguments for enabled GC plugin options:
@@ -133,9 +134,8 @@ config("config") {
 # The follow configs apply to all targets except for unit tests, which rely on
 # static initializers.
 config("non_test_config") {
-  cflags = []
-
-  if (is_clang) {
-    cflags += [ "-Wglobal-constructors" ]
-  }
+  configs = [
+    "//build/config/compiler:wexit_time_destructors",
+    "//build/config/compiler:wglobal_constructors",
+  ]
 }

@@ -13,7 +13,6 @@ import androidx.annotation.VisibleForTesting;
 import org.chromium.base.supplier.Supplier;
 import org.chromium.chrome.browser.compositor.CompositorViewHolder;
 import org.chromium.chrome.browser.keyboard_accessory.ManualFillingComponent;
-import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.ui.base.ActivityKeyboardVisibilityDelegate;
 import org.chromium.ui.base.ActivityWindowAndroid;
 import org.chromium.ui.base.IntentRequestTracker;
@@ -26,37 +25,38 @@ import java.lang.ref.WeakReference;
  * and show error messages.
  */
 public class ChromeWindow extends ActivityWindowAndroid {
-    /**
-     * Interface allowing to inject a different keyboard delegate for testing.
-     */
+    /** Interface allowing to inject a different keyboard delegate for testing. */
     @VisibleForTesting
     public interface KeyboardVisibilityDelegateFactory {
-        ChromeKeyboardVisibilityDelegate create(@NonNull WeakReference<Activity> activity,
+        ChromeKeyboardVisibilityDelegate create(
+                @NonNull WeakReference<Activity> activity,
                 @NonNull Supplier<ManualFillingComponent> manualFillingComponentSupplier);
     }
+
     private static KeyboardVisibilityDelegateFactory sKeyboardVisibilityDelegateFactory =
             ChromeKeyboardVisibilityDelegate::new;
 
-    private final ActivityTabProvider mActivityTabProvider;
     private final Supplier<CompositorViewHolder> mCompositorViewHolderSupplier;
     private final Supplier<ModalDialogManager> mModalDialogManagerSupplier;
 
     /**
      * Creates Chrome specific ActivityWindowAndroid.
+     *
      * @param activity The activity that owns the ChromeWindow.
-     * @param activityTabProvider Provides the current activity's {@link Tab}.
      * @param compositorViewHolderSupplier Supplies the {@link CompositorViewHolder}.
      * @param modalDialogManagerSupplier Supplies the {@link ModalDialogManager}.
      * @param manualFillingComponentSupplier Supplies the {@link ManualFillingComponent}.
      * @param intentRequestTracker The {@link IntentRequestTracker} of the current activity.
      */
-    public ChromeWindow(@NonNull Activity activity,
-            @NonNull ActivityTabProvider activityTabProvider,
+    public ChromeWindow(
+            @NonNull Activity activity,
             @NonNull Supplier<CompositorViewHolder> compositorViewHolderSupplier,
             @NonNull Supplier<ModalDialogManager> modalDialogManagerSupplier,
             @NonNull Supplier<ManualFillingComponent> manualFillingComponentSupplier,
             @NonNull IntentRequestTracker intentRequestTracker) {
-        this(activity, activityTabProvider, compositorViewHolderSupplier,
+        this(
+                activity,
+                compositorViewHolderSupplier,
                 modalDialogManagerSupplier,
                 sKeyboardVisibilityDelegateFactory.create(
                         new WeakReference<Activity>(activity), manualFillingComponentSupplier),
@@ -65,22 +65,24 @@ public class ChromeWindow extends ActivityWindowAndroid {
 
     /**
      * Creates Chrome specific ActivityWindowAndroid.
+     *
      * @param activity The activity that owns the ChromeWindow.
-     * @param activityTabProvider Provides the current activity's {@link Tab}.
      * @param compositorViewHolderSupplier Supplies the {@link CompositorViewHolder}.
      * @param modalDialogManagerSupplier Supplies the {@link ModalDialogManager}.
      * @param activityKeyboardVisibilityDelegate Delegate to handle keyboard visibility.
      * @param intentRequestTracker The {@link IntentRequestTracker} of the current activity.
      */
-    public ChromeWindow(@NonNull Activity activity,
-            @NonNull ActivityTabProvider activityTabProvider,
+    public ChromeWindow(
+            @NonNull Activity activity,
             @NonNull Supplier<CompositorViewHolder> compositorViewHolderSupplier,
             @NonNull Supplier<ModalDialogManager> modalDialogManagerSupplier,
             @NonNull ActivityKeyboardVisibilityDelegate activityKeyboardVisibilityDelegate,
             IntentRequestTracker intentRequestTracker) {
-        super(activity, /* listenToActivityState= */ true, activityKeyboardVisibilityDelegate,
+        super(
+                activity,
+                /* listenToActivityState= */ true,
+                activityKeyboardVisibilityDelegate,
                 intentRequestTracker);
-        mActivityTabProvider = activityTabProvider;
         mCompositorViewHolderSupplier = compositorViewHolderSupplier;
         mModalDialogManagerSupplier = modalDialogManagerSupplier;
     }
@@ -94,7 +96,7 @@ public class ChromeWindow extends ActivityWindowAndroid {
 
     @Override
     public ModalDialogManager getModalDialogManager() {
-        // TODO(crbug.com/1155658): Move ModalDialogManager to UnownedUserData.
+        // TODO(crbug.com/40160045): Move ModalDialogManager to UnownedUserData.
         return mModalDialogManagerSupplier.get();
     }
 

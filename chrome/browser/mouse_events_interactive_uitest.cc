@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
+#include "base/functional/callback_helpers.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -18,6 +18,7 @@
 #include "components/javascript_dialogs/tab_modal_dialog_manager.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/isolated_world_ids.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "ui/base/test/ui_controls.h"
@@ -132,7 +133,7 @@ IN_PROC_BROWSER_TEST_F(MouseEventsTest, MouseDownOnBrowserCaption) {
 }
 #endif
 
-#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || defined(USE_OZONE)
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_OZONE)
 // Test that a mouseleave is not triggered when showing the context menu.
 // If the test is failed, it means that Blink gets the mouseleave event
 // when showing the context menu and it could make the unexpecting
@@ -153,8 +154,8 @@ IN_PROC_BROWSER_TEST_F(MouseEventsTest, MAYBE_ContextMenu) {
   menu_observer.WaitForMenuOpenAndClose();
 
   content::WebContents* tab = GetActiveWebContents();
-  tab->GetPrimaryMainFrame()->ExecuteJavaScriptForTests(u"done()",
-                                                        base::NullCallback());
+  tab->GetPrimaryMainFrame()->ExecuteJavaScriptForTests(
+      u"done()", base::NullCallback(), content::ISOLATED_WORLD_ID_GLOBAL);
   const std::u16string success_title = u"without mouseleave";
   const std::u16string failure_title = u"with mouseleave";
   content::TitleWatcher done_title_watcher(tab, success_title);
@@ -181,15 +182,15 @@ IN_PROC_BROWSER_TEST_F(MouseEventsTest, MAYBE_ModalDialog) {
   base::RunLoop dialog_wait;
   js_dialog_manager->SetDialogShownCallbackForTesting(
       dialog_wait.QuitClosure());
-  tab->GetPrimaryMainFrame()->ExecuteJavaScriptForTests(u"alert()",
-                                                        base::NullCallback());
+  tab->GetPrimaryMainFrame()->ExecuteJavaScriptForTests(
+      u"alert()", base::NullCallback(), content::ISOLATED_WORLD_ID_GLOBAL);
   dialog_wait.Run();
 
   // Cancel the dialog.
   js_dialog_manager->HandleJavaScriptDialog(tab, false, nullptr);
 
-  tab->GetPrimaryMainFrame()->ExecuteJavaScriptForTests(u"done()",
-                                                        base::NullCallback());
+  tab->GetPrimaryMainFrame()->ExecuteJavaScriptForTests(
+      u"done()", base::NullCallback(), content::ISOLATED_WORLD_ID_GLOBAL);
   const std::u16string success_title = u"without mouseleave";
   const std::u16string failure_title = u"with mouseleave";
   content::TitleWatcher done_title_watcher(tab, success_title);

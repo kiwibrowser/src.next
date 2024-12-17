@@ -4,12 +4,12 @@
 
 package org.chromium.chrome.browser.omnibox.suggestions;
 
+import androidx.annotation.NonNull;
+
 import org.chromium.build.annotations.MockedInTests;
 import org.chromium.ui.modelutil.PropertyModel;
 
-/**
- * A processor of omnibox dropdown items.
- */
+/** A processor of omnibox dropdown items. */
 @MockedInTests
 public interface DropdownItemProcessor {
     /**
@@ -24,27 +24,18 @@ public interface DropdownItemProcessor {
 
     /**
      * Create a model for views managed by the processor.
+     *
      * @return A newly created model.
      */
+    @NonNull
     PropertyModel createModel();
 
-    /**
-     * @see org.chromium.chrome.browser.omnibox.UrlFocusChangeListener#onUrlFocusChange(boolean)
-     */
-    void onUrlFocusChange(boolean hasFocus);
+    /** Signals that the omnibox session has been activated or deactivated. */
+    default void onOmniboxSessionStateChange(boolean hasFocus) {}
 
-    /**
-     * Signals that native initialization has completed.
-     */
-    void onNativeInitialized();
+    /** Signals that native initialization has completed. */
+    default void onNativeInitialized() {}
 
-    /**
-     * Signals that the dropdown list is about to be populated with new content.
-     */
+    /** Signals that the dropdown list is about to be populated with new content. */
     default void onSuggestionsReceived() {}
-
-    /**
-     * Return if the suggestion view can have background rounding.
-     */
-    boolean allowBackgroundRounding();
 }

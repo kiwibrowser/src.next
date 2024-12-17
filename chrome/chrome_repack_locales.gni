@@ -28,16 +28,18 @@ template("chrome_repack_locales") {
       "${root_gen_dir}/chrome/locale_settings_",
       "${root_gen_dir}/chrome/platform_locale_settings_",
       "${root_gen_dir}/components/omnibox/resources/omnibox_pedal_synonyms_",
-      "${root_gen_dir}/components/omnibox/resources/omnibox_resources_",
+      "${root_gen_dir}/components/plus_addresses/resources/strings/plus_addresses_strings_",
       "${root_gen_dir}/components/strings/components_locale_settings_",
       "${root_gen_dir}/components/strings/components_strings_",
-      "${root_gen_dir}/third_party/blink/public/strings/blink_accessibility_strings_",
+      "${root_gen_dir}/components/strings/privacy_sandbox_strings_",
       "${root_gen_dir}/third_party/blink/public/strings/blink_strings_",
+      "${root_gen_dir}/third_party/blink/public/strings/permission_element_strings_",
       "${root_gen_dir}/device/bluetooth/strings/bluetooth_strings_",
       "${root_gen_dir}/device/fido/strings/fido_strings_",
       "${root_gen_dir}/services/strings/services_strings_",
       "${root_gen_dir}/third_party/libaddressinput/address_input_strings_",
       "${root_gen_dir}/ui/strings/app_locale_settings_",
+      "${root_gen_dir}/ui/strings/auto_image_annotation_strings_",
       "${root_gen_dir}/ui/strings/ax_strings_",
       "${root_gen_dir}/ui/strings/ui_strings_",
     ]
@@ -45,20 +47,24 @@ template("chrome_repack_locales") {
       deps = []
     }
     deps += [
+      "//chrome/app:branded_strings",
       "//chrome/app:generated_resources",
       "//chrome/app/resources:locale_settings",
       "//chrome/app/resources:platform_locale_settings",
       "//components/omnibox/resources:omnibox_pedal_synonyms",
-      "//components/omnibox/resources:omnibox_resources",
+      "//components/plus_addresses/resources/strings",
+      "//components/strings:components_branded_strings",
       "//components/strings:components_locale_settings",
       "//components/strings:components_strings",
+      "//components/strings:privacy_sandbox_strings",
       "//device/bluetooth/strings",
       "//device/fido/strings",
       "//services/strings",
       "//third_party/blink/public/strings",
-      "//third_party/blink/public/strings:accessibility_strings",
+      "//third_party/blink/public/strings:permission_element_strings",
       "//third_party/libaddressinput:strings",
       "//ui/strings:app_locale_settings",
+      "//ui/strings:auto_image_annotation_strings",
       "//ui/strings:ax_strings",
       "//ui/strings:ui_strings",
     ]
@@ -70,22 +76,28 @@ template("chrome_repack_locales") {
       source_patterns +=
           [ "${root_gen_dir}/ui/chromeos/strings/ui_chromeos_strings_" ]
       deps += [ "//ui/chromeos/strings" ]
+      if (is_chrome_branded) {
+        source_patterns += [ "${root_gen_dir}/chrome/app/theme/google_chrome/chromeos/strings/chromeos_chrome_internal_strings_" ]
+        deps += [ "//chrome/app/theme/google_chrome/chromeos/strings" ]
+      }
     }
     if (is_chromeos_ash) {
       source_patterns += [
-        "${root_gen_dir}/ash/shortcut_viewer/strings/shortcut_viewer_strings_",
         "${root_gen_dir}/ash/strings/ash_strings_",
         "${root_gen_dir}/ash/webui/camera_app_ui/resources/strings/ash_camera_app_strings_",
         "${root_gen_dir}/chromeos/strings/chromeos_strings_",
         "${root_gen_dir}/remoting/resources/",
       ]
       deps += [
-        "//ash/shortcut_viewer/strings",
         "//ash/strings",
         "//ash/webui/camera_app_ui/resources/strings",
         "//chromeos/strings",
         "//remoting/resources",
       ]
+      if (is_chrome_branded) {
+        source_patterns += [ "${root_gen_dir}/chromeos/ash/resources/internal/strings/ash_internal_strings_" ]
+        deps += [ "//chromeos/ash/resources/internal/strings" ]
+      }
       compress = true
     }
     if (is_chromeos_lacros) {
@@ -93,31 +105,26 @@ template("chrome_repack_locales") {
           [ "${root_gen_dir}/chromeos/strings/chromeos_strings_" ]
       deps += [ "//chromeos/strings" ]
     }
-    if (enable_extensions) {
+    if (!is_android) {
+      source_patterns += [ "${root_gen_dir}/components/strings/search_engine_descriptions_strings_" ]
+      deps += [ "//components/strings:search_engine_descriptions_strings" ]
+    }
+    if (enable_extensions_core) {
       source_patterns +=
           [ "${root_gen_dir}/extensions/strings/extensions_strings_" ]
       deps += [ "//extensions/strings" ]
     }
 
+    # src-internal strings only available on Chrome branded builds.
     if (is_chrome_branded) {
-      source_patterns += [
-        "${root_gen_dir}/chrome/google_chrome_strings_",
-        "${root_gen_dir}/components/strings/components_google_chrome_strings_",
-      ]
-      deps += [
-        "//chrome/app:google_chrome_strings",
-        "//components/strings:components_google_chrome_strings",
-      ]
-    } else {
-      source_patterns += [
-        "${root_gen_dir}/chrome/chromium_strings_",
-        "${root_gen_dir}/components/strings/components_chromium_strings_",
-      ]
-      deps += [
-        "//chrome/app:chromium_strings",
-        "//components/strings:components_chromium_strings",
-      ]
+      source_patterns += [ "${root_gen_dir}/chrome/browser/nearby_sharing/internal/resources/nearby_share_internal_strings_" ]
+      deps += [ "//chrome/browser/nearby_sharing/internal/resources:nearby_share_internal_strings" ]
     }
+
+    source_patterns += [
+      "${root_gen_dir}/chrome/${branding_path_product}_strings_",
+      "${root_gen_dir}/components/strings/components_${branding_path_product}_strings_",
+    ]
 
     if (defined(invoker.additional_source_patterns)) {
       source_patterns += invoker.additional_source_patterns

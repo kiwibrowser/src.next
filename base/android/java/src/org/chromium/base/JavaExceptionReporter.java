@@ -4,22 +4,23 @@
 
 package org.chromium.base;
 
+import android.os.DeadSystemException;
+
 import androidx.annotation.UiThread;
 
-import org.chromium.base.annotations.CalledByNative;
-import org.chromium.base.annotations.JNINamespace;
-import org.chromium.base.annotations.NativeMethods;
-import org.chromium.build.annotations.MainDex;
+import org.jni_zero.CalledByNative;
+import org.jni_zero.JNINamespace;
+import org.jni_zero.JniType;
+import org.jni_zero.NativeMethods;
 
 /**
  * This UncaughtExceptionHandler will create a breakpad minidump when there is an uncaught
  * exception.
  *
- * The exception's stack trace will be added to the minidump's data. This allows java-only crashes
- * to be reported in the same way as other native crashes.
+ * <p>The exception's stack trace will be added to the minidump's data. This allows java-only
+ * crashes to be reported in the same way as other native crashes.
  */
 @JNINamespace("base::android")
-@MainDex
 public class JavaExceptionReporter implements Thread.UncaughtExceptionHandler {
     private final Thread.UncaughtExceptionHandler mParent;
     private final boolean mCrashAfterReport;
@@ -31,11 +32,34 @@ public class JavaExceptionReporter implements Thread.UncaughtExceptionHandler {
         mCrashAfterReport = crashAfterReport;
     }
 
+    /**
+     * Returns whether a given Throwable is meaningful and actionable and should be reported.
+     *
+     * <p>Removes the following exceptions:
+     *
+     * <ul>
+     *   <li>DeadSystemException: The core Android system has died and is going through a restart.
+     *       http://go/android-dev/reference/android/os/DeadSystemException
+     * </ul>
+     */
+    public static boolean shouldReportThrowable(Throwable e) {
+        return !(e instanceof DeadSystemException);
+    }
+
     @Override
     public void uncaughtException(Thread t, Throwable e) {
-        if (!mHandlingException) {
+        if (!mHandlingException && shouldReportThrowable(e)) {
             mHandlingException = true;
-            JavaExceptionReporterJni.get().reportJavaException(mCrashAfterReport, e);
+            JavaExceptionReporterJni.get()
+                    .reportJavaException(
+                            mCrashAfterReport,
+                            // If we are dealing with a JNI uncaught exception, then `e` is just a
+                            // wrapper around the true exception, annotated with the native stack
+                            // trace. The native stack trace is redundant, since we're going to
+                            // include it separately anyway. Remove it to make the report smaller,
+                            // clearer and to prevent the true Java exception information from being
+                            // truncated away.
+                            e instanceof JniAndroid.UncaughtExceptionException ? e.getCause() : e);
         }
         if (mParent != null) {
             mParent.uncaughtException(t, e);
@@ -52,8 +76,8 @@ public class JavaExceptionReporter implements Thread.UncaughtExceptionHandler {
     @UiThread
     public static void reportStackTrace(String stackTrace) {
         assert ThreadUtils.runningOnUiThread();
-        JavaExceptionReporterJni.get().reportJavaStackTrace(
-                PiiElider.sanitizeStacktrace(stackTrace));
+        JavaExceptionReporterJni.get()
+                .reportJavaStackTrace(PiiElider.sanitizeStacktrace(stackTrace));
     }
 
     /**
@@ -71,13 +95,15 @@ public class JavaExceptionReporter implements Thread.UncaughtExceptionHandler {
 
     @CalledByNative
     private static void installHandler(boolean crashAfterReport) {
-        Thread.setDefaultUncaughtExceptionHandler(new JavaExceptionReporter(
-                Thread.getDefaultUncaughtExceptionHandler(), crashAfterReport));
+        Thread.setDefaultUncaughtExceptionHandler(
+                new JavaExceptionReporter(
+                        Thread.getDefaultUncaughtExceptionHandler(), crashAfterReport));
     }
 
     @NativeMethods
     interface Natives {
         void reportJavaException(boolean crashAfterReport, Throwable e);
-        void reportJavaStackTrace(String stackTrace);
+
+        void reportJavaStackTrace(@JniType("std::string") String stackTrace);
     }
 }

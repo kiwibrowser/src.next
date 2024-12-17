@@ -6,20 +6,22 @@
 #define EXTENSIONS_BROWSER_EXTENSIONS_BROWSER_CLIENT_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
-#include "base/callback_forward.h"
+#include "base/functional/callback_forward.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "content/public/browser/bluetooth_chooser.h"
-#include "content/public/browser/storage_partition_config.h"
+#include "content/public/browser/frame_tree_node_id.h"
 #include "extensions/browser/extension_event_histogram_value.h"
 #include "extensions/browser/extension_prefs_observer.h"
 #include "extensions/browser/extensions_browser_api_provider.h"
+#include "extensions/common/api/declarative_net_request.h"
 #include "extensions/common/extension_id.h"
 #include "extensions/common/mojom/view_type.mojom.h"
 #include "mojo/public/cpp/bindings/binder_map.h"
@@ -27,6 +29,7 @@
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/network/public/mojom/fetch_api.mojom.h"
 #include "services/network/public/mojom/url_loader.mojom-forward.h"
+#include "services/network/public/mojom/url_loader_factory.mojom-forward.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
 
@@ -41,6 +44,8 @@ class FilePath;
 namespace content {
 class BrowserContext;
 class RenderFrameHost;
+class SiteInstance;
+class StoragePartitionConfig;
 class WebContents;
 }  // namespace content
 
@@ -66,6 +71,10 @@ class Origin;
 namespace base {
 class CancelableTaskTracker;
 }  // namespace base
+
+namespace media_device_salt {
+class MediaDeviceSaltService;
+}  // namespace media_device_salt
 
 namespace extensions {
 
@@ -114,6 +123,14 @@ class ExtensionsBrowserClient {
   /////////////////////////////////////////////////////////////////////////////
   // Virtual Methods
 
+  // Alerts the ExtensionsBrowserClient that the browser is shutting down,
+  // indicating that we should perform any teardown necessary before being
+  // destroyed (e.g. unsubscribing observers, or any other pre-emptive freeing
+  // of resources. Note that we may still receive calls from other shutting
+  // down objects after this call, so this should primarily be used for things
+  // that may need to be cleaned up before other parts of the browser).
+  virtual void StartTearDown();
+
   // Returns true if the embedder has started shutting down.
   virtual bool IsShuttingDown() = 0;
 
@@ -122,8 +139,10 @@ class ExtensionsBrowserClient {
   virtual bool AreExtensionsDisabled(const base::CommandLine& command_line,
                                      content::BrowserContext* context) = 0;
 
-  // Returns true if the |context| is known to the embedder.
-  virtual bool IsValidContext(content::BrowserContext* context) = 0;
+  // Returns true if the `context` is known to the embedder.
+  // Note: This is a `void*` to ensure downstream uses do not use the `context`
+  // in case it is *not* valid.
+  virtual bool IsValidContext(void* context) = 0;
 
   // Returns true if the BrowserContexts could be considered equivalent, for
   // example, if one is an off-the-record context owned by the other.
@@ -145,44 +164,47 @@ class ExtensionsBrowserClient {
   virtual content::BrowserContext* GetOriginalContext(
       content::BrowserContext* context) = 0;
 
-  // The below methods include a test for the experiment
-  // `kSystemProfileSelectionDefaultNone` and will include a similar experiment
-  // for Guest Profile, these two experiment can be bypassed by setting the
-  // force_* to true. The naming of the functions follows the logic of
-  // `ProfileSelections` predefined experimental builders.
-  // - `force_guest_profile`: to force Guest Profile selection in experiment.
-  // - `force_system_profile`: to force System Profile selection in experiment.
+  // The below methods are modeled off `Profile` and `ProfileSelections` in
+  // //chrome where their implementation filters out Profiles based on their
+  // types (Regular, Guest, System, etc..) and sub-implementation (Original vs
+  // OTR).
   //
-  // Returns the Original Profile for Regular Profile and redirects Incognito
-  // to the Original Profile.
-  // Force values to have the same behavior for Guest and System Profile.
-  virtual content::BrowserContext* GetRedirectedContextInIncognito(
+  // Returns the Original `BrowserContext` based on the input `context`:
+  // - if `context` is Original: returns itself.
+  // - if `context` is OTR: returns the equivalent parent context.
+  // - returns nullptr if the underlying implementation of `context` is of type
+  // System Profile, or of type Guest Profile if `force_guest_profile` is false.
+  virtual content::BrowserContext* GetContextRedirectedToOriginal(
       content::BrowserContext* context,
-      bool force_guest_profile,
-      bool force_system_profile) = 0;
-  // Returns Profile for Regular and Incognito.
-  // Force values to have the same behavior for Guest and System Profile.
-  virtual content::BrowserContext* GetContextForRegularAndIncognito(
+      bool force_guest_profile) = 0;
+  // Returns its own instance of `BrowserContext` based on the input `context`:
+  // - if `context` is Original: returns itself.
+  // - if `context` is OTR: returns nullptr.
+  // - returns nullptr if the underlying implementation of `context` is of type
+  // System Profile, or of type Guest Profile if `force_guest_profile` is false.
+  virtual content::BrowserContext* GetContextOwnInstance(
       content::BrowserContext* context,
-      bool force_guest_profile,
-      bool force_system_profile) = 0;
-  // Returns Profile only for Original Regular profile.
-  // Force values to have the same behavior for Guest and System Profile.
-  virtual content::BrowserContext* GetRegularProfile(
+      bool force_guest_profile) = 0;
+  // Returns the Original `BrowserContext` based on the input `context`:
+  // - if `context` is Original: returns itself.
+  // - if `context` is OTR: returns nullptr.
+  // - returns nullptr if the underlying implementation of `context` is of type
+  // System Profile, or of type Guest Profile if `force_guest_profile` is false.
+  virtual content::BrowserContext* GetContextForOriginalOnly(
       content::BrowserContext* context,
-      bool force_guest_profile,
-      bool force_system_profile) = 0;
+      bool force_guest_profile) = 0;
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+  // Returns whether the `context` has extensions disabled.
+  // An example of an implementation of `BrowserContext` that has extensions
+  // disabled is `Profile` of type System Profile.
+  virtual bool AreExtensionsDisabledForContext(
+      content::BrowserContext* context) = 0;
+
+#if BUILDFLAG(IS_CHROMEOS)
   // Returns a user id hash from |context| or an empty string if no hash could
   // be extracted.
   virtual std::string GetUserIdHashFromContext(
       content::BrowserContext* context) = 0;
-#endif
-
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-  // Returns if a browser |context| belongs to the main profile or not.
-  virtual bool IsFromMainProfile(content::BrowserContext* context) = 0;
 #endif
 
   // Returns true if |context| corresponds to a guest session.
@@ -190,7 +212,7 @@ class ExtensionsBrowserClient {
 
   // Returns true if |extension_id| can run in an incognito window.
   virtual bool IsExtensionIncognitoEnabled(
-      const std::string& extension_id,
+      const ExtensionId& extension_id,
       content::BrowserContext* context) const = 0;
 
   // Returns true if |extension| can see events and data from another
@@ -227,7 +249,8 @@ class ExtensionsBrowserClient {
       bool is_incognito,
       const Extension* extension,
       const ExtensionSet& extensions,
-      const ProcessMap& process_map) = 0;
+      const ProcessMap& process_map,
+      const GURL& upstream_url) = 0;
 
   // Returns the PrefService associated with |context|.
   virtual PrefService* GetPrefServiceForContext(
@@ -243,6 +266,12 @@ class ExtensionsBrowserClient {
   // Returns the ProcessManagerDelegate shared across all BrowserContexts. May
   // return NULL in tests or for simple embedders.
   virtual ProcessManagerDelegate* GetProcessManagerDelegate() const = 0;
+
+  virtual mojo::PendingRemote<network::mojom::URLLoaderFactory>
+  GetControlledFrameEmbedderURLLoader(
+      const url::Origin& app_origin,
+      content::FrameTreeNodeId frame_tree_node_id,
+      content::BrowserContext* browser_context) = 0;
 
   // Creates a new ExtensionHostDelegate instance.
   virtual std::unique_ptr<ExtensionHostDelegate>
@@ -321,6 +350,11 @@ class ExtensionsBrowserClient {
   virtual void ReportError(content::BrowserContext* context,
                            std::unique_ptr<ExtensionError> error);
 
+  // Creates a new instance of an ExtensionWebContentsObserver and attaches it
+  // to the given `web_contents`.
+  virtual void CreateExtensionWebContentsObserver(
+      content::WebContents* web_contents) = 0;
+
   // Returns the ExtensionWebContentsObserver for the given |web_contents|.
   virtual ExtensionWebContentsObserver* GetExtensionWebContentsObserver(
       content::WebContents* web_contents) = 0;
@@ -378,7 +412,7 @@ class ExtensionsBrowserClient {
   // Unloaded extensions will return true if they are not blocked, disabled,
   // blocklisted or uninstalled (for external extensions). The default return
   // value of this function is false.
-  virtual bool IsExtensionEnabled(const std::string& extension_id,
+  virtual bool IsExtensionEnabled(const ExtensionId& extension_id,
                                   content::BrowserContext* context) const;
 
   // http://crbug.com/829412
@@ -412,7 +446,7 @@ class ExtensionsBrowserClient {
 
   // Returns true if the |extension_id| requires its own isolated storage
   // partition.
-  virtual bool HasIsolatedStorage(const std::string& extension_id,
+  virtual bool HasIsolatedStorage(const ExtensionId& extension_id,
                                   content::BrowserContext* context);
 
   // Returns whether screenshot of |web_contents| is restricted due to Data Leak
@@ -426,11 +460,6 @@ class ExtensionsBrowserClient {
   virtual bool IsExtensionTelemetryServiceEnabled(
       content::BrowserContext* context) const;
 
-  // Returns true if remote host contacted signal feature is enabled.
-  // TODO(zackhan): This function is for measuring the impacts in finch
-  // experiments, will remove afterwards.
-  virtual bool IsExtensionTelemetryRemoteHostContactedSignalEnabled() const;
-
   // TODO(anunoy): This is a temporary implementation of notifying the
   // extension telemetry service of the tabs.executeScript API invocation
   // while its usefulness is evaluated.
@@ -438,6 +467,21 @@ class ExtensionsBrowserClient {
       content::BrowserContext* context,
       const ExtensionId& extension_id,
       const std::string& code) const;
+
+  // Notifies the extension telemetry service when declarativeNetRequest API
+  // rules are added.
+  virtual void NotifyExtensionApiDeclarativeNetRequest(
+      content::BrowserContext* context,
+      const ExtensionId& extension_id,
+      const std::vector<api::declarative_net_request::Rule>& rules) const;
+
+  // Notifies the extension telemetry service when declarativeNetRequest
+  // redirect action is invoked.
+  virtual void NotifyExtensionDeclarativeNetRequestRedirectAction(
+      content::BrowserContext* context,
+      const ExtensionId& extension_id,
+      const GURL& request_url,
+      const GURL& redirect_url) const;
 
   // TODO(zackhan): This is a temporary implementation of notifying the
   // extension telemetry service when there are web requests initiated from
@@ -477,6 +521,47 @@ class ExtensionsBrowserClient {
   virtual void AddAdditionalAllowedHosts(
       const PermissionSet& desired_permissions,
       PermissionSet* granted_permissions) const;
+
+  virtual void AddAPIActionToActivityLog(
+      content::BrowserContext* browser_context,
+      const ExtensionId& extension_id,
+      const std::string& call_name,
+      base::Value::List args,
+      const std::string& extra);
+  virtual void AddEventToActivityLog(content::BrowserContext* context,
+                                     const ExtensionId& extension_id,
+                                     const std::string& call_name,
+                                     base::Value::List args,
+                                     const std::string& extra);
+  virtual void AddDOMActionToActivityLog(
+      content::BrowserContext* browser_context,
+      const ExtensionId& extension_id,
+      const std::string& call_name,
+      base::Value::List args,
+      const GURL& url,
+      const std::u16string& url_title,
+      int call_type);
+
+  // Invokes |callback| with the StoragePartitionConfig that should be used for
+  // a <webview> or <controlledframe> with the given |partition_name| that is
+  // owned by a frame within |owner_site_instance|.
+  virtual void GetWebViewStoragePartitionConfig(
+      content::BrowserContext* browser_context,
+      content::SiteInstance* owner_site_instance,
+      const std::string& partition_name,
+      bool in_memory,
+      base::OnceCallback<void(std::optional<content::StoragePartitionConfig>)>
+          callback);
+
+  // Creates password reuse detection manager when new extension web contents
+  // are created.
+  virtual void CreatePasswordReuseDetectionManager(
+      content::WebContents* web_contents) const;
+
+  // Returns a service that provides persistent salts for generating media
+  // device IDs. Can be null if the embedder does not support persistent salts.
+  virtual media_device_salt::MediaDeviceSaltService* GetMediaDeviceSaltService(
+      content::BrowserContext* context);
 
  private:
   std::vector<std::unique_ptr<ExtensionsBrowserAPIProvider>> providers_;

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,7 +30,7 @@ struct SerializedAnchor {
   SerializedAnchor(const String& s, const LayoutPoint& p, uint64_t hash)
       : selector(s), relative_offset(p), simhash(hash) {}
 
-  bool IsValid() const { return !selector.IsEmpty(); }
+  bool IsValid() const { return !selector.empty(); }
 
   // Used to locate an element previously used as a scroll anchor.
   const String selector;
@@ -56,11 +56,11 @@ class CORE_EXPORT ScrollAnchor final {
   void SetScroller(ScrollableArea*);
 
   // Returns true if the underlying scroller is set.
-  bool HasScroller() const { return scroller_; }
+  bool HasScroller() const { return scroller_ != nullptr; }
 
   // The LayoutObject we are currently anchored to. Lazily computed during
   // notifyBeforeLayout() and cached until the next call to clear().
-  LayoutObject* AnchorObject() const { return anchor_object_; }
+  LayoutObject* AnchorObject() const { return anchor_object_.Get(); }
 
   // Called when the scroller attached to this anchor is being destroyed.
   void Dispose();
@@ -104,6 +104,9 @@ class CORE_EXPORT ScrollAnchor final {
 
   // Notifies us that an object will be removed from the layout tree.
   void NotifyRemoved(LayoutObject*);
+
+  // This anchor is not active because we are applying scroll-start.
+  void CancelAdjustment() { queued_ = false; }
 
  private:
   enum WalkStatus { kSkip = 0, kConstrain, kContinue, kReturn };
@@ -154,6 +157,10 @@ class CORE_EXPORT ScrollAnchor final {
 
   gfx::Vector2d ComputeAdjustment() const;
 
+  // Previously calculated css selector that uniquely locates the current
+  // anchor_object_. Cleared when the anchor_object_ is cleared.
+  String saved_selector_;
+
   // The scroller to be adjusted by this ScrollAnchor. This is also the scroller
   // that owns us, unless it is the RootFrameViewport in which case we are owned
   // by the layout viewport.
@@ -170,10 +177,6 @@ class CORE_EXPORT ScrollAnchor final {
   // which makes a difference if we're in a block-flipped writing-mode
   // (vertical-rl).
   LayoutPoint saved_relative_offset_;
-
-  // Previously calculated css selector that uniquely locates the current
-  // anchor_object_. Cleared when the anchor_object_ is cleared.
-  String saved_selector_;
 
   // We suppress scroll anchoring after a style change on the anchor node or
   // one of its ancestors, if that change might have caused the node to move.

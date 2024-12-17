@@ -12,11 +12,6 @@
 
 namespace content {
 
-const base::FilePath::CharType kAppCacheDirname[] =
-    FILE_PATH_LITERAL("Application Cache");
-const base::FilePath::CharType kPepperDataDirname[] =
-    FILE_PATH_LITERAL("Pepper Data");
-
 const char kBrowserPluginMimeType[] = "application/browser-plugin";
 
 const size_t kMaxURLDisplayChars = 32 * 1024;
@@ -67,6 +62,10 @@ const int kPluginOomScore = kMiscOomScore - kOomScoreBump;
 
 static_assert(kMiscOomScore > 0, "kMiscOomScore should be greater than 0");
 static_assert(kPluginOomScore > 0, "kPluginOomScore should be greater than 0");
+#endif
+
+#if BUILDFLAG(IS_ANDROID)
+const int kAndroidMinimumTabletWidthDp = 600;
 #endif
 
 }  // namespace content

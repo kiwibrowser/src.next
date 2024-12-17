@@ -27,17 +27,22 @@
 #include "third_party/blink/renderer/platform/heap/custom_spaces.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
+namespace WTF {
+class String;
+}  // namespace WTF
+
 namespace blink {
 
 class Document;
 class Length;
+class TreeScope;
 
 class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
  public:
   // TODO(sashab): Remove this method and move logic to the caller.
   static CSSValue* Create(const Length& value, float zoom);
 
-  String CssText() const;
+  WTF::String CssText() const;
 
   bool IsNumericLiteralValue() const {
     return class_type_ == kNumericLiteralClass;
@@ -47,6 +52,9 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     return IsNumericLiteralValue() || IsMathFunctionValue();
   }
   bool IsIdentifierValue() const { return class_type_ == kIdentifierClass; }
+  bool IsScopedKeywordValue() const {
+    return class_type_ == kScopedKeywordClass;
+  }
   bool IsValuePair() const { return class_type_ == kValuePairClass; }
   bool IsValueList() const { return class_type_ >= kValueListClass; }
 
@@ -54,7 +62,7 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
 
   bool IsBasicShapeValue() const {
     return class_type_ >= kBasicShapeCircleClass &&
-           class_type_ <= kBasicShapeRectClass;
+           class_type_ <= kBasicShapeXYWHClass;
   }
   bool IsBasicShapeCircleValue() const {
     return class_type_ == kBasicShapeCircleClass;
@@ -79,9 +87,13 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     return class_type_ == kBorderImageSliceClass;
   }
   bool IsColorValue() const { return class_type_ == kColorClass; }
+  bool IsColorMixValue() const { return class_type_ == kColorMixClass; }
   bool IsCounterValue() const { return class_type_ == kCounterClass; }
   bool IsCursorImageValue() const { return class_type_ == kCursorImageClass; }
   bool IsCrossfadeValue() const { return class_type_ == kCrossfadeClass; }
+  bool IsDynamicRangeLimitMixValue() const {
+    return class_type_ == kDynamicRangeLimitMixClass;
+  }
   bool IsPaintValue() const { return class_type_ == kPaintClass; }
   bool IsFontFeatureValue() const { return class_type_ == kFontFeatureClass; }
   bool IsFontFamilyValue() const { return class_type_ == kFontFamilyClass; }
@@ -95,12 +107,17 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   bool IsFunctionValue() const { return class_type_ == kFunctionClass; }
   bool IsCustomIdentValue() const { return class_type_ == kCustomIdentClass; }
   bool IsImageGeneratorValue() const {
-    return class_type_ >= kCrossfadeClass && class_type_ <= kConicGradientClass;
+    return class_type_ >= kCrossfadeClass &&
+           class_type_ <= kConstantGradientClass;
   }
   bool IsGradientValue() const {
     return class_type_ >= kLinearGradientClass &&
-           class_type_ <= kConicGradientClass;
+           class_type_ <= kConstantGradientClass;
   }
+  bool IsImageSetOptionValue() const {
+    return class_type_ == kImageSetOptionClass;
+  }
+  bool IsImageSetTypeValue() const { return class_type_ == kImageSetTypeClass; }
   bool IsImageSetValue() const { return class_type_ == kImageSetClass; }
   bool IsImageValue() const { return class_type_ == kImageClass; }
   bool IsInheritedValue() const { return class_type_ == kInheritedClass; }
@@ -117,6 +134,7 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   bool IsLinearGradientValue() const {
     return class_type_ == kLinearGradientClass;
   }
+  bool IsPaletteMixValue() const { return class_type_ == kPaletteMixClass; }
   bool IsPathValue() const { return class_type_ == kPathClass; }
   bool IsQuadValue() const { return class_type_ == kQuadClass; }
   bool IsRayValue() const { return class_type_ == kRayClass; }
@@ -126,10 +144,16 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   bool IsConicGradientValue() const {
     return class_type_ == kConicGradientClass;
   }
+  bool IsConstantGradientValue() const {
+    return class_type_ == kConstantGradientClass;
+  }
   bool IsReflectValue() const { return class_type_ == kReflectClass; }
   bool IsShadowValue() const { return class_type_ == kShadowClass; }
   bool IsStringValue() const { return class_type_ == kStringClass; }
   bool IsURIValue() const { return class_type_ == kURIClass; }
+  bool IsLinearTimingFunctionValue() const {
+    return class_type_ == kLinearTimingFunctionClass;
+  }
   bool IsCubicBezierTimingFunctionValue() const {
     return class_type_ == kCubicBezierTimingFunctionClass;
   }
@@ -146,11 +170,8 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   bool IsGridLineNamesValue() const {
     return class_type_ == kGridLineNamesClass;
   }
-  bool IsCustomPropertyDeclaration() const {
-    return class_type_ == kCustomPropertyDeclarationClass;
-  }
-  bool IsVariableReferenceValue() const {
-    return class_type_ == kVariableReferenceClass;
+  bool IsUnparsedDeclaration() const {
+    return class_type_ == kUnparsedDeclarationClass;
   }
   bool IsGridAutoRepeatValue() const {
     return class_type_ == kGridAutoRepeatClass;
@@ -171,6 +192,8 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   bool IsCyclicVariableValue() const {
     return class_type_ == kCyclicVariableValueClass;
   }
+  bool IsFlipRevertValue() const { return class_type_ == kFlipRevertClass; }
+  bool IsAlternateValue() const { return class_type_ == kAlternateClass; }
   bool IsAxisValue() const { return class_type_ == kAxisClass; }
   bool IsShorthandWrapperValue() const {
     return class_type_ == kKeyframeShorthandClass;
@@ -181,8 +204,21 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   bool IsLightDarkValuePair() const {
     return class_type_ == kLightDarkValuePairClass;
   }
+  bool IsAppearanceAutoBaseSelectValuePair() const {
+    return class_type_ == kAppearanceAutoBaseSelectValuePairClass;
+  }
+
   bool IsScrollValue() const { return class_type_ == kScrollClass; }
+  bool IsViewValue() const { return class_type_ == kViewClass; }
   bool IsRatioValue() const { return class_type_ == kRatioClass; }
+
+  bool IsRepeatStyleValue() const { return class_type_ == kRepeatStyleClass; }
+
+  bool IsRelativeColorValue() const {
+    return class_type_ == kRelativeColorClass;
+  }
+
+  bool IsRepeatValue() const { return class_type_ == kRepeatClass; }
 
   bool HasFailedOrCanceledSubresources() const;
   bool MayContainUrl() const;
@@ -191,22 +227,36 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
   bool operator==(const CSSValue&) const;
   bool operator!=(const CSSValue& o) const { return !(*this == o); }
 
-  void FinalizeGarbageCollectedObject();
+  // Returns the same CSS value, but populated with the given tree scope for
+  // tree-scoped names and references.
+  const CSSValue& EnsureScopedValue(const TreeScope* tree_scope) const {
+    if (!needs_tree_scope_population_) {
+      return *this;
+    }
+    return PopulateWithTreeScope(tree_scope);
+  }
+  bool IsScopedValue() const { return !needs_tree_scope_population_; }
+
+  const CSSValue* UntaintedCopy() const;
+
+#if DCHECK_IS_ON()
+  WTF::String ClassTypeToString() const;
+#endif
+
   void TraceAfterDispatch(blink::Visitor* visitor) const {}
   void Trace(Visitor*) const;
 
-  // ~CSSValue should be public, because non-public ~CSSValue causes C2248
-  // error: 'blink::CSSValue::~CSSValue' : cannot access protected member
-  // declared in class 'blink::CSSValue' when compiling
-  // 'source\wtf\refcounted.h' by using msvc.
-  ~CSSValue() = default;
+  static const size_t kValueListSeparatorBits = 2;
+  enum ValueListSeparator { kSpaceSeparator, kCommaSeparator, kSlashSeparator };
 
  protected:
   enum ClassType {
     kNumericLiteralClass,
     kMathFunctionClass,
     kIdentifierClass,
+    kScopedKeywordClass,
     kColorClass,
+    kColorMixClass,
     kCounterClass,
     kQuadClass,
     kCustomIdentClass,
@@ -214,8 +264,11 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     kURIClass,
     kValuePairClass,
     kLightDarkValuePairClass,
+    kAppearanceAutoBaseSelectValuePairClass,
     kScrollClass,
+    kViewClass,
     kRatioClass,
+    kRelativeColorClass,
 
     // Basic shape classes.
     // TODO(sashab): Represent these as a single subclass, BasicShapeClass.
@@ -236,18 +289,22 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     kLinearGradientClass,
     kRadialGradientClass,
     kConicGradientClass,
+    kConstantGradientClass,
 
     // Timing function classes.
+    kLinearTimingFunctionClass,
     kCubicBezierTimingFunctionClass,
     kStepsTimingFunctionClass,
 
     // Other class types.
     kBorderImageSliceClass,
+    kDynamicRangeLimitMixClass,
     kFontFeatureClass,
     kFontFaceSrcClass,
     kFontFamilyClass,
     kFontStyleRangeClass,
     kFontVariationClass,
+    kAlternateClass,
 
     kInheritedClass,
     kInitialClass,
@@ -259,20 +316,26 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     kShadowClass,
     kUnicodeRangeClass,
     kGridTemplateAreasClass,
+    kPaletteMixClass,
     kPathClass,
     kRayClass,
-    kVariableReferenceClass,
-    kCustomPropertyDeclarationClass,
+    kUnparsedDeclarationClass,
     kPendingSubstitutionValueClass,
     kPendingSystemFontValueClass,
     kInvalidVariableValueClass,
     kCyclicVariableValueClass,
+    kFlipRevertClass,
     kLayoutFunctionClass,
 
     kCSSContentDistributionClass,
 
     kKeyframeShorthandClass,
     kInitialColorValueClass,
+
+    kImageSetOptionClass,
+    kImageSetTypeClass,
+
+    kRepeatStyleClass,
 
     // List class types must appear after ValueListClass.
     kValueListClass,
@@ -282,44 +345,54 @@ class CORE_EXPORT CSSValue : public GarbageCollected<CSSValue> {
     kGridAutoRepeatClass,
     kGridIntegerRepeatClass,
     kAxisClass,
+    kRepeatClass,
     // Do not append non-list class types here.
   };
 
-  static const size_t kValueListSeparatorBits = 2;
-  enum ValueListSeparator { kSpaceSeparator, kCommaSeparator, kSlashSeparator };
-
   ClassType GetClassType() const { return static_cast<ClassType>(class_type_); }
 
+  const CSSValue& PopulateWithTreeScope(const TreeScope*) const;
+
   explicit CSSValue(ClassType class_type)
-      : numeric_literal_unit_type_(0),
-        value_list_separator_(kSpaceSeparator),
-        allows_negative_percentage_reference_(false),
+      : allows_negative_percentage_reference_(false),
+        needs_tree_scope_population_(false),
         class_type_(class_type) {}
 
   // NOTE: This class is non-virtual for memory and performance reasons.
   // Don't go making it virtual again unless you know exactly what you're doing!
 
  protected:
-  // The bits in this section are only used by specific subclasses but kept here
-  // to maximize struct packing.
-  // The bits are ordered and split into groups to such that from the
-  // perspective of each subclass, each field is a separate memory location.
-  // Using NOLINT here allows to use uint8_t as bitfield type which reduces
-  // size of CSSValue from 4 bytes to 3 bytes.
+  // The value in this section are only used by specific subclasses but kept
+  // here to maximize struct packing. If we need space for more, we could use
+  // bitfields, but we don't currently (and Clang creates better code if we
+  // avoid it). (This class used to be 3 and not 4 bytes, but this doesn't
+  // actually save any memory, due to padding.)
 
   // CSSNumericLiteralValue bits:
-  // This field hold CSSPrimitiveValue::UnitType.
-  uint8_t numeric_literal_unit_type_ : 7;  // NOLINT
-
-  // Force a new memory location. This will make TSAN treat the 2 fields above
-  // this line as a separate memory location than the 2 fields below it.
-  char : 0;
+  // This field holds CSSPrimitiveValue::UnitType.
+  uint8_t numeric_literal_unit_type_ = 0;
 
   // CSSNumericLiteralValue bits:
-  uint8_t value_list_separator_ : kValueListSeparatorBits;  // NOLINT
+  uint8_t value_list_separator_ = kSpaceSeparator;
 
   // CSSMathFunctionValue:
   uint8_t allows_negative_percentage_reference_ : 1;  // NOLINT
+
+  // Any CSS value that defines/references a global name should be tree-scoped.
+  // However, to allow sharing StyleSheetContents, we don't directly populate
+  // CSS values with tree scope in parsed results, but wait until resolving an
+  // element's style.
+  // The flag is true if the value contains such references but hasn't been
+  // populated with a tree scope.
+  uint8_t needs_tree_scope_population_ : 1;  // NOLINT
+
+  // Whether this value originally came from a quirksmode-specific declaration.
+  // Used for use counting of such situations (to see if we can try to remove
+  // the functionality).
+  uint8_t was_quirky_ : 1 = false;
+
+  // See css_attr_value_tainting.h.
+  uint8_t attr_tainted_ : 1 = false;
 
  private:
   const uint8_t class_type_;  // ClassType

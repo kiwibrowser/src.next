@@ -8,12 +8,13 @@
 #include <utility>
 #include <vector>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_forward.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
@@ -21,6 +22,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/repeating_test_future.h"
 #include "base/test/test_file_util.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
@@ -51,8 +53,6 @@
 #include "components/security_state/core/security_state.h"
 #include "components/services/quarantine/test_support.h"
 #include "content/public/browser/download_manager.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
@@ -69,6 +69,10 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/shell_dialogs/fake_select_file_dialog.h"
 
+#if BUILDFLAG(IS_CHROMEOS)
+#include "chromeos/dbus/dlp/dlp_client.h"
+#endif  // BUILDFLAG(IS_CHROMEOS)
+
 using content::BrowserContext;
 using content::BrowserThread;
 using content::DownloadManager;
@@ -76,6 +80,7 @@ using content::RenderFrameHost;
 using content::RenderProcessHost;
 using content::WebContents;
 using download::DownloadItem;
+using testing::_;
 using testing::ContainsRegex;
 using testing::HasSubstr;
 using ui::FakeSelectFileDialog;
@@ -99,8 +104,8 @@ std::string ReadFileAndCollapseWhitespace(const base::FilePath& file_path) {
 // the SavePageAs logic.
 std::string WriteSavedFromPath(const std::string& file_contents,
                                const GURL& url) {
-  return base::StringPrintf(file_contents.c_str(), url.spec().length(),
-                            url.spec().c_str());
+  return base::StringPrintfNonConstexpr(
+      file_contents.c_str(), url.spec().length(), url.spec().c_str());
 }
 
 // Waits for an item record in the downloads database to match |filter|. See
@@ -249,7 +254,8 @@ class DownloadItemCreatedObserver : public DownloadManager::Observer {
   // Note that this class provides no protection against the download
   // being destroyed between creation and return of WaitForNewDownloadItem();
   // the caller must guarantee that in some other fashion.
-  void WaitForDownloadItem(std::vector<DownloadItem*>* items_seen) {
+  void WaitForDownloadItem(
+      std::vector<raw_ptr<DownloadItem, VectorExperimental>>* items_seen) {
     if (!manager_) {
       // The manager went away before we were asked to wait; return
       // what we have, even if it's null.
@@ -287,7 +293,7 @@ class DownloadItemCreatedObserver : public DownloadManager::Observer {
 
   base::OnceClosure quit_waiting_callback_;
   raw_ptr<DownloadManager> manager_;
-  std::vector<DownloadItem*> items_seen_;
+  std::vector<raw_ptr<DownloadItem, VectorExperimental>> items_seen_;
 };
 
 class SavePageBrowserTest : public InProcessBrowserTest {
@@ -340,7 +346,7 @@ class SavePageBrowserTest : public InProcessBrowserTest {
     // Generally, there should only be one download item created
     // in all of these tests.  If it's already here, grab it; if not,
     // wait for it to show up.
-    std::vector<DownloadItem*> items;
+    std::vector<raw_ptr<DownloadItem, VectorExperimental>> items;
     DownloadManager* manager = browser->profile()->GetDownloadManager();
     manager->GetAllDownloads(&items);
     if (items.empty())
@@ -466,7 +472,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest,
   EXPECT_TRUE(base::ContentsEqual(kTestFile, full_file_name));
 }
 
-// TODO(crbug.com/1271463): Flaky on mac arm64.
+// TODO(crbug.com/40805571): Flaky on mac arm64.
 #if BUILDFLAG(IS_MAC) && defined(ARCH_CPU_ARM64)
 #define MAYBE_SaveHTMLOnlyCancel DISABLED_SaveHTMLOnlyCancel
 #else
@@ -475,7 +481,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest,
 IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveHTMLOnlyCancel) {
   GURL url = NavigateToMockURL("a");
   DownloadManager* manager = GetDownloadManager();
-  std::vector<DownloadItem*> downloads;
+  std::vector<raw_ptr<DownloadItem, VectorExperimental>> downloads;
   manager->GetAllDownloads(&downloads);
   ASSERT_EQ(0u, downloads.size());
 
@@ -492,7 +498,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveHTMLOnlyCancel) {
 
   ASSERT_TRUE(GetCurrentTab(browser())->SavePage(full_file_name, dir,
                                         content::SAVE_PAGE_TYPE_AS_ONLY_HTML));
-  std::vector<DownloadItem*> items;
+  std::vector<raw_ptr<DownloadItem, VectorExperimental>> items;
   creation_observer.WaitForDownloadItem(&items);
   ASSERT_EQ(1UL, items.size());
   ASSERT_EQ(url.spec(), items[0]->GetOriginalUrl().spec());
@@ -562,7 +568,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, DISABLED_SaveHTMLOnlyTabDestroy) {
   DownloadCoreServiceFactory::GetForBrowserContext(browser()->profile())
       ->SetDownloadManagerDelegateForTesting(std::move(delaying_delegate));
   DownloadManager* manager = GetDownloadManager();
-  std::vector<DownloadItem*> downloads;
+  std::vector<raw_ptr<DownloadItem, VectorExperimental>> downloads;
   manager->GetAllDownloads(&downloads);
   ASSERT_EQ(0u, downloads.size());
 
@@ -571,7 +577,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, DISABLED_SaveHTMLOnlyTabDestroy) {
   DownloadItemCreatedObserver creation_observer(manager);
   ASSERT_TRUE(GetCurrentTab(browser())->SavePage(full_file_name, dir,
                                         content::SAVE_PAGE_TYPE_AS_ONLY_HTML));
-  std::vector<DownloadItem*> items;
+  std::vector<raw_ptr<DownloadItem, VectorExperimental>> items;
   creation_observer.WaitForDownloadItem(&items);
   ASSERT_EQ(1u, items.size());
 
@@ -716,7 +722,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, RemoveFromList) {
   ASSERT_FALSE(HasFailure());
 
   DownloadManager* manager = GetDownloadManager();
-  std::vector<DownloadItem*> downloads;
+  std::vector<raw_ptr<DownloadItem, VectorExperimental>> downloads;
   manager->GetAllDownloads(&downloads);
   ASSERT_EQ(1UL, downloads.size());
 
@@ -846,28 +852,27 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest,
   base::FilePath full_file_name = download_dir.AppendASCII("test_page");
   download_prefs->SetSaveFileType(content::SAVE_PAGE_TYPE_AS_MHTML);
 
-  base::FilePath received_path;
-  content::SavePageType received_type;
+  content::SavePackagePathPickedParams received_params;
   content::SavePackagePathPickedCallback callback = base::BindOnce(
-      [](base::FilePath* received_path, content::SavePageType* received_type,
-         const base::FilePath& path, content::SavePageType type,
+      [](content::SavePackagePathPickedParams* received_params,
+         content::SavePackagePathPickedParams params,
          content::SavePackageDownloadCreatedCallback cb) {
-        *received_path = path;
-        *received_type = type;
+        *received_params = params;
       },
-      &received_path, &received_type);
+      &received_params);
 
   // Deletes itself.
   new SavePackageFilePicker(
-      /* web_contents */ GetCurrentTab(browser()),
-      /* suggested_path */ full_file_name,
-      /* default_extension */ FILE_PATH_LITERAL(".html"),
-      /* can_save_as_complete */ true,
-      /* download_prefs */ download_prefs,
-      /* callback */ std::move(callback));
+      /*web_contents=*/GetCurrentTab(browser()),
+      /*suggested_path=*/full_file_name,
+      /*default_extension=*/FILE_PATH_LITERAL(".html"),
+      /*can_save_as_complete=*/true,
+      /*download_prefs=*/download_prefs,
+      /*callback=*/std::move(callback));
 
-  EXPECT_TRUE(received_path.MatchesExtension(FILE_PATH_LITERAL(".mhtml")));
-  EXPECT_EQ(received_type, content::SAVE_PAGE_TYPE_AS_MHTML);
+  EXPECT_TRUE(
+      received_params.file_path.MatchesExtension(FILE_PATH_LITERAL(".mhtml")));
+  EXPECT_EQ(received_params.save_type, content::SAVE_PAGE_TYPE_AS_MHTML);
 }
 
 // Flaky on Windows: https://crbug.com/1247404.
@@ -935,10 +940,11 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveDownloadableIFrame) {
 
     ASSERT_TRUE(VerifySavePackageExpectations(browser(), download_url));
     persisted.WaitForPersisted();
-    std::vector<download::DownloadItem*> downloads;
+    std::vector<raw_ptr<download::DownloadItem, VectorExperimental>> downloads;
     GetDownloadManager()->GetAllDownloads(&downloads);
-    for (auto* download : downloads)
+    for (download::DownloadItem* download : downloads) {
       download->Remove();
+    }
   }
 
   base::FilePath full_file_name, dir;
@@ -968,7 +974,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveUnauthorizedResource) {
 
   // Refer to the test file from the test page.
   GURL file_url = net::FilePathToFileURL(file_path);
-  ASSERT_TRUE(ExecuteScript(
+  ASSERT_TRUE(ExecJs(
       browser()->tab_strip_model()->GetWebContentsAt(0),
       base::StringPrintf("document.getElementById('resource1').src = '%s';",
                          file_url.spec().data())));
@@ -1420,7 +1426,7 @@ IN_PROC_BROWSER_TEST_P(SavePageOriginalVsSavedComparisonTest,
 // This tests handling of iframe elements without src attribute (only with
 // srcdoc attribute) and how they get saved / cross-referenced.
 #if BUILDFLAG(IS_MAC)
-// TODO(https://crbug.com/1262400): Fails on dcheck-enabled builds on 11.0.
+// TODO(crbug.com/40202613): Fails on dcheck-enabled builds on 11.0.
 #define MAYBE_AboutBlank DISABLED_AboutBlank
 #else
 #define MAYBE_AboutBlank AboutBlank
@@ -1466,7 +1472,7 @@ IN_PROC_BROWSER_TEST_P(SavePageOriginalVsSavedComparisonTest, NestedFrames) {
 //   subframe3 and subframe4 - about:blank (no src, only srcdoc attribute).
 // ... but different content (generated by main frame's javascript).
 #if BUILDFLAG(IS_MAC)
-// TODO(https://crbug.com/1262400): Fails on dcheck-enabled builds on 11.0.
+// TODO(crbug.com/40202613): Fails on dcheck-enabled builds on 11.0.
 #define MAYBE_RuntimeChanges DISABLED_RuntimeChanges
 #else
 #define MAYBE_RuntimeChanges RuntimeChanges
@@ -1527,7 +1533,7 @@ IN_PROC_BROWSER_TEST_P(SavePageOriginalVsSavedComparisonTest, Encoding) {
 
 // Test for saving style element and attribute (see also crbug.com/568293).
 #if BUILDFLAG(IS_MAC)
-// TODO(https://crbug.com/1262400): Fails on dcheck-enabled builds on 11.0.
+// TODO(crbug.com/40202613): Fails on dcheck-enabled builds on 11.0.
 #define MAYBE_Style DISABLED_Style
 #else
 #define MAYBE_Style Style
@@ -1623,9 +1629,9 @@ class BlockingDownloadManagerDelegate : public ChromeDownloadManagerDelegate {
     std::move(callback).Run(false);
   }
 
-  void ValidateSavePackageFiles(base::flat_set<base::FilePath> expected_paths) {
+  void ValidateSavePackageFiles(
+      const base::flat_set<base::FilePath>& expected_paths) {
     EXPECT_EQ(expected_paths.size(), save_package_final_paths_.size());
-
     for (const base::FilePath& expected_path : expected_paths) {
       EXPECT_TRUE(save_package_final_paths_.contains(expected_path));
     }
@@ -1702,5 +1708,67 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveCompleteHTMLBlocked) {
       dir.AppendASCII("1.css"),
   });
 }
+
+#if BUILDFLAG(IS_CHROMEOS)
+
+IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveHTMLWithDlp) {
+  base::FilePath full_file_name, dir;
+  GURL url;
+
+  chromeos::DlpClient::Shutdown();
+  chromeos::DlpClient::InitializeFake();
+  base::test::RepeatingTestFuture<
+      dlp::AddFilesRequest, base::OnceCallback<void(dlp::AddFilesResponse)>>
+      add_file_cb;
+  chromeos::DlpClient::Get()->GetTestInterface()->SetAddFilesMock(
+      add_file_cb.GetCallback());
+
+  url = NavigateToMockURL("a");
+
+  SaveCurrentTab(url, content::SAVE_PAGE_TYPE_AS_COMPLETE_HTML, "a", 1, &dir,
+                 &full_file_name);
+
+  ASSERT_FALSE(HasFailure());
+
+  auto request = std::get<0>(add_file_cb.Take());
+  EXPECT_EQ(1, request.add_file_requests().size());
+  EXPECT_EQ(full_file_name.value(), request.add_file_requests(0).file_path());
+  EXPECT_EQ(request.add_file_requests(0).source_url(), url.spec());
+
+  base::ScopedAllowBlockingForTesting allow_blocking;
+  EXPECT_TRUE(base::PathExists(full_file_name));
+  EXPECT_FALSE(base::PathExists(dir));
+}
+
+IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveMHTMLWithDlp) {
+  base::FilePath full_file_name, dir;
+  GURL url;
+
+  chromeos::DlpClient::Shutdown();
+  chromeos::DlpClient::InitializeFake();
+  base::test::RepeatingTestFuture<
+      dlp::AddFilesRequest, base::OnceCallback<void(dlp::AddFilesResponse)>>
+      add_file_cb;
+  chromeos::DlpClient::Get()->GetTestInterface()->SetAddFilesMock(
+      add_file_cb.GetCallback());
+
+  url = NavigateToMockURL("a");
+
+  SaveCurrentTab(url, content::SAVE_PAGE_TYPE_AS_MHTML, "a", -1, &dir,
+                 &full_file_name);
+
+  ASSERT_FALSE(HasFailure());
+
+  auto request = std::get<0>(add_file_cb.Take());
+  EXPECT_EQ(1, request.add_file_requests().size());
+  EXPECT_EQ(full_file_name.value(), request.add_file_requests(0).file_path());
+  EXPECT_EQ(request.add_file_requests(0).source_url(), url.spec());
+
+  base::ScopedAllowBlockingForTesting allow_blocking;
+  EXPECT_TRUE(base::PathExists(full_file_name));
+  EXPECT_FALSE(base::PathExists(dir));
+}
+
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 }  // namespace

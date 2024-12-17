@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/plugins/plugin_registry.mojom-blink.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
@@ -26,6 +27,7 @@ class MockPluginRegistry : public mojom::blink::PluginRegistry {
 };
 
 TEST(PluginDataTest, UpdatePluginList) {
+  test::TaskEnvironment task_environment;
   ScopedTestingPlatformSupport<TestingPlatformSupport> support;
 
   MockPluginRegistry mock_plugin_registry;

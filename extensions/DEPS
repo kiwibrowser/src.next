@@ -8,7 +8,6 @@ include_rules = [
   "+components/url_matcher",
   "+components/version_info",
   "-content",
-  "+content/grit/content_resources.h",
   "+content/public/common",
   "+content/public/test",
   "+crypto",
@@ -39,6 +38,7 @@ include_rules = [
 
 specific_include_rules = {
   ".*(test|test_util)\.(cc|h)$": [
+    "+chrome/browser/profiles/profile.h",
     "+content/public/test",
   ],
 }

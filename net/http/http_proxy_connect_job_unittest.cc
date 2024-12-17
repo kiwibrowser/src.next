@@ -17,18 +17,29 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "net/base/features.h"
+#include "net/base/hex_utils.h"
 #include "net/base/host_port_pair.h"
-#include "net/base/network_isolation_key.h"
+#include "net/base/net_errors.h"
+#include "net/base/network_anonymization_key.h"
+#include "net/base/proxy_chain.h"
 #include "net/base/proxy_string_util.h"
+#include "net/base/session_usage.h"
 #include "net/base/test_proxy_delegate.h"
+#include "net/cert/mock_cert_verifier.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/dns/public/secure_dns_policy.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_response_headers.h"
+#include "net/http/http_server_properties.h"
+#include "net/http/transport_security_state.h"
 #include "net/nqe/network_quality_estimator_test_util.h"
+#include "net/quic/quic_context.h"
+#include "net/quic/quic_session_pool.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/connect_job_test_util.h"
 #include "net/socket/socket_test_util.h"
@@ -37,14 +48,20 @@
 #include "net/socket/ssl_connect_job.h"
 #include "net/socket/transport_connect_job.h"
 #include "net/spdy/spdy_test_util_common.h"
+#include "net/ssl/ssl_connection_status_flags.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/gtest_util.h"
 #include "net/test/test_data_directory.h"
 #include "net/test/test_with_task_environment.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_versions.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
+#include "net/url_request/static_http_user_agent_settings.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 #include "url/scheme_host_port.h"
+
+using ::testing::_;
 
 namespace net {
 
@@ -56,19 +73,63 @@ enum HttpProxyType { HTTP, HTTPS, SPDY };
 
 const char kHttpProxyHost[] = "httpproxy.example.test";
 const char kHttpsProxyHost[] = "httpsproxy.example.test";
+const char kQuicProxyHost[] = "quicproxy.example.test";
+const char kHttpsNestedProxyHost[] = "last-hop-https-proxy.example.test";
+
+const ProxyServer kHttpProxyServer{ProxyServer::SCHEME_HTTP,
+                                   HostPortPair(kHttpProxyHost, 80)};
+const ProxyServer kHttpsProxyServer{ProxyServer::SCHEME_HTTPS,
+                                    HostPortPair(kHttpsProxyHost, 443)};
+const ProxyServer kHttpsNestedProxyServer{
+    ProxyServer::SCHEME_HTTPS, HostPortPair(kHttpsNestedProxyHost, 443)};
+
+const ProxyChain kHttpProxyChain{kHttpProxyServer};
+const ProxyChain kHttpsProxyChain{kHttpsProxyServer};
+// TODO(crbug.com/365771838): Add tests for non-ip protection nested proxy
+// chains if support is enabled for all builds.
+const ProxyChain kHttpsNestedProxyChain =
+    ProxyChain::ForIpProtection({{kHttpsProxyServer, kHttpsNestedProxyServer}});
+
+constexpr char kTestHeaderName[] = "Foo";
+// Note: `kTestSpdyHeaderName` should be a lowercase version of
+// `kTestHeaderName`.
+constexpr char kTestSpdyHeaderName[] = "foo";
+
+// Match QuicStreamRequests' proxy chains.
+MATCHER_P(QSRHasProxyChain,
+          proxy_chain,
+          base::StringPrintf("QuicStreamRequest %s ProxyChain %s",
+                             negation ? "does not have" : "has",
+                             proxy_chain.ToDebugString().c_str())) {
+  *result_listener << "where the proxy chain is "
+                   << arg->session_key().proxy_chain().ToDebugString();
+  return arg->session_key().proxy_chain() == proxy_chain;
+}
+
+MATCHER_P(
+    IsQuicVersion,
+    quic_version,
+    base::StringPrintf("QUIC version %s %s",
+                       negation ? "is not" : "is",
+                       quic::ParsedQuicVersionToString(quic_version).c_str())) {
+  *result_listener << "where the QUIC version is "
+                   << quic::ParsedQuicVersionToString(arg);
+  return arg == quic_version;
+}
 
 }  // namespace
 
-class HttpProxyConnectJobTest : public ::testing::TestWithParam<HttpProxyType>,
-                                public WithTaskEnvironment {
- protected:
-  HttpProxyConnectJobTest()
+class HttpProxyConnectJobTestBase : public WithTaskEnvironment {
+ public:
+  HttpProxyConnectJobTestBase()
       : WithTaskEnvironment(
             base::test::TaskEnvironment::TimeSource::MOCK_TIME) {
     // Used a mock HostResolver that does not have a cache.
     session_deps_.host_resolver = std::make_unique<MockHostResolver>(
         /*default_result=*/MockHostResolverBase::RuleResolver::
             GetLocalhostResult());
+    session_deps_.http_user_agent_settings =
+        std::make_unique<StaticHttpUserAgentSettings>("*", "test-ua");
 
     network_quality_estimator_ =
         std::make_unique<TestNetworkQualityEstimator>();
@@ -76,12 +137,51 @@ class HttpProxyConnectJobTest : public ::testing::TestWithParam<HttpProxyType>,
     InitCommonConnectJobParams();
   }
 
-  ~HttpProxyConnectJobTest() override {
+  virtual ~HttpProxyConnectJobTestBase() {
     // Reset global field trial parameters to defaults values.
     base::FieldTrialParamAssociator::GetInstance()->ClearAllParamsForTesting();
     HttpProxyConnectJob::UpdateFieldTrialParametersForTesting();
   }
 
+  // This may only be called at the start of the test, before any ConnectJobs
+  // have been created.
+  void InitCommonConnectJobParams() {
+    common_connect_job_params_ = std::make_unique<CommonConnectJobParams>(
+        session_->CreateCommonConnectJobParams());
+    // TODO(mmenke): Consider reworking this so it can be done through
+    // |session_deps_|.
+    common_connect_job_params_->proxy_delegate = proxy_delegate_.get();
+    common_connect_job_params_->network_quality_estimator =
+        network_quality_estimator_.get();
+  }
+
+  // This may only be called at the start of the test, before any ConnectJobs
+  // have been created.
+  void InitProxyDelegate() {
+    proxy_delegate_ = std::make_unique<TestProxyDelegate>();
+    proxy_delegate_->set_extra_header_name(kTestHeaderName);
+    InitCommonConnectJobParams();
+  }
+
+ protected:
+  std::unique_ptr<TestProxyDelegate> proxy_delegate_;
+
+  // These data providers may be pointed to by the socket factory in
+  // `session_deps_`.
+  std::unique_ptr<SSLSocketDataProvider> ssl_data_;
+  std::unique_ptr<SSLSocketDataProvider> old_ssl_data_;
+  std::unique_ptr<SSLSocketDataProvider> nested_second_proxy_ssl_data_;
+  std::unique_ptr<SequencedSocketData> data_;
+
+  SpdySessionDependencies session_deps_;
+  std::unique_ptr<HttpNetworkSession> session_;
+  std::unique_ptr<TestNetworkQualityEstimator> network_quality_estimator_;
+  std::unique_ptr<CommonConnectJobParams> common_connect_job_params_;
+};
+
+class HttpProxyConnectJobTest : public HttpProxyConnectJobTestBase,
+                                public ::testing::TestWithParam<HttpProxyType> {
+ public:
   // Initializes the field trial parameters for the field trial that determines
   // connection timeout based on the network quality.
   void InitAdaptiveTimeoutFieldTrialWithParams(
@@ -115,37 +215,115 @@ class HttpProxyConnectJobTest : public ::testing::TestWithParam<HttpProxyType>,
 
   scoped_refptr<TransportSocketParams> CreateHttpProxyParams(
       SecureDnsPolicy secure_dns_policy) const {
-    if (GetParam() != HTTP)
+    if (GetParam() != HTTP) {
       return nullptr;
+    }
     return base::MakeRefCounted<TransportSocketParams>(
-        HostPortPair(kHttpProxyHost, 80), NetworkIsolationKey(),
+        kHttpProxyServer.host_port_pair(), NetworkAnonymizationKey(),
         secure_dns_policy, OnHostResolutionCallback(),
         /*supported_alpns=*/base::flat_set<std::string>());
   }
 
   scoped_refptr<SSLSocketParams> CreateHttpsProxyParams(
       SecureDnsPolicy secure_dns_policy) const {
-    if (GetParam() == HTTP)
+    if (GetParam() == HTTP) {
       return nullptr;
+    }
     return base::MakeRefCounted<SSLSocketParams>(
-        base::MakeRefCounted<TransportSocketParams>(
-            HostPortPair(kHttpsProxyHost, 443), NetworkIsolationKey(),
+        ConnectJobParams(base::MakeRefCounted<TransportSocketParams>(
+            kHttpsProxyServer.host_port_pair(), NetworkAnonymizationKey(),
             secure_dns_policy, OnHostResolutionCallback(),
-            /*supported_alpns=*/base::flat_set<std::string>()),
-        nullptr, nullptr, HostPortPair(kHttpsProxyHost, 443), SSLConfig(),
-        PRIVACY_MODE_DISABLED, NetworkIsolationKey());
+            /*supported_alpns=*/base::flat_set<std::string>())),
+        HostPortPair(kHttpsProxyHost, 443), SSLConfig(),
+        NetworkAnonymizationKey());
   }
 
-  // Returns a correctly constructed HttpProxyParams for the HTTP or HTTPS
+  // Returns a correctly constructed HttpProxyParams for a single HTTP or HTTPS
   // proxy.
   scoped_refptr<HttpProxySocketParams> CreateParams(
       bool tunnel,
       SecureDnsPolicy secure_dns_policy) {
+    ConnectJobParams params;
+    if (GetParam() == HTTP) {
+      params = ConnectJobParams(CreateHttpProxyParams(secure_dns_policy));
+    } else {
+      params = ConnectJobParams(CreateHttpsProxyParams(secure_dns_policy));
+    }
     return base::MakeRefCounted<HttpProxySocketParams>(
-        CreateHttpProxyParams(secure_dns_policy),
-        CreateHttpsProxyParams(secure_dns_policy), false /* is_quic */,
-        HostPortPair(kEndpointHost, tunnel ? 443 : 80), tunnel,
-        TRAFFIC_ANNOTATION_FOR_TESTS, NetworkIsolationKey());
+        std::move(params), HostPortPair(kEndpointHost, tunnel ? 443 : 80),
+        GetParam() == HTTP ? kHttpProxyChain : kHttpsProxyChain,
+        /*proxy_chain_index=*/0, tunnel, TRAFFIC_ANNOTATION_FOR_TESTS,
+        NetworkAnonymizationKey(), secure_dns_policy);
+  }
+
+  // Creates a correctly constructed `SSLSocketParams()` corresponding to the
+  // proxy server in `proxy_chain` at index `proxy_chain_index`.
+  scoped_refptr<SSLSocketParams> CreateNestedHttpsProxyParams(
+      bool tunnel,
+      SecureDnsPolicy secure_dns_policy,
+      const ProxyChain& proxy_chain,
+      size_t proxy_chain_index) const {
+    DCHECK_NE(GetParam(), HTTP);
+
+    const ProxyServer& proxy_server =
+        proxy_chain.GetProxyServer(proxy_chain_index);
+
+    if (proxy_chain_index != 0) {
+      // For all but the first hop in a multi-hop proxy, the SSLSocketParams
+      // should be created such that it tunnels over a direct encrypted
+      // connection made to the first hop (possibly via intermediate tunnels
+      // through other hops)... Build an HttpProxySocketParams for the
+      // previous hop that will establish this.
+      size_t previous_hop_proxy_chain_index = proxy_chain_index - 1;
+
+      return base::MakeRefCounted<SSLSocketParams>(
+          ConnectJobParams(CreateNestedParams(tunnel, secure_dns_policy,
+                                              proxy_chain,
+                                              previous_hop_proxy_chain_index)),
+          proxy_server.host_port_pair(), SSLConfig(),
+          NetworkAnonymizationKey());
+    }
+
+    // If we are creating the SSLSocketParams for the first hop, establish a
+    // direct encrypted connection to it.
+    return base::MakeRefCounted<SSLSocketParams>(
+        ConnectJobParams(base::MakeRefCounted<TransportSocketParams>(
+            proxy_server.host_port_pair(), NetworkAnonymizationKey(),
+            secure_dns_policy, OnHostResolutionCallback(),
+            /*supported_alpns=*/base::flat_set<std::string>())),
+        proxy_server.host_port_pair(), SSLConfig(), NetworkAnonymizationKey());
+  }
+
+  // Creates a correctly constructed `HttpProxySocketParams()` corresponding to
+  // the proxy server in `proxy_chain` at index `proxy_chain_index` (and set to
+  // create a CONNECT for either the next hop in the proxy or to
+  // `kEndpointHost`).
+  scoped_refptr<HttpProxySocketParams> CreateNestedParams(
+      bool tunnel,
+      SecureDnsPolicy secure_dns_policy,
+      const ProxyChain& proxy_chain,
+      size_t proxy_chain_index) const {
+    DCHECK_NE(GetParam(), HTTP);
+    HostPortPair connect_host_port_pair;
+    scoped_refptr<SSLSocketParams> ssl_params = CreateNestedHttpsProxyParams(
+        tunnel, secure_dns_policy, proxy_chain, proxy_chain_index);
+    if (proxy_chain_index + 1 != proxy_chain.length()) {
+      // For all but the last hop in the proxy, what we CONNECT to is the next
+      // hop in the proxy.
+      size_t next_hop_proxy_chain_index = proxy_chain_index + 1;
+      const ProxyServer& next_hop_proxy_server =
+          proxy_chain.GetProxyServer(next_hop_proxy_chain_index);
+      connect_host_port_pair = next_hop_proxy_server.host_port_pair();
+    } else {
+      // If we aren't testing multi-hop proxies or this HttpProxySocketParams
+      // corresponds to the last hop, then we need to CONNECT to the
+      // destination site.
+      connect_host_port_pair = HostPortPair(kEndpointHost, tunnel ? 443 : 80);
+    }
+    return base::MakeRefCounted<HttpProxySocketParams>(
+        ConnectJobParams(std::move(ssl_params)), connect_host_port_pair,
+        proxy_chain, proxy_chain_index, tunnel, TRAFFIC_ANNOTATION_FOR_TESTS,
+        NetworkAnonymizationKey(), secure_dns_policy);
   }
 
   std::unique_ptr<HttpProxyConnectJob> CreateConnectJobForHttpRequest(
@@ -164,39 +342,39 @@ class HttpProxyConnectJobTest : public ::testing::TestWithParam<HttpProxyType>,
                             delegate, priority);
   }
 
+  // Creates an HttpProxyConnectJob corresponding to `kHttpsNestedProxyChain`.
+  // This is done by working backwards through the proxy chain and creating
+  // socket params such that connect jobs will be created recursively with
+  // dependencies in the correct order (in other words, the inner-most connect
+  // job will establish a connection to the first proxy, and then that
+  // connection will get used to establish a connection to the second proxy, and
+  // finally a connection will be established to the destination).
+  std::unique_ptr<HttpProxyConnectJob> CreateConnectJobForNestedProxyTunnel(
+      ConnectJob::Delegate* delegate,
+      RequestPriority priority = DEFAULT_PRIORITY,
+      SecureDnsPolicy secure_dns_policy = SecureDnsPolicy::kAllow) {
+    size_t last_hop_proxy_server_index = kHttpsNestedProxyChain.length() - 1;
+    return CreateConnectJob(
+        CreateNestedParams(/*tunnel=*/true, secure_dns_policy,
+                           kHttpsNestedProxyChain, last_hop_proxy_server_index),
+        delegate, priority);
+  }
+
   std::unique_ptr<HttpProxyConnectJob> CreateConnectJob(
       scoped_refptr<HttpProxySocketParams> http_proxy_socket_params,
       ConnectJob::Delegate* delegate,
       RequestPriority priority) {
     return std::make_unique<HttpProxyConnectJob>(
         priority, SocketTag(), common_connect_job_params_.get(),
-        std::move(http_proxy_socket_params), delegate, nullptr /* net_log */);
-  }
-
-  // This may only be called at the start of the test, before any ConnectJobs
-  // have been created.
-  void InitProxyDelegate() {
-    proxy_delegate_ = std::make_unique<TestProxyDelegate>();
-    InitCommonConnectJobParams();
-  }
-
-  // This may only be called at the start of the test, before any ConnectJobs
-  // have been created.
-  void InitCommonConnectJobParams() {
-    common_connect_job_params_ = std::make_unique<CommonConnectJobParams>(
-        session_->CreateCommonConnectJobParams());
-    // TODO(mmenke): Consider reworking this so it can be done through
-    // |session_deps_|.
-    common_connect_job_params_->proxy_delegate = proxy_delegate_.get();
-    common_connect_job_params_->network_quality_estimator =
-        network_quality_estimator_.get();
+        std::move(http_proxy_socket_params), delegate, /*net_log=*/nullptr);
   }
 
   void Initialize(base::span<const MockRead> reads,
                   base::span<const MockWrite> writes,
                   base::span<const MockRead> spdy_reads,
                   base::span<const MockWrite> spdy_writes,
-                  IoMode connect_and_ssl_io_mode) {
+                  IoMode connect_and_ssl_io_mode,
+                  bool two_ssl_proxies = false) {
     if (GetParam() == SPDY) {
       data_ = std::make_unique<SequencedSocketData>(spdy_reads, spdy_writes);
     } else {
@@ -217,6 +395,19 @@ class HttpProxyConnectJobTest : public ::testing::TestWithParam<HttpProxyType>,
       }
       session_deps_.socket_factory->AddSSLSocketDataProvider(ssl_data_.get());
     }
+
+    if (two_ssl_proxies) {
+      // For testing nested proxies we need another SSLSocketDataProvider
+      // corresponding to the SSL connection established to the second hop in
+      // the proxy.
+      nested_second_proxy_ssl_data_ =
+          std::make_unique<SSLSocketDataProvider>(connect_and_ssl_io_mode, OK);
+      if (GetParam() == SPDY) {
+        InitializeSpdySsl(nested_second_proxy_ssl_data_.get());
+      }
+      session_deps_.socket_factory->AddSSLSocketDataProvider(
+          nested_second_proxy_ssl_data_.get());
+    }
   }
 
   void InitializeSpdySsl(SSLSocketDataProvider* ssl_data) {
@@ -230,13 +421,14 @@ class HttpProxyConnectJobTest : public ::testing::TestWithParam<HttpProxyType>,
   base::TimeDelta GetNestedConnectionTimeout() {
     base::TimeDelta normal_nested_connection_timeout =
         TransportConnectJob::ConnectionTimeout();
-    if (GetParam() != HTTP)
+    if (GetParam() != HTTP) {
       normal_nested_connection_timeout +=
           SSLConnectJob::HandshakeTimeoutForTesting();
+    }
 
     // Doesn't actually matter whether or not this is for a tunnel - the
-    // connection timeout is the same, though it probably shouldn't be the same,
-    // since tunnels need an extra round trip.
+    // connection timeout is the same, though it probably shouldn't be the
+    // same, since tunnels need an extra round trip.
     base::TimeDelta alternate_connection_timeout =
         HttpProxyConnectJob::AlternateNestedConnectionTimeout(
             *CreateParams(true /* tunnel */, SecureDnsPolicy::kAllow),
@@ -255,22 +447,9 @@ class HttpProxyConnectJobTest : public ::testing::TestWithParam<HttpProxyType>,
   }
 
  protected:
-  std::unique_ptr<TestProxyDelegate> proxy_delegate_;
-
-  std::unique_ptr<SSLSocketDataProvider> ssl_data_;
-  std::unique_ptr<SSLSocketDataProvider> old_ssl_data_;
-  std::unique_ptr<SequencedSocketData> data_;
-  SpdySessionDependencies session_deps_;
-
-  std::unique_ptr<TestNetworkQualityEstimator> network_quality_estimator_;
-
-  std::unique_ptr<HttpNetworkSession> session_;
-
   SpdyTestUtil spdy_util_;
 
   TestCompletionCallback callback_;
-
-  std::unique_ptr<CommonConnectJobParams> common_connect_job_params_;
 };
 
 // All tests are run with three different proxy types: HTTP, HTTPS (non-SPDY)
@@ -294,17 +473,22 @@ TEST_P(HttpProxyConnectJobTest, NoTunnel) {
         CreateConnectJobForHttpRequest(&test_delegate);
     test_delegate.StartJobExpectingResult(connect_job.get(), OK,
                                           io_mode == SYNCHRONOUS);
-    EXPECT_FALSE(proxy_delegate_->on_before_tunnel_request_called());
+    EXPECT_EQ(proxy_delegate_->on_before_tunnel_request_call_count(), 0u);
 
     // Proxies should not set any DNS aliases.
     EXPECT_TRUE(test_delegate.socket()->GetDnsAliases().empty());
 
-    bool is_secure_proxy = GetParam() == HTTPS || GetParam() == SPDY;
+    bool is_secure = GetParam() == HTTPS || GetParam() == SPDY;
+    bool is_http2 = GetParam() == SPDY;
     histogram_tester.ExpectTotalCount(
-        "Net.HttpProxy.ConnectLatency.Insecure.Success",
-        is_secure_proxy ? 0 : 1);
+        "Net.HttpProxy.ConnectLatency.Http1.Http.Success",
+        (!is_secure && !is_http2) ? 1 : 0);
     histogram_tester.ExpectTotalCount(
-        "Net.HttpProxy.ConnectLatency.Secure.Success", is_secure_proxy ? 1 : 0);
+        "Net.HttpProxy.ConnectLatency.Http1.Https.Success",
+        (is_secure && !is_http2) ? 1 : 0);
+    histogram_tester.ExpectTotalCount(
+        "Net.HttpProxy.ConnectLatency.Http2.Https.Success",
+        (is_secure && is_http2) ? 1 : 0);
   }
 }
 
@@ -382,7 +566,8 @@ TEST_P(HttpProxyConnectJobTest, HasEstablishedConnectionTunnel) {
       MockWrite(ASYNC, 0,
                 "CONNECT www.endpoint.test:443 HTTP/1.1\r\n"
                 "Host: www.endpoint.test:443\r\n"
-                "Proxy-Connection: keep-alive\r\n\r\n"),
+                "Proxy-Connection: keep-alive\r\n"
+                "User-Agent: test-ua\r\n\r\n"),
   };
   MockRead http1_reads[] = {
       // Pause at first read.
@@ -470,7 +655,6 @@ TEST_P(HttpProxyConnectJobTest, HasEstablishedConnectionTunnel) {
   // values.
   SSLInfo ssl_info;
   EXPECT_FALSE(test_delegate.socket()->GetSSLInfo(&ssl_info));
-  EXPECT_FALSE(test_delegate.socket()->WasAlpnNegotiated());
   EXPECT_EQ(test_delegate.socket()->GetNegotiatedProtocol(),
             NextProto::kProtoUnknown);
 }
@@ -484,17 +668,18 @@ TEST_P(HttpProxyConnectJobTest, ProxyDelegateExtraHeaders) {
                    GetParam() == HTTP ? 80 : 443));
   std::string proxy_server_uri = ProxyServerToProxyUri(proxy_server);
 
-  std::string http1_request =
+  std::string http1_request = base::StringPrintf(
       "CONNECT www.endpoint.test:443 HTTP/1.1\r\n"
       "Host: www.endpoint.test:443\r\n"
       "Proxy-Connection: keep-alive\r\n"
-      "Foo: " +
-      proxy_server_uri + "\r\n\r\n";
+      "User-Agent: test-ua\r\n"
+      "%s: %s\r\n\r\n",
+      kTestHeaderName, proxy_server_uri.c_str());
   MockWrite writes[] = {
       MockWrite(ASYNC, 0, http1_request.c_str()),
   };
 
-  const char kResponseHeaderName[] = "foo";
+  const char kResponseHeaderName[] = "bar";
   const char kResponseHeaderValue[] = "Response";
   std::string http1_response = base::StringPrintf(
       "HTTP/1.1 200 Connection Established\r\n"
@@ -505,8 +690,10 @@ TEST_P(HttpProxyConnectJobTest, ProxyDelegateExtraHeaders) {
   };
 
   const char* const kExtraRequestHeaders[] = {
-      "foo",
+      kTestSpdyHeaderName,
       proxy_server_uri.c_str(),
+      "user-agent",
+      "test-ua",
   };
   const char* const kExtraResponseHeaders[] = {
       kResponseHeaderName,
@@ -531,8 +718,163 @@ TEST_P(HttpProxyConnectJobTest, ProxyDelegateExtraHeaders) {
       CreateConnectJobForTunnel(&test_delegate);
   test_delegate.StartJobExpectingResult(connect_job.get(), OK,
                                         false /* expect_sync_result */);
+
+  ASSERT_EQ(proxy_delegate_->on_tunnel_headers_received_call_count(), 1u);
   proxy_delegate_->VerifyOnTunnelHeadersReceived(
-      proxy_server, kResponseHeaderName, kResponseHeaderValue);
+      ProxyChain(proxy_server), 0, kResponseHeaderName, kResponseHeaderValue);
+}
+
+// Test HTTP CONNECTs and SPDY CONNECTs through two proxies
+// (HTTPS -> HTTPS -> HTTPS and SPDY -> SPDY -> HTTPS).
+TEST_P(HttpProxyConnectJobTest, NestedProxyProxyDelegateExtraHeaders) {
+  if (GetParam() == HTTP) {
+    return;
+  }
+  InitProxyDelegate();
+
+  const ProxyServer& first_hop_proxy_server =
+      kHttpsNestedProxyChain.GetProxyServer(/*chain_index=*/0);
+  const ProxyServer& second_hop_proxy_server =
+      kHttpsNestedProxyChain.GetProxyServer(/*chain_index=*/1);
+
+  std::string first_hop_proxy_server_uri =
+      ProxyServerToProxyUri(first_hop_proxy_server);
+  std::string second_hop_proxy_server_uri =
+      ProxyServerToProxyUri(second_hop_proxy_server);
+
+  std::string first_hop_http1_request = base::StringPrintf(
+      "CONNECT last-hop-https-proxy.example.test:443 HTTP/1.1\r\n"
+      "Host: last-hop-https-proxy.example.test:443\r\n"
+      "Proxy-Connection: keep-alive\r\n"
+      "User-Agent: test-ua\r\n"
+      "%s: %s\r\n\r\n",
+      kTestHeaderName, first_hop_proxy_server_uri.c_str());
+  std::string second_hop_http1_request = base::StringPrintf(
+      "CONNECT www.endpoint.test:443 HTTP/1.1\r\n"
+      "Host: www.endpoint.test:443\r\n"
+      "Proxy-Connection: keep-alive\r\n"
+      "User-Agent: test-ua\r\n"
+      "%s: %s\r\n\r\n",
+      kTestHeaderName, second_hop_proxy_server_uri.c_str());
+
+  const char kResponseHeaderName[] = "bar";
+  std::string first_hop_http1_response = base::StringPrintf(
+      "HTTP/1.1 200 Connection Established\r\n"
+      "%s: %s\r\n\r\n",
+      kResponseHeaderName, first_hop_proxy_server_uri.c_str());
+
+  std::string second_hop_http1_response = base::StringPrintf(
+      "HTTP/1.1 200 Connection Established\r\n"
+      "%s: %s\r\n\r\n",
+      kResponseHeaderName, second_hop_proxy_server_uri.c_str());
+
+  MockWrite writes[] = {
+      MockWrite(ASYNC, 0, first_hop_http1_request.c_str()),
+      MockWrite(ASYNC, 2, second_hop_http1_request.c_str()),
+  };
+
+  MockRead reads[] = {
+      MockRead(ASYNC, 1, first_hop_http1_response.c_str()),
+      MockRead(ASYNC, 3, second_hop_http1_response.c_str()),
+  };
+
+  const char* const kFirstHopExtraRequestHeaders[] = {
+      kTestSpdyHeaderName,
+      first_hop_proxy_server_uri.c_str(),
+      "user-agent",
+      "test-ua",
+  };
+  const char* const kSecondHopExtraRequestHeaders[] = {
+      kTestSpdyHeaderName,
+      second_hop_proxy_server_uri.c_str(),
+      "user-agent",
+      "test-ua",
+  };
+  const char* const kFirstHopExtraResponseHeaders[] = {
+      kResponseHeaderName,
+      first_hop_proxy_server_uri.c_str(),
+  };
+  const char* const kSecondHopExtraResponseHeaders[] = {
+      kResponseHeaderName,
+      second_hop_proxy_server_uri.c_str(),
+  };
+
+  spdy::SpdySerializedFrame first_hop_req(spdy_util_.ConstructSpdyConnect(
+      kFirstHopExtraRequestHeaders, std::size(kFirstHopExtraRequestHeaders) / 2,
+      1, HttpProxyConnectJob::kH2QuicTunnelPriority,
+      second_hop_proxy_server.host_port_pair()));
+
+  spdy::SpdySerializedFrame first_hop_resp(spdy_util_.ConstructSpdyGetReply(
+      kFirstHopExtraResponseHeaders,
+      std::size(kFirstHopExtraResponseHeaders) / 2, 1));
+
+  // Use a new `SpdyTestUtil()` instance for the second hop response and request
+  // because otherwise, the serialized frames that get generated for these will
+  // use header compression and won't match what actually gets sent on the wire
+  // (where header compression doesn't affect these requests because they are
+  // associated with different streams).
+  SpdyTestUtil new_spdy_util;
+
+  spdy::SpdySerializedFrame second_hop_req(new_spdy_util.ConstructSpdyConnect(
+      kSecondHopExtraRequestHeaders,
+      std::size(kSecondHopExtraRequestHeaders) / 2, 1,
+      HttpProxyConnectJob::kH2QuicTunnelPriority,
+      HostPortPair(kEndpointHost, 443)));
+
+  // Since the second request and response are sent over the tunnel established
+  // previously, from a socket-perspective these need to be wrapped as data
+  // frames.
+  spdy::SpdySerializedFrame wrapped_second_hop_req(
+      spdy_util_.ConstructWrappedSpdyFrame(second_hop_req, 1));
+
+  spdy::SpdySerializedFrame second_hop_resp(new_spdy_util.ConstructSpdyGetReply(
+      kSecondHopExtraResponseHeaders,
+      std::size(kSecondHopExtraResponseHeaders) / 2, 1));
+
+  spdy::SpdySerializedFrame wrapped_second_hop_resp(
+      spdy_util_.ConstructWrappedSpdyFrame(second_hop_resp, 1));
+
+  MockWrite spdy_writes[] = {
+      CreateMockWrite(first_hop_req, 0),
+      CreateMockWrite(wrapped_second_hop_req, 2),
+  };
+  MockRead spdy_reads[] = {
+      CreateMockRead(first_hop_resp, 1, ASYNC),
+      // TODO(crbug.com/41180906): We have to manually delay this read so
+      // that the higher-level SPDY stream doesn't get notified of an available
+      // read before the write it initiated (the second CONNECT) finishes,
+      // triggering a DCHECK.
+      MockRead(ASYNC, ERR_IO_PENDING, 3),
+      CreateMockRead(wrapped_second_hop_resp, 4, ASYNC),
+      MockRead(SYNCHRONOUS, ERR_IO_PENDING, 5),
+  };
+
+  Initialize(reads, writes, spdy_reads, spdy_writes, ASYNC,
+             /*two_ssl_proxies=*/true);
+
+  TestConnectJobDelegate test_delegate;
+  std::unique_ptr<ConnectJob> connect_job =
+      CreateConnectJobForNestedProxyTunnel(&test_delegate);
+
+  if (GetParam() != SPDY) {
+    test_delegate.StartJobExpectingResult(connect_job.get(), OK,
+                                          /*expect_sync_result=*/false);
+  } else {
+    EXPECT_THAT(connect_job->Connect(), test::IsError(ERR_IO_PENDING));
+
+    data_->RunUntilPaused();
+    base::RunLoop().RunUntilIdle();
+    data_->Resume();
+
+    EXPECT_THAT(test_delegate.WaitForResult(), test::IsOk());
+  }
+  ASSERT_EQ(proxy_delegate_->on_tunnel_headers_received_call_count(), 2u);
+  proxy_delegate_->VerifyOnTunnelHeadersReceived(
+      kHttpsNestedProxyChain, /*chain_index=*/0, kResponseHeaderName,
+      first_hop_proxy_server_uri, /*call_index=*/0);
+  proxy_delegate_->VerifyOnTunnelHeadersReceived(
+      kHttpsNestedProxyChain, /*chain_index=*/1, kResponseHeaderName,
+      second_hop_proxy_server_uri, /*call_index=*/1);
 }
 
 // Test the case where auth credentials are not cached.
@@ -546,11 +888,13 @@ TEST_P(HttpProxyConnectJobTest, NeedAuth) {
         MockWrite(io_mode, 0,
                   "CONNECT www.endpoint.test:443 HTTP/1.1\r\n"
                   "Host: www.endpoint.test:443\r\n"
-                  "Proxy-Connection: keep-alive\r\n\r\n"),
+                  "Proxy-Connection: keep-alive\r\n"
+                  "User-Agent: test-ua\r\n\r\n"),
         MockWrite(io_mode, 5,
                   "CONNECT www.endpoint.test:443 HTTP/1.1\r\n"
                   "Host: www.endpoint.test:443\r\n"
                   "Proxy-Connection: keep-alive\r\n"
+                  "User-Agent: test-ua\r\n"
                   "Proxy-Authorization: Basic Zm9vOmJhcg==\r\n\r\n"),
     };
     MockRead reads[] = {
@@ -574,6 +918,8 @@ TEST_P(HttpProxyConnectJobTest, NeedAuth) {
     // After calling trans.RestartWithAuth(), this is the request we should
     // be issuing -- the final header line contains the credentials.
     const char* const kSpdyAuthCredentials[] = {
+        "user-agent",
+        "test-ua",
         "proxy-authorization",
         "Basic Zm9vOmJhcg==",
     };
@@ -632,12 +978,13 @@ TEST_P(HttpProxyConnectJobTest, NeedAuth) {
     // Per API contract, the request can not complete synchronously.
     EXPECT_FALSE(test_delegate.has_result());
 
-    EXPECT_EQ(net::OK, test_delegate.WaitForResult());
+    EXPECT_EQ(OK, test_delegate.WaitForResult());
     EXPECT_EQ(1, test_delegate.num_auth_challenges());
 
     // Close the H2 session to prevent reuse.
-    if (GetParam() == SPDY)
+    if (GetParam() == SPDY) {
       session_->CloseAllConnections(ERR_FAILED, "Very good reason");
+    }
     // Also need to clear the auth cache before re-running the test.
     session_->http_auth_cache()->ClearAllEntries();
   }
@@ -655,16 +1002,19 @@ TEST_P(HttpProxyConnectJobTest, NeedAuthTwice) {
         MockWrite(io_mode, 0,
                   "CONNECT www.endpoint.test:443 HTTP/1.1\r\n"
                   "Host: www.endpoint.test:443\r\n"
-                  "Proxy-Connection: keep-alive\r\n\r\n"),
+                  "Proxy-Connection: keep-alive\r\n"
+                  "User-Agent: test-ua\r\n\r\n"),
         MockWrite(io_mode, 2,
                   "CONNECT www.endpoint.test:443 HTTP/1.1\r\n"
                   "Host: www.endpoint.test:443\r\n"
                   "Proxy-Connection: keep-alive\r\n"
+                  "User-Agent: test-ua\r\n"
                   "Proxy-Authorization: Basic Zm9vOmJhcg==\r\n\r\n"),
         MockWrite(io_mode, 4,
                   "CONNECT www.endpoint.test:443 HTTP/1.1\r\n"
                   "Host: www.endpoint.test:443\r\n"
                   "Proxy-Connection: keep-alive\r\n"
+                  "User-Agent: test-ua\r\n"
                   "Proxy-Authorization: Basic Zm9vOmJhcg==\r\n\r\n"),
     };
     MockRead reads[] = {
@@ -691,6 +1041,8 @@ TEST_P(HttpProxyConnectJobTest, NeedAuthTwice) {
     // After calling trans.RestartWithAuth(), this is the request we should
     // be issuing -- the final header line contains the credentials.
     const char* const kSpdyAuthCredentials[] = {
+        "user-agent",
+        "test-ua",
         "proxy-authorization",
         "Basic Zm9vOmJhcg==",
     };
@@ -774,12 +1126,13 @@ TEST_P(HttpProxyConnectJobTest, NeedAuthTwice) {
     // Per API contract, the request can't complete synchronously.
     EXPECT_FALSE(test_delegate.has_result());
 
-    EXPECT_EQ(net::OK, test_delegate.WaitForResult());
+    EXPECT_EQ(OK, test_delegate.WaitForResult());
     EXPECT_EQ(2, test_delegate.num_auth_challenges());
 
     // Close the H2 session to prevent reuse.
-    if (GetParam() == SPDY)
+    if (GetParam() == SPDY) {
       session_->CloseAllConnections(ERR_FAILED, "Very good reason");
+    }
     // Also need to clear the auth cache before re-running the test.
     session_->http_auth_cache()->ClearAllEntries();
   }
@@ -795,7 +1148,7 @@ TEST_P(HttpProxyConnectJobTest, HaveAuth) {
                          : GURL(std::string("https://") + kHttpsProxyHost));
   session_->http_auth_cache()->Add(
       proxy_scheme_host_port, HttpAuth::AUTH_PROXY, "MyRealm1",
-      HttpAuth::AUTH_SCHEME_BASIC, NetworkIsolationKey(),
+      HttpAuth::AUTH_SCHEME_BASIC, NetworkAnonymizationKey(),
       "Basic realm=MyRealm1", AuthCredentials(kFoo, kBar), "/");
 
   for (IoMode io_mode : {SYNCHRONOUS, ASYNC}) {
@@ -808,6 +1161,7 @@ TEST_P(HttpProxyConnectJobTest, HaveAuth) {
                   "CONNECT www.endpoint.test:443 HTTP/1.1\r\n"
                   "Host: www.endpoint.test:443\r\n"
                   "Proxy-Connection: keep-alive\r\n"
+                  "User-Agent: test-ua\r\n"
                   "Proxy-Authorization: Basic Zm9vOmJhcg==\r\n\r\n"),
     };
     MockRead reads[] = {
@@ -815,6 +1169,8 @@ TEST_P(HttpProxyConnectJobTest, HaveAuth) {
     };
 
     const char* const kSpdyAuthCredentials[] = {
+        "user-agent",
+        "test-ua",
         "proxy-authorization",
         "Basic Zm9vOmJhcg==",
     };
@@ -847,8 +1203,9 @@ TEST_P(HttpProxyConnectJobTest, HaveAuth) {
         connect_job.get(), OK, io_mode == SYNCHRONOUS && GetParam() != SPDY);
 
     // Close the H2 session to prevent reuse.
-    if (GetParam() == SPDY)
+    if (GetParam() == SPDY) {
       session_->CloseAllConnections(ERR_FAILED, "Very good reason");
+    }
   }
 }
 
@@ -878,8 +1235,9 @@ TEST_P(HttpProxyConnectJobTest, RequestPriority) {
     for (int new_priority = MINIMUM_PRIORITY; new_priority <= MAXIMUM_PRIORITY;
          ++new_priority) {
       SCOPED_TRACE(new_priority);
-      if (initial_priority == new_priority)
+      if (initial_priority == new_priority) {
         continue;
+      }
       TestConnectJobDelegate test_delegate;
       std::unique_ptr<ConnectJob> connect_job = CreateConnectJobForHttpRequest(
           &test_delegate, static_cast<RequestPriority>(initial_priority));
@@ -914,8 +1272,9 @@ TEST_P(HttpProxyConnectJobTest, SecureDnsPolicy) {
 }
 
 TEST_P(HttpProxyConnectJobTest, SpdySessionKeyDisableSecureDns) {
-  if (GetParam() != SPDY)
+  if (GetParam() != SPDY) {
     return;
+  }
 
   SSLSocketDataProvider ssl_data(ASYNC, OK);
   InitializeSpdySsl(&ssl_data);
@@ -935,37 +1294,27 @@ TEST_P(HttpProxyConnectJobTest, SpdySessionKeyDisableSecureDns) {
   session_deps_.socket_factory->AddSocketDataProvider(sequenced_data);
 
   TestConnectJobDelegate test_delegate;
-  auto ssl_params = base::MakeRefCounted<SSLSocketParams>(
-      base::MakeRefCounted<TransportSocketParams>(
-          HostPortPair(kHttpsProxyHost, 443), NetworkIsolationKey(),
-          SecureDnsPolicy::kDisable, OnHostResolutionCallback(),
-          /*supported_alpns=*/base::flat_set<std::string>()),
-      nullptr, nullptr, HostPortPair(kHttpsProxyHost, 443), SSLConfig(),
-      PRIVACY_MODE_DISABLED, NetworkIsolationKey());
-  auto http_proxy_params = base::MakeRefCounted<HttpProxySocketParams>(
-      nullptr /* tcp_params */, std::move(ssl_params), false /* is_quic */,
-      HostPortPair(kEndpointHost, 443),
-      /*tunnel=*/true, TRAFFIC_ANNOTATION_FOR_TESTS, NetworkIsolationKey());
-
-  std::unique_ptr<ConnectJob> connect_job = CreateConnectJob(
-      std::move(http_proxy_params), &test_delegate, DEFAULT_PRIORITY);
+  std::unique_ptr<ConnectJob> connect_job = CreateConnectJobForTunnel(
+      &test_delegate, DEFAULT_PRIORITY, SecureDnsPolicy::kDisable);
 
   EXPECT_THAT(connect_job->Connect(), test::IsError(ERR_IO_PENDING));
   EXPECT_THAT(test_delegate.WaitForResult(), test::IsOk());
   EXPECT_TRUE(
       common_connect_job_params_->spdy_session_pool->FindAvailableSession(
-          SpdySessionKey(HostPortPair(kHttpsProxyHost, 443),
-                         ProxyServer::Direct(), PRIVACY_MODE_DISABLED,
-                         SpdySessionKey::IsProxySession::kTrue, SocketTag(),
-                         NetworkIsolationKey(), SecureDnsPolicy::kDisable),
+          SpdySessionKey(kHttpsProxyServer.host_port_pair(),
+                         PRIVACY_MODE_DISABLED, ProxyChain::Direct(),
+                         SessionUsage::kProxy, SocketTag(),
+                         NetworkAnonymizationKey(), SecureDnsPolicy::kDisable,
+                         /*disable_cert_verification_network_fetches=*/true),
           /* enable_ip_based_pooling = */ false,
           /* is_websocket = */ false, NetLogWithSource()));
   EXPECT_FALSE(
       common_connect_job_params_->spdy_session_pool->FindAvailableSession(
-          SpdySessionKey(HostPortPair(kHttpsProxyHost, 443),
-                         ProxyServer::Direct(), PRIVACY_MODE_DISABLED,
-                         SpdySessionKey::IsProxySession::kTrue, SocketTag(),
-                         NetworkIsolationKey(), SecureDnsPolicy::kAllow),
+          SpdySessionKey(kHttpsProxyServer.host_port_pair(),
+                         PRIVACY_MODE_DISABLED, ProxyChain::Direct(),
+                         SessionUsage::kProxy, SocketTag(),
+                         NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+                         /*disable_cert_verification_network_fetches=*/true),
           /* enable_ip_based_pooling = */ false,
           /* is_websocket = */ false, NetLogWithSource()));
 }
@@ -973,8 +1322,9 @@ TEST_P(HttpProxyConnectJobTest, SpdySessionKeyDisableSecureDns) {
 // Make sure that HttpProxyConnectJob does not pass on its priority to its
 // SPDY session's socket request on Init, or on SetPriority.
 TEST_P(HttpProxyConnectJobTest, SetSpdySessionSocketRequestPriority) {
-  if (GetParam() != SPDY)
+  if (GetParam() != SPDY) {
     return;
+  }
   session_deps_.host_resolver->set_synchronous_mode(true);
 
   // The SPDY CONNECT request should have a priority of kH2QuicTunnelPriority,
@@ -1007,11 +1357,180 @@ TEST_P(HttpProxyConnectJobTest, SetSpdySessionSocketRequestPriority) {
   EXPECT_THAT(test_delegate.WaitForResult(), test::IsOk());
 }
 
+TEST_P(HttpProxyConnectJobTest, SpdyInadequateTransportSecurity) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(
+      features::kSpdySessionForProxyAdditionalChecks);
+
+  if (GetParam() != SPDY) {
+    return;
+  }
+
+  SSLSocketDataProvider ssl_data(ASYNC, OK);
+  InitializeSpdySsl(&ssl_data);
+  // TLS 1.1 is inadequate.
+  SSLConnectionStatusSetVersion(SSL_CONNECTION_VERSION_TLS1_1,
+                                &ssl_data.ssl_info.connection_status);
+  session_deps_.socket_factory->AddSSLSocketDataProvider(&ssl_data);
+
+  SequencedSocketData spdy_data;
+  spdy_data.set_connect_data(MockConnect(ASYNC, OK));
+  SequencedSocketData* sequenced_data = &spdy_data;
+  session_deps_.socket_factory->AddSocketDataProvider(sequenced_data);
+
+  TestConnectJobDelegate test_delegate;
+  std::unique_ptr<ConnectJob> connect_job = CreateConnectJobForTunnel(
+      &test_delegate, DEFAULT_PRIORITY, SecureDnsPolicy::kDisable);
+
+  EXPECT_THAT(connect_job->Connect(), test::IsError(ERR_IO_PENDING));
+  EXPECT_THAT(test_delegate.WaitForResult(),
+              test::IsError(ERR_HTTP2_INADEQUATE_TRANSPORT_SECURITY));
+  EXPECT_FALSE(
+      common_connect_job_params_->spdy_session_pool->FindAvailableSession(
+          SpdySessionKey(kHttpsProxyServer.host_port_pair(),
+                         PRIVACY_MODE_DISABLED, ProxyChain::Direct(),
+                         SessionUsage::kProxy, SocketTag(),
+                         NetworkAnonymizationKey(), SecureDnsPolicy::kDisable,
+                         /*disable_cert_verification_network_fetches=*/true),
+          /*enable_ip_based_pooling=*/false,
+          /*is_websocket=*/false, NetLogWithSource()));
+}
+
+TEST_P(HttpProxyConnectJobTest, SpdyValidAlps) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(
+      features::kSpdySessionForProxyAdditionalChecks);
+
+  if (GetParam() != SPDY) {
+    return;
+  }
+
+  SSLSocketDataProvider ssl_data(ASYNC, OK);
+  InitializeSpdySsl(&ssl_data);
+  ssl_data.peer_application_settings = HexDecode(
+      "000000"      // length
+      "04"          // type SETTINGS
+      "00"          // flags
+      "00000000");  // stream ID
+  session_deps_.socket_factory->AddSSLSocketDataProvider(&ssl_data);
+
+  // SPDY proxy CONNECT request / response, with a pause during the read.
+  spdy::SpdySerializedFrame req(spdy_util_.ConstructSpdyConnect(
+      nullptr, 0, 1, HttpProxyConnectJob::kH2QuicTunnelPriority,
+      HostPortPair(kEndpointHost, 443)));
+  MockWrite spdy_writes[] = {CreateMockWrite(req, 0)};
+  spdy::SpdySerializedFrame resp(
+      spdy_util_.ConstructSpdyGetReply(nullptr, 0, 1));
+  MockRead spdy_reads[] = {CreateMockRead(resp, 1), MockRead(ASYNC, 0, 2)};
+  SequencedSocketData spdy_data(spdy_reads, spdy_writes);
+  spdy_data.set_connect_data(MockConnect(ASYNC, OK));
+  SequencedSocketData* sequenced_data = &spdy_data;
+  session_deps_.socket_factory->AddSocketDataProvider(sequenced_data);
+
+  TestConnectJobDelegate test_delegate;
+  std::unique_ptr<ConnectJob> connect_job = CreateConnectJobForTunnel(
+      &test_delegate, DEFAULT_PRIORITY, SecureDnsPolicy::kDisable);
+
+  EXPECT_THAT(connect_job->Connect(), test::IsError(ERR_IO_PENDING));
+  EXPECT_THAT(test_delegate.WaitForResult(), test::IsOk());
+  EXPECT_TRUE(
+      common_connect_job_params_->spdy_session_pool->FindAvailableSession(
+          SpdySessionKey(kHttpsProxyServer.host_port_pair(),
+                         PRIVACY_MODE_DISABLED, ProxyChain::Direct(),
+                         SessionUsage::kProxy, SocketTag(),
+                         NetworkAnonymizationKey(), SecureDnsPolicy::kDisable,
+                         /*disable_cert_verification_network_fetches=*/true),
+          /*enable_ip_based_pooling=*/false,
+          /*is_websocket=*/false, NetLogWithSource()));
+}
+
+TEST_P(HttpProxyConnectJobTest, SpdyInvalidAlpsCheckEnabled) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(
+      features::kSpdySessionForProxyAdditionalChecks);
+
+  if (GetParam() != SPDY) {
+    return;
+  }
+
+  SSLSocketDataProvider ssl_data(ASYNC, OK);
+  InitializeSpdySsl(&ssl_data);
+  ssl_data.peer_application_settings = "invalid";
+  session_deps_.socket_factory->AddSSLSocketDataProvider(&ssl_data);
+
+  SequencedSocketData spdy_data;
+  spdy_data.set_connect_data(MockConnect(ASYNC, OK));
+  SequencedSocketData* sequenced_data = &spdy_data;
+  session_deps_.socket_factory->AddSocketDataProvider(sequenced_data);
+
+  TestConnectJobDelegate test_delegate;
+  std::unique_ptr<ConnectJob> connect_job = CreateConnectJobForTunnel(
+      &test_delegate, DEFAULT_PRIORITY, SecureDnsPolicy::kDisable);
+
+  EXPECT_THAT(connect_job->Connect(), test::IsError(ERR_IO_PENDING));
+  EXPECT_THAT(test_delegate.WaitForResult(),
+              test::IsError(ERR_HTTP2_PROTOCOL_ERROR));
+  EXPECT_FALSE(
+      common_connect_job_params_->spdy_session_pool->FindAvailableSession(
+          SpdySessionKey(kHttpsProxyServer.host_port_pair(),
+                         PRIVACY_MODE_DISABLED, ProxyChain::Direct(),
+                         SessionUsage::kProxy, SocketTag(),
+                         NetworkAnonymizationKey(), SecureDnsPolicy::kDisable,
+                         /*disable_cert_verification_network_fetches=*/true),
+          /*enable_ip_based_pooling=*/false,
+          /*is_websocket=*/false, NetLogWithSource()));
+}
+
+TEST_P(HttpProxyConnectJobTest, SpdyInvalidAlpsCheckDisabled) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndDisableFeature(
+      features::kSpdySessionForProxyAdditionalChecks);
+
+  if (GetParam() != SPDY) {
+    return;
+  }
+
+  SSLSocketDataProvider ssl_data(ASYNC, OK);
+  InitializeSpdySsl(&ssl_data);
+  ssl_data.peer_application_settings = "invalid";
+  session_deps_.socket_factory->AddSSLSocketDataProvider(&ssl_data);
+
+  // SPDY proxy CONNECT request / response, with a pause during the read.
+  spdy::SpdySerializedFrame req(spdy_util_.ConstructSpdyConnect(
+      nullptr, 0, 1, HttpProxyConnectJob::kH2QuicTunnelPriority,
+      HostPortPair(kEndpointHost, 443)));
+  MockWrite spdy_writes[] = {CreateMockWrite(req, 0)};
+  spdy::SpdySerializedFrame resp(
+      spdy_util_.ConstructSpdyGetReply(nullptr, 0, 1));
+  MockRead spdy_reads[] = {CreateMockRead(resp, 1), MockRead(ASYNC, 0, 2)};
+  SequencedSocketData spdy_data(spdy_reads, spdy_writes);
+  spdy_data.set_connect_data(MockConnect(ASYNC, OK));
+  SequencedSocketData* sequenced_data = &spdy_data;
+  session_deps_.socket_factory->AddSocketDataProvider(sequenced_data);
+
+  TestConnectJobDelegate test_delegate;
+  std::unique_ptr<ConnectJob> connect_job = CreateConnectJobForTunnel(
+      &test_delegate, DEFAULT_PRIORITY, SecureDnsPolicy::kDisable);
+
+  EXPECT_THAT(connect_job->Connect(), test::IsError(ERR_IO_PENDING));
+  EXPECT_THAT(test_delegate.WaitForResult(), test::IsOk());
+  EXPECT_TRUE(
+      common_connect_job_params_->spdy_session_pool->FindAvailableSession(
+          SpdySessionKey(kHttpsProxyServer.host_port_pair(),
+                         PRIVACY_MODE_DISABLED, ProxyChain::Direct(),
+                         SessionUsage::kProxy, SocketTag(),
+                         NetworkAnonymizationKey(), SecureDnsPolicy::kDisable,
+                         /*disable_cert_verification_network_fetches=*/true),
+          /*enable_ip_based_pooling=*/false,
+          /*is_websocket=*/false, NetLogWithSource()));
+}
+
 TEST_P(HttpProxyConnectJobTest, TCPError) {
   // SPDY and HTTPS are identical, as they only differ once a connection is
   // established.
-  if (GetParam() == SPDY)
+  if (GetParam() == SPDY) {
     return;
+  }
   for (IoMode io_mode : {SYNCHRONOUS, ASYNC}) {
     SCOPED_TRACE(io_mode);
     session_deps_.host_resolver->set_synchronous_mode(io_mode == SYNCHRONOUS);
@@ -1029,15 +1548,18 @@ TEST_P(HttpProxyConnectJobTest, TCPError) {
 
     bool is_secure_proxy = GetParam() == HTTPS;
     histogram_tester.ExpectTotalCount(
-        "Net.HttpProxy.ConnectLatency.Insecure.Error", is_secure_proxy ? 0 : 1);
+        "Net.HttpProxy.ConnectLatency.Http1.Http.Error",
+        is_secure_proxy ? 0 : 1);
     histogram_tester.ExpectTotalCount(
-        "Net.HttpProxy.ConnectLatency.Secure.Error", is_secure_proxy ? 1 : 0);
+        "Net.HttpProxy.ConnectLatency.Http1.Https.Error",
+        is_secure_proxy ? 1 : 0);
   }
 }
 
 TEST_P(HttpProxyConnectJobTest, SSLError) {
-  if (GetParam() == HTTP)
+  if (GetParam() == HTTP) {
     return;
+  }
 
   for (IoMode io_mode : {SYNCHRONOUS, ASYNC}) {
     SCOPED_TRACE(io_mode);
@@ -1062,9 +1584,13 @@ TEST_P(HttpProxyConnectJobTest, SSLError) {
                                           io_mode == SYNCHRONOUS);
 
     histogram_tester.ExpectTotalCount(
-        "Net.HttpProxy.ConnectLatency.Secure.Error", 1);
+        "Net.HttpProxy.ConnectLatency.Http1.Https.Error", 1);
     histogram_tester.ExpectTotalCount(
-        "Net.HttpProxy.ConnectLatency.Insecure.Error", 0);
+        "Net.HttpProxy.ConnectLatency.Http1.Http.Error", 0);
+    histogram_tester.ExpectTotalCount(
+        "Net.HttpProxy.ConnectLatency.Http2.Https.Error", 0);
+    histogram_tester.ExpectTotalCount(
+        "Net.HttpProxy.ConnectLatency.Http2.Http.Error", 0);
   }
 }
 
@@ -1077,7 +1603,8 @@ TEST_P(HttpProxyConnectJobTest, TunnelUnexpectedClose) {
         MockWrite(io_mode, 0,
                   "CONNECT www.endpoint.test:443 HTTP/1.1\r\n"
                   "Host: www.endpoint.test:443\r\n"
-                  "Proxy-Connection: keep-alive\r\n\r\n"),
+                  "Proxy-Connection: keep-alive\r\n"
+                  "User-Agent: test-ua\r\n\r\n"),
     };
     MockRead reads[] = {
         MockRead(io_mode, 1, "HTTP/1.1 200 Conn"),
@@ -1130,7 +1657,8 @@ TEST_P(HttpProxyConnectJobTest, Tunnel1xxResponse) {
         MockWrite(io_mode, 0,
                   "CONNECT www.endpoint.test:443 HTTP/1.1\r\n"
                   "Host: www.endpoint.test:443\r\n"
-                  "Proxy-Connection: keep-alive\r\n\r\n"),
+                  "Proxy-Connection: keep-alive\r\n"
+                  "User-Agent: test-ua\r\n\r\n"),
     };
     MockRead reads[] = {
         MockRead(io_mode, 1, "HTTP/1.1 100 Continue\r\n\r\n"),
@@ -1158,7 +1686,8 @@ TEST_P(HttpProxyConnectJobTest, TunnelSetupError) {
         MockWrite(io_mode, 0,
                   "CONNECT www.endpoint.test:443 HTTP/1.1\r\n"
                   "Host: www.endpoint.test:443\r\n"
-                  "Proxy-Connection: keep-alive\r\n\r\n"),
+                  "Proxy-Connection: keep-alive\r\n"
+                  "User-Agent: test-ua\r\n\r\n"),
     };
     MockRead reads[] = {
         MockRead(io_mode, 1, "HTTP/1.1 304 Not Modified\r\n\r\n"),
@@ -1196,8 +1725,9 @@ TEST_P(HttpProxyConnectJobTest, TunnelSetupError) {
 }
 
 TEST_P(HttpProxyConnectJobTest, SslClientAuth) {
-  if (GetParam() == HTTP)
+  if (GetParam() == HTTP) {
     return;
+  }
   for (IoMode io_mode : {SYNCHRONOUS, ASYNC}) {
     SCOPED_TRACE(io_mode);
     session_deps_.host_resolver->set_synchronous_mode(io_mode == SYNCHRONOUS);
@@ -1208,8 +1738,9 @@ TEST_P(HttpProxyConnectJobTest, SslClientAuth) {
                                     base::span<const MockWrite>());
     session_deps_.socket_factory->AddSocketDataProvider(&socket_data);
     SSLSocketDataProvider ssl_data(io_mode, ERR_SSL_CLIENT_AUTH_CERT_NEEDED);
-    if (GetParam() == SPDY)
+    if (GetParam() == SPDY) {
       InitializeSpdySsl(&ssl_data);
+    }
     session_deps_.socket_factory->AddSSLSocketDataProvider(&ssl_data);
 
     // Redirects in the HTTPS case return errors, but also return sockets.
@@ -1221,9 +1752,9 @@ TEST_P(HttpProxyConnectJobTest, SslClientAuth) {
                                           io_mode == SYNCHRONOUS);
 
     histogram_tester.ExpectTotalCount(
-        "Net.HttpProxy.ConnectLatency.Secure.Error", 1);
+        "Net.HttpProxy.ConnectLatency.Http1.Https.Error", 1);
     histogram_tester.ExpectTotalCount(
-        "Net.HttpProxy.ConnectLatency.Insecure.Error", 0);
+        "Net.HttpProxy.ConnectLatency.Http1.Http.Error", 0);
   }
 }
 
@@ -1246,7 +1777,8 @@ TEST_P(HttpProxyConnectJobTest, TunnelSetupRedirect) {
         MockWrite(io_mode, 0,
                   "CONNECT www.endpoint.test:443 HTTP/1.1\r\n"
                   "Host: www.endpoint.test:443\r\n"
-                  "Proxy-Connection: keep-alive\r\n\r\n"),
+                  "Proxy-Connection: keep-alive\r\n"
+                  "User-Agent: test-ua\r\n\r\n"),
     };
     MockRead reads[] = {
         MockRead(io_mode, 1, kResponseText.c_str()),
@@ -1324,11 +1856,13 @@ TEST_P(HttpProxyConnectJobTest, TestTimeoutsAuthChallenge) {
       MockWrite(ASYNC, 0,
                 "CONNECT www.endpoint.test:443 HTTP/1.1\r\n"
                 "Host: www.endpoint.test:443\r\n"
-                "Proxy-Connection: keep-alive\r\n\r\n"),
+                "Proxy-Connection: keep-alive\r\n"
+                "User-Agent: test-ua\r\n\r\n"),
       MockWrite(ASYNC, 3,
                 "CONNECT www.endpoint.test:443 HTTP/1.1\r\n"
                 "Host: www.endpoint.test:443\r\n"
                 "Proxy-Connection: keep-alive\r\n"
+                "User-Agent: test-ua\r\n"
                 "Proxy-Authorization: Basic Zm9vOmJhcg==\r\n\r\n"),
   };
   MockRead reads[] = {
@@ -1355,6 +1889,8 @@ TEST_P(HttpProxyConnectJobTest, TestTimeoutsAuthChallenge) {
   // After calling trans.RestartWithAuth(), this is the request we should
   // be issuing -- the final header line contains the credentials.
   const char* const kSpdyAuthCredentials[] = {
+      "user-agent",
+      "test-ua",
       "proxy-authorization",
       "Basic Zm9vOmJhcg==",
   };
@@ -1479,8 +2015,9 @@ TEST_P(HttpProxyConnectJobTest, TestTimeoutsAuthChallenge) {
 // once credentials are received.
 TEST_P(HttpProxyConnectJobTest, TestTimeoutsAuthChallengeNewConnection) {
   // Proxy-Connection: Close doesn't make sense with H2.
-  if (GetParam() == SPDY)
+  if (GetParam() == SPDY) {
     return;
+  }
 
   enum class TimeoutPhase {
     CONNECT,
@@ -1508,7 +2045,8 @@ TEST_P(HttpProxyConnectJobTest, TestTimeoutsAuthChallengeNewConnection) {
       MockWrite(ASYNC, 0,
                 "CONNECT www.endpoint.test:443 HTTP/1.1\r\n"
                 "Host: www.endpoint.test:443\r\n"
-                "Proxy-Connection: keep-alive\r\n\r\n"),
+                "Proxy-Connection: keep-alive\r\n"
+                "User-Agent: test-ua\r\n\r\n"),
   };
   MockRead reads[] = {
       // Pause at read.
@@ -1525,6 +2063,7 @@ TEST_P(HttpProxyConnectJobTest, TestTimeoutsAuthChallengeNewConnection) {
                 "CONNECT www.endpoint.test:443 HTTP/1.1\r\n"
                 "Host: www.endpoint.test:443\r\n"
                 "Proxy-Connection: keep-alive\r\n"
+                "User-Agent: test-ua\r\n"
                 "Proxy-Authorization: Basic Zm9vOmJhcg==\r\n\r\n"),
   };
   MockRead reads2[] = {
@@ -1652,7 +2191,7 @@ TEST_P(HttpProxyConnectJobTest, ConnectionTimeoutNoNQE) {
   base::TimeDelta alternate_connection_timeout =
       HttpProxyConnectJob::AlternateNestedConnectionTimeout(
           *CreateParams(true /* tunnel */, SecureDnsPolicy::kAllow),
-          nullptr /* network_quality_estimator */);
+          /*network_quality_estimator=*/nullptr);
 
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
   // On Android and iOS, when there's no NQE, there's a hard-coded alternate
@@ -1800,6 +2339,190 @@ TEST_P(HttpProxyConnectJobTest, ProxyPoolTimeoutWithExperimentDefaultParams) {
   rtt_estimate = base::Seconds(0);
   network_quality_estimator_->SetStartTimeNullHttpRtt(rtt_estimate);
   EXPECT_LT(rtt_estimate, GetNestedConnectionTimeout());
+}
+
+// A Mock QuicSessionPool which can intercept calls to RequestSession.
+class MockQuicSessionPool : public QuicSessionPool {
+ public:
+  explicit MockQuicSessionPool(HttpServerProperties* http_server_properties,
+                               CertVerifier* cert_verifier,
+                               TransportSecurityState* transport_security_state,
+                               QuicContext* context)
+      : QuicSessionPool(/*net_log=*/nullptr,
+                        /*host_resolver=*/nullptr,
+                        /*ssl_config_service=*/nullptr,
+                        /*client_socket_factory=*/nullptr,
+                        http_server_properties,
+                        cert_verifier,
+                        transport_security_state,
+                        /*proxy_delegate=*/nullptr,
+                        /*sct_auditing_delegate=*/nullptr,
+                        /*socket_performance_watcher_factory=*/nullptr,
+                        /*quic_crypto_client_stream_factory=*/nullptr,
+                        context) {}
+
+  MockQuicSessionPool(const MockQuicSessionPool&) = delete;
+  MockQuicSessionPool& operator=(const MockQuicSessionPool&) = delete;
+
+  ~MockQuicSessionPool() override = default;
+
+  // Requests are cancelled during test tear-down, so ignore those calls.
+  MOCK_METHOD1(CancelRequest, void(QuicSessionRequest* request));
+
+  MOCK_METHOD(
+      int,
+      RequestSession,
+      (const QuicSessionKey& session_key,
+       url::SchemeHostPort destination,
+       quic::ParsedQuicVersion quic_version,
+       const std::optional<NetworkTrafficAnnotationTag> proxy_annotation_tag,
+       const HttpUserAgentSettings* http_user_agent_settings,
+       RequestPriority priority,
+       bool use_dns_aliases,
+       int cert_verify_flags,
+       const GURL& url,
+       const NetLogWithSource& net_log,
+       QuicSessionRequest* request));
+};
+
+class HttpProxyConnectQuicJobTest : public HttpProxyConnectJobTestBase,
+                                    public testing::Test {
+ public:
+  HttpProxyConnectQuicJobTest()
+      : mock_quic_session_pool_(session_->http_server_properties(),
+                                session_->cert_verifier(),
+                                session_->context().transport_security_state,
+                                session_->context().quic_context) {
+    common_connect_job_params_->quic_session_pool = &mock_quic_session_pool_;
+  }
+
+ protected:
+  MockQuicSessionPool mock_quic_session_pool_;
+};
+
+// Test that a QUIC session is properly requested from the QuicSessionPool.
+TEST_F(HttpProxyConnectQuicJobTest, RequestQuicProxy) {
+  // Create params for a single-hop QUIC proxy. This consists of an
+  // HttpProxySocketParams, an SSLSocketParams from which a few values are used,
+  // and a TransportSocketParams which is totally unused but must be non-null.
+  ProxyChain proxy_chain = ProxyChain::ForIpProtection({ProxyServer(
+      ProxyServer::SCHEME_QUIC, HostPortPair(kQuicProxyHost, 443))});
+  SSLConfig quic_ssl_config;
+  scoped_refptr<HttpProxySocketParams> http_proxy_socket_params =
+      base::MakeRefCounted<HttpProxySocketParams>(
+          quic_ssl_config, HostPortPair(kEndpointHost, 443), proxy_chain,
+          /*proxy_chain_index=*/0, /*tunnel=*/true,
+          TRAFFIC_ANNOTATION_FOR_TESTS, NetworkAnonymizationKey(),
+          SecureDnsPolicy::kAllow);
+
+  TestConnectJobDelegate test_delegate;
+  auto connect_job = std::make_unique<HttpProxyConnectJob>(
+      DEFAULT_PRIORITY, SocketTag(), common_connect_job_params_.get(),
+      std::move(http_proxy_socket_params), &test_delegate,
+      /*net_log=*/nullptr);
+
+  // Expect a session to be requested, and then leave it pending.
+  EXPECT_CALL(mock_quic_session_pool_,
+              RequestSession(_, _, _, _, _, _, _, _, _, _,
+                             QSRHasProxyChain(proxy_chain.Prefix(0))))
+      .Times(1)
+      .WillRepeatedly(testing::Return(ERR_IO_PENDING));
+
+  // Expect the request to be cancelled during test tear-down.
+  EXPECT_CALL(mock_quic_session_pool_, CancelRequest).Times(1);
+
+  EXPECT_THAT(connect_job->Connect(), test::IsError(ERR_IO_PENDING));
+}
+
+// Test that for QUIC sessions to the proxy, version RFCv1 is used.
+TEST_F(HttpProxyConnectQuicJobTest, QuicProxyRequestUsesRfcV1) {
+  // While the default supported QUIC version is RFCv1, to test that RFCv1 is
+  // forced for proxy connections we need to specify a different default. If
+  // that ever changes and we still want to continue forcing QUIC connections to
+  // proxy servers to use RFCv1, then we won't need to modify
+  // `supported_versions` anymore (and could merge this test with
+  // RequestQuicProxy above).
+  ASSERT_EQ(DefaultSupportedQuicVersions()[0],
+            quic::ParsedQuicVersion::RFCv1());
+
+  auto supported_versions = quic::ParsedQuicVersionVector{
+      quic::ParsedQuicVersion::RFCv2(), quic::ParsedQuicVersion::RFCv1()};
+  common_connect_job_params_->quic_supported_versions = &supported_versions;
+
+  ProxyChain proxy_chain = ProxyChain::ForIpProtection({ProxyServer(
+      ProxyServer::SCHEME_QUIC, HostPortPair(kQuicProxyHost, 443))});
+  SSLConfig quic_ssl_config;
+  scoped_refptr<HttpProxySocketParams> http_proxy_socket_params =
+      base::MakeRefCounted<HttpProxySocketParams>(
+          quic_ssl_config, HostPortPair(kEndpointHost, 443), proxy_chain,
+          /*proxy_chain_index=*/0, /*tunnel=*/true,
+          TRAFFIC_ANNOTATION_FOR_TESTS, NetworkAnonymizationKey(),
+          SecureDnsPolicy::kAllow);
+
+  TestConnectJobDelegate test_delegate;
+  auto connect_job = std::make_unique<HttpProxyConnectJob>(
+      DEFAULT_PRIORITY, SocketTag(), common_connect_job_params_.get(),
+      std::move(http_proxy_socket_params), &test_delegate,
+      /*net_log=*/nullptr);
+
+  // Expect a session to be requested, and then leave it pending.
+  EXPECT_CALL(
+      mock_quic_session_pool_,
+      RequestSession(_, _, IsQuicVersion(quic::ParsedQuicVersion::RFCv1()), _,
+                     _, _, _, _, _, _, QSRHasProxyChain(proxy_chain.Prefix(0))))
+
+      .Times(1)
+      .WillRepeatedly(testing::Return(ERR_IO_PENDING));
+
+  // Expect the request to be cancelled during test tear-down.
+  EXPECT_CALL(mock_quic_session_pool_, CancelRequest).Times(1);
+
+  EXPECT_THAT(connect_job->Connect(), test::IsError(ERR_IO_PENDING));
+
+  // Since we set `common_connect_job_params_->quic_supported_versions` to the
+  // address of a local variable above, clear it here to avoid having a dangling
+  // pointer.
+  common_connect_job_params_->quic_supported_versions = nullptr;
+}
+
+// Test that a QUIC session is properly requested from the QuicSessionPool,
+// including a ProxyChain containing additional QUIC proxies, but excluding any
+// proxies later in the chain.
+TEST_F(HttpProxyConnectQuicJobTest, RequestMultipleQuicProxies) {
+  // Create params for a two-proxy QUIC proxy, as a prefix of a larger chain.
+  ProxyChain proxy_chain = ProxyChain::ForIpProtection({
+      ProxyServer(ProxyServer::SCHEME_QUIC, HostPortPair("qproxy1", 443)),
+      // The proxy_chain_index points to this ProxyServer:
+      ProxyServer(ProxyServer::SCHEME_QUIC, HostPortPair("qproxy2", 443)),
+      ProxyServer(ProxyServer::SCHEME_HTTPS, HostPortPair("hproxy1", 443)),
+      ProxyServer(ProxyServer::SCHEME_HTTPS, HostPortPair("hproxy2", 443)),
+  });
+  SSLConfig quic_ssl_config;
+  scoped_refptr<HttpProxySocketParams> http_proxy_socket_params =
+      base::MakeRefCounted<HttpProxySocketParams>(
+          quic_ssl_config, HostPortPair(kEndpointHost, 443), proxy_chain,
+          /*proxy_chain_index=*/1, /*tunnel=*/true,
+          TRAFFIC_ANNOTATION_FOR_TESTS, NetworkAnonymizationKey(),
+          SecureDnsPolicy::kAllow);
+
+  TestConnectJobDelegate test_delegate;
+  auto connect_job = std::make_unique<HttpProxyConnectJob>(
+      DEFAULT_PRIORITY, SocketTag(), common_connect_job_params_.get(),
+      std::move(http_proxy_socket_params), &test_delegate,
+      /*net_log=*/nullptr);
+
+  // Expect a session to be requested, and then leave it pending. The requested
+  // QUIC session is to `qproxy2`, via proxy chain [`qproxy1`].
+  EXPECT_CALL(mock_quic_session_pool_,
+              RequestSession(_, _, _, _, _, _, _, _, _, _,
+                             QSRHasProxyChain(proxy_chain.Prefix(1))))
+      .Times(1)
+      .WillRepeatedly(testing::Return(ERR_IO_PENDING));
+
+  // Expect the request to be cancelled during test tear-down.
+  EXPECT_CALL(mock_quic_session_pool_, CancelRequest).Times(1);
+
+  EXPECT_THAT(connect_job->Connect(), test::IsError(ERR_IO_PENDING));
 }
 
 }  // namespace net

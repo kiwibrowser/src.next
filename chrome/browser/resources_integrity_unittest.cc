@@ -4,12 +4,14 @@
 
 #include "chrome/browser/resources_integrity.h"
 
-#include "base/bind.h"
+#include <algorithm>
+
+#include "base/functional/bind.h"
 #include "base/path_service.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/task_environment.h"
-#include "base/threading/sequenced_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/app/packed_resources_integrity.h"
 #include "chrome/browser/buildflags.h"
@@ -32,7 +34,7 @@ TEST_F(CheckResourceIntegrityTest, Match) {
 
   base::RunLoop loop;
   CheckResourceIntegrity(test_data_path.AppendASCII("circle.svg"), expected,
-                         base::SequencedTaskRunnerHandle::Get(),
+                         base::SequencedTaskRunner::GetCurrentDefault(),
                          base::BindLambdaForTesting([&](bool matches) {
                            EXPECT_TRUE(matches);
                            loop.Quit();
@@ -44,11 +46,11 @@ TEST_F(CheckResourceIntegrityTest, Mismatch) {
   base::FilePath test_data_path;
   ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_path));
 
-  std::vector<uint8_t> unexpected(crypto::kSHA256Length, 'a');
+  uint8_t unexpected[crypto::kSHA256Length];
+  std::ranges::fill(unexpected, 'a');
   base::RunLoop loop;
-  CheckResourceIntegrity(test_data_path.AppendASCII("circle.svg"),
-                         base::make_span<32>(unexpected),
-                         base::SequencedTaskRunnerHandle::Get(),
+  CheckResourceIntegrity(test_data_path.AppendASCII("circle.svg"), unexpected,
+                         base::SequencedTaskRunner::GetCurrentDefault(),
                          base::BindLambdaForTesting([&](bool matches) {
                            EXPECT_FALSE(matches);
                            loop.Quit();
@@ -57,12 +59,12 @@ TEST_F(CheckResourceIntegrityTest, Mismatch) {
 }
 
 TEST_F(CheckResourceIntegrityTest, NonExistentFile) {
-  std::vector<uint8_t> unexpected(crypto::kSHA256Length, 'a');
+  uint8_t unexpected[crypto::kSHA256Length];
+  std::ranges::fill(unexpected, 'a');
   base::RunLoop loop;
   CheckResourceIntegrity(
       base::FilePath(FILE_PATH_LITERAL("this file does not exist.moo")),
-      base::make_span<crypto::kSHA256Length>(unexpected),
-      base::SequencedTaskRunnerHandle::Get(),
+      unexpected, base::SequencedTaskRunner::GetCurrentDefault(),
       base::BindLambdaForTesting([&](bool matches) {
         EXPECT_FALSE(matches);
         loop.Quit();

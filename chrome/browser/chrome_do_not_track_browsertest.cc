@@ -11,6 +11,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/prefs/pref_service.h"
+#include "components/privacy_sandbox/tracking_protection_prefs.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -27,12 +28,9 @@ class ChromeDoNotTrackTest : public InProcessBrowserTest {
   }
 
   void ExpectPageTextEq(const std::string& expected_content) {
-    std::string text;
-    ASSERT_TRUE(ExecuteScriptAndExtractString(
-        browser()->tab_strip_model()->GetActiveWebContents(),
-        "window.domAutomationController.send(document.body.innerText);",
-        &text));
-    EXPECT_EQ(expected_content, text);
+    EXPECT_EQ(expected_content,
+              EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
+                     "document.body.innerText;"));
   }
 
   content::WebContents* GetWebContents() {

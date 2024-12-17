@@ -11,7 +11,10 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
+#include "chrome/browser/search_engine_choice/search_engine_choice_service_factory.h"
+#include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/search_engines/enterprise/enterprise_site_search_manager.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_data.h"
 #include "components/search_engines/template_url_service_observer.h"
@@ -35,6 +38,12 @@ void SetRecommendedDefaultSearchPreferences(const TemplateURLData& data,
                                             bool enabled,
                                             TestingProfile* profile);
 
+// Sets the managed preferences for site search providers.
+void SetManagedSiteSearchSettingsPreference(
+    const EnterpriseSiteSearchManager::OwnedTemplateURLDataVector&
+        site_search_engines,
+    TestingProfile* profile);
+
 // Creates a TemplateURL with some test values. The caller owns the returned
 // TemplateURL*.
 std::unique_ptr<TemplateURL> CreateTestTemplateURL(
@@ -43,14 +52,19 @@ std::unique_ptr<TemplateURL> CreateTestTemplateURL(
     const std::string& guid = std::string(),
     base::Time last_modified = base::Time::FromTimeT(100),
     bool safe_for_autoreplace = false,
-    bool created_by_policy = false,
+    TemplateURLData::CreatedByPolicy created_by_policy =
+        TemplateURLData::CreatedByPolicy::kNoPolicy,
     int prepopulate_id = 999999);
 
 class TemplateURLServiceTestUtil : public TemplateURLServiceObserver {
  public:
   TemplateURLServiceTestUtil();
+
+  explicit TemplateURLServiceTestUtil(PrefService& local_state);
+
   explicit TemplateURLServiceTestUtil(
-      const TestingProfile::TestingFactories& testing_factories);
+      TestingProfile::TestingFactories testing_factories,
+      PrefService* local_state = nullptr);
 
   TemplateURLServiceTestUtil(const TemplateURLServiceTestUtil&) = delete;
   TemplateURLServiceTestUtil& operator=(const TemplateURLServiceTestUtil&) =
@@ -104,13 +118,27 @@ class TemplateURLServiceTestUtil : public TemplateURLServiceObserver {
   KeywordWebDataService* web_data_service() { return web_data_service_.get(); }
   TemplateURLService* model() { return model_.get(); }
   TestingProfile* profile() { return profile_.get(); }
+  search_engines::SearchEngineChoiceService* search_engine_choice_service() {
+    return search_engine_choice_service_.get();
+  }
 
  private:
+  // Populated only if the calling test did not previously set up a
+  // local state. This object would then own the process-global local
+  // state.
+  // Don't access it directly, prefer using `local_state_` instead.
+  std::unique_ptr<ScopedTestingLocalState> owned_local_state_;
+
+  // We pass `local_state_` to the constructor in some cases where we can't
+  // or don't want to use `g_browser_process->local_state()`.
+  raw_ptr<PrefService> local_state_;
   std::unique_ptr<TestingProfile> profile_;
   int changed_count_ = 0;
   std::u16string search_term_;
   int dsp_set_to_google_callback_count_ = 0;
   scoped_refptr<KeywordWebDataService> web_data_service_;
+  std::unique_ptr<search_engines::SearchEngineChoiceService>
+      search_engine_choice_service_;
   std::unique_ptr<TemplateURLService> model_;
   data_decoder::test::InProcessDataDecoder data_decoder_;
 };

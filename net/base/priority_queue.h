@@ -12,9 +12,10 @@
 #include <utility>
 #include <vector>
 
-#include "base/bind.h"
-#include "base/callback.h"
 #include "base/check_op.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
+#include "base/not_fatal_until.h"
 #include "base/threading/thread_checker.h"
 
 #if !defined(NDEBUG)
@@ -153,7 +154,7 @@ class PriorityQueue {
     unsigned id = next_id_;
     valid_ids_.insert(id);
     ++next_id_;
-    list.emplace_back(std::make_pair(id, std::move(value)));
+    list.emplace_back(id, std::move(value));
 #else
     list.emplace_back(std::move(value));
 #endif
@@ -171,7 +172,7 @@ class PriorityQueue {
     unsigned id = next_id_;
     valid_ids_.insert(id);
     ++next_id_;
-    list.emplace_front(std::make_pair(id, std::move(value)));
+    list.emplace_front(std::pair(id, std::move(value)));
 #else
     list.emplace_front(std::move(value));
 #endif
@@ -264,7 +265,7 @@ class PriorityQueue {
 
     typename Pointer::ListIterator it = pointer.iterator_;
     Priority priority = pointer.priority_;
-    DCHECK(it != lists_[priority].end());
+    CHECK(it != lists_[priority].end(), base::NotFatalUntil::M130);
     ++it;
     while (it == lists_[priority].end()) {
       if (priority == 0u) {
@@ -289,7 +290,7 @@ class PriorityQueue {
 
     typename Pointer::ListIterator it = pointer.iterator_;
     Priority priority = pointer.priority_;
-    DCHECK(it != lists_[priority].end());
+    CHECK(it != lists_[priority].end(), base::NotFatalUntil::M130);
     while (it == lists_[priority].begin()) {
       if (priority == num_priorities() - 1) {
         DCHECK(pointer.Equals(FirstMax()));

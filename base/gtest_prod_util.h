@@ -5,6 +5,7 @@
 #ifndef BASE_GTEST_PROD_UTIL_H_
 #define BASE_GTEST_PROD_UTIL_H_
 
+#include "base/base_export.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"  // nogncheck
 
 // This is a wrapper for gtest's FRIEND_TEST macro that friends
@@ -16,7 +17,7 @@
 // class MyClass {
 //  private:
 //   void MyMethod();
-//   FRIEND_TEST_ALL_PREFIXES(MyClassTest, MyMethod);
+//   FRIEND_TEST_ALL_PREFIXES(MyClassTest, TestName);
 // };
 #define FRIEND_TEST_ALL_PREFIXES(test_case_name, test_name) \
   FRIEND_TEST(test_case_name, test_name); \
@@ -28,32 +29,32 @@
 // namespace foo {
 // class MyClass {
 //  private:
-//   FRIEND_TEST_ALL_PREFIXES(MyClassTest, TestMethod);
+//   FRIEND_TEST_ALL_PREFIXES(MyClassTest, TestName);
 //   bool private_var;
 // };
 // }  // namespace foo
 //
-// class MyClassTest::TestMethod() {
+// class MyClassTest::TestName() {
 //   foo::MyClass foo_class;
 //   foo_class.private_var = true;
 // }
 //
-// Unless you forward declare MyClassTest::TestMethod outside of namespace foo.
+// Unless you forward declare MyClassTest::TestName outside of namespace foo.
 // Use FORWARD_DECLARE_TEST to do so for all possible prefixes.
 //
 // Example usage:
 //
-// FORWARD_DECLARE_TEST(MyClassTest, TestMethod);
+// FORWARD_DECLARE_TEST(MyClassTest, TestName);
 //
 // namespace foo {
 // class MyClass {
 //  private:
-//   FRIEND_TEST_ALL_PREFIXES(::MyClassTest, TestMethod);  // NOTE use of ::
+//   FRIEND_TEST_ALL_PREFIXES(::MyClassTest, TestName);  // NOTE use of ::
 //   bool private_var;
 // };
 // }  // namespace foo
 //
-// class MyClassTest::TestMethod() {
+// class MyClassTest::TestName() {
 //   foo::MyClass foo_class;
 //   foo_class.private_var = true;
 // }

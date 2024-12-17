@@ -5,6 +5,9 @@
 #ifndef CHROME_BROWSER_HISTORY_HISTORY_TAB_HELPER_H_
 #define CHROME_BROWSER_HISTORY_HISTORY_TAB_HELPER_H_
 
+#include <optional>
+
+#include "base/gtest_prod_util.h"
 #include "base/scoped_observation.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -16,7 +19,7 @@
 namespace history {
 struct HistoryAddPageArgs;
 class HistoryService;
-}
+}  // namespace history
 
 class HistoryTabHelper
     : public content::WebContentsObserver,
@@ -27,11 +30,6 @@ class HistoryTabHelper
   HistoryTabHelper& operator=(const HistoryTabHelper&) = delete;
 
   ~HistoryTabHelper() override;
-
-  // Updates history with the specified navigation. This is called by
-  // DidFinishNavigation to update history state.
-  void UpdateHistoryForNavigation(
-      const history::HistoryAddPageArgs& add_page_args);
 
   // Returns the history::HistoryAddPageArgs to use for adding a page to
   // history.
@@ -51,6 +49,11 @@ class HistoryTabHelper
     force_eligible_tab_for_testing_ = force;
   }
 
+#if BUILDFLAG(IS_ANDROID)
+  // Sets App ID that that goes into visit database.
+  void SetAppId(const std::string& app_id) { app_id_ = app_id; }
+#endif
+
  private:
   explicit HistoryTabHelper(content::WebContents* web_contents);
   friend class content::WebContentsUserData<HistoryTabHelper>;
@@ -61,11 +64,14 @@ class HistoryTabHelper
   FRIEND_TEST_ALL_PREFIXES(HistoryFencedFrameBrowserTest,
                            FencedFrameDoesNotAffectLoadingState);
 
+  // Updates history with the specified navigation. This is called by
+  // DidFinishNavigation to update history state.
+  void UpdateHistoryForNavigation(
+      const history::HistoryAddPageArgs& add_page_args);
+
   // content::WebContentsObserver implementation.
   void DidFinishNavigation(
       content::NavigationHandle* navigation_handle) override;
-  void DidActivatePortal(content::WebContents* predecessor_contents,
-                         base::TimeTicks activation_time) override;
   void DidFinishLoad(content::RenderFrameHost* render_frame_host,
                      const GURL& validated_url) override;
   void TitleWasSet(content::NavigationEntry* entry) override;
@@ -91,11 +97,8 @@ class HistoryTabHelper
 
   // Observes LanguageDetectionObserver, which notifies us when the language of
   // the contents of the current page has been determined.
-  base::ScopedObservation<
-      translate::TranslateDriver,
-      translate::TranslateDriver::LanguageDetectionObserver,
-      &translate::TranslateDriver::AddLanguageDetectionObserver,
-      &translate::TranslateDriver::RemoveLanguageDetectionObserver>
+  base::ScopedObservation<translate::TranslateDriver,
+                          translate::TranslateDriver::LanguageDetectionObserver>
       translate_observation_{this};
 
   // True after navigation to a page is complete and the page is currently
@@ -109,6 +112,17 @@ class HistoryTabHelper
   // a certain time period after the page load is complete will be saved to the
   // history system. Only applies to the main frame of the page.
   base::TimeTicks last_load_completion_;
+
+  // Some cached state about the current navigation, used to identify it again
+  // once a new navigation has happened.
+  struct NavigationState {
+    int nav_entry_id;
+    GURL url;
+  };
+  std::optional<NavigationState> cached_navigation_state_;
+
+  // The package name of an app that opens a Custom Tab and visits a URL.
+  std::optional<std::string> app_id_ = std::nullopt;
 
   // Set to true in unit tests to avoid need for a Browser instance.
   bool force_eligible_tab_for_testing_ = false;

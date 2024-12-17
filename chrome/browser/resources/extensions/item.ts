@@ -4,36 +4,32 @@
 
 import 'chrome://resources/cr_elements/cr_button/cr_button.js';
 import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.js';
-import 'chrome://resources/cr_elements/cr_icons.css.js';
 import 'chrome://resources/cr_elements/cr_toggle/cr_toggle.js';
-import 'chrome://resources/cr_elements/cr_hidden_style.css.js';
-import 'chrome://resources/cr_elements/icons.html.js';
-import 'chrome://resources/cr_elements/cr_shared_style.css.js';
-import 'chrome://resources/cr_elements/cr_shared_vars.css.js';
+import 'chrome://resources/cr_elements/cr_tooltip/cr_tooltip.js';
+import 'chrome://resources/cr_elements/icons_lit.html.js';
 import 'chrome://resources/js/action_link.js';
-import 'chrome://resources/cr_elements/action_link.css.js';
 import './icons.html.js';
-import './shared_style.css.js';
-import './shared_vars.css.js';
 import './strings.m.js';
-import 'chrome://resources/polymer/v3_0/iron-flex-layout/iron-flex-layout-classes.js';
-import 'chrome://resources/polymer/v3_0/iron-icon/iron-icon.js';
-import 'chrome://resources/polymer/v3_0/paper-tooltip/paper-tooltip.js';
+import 'chrome://resources/cr_elements/cr_icon/cr_icon.js';
 
-import {ChromeEvent} from '/tools/typescript/definitions/chrome_event.js';
-import {getToastManager} from 'chrome://resources/cr_elements/cr_toast/cr_toast_manager.js';
-import {CrToggleElement} from 'chrome://resources/cr_elements/cr_toggle/cr_toggle.js';
-import {assert, assertNotReached} from 'chrome://resources/js/assert_ts.js';
-import {I18nMixin} from 'chrome://resources/js/i18n_mixin.js';
-import {flush, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import type {ChromeEvent} from '/tools/typescript/definitions/chrome_event.js';
+import type {CrToggleElement} from 'chrome://resources/cr_elements/cr_toggle/cr_toggle.js';
+import {I18nMixinLit} from 'chrome://resources/cr_elements/i18n_mixin_lit.js';
+import {assert, assertNotReached} from 'chrome://resources/js/assert.js';
+import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
+import type {PropertyValues} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 
-import {getTemplate} from './item.html.js';
-import {ItemMixin} from './item_mixin.js';
-import {computeInspectableViewLabel, EnableControl, getEnableControl, getItemSource, getItemSourceString, isEnabled, sortViews, SourceType, userCanChangeEnablement} from './item_util.js';
+import {getCss} from './item.css.js';
+import {getHtml} from './item.html.js';
+import {ItemMixinLit} from './item_mixin_lit.js';
+import {computeInspectableViewLabel, createDummyExtensionInfo, EnableControl, getEnableControl, getEnableToggleAriaLabel, getEnableToggleTooltipText, getItemSource, getItemSourceString, isEnabled, sortViews, SourceType, userCanChangeEnablement} from './item_util.js';
+import {Mv2ExperimentStage} from './mv2_deprecation_util.js';
 import {navigation, Page} from './navigation_helper.js';
 
 export interface ItemDelegate {
   deleteItem(id: string): void;
+  deleteItems(ids: string[]): Promise<void>;
+  uninstallItem(id: string): Promise<void>;
   setItemEnabled(id: string, isEnabled: boolean): void;
   setItemAllowedIncognito(id: string, isAllowedIncognito: boolean): void;
   setItemAllowedOnFileUrls(id: string, isAllowedOnFileUrls: boolean): void;
@@ -50,13 +46,64 @@ export interface ItemDelegate {
   getExtensionSize(id: string): Promise<string>;
   addRuntimeHostPermission(id: string, host: string): Promise<void>;
   removeRuntimeHostPermission(id: string, host: string): Promise<void>;
+  setItemSafetyCheckWarningAcknowledged(
+      id: string,
+      reason: chrome.developerPrivate.SafetyCheckWarningReason): void;
   setShowAccessRequestsInToolbar(id: string, showRequests: boolean): void;
+  setItemPinnedToToolbar(id: string, pinnedToToolbar: boolean): void;
 
   // TODO(tjudkins): This function is not specific to items, so should be pulled
   // out to a more generic place when we need to access it from elsewhere.
   recordUserAction(metricName: string): void;
   getItemStateChangedTarget():
       ChromeEvent<(data: chrome.developerPrivate.EventData) => void>;
+}
+
+export class FakeChromeEvent {
+  addListener(_listener: Function) {}
+  removeListener(_listener: Function) {}
+  callListeners(..._args: any[]) {}
+}
+
+export class DummyItemDelegate {
+  deleteItem(_id: string) {}
+  deleteItems(_ids: string[]) {
+    return Promise.resolve();
+  }
+  uninstallItem(_id: string) {
+    return Promise.resolve();
+  }
+  setItemEnabled(_id: string, _isEnabled: boolean) {}
+  setItemAllowedIncognito(_id: string, _isAllowedIncognito: boolean) {}
+  setItemAllowedOnFileUrls(_id: string, _isAllowedOnFileUrls: boolean) {}
+  setItemHostAccess(
+      _id: string, _hostAccess: chrome.developerPrivate.HostAccess) {}
+  setItemCollectsErrors(_id: string, _collectsErrors: boolean) {}
+  inspectItemView(_id: string, _view: chrome.developerPrivate.ExtensionView) {}
+  openUrl(_url: string) {}
+  reloadItem(_id: string) {
+    return Promise.resolve();
+  }
+  repairItem(_id: string) {}
+  showItemOptionsPage(_extension: chrome.developerPrivate.ExtensionInfo) {}
+  showInFolder(_id: string) {}
+  getExtensionSize(_id: string) {
+    return Promise.resolve('');
+  }
+  addRuntimeHostPermission(_id: string, _host: string) {
+    return Promise.resolve();
+  }
+  removeRuntimeHostPermission(_id: string, _host: string) {
+    return Promise.resolve();
+  }
+  setItemSafetyCheckWarningAcknowledged(
+      _id: string, _reason: chrome.developerPrivate.SafetyCheckWarningReason) {}
+  setShowAccessRequestsInToolbar(_id: string, _showRequests: boolean) {}
+  setItemPinnedToToolbar(_id: string, _pinnedToToolbar: boolean) {}
+  recordUserAction(_metricName: string) {}
+  getItemStateChangedTarget() {
+    return new FakeChromeEvent();
+  }
 }
 
 export interface ExtensionsItemElement {
@@ -69,65 +116,68 @@ export interface ExtensionsItemElement {
   };
 }
 
-const ExtensionsItemElementBase = I18nMixin(ItemMixin(PolymerElement));
+const ExtensionsItemElementBase = I18nMixinLit(ItemMixinLit(CrLitElement));
 
 export class ExtensionsItemElement extends ExtensionsItemElementBase {
   static get is() {
     return 'extensions-item';
   }
 
-  static get template() {
-    return getTemplate();
+  static override get styles() {
+    return getCss();
   }
 
-  static get properties() {
+  override render() {
+    return getHtml.bind(this)();
+  }
+
+  static override get properties() {
     return {
       // The item's delegate, or null.
-      delegate: Object,
+      delegate: {type: Object},
 
       // Whether or not dev mode is enabled.
-      inDevMode: {
-        type: Boolean,
-        value: false,
-      },
+      inDevMode: {type: Boolean},
+      safetyCheckShowing: {type: Boolean},
 
       // The underlying ExtensionInfo itself. Public for use in declarative
       // bindings.
-      data: Object,
+      data: {type: Object},
+
+      mv2ExperimentStage: {type: Number},
 
       // Whether or not the expanded view of the item is shown.
-      showingDetails_: {
-        type: Boolean,
-        value: false,
-      },
+      showingDetails_: {type: Boolean},
 
       // First inspectable view after sorting.
-      firstInspectView_: {
-        type: Object,
-        computed: 'computeFirstInspectView_(data.views)',
-      },
+      firstInspectView_: {type: Object},
     };
   }
 
-  static get observers() {
-    return ['observeIdVisibility_(inDevMode, showingDetails_, data.id)'];
-  }
-
-  delegate: ItemDelegate;
-  inDevMode: boolean;
-  data: chrome.developerPrivate.ExtensionInfo;
-  private showingDetails_: boolean;
+  delegate: ItemDelegate|null = null;
+  inDevMode: boolean = false;
+  mv2ExperimentStage: Mv2ExperimentStage = Mv2ExperimentStage.NONE;
+  safetyCheckShowing: boolean = false;
+  data: chrome.developerPrivate.ExtensionInfo = createDummyExtensionInfo();
+  private showingDetails_: boolean = false;
   private firstInspectView_: chrome.developerPrivate.ExtensionView;
-  /** Prevents reloading the same item while it's already being reloaded. */
-  private isReloading_: boolean = false;
 
-  private fire_(eventName: string, detail?: any) {
-    this.dispatchEvent(
-        new CustomEvent(eventName, {bubbles: true, composed: true, detail}));
+  override willUpdate(changedProperties: PropertyValues<this>) {
+    super.willUpdate(changedProperties);
+
+    if (changedProperties.has('data')) {
+      this.firstInspectView_ = this.computeFirstInspectView_();
+    }
   }
 
-  getDetailsButton() {
+  /** @return The "Details" button. */
+  getDetailsButton(): HTMLElement {
     return this.$.detailsButton;
+  }
+
+  /** @return The "Remove" button, if it exists. */
+  getRemoveButton(): HTMLElement|null {
+    return this.data.mustRemainInstalled ? null : this.$.removeButton;
   }
 
   /** @return The "Errors" button, if it exists. */
@@ -135,16 +185,21 @@ export class ExtensionsItemElement extends ExtensionsItemElementBase {
     return this.shadowRoot!.querySelector('#errors-button');
   }
 
-  private observeIdVisibility_() {
-    flush();
-    const idElement = this.shadowRoot!.querySelector('#extension-id');
-    if (idElement) {
-      assert(this.data);
-      idElement.innerHTML = this.i18n('itemId', this.data.id);
-    }
+  protected getEnableToggleAriaLabel_(): string {
+    return getEnableToggleAriaLabel(
+        this.isEnabled_(), this.data.type, this.i18n('appEnabled'),
+        this.i18n('extensionEnabled'), this.i18n('itemOff'));
   }
 
-  private shouldShowErrorsButton_(): boolean {
+  protected getEnableToggleTooltipText_(): string {
+    return getEnableToggleTooltipText(this.data);
+  }
+
+  protected getIdElementText_() {
+    return this.i18n('itemId', this.data.id);
+  }
+
+  protected shouldShowErrorsButton_(): boolean {
     // When the error console is disabled (happens when
     // --disable-error-console command line flag is used or when in the
     // Stable/Beta channel), |installWarnings| is populated.
@@ -158,25 +213,33 @@ export class ExtensionsItemElement extends ExtensionsItemElementBase {
         this.data.runtimeErrors.length > 0;
   }
 
-  private onRemoveTap_() {
+  protected onRemoveClick_() {
+    if (this.safetyCheckShowing) {
+      const actionToRecord = this.data.safetyCheckText ?
+          'SafetyCheck.ReviewPanelRemoveClicked' :
+          'SafetyCheck.NonTriggeringExtensionRemoved';
+      chrome.metricsPrivate.recordUserAction(actionToRecord);
+    }
+    assert(this.delegate);
     this.delegate.deleteItem(this.data.id);
   }
 
-  private onEnableToggleChange_() {
+  protected onEnableToggleChange_() {
+    assert(this.delegate);
     this.delegate.setItemEnabled(this.data.id, this.$.enableToggle.checked);
     this.$.enableToggle.checked = this.isEnabled_();
   }
 
-  private onErrorsTap_() {
+  protected onErrorsClick_() {
     if (this.data.installWarnings && this.data.installWarnings.length > 0) {
-      this.fire_('show-install-warnings', this.data.installWarnings);
+      this.fire('show-install-warnings', this.data.installWarnings);
       return;
     }
 
     navigation.navigateTo({page: Page.ERRORS, extensionId: this.data.id});
   }
 
-  private onDetailsTap_() {
+  protected onDetailsClick_() {
     navigation.navigateTo({page: Page.DETAILS, extensionId: this.data.id});
   }
 
@@ -184,70 +247,49 @@ export class ExtensionsItemElement extends ExtensionsItemElementBase {
     return sortViews(this.data.views)[0];
   }
 
-  private onInspectTap_() {
+  protected onInspectClick_() {
+    assert(this.delegate);
     this.delegate.inspectItemView(this.data.id, this.firstInspectView_);
   }
 
-  private onExtraInspectTap_() {
+  protected onExtraInspectClick_() {
     navigation.navigateTo({page: Page.DETAILS, extensionId: this.data.id});
   }
 
-  private onReloadTap_() {
-    // Don't reload if in the middle of an update.
-    if (this.isReloading_) {
-      return;
-    }
-
-    this.isReloading_ = true;
-
-    const toastManager = getToastManager();
-    // Keep the toast open indefinitely.
-    toastManager.duration = 0;
-    toastManager.show(this.i18n('itemReloading'));
-    this.delegate.reloadItem(this.data.id)
-        .then(
-            () => {
-              toastManager.hide();
-              toastManager.duration = 3000;
-              toastManager.show(this.i18n('itemReloaded'));
-              this.isReloading_ = false;
-            },
-            loadError => {
-              this.fire_('load-error', loadError);
-              toastManager.hide();
-              this.isReloading_ = false;
-            });
+  protected onReloadClick_() {
+    this.reloadItem().catch((loadError) => this.fire('load-error', loadError));
   }
 
-  private onRepairTap_() {
+  protected onRepairClick_() {
+    assert(this.delegate);
     this.delegate.repairItem(this.data.id);
   }
 
-  private isEnabled_(): boolean {
+  protected isEnabled_(): boolean {
     return isEnabled(this.data.state);
   }
 
-  private isEnableToggleEnabled_(): boolean {
-    return userCanChangeEnablement(this.data);
+  protected isEnableToggleEnabled_(): boolean {
+    return userCanChangeEnablement(this.data, this.mv2ExperimentStage);
   }
 
   /** @return Whether the reload button should be shown. */
-  private showReloadButton_(): boolean {
+  protected showReloadButton_(): boolean {
     return getEnableControl(this.data) === EnableControl.RELOAD;
   }
 
   /** @return Whether the repair button should be shown. */
-  private showRepairButton_(): boolean {
+  protected showRepairButton_(): boolean {
     return getEnableControl(this.data) === EnableControl.REPAIR;
   }
 
 
   /** @return Whether the enable toggle should be shown. */
-  private showEnableToggle_(): boolean {
+  protected showEnableToggle_(): boolean {
     return getEnableControl(this.data) === EnableControl.ENABLE_TOGGLE;
   }
 
-  private computeClasses_(): string {
+  protected computeClasses_(): string {
     let classes = this.isEnabled_() ? 'enabled' : 'disabled';
     if (this.inDevMode) {
       classes += ' dev-mode';
@@ -255,7 +297,7 @@ export class ExtensionsItemElement extends ExtensionsItemElementBase {
     return classes;
   }
 
-  private computeSourceIndicatorIcon_(): string {
+  protected computeSourceIndicatorIcon_(): string {
     switch (getItemSource(this.data)) {
       case SourceType.POLICY:
         return 'extensions-icons:business';
@@ -274,7 +316,7 @@ export class ExtensionsItemElement extends ExtensionsItemElementBase {
     }
   }
 
-  private computeSourceIndicatorText_(): string {
+  protected computeSourceIndicatorText_(): string {
     if (this.data.locationText) {
       return this.data.locationText;
     }
@@ -284,11 +326,11 @@ export class ExtensionsItemElement extends ExtensionsItemElementBase {
                                                 getItemSourceString(sourceType);
   }
 
-  private computeInspectViewsHidden_(): boolean {
+  protected computeInspectViewsHidden_(): boolean {
     return !this.data.views || this.data.views.length === 0;
   }
 
-  private computeFirstInspectTitle_(): string {
+  protected computeFirstInspectTitle_(): string {
     // Note: theoretically, this wouldn't be called without any inspectable
     // views (because it's in a dom-if="!computeInspectViewsHidden_()").
     // However, due to the recycling behavior of iron list, it seems that
@@ -299,57 +341,82 @@ export class ExtensionsItemElement extends ExtensionsItemElementBase {
         '';
   }
 
-  private computeFirstInspectLabel_(): string {
+  protected computeFirstInspectLabel_(): string {
     const label = this.computeFirstInspectTitle_();
     return label && this.data.views.length > 1 ? label + ',' : label;
   }
 
-  private computeExtraViewsHidden_(): boolean {
+  protected computeExtraViewsHidden_(): boolean {
     return this.data.views.length <= 1;
   }
 
-  private computeDevReloadButtonHidden_(): boolean {
-    // Only display the reload spinner if the extension is unpacked and
-    // enabled or disabled for reload. If an extension fails to reload (due to
-    // e.g. a parsing error), it will
-    // remain disabled with the "reloading" reason. We show the reload button
-    // when it's disabled for reload to enable developers to reload the fixed
-    // version. (Note that trying to reload an extension that is currently
-    // trying to reload is a no-op.) For other
-    // disableReasons, there's no point in reloading a disabled extension, and
-    // we'll show a crashed reload button if it's terminated.
-    const showIcon =
-        this.data.location === chrome.developerPrivate.Location.UNPACKED &&
-        (this.data.state === chrome.developerPrivate.ExtensionState.ENABLED ||
-         this.data.disableReasons.reloading);
-    return !showIcon;
+  protected computeDevReloadButtonHidden_(): boolean {
+    return !this.canReloadItem();
   }
 
-  private computeExtraInspectLabel_(): string {
+  protected computeExtraInspectLabel_(): string {
     return this.i18n(
         'itemInspectViewsExtra', (this.data.views.length - 1).toString());
   }
 
+  /**
+   * @return Whether the extension has severe warnings. Doesn't determine the
+   *     warning's visibility.
+   */
   private hasSevereWarnings_(): boolean {
     return this.data.disableReasons.corruptInstall ||
         this.data.disableReasons.suspiciousInstall ||
-        this.data.runtimeWarnings.length > 0 || !!this.data.blacklistText;
+        this.data.runtimeWarnings.length > 0 || !!this.data.blocklistText;
   }
 
-  private showDescription_(): boolean {
-    return !this.hasSevereWarnings_() &&
-        !this.data.showSafeBrowsingAllowlistWarning;
+  /**
+   * @return Whether the extension has an MV2 warning. Doesn't determine the
+   *     warning's visibility.
+   */
+  private hasMv2DeprecationWarning_(): boolean {
+    return this.data.disableReasons.unsupportedManifestVersion;
   }
 
-  private showAllowlistWarning_(): boolean {
-    // Only show the allowlist warning if there are no other warnings. The item
-    // card has a fixed height and the content might get cropped if too many
-    // warnings are displayed. This should be a rare edge case and the allowlist
-    // warning will still be shown in the item detail view.
-    return this.data.showSafeBrowsingAllowlistWarning &&
-        !this.hasSevereWarnings_();
+  /**
+   * @return Whether the extension has an allowlist warning. Doesn't determine
+   *     the warning's visibility.
+   */
+  private hasAllowlistWarning_(): boolean {
+    return this.data.showSafeBrowsingAllowlistWarning;
+  }
+
+  protected showDescription_(): boolean {
+    // Description is only visible iff no warnings are visible.
+    return !this.hasSevereWarnings_() && !this.hasMv2DeprecationWarning_() &&
+        !this.hasAllowlistWarning_();
+  }
+
+  protected showSevereWarnings(): boolean {
+    // Severe warning are always visible, if they exist.
+    return this.hasSevereWarnings_();
+  }
+
+  protected showMv2DeprecationWarning_(): boolean {
+    // MV2 deprecation warning is visible, if existent, if there are no severe
+    // warnings visible.
+    // Note: The item card has a fixed height and the content might get cropped
+    // if too many warnings are displayed.
+    return this.hasMv2DeprecationWarning_() && !this.hasSevereWarnings_();
+  }
+
+  protected showAllowlistWarning_(): boolean {
+    // Allowlist warning is visible, if existent, if there are no severe
+    // warnings or mv2 deprecation warnings visible.
+    // Note: The item card has a fixed height and the content might get cropped
+    // if too many warnings are displayed. This should be a rare edge case and
+    // the allowlist warning will still be shown in the item detail view.
+    return this.hasAllowlistWarning_() && !this.hasSevereWarnings_() &&
+        !this.hasMv2DeprecationWarning_();
   }
 }
+
+// Exported to be used in the autogenerated Lit template file
+export type ItemElement = ExtensionsItemElement;
 
 declare global {
   interface HTMLElementTagNameMap {

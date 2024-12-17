@@ -21,8 +21,8 @@ void RedirectUtil::UpdateHttpRequest(
     const GURL& original_url,
     const std::string& original_method,
     const RedirectInfo& redirect_info,
-    const absl::optional<std::vector<std::string>>& removed_headers,
-    const absl::optional<net::HttpRequestHeaders>& modified_headers,
+    const std::optional<std::vector<std::string>>& removed_headers,
+    const std::optional<net::HttpRequestHeaders>& modified_headers,
     HttpRequestHeaders* request_headers,
     bool* should_clear_upload) {
   DCHECK(request_headers);
@@ -74,8 +74,10 @@ void RedirectUtil::UpdateHttpRequest(
   // [1]: https://fetch.spec.whatwg.org/#http-redirect-fetch
   // [2]: https://tools.ietf.org/html/rfc6454#section-7
   //
-  // TODO(jww): This is a layering violation and should be refactored somewhere
-  // up into //net's embedder. https://crbug.com/471397
+  // TODO(crbug.com/471397, crbug.com/1406737): This is a layering violation and
+  // should be refactored somewhere into //net's embedder. Also, step 13 of
+  // https://fetch.spec.whatwg.org/#http-redirect-fetch is implemented in
+  // Blink.
   if (!url::IsSameOriginWith(redirect_info.new_url, original_url) &&
       request_headers->HasHeader(HttpRequestHeaders::kOrigin)) {
     request_headers->SetHeader(HttpRequestHeaders::kOrigin,
@@ -87,14 +89,14 @@ void RedirectUtil::UpdateHttpRequest(
 }
 
 // static
-absl::optional<std::string> RedirectUtil::GetReferrerPolicyHeader(
+std::optional<std::string> RedirectUtil::GetReferrerPolicyHeader(
     const HttpResponseHeaders* response_headers) {
   if (!response_headers)
-    return absl::nullopt;
+    return std::nullopt;
   std::string referrer_policy_header;
   if (!response_headers->GetNormalizedHeader("Referrer-Policy",
                                              &referrer_policy_header)) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   return referrer_policy_header;
 }
@@ -110,11 +112,12 @@ scoped_refptr<HttpResponseHeaders> RedirectUtil::SynthesizeRedirectHeaders(
       "Location: %s\n"
       "Cross-Origin-Resource-Policy: Cross-Origin\n"
       "Non-Authoritative-Reason: %s",
-      response_code, redirect_destination.spec().c_str(),
+      static_cast<int>(response_code), redirect_destination.spec().c_str(),
       redirect_reason.c_str());
 
-  std::string http_origin;
-  if (request_headers.GetHeader("Origin", &http_origin)) {
+  if (std::optional<std::string> http_origin =
+          request_headers.GetHeader("Origin");
+      http_origin) {
     // If this redirect is used in a cross-origin request, add CORS headers to
     // make sure that the redirect gets through. Note that the destination URL
     // is still subject to the usual CORS policy, i.e. the resource will only
@@ -124,7 +127,7 @@ scoped_refptr<HttpResponseHeaders> RedirectUtil::SynthesizeRedirectHeaders(
         "\n"
         "Access-Control-Allow-Origin: %s\n"
         "Access-Control-Allow-Credentials: true",
-        http_origin.c_str());
+        http_origin->c_str());
   }
 
   auto fake_headers = base::MakeRefCounted<HttpResponseHeaders>(

@@ -27,21 +27,23 @@
 // https://html.spec.whatwg.org/C/#the-window-object
 
 // FIXME: explain all uses of [CrossOrigin]
+// NOTE: In the spec, Window inherits from EventTarget. We inject an additional
+// layer to implement window's named properties object.
 [
-    CheckSecurity=Receiver,
     ImplementedAs=DOMWindow,
     Global=Window,
     Exposed=Window
-] interface Window : EventTarget {
+] interface Window : WindowProperties {
     // the current browsing context
     // FIXME: The spec uses the WindowProxy type for this and many other attributes.
     [LegacyUnforgeable, CrossOrigin, CachedAccessor=kWindowProxy] readonly attribute Window window;
     [Replaceable, CrossOrigin, CachedAccessor=kWindowProxy] readonly attribute Window self;
     [LegacyUnforgeable, CachedAccessor=kWindowDocument] readonly attribute Document document;
     attribute DOMString name;
-    [PutForwards=href, LegacyUnforgeable, CrossOrigin=(Getter,Setter), Custom=Getter] readonly attribute Location location;
+    [PutForwards=href, LegacyUnforgeable, CrossOrigin=(Getter,Setter)] readonly attribute Location location;
     [CallWith=ScriptState] readonly attribute CustomElementRegistry customElements;
     readonly attribute History history;
+    [Replaceable] readonly attribute Navigation navigation;
     [Replaceable, MeasureAs=BarPropLocationbar] readonly attribute BarProp locationbar;
     [Replaceable, MeasureAs=BarPropMenubar] readonly attribute BarProp menubar;
     [Replaceable, MeasureAs=BarPropPersonalbar] readonly attribute BarProp personalbar;
@@ -60,18 +62,21 @@
     [Replaceable, CrossOrigin] readonly attribute unsigned long length;
     [LegacyUnforgeable, CrossOrigin] readonly attribute Window? top;
     // FIXME: opener should be of type any.
-    [CrossOrigin, Custom=Setter, ImplementedAs=OpenerWithMetrics] attribute Window opener;
+    [CrossOrigin, ImplementedAs=openerForBindings, CallWith=Isolate, RaisesException=Setter] attribute any opener;
     [Replaceable, CrossOrigin] readonly attribute Window? parent;
-    [CheckSecurity=ReturnValue, Custom=Getter] readonly attribute Element? frameElement;
+    [CheckSecurity=ReturnValue] readonly attribute Element? frameElement;
 
-    [CallWith=Isolate, RaisesException] Window? open(optional USVString url="", optional DOMString target = "_blank", optional [TreatNullAs=EmptyString] DOMString features = "");
+    [CallWith=Isolate, RaisesException] Window? open(optional USVString url="", optional DOMString target = "_blank", optional [LegacyNullToEmptyString] DOMString features = "");
 
     // indexed properties
     // https://html.spec.whatwg.org/C/browsers.html#windowproxy-getownproperty
     [NotEnumerable, CrossOrigin] getter Window (unsigned long index);
 
     // named properties
-    [Custom, NotEnumerable, CrossOrigin] getter object (DOMString name);
+    // The spec defines the named getter on the Window interface, but we inject
+    // the named properties object as its own interface that Window inherits
+    // from.
+    // getter object (DOMString name);
 
     // the user agent
     [LogActivity=GetterOnly] readonly attribute Navigator navigator;
@@ -107,11 +112,6 @@
 
     [Replaceable, SameObject] readonly attribute External external;
 
-    // Cooperative Scheduling of Background Tasks
-    // https://www.w3.org/TR/requestidlecallback/#window_extensions
-    [Measure] long requestIdleCallback(IdleRequestCallback callback, optional IdleRequestOptions options = {});
-    void cancelIdleCallback(long handle);
-
     // CSS Object Model (CSSOM)
     // https://drafts.csswg.org/cssom/#extensions-to-the-window-interface
     [Affects=Nothing, NewObject] CSSStyleDeclaration getComputedStyle(Element elt, optional DOMString? pseudoElt);
@@ -124,8 +124,8 @@
     // browsing context
     [MeasureAs=WindowMove] void moveTo(long x, long y);
     [MeasureAs=WindowMove] void moveBy(long x, long y);
-    [MeasureAs=WindowResize] void resizeTo(long x, long y);
-    [MeasureAs=WindowResize] void resizeBy(long x, long y);
+    [MeasureAs=WindowResize, RaisesException] void resizeTo(long x, long y);
+    [MeasureAs=WindowResize, RaisesException] void resizeBy(long x, long y);
 
     // viewport
     [HighEntropy=Direct, MeasureAs=WindowInnerWidth, Replaceable] readonly attribute long innerWidth;
@@ -146,6 +146,10 @@
     // Visual Viewport API
     // https://github.com/WICG/ViewportAPI
     [Replaceable, SameObject] readonly attribute VisualViewport visualViewport;
+
+    // Viewport API
+    // https://drafts.csswg.org/css-viewport-1/
+    [Replaceable, SameObject, RuntimeEnabled=ViewportSegments] readonly attribute Viewport viewport;
 
     // client
     [HighEntropy=Direct, MeasureAs=WindowScreenX, Replaceable] readonly attribute long screenX;
@@ -172,12 +176,15 @@
     //  90 is when rotated counter clockwise.
     [HighEntropy=Direct, MeasureAs=WindowOrientation, RuntimeEnabled=OrientationEvent] readonly attribute long orientation;
 
-    // Accessibility Object Model
-    // https://github.com/WICG/aom/blob/HEAD/explainer.md
-    [RuntimeEnabled=AccessibilityObjectModel, CallWith=ScriptState] Promise<ComputedAccessibleNode> getComputedAccessibleNode(Element element);
+    // Event handler attribute for the pageswap event.
+    [RuntimeEnabled=PageSwapEvent] attribute EventHandler onpageswap;
+
+    // Event handler attribute for the pagereveal event.
+    // https://drafts.csswg.org/css-view-transitions-2/#reveal-event
+    [RuntimeEnabled=PageRevealEvent] attribute EventHandler onpagereveal;
 
     // https://dom.spec.whatwg.org/#interface-window-extensions
-    [Replaceable, GetterCallWith=ScriptState, MeasureAs=WindowEvent, NotEnumerable] readonly attribute any event;
+    [Replaceable, GetterCallWith=ScriptState, MeasureAs=WindowEvent] readonly attribute any event;
 
     // Non-standard APIs
     [MeasureAs=WindowClientInformation, Replaceable] readonly attribute Navigator clientInformation;
@@ -191,8 +198,8 @@
     [MeasureAs=WindowOffscreenBuffering, Replaceable, NotEnumerable] readonly attribute boolean offscreenBuffering;
     [HighEntropy=Direct, MeasureAs=WindowScreenLeft, Replaceable] readonly attribute long screenLeft;
     [HighEntropy=Direct, MeasureAs=WindowScreenTop, Replaceable] readonly attribute long screenTop;
-    [MeasureAs=WindowDefaultStatus] attribute DOMString defaultStatus;
-    [MeasureAs=WindowDefaultstatus, ImplementedAs=defaultStatus] attribute DOMString defaultstatus;
+    [RuntimeEnabled=WindowDefaultStatus,MeasureAs=WindowDefaultStatus] attribute DOMString defaultStatus;
+    [RuntimeEnabled=WindowDefaultStatus,MeasureAs=WindowDefaultstatus, ImplementedAs=defaultStatus] attribute DOMString defaultstatus;
     [MeasureAs=StyleMedia] readonly attribute StyleMedia styleMedia;
     [DeprecateAs=PrefixedRequestAnimationFrame] long webkitRequestAnimationFrame(FrameRequestCallback callback);
     [DeprecateAs=PrefixedCancelAnimationFrame, ImplementedAs=cancelAnimationFrame] void webkitCancelAnimationFrame(long id);
@@ -203,12 +210,12 @@
     // https://w3c.github.io/webappsec-secure-contexts/#monkey-patching-global-object
     readonly attribute boolean isSecureContext;
 
-    // TrustedTypes API: http://github.com/wicg/trusted-types
+    // TrustedTypes API: http://github.com/w3c/trusted-types
     [CallWith=ScriptState] readonly attribute TrustedTypePolicyFactory trustedTypes;
 
     // Anonymous iframe:
-    // https://wicg.github.io/anonymous-iframe/#spec-window-attribute
-    [RuntimeEnabled=AnonymousIframe] readonly attribute boolean anonymouslyFramed;
+    // https://github.com/WICG/anonymous-iframe
+    [RuntimeEnabled=AnonymousIframe] readonly attribute boolean credentialless;
 
     // Collection of fenced frame APIs
     // https://github.com/shivanigithub/fenced-frame/issues/14

@@ -5,6 +5,7 @@
 #include "chrome/browser/signin/primary_account_policy_manager_factory.h"
 
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/chrome_signin_client_factory.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 
 // static
@@ -23,15 +24,24 @@ PrimaryAccountPolicyManager* PrimaryAccountPolicyManagerFactory::GetForProfile(
 }
 
 PrimaryAccountPolicyManagerFactory::PrimaryAccountPolicyManagerFactory()
-    : ProfileKeyedServiceFactory("PrimaryAccountPolicyManager") {
+    : ProfileKeyedServiceFactory(
+          "PrimaryAccountPolicyManager",
+          ProfileSelections::Builder()
+              .WithRegular(ProfileSelection::kOriginalOnly)
+              // TODO(crbug.com/41488885): Check if this service is needed for
+              // Ash Internals.
+              .WithAshInternals(ProfileSelection::kOriginalOnly)
+              .Build()) {
   DependsOn(IdentityManagerFactory::GetInstance());
+  DependsOn(ChromeSigninClientFactory::GetInstance());
 }
 
 PrimaryAccountPolicyManagerFactory::~PrimaryAccountPolicyManagerFactory() =
     default;
 
-KeyedService* PrimaryAccountPolicyManagerFactory::BuildServiceInstanceFor(
+std::unique_ptr<KeyedService>
+PrimaryAccountPolicyManagerFactory::BuildServiceInstanceForBrowserContext(
     content::BrowserContext* context) const {
   Profile* profile = Profile::FromBrowserContext(context);
-  return new PrimaryAccountPolicyManager(profile);
+  return std::make_unique<PrimaryAccountPolicyManager>(profile);
 }

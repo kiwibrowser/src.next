@@ -6,11 +6,12 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "net/base/net_errors.h"
-#include "net/base/network_isolation_key.h"
+#include "net/base/network_anonymization_key.h"
 #include "net/base/test_completion_callback.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/http/http_auth_challenge_tokenizer.h"
@@ -51,7 +52,7 @@ TEST(HttpAuthHandlerBasicTest, GenerateAuthToken) {
     std::unique_ptr<HttpAuthHandler> basic;
     EXPECT_EQ(OK, factory.CreateAuthHandlerFromString(
                       challenge, HttpAuth::AUTH_SERVER, null_ssl_info,
-                      NetworkIsolationKey(), scheme_host_port,
+                      NetworkAnonymizationKey(), scheme_host_port,
                       NetLogWithSource(), host_resolver.get(), &basic));
     AuthCredentials credentials(base::ASCIIToUTF16(test.username),
                                 base::ASCIIToUTF16(test.password));
@@ -107,13 +108,11 @@ TEST(HttpAuthHandlerBasicTest, HandleAnotherChallenge) {
   std::unique_ptr<HttpAuthHandler> basic;
   EXPECT_EQ(OK, factory.CreateAuthHandlerFromString(
                     tests[0].challenge, HttpAuth::AUTH_SERVER, null_ssl_info,
-                    NetworkIsolationKey(), scheme_host_port, NetLogWithSource(),
-                    host_resolver.get(), &basic));
+                    NetworkAnonymizationKey(), scheme_host_port,
+                    NetLogWithSource(), host_resolver.get(), &basic));
 
   for (const auto& test : tests) {
-    std::string challenge(test.challenge);
-    HttpAuthChallengeTokenizer tok(challenge.begin(),
-                                   challenge.end());
+    HttpAuthChallengeTokenizer tok(test.challenge);
     EXPECT_EQ(test.expected_rv, basic->HandleAnotherChallenge(&tok));
   }
 }
@@ -209,8 +208,9 @@ TEST(HttpAuthHandlerBasicTest, InitFromChallenge) {
     auto host_resolver = std::make_unique<MockHostResolver>();
     std::unique_ptr<HttpAuthHandler> basic;
     int rv = factory.CreateAuthHandlerFromString(
-        challenge, HttpAuth::AUTH_SERVER, null_ssl_info, NetworkIsolationKey(),
-        scheme_host_port, NetLogWithSource(), host_resolver.get(), &basic);
+        challenge, HttpAuth::AUTH_SERVER, null_ssl_info,
+        NetworkAnonymizationKey(), scheme_host_port, NetLogWithSource(),
+        host_resolver.get(), &basic);
     EXPECT_EQ(test.expected_rv, rv);
     if (rv == OK)
       EXPECT_EQ(test.expected_realm, basic->realm());
@@ -235,7 +235,7 @@ TEST(HttpAuthHandlerBasicTest, BasicAuthRequiresHTTPS) {
   // Ensure that HTTP is disallowed.
   EXPECT_THAT(factory.CreateAuthHandlerFromString(
                   challenge, HttpAuth::AUTH_SERVER, null_ssl_info,
-                  NetworkIsolationKey(), nonsecure_scheme_host_port,
+                  NetworkAnonymizationKey(), nonsecure_scheme_host_port,
                   NetLogWithSource(), host_resolver.get(), &basic),
               IsError(ERR_UNSUPPORTED_AUTH_SCHEME));
 
@@ -243,7 +243,7 @@ TEST(HttpAuthHandlerBasicTest, BasicAuthRequiresHTTPS) {
   url::SchemeHostPort secure_scheme_host_port(GURL("https://www.example.com"));
   EXPECT_THAT(factory.CreateAuthHandlerFromString(
                   challenge, HttpAuth::AUTH_SERVER, null_ssl_info,
-                  NetworkIsolationKey(), secure_scheme_host_port,
+                  NetworkAnonymizationKey(), secure_scheme_host_port,
                   NetLogWithSource(), host_resolver.get(), &basic),
               IsOk());
 }

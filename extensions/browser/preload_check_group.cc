@@ -4,16 +4,17 @@
 
 #include "extensions/browser/preload_check_group.h"
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/ref_counted.h"
+#include "content/public/browser/browser_thread.h"
 #include "extensions/common/extension.h"
 
 namespace extensions {
 
 PreloadCheckGroup::PreloadCheckGroup() : PreloadCheck(nullptr) {}
 
-PreloadCheckGroup::~PreloadCheckGroup() {}
+PreloadCheckGroup::~PreloadCheckGroup() = default;
 
 void PreloadCheckGroup::AddCheck(PreloadCheck* check) {
   DCHECK_EQ(0, running_checks_);
@@ -26,12 +27,13 @@ void PreloadCheckGroup::Start(ResultCallback callback) {
 
   callback_ = std::move(callback);
   running_checks_ = checks_.size();
-  for (auto* check : checks_) {
+  for (extensions::PreloadCheck* check : checks_) {
     check->Start(base::BindOnce(&PreloadCheckGroup::OnCheckComplete,
                                 weak_ptr_factory_.GetWeakPtr()));
     // Synchronous checks may fail immediately.
-    if (running_checks_ == 0)
+    if (running_checks_ == 0) {
       return;
+    }
   }
 }
 
@@ -45,15 +47,18 @@ void PreloadCheckGroup::OnCheckComplete(const Errors& errors) {
 void PreloadCheckGroup::MaybeInvokeCallback() {
   // Only invoke callback if all checks are complete, or if there was at least
   // one failure and |stop_on_first_error_| is true.
-  if (running_checks_ > 0 && (errors_.empty() || !stop_on_first_error_))
+  if (running_checks_ > 0 && (errors_.empty() || !stop_on_first_error_)) {
     return;
+  }
 
   // If we are failing fast, discard any pending results.
   weak_ptr_factory_.InvalidateWeakPtrs();
   running_checks_ = 0;
 
   DCHECK(callback_);
-  std::move(callback_).Run(errors_);
+  // Ensure callback is called asynchronously
+  content::GetUIThreadTaskRunner()->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback_), errors_));
 }
 
 }  // namespace extensions

@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,7 @@ TEST_F(TreeOrderedListTest, Basic) {
       "id='d'></div>");
 
   Element* body = GetDocument().body();
-  Element* a = body->QuerySelector("#a");
+  Element* a = body->QuerySelector(AtomicString("#a"));
 
   TreeOrderedList list;
 
@@ -40,9 +40,9 @@ TEST_F(TreeOrderedListTest, DuplicateKeys) {
       "id='d'></div>");
 
   Element* body = GetDocument().body();
-  Element* a = body->QuerySelector("#a");
-  Element* b = body->QuerySelector("#b");
-  Element* c = body->QuerySelector("#c");
+  Element* a = body->QuerySelector(AtomicString("#a"));
+  Element* b = body->QuerySelector(AtomicString("#b"));
+  Element* c = body->QuerySelector(AtomicString("#c"));
 
   TreeOrderedList list;
 
@@ -61,10 +61,10 @@ TEST_F(TreeOrderedListTest, SortedByDocumentPosition) {
       "id='d'></div>");
 
   Element* body = GetDocument().body();
-  Element* a = body->QuerySelector("#a");
-  Element* b = body->QuerySelector("#b");
-  Element* c = body->QuerySelector("#c");
-  Element* d = body->QuerySelector("#d");
+  Element* a = body->QuerySelector(AtomicString("#a"));
+  Element* b = body->QuerySelector(AtomicString("#b"));
+  Element* c = body->QuerySelector(AtomicString("#c"));
+  Element* d = body->QuerySelector(AtomicString("#d"));
 
   TreeOrderedList list;
 

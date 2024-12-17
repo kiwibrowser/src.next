@@ -74,6 +74,9 @@ class CORE_EXPORT FlatTreeTraversal {
 
   static ContainerNode* Parent(const Node&);
   static Element* ParentElement(const Node&);
+  // Return the passed in Node if it is an Element, otherwise return the
+  // ParentElement()
+  static const Element* InclusiveParentElement(const Node&);
 
   static Node* NextSibling(const Node&);
   static Node* PreviousSibling(const Node&);
@@ -150,17 +153,15 @@ class CORE_EXPORT FlatTreeTraversal {
   static Node& LastWithinOrSelf(const Node&);
 
   // Flat tree range helper functions for range based for statement.
-  // TODO(dom-team): We should have following functions to match with
-  // |NodeTraversal|:
-  //   - DescendantsOf()
-  //   - InclusiveDescendantsOf()
-  //   - StartsAt()
-  //   - StartsAfter()
   static TraversalAncestorRange<FlatTreeTraversal> AncestorsOf(const Node&);
-  static TraversalSiblingRange<FlatTreeTraversal> ChildrenOf(const Node&);
-
   static TraversalAncestorRange<FlatTreeTraversal> InclusiveAncestorsOf(
       const Node&);
+  static TraversalSiblingRange<FlatTreeTraversal> ChildrenOf(const Node&);
+  static TraversalDescendantRange<FlatTreeTraversal> DescendantsOf(const Node&);
+  static TraversalInclusiveDescendantRange<FlatTreeTraversal>
+  InclusiveDescendantsOf(const Node&);
+  static TraversalNextRange<FlatTreeTraversal> StartsAt(const Node&);
+  static TraversalNextRange<FlatTreeTraversal> StartsAfter(const Node&);
 
  private:
   enum TraversalDirection {
@@ -170,7 +171,9 @@ class CORE_EXPORT FlatTreeTraversal {
 
   static void AssertPrecondition(const Node& node) {
     DCHECK(!node.GetDocument().IsFlatTreeTraversalForbidden());
-    DCHECK(!node.IsShadowRoot());
+    DCHECK(!node.IsShadowRoot())
+        << "Shadow roots don't have layout objects. Their host has one, and "
+           "their children have them, and those two are connected.";
   }
 
   static void AssertPostcondition(const Node* node) {
@@ -193,7 +196,6 @@ class CORE_EXPORT FlatTreeTraversal {
   static Node* TraverseChild(const Node&, TraversalDirection);
 
   static ContainerNode* TraverseParent(const Node&);
-  static ContainerNode* TraverseParentOrHost(const Node&);
 
   static Node* TraverseNextSibling(const Node&);
   static Node* TraversePreviousSibling(const Node&);
@@ -352,15 +354,35 @@ inline TraversalAncestorRange<FlatTreeTraversal> FlatTreeTraversal::AncestorsOf(
       FlatTreeTraversal::Parent(node));
 }
 
+inline TraversalAncestorRange<FlatTreeTraversal>
+FlatTreeTraversal::InclusiveAncestorsOf(const Node& node) {
+  return TraversalAncestorRange<FlatTreeTraversal>(&node);
+}
+
 inline TraversalSiblingRange<FlatTreeTraversal> FlatTreeTraversal::ChildrenOf(
     const Node& parent) {
   return TraversalSiblingRange<FlatTreeTraversal>(
       FlatTreeTraversal::FirstChild(parent));
 }
 
-inline TraversalAncestorRange<FlatTreeTraversal>
-FlatTreeTraversal::InclusiveAncestorsOf(const Node& node) {
-  return TraversalAncestorRange<FlatTreeTraversal>(&node);
+inline TraversalDescendantRange<FlatTreeTraversal>
+FlatTreeTraversal::DescendantsOf(const Node& root) {
+  return TraversalDescendantRange<FlatTreeTraversal>(&root);
+}
+
+inline TraversalInclusiveDescendantRange<FlatTreeTraversal>
+FlatTreeTraversal::InclusiveDescendantsOf(const Node& root) {
+  return TraversalInclusiveDescendantRange<FlatTreeTraversal>(&root);
+}
+
+inline TraversalNextRange<FlatTreeTraversal> FlatTreeTraversal::StartsAt(
+    const Node& start) {
+  return TraversalNextRange<FlatTreeTraversal>(&start);
+}
+
+inline TraversalNextRange<FlatTreeTraversal> FlatTreeTraversal::StartsAfter(
+    const Node& start) {
+  return TraversalNextRange<FlatTreeTraversal>(FlatTreeTraversal::Next(start));
 }
 
 }  // namespace blink

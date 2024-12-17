@@ -6,21 +6,20 @@
 #define NET_BASE_PROXY_STRING_UTIL_H_
 
 #include <string>
+#include <string_view>
 
-#include "base/strings/string_piece.h"
-#include "build/build_config.h"
 #include "net/base/net_export.h"
+#include "net/base/proxy_chain.h"
 #include "net/base/proxy_server.h"
-
-#if BUILDFLAG(IS_APPLE)
-#include <CoreFoundation/CoreFoundation.h>
-#endif  // BUILDFLAG(IS_APPLE)
 
 namespace net {
 
 // Converts a PAC result element (commonly called a PAC string) to/from a
-// ProxyServer. Note that this only deals with a single proxy server element
-// separated out from the complete semicolon-delimited PAC result string.
+// ProxyServer / ProxyChain. Note that this only deals with a single proxy
+// element separated out from the complete semicolon-delimited PAC result
+// string.
+//
+// Note that PAC strings cannot currently specify multi-proxy chains.
 //
 // PAC result elements have the format:
 // <scheme>" "<host>[":"<port>]
@@ -37,8 +36,7 @@ namespace net {
 // If <port> is omitted, it will be assumed as the default port for the
 // chosen scheme (via ProxyServer::GetDefaultPortForScheme()).
 //
-// If parsing fails the returned proxy will have scheme
-// `ProxyServer::SCHEME_INVALID`.
+// Returns an invalid ProxyServer / ProxyChain if parsing fails.
 //
 // Examples:
 //   "PROXY foopy:19"   {scheme=HTTP, host="foopy", port=19}
@@ -47,12 +45,16 @@ namespace net {
 //   "HTTPS foopy:123"  {scheme=HTTPS, host="foopy", port=123}
 //   "QUIC foopy:123"   {scheme=QUIC, host="foopy", port=123}
 //   "BLAH xxx:xx"      INVALID
+NET_EXPORT ProxyChain
+PacResultElementToProxyChain(std::string_view pac_result_element);
+// TODO(crbug.com/40284947): Remove method once all calls are updated to use
+// PacResultElementToProxyChain.
 NET_EXPORT ProxyServer
-PacResultElementToProxyServer(base::StringPiece pac_result_element);
+PacResultElementToProxyServer(std::string_view pac_result_element);
 NET_EXPORT std::string ProxyServerToPacResultElement(
     const ProxyServer& proxy_server);
 
-// Converts a non-standard URI string to/from a ProxyServer.
+// Converts a non-standard URI string to/from a ProxyChain.
 //
 // The non-standard URI strings have the format:
 //   [<scheme>"://"]<server>[":"<port>]
@@ -84,32 +86,46 @@ NET_EXPORT std::string ProxyServerToPacResultElement(
 //   "quic://foopy:17"  {scheme=QUIC, host="foopy", port=17}
 //   "direct://"        {scheme=DIRECT}
 //   "foopy:X"          INVALID -- bad port.
-NET_EXPORT ProxyServer
-ProxyUriToProxyServer(base::StringPiece uri,
-                      ProxyServer::Scheme default_scheme);
+NET_EXPORT ProxyChain ProxyUriToProxyChain(std::string_view uri,
+                                           ProxyServer::Scheme default_scheme,
+                                           bool is_quic_allowed = false);
+
+// Converts a bracketed string of non-standard uris to a multi-proxy
+// `net::ProxyChain`.
+//
+// The `uris` parameter may contain 1 or more non-standard URIs but not 0 which
+// would result in an invalid `ProxyChain()`.
+//
+// If brackets are omitted from the `uris` string, it MUST be a single
+// non-standard URI. Otherwise, an invalid `ProxyChain()` will be returned.
+//
+//
+// The bracketed non-standard URIs strings have the format:
+//   [x y z] where individual non-standard uris are space delimited and
+//   encompassed within brackets.
+//   ex. [https://foopy:17 https://hoopy:17]
+//
+// Each non-standard URI string follows the format described in the
+// documentation for the `ProxyUriToProxyChain` function.
+NET_EXPORT ProxyChain
+MultiProxyUrisToProxyChain(std::string_view uris,
+                           ProxyServer::Scheme default_scheme,
+                           bool is_quic_allowed = false);
+NET_EXPORT ProxyServer ProxyUriToProxyServer(std::string_view uri,
+                                             ProxyServer::Scheme default_scheme,
+                                             bool is_quic_allowed = false);
 NET_EXPORT std::string ProxyServerToProxyUri(const ProxyServer& proxy_server);
+NET_EXPORT ProxyServer
+ProxySchemeHostAndPortToProxyServer(ProxyServer::Scheme scheme,
+                                    std::string_view host_and_port);
 
 // Parses the proxy scheme from the non-standard URI scheme string
 // representation used in `ProxyUriToProxyServer()` and
 // `ProxyServerToProxyUri()`. If no type could be matched, returns
 // SCHEME_INVALID.
-NET_EXPORT ProxyServer::Scheme GetSchemeFromUriScheme(base::StringPiece scheme);
-
-#if BUILDFLAG(IS_APPLE)
-// Utility function to pull out a host/port pair from a dictionary and return
-// it as a ProxyServer object. Pass in a dictionary that has a  value for the
-// host key and optionally a value for the port key. In the error condition
-// where the host value is especially malformed, returns an invalid
-// ProxyServer.
-//
-// TODO(ericorth@chromium.org): Dictionary isn't really a string representation,
-// so this doesn't really belong in this file. Consider moving this logic to
-// somewhere alongside the Apple-specific proxy-resolution code.
-ProxyServer ProxyDictionaryToProxyServer(ProxyServer::Scheme scheme,
-                                         CFDictionaryRef dict,
-                                         CFStringRef host_key,
-                                         CFStringRef port_key);
-#endif  // BUILDFLAG(IS_APPLE)
+NET_EXPORT ProxyServer::Scheme GetSchemeFromUriScheme(
+    std::string_view scheme,
+    bool is_quic_allowed = false);
 
 }  // namespace net
 

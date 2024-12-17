@@ -26,6 +26,7 @@
 
 #include "third_party/blink/renderer/core/dom/tree_scope.h"
 
+#include "third_party/blink/renderer/core/animation/document_animations.h"
 #include "third_party/blink/renderer/core/css/resolver/scoped_style_resolver.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
@@ -36,15 +37,21 @@
 #include "third_party/blink/renderer/core/dom/events/event_path.h"
 #include "third_party/blink/renderer/core/dom/id_target_observer_registry.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
+#include "third_party/blink/renderer/core/dom/scroll_marker_group_pseudo_element.h"
+#include "third_party/blink/renderer/core/dom/scroll_marker_pseudo_element.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/dom/tree_scope_adopter.h"
 #include "third_party/blink/renderer/core/editing/dom_selection.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
+#include "third_party/blink/renderer/core/frame/picture_in_picture_controller.h"
+#include "third_party/blink/renderer/core/fullscreen/fullscreen.h"
 #include "third_party/blink/renderer/core/html/html_anchor_element.h"
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
 #include "third_party/blink/renderer/core/html/html_map_element.h"
+#include "third_party/blink/renderer/core/html/html_slot_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
+#include "third_party/blink/renderer/core/layout/hit_test_location.h"
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/page/focus_controller.h"
@@ -58,49 +65,20 @@
 
 namespace blink {
 
-TreeScope::TreeScope(ContainerNode& root_node,
-                     Document& document,
-                     V8ObservableArrayCSSStyleSheet::SetAlgorithmCallback
-                         adopted_style_sheets_set_callback,
-                     V8ObservableArrayCSSStyleSheet::DeleteAlgorithmCallback
-                         adopted_style_sheets_delete_callback)
-    : root_node_(&root_node),
-      document_(&document),
-      parent_tree_scope_(&document),
-      id_target_observer_registry_(
-          MakeGarbageCollected<IdTargetObserverRegistry>()),
-      adopted_style_sheets_(
-          MakeGarbageCollected<V8ObservableArrayCSSStyleSheet>(
-              &root_node,
-              adopted_style_sheets_set_callback,
-              adopted_style_sheets_delete_callback)) {
+TreeScope::TreeScope(ContainerNode& root_node, Document& document)
+    : document_(&document),
+      root_node_(&root_node),
+      parent_tree_scope_(&document) {
   DCHECK_NE(root_node, document);
   root_node_->SetTreeScope(this);
 }
 
-TreeScope::TreeScope(Document& document,
-                     V8ObservableArrayCSSStyleSheet::SetAlgorithmCallback
-                         adopted_style_sheets_set_callback,
-                     V8ObservableArrayCSSStyleSheet::DeleteAlgorithmCallback
-                         adopted_style_sheets_delete_callback)
-    : root_node_(document),
-      document_(&document),
-      parent_tree_scope_(nullptr),
-      id_target_observer_registry_(
-          MakeGarbageCollected<IdTargetObserverRegistry>()),
-      adopted_style_sheets_(
-          MakeGarbageCollected<V8ObservableArrayCSSStyleSheet>(
-              &document,
-              adopted_style_sheets_set_callback,
-              adopted_style_sheets_delete_callback)) {
+TreeScope::TreeScope(Document& document)
+    : document_(&document), root_node_(document) {
   root_node_->SetTreeScope(this);
 }
 
 TreeScope::~TreeScope() = default;
-
-void TreeScope::ResetTreeScope() {
-  selection_ = nullptr;
-}
 
 bool TreeScope::IsInclusiveAncestorTreeScopeOf(const TreeScope& scope) const {
   for (const TreeScope* current = &scope; current;
@@ -133,7 +111,7 @@ void TreeScope::ClearScopedStyleResolver() {
 }
 
 Element* TreeScope::getElementById(const AtomicString& element_id) const {
-  if (element_id.IsEmpty())
+  if (element_id.empty())
     return nullptr;
   if (!elements_by_id_)
     return nullptr;
@@ -144,7 +122,7 @@ const HeapVector<Member<Element>>& TreeScope::GetAllElementsById(
     const AtomicString& element_id) const {
   DEFINE_STATIC_LOCAL(Persistent<HeapVector<Member<Element>>>, empty_vector,
                       (MakeGarbageCollected<HeapVector<Member<Element>>>()));
-  if (element_id.IsEmpty())
+  if (element_id.empty())
     return *empty_vector;
   if (!elements_by_id_)
     return *empty_vector;
@@ -153,18 +131,24 @@ const HeapVector<Member<Element>>& TreeScope::GetAllElementsById(
 
 void TreeScope::AddElementById(const AtomicString& element_id,
                                Element& element) {
-  if (!elements_by_id_)
+  if (!elements_by_id_) {
     elements_by_id_ = MakeGarbageCollected<TreeOrderedMap>();
+  }
   elements_by_id_->Add(element_id, element);
-  id_target_observer_registry_->NotifyObservers(element_id);
+  if (id_target_observer_registry_) {
+    id_target_observer_registry_->NotifyObservers(element_id);
+  }
 }
 
 void TreeScope::RemoveElementById(const AtomicString& element_id,
                                   Element& element) {
-  if (!elements_by_id_)
+  if (!elements_by_id_) {
     return;
+  }
   elements_by_id_->Remove(element_id, element);
-  id_target_observer_registry_->NotifyObservers(element_id);
+  if (id_target_observer_registry_) {
+    id_target_observer_registry_->NotifyObservers(element_id);
+  }
 }
 
 Node* TreeScope::AncestorInThisScope(Node* node) const {
@@ -182,20 +166,27 @@ Node* TreeScope::AncestorInThisScope(Node* node) const {
 
 void TreeScope::AddImageMap(HTMLMapElement& image_map) {
   const AtomicString& name = image_map.GetName();
-  if (!name)
+  const AtomicString& id = image_map.GetIdAttribute();
+  if (!name && !id) {
     return;
+  }
   if (!image_maps_by_name_)
     image_maps_by_name_ = MakeGarbageCollected<TreeOrderedMap>();
-  image_maps_by_name_->Add(name, image_map);
+  if (name)
+    image_maps_by_name_->Add(name, image_map);
+  if (id) {
+    image_maps_by_name_->Add(id, image_map);
+  }
 }
 
 void TreeScope::RemoveImageMap(HTMLMapElement& image_map) {
   if (!image_maps_by_name_)
     return;
-  const AtomicString& name = image_map.GetName();
-  if (!name)
-    return;
-  image_maps_by_name_->Remove(name, image_map);
+  if (const AtomicString& name = image_map.GetName())
+    image_maps_by_name_->Remove(name, image_map);
+  if (const AtomicString& id = image_map.GetIdAttribute()) {
+    image_maps_by_name_->Remove(id, image_map);
+  }
 }
 
 HTMLMapElement* TreeScope::GetImageMap(const String& url) const {
@@ -207,6 +198,9 @@ HTMLMapElement* TreeScope::GetImageMap(const String& url) const {
   if (hash_pos == kNotFound)
     return nullptr;
   String name = url.Substring(hash_pos + 1);
+  if (name.empty()) {
+    return nullptr;
+  }
   return To<HTMLMapElement>(
       image_maps_by_name_->GetElementByMapName(AtomicString(name), *this));
 }
@@ -227,12 +221,12 @@ static bool PointInFrameContentIfVisible(Document& document,
 
   auto* scrollable_area = frame_view->LayoutViewport();
   gfx::Rect visible_frame_rect(scrollable_area->VisibleContentRect().size());
-  visible_frame_rect =
-      gfx::ScaleToRoundedRect(visible_frame_rect, 1 / frame->PageZoomFactor());
+  visible_frame_rect = gfx::ScaleToRoundedRect(visible_frame_rect,
+                                               1 / frame->LayoutZoomFactor());
   if (!visible_frame_rect.Contains(gfx::ToRoundedPoint(point_in_frame)))
     return false;
 
-  point_in_frame.Scale(frame->PageZoomFactor());
+  point_in_frame.Scale(frame->LayoutZoomFactor());
   return true;
 }
 
@@ -276,10 +270,12 @@ Element* TreeScope::HitTestPointInternal(Node* node,
   if (!node || node->IsDocumentNode())
     return nullptr;
   Element* element;
-  if (node->IsPseudoElement() || node->IsTextNode())
+  if ((node->IsPseudoElement() && !node->IsScrollMarkerPseudoElement()) ||
+      node->IsTextNode()) {
     element = node->ParentOrShadowHostElement();
-  else
+  } else {
     element = To<Element>(node);
+  }
   if (!element)
     return nullptr;
   if (type == HitTestPointType::kWebExposed)
@@ -321,7 +317,7 @@ HeapVector<Member<Element>> TreeScope::ElementsFromHitTestResult(
     }
   }
   if (Element* document_element = GetDocument().documentElement()) {
-    if (elements.IsEmpty() || elements.back() != document_element)
+    if (elements.empty() || elements.back() != document_element)
       elements.push_back(document_element);
   }
   return elements;
@@ -352,8 +348,17 @@ SVGTreeScopeResources& TreeScope::EnsureSVGTreeScopedResources() {
   return *svg_tree_scoped_resources_;
 }
 
+V8ObservableArrayCSSStyleSheet& TreeScope::EnsureAdoptedStyleSheets() {
+  if (!adopted_style_sheets_) [[unlikely]] {
+    adopted_style_sheets_ =
+        MakeGarbageCollected<V8ObservableArrayCSSStyleSheet>(
+            this, &OnAdoptedStyleSheetSet, &OnAdoptedStyleSheetDelete);
+  }
+  return *adopted_style_sheets_;
+}
+
 bool TreeScope::HasAdoptedStyleSheets() const {
-  return adopted_style_sheets_->size();
+  return adopted_style_sheets_ && adopted_style_sheets_->size();
 }
 
 void TreeScope::StyleSheetWasAdded(CSSStyleSheet* sheet) {
@@ -364,7 +369,17 @@ void TreeScope::StyleSheetWasRemoved(CSSStyleSheet* sheet) {
   GetDocument().GetStyleEngine().AdoptedStyleSheetRemoved(*this, sheet);
 }
 
+// We pass TreeScope to the bindings array to be informed via set and delete
+// callbacks. Bindings doesn't know about DOM types, so we can only pass
+// ScriptWrappable (i.e. Document or ShadowRoot) or a GarbageCollectedMixin. We
+// choose the mixin as that avoids dispatching from Document back to TreeScope
+// essentially implementing a cast. The mixin is passed as void*-like object
+// that is only passed back from the observable array into the set/delete
+// callbacks where it is again used as TreeScope.
+//
+// static
 void TreeScope::OnAdoptedStyleSheetSet(
+    GarbageCollectedMixin* tree_scope,
     ScriptState* script_state,
     V8ObservableArrayCSSStyleSheet& observable_array,
     uint32_t index,
@@ -376,25 +391,34 @@ void TreeScope::OnAdoptedStyleSheetSet(
         "Can't adopt non-constructed stylesheets.");
     return;
   }
+  TreeScope* self = reinterpret_cast<TreeScope*>(tree_scope);
   Document* document = sheet->ConstructorDocument();
-  if (document && *document != GetDocument()) {
+  if (document && *document != self->GetDocument()) {
     exception_state.ThrowDOMException(DOMExceptionCode::kNotAllowedError,
                                       "Sharing constructed stylesheets in "
                                       "multiple documents is not allowed");
     return;
   }
-  StyleSheetWasAdded(sheet.Get());
+  self->StyleSheetWasAdded(sheet.Get());
 }
 
+// See OnAdoptedStyleSheetSet() for description around inner workings.
+//
+// static
 void TreeScope::OnAdoptedStyleSheetDelete(
+    GarbageCollectedMixin* tree_scope,
     ScriptState* script_state,
     V8ObservableArrayCSSStyleSheet& observable_array,
     uint32_t index,
     ExceptionState& exception_state) {
-  StyleSheetWasRemoved(adopted_style_sheets_->at(index));
+  TreeScope* self = reinterpret_cast<TreeScope*>(tree_scope);
+  self->StyleSheetWasRemoved(self->adopted_style_sheets_->at(index));
 }
 
 void TreeScope::ClearAdoptedStyleSheets() {
+  if (!HasAdoptedStyleSheets()) {
+    return;
+  }
   HeapVector<Member<CSSStyleSheet>> removed;
   removed.AppendRange(adopted_style_sheets_->begin(),
                       adopted_style_sheets_->end());
@@ -407,6 +431,7 @@ void TreeScope::ClearAdoptedStyleSheets() {
 void TreeScope::SetAdoptedStyleSheetsForTesting(
     HeapVector<Member<CSSStyleSheet>>& adopted_style_sheets) {
   ClearAdoptedStyleSheets();
+  EnsureAdoptedStyleSheets();
   for (auto sheet : adopted_style_sheets) {
     DCHECK(sheet->IsConstructed());
     DCHECK_EQ(sheet->ConstructorDocument(), GetDocument());
@@ -430,10 +455,11 @@ DOMSelection* TreeScope::GetSelection() const {
 }
 
 Element* TreeScope::FindAnchorWithName(const String& name) {
-  if (name.IsEmpty())
+  if (name.empty())
     return nullptr;
   if (Element* element = getElementById(AtomicString(name)))
     return element;
+  // TODO(crbug.com/369219144): Should this be Traversal<HTMLAnchorElementBase>?
   for (HTMLAnchorElement& anchor :
        Traversal<HTMLAnchorElement>::StartsAfter(RootNode())) {
     if (RootNode().GetDocument().InQuirksMode()) {
@@ -475,19 +501,22 @@ Node* TreeScope::FindAnchor(const String& fragment) {
 
   // 7. If decodedFragment is "top", top of the document.
   // TODO(1117212) Move the IsEmpty check to step 2.
-  if (fragment.IsEmpty() || EqualIgnoringASCIICase(name, "top"))
+  if (fragment.empty() || EqualIgnoringASCIICase(name, "top"))
     anchor = &GetDocument();
 
   return anchor;
 }
 
 void TreeScope::AdoptIfNeeded(Node& node) {
+  DCHECK(!node.IsDocumentNode());
+  if (&node.GetTreeScope() == this) [[likely]] {
+    return;
+  }
+
   // Script is forbidden to protect against event handlers firing in the middle
   // of rescoping in |didMoveToNewDocument| callbacks. See
   // https://crbug.com/605766 and https://crbug.com/606651.
   ScriptForbiddenScope forbid_script;
-  DCHECK(this);
-  DCHECK(!node.IsDocumentNode());
   TreeScopeAdopter adopter(node, *this);
   if (adopter.NeedsScopeChange())
     adopter.Execute();
@@ -547,6 +576,16 @@ Element* TreeScope::AdjustedFocusedElement() const {
   if (!element)
     return nullptr;
 
+  // https://github.com/flackr/carousel/tree/main/scroll-marker#what-is-the-documentactiveelement-of-a-focused-pseudo-element
+  if (auto* scroll_marker = DynamicTo<ScrollMarkerPseudoElement>(element)) {
+    CHECK(scroll_marker->ScrollMarkerGroup());
+    element = scroll_marker->ScrollMarkerGroup()->OriginatingElement();
+  } else if (auto* pseudo_element = DynamicTo<PseudoElement>(element)) {
+    element = pseudo_element->OriginatingElement();
+  }
+
+  CHECK(!element->IsPseudoElement());
+
   if (RootNode().IsInShadowTree()) {
     if (Element* retargeted = AdjustedFocusedElementInternal(*element)) {
       return (this == &retargeted->GetTreeScope()) ? retargeted : nullptr;
@@ -578,6 +617,39 @@ Element* TreeScope::AdjustedElement(const Element& target) const {
       return const_cast<Element*>(adjusted_target);
   }
   return nullptr;
+}
+
+StyleSheetList& TreeScope::StyleSheets() {
+  if (!style_sheet_list_) {
+    style_sheet_list_ = MakeGarbageCollected<StyleSheetList>(this);
+  }
+  return *style_sheet_list_;
+}
+
+Element* TreeScope::activeElement() const {
+  if (Element* element = AdjustedFocusedElement()) {
+    return element;
+  }
+  return document_ == this ? document_->body() : nullptr;
+}
+
+HeapVector<Member<Animation>> TreeScope::getAnimations() {
+  return GetDocument().GetDocumentAnimations().getAnimations(*this);
+}
+
+Element* TreeScope::pointerLockElement() {
+  UseCounter::Count(GetDocument(), WebFeature::kShadowRootPointerLockElement);
+  const Element* target = GetDocument().PointerLockElement();
+  return target ? AdjustedElement(*target) : nullptr;
+}
+
+Element* TreeScope::fullscreenElement() {
+  return Fullscreen::FullscreenElementForBindingFrom(*this);
+}
+
+Element* TreeScope::pictureInPictureElement() {
+  return PictureInPictureController::From(GetDocument())
+      .PictureInPictureElement(*this);
 }
 
 uint16_t TreeScope::ComparePosition(const TreeScope& other_scope) const {
@@ -633,7 +705,7 @@ const TreeScope* TreeScope::CommonAncestorTreeScope(
   // is found. If |this| and |other| belong to different documents, null will be
   // returned.
   const TreeScope* last_ancestor = nullptr;
-  while (!this_chain.IsEmpty() && !other_chain.IsEmpty() &&
+  while (!this_chain.empty() && !other_chain.empty() &&
          this_chain.back() == other_chain.back()) {
     last_ancestor = this_chain.back();
     this_chain.pop_back();
@@ -657,7 +729,7 @@ bool TreeScope::IsInclusiveAncestorOf(const TreeScope& scope) const {
 }
 
 Element* TreeScope::GetElementByAccessKey(const String& key) const {
-  if (key.IsEmpty())
+  if (key.empty())
     return nullptr;
   Element* result = nullptr;
   Node& root = RootNode();
@@ -684,7 +756,16 @@ void TreeScope::Trace(Visitor* visitor) const {
   visitor->Trace(scoped_style_resolver_);
   visitor->Trace(radio_button_group_scope_);
   visitor->Trace(svg_tree_scoped_resources_);
+  visitor->Trace(style_sheet_list_);
   visitor->Trace(adopted_style_sheets_);
+}
+
+IdTargetObserverRegistry& TreeScope::EnsureIdTargetObserverRegistry() {
+  if (!id_target_observer_registry_) [[unlikely]] {
+    id_target_observer_registry_ =
+        MakeGarbageCollected<IdTargetObserverRegistry>();
+  }
+  return *id_target_observer_registry_;
 }
 
 }  // namespace blink

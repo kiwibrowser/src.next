@@ -6,7 +6,7 @@
 
 #include <string>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
@@ -39,7 +39,7 @@ int HumanReadableNetworkHandle(handles::NetworkHandle network) {
 // Return a dictionary of values that provide information about a
 // network-specific change. This also includes relevant current state
 // like the default network, and the types of active networks.
-base::Value NetworkSpecificNetLogParams(handles::NetworkHandle network) {
+base::Value::Dict NetworkSpecificNetLogParams(handles::NetworkHandle network) {
   base::Value::Dict dict;
   dict.Set("changed_network_handle", HumanReadableNetworkHandle(network));
   dict.Set("changed_network_type",
@@ -57,23 +57,20 @@ base::Value NetworkSpecificNetLogParams(handles::NetworkHandle network) {
         NetworkChangeNotifier::ConnectionTypeToString(
             NetworkChangeNotifier::GetNetworkConnectionType(active_network)));
   }
-  return base::Value(std::move(dict));
+  return dict;
 }
 
-void NetLogNetworkSpecific(NetLog* net_log,
+void NetLogNetworkSpecific(NetLogWithSource& net_log,
                            NetLogEventType type,
                            handles::NetworkHandle network) {
-  if (!net_log)
-    return;
-
-  net_log->AddGlobalEntry(type,
+  net_log.AddEvent(type,
                           [&] { return NetworkSpecificNetLogParams(network); });
 }
 
 }  // namespace
 
 LoggingNetworkChangeObserver::LoggingNetworkChangeObserver(NetLog* net_log)
-    : net_log_(net_log) {
+    : net_log_(NetLogWithSource::Make(net_log, NetLogSourceType::NETWORK_CHANGE_NOTIFIER)) {
   NetworkChangeNotifier::AddIPAddressObserver(this);
   NetworkChangeNotifier::AddConnectionTypeObserver(this);
   NetworkChangeNotifier::AddNetworkChangeObserver(this);
@@ -92,30 +89,30 @@ LoggingNetworkChangeObserver::~LoggingNetworkChangeObserver() {
 void LoggingNetworkChangeObserver::OnIPAddressChanged() {
   VLOG(1) << "Observed a change to the network IP addresses";
 
-  net_log_->AddGlobalEntry(NetLogEventType::NETWORK_IP_ADDRESSES_CHANGED);
+  net_log_.AddEvent(NetLogEventType::NETWORK_IP_ADDRESSES_CHANGED);
 }
 
 void LoggingNetworkChangeObserver::OnConnectionTypeChanged(
     NetworkChangeNotifier::ConnectionType type) {
-  std::string type_as_string =
+  std::string_view type_as_string =
       NetworkChangeNotifier::ConnectionTypeToString(type);
 
   VLOG(1) << "Observed a change to network connectivity state "
           << type_as_string;
 
-  net_log_->AddGlobalEntryWithStringParams(
+  net_log_.AddEventWithStringParams(
       NetLogEventType::NETWORK_CONNECTIVITY_CHANGED, "new_connection_type",
       type_as_string);
 }
 
 void LoggingNetworkChangeObserver::OnNetworkChanged(
     NetworkChangeNotifier::ConnectionType type) {
-  std::string type_as_string =
+  std::string_view type_as_string =
       NetworkChangeNotifier::ConnectionTypeToString(type);
 
   VLOG(1) << "Observed a network change to state " << type_as_string;
 
-  net_log_->AddGlobalEntryWithStringParams(
+  net_log_.AddEventWithStringParams(
       NetLogEventType::NETWORK_CHANGED, "new_connection_type", type_as_string);
 }
 

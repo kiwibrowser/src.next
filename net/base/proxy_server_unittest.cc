@@ -2,12 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "net/base/proxy_server.h"
+
+#include <optional>
 
 #include "base/strings/string_number_conversions.h"
 #include "net/base/proxy_string_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace net {
 
@@ -22,7 +28,7 @@ TEST(ProxyServerTest, FromSchemeHostAndPort) {
   const struct {
     const ProxyServer::Scheme input_scheme;
     const char* const input_host;
-    const absl::optional<uint16_t> input_port;
+    const std::optional<uint16_t> input_port;
     const char* const input_port_str;
     const char* const expected_host;
     const uint16_t expected_port;
@@ -61,13 +67,14 @@ TEST(ProxyServerTest, FromSchemeHostAndPort) {
       {ProxyServer::SCHEME_QUIC, "foopy", 111, "111", "foopy", 111},
       {ProxyServer::SCHEME_SOCKS4, "foopy", 111, "111", "foopy", 111},
       {ProxyServer::SCHEME_SOCKS5, "foopy", 111, "111", "foopy", 111},
+      {ProxyServer::SCHEME_HTTPS, " foopy \n", 111, "111", "foopy", 111},
 
       // Default ports
-      {ProxyServer::SCHEME_HTTP, "foopy", absl::nullopt, "", "foopy", 80},
-      {ProxyServer::SCHEME_HTTPS, "foopy", absl::nullopt, "", "foopy", 443},
-      {ProxyServer::SCHEME_QUIC, "foopy", absl::nullopt, "", "foopy", 443},
-      {ProxyServer::SCHEME_SOCKS4, "foopy", absl::nullopt, "", "foopy", 1080},
-      {ProxyServer::SCHEME_SOCKS5, "foopy", absl::nullopt, "", "foopy", 1080},
+      {ProxyServer::SCHEME_HTTP, "foopy", std::nullopt, "", "foopy", 80},
+      {ProxyServer::SCHEME_HTTPS, "foopy", std::nullopt, "", "foopy", 443},
+      {ProxyServer::SCHEME_QUIC, "foopy", std::nullopt, "", "foopy", 443},
+      {ProxyServer::SCHEME_SOCKS4, "foopy", std::nullopt, "", "foopy", 1080},
+      {ProxyServer::SCHEME_SOCKS5, "foopy", std::nullopt, "", "foopy", 1080},
   };
 
   for (size_t i = 0; i < std::size(tests); ++i) {
@@ -185,7 +192,8 @@ TEST(ProxyServerTest, ComparatorAndEquality) {
 TEST(ProxyServerTest, Properties) {
   // HTTP proxy.
   {
-    auto proxy = PacResultElementToProxyServer("PROXY foo");
+    auto proxy = ProxyServer::FromSchemeHostAndPort(ProxyServer::SCHEME_HTTP,
+                                                    "foo", std::nullopt);
     ASSERT_TRUE(proxy.is_valid());
     EXPECT_TRUE(proxy.is_http());
     EXPECT_FALSE(proxy.is_https());
@@ -195,7 +203,8 @@ TEST(ProxyServerTest, Properties) {
 
   // HTTPS proxy.
   {
-    auto proxy = PacResultElementToProxyServer("HTTPS foo");
+    auto proxy = ProxyServer::FromSchemeHostAndPort(ProxyServer::SCHEME_HTTPS,
+                                                    "foo", std::nullopt);
     ASSERT_TRUE(proxy.is_valid());
     EXPECT_FALSE(proxy.is_http());
     EXPECT_TRUE(proxy.is_https());
@@ -205,7 +214,8 @@ TEST(ProxyServerTest, Properties) {
 
   // QUIC proxy.
   {
-    auto proxy = PacResultElementToProxyServer("QUIC foo");
+    auto proxy = ProxyServer::FromSchemeHostAndPort(ProxyServer::SCHEME_QUIC,
+                                                    "foo", std::nullopt);
     ASSERT_TRUE(proxy.is_valid());
     EXPECT_FALSE(proxy.is_http());
     EXPECT_FALSE(proxy.is_https());
@@ -215,17 +225,8 @@ TEST(ProxyServerTest, Properties) {
 
   // SOCKS5 proxy.
   {
-    auto proxy = PacResultElementToProxyServer("SOCKS5 foo");
-    ASSERT_TRUE(proxy.is_valid());
-    EXPECT_FALSE(proxy.is_http());
-    EXPECT_FALSE(proxy.is_https());
-    EXPECT_FALSE(proxy.is_http_like());
-    EXPECT_FALSE(proxy.is_secure_http_like());
-  }
-
-  // DIRECT
-  {
-    auto proxy = PacResultElementToProxyServer("DIRECT");
+    auto proxy = ProxyServer::FromSchemeHostAndPort(ProxyServer::SCHEME_SOCKS5,
+                                                    "foo", std::nullopt);
     ASSERT_TRUE(proxy.is_valid());
     EXPECT_FALSE(proxy.is_http());
     EXPECT_FALSE(proxy.is_https());

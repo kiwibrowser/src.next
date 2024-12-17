@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include "third_party/blink/renderer/core/layout/geometry/physical_rect.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/geometry/float_rounded_rect.h"
-#include "third_party/blink/renderer/platform/geometry/layout_rect_outsets.h"
 #include "third_party/blink/renderer/platform/geometry/length_functions.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 
@@ -65,10 +64,10 @@ FloatRoundedRect RoundedBorderGeometry::RoundedInnerBorder(
     const PhysicalRect& border_rect) {
   FloatRoundedRect rounded_border = RoundedBorder(style, border_rect);
   rounded_border.Inset(gfx::InsetsF()
-                           .set_top(style.BorderTopWidth().ToInt())
-                           .set_right(style.BorderRightWidth().ToInt())
-                           .set_bottom(style.BorderBottomWidth().ToInt())
-                           .set_left(style.BorderLeftWidth().ToInt()));
+                           .set_top(style.BorderTopWidth())
+                           .set_right(style.BorderRightWidth())
+                           .set_bottom(style.BorderBottomWidth())
+                           .set_left(style.BorderLeftWidth()));
   return rounded_border;
 }
 
@@ -78,27 +77,26 @@ FloatRoundedRect RoundedBorderGeometry::PixelSnappedRoundedInnerBorder(
     PhysicalBoxSides sides_to_include) {
   return PixelSnappedRoundedBorderWithOutsets(
       style, border_rect,
-      LayoutRectOutsets(
-          -style.BorderTopWidth().Floor(), -style.BorderRightWidth().Floor(),
-          -style.BorderBottomWidth().Floor(), -style.BorderLeftWidth().Floor()),
+      PhysicalBoxStrut(-style.BorderTopWidth(), -style.BorderRightWidth(),
+                       -style.BorderBottomWidth(), -style.BorderLeftWidth()),
       sides_to_include);
 }
 
 FloatRoundedRect RoundedBorderGeometry::PixelSnappedRoundedBorderWithOutsets(
     const ComputedStyle& style,
     const PhysicalRect& border_rect,
-    const LayoutRectOutsets& outsets,
+    const PhysicalBoxStrut& outsets,
     PhysicalBoxSides sides_to_include) {
-  LayoutRectOutsets adjusted_outsets(
-      sides_to_include.top ? outsets.Top() : LayoutUnit(),
-      sides_to_include.right ? outsets.Right() : LayoutUnit(),
-      sides_to_include.bottom ? outsets.Bottom() : LayoutUnit(),
-      sides_to_include.left ? outsets.Left() : LayoutUnit());
+  PhysicalBoxStrut adjusted_outsets(
+      sides_to_include.top ? outsets.top : LayoutUnit(),
+      sides_to_include.right ? outsets.right : LayoutUnit(),
+      sides_to_include.bottom ? outsets.bottom : LayoutUnit(),
+      sides_to_include.left ? outsets.left : LayoutUnit());
   PhysicalRect rect_with_outsets = border_rect;
   rect_with_outsets.Expand(adjusted_outsets);
   rect_with_outsets.size.ClampNegativeToZero();
 
-  // The standard LayoutRect::ToPixelSnappedRect() method will not
+  // The standard ToPixelSnappedRect(const PhysicalRect&) will not
   // let small sizes snap to zero, but that has the side effect here of
   // preventing an inner border for a very thin element from snapping to
   // zero size as occurs when a unit width border is applied to a sub-pixel

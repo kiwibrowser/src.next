@@ -5,6 +5,8 @@
 #ifndef CONTENT_PUBLIC_COMMON_CDM_INFO_H_
 #define CONTENT_PUBLIC_COMMON_CDM_INFO_H_
 
+#include <iosfwd>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -12,12 +14,11 @@
 #include "base/version.h"
 #include "build/build_config.h"
 #include "content/common/content_export.h"
+#include "media/base/cdm_capability.h"
 #include "media/base/content_decryption_module.h"
 #include "media/base/encryption_scheme.h"
 #include "media/base/video_codecs.h"
-#include "media/cdm/cdm_capability.h"
 #include "media/cdm/cdm_type.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace content {
 
@@ -46,14 +47,15 @@ struct CONTENT_EXPORT CdmInfo {
     kGpuFeatureDisabled,      // gpu::DISABLE_MEDIA_FOUNDATION_HARDWARE_SECURITY
     kGpuCompositionDisabled,  // GPU (direct) composition disabled
     kDisabledByPref,  // Disabled due to previous errors (stored in Local State)
-    kDisabledOnError,  // Disabled after errors or crashes
-    kMaxValue = kDisabledOnError,
+    kDisabledOnError,                // Disabled after errors or crashes
+    kDisabledBySoftwareEmulatedGpu,  // Disabled by software emulated GPU
+    kMaxValue = kDisabledBySoftwareEmulatedGpu,
   };
 
   // If `capability` is nullopt, the `capability` will be lazy initialized.
   CdmInfo(const std::string& key_system,
           Robustness robustness,
-          absl::optional<media::CdmCapability> capability,
+          std::optional<media::CdmCapability> capability,
           bool supports_sub_key_systems,
           const std::string& name,
           const media::CdmType& type,
@@ -61,7 +63,7 @@ struct CONTENT_EXPORT CdmInfo {
           const base::FilePath& path);
   CdmInfo(const std::string& key_system,
           Robustness robustness,
-          absl::optional<media::CdmCapability> capability,
+          std::optional<media::CdmCapability> capability,
           const media::CdmType& type);
   CdmInfo(const CdmInfo& other);
   ~CdmInfo();
@@ -77,7 +79,7 @@ struct CONTENT_EXPORT CdmInfo {
   Robustness robustness;
 
   // CDM capability, e.g. video codecs, encryption schemes and session types.
-  absl::optional<media::CdmCapability> capability;
+  std::optional<media::CdmCapability> capability;
 
   // Whether the CdmInfo is enabled etc. This only affects capability query.
   Status status = Status::kEnabled;
@@ -103,6 +105,14 @@ struct CONTENT_EXPORT CdmInfo {
   // CDM is not a separate library (e.g. Widevine on Android).
   base::FilePath path;
 };
+
+CONTENT_EXPORT std::string GetCdmInfoRobustnessName(
+    CdmInfo::Robustness robustness);
+
+inline std::ostream& operator<<(std::ostream& os,
+                                CdmInfo::Robustness robustness) {
+  return os << GetCdmInfoRobustnessName(robustness);
+}
 
 }  // namespace content
 

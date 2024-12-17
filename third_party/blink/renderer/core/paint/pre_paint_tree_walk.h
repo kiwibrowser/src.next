@@ -1,26 +1,28 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_PRE_PAINT_TREE_WALK_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_PRE_PAINT_TREE_WALK_H_
 
+#include <optional>
+
 #include "base/dcheck_is_on.h"
 #include "base/gtest_prod_util.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/paint/paint_invalidator.h"
 #include "third_party/blink/renderer/core/paint/paint_property_tree_builder.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
 class LayoutObject;
 class LocalFrameView;
-struct NGLink;
-class NGPhysicalBoxFragment;
-class NGPhysicalFragment;
+class PhysicalBoxFragment;
+class PhysicalFragment;
+struct PhysicalFragmentLink;
 
 // This class walks the whole layout tree, beginning from the root
 // LocalFrameView, across frame boundaries. Helper classes are called for each
@@ -45,7 +47,7 @@ class CORE_EXPORT PrePaintTreeWalk final {
    public:
     bool IsInFragmentationContext() const;
 
-    const NGPhysicalBoxFragment* fragment = nullptr;
+    const PhysicalBoxFragment* fragment = nullptr;
     wtf_size_t fragmentainer_idx = WTF::kNotFound;
     int fragmentation_nesting_level = 0;
   };
@@ -70,10 +72,6 @@ class CORE_EXPORT PrePaintTreeWalk final {
     }
 
     PaintInvalidatorContext paint_invalidator_context;
-
-    // The ancestor in the PaintLayer tree which is a scroll container. Note
-    // that it is tree ancestor, not containing block or stacking ancestor.
-    PaintLayer* ancestor_scroll_container_paint_layer = nullptr;
 
     // Whether there is a blocking touch event handler on any ancestor.
     bool inside_blocking_touch_event_handler = false;
@@ -130,7 +128,7 @@ class CORE_EXPORT PrePaintTreeWalk final {
           ;
     }
 
-    absl::optional<PaintPropertyTreeBuilderContext> tree_builder_context;
+    std::optional<PaintPropertyTreeBuilderContext> tree_builder_context;
   };
 
   static bool ContextRequiresChildPrePaint(const PrePaintTreeWalkContext&);
@@ -142,22 +140,22 @@ class CORE_EXPORT PrePaintTreeWalk final {
                                     const PrePaintTreeWalkContext&);
 #endif
 
-  // Upon entering a child LayoutObject, create an NGPrePaintInfo, and populate
+  // Upon entering a child LayoutObject, create an PrePaintInfo, and populate
   // everything except its FragmentData. We need to get a bit further inside the
   // child (WalkInternal()) before we can set up FragmentData (if we get there
   // at all).
-  NGPrePaintInfo CreatePrePaintInfo(const NGLink& child,
-                                    const PrePaintTreeWalkContext& context);
+  PrePaintInfo CreatePrePaintInfo(const PhysicalFragmentLink& child,
+                                  const PrePaintTreeWalkContext& context);
 
   // Locate and/or set up a FragmentData object for the current object /
   // physical fragment.
   FragmentData* GetOrCreateFragmentData(const LayoutObject&,
                                         const PrePaintTreeWalkContext&,
-                                        const NGPrePaintInfo&);
+                                        const PrePaintInfo&);
 
   void UpdateContextForOOFContainer(const LayoutObject&,
                                     PrePaintTreeWalkContext&,
-                                    const NGPhysicalBoxFragment*);
+                                    const PhysicalBoxFragment*);
 
   void Walk(LocalFrameView&, const PrePaintTreeWalkContext& parent_context);
 
@@ -168,7 +166,7 @@ class CORE_EXPORT PrePaintTreeWalk final {
   // See https://crbug.com/781301 .
   NOINLINE void WalkInternal(const LayoutObject&,
                              PrePaintTreeWalkContext&,
-                             NGPrePaintInfo*);
+                             PrePaintInfo*);
 
   // Add any "missable" children to a list. Missable children are children that
   // we might not find during LayoutObject traversal. This happens when an
@@ -181,33 +179,56 @@ class CORE_EXPORT PrePaintTreeWalk final {
   // Returns true if there are any missable children inside the fragment, false
   // otherwise.
   bool CollectMissableChildren(PrePaintTreeWalkContext&,
-                               const NGPhysicalBoxFragment&);
+                               const PhysicalBoxFragment&);
 
-  // Based on the context established by |ancestor|, modify it to become correct
-  // for |object|, at least as far as OOF containing block info is concerned.
-  void RebuildContextForMissedDescendant(const LayoutObject& ancestor,
-                                         const LayoutObject& object,
-                                         PrePaintTreeWalkContext&);
+  // Based on the context established by |ancestor|, modify it to become as
+  // correct as possible for |object|. Any object between the ancestor and the
+  // target object may have paint effects that would be missed otherwise.
+  //
+  // This function will start by walking up to the ancestor recursively, and
+  // then build whatever it can on the way down again. If a physical fragment is
+  // returned, this will be the parent fragment of the next child, so that we
+  // can search for a fragment for the child right there. If the child is
+  // out-of-flow positioned, it will need to locate the correct containing
+  // fragment via other means, though. If it's nullptr, it means that no
+  // fragment exists for the parent (i.e. the node isn't represented in this
+  // fragmentainer), and we need to behave according to specs (assume that a
+  // transform origin is based on a zero-block-size box, zero clip rectangle
+  // size, etc.)
+  const PhysicalBoxFragment* RebuildContextForMissedDescendant(
+      const PhysicalBoxFragment& ancestor,
+      const LayoutObject& object,
+      bool update_tree_builder_context,
+      PrePaintTreeWalkContext&);
 
   // Walk any missed children (i.e. those collected by CollectMissableChildren()
   // and not walked by Walk()) after child object traversal.
-  void WalkMissedChildren(const LayoutObject& ancestor,
-                          const NGPhysicalBoxFragment&,
+  void WalkMissedChildren(const PhysicalBoxFragment&,
+                          bool is_in_fragment_traversal,
                           const PrePaintTreeWalkContext&);
 
   void WalkFragmentationContextRootChildren(const LayoutObject&,
-                                            const NGPhysicalBoxFragment&,
+                                            const PhysicalBoxFragment&,
                                             const PrePaintTreeWalkContext&);
+  void WalkPageContainer(const PhysicalFragmentLink& page_container_link,
+                         const LayoutObject& parent_object,
+                         const PrePaintTreeWalkContext& parent_context,
+                         wtf_size_t fragmentainer_idx);
+  void WalkFragmentainer(const LayoutObject& parent_object,
+                         const PhysicalFragmentLink& child_link,
+                         const PrePaintTreeWalkContext& parent_context,
+                         wtf_size_t fragmentainer_idx);
+
   void WalkLayoutObjectChildren(const LayoutObject&,
-                                const NGPhysicalBoxFragment*,
+                                const PhysicalBoxFragment*,
                                 const PrePaintTreeWalkContext&);
   void WalkChildren(const LayoutObject&,
-                    const NGPhysicalBoxFragment*,
+                    const PhysicalBoxFragment*,
                     PrePaintTreeWalkContext&,
                     bool is_inside_fragment_child = false);
   void Walk(const LayoutObject&,
             const PrePaintTreeWalkContext& parent_context,
-            NGPrePaintInfo*);
+            PrePaintInfo*);
 
   bool NeedsTreeBuilderContextUpdate(const LocalFrameView&,
                                      const PrePaintTreeWalkContext&);
@@ -230,9 +251,9 @@ class CORE_EXPORT PrePaintTreeWalk final {
 
   // List of fragments that may be missed during LayoutObject walking. See
   // CollectMissableChildren() and WalkMissedChildren().
-  HeapHashSet<Member<const NGPhysicalFragment>> pending_missables_;
+  HeapHashSet<Member<const PhysicalFragment>> pending_missables_;
 
-  bool needs_invalidate_chrome_client_ = false;
+  bool needs_invalidate_chrome_client_and_intersection_ = false;
 
   FRIEND_TEST_ALL_PREFIXES(PrePaintTreeWalkTest, ClipRects);
 };

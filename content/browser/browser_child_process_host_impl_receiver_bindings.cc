@@ -6,7 +6,7 @@
 
 #include "content/browser/browser_child_process_host_impl.h"
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/no_destructor.h"
 #include "base/task/thread_pool.h"
 #include "build/build_config.h"
@@ -22,7 +22,7 @@
 #include "services/device/public/mojom/power_monitor.mojom.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "services/metrics/public/mojom/ukm_interface.mojom.h"
-#include "services/metrics/ukm_recorder_interface.h"
+#include "services/metrics/ukm_recorder_factory_impl.h"
 
 #if BUILDFLAG(IS_MAC)
 #include "content/browser/sandbox_support_mac_impl.h"
@@ -50,12 +50,24 @@ GetBindHostReceiverInterceptor() {
 
 void BrowserChildProcessHostImpl::BindHostReceiver(
     mojo::GenericPendingReceiver receiver) {
+  // TODO(crbug.com/40285371): this function should run on the IO thread and
+  // calls functions documented as running on the IO thread.
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
   const auto& interceptor = GetBindHostReceiverInterceptor();
   if (interceptor) {
     interceptor.Run(this, &receiver);
-    if (!receiver)
+    if (!receiver) {
       return;
+    }
   }
+
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+  if (auto r = receiver.As<mojom::ThreadTypeSwitcher>()) {
+    child_thread_type_switcher_.Bind(std::move(r));
+    return;
+  }
+#endif  // (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS))
 
   if (auto r =
           receiver.As<memory_instrumentation::mojom::CoordinatorConnector>()) {
@@ -112,9 +124,9 @@ void BrowserChildProcessHostImpl::BindHostReceiver(
     return;
   }
 
-  if (auto r = receiver.As<ukm::mojom::UkmRecorderInterface>()) {
-    metrics::UkmRecorderInterface::Create(ukm::UkmRecorder::Get(),
-                                          std::move(r));
+  if (auto r = receiver.As<ukm::mojom::UkmRecorderFactory>()) {
+    metrics::UkmRecorderFactoryImpl::Create(ukm::UkmRecorder::Get(),
+                                            std::move(r));
     return;
   }
 

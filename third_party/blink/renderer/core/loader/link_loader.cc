@@ -31,6 +31,7 @@
 
 #include "third_party/blink/renderer/core/loader/link_loader.h"
 
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-shared.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -50,7 +51,6 @@
 #include "third_party/blink/renderer/platform/loader/fetch/resource_finish_observer.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
 #include "third_party/blink/renderer/platform/loader/subresource_integrity.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -59,11 +59,11 @@ class WebPrescientNetworking;
 namespace {
 
 // Decide the prerender type based on the link rel attribute. Returns
-// absl::nullopt if the attribute doesn't indicate the prerender type.
-absl::optional<mojom::blink::PrerenderTriggerType>
+// std::nullopt if the attribute doesn't indicate the prerender type.
+std::optional<mojom::blink::PrerenderTriggerType>
 PrerenderTriggerTypeFromRelAttribute(const LinkRelAttribute& rel_attribute,
                                      Document& document) {
-  absl::optional<mojom::blink::PrerenderTriggerType> trigger_type;
+  std::optional<mojom::blink::PrerenderTriggerType> trigger_type;
   if (rel_attribute.IsLinkPrerender()) {
     UseCounter::Count(document, WebFeature::kLinkRelPrerender);
     trigger_type = mojom::blink::PrerenderTriggerType::kLinkRelPrerender;
@@ -140,8 +140,10 @@ bool LinkLoader::LoadLink(const LinkLoadParameters& params,
     PreloadHelper::PrefetchIfNeeded(params, document, pending_preload_);
   PreloadHelper::ModulePreloadIfNeeded(
       params, document, nullptr /* viewport_description */, pending_preload_);
+  PreloadHelper::FetchCompressionDictionaryIfNeeded(params, document,
+                                                    pending_preload_);
 
-  absl::optional<mojom::blink::PrerenderTriggerType> trigger_type =
+  std::optional<mojom::blink::PrerenderTriggerType> trigger_type =
       PrerenderTriggerTypeFromRelAttribute(params.rel, document);
   if (trigger_type) {
     // The previous prerender should already be aborted by Abort().
@@ -165,8 +167,6 @@ void LinkLoader::LoadStylesheet(
 
   mojom::blink::FetchPriorityHint fetch_priority_hint =
       GetFetchPriorityAttributeValue(params.fetch_priority_hint);
-  DCHECK(fetch_priority_hint == mojom::blink::FetchPriorityHint::kAuto ||
-         RuntimeEnabledFeatures::PriorityHintsEnabled(context));
   resource_request.SetFetchPriorityHint(fetch_priority_hint);
 
   ResourceLoaderOptions options(context->GetCurrentWorld());
@@ -185,7 +185,7 @@ void LinkLoader::LoadStylesheet(
   }
 
   String integrity_attr = params.integrity;
-  if (!integrity_attr.IsEmpty()) {
+  if (!integrity_attr.empty()) {
     IntegrityMetadataSet metadata_set;
     SubresourceIntegrity::ParseIntegrityAttribute(
         integrity_attr, SubresourceIntegrityHelper::GetFeatures(context),

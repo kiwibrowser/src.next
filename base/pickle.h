@@ -2,21 +2,28 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
+#pragma allow_unsafe_buffers
+#endif
+
 #ifndef BASE_PICKLE_H_
 #define BASE_PICKLE_H_
 
 #include <stddef.h>
 #include <stdint.h>
 
+#include <optional>
 #include <string>
+#include <string_view>
 
 #include "base/base_export.h"
 #include "base/check_op.h"
+#include "base/compiler_specific.h"
 #include "base/containers/span.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr_exclusion.h"
 #include "base/memory/ref_counted.h"
-#include "base/strings/string_piece.h"
 
 namespace base {
 
@@ -44,11 +51,13 @@ class BASE_EXPORT PickleIterator {
   [[nodiscard]] bool ReadFloat(float* result);
   [[nodiscard]] bool ReadDouble(double* result);
   [[nodiscard]] bool ReadString(std::string* result);
-  // The StringPiece data will only be valid for the lifetime of the message.
-  [[nodiscard]] bool ReadStringPiece(StringPiece* result);
+  // The std::string_view data will only be valid for the lifetime of the
+  // message.
+  [[nodiscard]] bool ReadStringPiece(std::string_view* result);
   [[nodiscard]] bool ReadString16(std::u16string* result);
-  // The StringPiece16 data will only be valid for the lifetime of the message.
-  [[nodiscard]] bool ReadStringPiece16(StringPiece16* result);
+  // The std::u16string_view data will only be valid for the lifetime of the
+  // message.
+  [[nodiscard]] bool ReadStringPiece16(std::u16string_view* result);
 
   // A pointer to the data will be placed in |*data|, and the length will be
   // placed in |*length|. The pointer placed into |*data| points into the
@@ -57,7 +66,7 @@ class BASE_EXPORT PickleIterator {
   [[nodiscard]] bool ReadData(const char** data, size_t* length);
 
   // Similar, but using base::span for convenience.
-  [[nodiscard]] bool ReadData(base::span<const uint8_t>* data);
+  [[nodiscard]] std::optional<base::span<const uint8_t>> ReadData();
 
   // A pointer to the data will be placed in |*data|. The caller specifies the
   // number of bytes to read, and ReadBytes will validate this length. The
@@ -151,24 +160,33 @@ class BASE_EXPORT Pickle {
   Pickle();
 
   // Initialize a Pickle object with the specified header size in bytes, which
-  // must be greater-than-or-equal-to sizeof(Pickle::Header).  The header size
-  // will be rounded up to ensure that the header size is 32bit-aligned.
+  // must be greater-than-or-equal-to `sizeof(Pickle::Header)`. The header size
+  // will be rounded up to ensure that the header size is 32bit-aligned. Note
+  // that the extra memory allocated due to the size difference between the
+  // requested header size and the size of a standard header is not initialized.
   explicit Pickle(size_t header_size);
 
-  // Initializes a Pickle from a const block of data.  The data is not copied;
-  // instead the data is merely referenced by this Pickle.  Only const methods
-  // should be used on the Pickle when initialized this way.  The header
-  // padding size is deduced from the data length.
-  Pickle(const char* data, size_t data_len);
+  // Returns a Pickle initialized from a block of data. The Pickle obtained by
+  // this call makes a copy of the data from which it is initialized, so it is
+  // safe to pass around without concern for the pointer to the original data
+  // dangling. The header padding size is deduced from the data length.
+  static Pickle WithData(span<const uint8_t> data);
 
-  // Initializes a Pickle as a deep copy of another Pickle.
+  // Returns a Pickle initialized from a const block of data. The data is not
+  // copied, only referenced, which can be dangerous; please only use this
+  // initialization when the speed gain of not copying the data outweighs the
+  // danger of dangling pointers. If a Pickle is obtained from this call, it is
+  // a requirement that only const methods be called. The header padding size is
+  // deduced from the data length.
+  static Pickle WithUnownedBuffer(span<const uint8_t> data);
+
+  // Initializes a Pickle as a copy of another Pickle. If the original Pickle's
+  // data is unowned, the copy will have its own internalized copy of the data.
   Pickle(const Pickle& other);
 
-  // Note: There are no virtual methods in this class.  This destructor is
-  // virtual as an element of defensive coding.  Other classes have derived from
-  // this class, and there is a *chance* that they will cast into this base
-  // class before destruction.  At least one such class does have a virtual
-  // destructor, suggesting at least some need to call more derived destructors.
+  // Note: Other classes are derived from this class, and they may well
+  // delete through this parent class, e.g. std::unique_ptr<Pickle> exists
+  // in several places the code.
   virtual ~Pickle();
 
   // Performs a deep copy.
@@ -179,8 +197,26 @@ class BASE_EXPORT Pickle {
     return header_ ? header_size_ + header_->payload_size : 0;
   }
 
+  bool empty() const { return !size(); }
+
   // Returns the data for this Pickle.
-  const void* data() const { return header_; }
+  const uint8_t* data() const {
+    return reinterpret_cast<const uint8_t*>(header_);
+  }
+
+  // Handy method to simplify calling data() with a reinterpret_cast.
+  const char* data_as_char() const {
+    return reinterpret_cast<const char*>(data());
+  }
+
+  // Iteration. These allow `Pickle` to satisfy `std::ranges::contiguous_range`,
+  // which in turn allow it to be implicitly converted to a `span`.
+  const uint8_t* begin() const { return data(); }
+  const uint8_t* end() const {
+    // SAFETY: `data()` always points to at least `size()` valid bytes, so this
+    // pointer is no further than just-past-the-end of the allocation.
+    return UNSAFE_BUFFERS(data() + size());
+  }
 
   // Returns the effective memory capacity of this Pickle, that is, the total
   // number of bytes currently dynamically allocated or 0 in the case of a
@@ -206,15 +242,20 @@ class BASE_EXPORT Pickle {
   void WriteUInt64(uint64_t value) { WritePOD(value); }
   void WriteFloat(float value) { WritePOD(value); }
   void WriteDouble(double value) { WritePOD(value); }
-  void WriteString(const StringPiece& value);
-  void WriteString16(const StringPiece16& value);
+  void WriteString(std::string_view value);
+  void WriteString16(std::u16string_view value);
   // "Data" is a blob with a length. When you read it out you will be given the
   // length. See also WriteBytes.
+  // TODO(https://crbug.com/40284755): Migrate callers to the span versions.
   void WriteData(const char* data, size_t length);
+  void WriteData(span<const uint8_t> data);
+  void WriteData(std::string_view data);
   // "Bytes" is a blob with no length. The caller must specify the length both
   // when reading and writing. It is normally used to serialize PoD types of a
   // known size. See also WriteData.
+  // TODO(https://crbug.com/40284755): Migrate callers to the span version.
   void WriteBytes(const void* data, size_t length);
+  void WriteBytes(span<const uint8_t> data);
 
   // WriteAttachment appends |attachment| to the pickle. It returns
   // false iff the set is full or if the Pickle implementation does not support
@@ -258,6 +299,20 @@ class BASE_EXPORT Pickle {
     return header_ ? header_->payload_size : 0;
   }
 
+  base::span<const uint8_t> payload_bytes() const {
+    return base::as_bytes(base::make_span(payload(), payload_size()));
+  }
+
+ protected:
+  // The protected constructor. Note that this creates a Pickle that does not
+  // own its own data.
+  enum UnownedData { kUnownedData };
+  explicit Pickle(UnownedData, span<const uint8_t> data);
+
+  // Returns size of the header, which can have default value, set by user or
+  // calculated by passed raw data.
+  size_t header_size() const { return header_size_; }
+
   const char* payload() const {
     return reinterpret_cast<const char*>(header_) + header_size_;
   }
@@ -268,11 +323,6 @@ class BASE_EXPORT Pickle {
     // This object may be invalid.
     return header_ ? payload() + payload_size() : NULL;
   }
-
- protected:
-  // Returns size of the header, which can have default value, set by user or
-  // calculated by passed raw data.
-  size_t header_size() const { return header_size_; }
 
   char* mutable_payload() {
     return reinterpret_cast<char*>(header_) + header_size_;
@@ -338,7 +388,7 @@ class BASE_EXPORT Pickle {
   }
 
   inline void* ClaimUninitializedBytesInternal(size_t num_bytes);
-  inline void WriteBytesCommon(const void* data, size_t length);
+  inline void WriteBytesCommon(span<const uint8_t> data);
 
   FRIEND_TEST_ALL_PREFIXES(PickleTest, DeepCopyResize);
   FRIEND_TEST_ALL_PREFIXES(PickleTest, Resize);

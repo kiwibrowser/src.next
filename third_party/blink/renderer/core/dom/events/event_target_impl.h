@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,9 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 
-class ScriptState;
-
 namespace blink {
+
+class ScriptState;
 
 // Constructible version of EventTarget. Calls to EventTarget
 // constructor in JavaScript will return an instance of this class.
@@ -21,7 +21,7 @@ namespace blink {
 // increase the size of EventTarget and all of its subclasses with code
 // that are mostly unnecessary for them, resulting in a performance
 // decrease.
-class CORE_EXPORT EventTargetImpl final : public EventTargetWithInlineData,
+class CORE_EXPORT EventTargetImpl final : public EventTarget,
                                           public ExecutionContextClient {
  public:
   explicit EventTargetImpl(ScriptState*);

@@ -24,8 +24,9 @@ std::string GetDirectoryListingHeader(const std::u16string& title) {
   DLOG_IF(WARNING, !header) << "Missing resource: directory listing header";
 
   std::string result;
-  if (header)
-    result.assign(header->front_as<char>(), header->size());
+  if (header) {
+    result = base::as_string_view(*header);
+  }
 
   result.append("<script>start(");
   base::EscapeJSONString(title, true, &result);
@@ -76,7 +77,7 @@ std::string GetDirectoryListingEntry(const std::u16string& name,
     std::stringstream raw_time_string_stream;
     // Certain access paths can only get up to seconds resolution, so here we
     // output the raw time value in seconds for consistency.
-    raw_time_string_stream << modified.ToJavaTime() /
+    raw_time_string_stream << modified.InMillisecondsSinceUnixEpoch() /
                                   base::Time::kMillisecondsPerSecond
                            << ",";
     result.append(raw_time_string_stream.str());

@@ -29,12 +29,13 @@
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 
 #include "base/notreached.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 
 namespace blink {
 
 namespace {
 
-// Name, decription, and legacy code name and value of DOMExceptions.
+// Name, description, and legacy code name and value of DOMExceptions.
 // https://webidl.spec.whatwg.org/#idl-DOMException-error-names
 const struct DOMExceptionEntry {
   DOMExceptionCode code;
@@ -127,6 +128,8 @@ const struct DOMExceptionEntry {
     {DOMExceptionCode::kNotAllowedError, "NotAllowedError",
      "The request is not allowed by the user agent or the platform in the "
      "current context."},
+    {DOMExceptionCode::kOptOutError, "OptOutError",
+     "The user opted out of the process."},
 
     // DOMError (obsolete, not DOMException) defined in File system (obsolete).
     // https://www.w3.org/TR/2012/WD-file-system-api-20120417/
@@ -153,6 +156,31 @@ const struct DOMExceptionEntry {
      "A parity error has been detected."},
     {DOMExceptionCode::kWebTransportError, "WebTransportError",
      "The WebTransport operation failed."},
+
+    // Smart Card API
+    // https://wicg.github.io/web-smart-card/#smartcarderror-interface
+    {DOMExceptionCode::kSmartCardError, "SmartCardError",
+     "A Smart Card operation failed."},
+
+    // WebGPU https://www.w3.org/TR/webgpu/
+    {DOMExceptionCode::kGPUPipelineError, "GPUPipelineError",
+     "A WebGPU pipeline creation failed."},
+
+    // Media Capture and Streams API
+    // https://w3c.github.io/mediacapture-main/#overconstrainederror-interface
+    {DOMExceptionCode::kOverconstrainedError, "OverconstrainedError",
+     "The desired set of constraints/capabilities cannot be met."},
+
+    // FedCM API
+    // https://fedidcg.github.io/FedCM/#browser-api-identity-credential-error-interface
+    {DOMExceptionCode::kIdentityCredentialError, "IdentityCredentialError",
+     "An attempt to retrieve an IdentityCredential has failed."},
+
+    // WebSocketStream API https://websockets.spec.whatwg.org/
+    {DOMExceptionCode::kWebSocketError, "WebSocketError",
+     "The WebSocket connection was closed."},
+
+    // Extra comment to keep the end of the initializer list on its own line.
 };
 
 uint16_t ToLegacyErrorCode(DOMExceptionCode exception_code) {
@@ -168,7 +196,7 @@ const DOMExceptionEntry* FindErrorEntry(DOMExceptionCode exception_code) {
     if (exception_code == entry.code)
       return &entry;
   }
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
   return nullptr;
 }
 
@@ -211,16 +239,27 @@ String DOMException::GetErrorMessage(DOMExceptionCode exception_code) {
 }
 
 DOMException::DOMException(DOMExceptionCode exception_code,
-                           const String& sanitized_message,
-                           const String& unsanitized_message)
-    : DOMException(ToLegacyErrorCode(FindErrorEntry(exception_code)->code),
-                   FindErrorEntry(exception_code)->name
-                       ? FindErrorEntry(exception_code)->name
-                       : "Error",
-                   sanitized_message.IsNull()
-                       ? String(FindErrorEntry(exception_code)->message)
-                       : sanitized_message,
-                   unsanitized_message) {}
+                           String sanitized_message,
+                           String unsanitized_message) {
+  // Don't delegate to another constructor to avoid calling FindErrorEntry()
+  // multiple times.
+  auto* error_entry = FindErrorEntry(exception_code);
+  CHECK(error_entry);
+  legacy_code_ = ToLegacyErrorCode(error_entry->code);
+  name_ = error_entry->name;
+  sanitized_message_ = sanitized_message.IsNull()
+                           ? String(error_entry->message)
+                           : std::move(sanitized_message);
+  unsanitized_message_ = std::move(unsanitized_message);
+}
+
+DOMException::DOMException(DOMExceptionCode exception_code,
+                           const char* sanitized_message,
+                           const char* unsanitized_message)
+    : DOMException(
+          exception_code,
+          sanitized_message ? String(sanitized_message) : String(),
+          unsanitized_message ? String(unsanitized_message) : String()) {}
 
 DOMException::DOMException(uint16_t legacy_code,
                            const String& name,
@@ -234,7 +273,21 @@ DOMException::DOMException(uint16_t legacy_code,
 }
 
 String DOMException::ToStringForConsole() const {
-  return name() + ": " + MessageForConsole();
+  // If an unsanitized message is present, we prefer it.
+  const String& message_for_console =
+      !unsanitized_message_.empty() ? unsanitized_message_ : sanitized_message_;
+  return message_for_console.empty()
+             ? String()
+             : "Uncaught " + name() + ": " + message_for_console;
+}
+
+void DOMException::AddContextToMessages(const ExceptionContext& context) {
+  sanitized_message_ =
+      ExceptionMessages::AddContextToMessage(context, sanitized_message_);
+  if (!unsanitized_message_.IsNull()) {
+    unsanitized_message_ =
+        ExceptionMessages::AddContextToMessage(context, unsanitized_message_);
+  }
 }
 
 }  // namespace blink

@@ -1,13 +1,16 @@
 # Runtime Enabled Features
 ## Overview
-Runtime flags enable Blink developers the ability to control access Chromium users have to new features they implement. Features that are hidden behind a runtime flag are known as Runtime Enabled Features. It is a requirement of the Blink Launch Process to implement new web exposed features behind a runtime flag until an Intent To Ship has been approved.
+Runtime flags enable Blink to control access to new features. Features that are hidden behind a runtime flag are known as Runtime Enabled Features. It is a requirement of the Blink Launch Process to implement new web exposed features behind a runtime flag until an Intent To Ship has been approved. Additionally, all changes with non-trivial compatibility risk [should be guarded](/docs/flag_guarding_guidelines.md) by a Runtime Enabled Feature (or other base::Feature) so that they can be disabled quickly.
 
 ## Adding A Runtime Enabled Feature
 Runtime Enabled Features are defined in runtime_enabled_features.json5 in alphabetical order. Add your feature's flag to [runtime_enabled_features.json5] and the rest will be generated for you automatically.
 
+Please add a descriptive comment, including a link to the spec or the chromestatus.com entry if either one is available. This allows readers to easily find more context about the feature.
+
 Example:
 ```js
 {
+  // Amazing new feature! https://chromestatus.com/feature/123
   name: "AmazingNewFeature",
   status: "experimental",
 }
@@ -65,12 +68,12 @@ Any in-development feature can be added with no status, the only requirement is 
 * For a feature to be marked `status: "experimental"`, it should be far enough along to permit testing by early adopter web developers.  Many chromium enthusiasts run with `--enable-experimental-web-platform-features`, and so promoting a feature to experimental status can be a good way to get early warning of any stability or compatibility problems.  If such problems are discovered (e.g. major websites being seriously broken when the feature is enabled), the feature should be demoted back to no status or `status: "test"` to avoid creating undue problems for such users.  It's notoriously difficult to diagnose a bug report from a user who neglects to mention that they have this flag enabled.  Often a feature will be set to experimental status long before it's implementation is complete, and while there is still substantial churn on the API design.  Features in this state are not expected to work completely, just do something of value which developers may want to provide feedback on.
 
    **Note:** features set to "experimental" should **not** be expected to cause significant breakage of existing major sites. The primary use case is new APIs or features that are not expected to cause compat issues. If your feature could be reasonably expected to cause compat issues, please keep it marked no status or `status:"test"` [4], and instead use the Finch system, which is better suited to detect and disable such features in case of problems.
-   
-\[4]: In this case, "no status" is preferred to `status:"test"` unless you can ensure test coverage of the code paths with the feature disabled. See the `status:"test"` section for more details.   
+
+\[4]: In this case, "no status" is preferred to `status:"test"` unless you can ensure test coverage of the code paths with the feature disabled. See the `status:"test"` section for more details.
 
 * For a feature to be marked `status: "stable"`, it must be complete and ready for use by all chrome users. Often this means it has gotten approval via the [blink launch process]. However, for features which are not web observable (e.g. a flag to track a large-scale code refactoring), this approval is not needed. In rare cases a feature may be tested on canary and dev channels by temporarily setting it to `status: "stable"`, with a comment pointing to a bug marked `Release-Block-Beta` tracking setting the feature back to `status: "experimental"` before the branch for beta.
 
-When a feature has shipped and is no longer at risk of needing to be disabled, it's associated RuntimeEnableFeatures entry should be removed entirely.  Permanent features should generally not have flags.
+When a feature has shipped and is no longer at risk of needing to be disabled, its associated RuntimeEnableFeatures entry should be removed entirely.  Permanent features should generally not have flags.
 
 If a feature is not stable and no longer under active development, remove `status: "test"/"experimental"` on it (and consider deleting the code implementing the feature).
 
@@ -78,28 +81,38 @@ If a feature is not stable and no longer under active development, remove `statu
 
 In some cases, e.g. for finch experiment, you may need to define a Chromium
 feature for a blink feature. If you need a Chromium feature just for finch
-experiment for a blink feature, see the next section. Otherwise,
-their relationship is defined in [content/child/runtime_features.cc]. See the
-[initialize blink features] doc for more details.
+experiment for a blink feature, see the next section. Otherwise, you should
+specify `base_feature: "none"`, and their relationship is defined in
+[content/child/runtime_features.cc]. See the [initialize blink features] doc
+for more details.
+
+**Note:** `base_feature: "none"` is strongly discouraged if the feature
+doesn't have an associated base feature because the feature would lack a
+killswitch controllable via finch.
 
 **Note:** If a feature is implemented at both Chromium side and blink side, as the blink feature doesn't fully work by itself, we normally don't set the blink feature's status so that the Chromium feature can fully control the blink feature ([example][controlled by chromium feature]).
 
 If you need to update or check a blink feature status from outside of blink,
+with dedicated methods (instead of `WebRuntimeFeatures::EnableFeatureFromString()`),
 you can generate methods of `WebRuntimeFeatures` by adding `public: true,` to
-the feature entry in `runtime_enabled_features.json5`.
+the feature entry in `runtime_enabled_features.json5`. This should be
+rare because `WebRuntimeFeatures::EnableFeaturesFromString()` works in
+most cases.
 
 ### Generate a `base::Feature` instance from a Blink Feature
 
-If your feature is guarded only by a blink feature and you need to prepare
-Finch experiment for the feature, including a kill switch, you can
-generate a `base::Feature` instance for the blink feature entry by adding:
+A Blink feature entry generates a corresponding `base::Feature` instance with
+the same name in `blink::features` namespace by default.  It's helpful for a
+Finch experiment for the feature, including a kill switch.
 
-```js
-  base_feature: "AmazingNewFeature",
-```
+Specify `base_feature: "AnotherFlagName"` if you'd like to generate a
+`base::Feature` with a different name.
 
-It generates a `base::Feature` instance as `kAmazingNewFeature` in
-`blink::features` namespace. The `base_feature` value is used for the feature
+Specify `base_feature: "none"` to disable `base::Feature` generation
+(see the note above about in what situation `base_feature: "none"` is strongly
+discouraged).
+
+The name specified by `base_feature` or `name` is used for the feature
 name which is referred in `--enable-features=` flag and Finch configurations.
 
 The generated `base::Feature` is enabled by default if the status of the blink
@@ -237,6 +250,6 @@ https://groups.google.com/a/chromium.org/d/msg/blink-dev/JBakhu5J6Qs/re2LkfEslTA
 [make_internal_runtime_flags.py]: <https://chromium.googlesource.com/chromium/src/+/main/third_party/blink/renderer/build/scripts/make_internal_runtime_flags.py>
 [code_generator_v8.py]: <https://chromium.googlesource.com/chromium/src/+/main/third_party/blink/renderer/bindings/scripts/code_generator_v8.py>
 [virtual/stable]: <https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/web_tests/VirtualTestSuites;drc=9878f26d52d32871ed1c085444196e5453909eec;l=112>
-[content/child/runtime_features.cc]: <https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/common/features.cc>
+[content/child/runtime_features.cc]: <https://source.chromium.org/chromium/chromium/src/+/main:content/child/runtime_features.cc>
 [initialize blink features]: <https://chromium.googlesource.com/chromium/src/+/main/docs/initialize_blink_features.md>
 [controlled by chromium feature]: <https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/platform/runtime_enabled_features.json5;drc=70bddadf50a14254072cf7ca0bcf83e4331a7d4f;l=833>

@@ -5,6 +5,7 @@
 #include "base/file_version_info_win.h"
 
 #include <windows.h>
+
 #include <stddef.h>
 
 #include <utility>
@@ -171,10 +172,10 @@ std::u16string FileVersionInfoWin::GetStringValue(const char16_t* name) const {
 }
 
 base::Version FileVersionInfoWin::GetFileVersion() const {
-  return base::Version({HIWORD(fixed_file_info_.dwFileVersionMS),
-                        LOWORD(fixed_file_info_.dwFileVersionMS),
-                        HIWORD(fixed_file_info_.dwFileVersionLS),
-                        LOWORD(fixed_file_info_.dwFileVersionLS)});
+  return base::Version({HIWORD(fixed_file_info_->dwFileVersionMS),
+                        LOWORD(fixed_file_info_->dwFileVersionMS),
+                        HIWORD(fixed_file_info_->dwFileVersionLS),
+                        LOWORD(fixed_file_info_->dwFileVersionLS)});
 }
 
 FileVersionInfoWin::FileVersionInfoWin(std::vector<uint8_t>&& data,

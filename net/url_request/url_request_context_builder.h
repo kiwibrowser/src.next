@@ -18,15 +18,17 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "base/callback.h"
 #include "base/files/file_path.h"
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
-#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/task/task_traits.h"
+#include "base/types/optional_ref.h"
 #include "build/build_config.h"
 #include "build/buildflag.h"
 #include "net/base/net_export.h"
@@ -45,16 +47,11 @@
 #include "net/third_party/quiche/src/quiche/quic/core/quic_packets.h"
 #include "net/url_request/url_request_job_factory.h"
 
-namespace base::android {
-class ApplicationStatusListener;
-}  // namespace base::android
-
 namespace net {
 
 class CertVerifier;
 class ClientSocketFactory;
 class CookieStore;
-class CTPolicyEnforcer;
 class HttpAuthHandlerFactory;
 class HttpTransactionFactory;
 class HttpUserAgentSettings;
@@ -68,6 +65,12 @@ class URLRequestContext;
 struct ReportingPolicy;
 class PersistentReportingAndNelStore;
 #endif  // BUILDFLAG(ENABLE_REPORTING)
+
+#if BUILDFLAG(ENABLE_DEVICE_BOUND_SESSIONS)
+namespace device_bound_sessions {
+class SessionService;
+}
+#endif  // BUILDFLAG(ENABLE_DEVICE_BOUND_SESSIONS)
 
 // A URLRequestContextBuilder creates a single URLRequestContext. It provides
 // methods to manage various URLRequestContext components which should be called
@@ -129,8 +132,7 @@ class NET_EXPORT URLRequestContextBuilder {
 #if BUILDFLAG(IS_ANDROID)
     // If this is set, will override the default ApplicationStatusListener. This
     // is useful if the cache will not be in the main process.
-    raw_ptr<base::android::ApplicationStatusListener> app_status_listener =
-        nullptr;
+    disk_cache::ApplicationStatusListenerGetter app_status_listener_getter;
 #endif
   };
 
@@ -144,14 +146,28 @@ class NET_EXPORT URLRequestContextBuilder {
   // Sets whether Brotli compression is enabled.  Disabled by default;
   void set_enable_brotli(bool enable_brotli) { enable_brotli_ = enable_brotli; }
 
+  // Sets whether Zstd compression is enabled. Disabled by default.
+  void set_enable_zstd(bool enable_zstd) { enable_zstd_ = enable_zstd; }
+
+  // Sets whether Compression Dictionary is enabled. Disabled by default.
+  void set_enable_shared_dictionary(bool enable_shared_dictionary) {
+    enable_shared_dictionary_ = enable_shared_dictionary;
+  }
+
+  // Sets whether SZSTD of Compression Dictionary is enabled. Disabled by
+  // default.
+  void set_enable_shared_zstd(bool enable_shared_zstd) {
+    enable_shared_zstd_ = enable_shared_zstd;
+  }
+
   // Sets the |check_cleartext_permitted| flag, which controls whether to check
   // system policy before allowing a cleartext http or ws request.
   void set_check_cleartext_permitted(bool value) {
     check_cleartext_permitted_ = value;
   }
 
-  void set_require_network_isolation_key(bool value) {
-    require_network_isolation_key_ = value;
+  void set_require_network_anonymization_key(bool value) {
+    require_network_anonymization_key_ = value;
   }
 
   // Unlike most other setters, the builder does not take ownership of the
@@ -278,15 +294,6 @@ class NET_EXPORT URLRequestContextBuilder {
 
   void SetSpdyAndQuicEnabled(bool spdy_enabled, bool quic_enabled);
 
-  void set_throttling_enabled(bool throttling_enabled) {
-    throttling_enabled_ = throttling_enabled;
-  }
-  void set_first_party_sets_enabled(bool enabled) {
-    first_party_sets_enabled_ = enabled;
-  }
-
-  void set_ct_policy_enforcer(
-      std::unique_ptr<CTPolicyEnforcer> ct_policy_enforcer);
   void set_sct_auditing_delegate(
       std::unique_ptr<SCTAuditingDelegate> sct_auditing_delegate);
   void set_quic_context(std::unique_ptr<QuicContext> quic_context);
@@ -311,6 +318,9 @@ class NET_EXPORT URLRequestContextBuilder {
   void set_persistent_reporting_and_nel_store(
       std::unique_ptr<PersistentReportingAndNelStore>
           persistent_reporting_and_nel_store);
+
+  void set_enterprise_reporting_endpoints(
+      const base::flat_map<std::string, GURL>& enterprise_reporting_endpoints);
 #endif  // BUILDFLAG(ENABLE_REPORTING)
 
   // Override the default in-memory cookie store. If |cookie_store| is NULL,
@@ -352,6 +362,20 @@ class NET_EXPORT URLRequestContextBuilder {
     client_socket_factory_ = std::move(client_socket_factory);
   }
 
+  void set_cookie_deprecation_label(const std::string& label) {
+    cookie_deprecation_label_ = label;
+  }
+
+#if BUILDFLAG(ENABLE_DEVICE_BOUND_SESSIONS)
+  void set_device_bound_session_service(
+      std::unique_ptr<device_bound_sessions::SessionService>
+          device_bound_session_service);
+
+  void set_has_device_bound_session_service(bool enable) {
+    has_device_bound_session_service_ = enable;
+  }
+#endif  // BUILDFLAG(ENABLE_DEVICE_BOUND_SESSIONS)
+
   // Binds the context to `network`. All requests scheduled through the context
   // built by this builder will be sent using `network`. Requests will fail if
   // `network` disconnects. `options` allows to specify the ManagerOptions that
@@ -361,7 +385,7 @@ class NET_EXPORT URLRequestContextBuilder {
   // Only implemented for Android (API level > 23).
   void BindToNetwork(
       handles::NetworkHandle network,
-      absl::optional<HostResolver::ManagerOptions> options = absl::nullopt);
+      std::optional<HostResolver::ManagerOptions> options = std::nullopt);
 
   // Creates a mostly self-contained URLRequestContext. May only be called once
   // per URLRequestContextBuilder. After this is called, the Builder can be
@@ -404,19 +428,22 @@ class NET_EXPORT URLRequestContextBuilder {
   }
 
   bool enable_brotli_ = false;
+  bool enable_zstd_ = false;
+  bool enable_shared_dictionary_ = false;
+  bool enable_shared_zstd_ = false;
   bool check_cleartext_permitted_ = false;
-  bool require_network_isolation_key_ = false;
+  bool require_network_anonymization_key_ = false;
   raw_ptr<NetworkQualityEstimator> network_quality_estimator_ = nullptr;
 
   std::string accept_language_;
   std::string user_agent_;
   std::unique_ptr<HttpUserAgentSettings> http_user_agent_settings_;
 
+  std::optional<std::string> cookie_deprecation_label_;
+
   bool http_cache_enabled_ = true;
-  bool throttling_enabled_ = false;
   bool cookie_store_set_by_client_ = false;
   bool suppress_setting_socket_performance_watcher_factory_for_testing_ = false;
-  bool first_party_sets_enabled_ = false;
 
   handles::NetworkHandle bound_network_ = handles::kInvalidNetworkHandle;
   // Used only if the context is bound to a network to customize the
@@ -443,7 +470,6 @@ class NET_EXPORT URLRequestContextBuilder {
   std::unique_ptr<CookieStore> cookie_store_;
   std::unique_ptr<HttpAuthHandlerFactory> http_auth_handler_factory_;
   std::unique_ptr<CertVerifier> cert_verifier_;
-  std::unique_ptr<CTPolicyEnforcer> ct_policy_enforcer_;
   std::unique_ptr<SCTAuditingDelegate> sct_auditing_delegate_;
   std::unique_ptr<QuicContext> quic_context_;
   std::unique_ptr<ClientSocketFactory> client_socket_factory_ = nullptr;
@@ -454,10 +480,16 @@ class NET_EXPORT URLRequestContextBuilder {
   std::unique_ptr<NetworkErrorLoggingService> network_error_logging_service_;
   std::unique_ptr<PersistentReportingAndNelStore>
       persistent_reporting_and_nel_store_;
+  base::flat_map<std::string, GURL> enterprise_reporting_endpoints_ = {};
 #endif  // BUILDFLAG(ENABLE_REPORTING)
   std::unique_ptr<HttpServerProperties> http_server_properties_;
   std::map<std::string, std::unique_ptr<URLRequestJobFactory::ProtocolHandler>>
       protocol_handlers_;
+#if BUILDFLAG(ENABLE_DEVICE_BOUND_SESSIONS)
+  bool has_device_bound_session_service_ = false;
+  std::unique_ptr<device_bound_sessions::SessionService>
+      device_bound_session_service_;
+#endif  // BUILDFLAG(ENABLE_DEVICE_BOUND_SESSIONS)
 
   raw_ptr<ClientSocketFactory> client_socket_factory_raw_ = nullptr;
 };

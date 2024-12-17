@@ -19,6 +19,10 @@ component("metrics_cpp") {
     "ukm_entry_builder_base.h",
     "ukm_recorder.cc",
     "ukm_recorder.h",
+    "ukm_recorder_client_interface_registry.cc",
+    "ukm_recorder_client_interface_registry.h",
+    "ukm_recorder_impl_utils.cc",
+    "ukm_recorder_impl_utils.h",
     "ukm_source.cc",
     "ukm_source.h",
     "ukm_source_id.cc",
@@ -31,6 +35,7 @@ component("metrics_cpp") {
 
   public_deps = [
     "//base",
+    "//net",
     "//services/metrics/public/mojom",
     "//url",
   ]
@@ -46,12 +51,14 @@ source_set("tests") {
 
   sources = [
     "metrics_utils_unittest.cc",
+    "ukm_entry_builder_unittest.cc",
     "ukm_source_id_unittest.cc",
   ]
 
   deps = [
     ":metrics_cpp",
     "//base",
+    "//testing/gmock",
     "//testing/gtest",
   ]
 }

@@ -2,6 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
+#pragma allow_unsafe_buffers
+#endif
+
 #include <stddef.h>
 
 #include "base/check.h"
@@ -11,7 +16,6 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
@@ -30,28 +34,19 @@ using content::NavigationController;
 
 namespace {
 
-const char kTestingPage[] = "/keyevents_test.html";
-const char kSuppressEventJS[] =
-    "window.domAutomationController.send(setDefaultAction('%ls', %ls));";
-const char kGetResultJS[] =
-    "window.domAutomationController.send(keyEventResult[%d]);";
-const char kGetResultLengthJS[] =
-    "window.domAutomationController.send(keyEventResult.length);";
-const char kGetFocusedElementJS[] =
-    "window.domAutomationController.send(focusedElement);";
-const char kSetFocusedElementJS[] =
-    "window.domAutomationController.send(setFocusedElement('%ls'));";
-const char kGetTextBoxValueJS[] =
-    "window.domAutomationController.send("
-    "    document.getElementById('%ls').value);";
-const char kSetTextBoxValueJS[] =
-    "window.domAutomationController.send("
-    "    document.getElementById('%ls').value = '%ls');";
-const char kStartTestJS[] =
-    "window.domAutomationController.send(startTest(%d));";
+constexpr char kTestingPage[] = "/keyevents_test.html";
+constexpr char kSuppressEventJS[] = "setDefaultAction('%s', %s);";
+constexpr char kGetResultJS[] = "keyEventResult[%d];";
+constexpr char kGetResultLengthJS[] = "keyEventResult.length;";
+constexpr char kGetFocusedElementJS[] = "focusedElement;";
+constexpr char kSetFocusedElementJS[] = "setFocusedElement('%s');";
+constexpr char kGetTextBoxValueJS[] = "document.getElementById('%s').value;";
+constexpr char kSetTextBoxValueJS[] =
+    "document.getElementById('%s').value = '%s';";
+constexpr char kStartTestJS[] = "startTest(%d);";
 
 // Maximum length of the result array in KeyEventTestData structure.
-const size_t kMaxResultLength = 10;
+constexpr size_t kMaxResultLength = 10;
 
 // A structure holding test data of a keyboard event.
 // Each keyboard event may generate multiple result strings representing
@@ -80,10 +75,6 @@ struct KeyEventTestData {
   const char* const result[kMaxResultLength];
 };
 
-const wchar_t* GetBoolString(bool value) {
-  return value ? L"true" : L"false";
-}
-
 // A class to help wait for the finish of a key event test.
 class TestFinishObserver : public content::WebContentsObserver {
  public:
@@ -98,7 +89,7 @@ class TestFinishObserver : public content::WebContentsObserver {
   bool WaitForFinish() {
     if (!finished_) {
       waiting_ = true;
-      content::RunMessageLoop();
+      loop_.Run();
       waiting_ = false;
     }
     return finished_;
@@ -111,13 +102,15 @@ class TestFinishObserver : public content::WebContentsObserver {
     if (dom_op_result == "\"FINISHED\"") {
       finished_ = true;
       if (waiting_)
-        base::RunLoop::QuitCurrentWhenIdleDeprecated();
+        loop_.QuitWhenIdle();
     }
   }
 
  private:
   bool finished_;
   bool waiting_;
+  // base::RunLoop used to require kNestableTaskAllowed
+  base::RunLoop loop_{base::RunLoop::Type::kNestableTasksAllowed};
 };
 
 class BrowserKeyEventsTest : public InProcessBrowserTest {
@@ -141,51 +134,47 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
   // Set the suppress flag of an event specified by |type|. If |suppress| is
   // true then the web page will suppress all events with |type|. Following
   // event types are supported: keydown, keypress, keyup and textInput.
-  void SuppressEventByType(int tab_index, const wchar_t* type, bool suppress) {
+  void SuppressEventByType(int tab_index, const char* type, bool suppress) {
     ASSERT_LT(tab_index, browser()->tab_strip_model()->count());
-    bool actual;
-    ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-        browser()->tab_strip_model()->GetWebContentsAt(tab_index),
-        base::StringPrintf(kSuppressEventJS, type, GetBoolString(!suppress)),
-        &actual));
-    ASSERT_EQ(!suppress, actual);
+    ASSERT_EQ(!suppress,
+              content::EvalJs(
+                  browser()->tab_strip_model()->GetWebContentsAt(tab_index),
+                  base::StringPrintf(kSuppressEventJS, type,
+                                     suppress ? "false" : "true")));
   }
 
   void SuppressEvents(int tab_index, bool keydown, bool keypress,
                       bool keyup, bool textinput) {
+    ASSERT_NO_FATAL_FAILURE(SuppressEventByType(tab_index, "keydown", keydown));
     ASSERT_NO_FATAL_FAILURE(
-        SuppressEventByType(tab_index, L"keydown", keydown));
+        SuppressEventByType(tab_index, "keypress", keypress));
+    ASSERT_NO_FATAL_FAILURE(SuppressEventByType(tab_index, "keyup", keyup));
     ASSERT_NO_FATAL_FAILURE(
-        SuppressEventByType(tab_index, L"keypress", keypress));
-    ASSERT_NO_FATAL_FAILURE(
-        SuppressEventByType(tab_index, L"keyup", keyup));
-    ASSERT_NO_FATAL_FAILURE(
-        SuppressEventByType(tab_index, L"textInput", textinput));
+        SuppressEventByType(tab_index, "textInput", textinput));
   }
 
   void SuppressAllEvents(int tab_index, bool suppress) {
     SuppressEvents(tab_index, suppress, suppress, suppress, suppress);
   }
 
-  void GetResultLength(int tab_index, int* length) {
-    ASSERT_LT(tab_index, browser()->tab_strip_model()->count());
-    ASSERT_TRUE(content::ExecuteScriptAndExtractInt(
-        browser()->tab_strip_model()->GetWebContentsAt(tab_index),
-        kGetResultLengthJS,
-        length));
+  int GetResultLength(int tab_index) {
+    CHECK_LT(tab_index, browser()->tab_strip_model()->count());
+    return content::EvalJs(
+               browser()->tab_strip_model()->GetWebContentsAt(tab_index),
+               kGetResultLengthJS)
+        .ExtractInt();
   }
 
   void CheckResult(int tab_index, int length, const char* const result[]) {
     ASSERT_LT(tab_index, browser()->tab_strip_model()->count());
-    int actual_length;
-    ASSERT_NO_FATAL_FAILURE(GetResultLength(tab_index, &actual_length));
+    int actual_length = GetResultLength(tab_index);
     ASSERT_GE(actual_length, length);
     for (int i = 0; i < actual_length; ++i) {
-      std::string actual;
-      ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-          browser()->tab_strip_model()->GetWebContentsAt(tab_index),
-          base::StringPrintf(kGetResultJS, i),
-          &actual));
+      std::string actual =
+          content::EvalJs(
+              browser()->tab_strip_model()->GetWebContentsAt(tab_index),
+              base::StringPrintf(kGetResultJS, i))
+              .ExtractString();
 
       // If more events were received than expected, then the additional events
       // must be keyup events.
@@ -196,56 +185,44 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
     }
   }
 
-  void CheckFocusedElement(int tab_index, const wchar_t* focused) {
+  void CheckFocusedElement(int tab_index, const char* focused) {
     ASSERT_LT(tab_index, browser()->tab_strip_model()->count());
-    std::string actual;
-    ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-        browser()->tab_strip_model()->GetWebContentsAt(tab_index),
-        kGetFocusedElementJS,
-        &actual));
-    ASSERT_EQ(base::WideToUTF8(focused), actual);
+    ASSERT_EQ(focused,
+              content::EvalJs(
+                  browser()->tab_strip_model()->GetWebContentsAt(tab_index),
+                  kGetFocusedElementJS));
   }
 
-  void SetFocusedElement(int tab_index, const wchar_t* focused) {
+  void SetFocusedElement(int tab_index, const char* focused) {
     ASSERT_LT(tab_index, browser()->tab_strip_model()->count());
-    bool actual;
-    ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-        browser()->tab_strip_model()->GetWebContentsAt(tab_index),
-        base::StringPrintf(kSetFocusedElementJS, focused),
-        &actual));
-    ASSERT_TRUE(actual);
+    ASSERT_EQ(true,
+              content::EvalJs(
+                  browser()->tab_strip_model()->GetWebContentsAt(tab_index),
+                  base::StringPrintf(kSetFocusedElementJS, focused)));
   }
 
-  void CheckTextBoxValue(int tab_index, const wchar_t* id,
-                         const wchar_t* value) {
+  void CheckTextBoxValue(int tab_index, const char* id, const char* value) {
     ASSERT_LT(tab_index, browser()->tab_strip_model()->count());
-    std::string actual;
-    ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-        browser()->tab_strip_model()->GetWebContentsAt(tab_index),
-        base::StringPrintf(kGetTextBoxValueJS, id),
-        &actual));
-    ASSERT_EQ(base::WideToUTF8(value), actual);
+    ASSERT_EQ(value,
+              content::EvalJs(
+                  browser()->tab_strip_model()->GetWebContentsAt(tab_index),
+                  base::StringPrintf(kGetTextBoxValueJS, id)));
   }
 
-  void SetTextBoxValue(int tab_index, const wchar_t* id,
-                       const wchar_t* value) {
+  void SetTextBoxValue(int tab_index, const char* id, const char* value) {
     ASSERT_LT(tab_index, browser()->tab_strip_model()->count());
-    std::string actual;
-    ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-        browser()->tab_strip_model()->GetWebContentsAt(tab_index),
-        base::StringPrintf(kSetTextBoxValueJS, id, value),
-        &actual));
-    ASSERT_EQ(base::WideToUTF8(value), actual);
+    ASSERT_EQ(value,
+              content::EvalJs(
+                  browser()->tab_strip_model()->GetWebContentsAt(tab_index),
+                  base::StringPrintf(kSetTextBoxValueJS, id, value)));
   }
 
   void StartTest(int tab_index, int result_length) {
     ASSERT_LT(tab_index, browser()->tab_strip_model()->count());
-    bool actual;
-    ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-        browser()->tab_strip_model()->GetWebContentsAt(tab_index),
-        base::StringPrintf(kStartTestJS, result_length),
-        &actual));
-    ASSERT_TRUE(actual);
+    ASSERT_EQ(true,
+              content::EvalJs(
+                  browser()->tab_strip_model()->GetWebContentsAt(tab_index),
+                  base::StringPrintf(kStartTestJS, result_length)));
   }
 
   void TestKeyEvent(int tab_index, const KeyEventTestData& test) {
@@ -289,7 +266,7 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
   }
 };
 
-// TODO(crbug.com/1338416): Re-enable this test
+// TODO(crbug.com/40849047): Re-enable this test
 IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_NormalKeyEvents) {
   static const KeyEventTestData kTestNoInput[] = {
     // a
@@ -367,22 +344,22 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_NormalKeyEvents) {
   }
 
   // Input in normal text box.
-  ASSERT_NO_FATAL_FAILURE(SetFocusedElement(tab_index, L"A"));
+  ASSERT_NO_FATAL_FAILURE(SetFocusedElement(tab_index, "A"));
   for (size_t i = 0; i < std::size(kTestWithInput); ++i) {
     EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestWithInput[i]))
         << "kTestWithInput[" << i << "] in text box failed:\n"
         << GetTestDataDescription(kTestWithInput[i]);
   }
-  EXPECT_NO_FATAL_FAILURE(CheckTextBoxValue(tab_index, L"A", L"aA"));
+  EXPECT_NO_FATAL_FAILURE(CheckTextBoxValue(tab_index, "A", "aA"));
 
   // Input in password box.
-  ASSERT_NO_FATAL_FAILURE(SetFocusedElement(tab_index, L"B"));
+  ASSERT_NO_FATAL_FAILURE(SetFocusedElement(tab_index, "B"));
   for (size_t i = 0; i < std::size(kTestWithInput); ++i) {
     EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestWithInput[i]))
         << "kTestWithInput[" << i << "] in password box failed:\n"
         << GetTestDataDescription(kTestWithInput[i]);
   }
-  EXPECT_NO_FATAL_FAILURE(CheckTextBoxValue(tab_index, L"B", L"aA"));
+  EXPECT_NO_FATAL_FAILURE(CheckTextBoxValue(tab_index, "B", "aA"));
 }
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
@@ -581,15 +558,15 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_AccessKeys) {
 
   int tab_index = browser()->tab_strip_model()->active_index();
   // Make sure no element is focused.
-  EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, L""));
+  EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, ""));
   // Alt+A should focus the element with accesskey = "A".
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestAccessA));
-  EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, L"A"));
+  EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, "A"));
 
   // Blur the focused element.
-  EXPECT_NO_FATAL_FAILURE(SetFocusedElement(tab_index, L""));
+  EXPECT_NO_FATAL_FAILURE(SetFocusedElement(tab_index, ""));
   // Make sure no element is focused.
-  EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, L""));
+  EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, ""));
 
 #if !BUILDFLAG(IS_MAC)
   // Alt+D should move the focus to the location entry.
@@ -600,14 +577,14 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_AccessKeys) {
   content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsViewFocused(VIEW_ID_OMNIBOX));
   // No element should be focused, as Alt+D was handled by the browser.
-  EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, L""));
+  EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, ""));
 
   // Move the focus back to the web page.
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
   ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
 
   // Make sure no element is focused.
-  EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, L""));
+  EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, ""));
 #endif
 
   // If the keydown event is suppressed, then Alt+D should be handled as an
@@ -616,12 +593,12 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_AccessKeys) {
   // suppressed at all.
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestAccessDSuppress));
   ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
-  EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, L"D"));
+  EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, "D"));
 
   // Blur the focused element.
-  EXPECT_NO_FATAL_FAILURE(SetFocusedElement(tab_index, L""));
+  EXPECT_NO_FATAL_FAILURE(SetFocusedElement(tab_index, ""));
   // Make sure no element is focused.
-  EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, L""));
+  EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, ""));
 }
 
 IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, ReservedAccelerators) {
@@ -662,9 +639,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, ReservedAccelerators) {
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(0, kTestCtrlOrCmdT));
   wait_for_new_tab.Wait();
 
-  int result_length;
-  ASSERT_NO_FATAL_FAILURE(GetResultLength(0, &result_length));
-  EXPECT_EQ(1, result_length);
+  EXPECT_EQ(1, GetResultLength(0));
 
   EXPECT_EQ(2, browser()->tab_strip_model()->count());
   ASSERT_EQ(1, browser()->tab_strip_model()->active_index());
@@ -737,15 +712,15 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, EditorKeyBindings) {
   ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
 
   int tab_index = browser()->tab_strip_model()->active_index();
-  ASSERT_NO_FATAL_FAILURE(SetFocusedElement(tab_index, L"A"));
-  ASSERT_NO_FATAL_FAILURE(SetTextBoxValue(tab_index, L"A", L"Hello"));
+  ASSERT_NO_FATAL_FAILURE(SetFocusedElement(tab_index, "A"));
+  ASSERT_NO_FATAL_FAILURE(SetTextBoxValue(tab_index, "A", "Hello"));
   // Move the caret to the beginning of the line.
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestCtrlA));
   // Forward one character
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestCtrlF));
   // Delete to the end of the line.
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestCtrlK));
-  EXPECT_NO_FATAL_FAILURE(CheckTextBoxValue(tab_index, L"A", L"H"));
+  EXPECT_NO_FATAL_FAILURE(CheckTextBoxValue(tab_index, "A", "H"));
 }
 #endif
 
@@ -774,10 +749,10 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, PageUpDownKeys) {
   ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
 
   int tab_index = browser()->tab_strip_model()->active_index();
-  ASSERT_NO_FATAL_FAILURE(SetFocusedElement(tab_index, L"A"));
+  ASSERT_NO_FATAL_FAILURE(SetFocusedElement(tab_index, "A"));
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestPageUp));
   EXPECT_NO_FATAL_FAILURE(TestKeyEvent(tab_index, kTestPageDown));
-  EXPECT_NO_FATAL_FAILURE(CheckTextBoxValue(tab_index, L"A", L""));
+  EXPECT_NO_FATAL_FAILURE(CheckTextBoxValue(tab_index, "A", ""));
 }
 
 // AltKey is enabled only on Windows. See crbug.com/114537.

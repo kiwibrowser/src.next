@@ -38,7 +38,9 @@
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 #if DCHECK_IS_ON()
-#include "third_party/blink/renderer/platform/wtf/forward.h"
+namespace WTF {
+class String;
+}  // namespace WTF
 #endif
 
 namespace blink {
@@ -61,11 +63,6 @@ class CORE_EXPORT DocumentLifecycle {
     kInPerformLayout,
     kAfterPerformLayout,
     kLayoutClean,
-
-    // In InAccessibility step, fire deferred accessibility events which
-    // require layout to be in a clean state.
-    kInAccessibility,
-    kAccessibilityClean,
 
     kInCompositingInputsUpdate,
     kCompositingInputsClean,

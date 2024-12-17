@@ -35,13 +35,13 @@ class InstantUnitTestBase : public BrowserWithTestWindowTest {
   // search_terms_replacement_key.
   void SetUserSelectedDefaultSearchProvider(const std::string& base_url);
 
-  raw_ptr<InstantService> instant_service_;
-  raw_ptr<TemplateURLService> template_url_service_;
-  raw_ptr<base::SimpleTestClock> clock_;
+  raw_ptr<InstantService, DanglingUntriaged> instant_service_;
+  raw_ptr<TemplateURLService, DanglingUntriaged> template_url_service_;
+  raw_ptr<base::SimpleTestClock, DanglingUntriaged> clock_;
 
  private:
   // BrowserWithTestWindowTest override:
-  TestingProfile* CreateProfile() override;
+  TestingProfile* CreateProfile(const std::string& profile_name) override;
 };
 
 #endif  // CHROME_BROWSER_SEARCH_INSTANT_UNITTEST_BASE_H_

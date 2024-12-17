@@ -39,9 +39,10 @@ class CORE_EXPORT LayoutVideo final : public LayoutMedia {
   explicit LayoutVideo(HTMLVideoElement*);
   ~LayoutVideo() override;
 
-  static LayoutSize DefaultSize();
+  static PhysicalSize DefaultSize();
 
-  PhysicalRect ReplacedContentRect() const final;
+  PhysicalRect ReplacedContentRectFrom(
+      const PhysicalRect& base_content_rect) const final;
 
   bool SupportsAcceleratedRendering() const;
 
@@ -64,24 +65,22 @@ class CORE_EXPORT LayoutVideo final : public LayoutMedia {
   }
 
  private:
-  void UpdateFromElement() override;
+  void UpdateAfterLayout() final;
+  void UpdateFromElement() final;
+  void InvalidateCompositing();
 
-  LayoutSize CalculateIntrinsicSize(float scale);
-  void UpdateIntrinsicSize(bool is_in_layout);
+  PhysicalSize CalculateIntrinsicSize(float scale);
+  void UpdateIntrinsicSize();
 
   void ImageChanged(WrappedImagePtr, CanDeferInvalidation) override;
 
-  bool IsOfType(LayoutObjectType type) const override {
+  bool IsVideo() const final {
     NOT_DESTROYED();
-    return type == kLayoutObjectVideo || LayoutMedia::IsOfType(type);
+    return true;
   }
 
   void PaintReplaced(const PaintInfo&,
                      const PhysicalOffset& paint_offset) const override;
-
-  void UpdateLayout() override;
-
-  LayoutUnit MinimumReplacedHeight() const override;
 
   bool CanHaveAdditionalCompositingReasons() const override {
     NOT_DESTROYED();
@@ -89,9 +88,7 @@ class CORE_EXPORT LayoutVideo final : public LayoutMedia {
   }
   CompositingReasons AdditionalCompositingReasons() const override;
 
-  void UpdatePlayer(bool is_in_layout);
-
-  LayoutSize cached_image_size_;
+  PhysicalSize cached_image_size_;
 };
 
 template <>

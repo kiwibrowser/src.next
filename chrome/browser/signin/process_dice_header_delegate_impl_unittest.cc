@@ -8,8 +8,8 @@
 #include <string>
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/signin/dice_tab_helper.h"
 #include "chrome/browser/signin/dice_web_signin_interceptor.h"
@@ -20,10 +20,12 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "components/signin/public/base/account_consistency_method.h"
+#include "components/signin/public/base/signin_metrics.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/navigation_simulator.h"
+#include "google_apis/gaia/core_account_id.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -39,10 +41,16 @@ signin_metrics::PromoAction kTestPromoAction =
 
 // Dummy delegate that declines all interceptions.
 class TestDiceWebSigninInterceptorDelegate
-    : public DiceWebSigninInterceptor::Delegate {
+    : public WebSigninInterceptor::Delegate {
  public:
   ~TestDiceWebSigninInterceptorDelegate() override = default;
-  std::unique_ptr<ScopedDiceWebSigninInterceptionBubbleHandle>
+
+  bool IsSigninInterceptionSupported(
+      const content::WebContents& web_contents) override {
+    return false;
+  }
+
+  std::unique_ptr<ScopedWebSigninInterceptionBubbleHandle>
   ShowSigninInterceptionBubble(
       content::WebContents* web_contents,
       const BubbleParameters& bubble_parameters,
@@ -51,11 +59,24 @@ class TestDiceWebSigninInterceptorDelegate
     return nullptr;
   }
 
+  std::unique_ptr<ScopedWebSigninInterceptionBubbleHandle>
+  ShowOidcInterceptionDialog(
+      content::WebContents* web_contents,
+      const BubbleParameters& bubble_parameters,
+      signin::SigninChoiceWithConfirmationCallback callback,
+      base::OnceClosure done_callback,
+      base::OnceClosure retry_callback) override {
+    std::move(callback)
+        .Then(std::move(done_callback))
+        .Run(signin::SIGNIN_CHOICE_CANCEL, base::DoNothing());
+    return nullptr;
+  }
+
   void ShowFirstRunExperienceInNewProfile(
       Browser* browser,
       const CoreAccountId& account_id,
-      DiceWebSigninInterceptor::SigninInterceptionType interception_type)
-      override {}
+      WebSigninInterceptor::SigninInterceptionType interception_type) override {
+  }
 };
 
 class MockDiceWebSigninInterceptor : public DiceWebSigninInterceptor {
@@ -70,6 +91,7 @@ class MockDiceWebSigninInterceptor : public DiceWebSigninInterceptor {
               MaybeInterceptWebSignin,
               (content::WebContents * web_contents,
                CoreAccountId account_id,
+               signin_metrics::AccessPoint access_point,
                bool is_new_account,
                bool is_sync_signin),
               (override));
@@ -86,16 +108,22 @@ class ProcessDiceHeaderDelegateImplTest
  public:
   ProcessDiceHeaderDelegateImplTest()
       : enable_sync_called_(false),
+        signin_header_received_(false),
         show_error_called_(false),
-        account_id_("12345"),
         email_("foo@bar.com"),
-        auth_error_(GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS) {}
+        auth_error_(GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS) {
+    std::string kGaiaId = "12345";
+    account_info_.account_id = CoreAccountId::FromGaiaId(kGaiaId);
+    account_info_.gaia = kGaiaId;
+    account_info_.email = "email@gmail.com";
+  }
 
-  ~ProcessDiceHeaderDelegateImplTest() override {}
+  ~ProcessDiceHeaderDelegateImplTest() override = default;
 
   void AddAccount(bool is_primary) {
-    if (!identity_test_environment_profile_adaptor_)
+    if (!identity_test_environment_profile_adaptor_) {
       InitializeIdentityTestEnvironment();
+    }
     if (is_primary) {
       identity_test_environment_profile_adaptor_->identity_test_env()
           ->SetPrimaryAccount(email_, signin::ConsentLevel::kSync);
@@ -115,10 +143,12 @@ class ProcessDiceHeaderDelegateImplTest
   std::unique_ptr<ProcessDiceHeaderDelegateImpl>
   CreateDelegateAndNavigateToSignin(
       bool is_sync_signin_tab,
+      const GURL& redirect_url,
       Reason reason = Reason::kSigninPrimaryAccount) {
     signin_reason_ = reason;
-    if (!identity_test_environment_profile_adaptor_)
+    if (!identity_test_environment_profile_adaptor_) {
       InitializeIdentityTestEnvironment();
+    }
     // Load the signin page.
     std::unique_ptr<content::NavigationSimulator> simulator =
         content::NavigationSimulator::CreateRendererInitiated(signin_url_,
@@ -128,29 +158,49 @@ class ProcessDiceHeaderDelegateImplTest
       DiceTabHelper::CreateForWebContents(web_contents());
       DiceTabHelper* dice_tab_helper =
           DiceTabHelper::FromWebContents(web_contents());
-      dice_tab_helper->InitializeSigninFlow(signin_url_, kTestAccessPoint,
-                                            signin_reason_, kTestPromoAction,
-                                            GURL::EmptyGURL());
+      dice_tab_helper->InitializeSigninFlow(
+          signin_url_, kTestAccessPoint, signin_reason_, kTestPromoAction,
+          redirect_url,
+          /*record_signin_started_metrics=*/true,
+          base::BindRepeating(
+              &ProcessDiceHeaderDelegateImplTest::StartSyncCallback,
+              base::Unretained(this)),
+          base::BindRepeating(
+              &ProcessDiceHeaderDelegateImplTest::OnSigninHeaderReceived,
+              base::Unretained(this)),
+          base::BindRepeating(
+              &ProcessDiceHeaderDelegateImplTest::ShowSigninErrorCallback,
+              base::Unretained(this)));
     }
     simulator->Commit();
     DCHECK_EQ(signin_url_, web_contents()->GetVisibleURL());
-    return std::make_unique<ProcessDiceHeaderDelegateImpl>(
-        web_contents(),
-        base::BindOnce(&ProcessDiceHeaderDelegateImplTest::StartSyncCallback,
-                       base::Unretained(this)),
-        base::BindOnce(
-            &ProcessDiceHeaderDelegateImplTest::ShowSigninErrorCallback,
-            base::Unretained(this)));
+
+    if (is_sync_signin_tab) {
+      return ProcessDiceHeaderDelegateImpl::Create(web_contents());
+    } else {
+      // Use the constructor rather than the `Create()` method, to specify the
+      // error callback.
+      return std::make_unique<ProcessDiceHeaderDelegateImpl>(
+          web_contents(), /*is_sync_signin_tab=*/false,
+          signin_metrics::AccessPoint::ACCESS_POINT_WEB_SIGNIN,
+          kTestPromoAction, GURL(),
+          ProcessDiceHeaderDelegateImpl::EnableSyncCallback(),
+          base::BindRepeating(
+              &ProcessDiceHeaderDelegateImplTest::OnSigninHeaderReceived,
+              base::Unretained(this)),
+          base::BindOnce(
+              &ProcessDiceHeaderDelegateImplTest::ShowSigninErrorCallback,
+              base::Unretained(this)));
+    }
   }
 
   // ChromeRenderViewHostTestHarness:
   TestingProfile::TestingFactories GetTestingFactories() const override {
-    TestingProfile::TestingFactories factories = {
-        {DiceWebSigninInterceptorFactory::GetInstance(),
-         base::BindRepeating(&CreateMockDiceWebSigninInterceptor)}};
-    IdentityTestEnvironmentProfileAdaptor::
-        AppendIdentityTestEnvironmentFactories(&factories);
-    return factories;
+    return IdentityTestEnvironmentProfileAdaptor::
+        GetIdentityTestEnvironmentFactoriesWithAppendedFactories(
+            {TestingProfile::TestingFactory{
+                DiceWebSigninInterceptorFactory::GetInstance(),
+                base::BindRepeating(&CreateMockDiceWebSigninInterceptor)}});
   }
 
   void TearDown() override {
@@ -162,17 +212,17 @@ class ProcessDiceHeaderDelegateImplTest
   void StartSyncCallback(Profile* profile,
                          signin_metrics::AccessPoint access_point,
                          signin_metrics::PromoAction promo_action,
-                         signin_metrics::Reason reason,
                          content::WebContents* contents,
-                         const CoreAccountId& account_id) {
+                         const CoreAccountInfo& account_info) {
     EXPECT_EQ(profile, this->profile());
     EXPECT_EQ(access_point, kTestAccessPoint);
     EXPECT_EQ(promo_action, kTestPromoAction);
-    EXPECT_EQ(reason, signin_reason_);
     EXPECT_EQ(web_contents(), contents);
-    EXPECT_EQ(account_id_, account_id);
+    EXPECT_EQ(account_info_, account_info);
     enable_sync_called_ = true;
   }
+
+  void OnSigninHeaderReceived() { signin_header_received_ = true; }
 
   // Callback for the ProcessDiceHeaderDelegateImpl.
   void ShowSigninErrorCallback(Profile* profile,
@@ -195,8 +245,9 @@ class ProcessDiceHeaderDelegateImplTest
 
   const GURL signin_url_ = GURL("https://accounts.google.com");
   bool enable_sync_called_;
+  bool signin_header_received_;
   bool show_error_called_;
-  CoreAccountId account_id_;
+  CoreAccountInfo account_info_;
   std::string email_;
   GoogleServiceAuthError auth_error_;
   Reason signin_reason_ = Reason::kSigninPrimaryAccount;
@@ -205,13 +256,14 @@ class ProcessDiceHeaderDelegateImplTest
 // Check that sync is enabled if the tab is closed during signin.
 TEST_F(ProcessDiceHeaderDelegateImplTest, CloseTabWhileStartingSync) {
   std::unique_ptr<ProcessDiceHeaderDelegateImpl> delegate =
-      CreateDelegateAndNavigateToSignin(true);
+      CreateDelegateAndNavigateToSignin(/*is_sync_signin_tab=*/true,
+                                        /*redirect_url=*/GURL());
 
   // Close the tab.
   DeleteContents();
 
   // Check expectations.
-  delegate->EnableSync(account_id_);
+  delegate->EnableSync(account_info_);
   EXPECT_TRUE(enable_sync_called_);
   EXPECT_FALSE(show_error_called_);
 }
@@ -220,7 +272,8 @@ TEST_F(ProcessDiceHeaderDelegateImplTest, CloseTabWhileStartingSync) {
 // received.
 TEST_F(ProcessDiceHeaderDelegateImplTest, CloseTabWhileFailingSignin) {
   std::unique_ptr<ProcessDiceHeaderDelegateImpl> delegate =
-      CreateDelegateAndNavigateToSignin(true);
+      CreateDelegateAndNavigateToSignin(/*is_sync_signin_tab=*/true,
+                                        /*redirect_url=*/GURL());
 
   // Close the tab.
   DeleteContents();
@@ -229,6 +282,77 @@ TEST_F(ProcessDiceHeaderDelegateImplTest, CloseTabWhileFailingSignin) {
   delegate->HandleTokenExchangeFailure(email_, auth_error_);
   EXPECT_FALSE(enable_sync_called_);
   EXPECT_TRUE(show_error_called_);
+}
+
+// Tests that there is no redirect when `redirect_url` is empty.
+TEST_F(ProcessDiceHeaderDelegateImplTest, NoRedirect) {
+  std::unique_ptr<ProcessDiceHeaderDelegateImpl> delegate =
+      CreateDelegateAndNavigateToSignin(/*is_sync_signin_tab=*/true,
+                                        /*redirect_url=*/GURL());
+  delegate->EnableSync(account_info_);
+  EXPECT_TRUE(enable_sync_called_);
+  // There was no redirect.
+  EXPECT_EQ(signin_url_, web_contents()->GetVisibleURL());
+  EXPECT_FALSE(show_error_called_);
+  // Check that the sync signin flow is complete.
+  DiceTabHelper* dice_tab_helper =
+      DiceTabHelper::FromWebContents(web_contents());
+  ASSERT_TRUE(dice_tab_helper);
+  EXPECT_FALSE(dice_tab_helper->IsSyncSigninInProgress());
+}
+
+// Check that a Dice header can still be processed in a reused tab.
+// Regression test for https://crbug.com/1471277
+TEST_F(ProcessDiceHeaderDelegateImplTest, TabReuse) {
+  // Complete a first signin flow.
+  std::unique_ptr<ProcessDiceHeaderDelegateImpl> delegate =
+      CreateDelegateAndNavigateToSignin(/*is_sync_signin_tab=*/true,
+                                        /*redirect_url=*/GURL());
+  delegate->EnableSync(account_info_);
+  EXPECT_TRUE(enable_sync_called_);
+  EXPECT_FALSE(show_error_called_);
+
+  // Receive another Dice header in the same tab.
+  enable_sync_called_ = false;
+  ProcessDiceHeaderDelegateImpl::Create(web_contents());
+  // Calling `EnableSync()` does nothing because the tab has already been used.
+  delegate->EnableSync(account_info_);
+  EXPECT_FALSE(enable_sync_called_);
+  EXPECT_FALSE(show_error_called_);
+}
+
+TEST_F(ProcessDiceHeaderDelegateImplTest, SigninHeaderReceived) {
+  // Complete a first signin flow.
+  std::unique_ptr<ProcessDiceHeaderDelegateImpl> delegate =
+      CreateDelegateAndNavigateToSignin(/*is_sync_signin_tab=*/true,
+                                        /*redirect_url=*/GURL());
+  ASSERT_FALSE(signin_header_received_);
+
+  delegate->OnDiceSigninHeaderReceived();
+  EXPECT_TRUE(signin_header_received_);
+
+  // Delete content and reset the received value.
+  DeleteContents();
+  signin_header_received_ = false;
+
+  delegate->OnDiceSigninHeaderReceived();
+  // Make sure the message is not propagated after the content (and the attached
+  // DiceTabHelper as well) is deleted.
+  EXPECT_FALSE(signin_header_received_);
+}
+
+TEST_F(ProcessDiceHeaderDelegateImplTest, SigninHeaderReceived_SyncingTabOff) {
+  // Complete a first signin flow.
+  std::unique_ptr<ProcessDiceHeaderDelegateImpl> delegate =
+      CreateDelegateAndNavigateToSignin(/*is_sync_signin_tab=*/false,
+                                        /*redirect_url=*/GURL());
+  ASSERT_FALSE(signin_header_received_);
+
+  delegate->OnDiceSigninHeaderReceived();
+
+  // Since there is DiceTabHelper created, we do not expect the message to be
+  // redirected.
+  EXPECT_FALSE(signin_header_received_);
 }
 
 struct TestConfiguration {
@@ -258,14 +382,16 @@ class ProcessDiceHeaderDelegateImplTestEnableSync
 
 // Test the EnableSync() method in all configurations.
 TEST_P(ProcessDiceHeaderDelegateImplTestEnableSync, EnableSync) {
-  if (GetParam().signed_in)
+  if (GetParam().signed_in) {
     AddAccount(/*is_primary=*/true);
+  }
+  const GURL kNtpUrl(chrome::kChromeUINewTabURL);
   std::unique_ptr<ProcessDiceHeaderDelegateImpl> delegate =
-      CreateDelegateAndNavigateToSignin(GetParam().signin_tab);
-  delegate->EnableSync(account_id_);
+      CreateDelegateAndNavigateToSignin(GetParam().signin_tab,
+                                        /*redirect_url=*/kNtpUrl);
+  delegate->EnableSync(account_info_);
   EXPECT_EQ(GetParam().callback_called, enable_sync_called_);
-  GURL expected_url =
-      GetParam().show_ntp ? GURL(chrome::kChromeUINewTabURL) : signin_url_;
+  GURL expected_url = GetParam().show_ntp ? kNtpUrl : signin_url_;
   EXPECT_EQ(expected_url, web_contents()->GetVisibleURL());
   EXPECT_FALSE(show_error_called_);
   // Check that the sync signin flow is complete.
@@ -299,15 +425,17 @@ class ProcessDiceHeaderDelegateImplTestHandleTokenExchangeFailure
 // Test the HandleTokenExchangeFailure() method in all configurations.
 TEST_P(ProcessDiceHeaderDelegateImplTestHandleTokenExchangeFailure,
        HandleTokenExchangeFailure) {
-  if (GetParam().signed_in)
+  if (GetParam().signed_in) {
     AddAccount(/*is_primary=*/true);
+  }
+  const GURL kNtpUrl(chrome::kChromeUINewTabURL);
   std::unique_ptr<ProcessDiceHeaderDelegateImpl> delegate =
-      CreateDelegateAndNavigateToSignin(GetParam().signin_tab);
+      CreateDelegateAndNavigateToSignin(GetParam().signin_tab,
+                                        /*redirect_url=*/kNtpUrl);
   delegate->HandleTokenExchangeFailure(email_, auth_error_);
   EXPECT_FALSE(enable_sync_called_);
   EXPECT_EQ(GetParam().callback_called, show_error_called_);
-  GURL expected_url =
-      GetParam().show_ntp ? GURL(chrome::kChromeUINewTabURL) : signin_url_;
+  GURL expected_url = GetParam().show_ntp ? kNtpUrl : signin_url_;
   EXPECT_EQ(expected_url, web_contents()->GetVisibleURL());
   // Check that the sync signin flow is complete.
   if (GetParam().signin_tab) {
@@ -324,20 +452,30 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::ValuesIn(kHandleTokenExchangeFailureTestCases));
 
 struct TokenExchangeSuccessConfiguration {
-  bool is_reauth;   // User was already signed in with the account.
-  bool signin_tab;  // A DiceTabHelper is attached to the tab.
-  Reason reason;
-  bool sync_signin;  // Expected value for the MaybeInterceptWebSigin call.
+  bool is_reauth = false;   // User was already signed in with the account.
+  bool signin_tab = false;  // A DiceTabHelper is attached to the tab.
+  Reason reason = Reason::kSigninPrimaryAccount;
+  // Expected value for the MaybeInterceptWebSigin call.
+  bool sync_signin = false;
+  signin_metrics::AccessPoint access_point =
+      signin_metrics::AccessPoint::ACCESS_POINT_UNKNOWN;
 };
 
 TokenExchangeSuccessConfiguration kHandleTokenExchangeSuccessTestCases[] = {
     // clang-format off
-    // is_reauth | signin_tab |       reason               | sync_signin
-    {  false,      false,     Reason::kSigninPrimaryAccount, false },
-    {  false,      true,      Reason::kSigninPrimaryAccount, true },
-    {  false,      true,      Reason::kAddSecondaryAccount,  false },
-    {  true,       false,     Reason::kSigninPrimaryAccount, false },
-    {  true,       true,      Reason::kSigninPrimaryAccount, true },
+    // is_reauth | signin_tab |       reason               |
+    //      sync_signin  | access_point
+    {  false,      false,     Reason::kSigninPrimaryAccount,
+            false, signin_metrics::AccessPoint::ACCESS_POINT_WEB_SIGNIN },
+    {  false,      true,      Reason::kSigninPrimaryAccount,
+            true, signin_metrics::AccessPoint::ACCESS_POINT_BOOKMARK_BUBBLE },
+    {  false,      true,      Reason::kAddSecondaryAccount,
+            false, signin_metrics::AccessPoint::ACCESS_POINT_BOOKMARK_BUBBLE },
+    {  true,       false,     Reason::kSigninPrimaryAccount,
+            false, signin_metrics::AccessPoint::ACCESS_POINT_WEB_SIGNIN },
+    {  true,       true,      Reason::kSigninPrimaryAccount,
+            true, signin_metrics::AccessPoint::ACCESS_POINT_BOOKMARK_BUBBLE },
+
     // clang-format on
 };
 
@@ -350,16 +488,21 @@ class ProcessDiceHeaderDelegateImplTestHandleTokenExchangeSuccess
 // Test the HandleTokenExchangeSuccess() method in all configurations.
 TEST_P(ProcessDiceHeaderDelegateImplTestHandleTokenExchangeSuccess,
        HandleTokenExchangeSuccess) {
-  if (GetParam().is_reauth)
+  if (GetParam().is_reauth) {
     AddAccount(/*is_primary=*/false);
+  }
   std::unique_ptr<ProcessDiceHeaderDelegateImpl> delegate =
-      CreateDelegateAndNavigateToSignin(GetParam().signin_tab,
-                                        GetParam().reason);
+      CreateDelegateAndNavigateToSignin(
+          GetParam().signin_tab,
+          /*redirect_url=*/GURL(chrome::kChromeUINewTabURL), GetParam().reason);
+
   EXPECT_CALL(
       *mock_interceptor(),
-      MaybeInterceptWebSignin(web_contents(), account_id_,
-                              !GetParam().is_reauth, GetParam().sync_signin));
-  delegate->HandleTokenExchangeSuccess(account_id_, !GetParam().is_reauth);
+      MaybeInterceptWebSignin(web_contents(), account_info_.account_id,
+                              GetParam().access_point, !GetParam().is_reauth,
+                              GetParam().sync_signin));
+  delegate->HandleTokenExchangeSuccess(account_info_.account_id,
+                                       !GetParam().is_reauth);
 
   // Check that the sync signin flow is complete.
   if (GetParam().signin_tab) {

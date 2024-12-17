@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
+#include "third_party/blink/renderer/core/html/forms/html_text_area_element.h"
 #include "third_party/blink/renderer/core/page/autoscroll_controller.h"
 #include "third_party/blink/renderer/core/page/drag_data.h"
 #include "third_party/blink/renderer/core/page/drag_image.h"
@@ -53,6 +54,38 @@ class DragControllerTest : public RenderingTest {
   DragMockChromeClient& GetChromeClient() const override {
     return *chrome_client_;
   }
+  void PerformDragAndDropFromTextareaToTargetElement(
+      HTMLTextAreaElement* drag_text_area,
+      DataObject* data_object,
+      Element* drop_target) {
+    const gfx::PointF drag_client_point(drag_text_area->OffsetLeft(),
+                                        drag_text_area->OffsetTop());
+    const gfx::PointF drop_client_point(drop_target->OffsetLeft(),
+                                        drop_target->OffsetTop());
+
+    WebMouseEvent mouse_event(WebInputEvent::Type::kMouseDown,
+                              WebInputEvent::kNoModifiers,
+                              WebInputEvent::GetStaticTimeStampForTests());
+    mouse_event.button = WebMouseEvent::Button::kLeft;
+    mouse_event.SetPositionInWidget(drag_client_point);
+
+    drag_text_area->SetValue("https://www.example.com/index.html");
+    drag_text_area->Focus();
+    UpdateAllLifecyclePhasesForTest();
+    GetFrame().Selection().SelectAll();
+    GetFrame().GetPage()->GetDragController().StartDrag(
+        &GetFrame(), GetFrame().GetPage()->GetDragController().GetDragState(),
+        mouse_event,
+        gfx::Point(drag_text_area->OffsetLeft(), drag_text_area->OffsetTop()));
+    DragData data(data_object,
+                  GetFrame().GetPage()->GetVisualViewport().ViewportToRootFrame(
+                      drop_client_point),
+                  drop_client_point,
+                  static_cast<DragOperationsMask>(kDragOperationMove), false);
+    GetFrame().GetPage()->GetDragController().DragEnteredOrUpdated(&data,
+                                                                   GetFrame());
+    GetFrame().GetPage()->GetDragController().PerformDrag(&data, GetFrame());
+  }
 
  private:
   Persistent<DragMockChromeClient> chrome_client_;
@@ -85,7 +118,10 @@ class DragControllerSimTest : public SimTest {};
 // Drop clears out the Autoscroll state. Regression test for
 // https://crbug.com/733996.
 TEST_F(DragControllerSimTest, DropURLOnNonNavigatingClearsState) {
-  WebView().GetPage()->GetSettings().SetNavigateOnDragDrop(false);
+  auto renderer_preferences = WebView().GetRendererPreferences();
+  renderer_preferences.can_accept_load_drops = false;
+  WebView().SetRendererPreferences(renderer_preferences);
+
   WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
   SimRequest main_resource("https://example.com/test.html", "text/html");
 
@@ -98,22 +134,26 @@ TEST_F(DragControllerSimTest, DropURLOnNonNavigatingClearsState) {
 
   Compositor().BeginFrame();
 
-  DataObject* object = DataObject::Create();
-  object->SetURLAndTitle("https://www.example.com/index.html", "index");
-  DragData data(
-      object, gfx::PointF(10, 10), gfx::PointF(10, 10),
-      static_cast<DragOperationsMask>(kDragOperationCopy | kDragOperationLink |
-                                      kDragOperationMove));
+  WebDragData drag_data;
+  WebDragData::StringItem item;
+  item.type = "text/uri-list";
+  item.data = WebString::FromUTF8("https://www.example.com/index.html");
+  drag_data.AddItem(item);
 
-  WebView().GetPage()->GetDragController().DragEnteredOrUpdated(
-      &data, *GetDocument().GetFrame());
+  const gfx::PointF client_point(10, 10);
+  const gfx::PointF screen_point(10, 10);
+  WebFrameWidget* widget = WebView().MainFrameImpl()->FrameWidget();
+  widget->DragTargetDragEnter(drag_data, client_point, screen_point,
+                              kDragOperationCopy, 0, base::DoNothing());
 
   // The page should tell the AutoscrollController about the drag.
   EXPECT_TRUE(
       WebView().GetPage()->GetAutoscrollController().AutoscrollInProgress());
 
-  WebView().GetPage()->GetDragController().PerformDrag(
-      &data, *GetDocument().GetFrame());
+  widget->DragTargetDrop(drag_data, client_point, screen_point, 0,
+                         base::DoNothing());
+  frame_test_helpers::PumpPendingRequestsForFrameToLoad(
+      WebView().MainFrameImpl());
 
   // Once we've "performed" the drag (in which nothing happens), the
   // AutoscrollController should have been cleared.
@@ -125,7 +165,6 @@ TEST_F(DragControllerSimTest, DropURLOnNonNavigatingClearsState) {
 // lifecycle updates for frames - are accounted for in the DragController.
 // Regression test for https://crbug.com/685030
 TEST_F(DragControllerSimTest, ThrottledDocumentHandled) {
-  WebView().GetPage()->GetSettings().SetNavigateOnDragDrop(false);
   WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
   SimRequest main_resource("https://example.com/test.html", "text/html");
 
@@ -138,12 +177,12 @@ TEST_F(DragControllerSimTest, ThrottledDocumentHandled) {
       "  document.addEventListener('dragenter', e => e.preventDefault());"
       "</script>");
 
-  DataObject* object = DataObject::Create();
-  object->SetURLAndTitle("https://www.example.com/index.html", "index");
+  DataObject* object = DataObject::CreateFromString("hello world");
   DragData data(
       object, gfx::PointF(10, 10), gfx::PointF(10, 10),
       static_cast<DragOperationsMask>(kDragOperationCopy | kDragOperationLink |
-                                      kDragOperationMove));
+                                      kDragOperationMove),
+      false);
 
   WebView().GetPage()->GetDragController().DragEnteredOrUpdated(
       &data, *GetDocument().GetFrame());
@@ -417,7 +456,7 @@ TEST_F(DragControllerTest, DragImageOffsetWithPageScaleFactor) {
 
   auto& drag_state = GetFrame().GetPage()->GetDragController().GetDragState();
   drag_state.drag_type_ = kDragSourceActionSelection;
-  drag_state.drag_src_ = GetDocument().getElementById("drag");
+  drag_state.drag_src_ = GetDocument().getElementById(AtomicString("drag"));
   drag_state.drag_data_transfer_ = DataTransfer::Create(
       DataTransfer::kDragAndDrop, DataTransferAccessPolicy::kWritable,
       DataObject::Create());
@@ -461,7 +500,7 @@ TEST_F(DragControllerTest, DragLinkWithPageScaleFactor) {
 
   auto& drag_state = GetFrame().GetPage()->GetDragController().GetDragState();
   drag_state.drag_type_ = kDragSourceActionLink;
-  drag_state.drag_src_ = GetDocument().getElementById("drag");
+  drag_state.drag_src_ = GetDocument().getElementById(AtomicString("drag"));
   drag_state.drag_data_transfer_ = DataTransfer::Create(
       DataTransfer::kDragAndDrop, DataTransferAccessPolicy::kWritable,
       DataObject::Create());
@@ -470,7 +509,7 @@ TEST_F(DragControllerTest, DragLinkWithPageScaleFactor) {
 
   gfx::Size link_image_size = GetChromeClient().last_drag_image_size;
   // The drag link image should be a textual representation of the drag url in a
-  // system font (see: DragImageForLink in DragController.cpp) and should not be
+  // system font (see: DeriveDragLabelFont in drag_image.cc) and should not be
   // an empty image.
   EXPECT_GT(link_image_size.Area64(), 0u);
   // Unlike the drag image in DragImageOffsetWithPageScaleFactor, the link
@@ -483,6 +522,206 @@ TEST_F(DragControllerTest, DragLinkWithPageScaleFactor) {
   // expectation until more precise offset mapping is available.
   EXPECT_NEAR(expected_offset.x(), GetChromeClient().last_cursor_offset.x(), 1);
   EXPECT_NEAR(expected_offset.y(), GetChromeClient().last_cursor_offset.y(), 1);
+}
+
+// Verify that drag and drop of URL from textarea to textarea drops the entire
+// URL
+TEST_F(DragControllerTest, DragAndDropUrlFromTextareaToTextarea) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    body,html { height: 1000px; width: 1000px; }
+    textarea { height: 100px; width: 250px; }
+    </style>
+    <textarea id='drag'>httts://www.example.com/index.html</textarea>
+    <textarea id='drop'></textarea>
+  )HTML");
+  HTMLTextAreaElement* drag_text_area = DynamicTo<HTMLTextAreaElement>(
+      *(GetDocument().getElementById(AtomicString("drag"))));
+  HTMLTextAreaElement* drop_text_area = DynamicTo<HTMLTextAreaElement>(
+      *(GetDocument().getElementById(AtomicString("drop"))));
+  WebDragData web_drag_data;
+  WebDragData::StringItem item1;
+  item1.type = "text/uri-list";
+  item1.data = WebString::FromUTF8("https://www.example.com/index.html");
+  item1.title = "index.html";
+  WebDragData::StringItem item2;
+  item2.type = "text/plain";
+  item2.data = "https://www.example.com/index.html";
+
+  web_drag_data.AddItem(item1);
+  web_drag_data.AddItem(item2);
+  DataObject* data_object = DataObject::Create(web_drag_data);
+  auto& drag_state = GetFrame().GetPage()->GetDragController().GetDragState();
+  drag_state.drag_type_ = kDragSourceActionSelection;
+  drag_state.drag_src_ = drag_text_area;
+  drag_state.drag_data_transfer_ =
+      DataTransfer::Create(DataTransfer::kDragAndDrop,
+                           DataTransferAccessPolicy::kWritable, data_object);
+
+  PerformDragAndDropFromTextareaToTargetElement(drag_text_area, data_object,
+                                                drop_text_area);
+  EXPECT_EQ("https://www.example.com/index.html", drop_text_area->Value());
+  EXPECT_EQ("", drag_text_area->Value());  // verify drag operation is move
+}
+
+// Verify that drag and drop of URL from textarea to richly editable div adds an
+// anchor element
+TEST_F(DragControllerTest, DragAndDropUrlFromTextareaToRichlyEditableDiv) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    body,html { height: 1000px; width: 1000px; }
+    textarea { height: 100px; width: 250px; }
+    </style>
+    <textarea id='drag'>httts://www.example.com/index.html</textarea>
+    <div id='drop' contenteditable='true'></div>
+  )HTML");
+  HTMLTextAreaElement* drag_text_area = DynamicTo<HTMLTextAreaElement>(
+      *(GetDocument().getElementById(AtomicString("drag"))));
+  Element* drop_div_rich = GetDocument().getElementById(AtomicString("drop"));
+  WebDragData web_drag_data;
+  WebDragData::StringItem item1;
+  item1.type = "text/uri-list";
+  item1.data = WebString::FromUTF8("https://www.example.com/index.html");
+  item1.title = "index.html";
+  WebDragData::StringItem item2;
+  item2.type = "text/plain";
+  item2.data = "https://www.example.com/index.html";
+
+  web_drag_data.AddItem(item1);
+  web_drag_data.AddItem(item2);
+  DataObject* data_object = DataObject::Create(web_drag_data);
+  auto& drag_state = GetFrame().GetPage()->GetDragController().GetDragState();
+  drag_state.drag_type_ = kDragSourceActionSelection;
+  drag_state.drag_src_ = drag_text_area;
+  drag_state.drag_data_transfer_ =
+      DataTransfer::Create(DataTransfer::kDragAndDrop,
+                           DataTransferAccessPolicy::kWritable, data_object);
+
+  PerformDragAndDropFromTextareaToTargetElement(drag_text_area, data_object,
+                                                drop_div_rich);
+  EXPECT_EQ("<a href=\"https://www.example.com/index.html\">index.html</a>",
+            drop_div_rich->innerHTML());
+  EXPECT_EQ("", drag_text_area->Value());
+}
+
+// Verify that drag and drop of URL from textarea to plaintext-only editable div
+// populates the entire URL as text
+TEST_F(DragControllerTest,
+       DragAndDropUrlFromTextareaToPlaintextonlyEditableDiv) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    body,html { height: 1000px; width: 1000px; }
+    textarea { height: 100px; width: 250px; }
+    </style>
+    <textarea id='drag'>httts://www.example.com/index.html</textarea>
+    <div id='drop' contenteditable='plaintext-only'></div>
+  )HTML");
+  HTMLTextAreaElement* drag_text_area = DynamicTo<HTMLTextAreaElement>(
+      *(GetDocument().getElementById(AtomicString("drag"))));
+  Element* drop_div_plain = GetDocument().getElementById(AtomicString("drop"));
+  WebDragData web_drag_data;
+  WebDragData::StringItem item1;
+  item1.type = "text/uri-list";
+  item1.data = WebString::FromUTF8("https://www.example.com/index.html");
+  item1.title = "index.html";
+  WebDragData::StringItem item2;
+  item2.type = "text/plain";
+  item2.data = "https://www.example.com/index.html";
+
+  web_drag_data.AddItem(item1);
+  web_drag_data.AddItem(item2);
+  DataObject* data_object = DataObject::Create(web_drag_data);
+  auto& drag_state = GetFrame().GetPage()->GetDragController().GetDragState();
+  drag_state.drag_type_ = kDragSourceActionSelection;
+  drag_state.drag_src_ = drag_text_area;
+  drag_state.drag_data_transfer_ =
+      DataTransfer::Create(DataTransfer::kDragAndDrop,
+                           DataTransferAccessPolicy::kWritable, data_object);
+
+  PerformDragAndDropFromTextareaToTargetElement(drag_text_area, data_object,
+                                                drop_div_plain);
+  EXPECT_EQ("https://www.example.com/index.html", drop_div_plain->innerHTML());
+  EXPECT_EQ("", drag_text_area->Value());
+}
+
+TEST_F(DragControllerTest,
+       DragAndDropUrlFromTextareaToRichlyEditableParagraph) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    body,html { height: 1000px; width: 1000px; }
+    textarea { height: 100px; width: 250px; }
+    </style>
+    <textarea id='drag'>httts://www.example.com/index.html</textarea>
+    <p id='drop' contenteditable='true'></p>
+  )HTML");
+  HTMLTextAreaElement* drag_text_area = DynamicTo<HTMLTextAreaElement>(
+      *(GetDocument().getElementById(AtomicString("drag"))));
+  Element* drop_paragraph_rich =
+      GetDocument().getElementById(AtomicString("drop"));
+  WebDragData web_drag_data;
+  WebDragData::StringItem item1;
+  item1.type = "text/uri-list";
+  item1.data = WebString::FromUTF8("https://www.example.com/index.html");
+  item1.title = "index.html";
+  WebDragData::StringItem item2;
+  item2.type = "text/plain";
+  item2.data = "https://www.example.com/index.html";
+
+  web_drag_data.AddItem(item1);
+  web_drag_data.AddItem(item2);
+  DataObject* data_object = DataObject::Create(web_drag_data);
+  auto& drag_state = GetFrame().GetPage()->GetDragController().GetDragState();
+  drag_state.drag_type_ = kDragSourceActionSelection;
+  drag_state.drag_src_ = drag_text_area;
+  drag_state.drag_data_transfer_ =
+      DataTransfer::Create(DataTransfer::kDragAndDrop,
+                           DataTransferAccessPolicy::kWritable, data_object);
+
+  PerformDragAndDropFromTextareaToTargetElement(drag_text_area, data_object,
+                                                drop_paragraph_rich);
+  EXPECT_EQ("<a href=\"https://www.example.com/index.html\">index.html</a>",
+            drop_paragraph_rich->innerHTML());
+  EXPECT_EQ("", drag_text_area->Value());
+}
+
+TEST_F(DragControllerTest,
+       DragAndDropUrlFromTextareaToPlaintextonlyEditableParagraph) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+    body,html { height: 1000px; width: 1000px; }
+    textarea { height: 100px; width: 250px; }
+    </style>
+    <textarea id='drag'>httts://www.example.com/index.html</textarea>
+    <p id='drop' contenteditable='plaintext-only'></p>
+  )HTML");
+  HTMLTextAreaElement* drag_text_area = DynamicTo<HTMLTextAreaElement>(
+      *(GetDocument().getElementById(AtomicString("drag"))));
+  Element* drop_paragraph_plain =
+      GetDocument().getElementById(AtomicString("drop"));
+  WebDragData web_drag_data;
+  WebDragData::StringItem item1;
+  item1.type = "text/uri-list";
+  item1.data = WebString::FromUTF8("https://www.example.com/index.html");
+  item1.title = "index.html";
+  WebDragData::StringItem item2;
+  item2.type = "text/plain";
+  item2.data = "https://www.example.com/index.html";
+
+  web_drag_data.AddItem(item1);
+  web_drag_data.AddItem(item2);
+  DataObject* data_object = DataObject::Create(web_drag_data);
+  auto& drag_state = GetFrame().GetPage()->GetDragController().GetDragState();
+  drag_state.drag_type_ = kDragSourceActionSelection;
+  drag_state.drag_src_ = drag_text_area;
+  drag_state.drag_data_transfer_ =
+      DataTransfer::Create(DataTransfer::kDragAndDrop,
+                           DataTransferAccessPolicy::kWritable, data_object);
+
+  PerformDragAndDropFromTextareaToTargetElement(drag_text_area, data_object,
+                                                drop_paragraph_plain);
+  EXPECT_EQ("https://www.example.com/index.html",
+            drop_paragraph_plain->innerHTML());
+  EXPECT_EQ("", drag_text_area->Value());
 }
 
 }  // namespace blink

@@ -2,12 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "extensions/browser/image_loader.h"
 
 #include <stddef.h>
 
-#include "base/bind.h"
 #include "base/files/file_path.h"
+#include "base/functional/bind.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
@@ -19,9 +24,9 @@
 #include "extensions/browser/unloaded_extension_reason.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
-#include "extensions/common/extension_icon_set.h"
 #include "extensions/common/extension_paths.h"
 #include "extensions/common/extension_resource.h"
+#include "extensions/common/icons/extension_icon_set.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_handlers/icons_handler.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -42,21 +47,23 @@ class ImageLoaderTest : public ExtensionsTest {
 
   void OnImageLoaded(const gfx::Image& image) {
     image_loaded_count_++;
-    if (quit_in_image_loaded_)
-      base::RunLoop::QuitCurrentWhenIdleDeprecated();
+    if (quit_in_image_loaded_) {
+      loop_.QuitWhenIdle();
+    }
     image_ = image;
   }
 
   void OnImageFamilyLoaded(gfx::ImageFamily image_family) {
     image_loaded_count_++;
-    if (quit_in_image_loaded_)
-      base::RunLoop::QuitCurrentWhenIdleDeprecated();
+    if (quit_in_image_loaded_) {
+      loop_.QuitWhenIdle();
+    }
     image_family_ = std::move(image_family);
   }
 
   void WaitForImageLoad() {
     quit_in_image_loaded_ = true;
-    base::RunLoop().Run();
+    loop_.Run();
     quit_in_image_loaded_ = false;
   }
 
@@ -79,19 +86,21 @@ class ImageLoaderTest : public ExtensionsTest {
     std::string error;
     JSONFileValueDeserializer deserializer(
         extension_dir.AppendASCII("manifest.json"));
-    std::unique_ptr<base::DictionaryValue> valid_value =
-        base::DictionaryValue::From(
-            deserializer.Deserialize(&error_code, &error));
+    std::unique_ptr<base::Value> valid_value =
+        deserializer.Deserialize(&error_code, &error);
     EXPECT_EQ(0, error_code) << error;
-    if (error_code != 0)
+    if (error_code != 0) {
       return nullptr;
+    }
 
     EXPECT_TRUE(valid_value.get());
-    if (!valid_value)
+    EXPECT_TRUE(valid_value->is_dict());
+    if (!valid_value || !valid_value->is_dict()) {
       return nullptr;
+    }
 
-    return Extension::Create(
-        extension_dir, location, *valid_value, Extension::NO_FLAGS, &error);
+    return Extension::Create(extension_dir, location, valid_value->GetDict(),
+                             Extension::NO_FLAGS, &error);
   }
 
   gfx::Image image_;
@@ -100,6 +109,7 @@ class ImageLoaderTest : public ExtensionsTest {
  private:
   int image_loaded_count_;
   bool quit_in_image_loaded_;
+  base::RunLoop loop_;
 };
 
 // Tests loading an image works correctly.
@@ -108,10 +118,9 @@ TEST_F(ImageLoaderTest, LoadImage) {
       CreateExtension("image_loader", ManifestLocation::kInvalidLocation));
   ASSERT_TRUE(extension.get() != nullptr);
 
-  ExtensionResource image_resource =
-      IconsInfo::GetIconResource(extension.get(),
-                                 extension_misc::EXTENSION_ICON_SMALLISH,
-                                 ExtensionIconSet::MATCH_EXACTLY);
+  ExtensionResource image_resource = IconsInfo::GetIconResource(
+      extension.get(), extension_misc::EXTENSION_ICON_SMALLISH,
+      ExtensionIconSet::Match::kExactly);
   gfx::Size max_size(extension_misc::EXTENSION_ICON_SMALLISH,
                      extension_misc::EXTENSION_ICON_SMALLISH);
   ImageLoader loader;
@@ -140,10 +149,9 @@ TEST_F(ImageLoaderTest, DeleteExtensionWhileWaitingForCache) {
       CreateExtension("image_loader", ManifestLocation::kInvalidLocation));
   ASSERT_TRUE(extension.get() != nullptr);
 
-  ExtensionResource image_resource =
-      IconsInfo::GetIconResource(extension.get(),
-                                 extension_misc::EXTENSION_ICON_SMALLISH,
-                                 ExtensionIconSet::MATCH_EXACTLY);
+  ExtensionResource image_resource = IconsInfo::GetIconResource(
+      extension.get(), extension_misc::EXTENSION_ICON_SMALLISH,
+      ExtensionIconSet::Match::kExactly);
   gfx::Size max_size(extension_misc::EXTENSION_ICON_SMALLISH,
                      extension_misc::EXTENSION_ICON_SMALLISH);
   ImageLoader loader;
@@ -186,7 +194,7 @@ TEST_F(ImageLoaderTest, MultipleImages) {
                  extension_misc::EXTENSION_ICON_SMALLISH, };
   for (size_t i = 0; i < std::size(sizes); ++i) {
     ExtensionResource resource = IconsInfo::GetIconResource(
-        extension.get(), sizes[i], ExtensionIconSet::MATCH_EXACTLY);
+        extension.get(), sizes[i], ExtensionIconSet::Match::kExactly);
     info_list.push_back(ImageLoader::ImageRepresentation(
         resource, ImageLoader::ImageRepresentation::RESIZE_WHEN_LARGER,
         gfx::Size(sizes[i], sizes[i]), 1.f));
@@ -229,7 +237,7 @@ TEST_F(ImageLoaderTest, LoadImageFamily) {
                  extension_misc::EXTENSION_ICON_SMALLISH, };
   for (size_t i = 0; i < std::size(sizes); ++i) {
     ExtensionResource resource = IconsInfo::GetIconResource(
-        extension.get(), sizes[i], ExtensionIconSet::MATCH_EXACTLY);
+        extension.get(), sizes[i], ExtensionIconSet::Match::kExactly);
     info_list.push_back(ImageLoader::ImageRepresentation(
         resource, ImageLoader::ImageRepresentation::NEVER_RESIZE,
         gfx::Size(sizes[i], sizes[i]), 1.f));
@@ -237,10 +245,9 @@ TEST_F(ImageLoaderTest, LoadImageFamily) {
 
   // Add a second icon of 200P which should get grouped with the smaller icon's
   // ImageSkia.
-  ExtensionResource resource =
-      IconsInfo::GetIconResource(extension.get(),
-                                 extension_misc::EXTENSION_ICON_SMALLISH,
-                                 ExtensionIconSet::MATCH_EXACTLY);
+  ExtensionResource resource = IconsInfo::GetIconResource(
+      extension.get(), extension_misc::EXTENSION_ICON_SMALLISH,
+      ExtensionIconSet::Match::kExactly);
   info_list.push_back(ImageLoader::ImageRepresentation(
       resource, ImageLoader::ImageRepresentation::NEVER_RESIZE,
       gfx::Size(extension_misc::EXTENSION_ICON_BITTY,

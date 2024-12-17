@@ -29,6 +29,7 @@
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/mojom/run_location.mojom-shared.h"
 #include "extensions/common/user_script.h"
+#include "extensions/common/utils/extension_types_utils.h"
 #include "url/gurl.h"
 
 namespace extensions {
@@ -71,7 +72,7 @@ scoped_refptr<Extension> ConvertUserScriptToExtension(
   }
 
   // Create the manifest
-  std::unique_ptr<base::DictionaryValue> root(new base::DictionaryValue);
+  base::Value::Dict root;
   std::string script_name;
   if (!script.name().empty() && !script.name_space().empty())
     script_name = script.name_space() + "/" + script.name();
@@ -84,28 +85,27 @@ scoped_refptr<Extension> ConvertUserScriptToExtension(
   // identity is its namespace+name, so we hash that to create a public key.
   // There will be no corresponding private key, which means user scripts cannot
   // be auto-updated, or claimed in the gallery.
-  char raw[crypto::kSHA256Length] = {0};
-  std::string key;
+  uint8_t raw[crypto::kSHA256Length] = {0};
   crypto::SHA256HashString(script_name, raw, crypto::kSHA256Length);
-  base::Base64Encode(base::StringPiece(raw, crypto::kSHA256Length), &key);
+  std::string key = base::Base64Encode(raw);
 
   // The script may not have a name field, but we need one for an extension. If
   // it is missing, use the filename of the original URL.
   if (!script.name().empty())
-    root->SetStringKey(manifest_keys::kName, script.name());
+    root.Set(manifest_keys::kName, script.name());
   else
-    root->SetStringKey(manifest_keys::kName, original_url.ExtractFileName());
+    root.Set(manifest_keys::kName, original_url.ExtractFileName());
 
   // Not all scripts have a version, but we need one. Default to 1.0 if it is
   // missing.
   if (!script.version().empty())
-    root->SetStringKey(manifest_keys::kVersion, script.version());
+    root.Set(manifest_keys::kVersion, script.version());
   else
-    root->SetStringKey(manifest_keys::kVersion, "1.0");
+    root.Set(manifest_keys::kVersion, "1.0");
 
-  root->SetStringKey(manifest_keys::kDescription, script.description());
-  root->SetStringKey(manifest_keys::kPublicKey, key);
-  root->SetBoolKey(manifest_keys::kConvertedFromUserScript, true);
+  root.Set(manifest_keys::kDescription, script.description());
+  root.Set(manifest_keys::kPublicKey, key);
+  root.Set(manifest_keys::kConvertedFromUserScript, true);
 
   // If the script provides its own match patterns, we use those. Otherwise, we
   // generate some using the include globs.
@@ -135,23 +135,16 @@ scoped_refptr<Extension> ConvertUserScriptToExtension(
   content_script.js.emplace();
   content_script.js->push_back("script.js");
 
-  if (script.run_location() == mojom::RunLocation::kDocumentStart) {
-    content_script.run_at = api::content_scripts::RUN_AT_DOCUMENT_START;
-  } else if (script.run_location() == mojom::RunLocation::kDocumentEnd) {
-    content_script.run_at = api::content_scripts::RUN_AT_DOCUMENT_END;
-  } else if (script.run_location() == mojom::RunLocation::kDocumentIdle) {
-    // This is the default, but store it just in case we change that.
-    content_script.run_at = api::content_scripts::RUN_AT_DOCUMENT_IDLE;
-  }
+  content_script.run_at = ConvertRunLocationForAPI(script.run_location());
 
-  base::Value content_scripts(base::Value::Type::LIST);
-  content_scripts.Append(base::Value(content_script.ToValue()));
-  root->SetKey(api::content_scripts::ManifestKeys::kContentScripts,
-               std::move(content_scripts));
+  base::Value::List content_scripts;
+  content_scripts.Append(content_script.ToValue());
+  root.Set(api::content_scripts::ManifestKeys::kContentScripts,
+           std::move(content_scripts));
 
   base::FilePath manifest_path = temp_dir.GetPath().Append(kManifestFilename);
   JSONFileValueSerializer serializer(manifest_path);
-  if (!serializer.Serialize(*root)) {
+  if (!serializer.Serialize(root)) {
     *error = u"Could not write JSON.";
     return nullptr;
   }
@@ -168,10 +161,10 @@ scoped_refptr<Extension> ConvertUserScriptToExtension(
   std::string utf8_error;
   scoped_refptr<Extension> extension =
       Extension::Create(temp_dir.GetPath(), mojom::ManifestLocation::kInternal,
-                        *root, Extension::NO_FLAGS, &utf8_error);
+                        root, Extension::NO_FLAGS, &utf8_error);
   *error = base::UTF8ToUTF16(utf8_error);
   if (!extension.get()) {
-    NOTREACHED() << "Could not init extension " << *error;
+    NOTREACHED_IN_MIGRATION() << "Could not init extension " << *error;
     return nullptr;
   }
 

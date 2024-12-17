@@ -13,7 +13,7 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.process_launcher.ChildProcessConnection;
 import org.chromium.base.task.PostTask;
-import org.chromium.content_public.browser.UiThreadTaskTraits;
+import org.chromium.base.task.TaskTraits;
 
 import java.util.Random;
 import java.util.Set;
@@ -28,8 +28,7 @@ import java.util.Set;
  * This class enforces that it is only used on the launcher thread other than during init.
  */
 public class ChildProcessConnectionMetrics {
-    @VisibleForTesting
-    private static final long INITIAL_EMISSION_DELAY_MS = 60 * 1000; // 1 min.
+    @VisibleForTesting private static final long INITIAL_EMISSION_DELAY_MS = 60 * 1000; // 1 min.
     private static final long REGULAR_EMISSION_DELAY_MS = 5 * 60 * 1000; // 5 min.
 
     private static ChildProcessConnectionMetrics sInstance;
@@ -44,10 +43,11 @@ public class ChildProcessConnectionMetrics {
 
     @VisibleForTesting
     ChildProcessConnectionMetrics() {
-        mEmitMetricsRunnable = () -> {
-            emitMetrics();
-            postEmitMetrics(REGULAR_EMISSION_DELAY_MS);
-        };
+        mEmitMetricsRunnable =
+                () -> {
+                    emitMetrics();
+                    postEmitMetrics(REGULAR_EMISSION_DELAY_MS);
+                };
     }
 
     public static ChildProcessConnectionMetrics getInstance() {
@@ -94,34 +94,41 @@ public class ChildProcessConnectionMetrics {
 
     private void cancelEmitting() {
         assert ThreadUtils.runningOnUiThread();
-        LauncherThread.post(() -> { LauncherThread.removeCallbacks(mEmitMetricsRunnable); });
+        LauncherThread.post(
+                () -> {
+                    LauncherThread.removeCallbacks(mEmitMetricsRunnable);
+                });
     }
 
     private void registerActivityStateListenerAndStartEmitting() {
-        PostTask.postTask(UiThreadTaskTraits.DEFAULT, () -> {
-            assert ThreadUtils.runningOnUiThread();
-            mApplicationInForegroundOnUiThread = ApplicationStatus.getStateForApplication()
-                            == ApplicationState.HAS_RUNNING_ACTIVITIES
-                    || ApplicationStatus.getStateForApplication()
-                            == ApplicationState.HAS_PAUSED_ACTIVITIES;
+        PostTask.postTask(
+                TaskTraits.UI_DEFAULT,
+                () -> {
+                    assert ThreadUtils.runningOnUiThread();
+                    mApplicationInForegroundOnUiThread =
+                            ApplicationStatus.getStateForApplication()
+                                            == ApplicationState.HAS_RUNNING_ACTIVITIES
+                                    || ApplicationStatus.getStateForApplication()
+                                            == ApplicationState.HAS_PAUSED_ACTIVITIES;
 
-            ApplicationStatus.registerApplicationStateListener(newState -> {
-                switch (newState) {
-                    case ApplicationState.UNKNOWN:
-                        break;
-                    case ApplicationState.HAS_RUNNING_ACTIVITIES:
-                    case ApplicationState.HAS_PAUSED_ACTIVITIES:
-                        if (!mApplicationInForegroundOnUiThread) onForegrounded();
-                        break;
-                    default:
-                        if (mApplicationInForegroundOnUiThread) onBackgrounded();
-                        break;
-                }
-            });
-            if (mApplicationInForegroundOnUiThread) {
-                startEmitting();
-            }
-        });
+                    ApplicationStatus.registerApplicationStateListener(
+                            newState -> {
+                                switch (newState) {
+                                    case ApplicationState.UNKNOWN:
+                                        break;
+                                    case ApplicationState.HAS_RUNNING_ACTIVITIES:
+                                    case ApplicationState.HAS_PAUSED_ACTIVITIES:
+                                        if (!mApplicationInForegroundOnUiThread) onForegrounded();
+                                        break;
+                                    default:
+                                        if (mApplicationInForegroundOnUiThread) onBackgrounded();
+                                        break;
+                                }
+                            });
+                    if (mApplicationInForegroundOnUiThread) {
+                        startEmitting();
+                    }
+                });
     }
 
     private void onForegrounded() {
@@ -184,7 +191,9 @@ public class ChildProcessConnectionMetrics {
             }
         }
 
-        assert strongBindingCount + visibleBindingCount + notPerceptibleBindingCount
+        assert strongBindingCount
+                        + visibleBindingCount
+                        + notPerceptibleBindingCount
                         + waivedBindingCount
                 == mConnections.size();
         final int totalConnections = mConnections.size();
@@ -213,47 +222,5 @@ public class ChildProcessConnectionMetrics {
                 "Android.ChildProcessBinding.ContentWaivedConnections", contentWaivedBindingCount);
         RecordHistogram.recordCount100Histogram(
                 "Android.ChildProcessBinding.WaivableConnections", waivableBindingCount);
-
-        // Percentages only if there are connections.
-        if (totalConnections > 0) {
-            String bucket = getBucket(totalConnections);
-            RecordHistogram.recordPercentageHistogram(
-                    "Android.ChildProcessBinding.PercentageStrongConnections_" + bucket,
-                    Math.round((float) strongBindingCount / totalConnections * 100));
-            RecordHistogram.recordPercentageHistogram(
-                    "Android.ChildProcessBinding.PercentageVisibleConnections_" + bucket,
-                    Math.round((float) visibleBindingCount / totalConnections * 100));
-            RecordHistogram.recordPercentageHistogram(
-                    "Android.ChildProcessBinding.PercentageNotPerceptibleConnections_" + bucket,
-                    Math.round((float) notPerceptibleBindingCount / totalConnections * 100));
-            RecordHistogram.recordPercentageHistogram(
-                    "Android.ChildProcessBinding.PercentageWaivedConnections_" + bucket,
-                    Math.round((float) waivedBindingCount / totalConnections * 100));
-
-            RecordHistogram.recordPercentageHistogram(
-                    "Android.ChildProcessBinding.PercentageContentVisibleConnections_" + bucket,
-                    Math.round((float) contentVisibleBindingCount / totalConnections * 100));
-            RecordHistogram.recordPercentageHistogram(
-                    "Android.ChildProcessBinding.PercentageContentWaivedConnections_" + bucket,
-                    Math.round((float) contentWaivedBindingCount / totalConnections * 100));
-            RecordHistogram.recordPercentageHistogram(
-                    "Android.ChildProcessBinding.PercentageWaivableConnections_" + bucket,
-                    Math.round((float) waivableBindingCount / totalConnections * 100));
-        }
-    }
-
-    private static String getBucket(int totalConnections) {
-        if (totalConnections < 3) {
-            return "LessThan3Connections";
-        } else if (totalConnections < 6) {
-            return "3To5Connections";
-        } else if (totalConnections < 11) {
-            return "6To10Connections";
-        } else if (totalConnections < 21) {
-            return "11To20Connections";
-        } else if (totalConnections < 51) {
-            return "21To50Connections";
-        }
-        return "MoreThan51Connections";
     }
 }

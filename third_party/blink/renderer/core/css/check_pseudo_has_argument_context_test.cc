@@ -1,8 +1,14 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "third_party/blink/renderer/core/css/check_pseudo_has_argument_context.h"
+
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/css/css_selector_list.h"
 #include "third_party/blink/renderer/core/css/css_test_helpers.h"
@@ -10,6 +16,7 @@
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/html/html_document.h"
+#include "third_party/blink/renderer/core/testing/null_execution_context.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 
 namespace blink {
@@ -25,11 +32,12 @@ class CheckPseudoHasArgumentContextTest : public PageTestBase {
       CSSSelector::RelationType expected_leftmost_relation,
       int expected_adjacent_distance_limit,
       int expected_depth_limit,
-      CheckPseudoHasArgumentTraversalScope expected_traversal_scope) const {
-    CSSSelectorList selector_list =
+      CheckPseudoHasArgumentTraversalScope expected_traversal_scope,
+      bool match_in_shadow_tree = false) const {
+    CSSSelectorList* selector_list =
         css_test_helpers::ParseSelectorList(selector_text);
     CheckPseudoHasArgumentContext context(
-        selector_list.First()->SelectorList()->First());
+        selector_list->First()->SelectorList()->First(), match_in_shadow_tree);
 
     EXPECT_EQ(expected_leftmost_relation, context.LeftmostRelation())
         << "Failed : " << selector_text;
@@ -39,6 +47,8 @@ class CheckPseudoHasArgumentContextTest : public PageTestBase {
         << "Failed : " << selector_text;
     EXPECT_EQ(expected_traversal_scope, context.TraversalScope())
         << "Failed : " << selector_text;
+    EXPECT_EQ(match_in_shadow_tree, context.MatchInShadowTree())
+        << "Failed : " << selector_text;
   }
 
   struct ExpectedTraversalStep {
@@ -46,11 +56,13 @@ class CheckPseudoHasArgumentContextTest : public PageTestBase {
     int depth;
   };
 
-  void TestTraversalIteratorForEmptyRange(Document* document,
-                                          const char* has_anchor_element_id,
-                                          const char* selector_text) const {
+  void TestTraversalIteratorForEmptyRange(
+      Document* document,
+      const char* has_anchor_element_id,
+      const char* selector_text,
+      bool match_in_shadow_tree = false) const {
     Element* has_anchor_element =
-        document->getElementById(has_anchor_element_id);
+        document->getElementById(AtomicString(has_anchor_element_id));
     if (!has_anchor_element) {
       ADD_FAILURE() << "Failed : test iterator on #" << has_anchor_element_id
                     << " (Cannot find element)";
@@ -58,17 +70,17 @@ class CheckPseudoHasArgumentContextTest : public PageTestBase {
     }
 
     unsigned i = 0;
-    CSSSelectorList selector_list =
+    CSSSelectorList* selector_list =
         css_test_helpers::ParseSelectorList(selector_text);
     CheckPseudoHasArgumentContext argument_context(
-        selector_list.First()->SelectorList()->First());
+        selector_list->First()->SelectorList()->First(), match_in_shadow_tree);
     for (CheckPseudoHasArgumentTraversalIterator iterator(*has_anchor_element,
                                                           argument_context);
          !iterator.AtEnd(); ++iterator, ++i) {
       AtomicString current_element_id =
           iterator.CurrentElement()
               ? iterator.CurrentElement()->GetIdAttribute()
-              : "nullptr";
+              : g_null_atom;
       int current_depth = iterator.CurrentDepth();
       ADD_FAILURE() << "Iteration failed : exceeded expected iteration"
                     << " (selector: " << selector_text
@@ -80,14 +92,15 @@ class CheckPseudoHasArgumentContextTest : public PageTestBase {
   }
 
   CheckPseudoHasArgumentTraversalType GetTraversalType(
-      const char* selector_text) const {
-    CSSSelectorList selector_list =
+      const char* selector_text,
+      bool match_in_shadow_tree = false) const {
+    CSSSelectorList* selector_list =
         css_test_helpers::ParseSelectorList(selector_text);
 
-    EXPECT_EQ(selector_list.First()->GetPseudoType(), CSSSelector::kPseudoHas);
+    EXPECT_EQ(selector_list->First()->GetPseudoType(), CSSSelector::kPseudoHas);
 
     CheckPseudoHasArgumentContext context(
-        selector_list.First()->SelectorList()->First());
+        selector_list->First()->SelectorList()->First(), match_in_shadow_tree);
     return context.TraversalType();
   }
 
@@ -96,9 +109,10 @@ class CheckPseudoHasArgumentContextTest : public PageTestBase {
       Document* document,
       const char* has_anchor_element_id,
       const char* selector_text,
-      const ExpectedTraversalStep (&expected_traversal_steps)[length]) const {
+      const ExpectedTraversalStep (&expected_traversal_steps)[length],
+      bool match_in_shadow_tree = false) const {
     Element* has_anchor_element =
-        document->getElementById(has_anchor_element_id);
+        document->getElementById(AtomicString(has_anchor_element_id));
     if (!has_anchor_element) {
       ADD_FAILURE() << "Failed : test iterator on #" << has_anchor_element_id
                     << " (Cannot find element)";
@@ -107,17 +121,17 @@ class CheckPseudoHasArgumentContextTest : public PageTestBase {
     EXPECT_EQ(has_anchor_element->GetIdAttribute(), has_anchor_element_id);
 
     unsigned i = 0;
-    CSSSelectorList selector_list =
+    CSSSelectorList* selector_list =
         css_test_helpers::ParseSelectorList(selector_text);
     CheckPseudoHasArgumentContext argument_context(
-        selector_list.First()->SelectorList()->First());
+        selector_list->First()->SelectorList()->First(), match_in_shadow_tree);
     for (CheckPseudoHasArgumentTraversalIterator iterator(*has_anchor_element,
                                                           argument_context);
          !iterator.AtEnd(); ++iterator, ++i) {
       AtomicString current_element_id =
           iterator.CurrentElement()
               ? iterator.CurrentElement()->GetIdAttribute()
-              : "nullptr";
+              : g_null_atom;
       int current_depth = iterator.CurrentDepth();
       if (i >= length) {
         ADD_FAILURE() << "Iteration failed : exceeded expected iteration"
@@ -146,9 +160,9 @@ class CheckPseudoHasArgumentContextTest : public PageTestBase {
                     << ", has_anchor_element: #" << has_anchor_element_id
                     << ", index: " << i << ", expected_element: "
                     << expected_traversal_steps[i].element_id << ")";
-      EXPECT_NE(
-          document->getElementById(expected_traversal_steps[i].element_id),
-          nullptr);
+      EXPECT_NE(document->getElementById(
+                    AtomicString(expected_traversal_steps[i].element_id)),
+                nullptr);
     }
   }
 };
@@ -295,6 +309,45 @@ TEST_F(CheckPseudoHasArgumentContextTest, TestArgumentMatchContext) {
       ":has(+ .a + .b > .c ~ .d > .e)", CSSSelector::kRelativeDirectAdjacent,
       /* expected_adjacent_distance_limit */ 2,
       /* expected_depth_limit */ 2, kOneNextSiblingFixedDepthDescendants);
+  TestArgumentContext(":has(.a)", CSSSelector::kRelativeDescendant,
+                      /* expected_adjacent_distance_limit */ 0,
+                      /* expected_depth_limit */ kDepthMax, kShadowRootSubtree,
+                      /* match_in_shadow_tree */ true);
+  TestArgumentContext(":has(~ .a)", CSSSelector::kRelativeIndirectAdjacent,
+                      /* expected_adjacent_distance_limit */ kAdjacentMax,
+                      /* expected_depth_limit */ 0,
+                      kInvalidShadowRootTraversalScope,
+                      /* match_in_shadow_tree */ true);
+  TestArgumentContext(":has(+ .a .b)", CSSSelector::kRelativeDirectAdjacent,
+                      /* expected_adjacent_distance_limit */ 1,
+                      /* expected_depth_limit */ kDepthMax,
+                      kInvalidShadowRootTraversalScope,
+                      /* match_in_shadow_tree */ true);
+  TestArgumentContext(":has(~ .a .b)", CSSSelector::kRelativeIndirectAdjacent,
+                      /* expected_adjacent_distance_limit */ kAdjacentMax,
+                      /* expected_depth_limit */ kDepthMax,
+                      kInvalidShadowRootTraversalScope,
+                      /* match_in_shadow_tree */ true);
+  TestArgumentContext(":has(+ .a)", CSSSelector::kRelativeDirectAdjacent,
+                      /* expected_adjacent_distance_limit */ 1,
+                      /* expected_depth_limit */ 0,
+                      kInvalidShadowRootTraversalScope,
+                      /* match_in_shadow_tree */ true);
+  TestArgumentContext(":has(> .a)", CSSSelector::kRelativeChild,
+                      /* expected_adjacent_distance_limit */ 0,
+                      /* expected_depth_limit */ 1,
+                      kShadowRootFixedDepthDescendants,
+                      /* match_in_shadow_tree */ true);
+  TestArgumentContext(":has(+ .a > .b)", CSSSelector::kRelativeDirectAdjacent,
+                      /* expected_adjacent_distance_limit */ 1,
+                      /* expected_depth_limit */ 1,
+                      kInvalidShadowRootTraversalScope,
+                      /* match_in_shadow_tree */ true);
+  TestArgumentContext(":has(~ .a > .b)", CSSSelector::kRelativeIndirectAdjacent,
+                      /* expected_adjacent_distance_limit */ kAdjacentMax,
+                      /* expected_depth_limit */ 1,
+                      kInvalidShadowRootTraversalScope,
+                      /* match_in_shadow_tree */ true);
 }
 
 TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalType) {
@@ -411,12 +464,70 @@ TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalType) {
   traversal_type = GetTraversalType(":has(~ .a > .b > .c)");
   EXPECT_EQ(traversal_type, 0x7fffc002u);
   EXPECT_EQ(GetTraversalType(":has(+ .a ~ .b > .c + .d > .e)"), traversal_type);
+
+  // traversal scope: kShadowRootSubtree
+  // adjacent distance: 0
+  // depth: Max
+  traversal_type = GetTraversalType(":has(.a)",
+                                    /* match_in_shadow_tree */ true);
+  EXPECT_EQ(traversal_type, 0x80003fffu);
+
+  // traversal scope: kInvalidShadowRootTraversalScope
+  // adjacent distance: Max
+  // depth: 0
+  traversal_type = GetTraversalType(":has(~ .a)",
+                                    /* match_in_shadow_tree */ true);
+  EXPECT_EQ(traversal_type, 0xafffc000u);
+
+  // traversal scope: kInvalidShadowRootTraversalScope
+  // adjacent distance: 1
+  // depth: Max
+  traversal_type = GetTraversalType(":has(+ .a .b)",
+                                    /* match_in_shadow_tree */ true);
+  EXPECT_EQ(traversal_type, 0xa0007fffu);
+
+  // traversal scope: kInvalidShadowRootTraversalScope
+  // adjacent distance: Max
+  // depth: Max
+  traversal_type = GetTraversalType(":has(~ .a .b)",
+                                    /* match_in_shadow_tree */ true);
+  EXPECT_EQ(traversal_type, 0xafffffffu);
+
+  // traversal scope: kInvalidShadowRootTraversalScope
+  // adjacent distance: 1
+  // depth: 0
+  traversal_type = GetTraversalType(":has(+ .a)",
+                                    /* match_in_shadow_tree */ true);
+  EXPECT_EQ(traversal_type, 0xa0004000u);
+
+  // traversal scope: kShadowRootFixedDepthDescendants
+  // adjacent distance: 0
+  // depth: 1
+  traversal_type = GetTraversalType(":has(> .a)",
+                                    /* match_in_shadow_tree */ true);
+  EXPECT_EQ(traversal_type, 0x90000001u);
+
+  // traversal scope: kInvalidShadowRootTraversalScope
+  // adjacent distance: 1
+  // depth: 1
+  traversal_type = GetTraversalType(":has(+ .a > .b)",
+                                    /* match_in_shadow_tree */ true);
+  EXPECT_EQ(traversal_type, 0xa0004001u);
+
+  // traversal scope: kInvalidShadowRootTraversalScope
+  // adjacent distance: Max
+  // depth: 1
+  traversal_type = GetTraversalType(":has(~ .a > .b)",
+                                    /* match_in_shadow_tree */ true);
+  EXPECT_EQ(traversal_type, 0xafffc001u);
 }
 
 TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase1) {
   // CheckPseudoHasArgumentTraversalScope::kSubtree
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -472,7 +583,9 @@ TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase1) {
 TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase2) {
   // CheckPseudoHasArgumentTraversalScope::kAllNextSiblings
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -505,7 +618,9 @@ TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase2) {
 TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase3) {
   // CheckPseudoHasArgumentTraversalScope::kOneNextSiblingSubtree
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -571,7 +686,9 @@ TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase3) {
 TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase4) {
   // CheckPseudoHasArgumentTraversalScope::kAllNextSiblingSubtrees
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -625,7 +742,9 @@ TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase4) {
 TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase5) {
   // CheckPseudoHasArgumentTraversalScope::kOneNextSibling
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -661,7 +780,9 @@ TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase5) {
 TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase6) {
   // CheckPseudoHasArgumentTraversalScope::kFixedDepthDescendants
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -714,7 +835,9 @@ TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase6) {
 TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase7) {
   // CheckPseudoHasArgumentTraversalScope::kOneNextSiblingFixedDepthDescendants
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -780,7 +903,9 @@ TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase7) {
 TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase8) {
   // CheckPseudoHasArgumentTraversalScope::kAllNextSiblingsFixedDepthDescendants
 
-  auto* document = HTMLDocument::CreateForTest();
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
   document->write(R"HTML(
     <!DOCTYPE html>
     <main id=main>
@@ -836,6 +961,170 @@ TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase8) {
                              {{"div5", /* depth */ 0}});
 
   TestTraversalIteratorForEmptyRange(document, "div5", ":has(~ .a > .b > .c)");
+}
+
+TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase9) {
+  // CheckPseudoHasArgumentTraversalScope::kShadowRootSubtree
+
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
+  document->write(R"HTML(
+    <!DOCTYPE html>
+    <main id=main>
+      <div id=div1>
+        <template shadowrootmode="open">
+          <div id=div11>
+            <div id=div111></div>
+          </div>
+          <div id=div12>
+            <div id=div121></div>
+            <div id=div122>
+              <div id=div1221></div>
+              <div id=div1222></div>
+              <div id=div1223></div>
+            </div>
+            <div id=div123></div>
+          </div>
+          <div id=div13></div>
+        </template>
+        <div id=div14>
+          <div id=div141></div>
+        </div>
+      </div>
+    </main>
+  )HTML");
+
+  TestTraversalIteratorSteps(document, "div1", ":has(.a)",
+                             {{"div13", /* depth */ 1},
+                              {"div123", /* depth */ 2},
+                              {"div1223", /* depth */ 3},
+                              {"div1222", /* depth */ 3},
+                              {"div1221", /* depth */ 3},
+                              {"div122", /* depth */ 2},
+                              {"div121", /* depth */ 2},
+                              {"div12", /* depth */ 1},
+                              {"div111", /* depth */ 2},
+                              {"div11", /* depth */ 1}},
+                             /* match_in_shadow_tree */ true);
+
+  TestTraversalIteratorForEmptyRange(document, "div14", ":has(.a)",
+                                     /* match_in_shadow_tree */ true);
+}
+
+TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase10) {
+  // CheckPseudoHasArgumentTraversalScope::kShadowRootFixedDepthDescendants
+
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
+  document->write(R"HTML(
+    <!DOCTYPE html>
+    <main id=main>
+      <div id=div1>
+        <template shadowrootmode="open">
+          <div id=div11>
+            <div id=div111></div>
+          </div>
+          <div id=div12>
+            <div id=div121></div>
+            <div id=div122>
+              <div id=div1221></div>
+              <div id=div1222></div>
+              <div id=div1223></div>
+            </div>
+            <div id=div123></div>
+          </div>
+          <div id=div13></div>
+        </template>
+        <div id=div14>
+          <div id=div141></div>
+          <div id=div142>
+            <div id=div1421></div>
+            <div id=div1422></div>
+            <div id=div1423></div>
+          </div>
+        </div>
+      </div>
+    </main>
+  )HTML");
+
+  TestTraversalIteratorSteps(document, "div1", ":has(> .a > .b)",
+                             {{"div13", /* depth */ 1},
+                              {"div123", /* depth */ 2},
+                              {"div122", /* depth */ 2},
+                              {"div121", /* depth */ 2},
+                              {"div12", /* depth */ 1},
+                              {"div111", /* depth */ 2},
+                              {"div11", /* depth */ 1}},
+                             /* match_in_shadow_tree */ true);
+
+  TestTraversalIteratorForEmptyRange(document, "div14", ":has(> .a)",
+                                     /* match_in_shadow_tree */ true);
+}
+
+TEST_F(CheckPseudoHasArgumentContextTest, TestTraversalIteratorCase11) {
+  // CheckPseudoHasArgumentTraversalScope::kInvalidShadowRootTraversalScope
+
+  ScopedNullExecutionContext execution_context;
+  auto* document =
+      HTMLDocument::CreateForTest(execution_context.GetExecutionContext());
+  document->write(R"HTML(
+    <!DOCTYPE html>
+    <main id=main>
+      <div id=div1>
+        <template shadowrootmode="open">
+          <div id=div11>
+            <div id=div111></div>
+          </div>
+          <div id=div12>
+            <div id=div121></div>
+            <div id=div122>
+              <div id=div1221></div>
+              <div id=div1222></div>
+              <div id=div1223></div>
+            </div>
+            <div id=div123></div>
+          </div>
+          <div id=div13></div>
+        </template>
+        <div id=div14>
+          <div id=div141></div>
+          <div id=div142>
+            <div id=div1421></div>
+            <div id=div1422></div>
+            <div id=div1423></div>
+          </div>
+        </div>
+      </div>
+      <div id=div2>
+        <div id=div21></div>
+        <div id=div22>
+          <div id=div221></div>
+          <div id=div222></div>
+          <div id=div223></div>
+        </div>
+      </div>
+    </main>
+  )HTML");
+
+  TestTraversalIteratorForEmptyRange(document, "div1", ":has(~ .a)",
+                                     /* match_in_shadow_tree */ true);
+
+  TestTraversalIteratorForEmptyRange(document, "div1", ":has(+ .a .b)",
+                                     /* match_in_shadow_tree */ true);
+
+  TestTraversalIteratorForEmptyRange(document, "div1", ":has(~ .a .b)",
+                                     /* match_in_shadow_tree */ true);
+
+  TestTraversalIteratorForEmptyRange(document, "div1", ":has(+ .a)",
+                                     /* match_in_shadow_tree */ true);
+
+  TestTraversalIteratorForEmptyRange(document, "div1", ":has(+ .a > .b)",
+                                     /* match_in_shadow_tree */ true);
+
+  TestTraversalIteratorForEmptyRange(document, "div1", ":has(~ .a > .b)",
+                                     /* match_in_shadow_tree */ true);
 }
 
 }  // namespace blink

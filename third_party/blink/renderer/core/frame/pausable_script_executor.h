@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,7 +54,7 @@ class CORE_EXPORT PausableScriptExecutor final
    public:
     virtual ~Executor() = default;
 
-    virtual Vector<v8::Local<v8::Value>> Execute(ScriptState*) = 0;
+    virtual v8::LocalVector<v8::Value> Execute(ScriptState*) = 0;
 
     virtual void Trace(Visitor* visitor) const {}
   };
@@ -79,7 +79,7 @@ class CORE_EXPORT PausableScriptExecutor final
   void ExecuteAndDestroySelf();
   void Dispose();
 
-  void HandleResults(const Vector<v8::Local<v8::Value>>& results);
+  void HandleResults(const v8::LocalVector<v8::Value>& results);
 
   Member<ScriptState> script_state_;
   WebScriptExecutionCallback callback_;

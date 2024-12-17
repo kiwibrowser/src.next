@@ -6,7 +6,7 @@
 
 #include <string>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/no_destructor.h"
 #include "base/time/default_clock.h"
 #include "build/build_config.h"
@@ -16,10 +16,6 @@
 #include "components/history/metrics/domain_diversity_reporter.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
-
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-#include "chrome/browser/ash/profiles/profile_helper.h"
-#endif
 
 // static
 DomainDiversityReporter* DomainDiversityReporterFactory::GetForProfile(
@@ -38,16 +34,6 @@ DomainDiversityReporterFactory* DomainDiversityReporterFactory::GetInstance() {
 std::unique_ptr<KeyedService> DomainDiversityReporterFactory::BuildInstanceFor(
     content::BrowserContext* context) {
   Profile* profile = static_cast<Profile*>(context);
-
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  // ChromeOS creates various profiles (login, lock screen...) that are not
-  // representative and should not have the reporter created for. Note that
-  // IsRegularProfile() returns true for these, so that ChromeOS specific APIs
-  // must be used to test for the type.
-  if (!chromeos::ProfileHelper::IsRegularProfile(profile))
-    return nullptr;
-#endif
-
   history::HistoryService* history_service =
       HistoryServiceFactory::GetForProfile(profile,
                                            ServiceAccessType::EXPLICIT_ACCESS);
@@ -64,10 +50,18 @@ DomainDiversityReporterFactory::DomainDiversityReporterFactory()
     : ProfileKeyedServiceFactory(
           "DomainDiversityReporter",
           // Incognito profiles share the HistoryService of the original
-          // profile, so no
-          // need for an instance for them. Guest and system profiles are not
-          // representative (guest in particular is transient) and not reported.
-          ProfileSelections::BuildRedirectedInIncognitoNonExperimental()) {
+          // profile, so no need for an instance for them. Guest and system
+          // profiles are not representative (guest in particular is transient)
+          // and not reported.
+          ProfileSelections::Builder()
+              .WithRegular(ProfileSelection::kRedirectedToOriginal)
+              .WithGuest(ProfileSelection::kNone)
+              .WithSystem(ProfileSelection::kNone)
+              // ChromeOS creates various profiles (login, lock screen...) that
+              // are not representative and should not have the reporter created
+              // for.
+              .WithAshInternals(ProfileSelection::kNone)
+              .Build()) {
   DependsOn(HistoryServiceFactory::GetInstance());
 }
 

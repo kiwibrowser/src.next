@@ -12,16 +12,16 @@ import android.view.ViewConfiguration;
 import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.Callback;
+import org.chromium.base.ResettersForTesting;
 import org.chromium.base.supplier.Supplier;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
+import org.chromium.ui.base.WindowAndroid;
 
 /** A UI coordinator the app menu. */
 class AppMenuCoordinatorImpl implements AppMenuCoordinator {
     private static Boolean sHasPermanentMenuKeyForTesting;
 
-    /**
-     * Factory which creates the AppMenuHandlerImpl.
-     */
+    /** Factory which creates the AppMenuHandlerImpl. */
     @VisibleForTesting
     interface AppMenuHandlerFactory {
         /**
@@ -35,8 +35,11 @@ class AppMenuCoordinatorImpl implements AppMenuCoordinator {
          *         containing activity.
          * @return AppMenuHandlerImpl for the given activity and menu resource id.
          */
-        AppMenuHandlerImpl get(AppMenuPropertiesDelegate delegate, AppMenuDelegate appMenuDelegate,
-                int menuResourceId, View decorView,
+        AppMenuHandlerImpl get(
+                AppMenuPropertiesDelegate delegate,
+                AppMenuDelegate appMenuDelegate,
+                int menuResourceId,
+                View decorView,
                 ActivityLifecycleDispatcher activityLifecycleDispatcher);
     }
 
@@ -51,27 +54,40 @@ class AppMenuCoordinatorImpl implements AppMenuCoordinator {
      * Construct a new AppMenuCoordinatorImpl.
      * @param context The activity context.
      * @param activityLifecycleDispatcher The {@link ActivityLifecycleDispatcher} for the containing
-     *         activity.
+     *     activity.
      * @param buttonDelegate The {@link MenuButtonDelegate} for the containing activity.
      * @param appMenuDelegate The {@link AppMenuDelegate} for the containing activity.
      * @param decorView The decor {@link View}, e.g. from Window#getDecorView(), for the containing
-     *         activity.
+     *     activity.
      * @param hardwareButtonAnchorView The {@link View} used as an anchor for the menu when it is
-     *            displayed using a hardware button.
+     *     displayed using a hardware button.
      * @param appRect Supplier of the app area in Window that the menu should fit in.
+     * @param windowAndroid The window that will be used to fetch KeyboardVisibilityDelegate
      */
-    public AppMenuCoordinatorImpl(Context context,
+    public AppMenuCoordinatorImpl(
+            Context context,
             ActivityLifecycleDispatcher activityLifecycleDispatcher,
-            MenuButtonDelegate buttonDelegate, AppMenuDelegate appMenuDelegate, View decorView,
-            View hardwareButtonAnchorView, Supplier<Rect> appRect) {
+            MenuButtonDelegate buttonDelegate,
+            AppMenuDelegate appMenuDelegate,
+            View decorView,
+            View hardwareButtonAnchorView,
+            Supplier<Rect> appRect,
+            WindowAndroid windowAndroid) {
         mContext = context;
         mButtonDelegate = buttonDelegate;
         mAppMenuDelegate = appMenuDelegate;
         mAppMenuPropertiesDelegate = mAppMenuDelegate.createAppMenuPropertiesDelegate();
 
         mAppMenuHandler =
-                new AppMenuHandlerImpl(mContext, mAppMenuPropertiesDelegate, mAppMenuDelegate,
-                        decorView, activityLifecycleDispatcher, hardwareButtonAnchorView, appRect);
+                new AppMenuHandlerImpl(
+                        mContext,
+                        mAppMenuPropertiesDelegate,
+                        mAppMenuDelegate,
+                        decorView,
+                        activityLifecycleDispatcher,
+                        hardwareButtonAnchorView,
+                        appRect,
+                        windowAndroid);
     }
 
     @Override
@@ -86,9 +102,10 @@ class AppMenuCoordinatorImpl implements AppMenuCoordinator {
     public void showAppMenuForKeyboardEvent() {
         if (mAppMenuHandler == null || !mAppMenuHandler.shouldShowAppMenu()) return;
 
-        boolean hasPermanentMenuKey = sHasPermanentMenuKeyForTesting != null
-                ? sHasPermanentMenuKeyForTesting.booleanValue()
-                : ViewConfiguration.get(mContext).hasPermanentMenuKey();
+        boolean hasPermanentMenuKey =
+                sHasPermanentMenuKeyForTesting != null
+                        ? sHasPermanentMenuKeyForTesting.booleanValue()
+                        : ViewConfiguration.get(mContext).hasPermanentMenuKey();
         mAppMenuHandler.showAppMenu(
                 hasPermanentMenuKey ? null : mButtonDelegate.getMenuButtonView(), false);
     }
@@ -115,7 +132,6 @@ class AppMenuCoordinatorImpl implements AppMenuCoordinator {
 
     // Testing methods
 
-    @VisibleForTesting
     AppMenuHandlerImpl getAppMenuHandlerImplForTesting() {
         return mAppMenuHandler;
     }
@@ -124,9 +140,9 @@ class AppMenuCoordinatorImpl implements AppMenuCoordinator {
      * @param hasPermanentMenuKey Overrides {@link ViewConfiguration#hasPermanentMenuKey()} for
      *         testing. Pass null to reset.
      */
-    @VisibleForTesting
     static void setHasPermanentMenuKeyForTesting(Boolean hasPermanentMenuKey) {
         sHasPermanentMenuKeyForTesting = hasPermanentMenuKey;
+        ResettersForTesting.register(() -> sHasPermanentMenuKeyForTesting = null);
     }
 
     /** @param reporter A means of reporting an exception without crashing. */

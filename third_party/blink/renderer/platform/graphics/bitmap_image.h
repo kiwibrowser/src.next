@@ -68,6 +68,7 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
   gfx::Size SizeWithConfig(SizeConfig) const override;
   bool GetHotSpot(gfx::Point&) const override;
   String FilenameExtension() const override;
+  const AtomicString& MimeType() const override;
 
   SizeAvailability SetData(scoped_refptr<SharedBuffer> data,
                            bool all_data_received) override;
@@ -97,7 +98,7 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
 
   PaintImage PaintImageForTesting();
   void AdvanceAnimationForTesting() override {
-    NOTREACHED() << "Supported only with svgs";
+    NOTREACHED_IN_MIGRATION() << "Supported only with svgs";
   }
   void SetDecoderForTesting(std::unique_ptr<DeferredImageDecoder> decoder) {
     decoder_ = std::move(decoder);

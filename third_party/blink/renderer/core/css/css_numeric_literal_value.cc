@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include "build/build_config.h"
 #include "third_party/blink/renderer/core/css/css_length_resolver.h"
 #include "third_party/blink/renderer/core/css/css_value_pool.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/blink/renderer/platform/wtf/size_assertions.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
@@ -31,16 +31,20 @@ CSSNumericLiteralValue::CSSNumericLiteralValue(double num, UnitType type)
 // static
 CSSNumericLiteralValue* CSSNumericLiteralValue::Create(double value,
                                                        UnitType type) {
-  if (value < 0 || value > CSSValuePool::kMaximumCacheableIntegerValue)
+  // NOTE: This will also deal with NaN and infinities.
+  // Writing value < 0 || value > ... is not equivalent.
+  if (!(value >= 0 && value <= CSSValuePool::kMaximumCacheableIntegerValue)) {
     return MakeGarbageCollected<CSSNumericLiteralValue>(value, type);
+  }
 
-  // Value can be NaN.
-  if (std::isnan(value))
+  // At this point, we know that value is in a small range,
+  // so we can use a simple cast instead of ClampTo<int>.
+  int int_value = static_cast<int>(value);
+  // To handle negative zero, detect signed zero
+  // https://en.wikipedia.org/wiki/Signed_zero
+  if (value != int_value || (value == 0 && std::signbit(value))) {
     return MakeGarbageCollected<CSSNumericLiteralValue>(value, type);
-
-  int int_value = ClampTo<int>(value);
-  if (value != int_value)
-    return MakeGarbageCollected<CSSNumericLiteralValue>(value, type);
+  }
 
   CSSValuePool& pool = CssValuePool();
   CSSNumericLiteralValue* result = nullptr;
@@ -78,11 +82,13 @@ CSSNumericLiteralValue* CSSNumericLiteralValue::Create(double value,
 double CSSNumericLiteralValue::ComputeSeconds() const {
   DCHECK(IsTime());
   UnitType current_type = GetType();
-  if (current_type == UnitType::kSeconds)
+  if (current_type == UnitType::kSeconds) {
     return num_;
-  if (current_type == UnitType::kMilliseconds)
+  }
+  if (current_type == UnitType::kMilliseconds) {
     return num_ / 1000;
-  NOTREACHED();
+  }
+  NOTREACHED_IN_MIGRATION();
   return 0;
 }
 
@@ -99,7 +105,7 @@ double CSSNumericLiteralValue::ComputeDegrees() const {
     case UnitType::kTurns:
       return Turn2deg(num_);
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       return 0;
   }
 }
@@ -109,10 +115,39 @@ double CSSNumericLiteralValue::ComputeDotsPerPixel() const {
   return DoubleValue() * ConversionToCanonicalUnitsScaleFactor(GetType());
 }
 
+double CSSNumericLiteralValue::ComputeInCanonicalUnit() const {
+  return DoubleValue() *
+         CSSPrimitiveValue::ConversionToCanonicalUnitsScaleFactor(GetType());
+}
+
+double CSSNumericLiteralValue::ComputeInCanonicalUnit(
+    const CSSLengthResolver& length_resolver) const {
+  if (IsLength()) {
+    return ComputeLengthPx(length_resolver);
+  }
+  return DoubleValue() *
+         CSSPrimitiveValue::ConversionToCanonicalUnitsScaleFactor(GetType());
+}
+
 double CSSNumericLiteralValue::ComputeLengthPx(
     const CSSLengthResolver& length_resolver) const {
   DCHECK(IsLength());
   return length_resolver.ZoomedComputedPixels(num_, GetType());
+}
+
+int CSSNumericLiteralValue::ComputeInteger() const {
+  DCHECK(IsNumber());
+  return ClampTo<int>(num_);
+}
+
+double CSSNumericLiteralValue::ComputeNumber() const {
+  DCHECK(IsNumber());
+  return ClampTo<double>(num_);
+}
+
+double CSSNumericLiteralValue::ComputePercentage() const {
+  DCHECK(IsPercentage());
+  return ClampTo<double>(num_);
 }
 
 bool CSSNumericLiteralValue::AccumulateLengthArray(CSSLengthArray& length_array,
@@ -120,8 +155,9 @@ bool CSSNumericLiteralValue::AccumulateLengthArray(CSSLengthArray& length_array,
   LengthUnitType length_type;
   bool conversion_success = UnitTypeToLengthUnitType(GetType(), length_type);
   DCHECK(conversion_success);
-  if (length_type >= CSSLengthArray::kSize)
+  if (length_type >= CSSLengthArray::kSize) {
     return false;
+  }
   length_array.values[length_type] +=
       num_ * ConversionToCanonicalUnitsScaleFactor(GetType()) * multiplier;
   length_array.type_flags.set(length_type);
@@ -130,8 +166,9 @@ bool CSSNumericLiteralValue::AccumulateLengthArray(CSSLengthArray& length_array,
 
 void CSSNumericLiteralValue::AccumulateLengthUnitTypes(
     LengthTypeFlags& types) const {
-  if (!IsLength())
+  if (!IsLength()) {
     return;
+  }
   LengthUnitType length_type;
   bool conversion_success = UnitTypeToLengthUnitType(GetType(), length_type);
   DCHECK(conversion_success);
@@ -139,10 +176,12 @@ void CSSNumericLiteralValue::AccumulateLengthUnitTypes(
 }
 
 bool CSSNumericLiteralValue::IsComputationallyIndependent() const {
-  if (!IsLength())
+  if (!IsLength()) {
     return true;
-  if (IsViewportPercentageLength())
+  }
+  if (IsViewportPercentageLength()) {
     return true;
+  }
   return !IsRelativeUnit(GetType());
 }
 
@@ -160,18 +199,20 @@ static String FormatNumber(double number, const char* suffix) {
 static String FormatInfinityOrNaN(double number, const char* suffix) {
   String result;
   if (std::isinf(number)) {
-    if (number > 0)
+    if (number > 0) {
       result = "infinity";
-    else
+    } else {
       result = "-infinity";
+    }
 
   } else {
     DCHECK(std::isnan(number));
     result = "NaN";
   }
 
-  if (strlen(suffix) > 0)
+  if (strlen(suffix) > 0) {
     result = result + String::Format(" * 1%s", suffix);
+  }
   return result;
 }
 
@@ -182,19 +223,27 @@ String CSSNumericLiteralValue::CustomCSSText() const {
       // FIXME
       break;
     case UnitType::kInteger:
-      text = String::Number(GetIntValue());
+      text = String::Number(ComputeInteger());
       break;
     case UnitType::kNumber:
     case UnitType::kPercentage:
     case UnitType::kEms:
     case UnitType::kQuirkyEms:
     case UnitType::kExs:
+    case UnitType::kRexs:
     case UnitType::kRems:
+    case UnitType::kRchs:
+    case UnitType::kRics:
     case UnitType::kChs:
     case UnitType::kIcs:
+    case UnitType::kCaps:
+    case UnitType::kRcaps:
+    case UnitType::kLhs:
+    case UnitType::kRlhs:
     case UnitType::kPixels:
     case UnitType::kCentimeters:
     case UnitType::kDotsPerPixel:
+    case UnitType::kX:
     case UnitType::kDotsPerInch:
     case UnitType::kDotsPerCentimeter:
     case UnitType::kMillimeters:
@@ -211,7 +260,7 @@ String CSSNumericLiteralValue::CustomCSSText() const {
     case UnitType::kHertz:
     case UnitType::kKilohertz:
     case UnitType::kTurns:
-    case UnitType::kFraction:
+    case UnitType::kFlex:
     case UnitType::kViewportWidth:
     case UnitType::kViewportHeight:
     case UnitType::kViewportInlineSize:
@@ -246,11 +295,11 @@ String CSSNumericLiteralValue::CustomCSSText() const {
       // be represented in non-exponential format with 6 digit precision.
       constexpr int kMinInteger = -999999;
       constexpr int kMaxInteger = 999999;
-      double value = To<CSSNumericLiteralValue>(this)->DoubleValue();
+      double value = DoubleValue();
       // If the value is small integer, go the fast path.
       if (value < kMinInteger || value > kMaxInteger ||
           std::trunc(value) != value) {
-        if (std::isinf(value) || std::isnan(value)) {
+        if (!std::isfinite(value)) {
           text = FormatInfinityOrNaN(value, UnitTypeToString(GetType()));
         } else {
           text = FormatNumber(value, UnitTypeToString(GetType()));
@@ -265,15 +314,16 @@ String CSSNumericLiteralValue::CustomCSSText() const {
       }
     } break;
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       break;
   }
   return text;
 }
 
 bool CSSNumericLiteralValue::Equals(const CSSNumericLiteralValue& other) const {
-  if (GetType() != other.GetType())
+  if (GetType() != other.GetType()) {
     return false;
+  }
 
   switch (GetType()) {
     case UnitType::kUnknown:
@@ -284,9 +334,13 @@ bool CSSNumericLiteralValue::Equals(const CSSNumericLiteralValue& other) const {
     case UnitType::kEms:
     case UnitType::kExs:
     case UnitType::kRems:
+    case UnitType::kRexs:
+    case UnitType::kRchs:
+    case UnitType::kRics:
     case UnitType::kPixels:
     case UnitType::kCentimeters:
     case UnitType::kDotsPerPixel:
+    case UnitType::kX:
     case UnitType::kDotsPerInch:
     case UnitType::kDotsPerCentimeter:
     case UnitType::kMillimeters:
@@ -307,13 +361,22 @@ bool CSSNumericLiteralValue::Equals(const CSSNumericLiteralValue& other) const {
     case UnitType::kViewportHeight:
     case UnitType::kViewportMin:
     case UnitType::kViewportMax:
-    case UnitType::kFraction:
+    case UnitType::kFlex:
       return num_ == other.num_;
     case UnitType::kQuirkyEms:
       return false;
     default:
       return false;
   }
+}
+
+CSSPrimitiveValue::UnitType CSSNumericLiteralValue::CanonicalUnit() const {
+  return CanonicalUnitTypeForCategory(UnitTypeToUnitCategory(GetType()));
+}
+
+CSSNumericLiteralValue* CSSNumericLiteralValue::CreateCanonicalUnitValue()
+    const {
+  return Create(ComputeInCanonicalUnit(), CanonicalUnit());
 }
 
 }  // namespace blink

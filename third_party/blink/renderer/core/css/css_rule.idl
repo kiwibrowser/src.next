@@ -29,8 +29,7 @@
     const unsigned short MEDIA_RULE = 4;
     const unsigned short FONT_FACE_RULE = 5;
     const unsigned short PAGE_RULE = 6;
-    // TODO(foolip): Implement CSSMarginRule.
-    // const unsigned short MARGIN_RULE = 9;
+    [RuntimeEnabled=PageMarginBoxes] const unsigned short MARGIN_RULE = 9;
     const unsigned short NAMESPACE_RULE = 10;
     readonly attribute unsigned short type;
     attribute DOMString cssText;
@@ -45,6 +44,10 @@
     // CSS Counter Styles
     // https://drafts.csswg.org/css-counter-styles-3/#extentions-to-cssrule-interface
     const unsigned short COUNTER_STYLE_RULE = 11;
+
+    // CSS Fonts Level 4
+    // https://drafts.csswg.org/css-fonts-4/#font-feature-values
+    const unsigned short FONT_FEATURE_VALUES_RULE = 14;
 
     // CSS Conditional Rules
     // https://drafts.csswg.org/css-conditional/#extentions-to-cssrule-interface

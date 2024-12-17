@@ -26,12 +26,12 @@
 #include "third_party/blink/renderer/core/layout/layout_media.h"
 
 #include "third_party/blink/public/mojom/scroll/scrollbar_mode.mojom-blink.h"
+#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/core/html/media/media_controls.h"
-#include "third_party/blink/renderer/core/layout/deferred_shaping.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/page/page.h"
 
@@ -53,65 +53,6 @@ HTMLMediaElement* LayoutMedia::MediaElement() const {
   return To<HTMLMediaElement>(GetNode());
 }
 
-void LayoutMedia::UpdateLayout() {
-  NOT_DESTROYED();
-  DeferredShapingDisallowScope disallow_deferred(*View());
-  LayoutSize old_size(ContentWidth(), ContentHeight());
-
-  LayoutImage::UpdateLayout();
-
-  auto new_rect = PhysicalContentBoxRect().ToLayoutRect();
-
-  LayoutState state(*this);
-
-// Iterate the children in reverse order so that the media controls are laid
-// out before the text track container. This is to ensure that the text
-// track rendering has an up-to-date position of the media controls for
-// overlap checking, see LayoutVTTCue.
-#if DCHECK_IS_ON()
-  bool seen_text_track_container = false;
-  bool seen_interstitial = false;
-#endif
-  for (LayoutObject* child = children_.LastChild(); child;
-       child = child->PreviousSibling()) {
-#if DCHECK_IS_ON()
-    if (child->GetNode()->IsMediaControls()) {
-      DCHECK(!seen_text_track_container);
-      DCHECK(!seen_interstitial);
-    } else if (child->GetNode()->IsTextTrackContainer()) {
-      seen_text_track_container = true;
-      DCHECK(!seen_interstitial);
-    } else if (child->GetNode()->IsMediaRemotingInterstitial() ||
-               child->GetNode()->IsPictureInPictureInterstitial()) {
-      // Only one interstitial can be shown at a time.
-      seen_interstitial = true;
-    } else {
-      NOTREACHED();
-    }
-#endif
-
-    // TODO(mlamouri): we miss some layouts because needsLayout returns false in
-    // some cases where we want to change the width of the controls because the
-    // visible viewport has changed for example.
-    if (new_rect.Size() == old_size && !child->NeedsLayout())
-      continue;
-
-    LayoutUnit width = new_rect.Width();
-    if (child->GetNode()->IsMediaControls()) {
-      width = ComputePanelWidth(new_rect);
-    }
-
-    auto* layout_box = To<LayoutBox>(child);
-    layout_box->SetLocation(new_rect.Location());
-    layout_box->SetOverrideLogicalWidth(width);
-    layout_box->SetOverrideLogicalHeight(new_rect.Height());
-    // TODO(cbiesinger): Can this just be ForceLayout()?
-    layout_box->ForceLayoutWithPaintInvalidation();
-  }
-
-  ClearNeedsLayout();
-}
-
 bool LayoutMedia::IsChildAllowed(LayoutObject* child,
                                  const ComputedStyle& style) const {
   NOT_DESTROYED();
@@ -122,7 +63,7 @@ bool LayoutMedia::IsChildAllowed(LayoutObject* child,
   // Out-of-flow positioned or floating child breaks layout hierarchy.
   // This check can be removed if ::-webkit-media-controls is made internal.
   if (style.HasOutOfFlowPosition() ||
-      (style.IsFloating() && !style.IsFlexOrGridItem()))
+      (style.IsFloating() && !style.IsInsideDisplayIgnoringFloatingChildren()))
     return false;
 
   // The user agent stylesheet (mediaControls.css) has
@@ -131,13 +72,23 @@ bool LayoutMedia::IsChildAllowed(LayoutObject* child,
   // of replaced content, which is not supposed to be possible. This
   // check can be removed if ::-webkit-media-controls is made
   // internal.
-  if (child->GetNode()->IsMediaControls())
-    return child->IsFlexibleBoxIncludingNG();
+  if (child->GetNode()->IsMediaControls()) {
+    // LayoutObject::IsInline() doesn't work at this timing.
+    DCHECK(!To<Element>(child->GetNode())
+                ->GetComputedStyle()
+                ->IsDisplayInlineType());
+    return child->IsFlexibleBox();
+  }
 
   if (child->GetNode()->IsTextTrackContainer() ||
       child->GetNode()->IsMediaRemotingInterstitial() ||
-      child->GetNode()->IsPictureInPictureInterstitial())
+      child->GetNode()->IsPictureInPictureInterstitial()) {
+    // LayoutObject::IsInline() doesn't work at this timing.
+    DCHECK(!To<Element>(child->GetNode())
+                ->GetComputedStyle()
+                ->IsDisplayInlineType());
     return true;
+  }
 
   return false;
 }
@@ -147,7 +98,8 @@ void LayoutMedia::PaintReplaced(const PaintInfo&,
   NOT_DESTROYED();
 }
 
-LayoutUnit LayoutMedia::ComputePanelWidth(const LayoutRect& media_rect) const {
+LayoutUnit LayoutMedia::ComputePanelWidth(
+    const PhysicalRect& media_rect) const {
   NOT_DESTROYED();
   // TODO(mlamouri): we don't know if the main frame has an horizontal scrollbar
   // if it is out of process. See https://crbug.com/662480
@@ -190,11 +142,11 @@ LayoutUnit LayoutMedia::ComputePanelWidth(const LayoutRect& media_rect) const {
   const LayoutUnit visible_width(page->GetVisualViewport().VisibleWidth());
   // The bottom left corner of the video.
   const gfx::PointF bottom_left_point(
-      LocalToAbsolutePoint(gfx::PointF(media_rect.X(), media_rect.MaxY()),
+      LocalToAbsolutePoint(gfx::PointF(media_rect.X(), media_rect.Bottom()),
                            kTraverseDocumentBoundaries));
   // The bottom right corner of the video.
   const gfx::PointF bottom_right_point(
-      LocalToAbsolutePoint(gfx::PointF(media_rect.MaxX(), media_rect.MaxY()),
+      LocalToAbsolutePoint(gfx::PointF(media_rect.Right(), media_rect.Bottom()),
                            kTraverseDocumentBoundaries));
 
   const bool bottom_left_corner_visible = bottom_left_point.x() < visible_width;
@@ -233,6 +185,10 @@ LayoutUnit LayoutMedia::ComputePanelWidth(const LayoutRect& media_rect) const {
 
   // Calculate difference.
   return LayoutUnit((edge_intersection_point - bottom_left_point).Length());
+}
+
+RecalcScrollableOverflowResult LayoutMedia::RecalcScrollableOverflow() {
+  return RecalcScrollableOverflowNG();
 }
 
 }  // namespace blink

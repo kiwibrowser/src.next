@@ -8,32 +8,34 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Process;
 
-import org.chromium.base.annotations.CalledByNative;
+import org.jni_zero.CalledByNative;
+
+import org.chromium.base.task.PostTask;
+import org.chromium.base.task.TaskTraits;
+import org.chromium.build.BuildConfig;
 
 import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 
-/**
- * Helper methods to deal with threading related tasks.
- */
+/** Helper methods to deal with threading related tasks. */
 public class ThreadUtils {
 
     private static final Object sLock = new Object();
 
-    private static boolean sWillOverride;
+    private static volatile boolean sWillOverride;
 
-    private static Handler sUiThreadHandler;
+    private static volatile Handler sUiThreadHandler;
 
-    private static boolean sThreadAssertsDisabled;
+    private static Throwable sUiThreadInitializer;
+    private static boolean sThreadAssertsDisabledForTesting;
+    private static Thread sInstrumentationThreadForTesting;
 
     /**
      * A helper object to ensure that interactions with a particular object only happens on a
      * particular thread.
      *
-     * Example:
-     * <pre>
-     * {@code
+     * <pre>Example:
+     *
      * class Foo {
      *     // Valid thread is set during construction here.
      *     private final ThreadChecker mThreadChecker = new ThreadChecker();
@@ -42,74 +44,123 @@ public class ThreadUtils {
      *         mThreadChecker.assertOnValidThread();
      *     }
      * }
-     * }
-     * </pre>
-     *
-     * Another way to use this class is to also use the baked in support for destruction:
-     * <pre>
-     * {@code
-     * class Foo {
-     *     // Valid thread is set during construction here.
-     *     private final ThreadChecker mThreadChecker = new ThreadChecker();
-     *
-     *     public void doFoo() {
-     *         mThreadChecker.assertOnValidThreadAndState();
-     *     }
-     * }
-     * }
      * </pre>
      */
+    // TODO(b/274802355): Add @CheckDiscard once R8 can remove this.
     public static class ThreadChecker {
-        private final long mThreadId = Process.myTid();
+        private Thread mThread;
+
+        public ThreadChecker() {
+            resetThreadId();
+        }
+
+        public void resetThreadId() {
+            if (BuildConfig.ENABLE_ASSERTS) {
+                mThread = Thread.currentThread();
+            }
+        }
 
         /**
          * Asserts that the current thread is the same as the one the ThreadChecker was constructed
          * on.
          */
         public void assertOnValidThread() {
-            assert sThreadAssertsDisabled
-                    || mThreadId == Process.myTid() : "Must only be used on a single thread.";
+            assertOnValidThreadHelper(false);
+        }
+
+        /**
+         * Asserts that the current thread is the same as the one the ThreadChecker was constructed
+         * on, or the Instrumentation thread.
+         */
+        public void assertOnValidOrInstrumentationThread() {
+            assertOnValidThreadHelper(true);
+        }
+
+        private void assertOnValidThreadHelper(boolean allowInstrThread) {
+            if (BuildConfig.ENABLE_ASSERTS && !sThreadAssertsDisabledForTesting) {
+                Thread curThread = Thread.currentThread();
+                if (curThread == mThread
+                        || (allowInstrThread && curThread == sInstrumentationThreadForTesting)) {
+                    return;
+                }
+                Thread uiThread = getUiThreadLooper().getThread();
+                if (curThread == uiThread) {
+                    assert false
+                            : "Background-only class called from UI thread (expected: "
+                                    + mThread
+                                    + ")";
+                } else if (mThread == uiThread) {
+                    assert false : "UI-only class called from background thread: " + curThread;
+                }
+                assert false
+                        : "Method called from wrong background thread. Expected: "
+                                + mThread
+                                + " Actual: "
+                                + curThread;
+            }
         }
     }
 
-    public static void setWillOverrideUiThread(boolean willOverrideUiThread) {
-        synchronized (sLock) {
-            sWillOverride = willOverrideUiThread;
+    public static void setWillOverrideUiThread() {
+        sWillOverride = true;
+        if (BuildConfig.ENABLE_ASSERTS && sUiThreadHandler != null) {
+            throw new AssertionError("UI Thread already set", sUiThreadInitializer);
         }
     }
 
+    @SuppressWarnings("StaticAssignmentOfThrowable")
+    public static void clearUiThreadForTesting() {
+        sWillOverride = false;
+        PostTask.resetUiThreadForTesting(); // IN-TEST
+        sUiThreadHandler = null;
+        sUiThreadInitializer = null;
+    }
+
+    @SuppressWarnings("StaticAssignmentOfThrowable")
     public static void setUiThread(Looper looper) {
+        assert looper != null;
         synchronized (sLock) {
-            if (looper == null) {
-                // Used to reset the looper after tests.
-                sUiThreadHandler = null;
-                return;
-            }
-            if (sUiThreadHandler != null && sUiThreadHandler.getLooper() != looper) {
-                throw new RuntimeException("UI thread looper is already set to "
-                        + sUiThreadHandler.getLooper() + " (Main thread looper is "
-                        + Looper.getMainLooper() + "), cannot set to new looper " + looper);
-            } else {
-                sUiThreadHandler = new Handler(looper);
+            if (sUiThreadHandler == null) {
+                if (BuildConfig.ENABLE_ASSERTS) {
+                    sUiThreadInitializer = new Throwable("This is who set sUiThreadHandler.");
+                }
+                Handler uiThreadHandler = new Handler(looper);
+                // volatile write signals readiness since other threads read it without acquiring
+                // sLock.
+                sUiThreadHandler = uiThreadHandler;
+                // Must come after PostTask is initialized since it uses PostTask.
+                TraceEvent.onUiThreadReady();
+            } else if (sUiThreadHandler.getLooper() != looper) {
+                RuntimeException exception =
+                        new RuntimeException(
+                                "UI thread looper is already set to "
+                                        + sUiThreadHandler.getLooper()
+                                        + " (Main thread looper is "
+                                        + Looper.getMainLooper()
+                                        + "), cannot set to new looper "
+                                        + looper);
+                if (BuildConfig.ENABLE_ASSERTS) {
+                    exception.initCause(sUiThreadInitializer);
+                }
+                throw exception;
             }
         }
-        TraceEvent.onUiThreadReady();
+    }
+
+    // Allows ThreadChecker to allowlist instrumentation thread calls.
+    public static void recordInstrumentationThreadForTesting() {
+        assert sInstrumentationThreadForTesting == null;
+        assert Looper.getMainLooper() != Looper.myLooper();
+        sInstrumentationThreadForTesting = Thread.currentThread();
     }
 
     public static Handler getUiThreadHandler() {
-        boolean createdHandler = false;
-        synchronized (sLock) {
-            if (sUiThreadHandler == null) {
-                if (sWillOverride) {
-                    throw new RuntimeException("Did not yet override the UI thread");
-                }
-                sUiThreadHandler = new Handler(Looper.getMainLooper());
-                createdHandler = true;
-            }
+        if (sUiThreadHandler != null) return sUiThreadHandler;
+
+        if (sWillOverride) {
+            throw new RuntimeException("Did not yet override the UI thread");
         }
-        if (createdHandler) {
-            TraceEvent.onUiThreadReady();
-        }
+        setUiThread(Looper.getMainLooper());
         return sUiThreadHandler;
     }
 
@@ -117,146 +168,60 @@ public class ThreadUtils {
      * Run the supplied Runnable on the main thread. The method will block until the Runnable
      * completes.
      *
-     * @deprecated Use {@link
-     *         org.chromium.content_public.browser.test.util.TestThreadUtils#runOnUiThreadBlocking(Runnable)
-     *         TestThreadUtils.runOnUiThreadBlocking(r)} instead. For non-test usage (heavily
-     * discouraged) use {@link org.chromium.base.task.PostTask#runSynchronously(TaskTraits,
-     * Runnable) PostTask.runSynchronously(TaskTraits, Runnable)} with task traits chosen from
-     * {@link org.chromium.content_public.browser.UiThreadTaskTraits}. If the call site can't import
-     * content, it means it shouldn't be posting to the UI thread at all; all such usages will
-     * gradually get rewritten.
+     * <p>Note that non-test usage of this function is heavily discouraged. For non-tests, use
+     * callbacks rather than blocking threads.
+     *
      * @param r The Runnable to run.
      */
-    @Deprecated
-    public static void runOnUiThreadBlocking(final Runnable r) {
-        if (runningOnUiThread()) {
-            r.run();
-        } else {
-            FutureTask<Void> task = new FutureTask<Void>(r, null);
-            postOnUiThread(task);
-            try {
-                task.get();
-            } catch (Exception e) {
-                throw new RuntimeException("Exception occurred while waiting for runnable", e);
-            }
-        }
-    }
-
-    /**
-     * Run the supplied Callable on the main thread, wrapping any exceptions in a RuntimeException.
-     * The method will block until the Callable completes.
-     *
-     * @deprecated Use {@link
-     *         org.chromium.content_public.browser.test.util.TestThreadUtils#runOnUiThreadBlockingNoException(Callable)
-     *         TestThreadUtils.runOnUiThreadBlockingNoException(c)} instead.
-     * @param c The Callable to run
-     * @return The result of the callable
-     */
-    @Deprecated
-    public static <T> T runOnUiThreadBlockingNoException(Callable<T> c) {
-        try {
-            return runOnUiThreadBlocking(c);
-        } catch (ExecutionException e) {
-            throw new RuntimeException("Error occurred waiting for callable", e);
-        }
+    public static void runOnUiThreadBlocking(Runnable r) {
+        PostTask.runSynchronously(TaskTraits.UI_DEFAULT, r);
     }
 
     /**
      * Run the supplied Callable on the main thread, The method will block until the Callable
      * completes.
      *
-     * @deprecated Use {@link
-     *         org.chromium.content_public.browser.test.util.TestThreadUtils#runOnUiThreadBlocking(Callable)
-     *         TestThreadUtils.runOnUiThreadBlocking(c)} instead.
+     * <p>Note that non-test usage of this function is heavily discouraged. For non-tests, use
+     * callbacks rather than blocking threads.
+     *
      * @param c The Callable to run
      * @return The result of the callable
-     * @throws ExecutionException c's exception
      */
-    @Deprecated
-    public static <T> T runOnUiThreadBlocking(Callable<T> c) throws ExecutionException {
-        FutureTask<T> task = new FutureTask<T>(c);
-        runOnUiThread(task);
-        try {
-            return task.get();
-        } catch (InterruptedException e) {
-            throw new RuntimeException("Interrupted waiting for callable", e);
-        }
+    public static <T> T runOnUiThreadBlocking(Callable<T> c) {
+        return PostTask.runSynchronously(TaskTraits.UI_DEFAULT, c);
     }
 
     /**
      * Run the supplied FutureTask on the main thread. The method will block only if the current
      * thread is the main thread.
      *
-     * @deprecated Use {@link org.chromium.base.task.PostTask#runOrPostTask(TaskTraits, Runnable)
-     *         PostTask.runOrPostTask(TaskTraits, Runnable)} with task traits chosen from {@link
-     *         org.chromium.content_public.browser.UiThreadTaskTraits}.
-     *         If the call site can't import content, it means it shouldn't be posting to the UI
-     *         thread at all; all such usages will gradually get rewritten.
      * @param task The FutureTask to run
      * @return The queried task (to aid inline construction)
      */
-    @Deprecated
     public static <T> FutureTask<T> runOnUiThread(FutureTask<T> task) {
-        if (runningOnUiThread()) {
-            task.run();
-        } else {
-            postOnUiThread(task);
-        }
+        PostTask.runOrPostTask(TaskTraits.UI_DEFAULT, task);
         return task;
-    }
-
-    /**
-     * Run the supplied Callable on the main thread. The method will block only if the current
-     * thread is the main thread.
-     *
-     * @deprecated Use {@link org.chromium.base.task.PostTask#runOrPostTask(TaskTraits, Runnable)
-     *         PostTask.runOrPostTask(TaskTraits, Runnable)} with task traits chosen from {@link
-     *         org.chromium.content_public.browser.UiThreadTaskTraits}.
-     *         If the call site can't import content, it means it shouldn't be posting to the UI
-     *         thread at all; all such usages will gradually get rewritten.
-     * @param c The Callable to run
-     * @return A FutureTask wrapping the callable to retrieve results
-     */
-    @Deprecated
-    public static <T> FutureTask<T> runOnUiThread(Callable<T> c) {
-        return runOnUiThread(new FutureTask<T>(c));
     }
 
     /**
      * Run the supplied Runnable on the main thread. The method will block only if the current
      * thread is the main thread.
      *
-     * @deprecated Use {@link org.chromium.base.task.PostTask#runOrPostTask(TaskTraits, Runnable)
-     *         PostTask.runOrPostTask(TaskTraits, Runnable)} with task traits chosen from {@link
-     *         org.chromium.content_public.browser.UiThreadTaskTraits}.
-     *         If the call site can't import content, it means it shouldn't be posting to the UI
-     *         thread at all; all such usages will gradually get rewritten.
      * @param r The Runnable to run
      */
-    @Deprecated
     public static void runOnUiThread(Runnable r) {
-        if (runningOnUiThread()) {
-            r.run();
-        } else {
-            getUiThreadHandler().post(r);
-        }
+        PostTask.runOrPostTask(TaskTraits.UI_DEFAULT, r);
     }
 
     /**
      * Post the supplied FutureTask to run on the main thread. The method will not block, even if
      * called on the UI thread.
      *
-     * @deprecated Use {@link org.chromium.base.task.PostTask#postTask(TaskTraits, Runnable)
-     *         PostTask.postTask(TaskTraits, Runnable)} with task traits chosen from {@link
-     *         org.chromium.content_public.browser.UiThreadTaskTraits}.
-     *         If the call site can't import content, it means it shouldn't be posting to the UI
-     *         thread at all; all such usages will gradually get rewritten.
      * @param task The FutureTask to run
      * @return The queried task (to aid inline construction)
      */
-    @Deprecated
     public static <T> FutureTask<T> postOnUiThread(FutureTask<T> task) {
-        getUiThreadHandler().post(task);
+        PostTask.postTask(TaskTraits.UI_DEFAULT, task);
         return task;
     }
 
@@ -264,33 +229,21 @@ public class ThreadUtils {
      * Post the supplied Runnable to run on the main thread. The method will not block, even if
      * called on the UI thread.
      *
-     * @deprecated Use {@link org.chromium.base.task.PostTask#postTask(TaskTraits, Runnable)
-     *         PostTask.postTask(TaskTraits, Runnable)} with task traits chosen from {@link
-     *         org.chromium.content_public.browser.UiThreadTaskTraits}.
-     *         If the call site can't import content, it means it shouldn't be posting to the UI
-     *         thread at all; all such usages will gradually get rewritten.
-     * @param task The Runnable to run
+     * @param r The Runnable to run
      */
-    @Deprecated
-    public static void postOnUiThread(Runnable task) {
-        getUiThreadHandler().post(task);
+    public static void postOnUiThread(Runnable r) {
+        PostTask.postTask(TaskTraits.UI_DEFAULT, r);
     }
 
     /**
      * Post the supplied Runnable to run on the main thread after the given amount of time. The
      * method will not block, even if called on the UI thread.
      *
-     * @deprecated Use {@link org.chromium.base.task.PostTask#postDelayedTask(TaskTraits, Runnable,
-     *         long) PostTask.postDelayedTask(TaskTraits, Runnable, long)} with task traits chosen
-     *         from {@link org.chromium.content_public.browser.UiThreadTaskTraits}.
-     *         If the call site can't import content, it means it shouldn't be posting to the UI
-     *         thread at all; all such usages will gradually get rewritten.
-     * @param task The Runnable to run
+     * @param r The Runnable to run
      * @param delayMillis The delay in milliseconds until the Runnable will be run
      */
-    @Deprecated
-    public static void postOnUiThreadDelayed(Runnable task, long delayMillis) {
-        getUiThreadHandler().postDelayed(task, delayMillis);
+    public static void postOnUiThreadDelayed(Runnable r, long delayMillis) {
+        PostTask.postDelayedTask(TaskTraits.UI_DEFAULT, r, delayMillis);
     }
 
     /**
@@ -299,7 +252,7 @@ public class ThreadUtils {
      * Can be disabled by setThreadAssertsDisabledForTesting(true).
      */
     public static void assertOnUiThread() {
-        if (sThreadAssertsDisabled) return;
+        if (sThreadAssertsDisabledForTesting) return;
 
         assert runningOnUiThread() : "Must be called on the UI thread.";
     }
@@ -312,7 +265,7 @@ public class ThreadUtils {
      * @see #assertOnUiThread()
      */
     public static void checkUiThread() {
-        if (!sThreadAssertsDisabled && !runningOnUiThread()) {
+        if (!sThreadAssertsDisabledForTesting && !runningOnUiThread()) {
             throw new IllegalStateException("Must be called on the UI thread.");
         }
     }
@@ -323,7 +276,7 @@ public class ThreadUtils {
      * Can be disabled by setThreadAssertsDisabledForTesting(true).
      */
     public static void assertOnBackgroundThread() {
-        if (sThreadAssertsDisabled) return;
+        if (sThreadAssertsDisabledForTesting) return;
 
         assert !runningOnUiThread() : "Must be called on a thread other than UI.";
     }
@@ -331,12 +284,29 @@ public class ThreadUtils {
     /**
      * Disables thread asserts.
      *
-     * Can be used by tests where code that normally runs multi-threaded is going to run
+     * <p>Can be used by tests where code that normally runs multi-threaded is going to run
+     * single-threaded for the test (otherwise asserts that are valid in production would fail in
+     * those tests). Avoid to use this in ui tests, especially under the batch unit tests
+     * environment, because any ThreadChecker instances created on the wrong thread will likely fail
+     * on subsequent tests when run on their correct threads. Prefer to use `runOnUiThread()` or
+     * `PostTask.runSynchronously()`.
+     */
+    public static void hasSubtleSideEffectsSetThreadAssertsDisabledForTesting(boolean disabled) {
+        sThreadAssertsDisabledForTesting = disabled;
+        ResettersForTesting.register(() -> sThreadAssertsDisabledForTesting = false);
+    }
+
+    /**
+     * Disables thread asserts.
+     *
+     * <p>Can be used by tests where code that normally runs multi-threaded is going to run
      * single-threaded for the test (otherwise asserts that are valid in production would fail in
      * those tests).
      */
+    @Deprecated
     public static void setThreadAssertsDisabledForTesting(boolean disabled) {
-        sThreadAssertsDisabled = disabled;
+        sThreadAssertsDisabledForTesting = disabled;
+        ResettersForTesting.register(() -> sThreadAssertsDisabledForTesting = false);
     }
 
     /**
@@ -346,13 +316,19 @@ public class ThreadUtils {
         return getUiThreadHandler().getLooper() == Looper.myLooper();
     }
 
+    /**
+     * @return true iff the current thread is the instrumentation thread.
+     */
+    public static boolean runningOnInstrumentationThread() {
+        return sInstrumentationThreadForTesting != null
+                && sInstrumentationThreadForTesting == Thread.currentThread();
+    }
+
     public static Looper getUiThreadLooper() {
         return getUiThreadHandler().getLooper();
     }
 
-    /**
-     * Set thread priority to audio.
-     */
+    /** Set thread priority to audio. */
     @CalledByNative
     public static void setThreadPriorityAudio(int tid) {
         Process.setThreadPriority(tid, Process.THREAD_PRIORITY_AUDIO);

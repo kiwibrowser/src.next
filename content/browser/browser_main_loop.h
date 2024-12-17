@@ -6,9 +6,12 @@
 #define CONTENT_BROWSER_BROWSER_MAIN_LOOP_H_
 
 #include <memory>
+#include <optional>
 
-#include "base/callback_helpers.h"
+#include "base/callback_list.h"
+#include "base/functional/callback_helpers.h"
 #include "base/gtest_prod_util.h"
+#include "base/memory/raw_ref.h"
 #include "base/memory/ref_counted.h"
 #include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/types/strong_alias.h"
@@ -19,20 +22,13 @@
 #include "content/public/browser/browser_main_runner.h"
 #include "media/media_buildflags.h"
 #include "services/viz/public/mojom/compositing/compositing_mode_watcher.mojom.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/base/buildflags.h"
+#include "ui/base/ozone_buildflags.h"
 
 #if defined(USE_AURA)
 namespace aura {
 class Env;
 }
-#endif
-
-#if defined(USE_OZONE)
-#include "ui/ozone/buildflags.h"  // nogncheck
-#if BUILDFLAG(OZONE_PLATFORM_X11)
-#define USE_OZONE_PLATFORM_X11
-#endif
 #endif
 
 namespace base {
@@ -60,9 +56,6 @@ class SystemMessageWindowWin;
 class DeviceMonitorLinux;
 #endif
 class UserInputMonitor;
-#if BUILDFLAG(IS_MAC)
-class DeviceMonitorMac;
-#endif
 }  // namespace media
 
 namespace midi {
@@ -85,7 +78,9 @@ class HostFrameSinkManager;
 }  // namespace viz
 
 namespace content {
+class BrowserAccessibilityStateImpl;
 class BrowserMainParts;
+class BackgroundTracingManager;
 class BrowserOnlineStateObserver;
 class BrowserThreadImpl;
 class MediaKeysListenerManagerImpl;
@@ -139,7 +134,7 @@ class CONTENT_EXPORT BrowserMainLoop {
 
   void PreCreateMainMessageLoop();
   // Creates the main message loop, bringing APIs like
-  // ThreadTaskRunnerHandle::Get() online.
+  // SingleThreadTaskRunner::GetCurrentDefault() online.
   void CreateMainMessageLoop();
   void PostCreateMainMessageLoop();
 
@@ -222,16 +217,15 @@ class CONTENT_EXPORT BrowserMainLoop {
   void GetCompositingModeReporter(
       mojo::PendingReceiver<viz::mojom::CompositingModeReporter> receiver);
 
-#if BUILDFLAG(IS_MAC)
-  media::DeviceMonitorMac* device_monitor_mac() const {
-    return device_monitor_mac_.get();
-  }
-#endif
-
   SmsProvider* GetSmsProvider();
   void SetSmsProviderForTesting(std::unique_ptr<SmsProvider>);
 
   BrowserMainParts* parts() { return parts_.get(); }
+
+  // This should only be called after the IO thread has been started (and will
+  // crash otherwise). May block on the thread ID being initialized if the IO
+  // thread ThreadMain has not yet run.
+  base::PlatformThreadId GetIOThreadId();
 
  private:
   FRIEND_TEST_ALL_PREFIXES(BrowserMainLoopTest, CreateThreadsInSingleProcess);
@@ -290,7 +284,7 @@ class CONTENT_EXPORT BrowserMainLoop {
 
   // Members initialized on construction ---------------------------------------
   MainFunctionParams parameters_;
-  const base::CommandLine& parsed_command_line_;
+  const raw_ref<const base::CommandLine> parsed_command_line_;
   int result_code_;
   bool created_threads_;  // True if the non-UI threads were created.
   // //content must be initialized single-threaded until
@@ -308,7 +302,7 @@ class CONTENT_EXPORT BrowserMainLoop {
   //
   // TODO(fdoray): Move this to a more elaborate class that prevents BEST_EFFORT
   // tasks from running when resources are needed to respond to user actions.
-  absl::optional<base::ThreadPoolInstance::ScopedBestEffortExecutionFence>
+  std::optional<base::ThreadPoolInstance::ScopedBestEffortExecutionFence>
       scoped_best_effort_execution_fence_;
 
   // Members initialized in |Init()| -------------------------------------------
@@ -330,6 +324,7 @@ class CONTENT_EXPORT BrowserMainLoop {
   // Android implementation of ScreenOrientationDelegate
   std::unique_ptr<ScreenOrientationDelegate> screen_orientation_delegate_;
 #endif
+  std::unique_ptr<BrowserAccessibilityStateImpl> browser_accessibility_state_;
 
   // Destroy |parts_| before above members (except the ones that are explicitly
   // reset() on shutdown) but after |main_thread_| and services below.
@@ -374,13 +369,12 @@ class CONTENT_EXPORT BrowserMainLoop {
   std::unique_ptr<media::SystemMessageWindowWin> system_message_window_;
 #elif (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)) && defined(USE_UDEV)
   std::unique_ptr<media::DeviceMonitorLinux> device_monitor_linux_;
-#elif BUILDFLAG(IS_MAC)
-  std::unique_ptr<media::DeviceMonitorMac> device_monitor_mac_;
 #endif
 
   std::unique_ptr<MediaStreamManager> media_stream_manager_;
   scoped_refptr<SaveFileManager> save_file_manager_;
   std::unique_ptr<content::TracingControllerImpl> tracing_controller_;
+  std::unique_ptr<BackgroundTracingManager> background_tracing_manager_;
 #if !BUILDFLAG(IS_ANDROID)
   std::unique_ptr<viz::HostFrameSinkManager> host_frame_sink_manager_;
 
@@ -395,6 +389,7 @@ class CONTENT_EXPORT BrowserMainLoop {
 
   // Members initialized in |PreMainMessageLoopRun()| --------------------------
   scoped_refptr<responsiveness::Watcher> responsiveness_watcher_;
+  base::CallbackListSubscription idle_callback_subscription_;
 
   // Members not associated with a specific phase.
   std::unique_ptr<SmsProvider> sms_provider_;

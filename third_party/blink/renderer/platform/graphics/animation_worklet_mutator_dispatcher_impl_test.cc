@@ -1,15 +1,17 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/platform/graphics/animation_worklet_mutator_dispatcher_impl.h"
 
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/blink/renderer/platform/graphics/animation_worklet_mutator.h"
 #include "third_party/blink/renderer/platform/graphics/compositor_mutator_client.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
@@ -17,6 +19,7 @@
 #include "third_party/blink/renderer/platform/scheduler/public/non_main_thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_type.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 
@@ -99,7 +102,7 @@ class AnimationWorkletMutatorDispatcherImplTest : public ::testing::Test {
  public:
   void SetUp() override {
     auto mutator = std::make_unique<AnimationWorkletMutatorDispatcherImpl>(
-        base::ThreadTaskRunnerHandle::Get());
+        scheduler::GetSingleThreadTaskRunnerForTesting());
     mutator_ = mutator.get();
     client_ =
         std::make_unique<::testing::StrictMock<MockCompositorMutatorClient>>(
@@ -108,8 +111,9 @@ class AnimationWorkletMutatorDispatcherImplTest : public ::testing::Test {
 
   void TearDown() override { mutator_ = nullptr; }
 
+  test::TaskEnvironment task_environment_;
   std::unique_ptr<::testing::StrictMock<MockCompositorMutatorClient>> client_;
-  AnimationWorkletMutatorDispatcherImpl* mutator_;
+  raw_ptr<AnimationWorkletMutatorDispatcherImpl> mutator_;
 };
 
 std::unique_ptr<AnimationWorkletDispatcherInput> CreateTestMutatorInput() {
@@ -373,7 +377,8 @@ class AnimationWorkletMutatorDispatcherImplAsyncTest
   AnimationWorkletMutatorDispatcher::AsyncMutationCompleteCallback
   CreateNotReachedCallback() {
     return CrossThreadBindOnce([](MutateStatus unused) {
-      NOTREACHED() << "Mutate complete callback should not have been triggered";
+      NOTREACHED_IN_MIGRATION()
+          << "Mutate complete callback should not have been triggered";
     });
   }
 

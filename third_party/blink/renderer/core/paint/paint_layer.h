@@ -47,11 +47,12 @@
 
 #include <memory>
 
+#include "base/auto_reset.h"
 #include "base/dcheck_is_on.h"
 #include "base/gtest_prod_util.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/layout/geometry/static_position.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
-#include "third_party/blink/renderer/core/layout/ng/geometry/ng_static_position.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_clipper.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_fragment.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_resource_info.h"
@@ -69,7 +70,6 @@ class FilterOperations;
 class HitTestResult;
 class HitTestingTransformState;
 class PaintLayerScrollableArea;
-class TransformationMatrix;
 
 enum IncludeSelfOrNot { kIncludeSelf, kExcludeSelf };
 
@@ -90,35 +90,18 @@ enum PaintLayerIteration {
       kNegativeZOrderChildren | kNormalFlowChildren | kPositiveZOrderChildren
 };
 
-struct CORE_EXPORT PaintLayerRareData final
-    : public GarbageCollected<PaintLayerRareData> {
- public:
-  PaintLayerRareData();
-  PaintLayerRareData(const PaintLayerRareData&) = delete;
-  PaintLayerRareData& operator=(const PaintLayerRareData&) = delete;
-  ~PaintLayerRareData();
-
-  void Trace(Visitor* visitor) const;
-
-  // The offset for an in-flow relative-positioned PaintLayer. This is not
-  // set by any other style.
-  PhysicalOffset offset_for_in_flow_rel_position;
-
-  std::unique_ptr<TransformationMatrix> transform;
-
-  // Pointer to the enclosing Layer that caused us to be paginated. It is 0 if
-  // we are not paginated.
-  //
-  // See LayoutMultiColumnFlowThread and
-  // https://sites.google.com/a/chromium.org/dev/developers/design-documents/multi-column-layout
-  // for more information about the multicol implementation. It's important to
-  // understand the difference between flow thread coordinates and visual
-  // coordinates when working with multicol in Layer, since Layer is one of the
-  // few places where we have to worry about the visual ones. Internally we try
-  // to use flow-thread coordinates whenever possible.
-  Member<PaintLayer> enclosing_pagination_layer;
-
-  Member<PaintLayerResourceInfo> resource_info;
+// TODO(crbug.com/332933527): Support anchors-valid.
+// If the size of this enum changes, make sure to update the bits needed for
+// `invisible_for_position_visibility_`.
+enum class LayerPositionVisibility : uint8_t {
+  // anchors-visible, anchor intersection.
+  kAnchorsIntersectionVisible = 1,
+  // anchors-visible, anchor CSS visibility.
+  kAnchorsCssVisible = 1 << 1,
+  // anchors-visible, chained anchor visibility.
+  kChainedAnchorsVisible = 1 << 2,
+  // no-overflow.
+  kNoOverflow = 1 << 3,
 };
 
 // PaintLayer is an old object that handles lots of unrelated operations.
@@ -165,7 +148,7 @@ struct CORE_EXPORT PaintLayerRareData final
 //   PaintLayers.
 // - If the flag is false, the LayoutObject is painted like normal children (ie
 //   as if it didn't have a PaintLayer). The paint order is handled by
-//   BlockPainter::paintChild that looks at children LayoutObjects.
+//   BoxFragmentPainter.
 // This means that the self-painting flag changes the painting order in a subtle
 // way, which can potentially have visible consequences. Those bugs are called
 // painting inversion as we invert the order of painting for 2 elements
@@ -209,11 +192,11 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   // Returns |GetLayoutBox()| if it exists and has fragments.
   const LayoutBox* GetLayoutBoxWithBlockFragments() const;
 
-  PaintLayer* Parent() const { return parent_; }
-  PaintLayer* PreviousSibling() const { return previous_; }
-  PaintLayer* NextSibling() const { return next_; }
-  PaintLayer* FirstChild() const { return first_; }
-  PaintLayer* LastChild() const { return last_; }
+  PaintLayer* Parent() const { return parent_.Get(); }
+  PaintLayer* PreviousSibling() const { return previous_.Get(); }
+  PaintLayer* NextSibling() const { return next_.Get(); }
+  PaintLayer* FirstChild() const { return first_.Get(); }
+  PaintLayer* LastChild() const { return last_.Get(); }
 
   // TODO(wangxianzhu): Find a better name for it. 'paintContainer' might be
   // good but we can't use it for now because it conflicts with
@@ -245,16 +228,6 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
     return curr;
   }
 
-  // The physical offset from this PaintLayer to its ContainingLayer.
-  // Does not include any scroll offset of the ContainingLayer. Also does not
-  // include offsets for positioned elements.
-  const PhysicalOffset& LocationWithoutPositionOffset() const {
-#if DCHECK_IS_ON()
-    DCHECK(!needs_position_update_);
-#endif
-    return location_without_position_offset_;
-  }
-
   // This is the scroll offset that's actually used to display to the screen.
   // It should only be used in paint/compositing type use cases (includes hit
   // testing, intersection observer). Most other cases should use the unsnapped
@@ -262,26 +235,11 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   // ScrollableArea.
   gfx::Vector2d PixelSnappedScrolledContentOffset() const;
 
-  // FIXME: size() should DCHECK(!needs_position_update_) as well, but that
-  // fails in some tests, for example, fast/repaint/clipped-relative.html.
-  const LayoutSize& Size() const { return size_; }
-
-#if DCHECK_IS_ON()
-  bool NeedsPositionUpdate() const { return needs_position_update_; }
-#endif
-
   bool IsRootLayer() const { return is_root_layer_; }
 
-  bool UpdateSize();
-  void UpdateSizeAndScrollingAfterLayout();
+  void UpdateScrollingAfterLayout();
 
-  void UpdateLayerPositionsAfterLayout();
-
-  PaintLayer* EnclosingPaginationLayer() const {
-    return rare_data_ ? rare_data_->enclosing_pagination_layer : nullptr;
-  }
-
-  void UpdateTransformationMatrix();
+  void UpdateTransform();
 
   bool HasVisibleContent() const {
     DCHECK(!needs_descendant_dependent_flags_update_);
@@ -300,37 +258,7 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   // of this layer. Normally the parent layer is the containing layer, except
   // for out of flow positioned, floating and multicol spanner layers whose
   // containing layer might be an ancestor of the parent layer.
-  // If |ancestor| is specified, |*skippedAncestor| will be set to true if
-  // |ancestor| is found in the ancestry chain between this layer and the
-  // containing block layer; if not found, it will be set to false. Either both
-  // |ancestor| and |skippedAncestor| should be nullptr, or none of them should.
-  PaintLayer* ContainingLayer(const PaintLayer* ancestor = nullptr,
-                              bool* skipped_ancestor = nullptr) const;
-
-  void ConvertToLayerCoords(const PaintLayer* ancestor_layer,
-                            PhysicalOffset&) const;
-  void ConvertToLayerCoords(const PaintLayer* ancestor_layer,
-                            PhysicalRect&) const;
-
-  // Does the same as convertToLayerCoords() when not in multicol. For multicol,
-  // however, convertToLayerCoords() calculates the offset in flow-thread
-  // coordinates (what the layout engine uses internally), while this method
-  // calculates the visual coordinates; i.e. it figures out which column the
-  // layer starts in and adds in the offset. See
-  // http://www.chromium.org/developers/design-documents/multi-column-layout for
-  // more info.
-  PhysicalOffset VisualOffsetFromAncestor(
-      const PaintLayer* ancestor_layer,
-      PhysicalOffset offset = PhysicalOffset()) const;
-
-  // Convert a bounding box from flow thread coordinates, relative to |this|, to
-  // visual coordinates, relative to |ancestorLayer|.
-  // See http://www.chromium.org/developers/design-documents/multi-column-layout
-  // for more info on these coordinate types.  This method requires this layer
-  // to be paginated; i.e. it must have an enclosingPaginationLayer().
-  void ConvertFromFlowThreadToVisualBoundingBoxInAncestor(
-      const PaintLayer* ancestor_layer,
-      PhysicalRect&) const;
+  PaintLayer* ContainingLayer() const;
 
   // The hitTest() method looks for mouse events by walking layers that
   // intersect the point from front to back.
@@ -340,24 +268,8 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
                HitTestResult&,
                const PhysicalRect& hit_test_area);
 
-  // Bounding box relative to some ancestor layer. Pass offsetFromRoot if known.
-  PhysicalRect PhysicalBoundingBox(
-      const PhysicalOffset& offset_from_root) const;
-  PhysicalRect PhysicalBoundingBox(const PaintLayer* ancestor_layer) const;
-
-  // Static position is set in parent's coordinate space.
-  LayoutUnit StaticInlinePosition() const { return static_inline_position_; }
-  LayoutUnit StaticBlockPosition() const { return static_block_position_; }
-
-  void SetStaticInlinePosition(LayoutUnit position) {
-    static_inline_position_ = position;
-  }
-  void SetStaticBlockPosition(LayoutUnit position) {
-    static_block_position_ = position;
-  }
-
-  using InlineEdge = NGLogicalStaticPosition::InlineEdge;
-  using BlockEdge = NGLogicalStaticPosition::BlockEdge;
+  using InlineEdge = LogicalStaticPosition::InlineEdge;
+  using BlockEdge = LogicalStaticPosition::BlockEdge;
   InlineEdge StaticInlineEdge() const {
     return static_cast<InlineEdge>(static_inline_edge_);
   }
@@ -365,15 +277,15 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
     return static_cast<BlockEdge>(static_block_edge_);
   }
 
-  void SetStaticPositionFromNG(const NGLogicalStaticPosition& position) {
+  void SetStaticPositionFromNG(const LogicalStaticPosition& position) {
     static_inline_position_ = position.offset.inline_offset;
     static_block_position_ = position.offset.block_offset;
     static_inline_edge_ = position.inline_edge;
     static_block_edge_ = position.block_edge;
   }
 
-  NGLogicalStaticPosition GetStaticPosition() const {
-    NGLogicalStaticPosition position;
+  LogicalStaticPosition GetStaticPosition() const {
+    LogicalStaticPosition position;
     position.offset.inline_offset = static_inline_position_;
     position.offset.block_offset = static_block_position_;
     position.inline_edge = StaticInlineEdge();
@@ -381,18 +293,20 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
     return position;
   }
 
-  // Note that this transform has the transform-origin baked in.
-  TransformationMatrix* Transform() const {
-    return rare_data_ ? rare_data_->transform.get() : nullptr;
-  }
+  // Note that this transform has the transform-origin baked in. Due to this
+  // fact, this transform is pretty useless if we're fragmented, since each
+  // fragment has its own origin. Avoid calling this method if a box is
+  // fragmented. Ideally, we should have a DCHECK for being non-fragmented here,
+  // but that's going to fail currently. LayoutBox::MapVisualRectToContainer()
+  // calls this function without any checks, for instance.
+  gfx::Transform* Transform() const { return transform_.get(); }
 
   // Returns *Transform(), or identity matrix if Transform() is nullptr.
-  TransformationMatrix CurrentTransform() const;
+  gfx::Transform CurrentTransform() const;
 
   bool Preserves3D() const { return GetLayoutObject().Preserves3D(); }
   bool Has3DTransform() const {
-    return rare_data_ && rare_data_->transform &&
-           !rare_data_->transform->IsAffine();
+    return transform_ && !transform_->Is2dTransform();
   }
 
   // Returns |true| if any property that renders using filter operations is
@@ -446,28 +360,30 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
     return has_filter_that_moves_pixels_;
   }
 
-  PaintLayerResourceInfo* ResourceInfo() const {
-    return rare_data_ ? rare_data_->resource_info.Get() : nullptr;
-  }
+  PaintLayerResourceInfo* ResourceInfo() const { return resource_info_.Get(); }
   PaintLayerResourceInfo& EnsureResourceInfo();
 
   // Filter reference box is the area over which the filter is computed, in the
   // local coordinate system of the effect node containing the filter.
   gfx::RectF FilterReferenceBox() const;
+  std::optional<gfx::SizeF> FilterViewport() const;
   gfx::RectF BackdropFilterReferenceBox() const;
   gfx::RRectF BackdropFilterBounds() const;
 
   void UpdateFilterReferenceBox();
-  void UpdateFilters(const ComputedStyle* old_style,
+  void UpdateFilters(StyleDifference,
+                     const ComputedStyle* old_style,
                      const ComputedStyle& new_style);
   void UpdateBackdropFilters(const ComputedStyle* old_style,
                              const ComputedStyle& new_style);
   void UpdateClipPath(const ComputedStyle* old_style,
                       const ComputedStyle& new_style);
+  void UpdateOffsetPath(const ComputedStyle* old_style,
+                        const ComputedStyle& new_style);
 
   Node* EnclosingNode() const;
 
-  bool IsInTopLayer() const;
+  bool IsInTopOrViewTransitionLayer() const;
 
   // FIXME: This should probably return a ScrollableArea but a lot of internal
   // methods are mistakenly exposed.
@@ -475,14 +391,7 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
     return scrollable_area_.Get();
   }
 
-  enum class GeometryMapperOption {
-    kUseGeometryMapper,
-    kDoNotUseGeometryMapper
-  };
-
-  PaintLayerClipper Clipper(GeometryMapperOption) const;
-
-  bool ScrollsOverflow() const;
+  PaintLayerClipper Clipper() const;
 
   bool NeedsVisualOverflowRecalc() const {
     return needs_visual_overflow_recalc_;
@@ -527,11 +436,6 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   // stacking contexts.
   bool HasNonIsolatedDescendantWithBlendMode() const;
 
-  CompositingReasons GetCompositingReasons() const {
-    // TODO(pdr): Remove this.
-    return CompositingReason::kNone;
-  }
-
   void UpdateDescendantDependentFlags();
 
   void UpdateSelfPaintingLayer();
@@ -562,7 +466,6 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   }
   void SetNeedsCullRectUpdate();
   void SetForcesChildrenCullRectUpdate();
-  void MarkCompositingContainerChainForNeedsCullRectUpdate();
   void SetDescendantNeedsCullRectUpdate();
   void ClearNeedsCullRectUpdate() {
     needs_cull_rect_update_ = false;
@@ -577,10 +480,7 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   PaintResult PreviousPaintResult() const {
     return static_cast<PaintResult>(previous_paint_result_);
   }
-  void SetPreviousPaintResult(PaintResult result) {
-    previous_paint_result_ = static_cast<unsigned>(result);
-    DCHECK(previous_paint_result_ == static_cast<unsigned>(result));
-  }
+  void SetPreviousPaintResult(PaintResult result);
 
   // Used to skip PaintPhaseDescendantOutlinesOnly for layers that have never
   // had descendant outlines.  The flag is set during paint invalidation on a
@@ -607,25 +507,32 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   }
 
   // See
-  // https://chromium.googlesource.com/chromium/src.git/+/master/third_party/blink/renderer/core/paint/README.md
+  // https://chromium.googlesource.com/chromium/src.git/+/main/third_party/blink/renderer/core/paint/README.md
   // for the definition of a replaced normal-flow stacking element.
   bool IsReplacedNormalFlowStacking() const;
 
 #if DCHECK_IS_ON()
-  bool IsInStackingParentZOrderLists() const;
   bool LayerListMutationAllowed() const { return layer_list_mutation_allowed_; }
 #endif
 
   void DirtyStackingContextZOrderLists();
 
-  PhysicalOffset OffsetForInFlowRelPosition() const {
-    return rare_data_ ? rare_data_->offset_for_in_flow_rel_position
-                      : PhysicalOffset();
-  }
-
   bool KnownToClipSubtreeToPaddingBox() const;
 
   void Trace(Visitor*) const override;
+
+  PhysicalRect LocalBoundingBoxIncludingSelfPaintingDescendants() const;
+
+  // If `invisible` is true, the whole subtree will be omitted in painting and
+  // hit-testing. The invisible status of each LayerPositionVisibility value is
+  // tracked separately.
+  void SetInvisibleForPositionVisibility(LayerPositionVisibility visibility,
+                                         bool invisible);
+  // Returns true if any bit of the flag is set.
+  bool InvisibleForPositionVisibility() const {
+    return invisible_for_position_visibility_;
+  }
+  bool HasAncestorInvisibleForPositionVisibility() const;
 
  private:
   void Update3DTransformedDescendantStatus();
@@ -633,15 +540,10 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   // Bounding box in the coordinates of this layer.
   PhysicalRect LocalBoundingBox() const;
 
-  void UpdateLayerPositionRecursive();
-  void UpdateLayerPosition();
-
   void SetNextSibling(PaintLayer* next) { next_ = next; }
   void SetPreviousSibling(PaintLayer* prev) { previous_ = prev; }
   void SetFirstChild(PaintLayer* first) { first_ = first; }
   void SetLastChild(PaintLayer* last) { last_ = last; }
-
-  void UpdateHasSelfPaintingLayerDescendant() const;
 
   void AppendSingleFragmentForHitTesting(
       PaintLayerFragments&,
@@ -705,7 +607,7 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
       const HitTestingTransformState* root_transform_state) const;
 
   bool HitTestFragmentWithPhase(HitTestResult&,
-                                const NGPhysicalBoxFragment*,
+                                const PhysicalBoxFragment*,
                                 const PhysicalOffset& fragment_offset,
                                 const HitTestLocation&,
                                 HitTestPhase phase) const;
@@ -751,24 +653,13 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   void MarkAncestorChainForFlagsUpdate(
       DescendantDependentFlagsUpdateFlag = kNeedsDescendantDependentUpdate);
 
-  // For transform updates we use a fast path that will not change
-  // NeedsPaintPropertyUpdate, but still need to set
-  // NeedsDescendantDependentFlagsUpdate to true, and will use this function.
   void SetNeedsDescendantDependentFlagsUpdate();
 
-  void UpdateTransform(const ComputedStyle* old_style,
-                       const ComputedStyle& new_style);
-
-  void UpdatePaginationRecursive(bool needs_pagination_update = false);
-  void ClearPaginationRecursive();
+  void UpdateTransformAfterStyleChange(StyleDifference,
+                                       const ComputedStyle* old_style,
+                                       const ComputedStyle& new_style);
 
   void MarkCompositingContainerChainForNeedsRepaint();
-
-  PaintLayerRareData& EnsureRareData() {
-    if (!rare_data_)
-      rare_data_ = MakeGarbageCollected<PaintLayerRareData>();
-    return *rare_data_;
-  }
 
   void MergeNeedsPaintPhaseFlagsFrom(const PaintLayer& layer) {
     needs_paint_phase_descendant_outlines_ |=
@@ -780,11 +671,9 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
 
   // This is private because PaintLayerStackingNode is only for PaintLayer and
   // PaintLayerPaintOrderIterator.
-  PaintLayerStackingNode* StackingNode() const { return stacking_node_; }
+  PaintLayerStackingNode* StackingNode() const { return stacking_node_.Get(); }
 
-  void SetNeedsReorderOverlayOverflowControls(bool b) {
-    needs_reorder_overlay_overflow_controls_ = b;
-  }
+  void SetNeedsReorderOverlayOverflowControls(bool);
 
   bool ComputeHasFilterThatMovesPixels() const;
 
@@ -803,10 +692,6 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   unsigned needs_visual_overflow_recalc_ : 1;
 
   unsigned has_visible_self_painting_descendant_ : 1;
-
-#if DCHECK_IS_ON()
-  unsigned needs_position_update_ : 1;
-#endif
 
   // Set on a stacking context layer that has 3D descendants anywhere
   // in a preserves3D hierarchy. Hint to do 3D-aware hit testing.
@@ -854,6 +739,9 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   unsigned static_inline_edge_ : 2;
   unsigned static_block_edge_ : 2;
 
+  unsigned invisible_for_position_visibility_ : 4 = 0;
+  unsigned descendant_needs_check_position_visibility_ : 1 = false;
+
 #if DCHECK_IS_ON()
   mutable unsigned layer_list_mutation_allowed_ : 1;
   bool is_destroyed_ = false;
@@ -867,26 +755,16 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   Member<PaintLayer> first_;
   Member<PaintLayer> last_;
 
-  // Our (x,y) coordinates are in our containing layer's coordinate space,
-  // excluding positioning offset and scroll.
-  PhysicalOffset location_without_position_offset_;
-
-  // The layer's size.
-  //
-  // If the associated LayoutBoxModelObject is a LayoutBox, it's its border
-  // box. Otherwise, this is the LayoutInline's lines' bounding box.
-  LayoutSize size_;
+  Member<PaintLayerScrollableArea> scrollable_area_;
+  Member<PaintLayerStackingNode> stacking_node_;
+  Member<PaintLayerResourceInfo> resource_info_;
 
   // Cached normal flow values for absolute positioned elements with static
   // left/top values.
   LayoutUnit static_inline_position_;
   LayoutUnit static_block_position_;
 
-  Member<PaintLayerScrollableArea> scrollable_area_;
-
-  Member<PaintLayerStackingNode> stacking_node_;
-
-  Member<PaintLayerRareData> rare_data_;
+  std::unique_ptr<gfx::Transform> transform_;
 
   // For layer_list_mutation_allowed_.
   friend class PaintLayerListMutationDetector;
@@ -895,6 +773,7 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   friend class PaintLayerPaintOrderIterator;
   friend class PaintLayerPaintOrderReverseIterator;
   friend class PaintLayerStackingNode;
+  friend class CheckAncestorPositionVisibilityScope;
 
   FRIEND_TEST_ALL_PREFIXES(PaintLayerTest,
                            DescendantDependentFlagsStopsAtThrottledFrames);
@@ -910,15 +789,37 @@ class CORE_EXPORT PaintLayer : public GarbageCollected<PaintLayer>,
   FRIEND_TEST_ALL_PREFIXES(PaintLayerOverlapTest,
                            NestedFixedUsesExpandedBoundingBoxForOverlap);
   FRIEND_TEST_ALL_PREFIXES(PaintLayerOverlapTest,
-
                            FixedWithExpandedBoundsForChild);
   FRIEND_TEST_ALL_PREFIXES(PaintLayerOverlapTest,
                            FixedWithClippedExpandedBoundsForChild);
   FRIEND_TEST_ALL_PREFIXES(PaintLayerOverlapTest,
                            FixedWithExpandedBoundsForGrandChild);
   FRIEND_TEST_ALL_PREFIXES(PaintLayerOverlapTest,
-
                            FixedWithExpandedBoundsForFixedChild);
+};
+
+// This scope should be instantiated for each stacking context during hit-test
+// and paint. In rare cases, a non-stacking-context PaintLayer containing
+// self-painting descendants sets descendant_needs_check_position_visibility_
+// to true on the containing stacking context to let descendants (not across
+// descendant stacking contexts) check if they need to hide due to the position
+// visibility hidden flag on that layer.
+class CheckAncestorPositionVisibilityScope {
+  STACK_ALLOCATED();
+
+ public:
+  explicit CheckAncestorPositionVisibilityScope(
+      const PaintLayer& stacking_context)
+      : reset_(&should_check_,
+               stacking_context.descendant_needs_check_position_visibility_) {
+    CHECK(stacking_context.GetLayoutObject().IsStackingContext());
+  }
+
+  static bool ShouldCheck() { return should_check_; }
+
+ private:
+  static bool should_check_;
+  base::AutoReset<bool> reset_;
 };
 
 #if DCHECK_IS_ON()

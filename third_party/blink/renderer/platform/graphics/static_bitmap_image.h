@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,9 @@
 
 #include "base/memory/weak_ptr.h"
 #include "base/notreached.h"
+#include "gpu/command_buffer/client/client_shared_image.h"
 #include "gpu/command_buffer/common/mailbox_holder.h"
+#include "gpu/command_buffer/common/shared_image_usage.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_color_params.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_types.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
@@ -74,28 +76,41 @@ class PLATFORM_EXPORT StaticBitmapImage : public Image {
                              bool,
                              const gfx::Point&,
                              const gfx::Rect&) {
-    NOTREACHED();
+    NOTREACHED_IN_MIGRATION();
     return false;
   }
 
-  virtual bool CopyToResourceProvider(CanvasResourceProvider*) {
-    NOTREACHED();
-    return false;
-  }
+  virtual bool CopyToResourceProvider(CanvasResourceProvider* resource_provider,
+                                      const gfx::Rect& copy_rect) = 0;
 
-  virtual void EnsureSyncTokenVerified() { NOTREACHED(); }
+  virtual void EnsureSyncTokenVerified() { NOTREACHED_IN_MIGRATION(); }
   virtual gpu::MailboxHolder GetMailboxHolder() const {
-    NOTREACHED();
+    NOTREACHED_IN_MIGRATION();
     return gpu::MailboxHolder();
   }
-  virtual void UpdateSyncToken(const gpu::SyncToken&) { NOTREACHED(); }
+  virtual scoped_refptr<gpu::ClientSharedImage> GetSharedImage() const {
+    NOTREACHED();
+    return nullptr;
+  }
+  virtual gpu::SyncToken GetSyncToken() const {
+    NOTREACHED();
+    return gpu::SyncToken();
+  }
+  virtual void UpdateSyncToken(const gpu::SyncToken&) {
+    NOTREACHED_IN_MIGRATION();
+  }
+
+  // For gpu based images the Usage is a bitmap indicating set of API(s) and
+  // underlying gpu::SharedImage may be used with.
+  // The gpu::SharedImageInterface is using uint32_t directly.
+  virtual gpu::SharedImageUsageSet GetUsage() const {
+    NOTREACHED_IN_MIGRATION();
+    return gpu::SharedImageUsageSet();
+  }
   bool IsPremultiplied() const {
-    return GetSkImageInfoInternal().alphaType() ==
-           SkAlphaType::kPremul_SkAlphaType;
+    return GetSkImageInfo().alphaType() == SkAlphaType::kPremul_SkAlphaType;
   }
-  SkColorInfo GetSkColorInfo() const {
-    return GetSkImageInfoInternal().colorInfo();
-  }
+  SkColorInfo GetSkColorInfo() const { return GetSkImageInfo().colorInfo(); }
 
   // Methods have exactly the same implementation for all sub-classes
   bool OriginClean() const { return is_origin_clean_; }
@@ -120,6 +135,9 @@ class PLATFORM_EXPORT StaticBitmapImage : public Image {
   Vector<uint8_t> CopyImageData(const SkImageInfo& info,
                                 bool apply_orientation);
 
+  // Return the SkImageInfo of the internal representation of this image.
+  virtual SkImageInfo GetSkImageInfo() const = 0;
+
  protected:
   // Helper for sub-classes
   void DrawHelper(cc::PaintCanvas*,
@@ -128,9 +146,6 @@ class PLATFORM_EXPORT StaticBitmapImage : public Image {
                   const gfx::RectF&,
                   const ImageDrawOptions&,
                   const PaintImage&);
-
-  // Return the SkImageInfo of the internal representation of this image.
-  virtual SkImageInfo GetSkImageInfoInternal() const = 0;
 
   // The image orientation is stored here because it is only available when the
   // static image is created and the underlying representations do not store

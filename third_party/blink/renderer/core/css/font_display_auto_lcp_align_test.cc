@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,18 +26,18 @@ class FontDisplayAutoLCPAlignTestBase : public SimTest {
   }
 
   static Vector<char> ReadAhemWoff2() {
-    return test::ReadFromFile(test::CoreTestDataPath("Ahem.woff2"))
-        ->CopyAs<Vector<char>>();
+    return *test::ReadFromFile(test::CoreTestDataPath("Ahem.woff2"));
   }
 
   static Vector<char> ReadMaterialIconsWoff2() {
-    return test::ReadFromFile(
-               test::CoreTestDataPath("MaterialIcons-Regular.woff2"))
-        ->CopyAs<Vector<char>>();
+    return *test::ReadFromFile(
+        test::CoreTestDataPath("MaterialIcons-Regular.woff2"));
   }
 
  protected:
-  Element* GetTarget() { return GetDocument().getElementById("target"); }
+  Element* GetTarget() {
+    return GetDocument().getElementById(AtomicString("target"));
+  }
 
   const Font& GetFont(const Element* element) {
     return element->GetLayoutObject()->Style()->GetFont();
@@ -284,8 +284,9 @@ TEST_F(FontDisplayAutoLCPAlignFailureModeTest, IconAndNonIconFonts) {
     <div><span id=non-icon-text>0123456789</span></div>
   )HTML");
 
-  Element* icon_text = GetDocument().getElementById("icon-text");
-  Element* non_icon_text = GetDocument().getElementById("non-icon-text");
+  Element* icon_text = GetDocument().getElementById(AtomicString("icon-text"));
+  Element* non_icon_text =
+      GetDocument().getElementById(AtomicString("non-icon-text"));
 
   // The first frame is rendered with invisible fallback, as the web fonts are
   // still loading, and are in the block display period.

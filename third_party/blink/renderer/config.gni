@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -42,11 +42,19 @@ declare_args() {
   # If true, defaults image interpolation to low quality.
   use_low_quality_image_interpolation = is_android
 
-  # If true, ffmpeg will be used for computing FFTs for WebAudio
-  use_webaudio_ffmpeg = !is_mac && !is_android && !use_webaudio_pffft
-
   # If true, the experimental renderer extensions library will be used.
   use_blink_extensions_chromeos = is_chromeos
+
+  # If true, the WebView renderer extensions library will be used.
+  #
+  # Android WebView and Chrome on Android both use the same build configuration
+  # for Blink, and may use a common installation of the Blink libraries on a
+  # device. There is no precise concept of "is_webview". As such, Chrome on
+  # Android technically has the WebView extensions available in its version of
+  # Blink; however, the extensions are default-disabled. Chrome (and any other
+  # non-WebView products) should never attempt to enable the extensions at
+  # runtime.
+  use_blink_extensions_webview = is_android
 }
 
 # feature_defines_list ---------------------------------------------------------
@@ -57,12 +65,12 @@ if (use_blink_extensions_chromeos) {
   feature_defines_list += [ "USE_BLINK_EXTENSIONS_CHROMEOS=1" ]
 }
 
-if (use_low_quality_image_interpolation) {
-  feature_defines_list += [ "WTF_USE_LOW_QUALITY_IMAGE_INTERPOLATION=1" ]
+if (use_blink_extensions_webview) {
+  feature_defines_list += [ "USE_BLINK_EXTENSIONS_WEBVIEW=1" ]
 }
 
-if (use_webaudio_ffmpeg) {
-  feature_defines_list += [ "WTF_USE_WEBAUDIO_FFMPEG=1" ]
+if (use_low_quality_image_interpolation) {
+  feature_defines_list += [ "WTF_USE_LOW_QUALITY_IMAGE_INTERPOLATION=1" ]
 }
 
 if (use_webaudio_pffft) {
@@ -78,3 +86,10 @@ if (blink_symbol_level == 2) {
 } else {
   blink_symbols_config = [ "//build/config/compiler:default_symbols" ]
 }
+
+# Record whether target_os (rather than current_os) is android, for the case of
+# generating the v8 context snapshot for android. When generating the snapshot
+# for android, blink is compiled with current_os="linux" and
+# target_os="android". Using target_os is necessary as we need to compile in the
+# same way as would happen when current_os="android".
+target_os_is_android = target_os == "android"

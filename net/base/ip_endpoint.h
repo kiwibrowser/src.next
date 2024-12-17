@@ -7,9 +7,11 @@
 
 #include <stdint.h>
 
+#include <optional>
 #include <ostream>
 #include <string>
 
+#include "base/values.h"
 #include "build/build_config.h"
 #include "net/base/address_family.h"
 #include "net/base/ip_address.h"
@@ -36,6 +38,9 @@ namespace net {
 //  * Port
 class NET_EXPORT IPEndPoint {
  public:
+  // Nullopt if `value` is malformed to be serialized to IPEndPoint.
+  static std::optional<IPEndPoint> FromValue(const base::Value& value);
+
   IPEndPoint();
   ~IPEndPoint();
   IPEndPoint(const IPAddress& address, uint16_t port);
@@ -87,6 +92,8 @@ class NET_EXPORT IPEndPoint {
   bool operator<(const IPEndPoint& that) const;
   bool operator==(const IPEndPoint& that) const;
   bool operator!=(const IPEndPoint& that) const;
+
+  base::Value ToValue() const;
 
  private:
   IPAddress address_;

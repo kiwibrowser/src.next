@@ -1,41 +1,52 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_ATTRIBUTION_SRC_LOADER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_ATTRIBUTION_SRC_LOADER_H_
 
-#include <stddef.h>
 #include <stdint.h>
 
-#include "base/memory/scoped_refptr.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include <optional>
+
+#include "components/attribution_reporting/registration_eligibility.mojom-blink-forward.h"
+#include "services/network/public/mojom/attribution.mojom-forward.h"
+#include "services/network/public/mojom/referrer_policy.mojom-blink-forward.h"
+#include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/heap/forward.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
+namespace attribution_reporting {
+class SuitableOrigin;
+struct RegistrationInfo;
+}  // namespace attribution_reporting
+
 namespace blink {
 
+class HTMLAnchorElementBase;
 class HTMLElement;
 class KURL;
 class LocalFrame;
-class Resource;
 class ResourceRequest;
 class ResourceResponse;
-class SecurityOrigin;
+class WebString;
+
+template <typename T>
+class WebVector;
 
 struct Impression;
 
+// Handles source and trigger registration from blink.
+// See
+// https://github.com/WICG/attribution-reporting-api/blob/main/EVENT.md#registering-attribution-sources
+// and
+// https://github.com/WICG/attribution-reporting-api/blob/main/EVENT.md#triggering-attribution.
 class CORE_EXPORT AttributionSrcLoader
     : public GarbageCollected<AttributionSrcLoader> {
  public:
-  static constexpr const char* kAttributionEligibleEventSource = "event-source";
-  static constexpr const char* kAttributionEligibleNavigationSource =
-      "navigation-source";
-  static constexpr const char* kAttributionEligibleTrigger = "trigger";
-
   explicit AttributionSrcLoader(LocalFrame* frame);
   AttributionSrcLoader(const AttributionSrcLoader&) = delete;
   AttributionSrcLoader& operator=(const AttributionSrcLoader&) = delete;
@@ -43,25 +54,42 @@ class CORE_EXPORT AttributionSrcLoader
   AttributionSrcLoader& operator=(AttributionSrcLoader&& other) = delete;
   ~AttributionSrcLoader();
 
-  // Registers an attributionsrc. This method handles fetching the attribution
-  // src and notifying the browser process to begin tracking it. It is a no-op
-  // if the frame is not attached.
-  void Register(const KURL& attribution_src, HTMLElement* element);
+  // Registers zero or more attribution srcs by splitting `attribution_src` on
+  // spaces and completing each token as a URL against the frame's document.
+  // This method handles fetching each URL and notifying the browser process to
+  // begin tracking it. It is a no-op if the frame is not attached.
+  void Register(const AtomicString& attribution_src,
+                HTMLElement* element,
+                network::mojom::ReferrerPolicy);
 
   // Registers an attribution resource client for the given resource if
-  // the request is eligible for attribution registration. Safe to call multiple
-  // times for the same `resource`. Returns whether a registration was
-  // successful.
+  // the request is eligible for attribution registration.
+  // Returns whether a registration was successful.
   bool MaybeRegisterAttributionHeaders(const ResourceRequest& request,
-                                       const ResourceResponse& response,
-                                       const Resource* resource);
+                                       const ResourceResponse& response);
 
-  // Registers an attributionsrc which is associated with a top-level
-  // navigation, for example a click on an anchor tag. Returns an Impression
-  // which identifies the attributionsrc request and notifies the browser to
-  // begin tracking it.
-  absl::optional<Impression> RegisterNavigation(const KURL& attribution_src,
-                                                HTMLElement* element = nullptr);
+  // Splits `attribution_src` on spaces and completes each token as a URL
+  // against the frame's document.
+  //
+  // For each URL eligible for Attribution Reporting, initiates a fetch for it,
+  // and notifies the browser to begin tracking it.
+  //
+  // If at least one URL is eligible or `navigation_url` is, returns a
+  // non-`std::nullopt` `Impression` to live alongside the navigation.
+  [[nodiscard]] std::optional<Impression> RegisterNavigation(
+      const KURL& navigation_url,
+      const AtomicString& attribution_src,
+      HTMLAnchorElementBase* element,
+      bool has_transient_user_activation,
+      network::mojom::ReferrerPolicy);
+
+  // Same as the above, but uses an already-tokenized attribution src for use
+  // with `window.open`.
+  [[nodiscard]] std::optional<Impression> RegisterNavigation(
+      const KURL& navigation_url,
+      const WebVector<WebString>& attribution_srcs,
+      bool has_transient_user_activation,
+      network::mojom::ReferrerPolicy);
 
   // Returns true if `url` can be used as an attributionsrc: its scheme is HTTP
   // or HTTPS, its origin is potentially trustworthy, the document's permission
@@ -72,40 +100,62 @@ class CORE_EXPORT AttributionSrcLoader
   // `log_issues` is true.
   [[nodiscard]] bool CanRegister(const KURL& url,
                                  HTMLElement* element,
-                                 absl::optional<uint64_t> request_id,
+                                 std::optional<uint64_t> request_id,
                                  bool log_issues = true);
 
   void Trace(Visitor* visitor) const;
 
-  static constexpr size_t kMaxConcurrentRequests = 30;
+  network::mojom::AttributionSupport GetSupport() const;
+
+  // Records whether the permission policy allows for Attribution support to
+  // 'Conversions.AllowedByPermissionPolicy'.
+  static void RecordAttributionFeatureAllowed(bool enabled);
 
  private:
   class ResourceClient;
 
-  // Represents what events are able to be registered from an attributionsrc.
-  enum class SrcType { kUndetermined, kSource, kTrigger };
+  Vector<KURL> ParseAttributionSrc(const AtomicString& attribution_src,
+                                   HTMLElement*);
 
-  ResourceClient* DoRegistration(const KURL& src_url,
-                                 SrcType src_type,
-                                 bool associated_with_navigation);
+  bool DoRegistration(const Vector<KURL>&,
+                      std::optional<AttributionSrcToken>,
+                      network::mojom::ReferrerPolicy);
+
+  // TODO(crbug.com/369219144): The explainer seems to indicate this should
+  // only work with <a>, but the code has always worked for <area> as well.
+  // Either update the explainer, or update the code to use HTMLAnchorElement*.
+  [[nodiscard]] std::optional<Impression> RegisterNavigationInternal(
+      const KURL& navigation_url,
+      Vector<KURL> attribution_src_urls,
+      HTMLAnchorElementBase*,
+      bool has_transient_user_activation,
+      network::mojom::ReferrerPolicy);
 
   // Returns the reporting origin corresponding to `url` if its protocol is in
   // the HTTP family, its origin is potentially trustworthy, and attribution is
-  // allowed. Returns `nullptr` otherwise, and reports a DevTools issue using
-  // `element` and `request_id if `log_issues` is true.
-  scoped_refptr<const SecurityOrigin> ReportingOriginForUrlIfValid(
-      const KURL& url,
-      HTMLElement* element,
-      absl::optional<uint64_t> request_id,
-      bool log_issues = true);
+  // allowed. Returns `std::nullopt` otherwise, and reports a DevTools issue
+  // using `element` and `request_id if `log_issues` is true.
+  std::optional<attribution_reporting::SuitableOrigin>
+  ReportingOriginForUrlIfValid(const KURL& url,
+                               HTMLElement* element,
+                               std::optional<uint64_t> request_id,
+                               bool log_issues = true);
 
-  ResourceClient* CreateAndSendRequest(const KURL& src_url,
-                                       HTMLElement* element,
-                                       SrcType src_type,
-                                       bool associated_with_navigation);
+  bool CreateAndSendRequests(Vector<KURL>,
+                             std::optional<AttributionSrcToken>,
+                             network::mojom::ReferrerPolicy);
+
+  struct AttributionHeaders;
+
+  void RegisterAttributionHeaders(
+      attribution_reporting::mojom::blink::RegistrationEligibility,
+      network::mojom::AttributionSupport,
+      attribution_reporting::SuitableOrigin reporting_origin,
+      const AttributionHeaders&,
+      const attribution_reporting::RegistrationInfo&,
+      bool was_fetched_via_service_worker);
 
   const Member<LocalFrame> local_frame_;
-  size_t num_resource_clients_ = 0;
 };
 
 }  // namespace blink

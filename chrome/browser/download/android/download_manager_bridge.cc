@@ -11,9 +11,12 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
-#include "chrome/browser/download/android/jni_headers/DownloadManagerBridge_jni.h"
 #include "components/download/public/common/download_features.h"
+#include "url/android/gurl_android.h"
 #include "url/gurl.h"
+
+// Must come after all headers that specialize FromJniType() / ToJniType().
+#include "chrome/browser/download/android/jni_headers/DownloadManagerBridge_jni.h"
 
 using base::android::ConvertUTF8ToJavaString;
 using base::android::JavaParamRef;
@@ -35,9 +38,6 @@ static void JNI_DownloadManagerBridge_OnAddCompletedDownloadDone(
 void DownloadManagerBridge::AddCompletedDownload(
     download::DownloadItem* download,
     AddCompletedDownloadCallback callback) {
-  DCHECK(base::FeatureList::IsEnabled(
-      download::features::kUseDownloadOfflineContentProvider));
-
   JNIEnv* env = base::android::AttachCurrentThread();
   ScopedJavaLocalRef<jstring> jfile_name =
       ConvertUTF8ToJavaString(env, download->GetFileNameToReportUser().value());
@@ -46,10 +46,10 @@ void DownloadManagerBridge::AddCompletedDownload(
   ScopedJavaLocalRef<jstring> jfile_path =
       ConvertUTF8ToJavaString(env, download->GetTargetFilePath().value());
   int64_t file_size = download->GetReceivedBytes();
-  ScopedJavaLocalRef<jstring> joriginal_url =
-      ConvertUTF8ToJavaString(env, download->GetOriginalUrl().spec());
-  ScopedJavaLocalRef<jstring> jreferer = base::android::ConvertUTF8ToJavaString(
-      env, download->GetReferrerUrl().spec());
+  ScopedJavaLocalRef<jobject> joriginal_url =
+      url::GURLAndroid::FromNativeGURL(env, download->GetOriginalUrl());
+  ScopedJavaLocalRef<jobject> jreferer =
+      url::GURLAndroid::FromNativeGURL(env, download->GetReferrerUrl());
   ScopedJavaLocalRef<jstring> jdownload_guid =
       base::android::ConvertUTF8ToJavaString(env, download->GetGuid());
 
@@ -64,11 +64,6 @@ void DownloadManagerBridge::AddCompletedDownload(
 
 void DownloadManagerBridge::RemoveCompletedDownload(
     download::DownloadItem* download) {
-  if (!base::FeatureList::IsEnabled(
-          download::features::kUseDownloadOfflineContentProvider)) {
-    return;
-  }
-
   JNIEnv* env = base::android::AttachCurrentThread();
   ScopedJavaLocalRef<jstring> jdownload_guid =
       base::android::ConvertUTF8ToJavaString(env, download->GetGuid());

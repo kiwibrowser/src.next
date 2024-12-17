@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -92,7 +92,7 @@ Member<const CSSValue>& StyleRuleCounterStyle::GetDescriptorReference(
     case AtRuleDescriptorID::SpeakAs:
       return speak_as_;
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       return speak_as_;
   }
 }
@@ -102,8 +102,9 @@ bool StyleRuleCounterStyle::NewValueInvalidOrEqual(
     const CSSValue* new_value) {
   Member<const CSSValue>& original_value =
       GetDescriptorReference(descriptor_id);
-  if (base::ValuesEquivalent(original_value.Get(), new_value))
+  if (base::ValuesEquivalent(original_value.Get(), new_value)) {
     return false;
+  }
 
   switch (descriptor_id) {
     case AtRuleDescriptorID::System:

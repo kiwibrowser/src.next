@@ -8,13 +8,15 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "base/files/file_path.h"
-#include "base/guid.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread_checker.h"
+#include "base/uuid.h"
+#include "base/values.h"
 #include "base/version.h"
 #include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension_guid.h"
@@ -27,13 +29,10 @@
 #include "url/gurl.h"
 #include "url/origin.h"
 
-#if !BUILDFLAG(ENABLE_EXTENSIONS)
+#if !BUILDFLAG(ENABLE_EXTENSIONS) && \
+    !BUILDFLAG(ENABLE_DESKTOP_ANDROID_EXTENSIONS)
 #error "Extensions must be enabled"
 #endif
-
-namespace base {
-class DictionaryValue;
-}
 
 namespace extensions {
 class HashedExtensionId;
@@ -70,7 +69,7 @@ class Extension final : public base::RefCountedThreadSafe<Extension> {
   // the extension. Related to base::SupportsUserData, but with an immutable
   // thread-safe interface to match Extension.
   struct ManifestData {
-    virtual ~ManifestData() {}
+    virtual ~ManifestData() = default;
   };
 
   // Do not change the order of entries or remove entries in this list
@@ -98,10 +97,11 @@ class Extension final : public base::RefCountedThreadSafe<Extension> {
     // Chrome Web Store.
     FROM_WEBSTORE = 1 << 3,
 
-    // |FROM_BOOKMARK| indicates the extension is a bookmark app which has been
-    // generated from a web page. Bookmark apps have no permissions or extent
-    // and launch the web page they are created from when run.
-    FROM_BOOKMARK = 1 << 4,
+    // DEPRECATED - |FROM_BOOKMARK| indicates the extension is a bookmark app
+    // which has been generated from a web page. Bookmark apps have no
+    // permissions or extent and launch the web page they are created from when
+    // run.
+    // FROM_BOOKMARK = 1 << 4,
 
     // |FOLLOW_SYMLINKS_ANYWHERE| means that resources can be symlinks to
     // anywhere in the filesystem, rather than being restricted to the
@@ -157,7 +157,7 @@ class Extension final : public base::RefCountedThreadSafe<Extension> {
 
   static scoped_refptr<Extension> Create(const base::FilePath& path,
                                          mojom::ManifestLocation location,
-                                         const base::DictionaryValue& value,
+                                         const base::Value::Dict& value,
                                          int flags,
                                          std::string* error);
 
@@ -165,7 +165,7 @@ class Extension final : public base::RefCountedThreadSafe<Extension> {
   // an explicit id. Most consumers should just use the other Create() method.
   static scoped_refptr<Extension> Create(const base::FilePath& path,
                                          mojom::ManifestLocation location,
-                                         const base::DictionaryValue& value,
+                                         const base::Value::Dict& value,
                                          int flags,
                                          const ExtensionId& explicit_id,
                                          std::string* error);
@@ -199,7 +199,7 @@ class Extension final : public base::RefCountedThreadSafe<Extension> {
 
   // Returns an extension resource object. |relative_path| should be UTF8
   // encoded.
-  ExtensionResource GetResource(base::StringPiece relative_path) const;
+  ExtensionResource GetResource(std::string_view relative_path) const;
 
   // As above, but with |relative_path| following the file system's encoding.
   ExtensionResource GetResource(const base::FilePath& relative_path) const;
@@ -222,30 +222,18 @@ class Extension final : public base::RefCountedThreadSafe<Extension> {
   // Returns the base extension url for a given |extension_id|.
   static GURL GetBaseURLFromExtensionId(const ExtensionId& extension_id);
 
+  // Returns for scope for the extension's service worker.
+  static GURL GetServiceWorkerScopeFromExtensionId(
+      const ExtensionId& extension_id) {
+    return GetBaseURLFromExtensionId(extension_id);
+  }
+
   // Returns the extension origin for a given |extension_id|.
   static url::Origin CreateOriginFromExtensionId(
       const ExtensionId& extension_id);
 
   // Returns true if this extension or app includes areas within |origin|.
   bool OverlapsWithOrigin(const GURL& origin) const;
-
-  // Returns true if the extension requires a valid ordinal for sorting, e.g.,
-  // for displaying in a launcher or new tab page.
-  bool RequiresSortOrdinal() const;
-
-  // TODO(devlin): The core Extension class shouldn't be responsible for these
-  // ShouldDisplay/ShouldExpose style functions; it doesn't know about the NTP,
-  // Management API, etc.
-
-  // Returns true if the extension should be displayed in the app launcher.
-  bool ShouldDisplayInAppLauncher() const;
-
-  // Returns true if the extension should be displayed in the browser NTP.
-  bool ShouldDisplayInNewTabPage() const;
-
-  // Returns true if the extension should be exposed via the chrome.management
-  // API.
-  bool ShouldExposeViaManagementAPI() const;
 
   // Get the manifest data associated with the key, or NULL if there is none.
   // Can only be called after InitFromValue is finished.
@@ -304,9 +292,7 @@ class Extension final : public base::RefCountedThreadSafe<Extension> {
   const std::vector<InstallWarning>& install_warnings() const {
     return install_warnings_;
   }
-  const extensions::Manifest* manifest() const {
-    return manifest_.get();
-  }
+  const extensions::Manifest* manifest() const { return manifest_.get(); }
   bool wants_file_access() const { return wants_file_access_; }
   // TODO(rdevlin.cronin): This is needed for ContentScriptsHandler, and should
   // be moved out as part of crbug.com/159265. This should not be used anywhere
@@ -316,11 +302,6 @@ class Extension final : public base::RefCountedThreadSafe<Extension> {
   }
   int creation_flags() const { return creation_flags_; }
   bool from_webstore() const { return (creation_flags_ & FROM_WEBSTORE) != 0; }
-  // TODO(crbug.com/1065748): Retire this function when there are no old
-  // entries.
-  bool from_deprecated_bookmark() const {
-    return (creation_flags_ & FROM_BOOKMARK) != 0;
-  }
   bool may_be_untrusted() const {
     return (creation_flags_ & MAY_BE_UNTRUSTED) != 0;
   }
@@ -334,14 +315,14 @@ class Extension final : public base::RefCountedThreadSafe<Extension> {
   // Type-related queries. These are all mutually exclusive.
   //
   // The differences between the types of Extension are documented here:
-  // https://chromium.googlesource.com/chromium/src/+/HEAD/extensions/docs/extension_and_app_types.md
+  // //extensions/docs/extension_and_app_types.md
   bool is_platform_app() const;         // aka "V2 app", "V2 packaged app"
   bool is_hosted_app() const;           // Hosted app (or bookmark app)
   bool is_legacy_packaged_app() const;  // aka "V1 packaged app"
   bool is_extension() const;            // Regular browser extension, not an app
   bool is_shared_module() const;        // Shared module
   bool is_theme() const;                // Theme
-  bool is_login_screen_extension() const;  // Extension on login screen.
+  bool is_login_screen_extension() const;     // Extension on login screen.
   bool is_chromeos_system_extension() const;  // ChromeOS System Extension.
 
   // True if this is a platform app, hosted app, or legacy packaged app.
@@ -368,8 +349,8 @@ class Extension final : public base::RefCountedThreadSafe<Extension> {
   // Initialize the extension from a parsed manifest.
   // TODO(aa): Rename to just Init()? There's no Value here anymore.
   // TODO(aa): It is really weird the way this class essentially contains a copy
-  // of the underlying DictionaryValue in its members. We should decide to
-  // either wrap the DictionaryValue and go with that only, or we should parse
+  // of the underlying base::Value::Dict in its members. We should decide to
+  // either wrap the base::Value::Dict and go with that only, or we should parse
   // into strong types and discard the value. But doing both is bad.
   bool InitFromValue(int flags, std::u16string* error);
 
@@ -471,12 +452,6 @@ class Extension final : public base::RefCountedThreadSafe<Extension> {
   // parts of the initialization process need information from previous parts).
   base::ThreadChecker thread_checker_;
 
-  // Should this app be shown in the app launcher.
-  bool display_in_launcher_;
-
-  // Should this app be shown in the browser New Tab Page.
-  bool display_in_new_tab_page_;
-
   // Whether the extension has host permissions or user script patterns that
   // imply access to file:/// scheme URLs (the user may not have actually
   // granted it that access).
@@ -487,24 +462,26 @@ class Extension final : public base::RefCountedThreadSafe<Extension> {
 
   // A dynamic ID that can be used when referencing extension resources via URL
   // instead of an extension ID.
-  base::GUID guid_;
+  base::Uuid guid_;
 };
 
-typedef std::vector<scoped_refptr<const Extension> > ExtensionList;
+using ExtensionList = std::vector<scoped_refptr<const Extension>>;
 
 // Handy struct to pass core extension info around.
 struct ExtensionInfo {
-  ExtensionInfo(const base::DictionaryValue* manifest,
+  ExtensionInfo(const base::Value::Dict* manifest,
                 const ExtensionId& id,
                 const base::FilePath& path,
                 mojom::ManifestLocation location);
+  ExtensionInfo(ExtensionInfo&&) noexcept;
   ExtensionInfo(const ExtensionInfo&) = delete;
   ExtensionInfo& operator=(const ExtensionInfo&) = delete;
+  ExtensionInfo& operator=(ExtensionInfo&&);
   ~ExtensionInfo();
 
   // Note: This may be null (e.g. for unpacked extensions retrieved from the
   // Preferences file).
-  std::unique_ptr<base::DictionaryValue> extension_manifest;
+  std::unique_ptr<base::Value::Dict> extension_manifest;
 
   ExtensionId extension_id;
   base::FilePath extension_path;

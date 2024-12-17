@@ -25,8 +25,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_SCOPED_SVG_PAINT_STATE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_SCOPED_SVG_PAINT_STATE_H_
 
+#include <optional>
+
 #include "base/dcheck_is_on.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/paint/object_paint_properties.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
 #include "third_party/blink/renderer/platform/graphics/paint/scoped_paint_chunk_properties.h"
@@ -44,12 +45,11 @@ class ScopedSVGTransformState {
 
  public:
   ScopedSVGTransformState(const PaintInfo& paint_info,
-                          const LayoutObject& object) {
+                          const LayoutObject& object)
+      : content_paint_info_(paint_info) {
     DCHECK(object.IsSVGChild());
 
-    const auto* fragment = paint_info.FragmentToPaint(object);
-    if (!fragment)
-      return;
+    const auto* fragment = &object.FirstFragment();
     const auto* properties = fragment->PaintProperties();
     if (!properties)
       return;
@@ -60,11 +60,23 @@ class ScopedSVGTransformState {
       transform_property_scope_.emplace(
           paint_info.context.GetPaintController(), *transform_node, object,
           DisplayItem::PaintPhaseToSVGTransformType(paint_info.phase));
+      if (auto* context_paints = paint_info.GetSvgContextPaints()) {
+        transformed_context_paints_.emplace(
+            context_paints->fill, context_paints->stroke,
+            context_paints->transform *
+                AffineTransform::FromTransform(transform_node->Matrix()));
+        content_paint_info_.SetSvgContextPaints(
+            base::OptionalToPtr(transformed_context_paints_));
+      }
     }
   }
 
+  PaintInfo& ContentPaintInfo() { return content_paint_info_; }
+
  private:
-  absl::optional<ScopedPaintChunkProperties> transform_property_scope_;
+  std::optional<SvgContextPaints> transformed_context_paints_;
+  std::optional<ScopedPaintChunkProperties> transform_property_scope_;
+  PaintInfo content_paint_info_;
 };
 
 class ScopedSVGPaintState {
@@ -87,12 +99,11 @@ class ScopedSVGPaintState {
  private:
   void ApplyEffects();
   void ApplyPaintPropertyState(const ObjectPaintProperties&);
-  void ApplyMaskIfNecessary();
 
   const LayoutObject& object_;
   const PaintInfo& paint_info_;
   const DisplayItemClient& display_item_client_;
-  absl::optional<ScopedPaintChunkProperties> scoped_paint_chunk_properties_;
+  std::optional<ScopedPaintChunkProperties> scoped_paint_chunk_properties_;
   bool should_paint_mask_ = false;
   bool should_paint_clip_path_as_mask_image_ = false;
 #if DCHECK_IS_ON()

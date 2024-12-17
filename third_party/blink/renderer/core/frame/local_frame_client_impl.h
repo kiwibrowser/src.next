@@ -41,7 +41,9 @@
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
 #include "mojo/public/cpp/bindings/remote.h"
+#include "third_party/blink/public/common/performance/performance_timeline_constants.h"
 #include "third_party/blink/public/common/responsiveness_metrics/user_interaction_latency.h"
+#include "third_party/blink/public/common/subresource_load_metrics.h"
 #include "third_party/blink/public/mojom/devtools/devtools_agent.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
@@ -52,7 +54,6 @@
 
 namespace blink {
 
-class BrowserInterfaceBrokerProxy;
 class WebDevToolsAgentImpl;
 class WebLocalFrameImpl;
 class WebSpellCheckPanelHostClient;
@@ -72,7 +73,9 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
   // Notifies the WebView delegate that the JS window object has been cleared,
   // giving it a chance to bind native objects to the window before script
   // parsing begins.
-  void DispatchDidClearWindowObjectInMainWorld() override;
+  void DispatchDidClearWindowObjectInMainWorld(
+      v8::Isolate* isolate,
+      v8::MicrotaskQueue* microtask_queue) override;
   void DocumentElementAvailable() override;
   void RunScriptsAtDocumentElementAvailable() override;
   void RunScriptsAtDocumentReady(bool document_is_empty) override;
@@ -90,16 +93,22 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
   bool InShadowTree() const override;
   void WillBeDetached() override;
   void Detached(FrameDetachType) override;
-  void DispatchWillSendRequest(ResourceRequest&) override;
+  void DispatchFinalizeRequest(ResourceRequest&) override;
+  std::optional<KURL> DispatchWillSendRequest(
+      const KURL& requested_url,
+      const scoped_refptr<const SecurityOrigin>& requestor_origin,
+      const net::SiteForCookies& site_for_cookies,
+      bool has_redirect_info,
+      const KURL& upstream_url) override;
   void DispatchDidLoadResourceFromMemoryCache(const ResourceRequest&,
                                               const ResourceResponse&) override;
   void DispatchDidHandleOnloadEvents() override;
-  void DidFinishSameDocumentNavigation(HistoryItem*,
-                                       WebHistoryCommitType,
+  void DidFinishSameDocumentNavigation(WebHistoryCommitType,
                                        bool is_handled_within_agent,
                                        mojom::blink::SameDocumentNavigationType,
                                        bool is_client_redirect,
                                        bool is_browser_initiated) override;
+  void DidFailAsyncSameDocumentCommit() override;
   void DispatchDidOpenDocumentInputStream(const KURL& url) override;
   void DispatchDidReceiveTitle(const String&) override;
   void DispatchDidCommitLoad(
@@ -115,12 +124,14 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
 
   void BeginNavigation(
       const ResourceRequest&,
+      const KURL& requestor_base_url,
       mojom::RequestContextFrameType,
       LocalDOMWindow* origin_window,
       DocumentLoader*,
       WebNavigationType,
       NavigationPolicy,
       WebFrameLoadType,
+      mojom::blink::ForceHistoryPush,
       bool is_client_redirect,
       // TODO(crbug.com/1315802): Refactor _unfencedTop handling.
       bool is_unfenced_top_navigation,
@@ -130,32 +141,37 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
       mojo::PendingRemote<mojom::blink::BlobURLToken>,
       base::TimeTicks input_start_time,
       const String& href_translate,
-      const absl::optional<Impression>& impression,
+      const std::optional<Impression>& impression,
       const LocalFrameToken* initiator_frame_token,
       std::unique_ptr<SourceLocation> source_location,
-      mojo::PendingRemote<mojom::blink::PolicyContainerHostKeepAliveHandle>
-          initiator_policy_container_keep_alive_handle) override;
+      mojo::PendingRemote<mojom::blink::NavigationStateKeepAliveHandle>
+          initiator_navigation_state_keep_alive_handle,
+      bool is_container_initiated,
+      bool has_rel_opener) override;
   void DispatchWillSendSubmitEvent(HTMLFormElement*) override;
   void DidStartLoading() override;
   void DidStopLoading() override;
-  bool NavigateBackForward(int offset) const override;
+  bool NavigateBackForward(
+      int offset,
+      std::optional<scheduler::TaskAttributionId>
+          soft_navigation_heuristics_task_id) const override;
   void DidDispatchPingLoader(const KURL&) override;
   void DidChangePerformanceTiming() override;
-  void DidObserveInputDelay(base::TimeDelta) override;
-  void DidObserveUserInteraction(base::TimeDelta max_event_duration,
-                                 UserInteractionType interaction_type) override;
+  void DidObserveUserInteraction(base::TimeTicks max_event_start,
+                                 base::TimeTicks max_event_queued_main_thread,
+                                 base::TimeTicks max_event_commit_finish,
+                                 base::TimeTicks max_event_end,
+                                 UserInteractionType interaction_type,
+                                 uint64_t interaction_offset) override;
   void DidChangeCpuTiming(base::TimeDelta) override;
   void DidObserveLoadingBehavior(LoadingBehaviorFlag) override;
+  void DidObserveJavaScriptFrameworks(
+      const JavaScriptFrameworkDetectionResult&) override;
+  void DidObserveSubresourceLoad(
+      const SubresourceLoadMetrics& subresource_load_metrics) override;
   void DidObserveNewFeatureUsage(const UseCounterFeature&) override;
-  void DidObserveSoftNavigation(uint32_t count) override;
+  void DidObserveSoftNavigation(SoftNavigationMetrics metrics) override;
   void DidObserveLayoutShift(double score, bool after_input_or_scroll) override;
-  void DidObserveLayoutNg(uint32_t all_block_count,
-                          uint32_t ng_block_count,
-                          uint32_t all_call_count,
-                          uint32_t ng_call_count) override;
-  void PreloadSubresourceOptimizationsForOrigins(
-      const WTF::HashSet<scoped_refptr<const SecurityOrigin>,
-                         SecurityOriginHash>& origins) override;
   void SelectorMatchChanged(const Vector<String>& added_selectors,
                             const Vector<String>& removed_selectors) override;
 
@@ -163,23 +179,16 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
 
   String UserAgentOverride() override;
   WTF::String UserAgent() override;
-  WTF::String FullUserAgent() override;
-  WTF::String ReducedUserAgent() override;
-  absl::optional<blink::UserAgentMetadata> UserAgentMetadata() override;
+  std::optional<blink::UserAgentMetadata> UserAgentMetadata() override;
   WTF::String DoNotTrackValue() override;
   void TransitionToCommittedForNewPage() override;
   LocalFrame* CreateFrame(const WTF::AtomicString& name,
                           HTMLFrameOwnerElement*) override;
-  std::pair<RemoteFrame*, PortalToken> CreatePortal(
-      HTMLPortalElement*,
-      mojo::PendingAssociatedReceiver<mojom::blink::Portal>,
-      mojo::PendingAssociatedRemote<mojom::blink::PortalClient>) override;
-  RemoteFrame* AdoptPortal(HTMLPortalElement*) override;
 
   RemoteFrame* CreateFencedFrame(
       HTMLFencedFrameElement*,
-      mojo::PendingAssociatedReceiver<mojom::blink::FencedFrameOwnerHost>,
-      mojom::blink::FencedFrameMode) override;
+      mojo::PendingAssociatedReceiver<mojom::blink::FencedFrameOwnerHost>)
+      override;
 
   WebPluginContainerImpl* CreatePlugin(HTMLPlugInElement&,
                                        const KURL&,
@@ -213,20 +222,22 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
 
   void NotifyUserActivation() override;
 
-  void AbortClientNavigation() override;
+  void AbortClientNavigation(bool for_new_navigation) override;
 
   WebSpellCheckPanelHostClient* SpellCheckPanelHostClient() const override;
 
   WebTextCheckClient* GetTextCheckerClient() const override;
 
-  std::unique_ptr<WebURLLoaderFactory> CreateURLLoaderFactory() override;
+  scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory() override;
+  std::unique_ptr<URLLoader> CreateURLLoaderForTesting() override;
 
-  blink::BrowserInterfaceBrokerProxy& GetBrowserInterfaceBroker() override;
+  blink::ChildURLLoaderFactoryBundle* GetLoaderFactoryBundle() override;
+
+  scoped_refptr<WebBackgroundResourceFetchAssets>
+  MaybeGetBackgroundResourceFetchAssets() override;
 
   AssociatedInterfaceProvider* GetRemoteNavigationAssociatedInterfaces()
       override;
-
-  void AnnotatedRegionsChanged() override;
 
   base::UnguessableToken GetDevToolsFrameToken() const override;
 
@@ -249,6 +260,10 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
   void OnMainFrameViewportRectangleChanged(
       const gfx::Rect& main_frame_viewport_rect) override;
 
+  void OnMainFrameImageAdRectangleChanged(
+      DOMNodeId element_id,
+      const gfx::Rect& image_ad_rect) override;
+
   void OnOverlayPopupAdDetected() override;
 
   void OnLargeStickyAdDetected() override;
@@ -268,7 +283,8 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
 
   void SetMouseCapture(bool capture) override;
 
-  bool UsePrintingLayout() const override;
+  void NotifyAutoscrollForSelectionInMainFrame(
+      bool autoscroll_selection) override;
 
   std::unique_ptr<blink::ResourceLoadInfoNotifierWrapper>
   CreateResourceLoadInfoNotifierWrapper() override;
@@ -278,23 +294,17 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
       mojo::PendingAssociatedReceiver<mojom::blink::DevToolsAgent> receiver)
       override;
 
-  void UpdateSubresourceFactory(
-      std::unique_ptr<blink::PendingURLLoaderFactoryBundle> pending_factory)
-      override;
-
-  void DidChangeMobileFriendliness(const MobileFriendliness&) override;
+  bool IsDomStorageDisabled() const override;
 
  private:
   bool IsLocalFrameClientImpl() const override { return true; }
-  WebDevToolsAgentImpl* DevToolsAgent();
+  WebDevToolsAgentImpl* DevToolsAgent(bool create_if_necessary);
 
   // The WebFrame that owns this object and manages its lifetime. Therefore,
   // the web frame object is guaranteed to exist.
   Member<WebLocalFrameImpl> web_frame_;
 
   String user_agent_;
-  String full_user_agent_;
-  String reduced_user_agent_;
 };
 
 template <>

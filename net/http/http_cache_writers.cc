@@ -7,16 +7,11 @@
 #include <algorithm>
 #include <utility>
 
-#include "base/auto_reset.h"
-#include "base/bind.h"
-#include "base/callback_helpers.h"
-#include "base/debug/crash_logging.h"
-#include "base/debug/dump_without_crashing.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/logging.h"
-#include "base/strings/stringprintf.h"
-#include "base/threading/thread_task_runner_handle.h"
-#include "crypto/secure_hash.h"
-#include "crypto/sha2.h"
+#include "base/not_fatal_until.h"
+#include "base/task/single_thread_task_runner.h"
 #include "net/base/net_errors.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/http/http_cache_transaction.h"
@@ -28,28 +23,17 @@ namespace net {
 
 namespace {
 
-base::debug::CrashKeyString* GetCacheKeyCrashKey() {
-  static auto* crash_key = base::debug::AllocateCrashKeyString(
-      "http_cache_key", base::debug::CrashKeySize::Size256);
-  return crash_key;
-}
-
-base::debug::CrashKeyString* GetTransactionFlagsCrashKey() {
-  static auto* crash_key = base::debug::AllocateCrashKeyString(
-      "http_cache_transaction", base::debug::CrashKeySize::Size256);
-  return crash_key;
-}
-
 bool IsValidResponseForWriter(bool is_partial,
                               const HttpResponseInfo* response_info) {
-  if (!response_info->headers.get())
+  if (!response_info->headers.get()) {
     return false;
+  }
 
   // Return false if the response code sent by the server is garbled.
   // Both 200 and 304 are valid since concurrent writing is supported.
   if (!is_partial &&
-      (response_info->headers->response_code() != net::HTTP_OK &&
-       response_info->headers->response_code() != net::HTTP_NOT_MODIFIED)) {
+      (response_info->headers->response_code() != HTTP_OK &&
+       response_info->headers->response_code() != HTTP_NOT_MODIFIED)) {
     return false;
   }
 
@@ -68,7 +52,8 @@ HttpCache::Writers::TransactionInfo::~TransactionInfo() = default;
 HttpCache::Writers::TransactionInfo::TransactionInfo(const TransactionInfo&) =
     default;
 
-HttpCache::Writers::Writers(HttpCache* cache, HttpCache::ActiveEntry* entry)
+HttpCache::Writers::Writers(HttpCache* cache,
+                            scoped_refptr<HttpCache::ActiveEntry> entry)
     : cache_(cache), entry_(entry) {
   DCHECK(cache_);
   DCHECK(entry_);
@@ -81,9 +66,7 @@ int HttpCache::Writers::Read(scoped_refptr<IOBuffer> buf,
                              CompletionOnceCallback callback,
                              Transaction* transaction) {
   DCHECK(buf);
-  // TODO(https://crbug.com/1335423): Change to DCHECK_GT() or remove after bug
-  // is fixed.
-  CHECK_GT(buf_len, 0);
+  DCHECK_GT(buf_len, 0);
   DCHECK(!callback.is_null());
   DCHECK(transaction);
 
@@ -92,7 +75,7 @@ int HttpCache::Writers::Read(scoped_refptr<IOBuffer> buf,
   // with the data returned from that read.
   if (next_state_ != State::NONE) {
     WaitingForRead read_info(buf, buf_len, std::move(callback));
-    waiting_for_read_.insert(std::make_pair(transaction, std::move(read_info)));
+    waiting_for_read_.emplace(transaction, std::move(read_info));
     return ERR_IO_PENDING;
   }
 
@@ -107,8 +90,9 @@ int HttpCache::Writers::Read(scoped_refptr<IOBuffer> buf,
   next_state_ = State::NETWORK_READ;
 
   int rv = DoLoop(OK);
-  if (rv == ERR_IO_PENDING)
+  if (rv == ERR_IO_PENDING) {
     callback_ = std::move(callback);
+  }
 
   return rv;
 }
@@ -117,13 +101,14 @@ bool HttpCache::Writers::StopCaching(bool keep_entry) {
   // If this is the only transaction in Writers, then stopping will be
   // successful. If not, then we will not stop caching since there are
   // other consumers waiting to read from the cache.
-  if (all_writers_.size() != 1)
+  if (all_writers_.size() != 1) {
     return false;
+  }
 
   network_read_only_ = true;
   if (!keep_entry) {
     should_keep_entry_ = false;
-    cache_->WritersDoomEntryRestartTransactions(entry_);
+    cache_->WritersDoomEntryRestartTransactions(entry_.get());
   }
 
   return true;
@@ -148,8 +133,9 @@ void HttpCache::Writers::AddTransaction(
   if (all_writers_.empty()) {
     DCHECK_EQ(PARALLEL_WRITING_NONE, parallel_writing_pattern_);
     parallel_writing_pattern_ = initial_writing_pattern;
-    if (parallel_writing_pattern_ != PARALLEL_WRITING_JOIN)
+    if (parallel_writing_pattern_ != PARALLEL_WRITING_JOIN) {
       is_exclusive_ = true;
+    }
   } else {
     DCHECK_EQ(PARALLEL_WRITING_JOIN, parallel_writing_pattern_);
   }
@@ -170,15 +156,12 @@ void HttpCache::Writers::AddTransaction(
 
 void HttpCache::Writers::SetNetworkTransaction(
     Transaction* transaction,
-    std::unique_ptr<HttpTransaction> network_transaction,
-    std::unique_ptr<crypto::SecureHash> checksum) {
+    std::unique_ptr<HttpTransaction> network_transaction) {
   DCHECK_EQ(1u, all_writers_.count(transaction));
   DCHECK(network_transaction);
   DCHECK(!network_transaction_);
   network_transaction_ = std::move(network_transaction);
   network_transaction_->SetPriority(priority_);
-  DCHECK(!checksum_);
-  checksum_ = std::move(checksum);
 }
 
 void HttpCache::Writers::ResetNetworkTransaction() {
@@ -192,12 +175,15 @@ void HttpCache::Writers::RemoveTransaction(Transaction* transaction,
                                            bool success) {
   EraseTransaction(transaction, OK);
 
-  if (!all_writers_.empty())
+  if (!all_writers_.empty()) {
     return;
+  }
 
-  if (!success && ShouldTruncate())
+  if (!success && ShouldTruncate()) {
     TruncateEntry();
+  }
 
+  // Destroys `this`.
   cache_->WritersDoneWritingToEntry(entry_, success, should_keep_entry_,
                                     TransactionSet());
 }
@@ -206,7 +192,7 @@ void HttpCache::Writers::EraseTransaction(Transaction* transaction,
                                           int result) {
   // The transaction should be part of all_writers.
   auto it = all_writers_.find(transaction);
-  DCHECK(it != all_writers_.end());
+  CHECK(it != all_writers_.end(), base::NotFatalUntil::M130);
   EraseTransaction(it, result);
 }
 
@@ -246,15 +232,17 @@ void HttpCache::Writers::UpdatePriority() {
   }
 
   if (priority_ != current_highest) {
-    if (network_transaction_)
+    if (network_transaction_) {
       network_transaction_->SetPriority(current_highest);
+    }
     priority_ = current_highest;
   }
 }
 
 void HttpCache::Writers::CloseConnectionOnDestruction() {
-  if (network_transaction_)
+  if (network_transaction_) {
     network_transaction_->CloseConnectionOnDestruction();
+  }
 }
 
 bool HttpCache::Writers::ContainsOnlyIdleWriters() const {
@@ -264,8 +252,9 @@ bool HttpCache::Writers::ContainsOnlyIdleWriters() const {
 bool HttpCache::Writers::CanAddWriters(ParallelWritingPattern* reason) {
   *reason = parallel_writing_pattern_;
 
-  if (all_writers_.empty())
+  if (all_writers_.empty()) {
     return true;
+  }
 
   return !is_exclusive_ && !network_read_only_;
 }
@@ -287,15 +276,16 @@ void HttpCache::Writers::TruncateEntry() {
                                     true /* response_truncated */);
   data->Done();
   io_buf_len_ = data->pickle()->size();
-  entry_->disk_entry->WriteData(kResponseInfoIndex, 0, data.get(), io_buf_len_,
+  entry_->GetEntry()->WriteData(kResponseInfoIndex, 0, data.get(), io_buf_len_,
                                 base::DoNothing(), true);
 }
 
 bool HttpCache::Writers::ShouldTruncate() {
   // Don't set the flag for sparse entries or for entries that cannot be
   // resumed.
-  if (!should_keep_entry_ || partial_do_not_truncate_)
+  if (!should_keep_entry_ || partial_do_not_truncate_) {
     return false;
+  }
 
   // Check the response headers for strong validators.
   // Note that if this is a 206, content-length was already fixed after calling
@@ -309,7 +299,7 @@ bool HttpCache::Writers::ShouldTruncate() {
   }
 
   // Double check that there is something worth keeping.
-  int current_size = entry_->disk_entry->GetDataSize(kResponseContentIndex);
+  int current_size = entry_->GetEntry()->GetDataSize(kResponseContentIndex);
   if (!current_size) {
     should_keep_entry_ = false;
     return false;
@@ -322,15 +312,17 @@ bool HttpCache::Writers::ShouldTruncate() {
 
   int64_t content_length =
       response_info_truncation_.headers->GetContentLength();
-  if (content_length >= 0 && content_length <= current_size)
+  if (content_length >= 0 && content_length <= current_size) {
     return false;
+  }
 
   return true;
 }
 
 LoadState HttpCache::Writers::GetLoadState() const {
-  if (network_transaction_)
+  if (network_transaction_) {
     return network_transaction_->GetLoadState();
+  }
   return LOAD_STATE_IDLE;
 }
 
@@ -371,16 +363,8 @@ int HttpCache::Writers::DoLoop(int result) {
       case State::CACHE_WRITE_DATA_COMPLETE:
         rv = DoCacheWriteDataComplete(rv);
         break;
-      case State::MARK_SINGLE_KEYED_CACHE_ENTRY_UNUSABLE:
-        // `rv` is bytes here.
-        DCHECK_EQ(0, rv);
-        rv = DoMarkSingleKeyedCacheEntryUnusable();
-        break;
-      case State::MARK_SINGLE_KEYED_CACHE_ENTRY_UNUSABLE_COMPLETE:
-        rv = DoMarkSingleKeyedCacheEntryUnusableComplete(rv);
-        break;
       case State::UNSET:
-        NOTREACHED() << "bad state";
+        NOTREACHED_IN_MIGRATION() << "bad state";
         rv = ERR_FAILED;
         break;
       case State::NONE:
@@ -401,11 +385,13 @@ int HttpCache::Writers::DoLoop(int result) {
   CompletionOnceCallback callback = std::move(callback_);
   read_buf_ = nullptr;
   DCHECK(!all_writers_.empty() || cache_callback_);
-  if (cache_callback_)
+  if (cache_callback_) {
     std::move(cache_callback_).Run();
+  }
   // |this| may have been destroyed in the |cache_callback_|.
-  if (rv != ERR_IO_PENDING && !callback.is_null())
+  if (rv != ERR_IO_PENDING && !callback.is_null()) {
     std::move(callback).Run(rv);
+  }
   return rv;
 }
 
@@ -413,31 +399,10 @@ int HttpCache::Writers::DoNetworkRead() {
   DCHECK(network_transaction_);
   next_state_ = State::NETWORK_READ_COMPLETE;
 
-  // TODO(https://crbug.com/778641): This is a partial mitigation and an attempt
-  // to gather more info)
+  // TODO(crbug.com/40089413): This is a partial mitigation. When
+  // reading from the network, a valid HttpNetworkTransaction must be always
+  // available.
   if (!network_transaction_) {
-    static bool reported = false;
-    if (!reported) {
-      reported = true;
-      base::debug::ScopedCrashKeyString key_info(
-          GetCacheKeyCrashKey(), active_transaction_
-                                     ? active_transaction_->key()
-                                     : "(no transaction)");
-      base::debug::ScopedCrashKeyString flags_info(
-          GetTransactionFlagsCrashKey(),
-          active_transaction_
-              ? base::StringPrintf(
-                    "mth=%s/m=%d/p=%d/t=%d/ex=%d/tc=%d/par=%d/pri=%d/nw=%zu",
-                    active_transaction_->method().c_str(),
-                    static_cast<int>(active_transaction_->mode()),
-                    static_cast<int>(active_transaction_->partial() != nullptr),
-                    static_cast<int>(active_transaction_->is_truncated()),
-                    static_cast<int>(IsExclusive()), GetTransactionsCount(),
-                    static_cast<int>(parallel_writing_pattern_),
-                    static_cast<int>(priority_), all_writers_.size())
-              : "(no transaction)");
-      base::debug::DumpWithoutCrashing();
-    }
     return ERR_FAILED;
   }
 
@@ -466,8 +431,9 @@ void HttpCache::Writers::OnNetworkReadFailure(int result) {
   }
   active_transaction_ = nullptr;
 
-  if (ShouldTruncate())
+  if (ShouldTruncate()) {
     TruncateEntry();
+  }
 
   SetCacheCallback(false, TransactionSet());
 }
@@ -475,10 +441,11 @@ void HttpCache::Writers::OnNetworkReadFailure(int result) {
 int HttpCache::Writers::DoCacheWriteData(int num_bytes) {
   next_state_ = State::CACHE_WRITE_DATA_COMPLETE;
   write_len_ = num_bytes;
-  if (!num_bytes || network_read_only_)
+  if (!num_bytes || network_read_only_) {
     return num_bytes;
+  }
 
-  int current_size = entry_->disk_entry->GetDataSize(kResponseContentIndex);
+  int current_size = entry_->GetEntry()->GetDataSize(kResponseContentIndex);
   CompletionOnceCallback io_callback = base::BindOnce(
       &HttpCache::Writers::OnIOComplete, weak_factory_.GetWeakPtr());
 
@@ -490,11 +457,13 @@ int HttpCache::Writers::DoCacheWriteData(int num_bytes) {
   // transaction.
   // TODO(shivanisha): When partial requests support parallel writing, this
   // assumption will not be true.
-  if (active_transaction_)
+  if (active_transaction_) {
     partial = all_writers_.find(active_transaction_)->second.partial;
+  }
 
   if (!partial) {
-    rv = entry_->disk_entry->WriteData(kResponseContentIndex, current_size,
+    last_disk_cache_access_start_time_ = base::TimeTicks::Now();
+    rv = entry_->GetEntry()->WriteData(kResponseContentIndex, current_size,
                                        read_buf_.get(), num_bytes,
                                        std::move(io_callback), true);
   } else {
@@ -519,55 +488,17 @@ int HttpCache::Writers::DoCacheWriteDataComplete(int result) {
     return write_len_;
   }
 
-  if (checksum_) {
-    if (write_len_ > 0) {
-      checksum_->Update(read_buf_->data(), write_len_);
-    } else {
-      DCHECK(active_transaction_);
-      if (!active_transaction_->ResponseChecksumMatches(std::move(checksum_))) {
-        next_state_ = State::MARK_SINGLE_KEYED_CACHE_ENTRY_UNUSABLE;
-        return result;
-      }
-    }
+  if (!last_disk_cache_access_start_time_.is_null() && active_transaction_ &&
+      !all_writers_.find(active_transaction_)->second.partial) {
+    active_transaction_->AddDiskCacheWriteTime(
+        base::TimeTicks::Now() - last_disk_cache_access_start_time_);
+    last_disk_cache_access_start_time_ = base::TimeTicks();
   }
 
   next_state_ = State::NONE;
   OnDataReceived(write_len_);
 
-  // If we came from DoMarkSingleKeyedCacheUnusableComplete() then  result  will
-  // be the size of the metadata that was written. But DoLoop() needs to know
-  // the number of bytes of data that were written. So return that instead.
   return write_len_;
-}
-
-int HttpCache::Writers::DoMarkSingleKeyedCacheEntryUnusable() {
-  // `response_info_truncation_` is not actually truncated.
-  // TODO(ricea): Maybe change the name of the member?
-  response_info_truncation_.single_keyed_cache_entry_unusable = true;
-  next_state_ = State::MARK_SINGLE_KEYED_CACHE_ENTRY_UNUSABLE_COMPLETE;
-
-  // Update cache metadata. This is a subset of what
-  // HttpCache::Transaction::WriteResponseInfoToEntry does.
-  auto data = base::MakeRefCounted<PickledIOBuffer>();
-  response_info_truncation_.Persist(data->pickle(),
-                                    /*skip_transient_headers=*/true,
-                                    /*response_truncated=*/false);
-  data->Done();
-  io_buf_len_ = data->pickle()->size();
-  CompletionOnceCallback io_callback = base::BindOnce(
-      &HttpCache::Writers::OnIOComplete, weak_factory_.GetWeakPtr());
-  return entry_->disk_entry->WriteData(kResponseInfoIndex, 0, data.get(),
-                                       io_buf_len_, std::move(io_callback),
-                                       true);
-}
-
-int HttpCache::Writers::DoMarkSingleKeyedCacheEntryUnusableComplete(
-    int result) {
-  DCHECK(!checksum_);
-  // We run DoCacheWriteDataComplete again, but this time `checksum_` is null so
-  // we won't come back here.
-  next_state_ = State::CACHE_WRITE_DATA_COMPLETE;
-  return result < 0 ? result : write_len_;
 }
 
 void HttpCache::Writers::OnDataReceived(int result) {
@@ -589,7 +520,7 @@ void HttpCache::Writers::OnDataReceived(int result) {
   if (result == 0) {
     // Check if the response is actually completed or if not, attempt to mark
     // the entry as truncated in OnNetworkReadFailure.
-    int current_size = entry_->disk_entry->GetDataSize(kResponseContentIndex);
+    int current_size = entry_->GetEntry()->GetDataSize(kResponseContentIndex);
     DCHECK(network_transaction_);
     const HttpResponseInfo* response_info =
         network_transaction_->GetResponseInfo();
@@ -639,7 +570,7 @@ void HttpCache::Writers::OnCacheWriteFailure() {
   if (all_writers_.empty()) {
     SetCacheCallback(false, TransactionSet());
   } else {
-    cache_->WritersDoomEntryRestartTransactions(entry_);
+    cache_->WritersDoomEntryRestartTransactions(entry_.get());
   }
 }
 
@@ -657,7 +588,7 @@ void HttpCache::Writers::CompleteWaitingForReadTransactions(int result) {
     }
 
     // Post task to notify transaction.
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE,
         base::BindOnce(std::move(it->second.callback), callback_result));
 

@@ -67,7 +67,7 @@ struct PresentationAttributeCacheEntry final
 using PresentationAttributeCache =
     HeapHashMap<unsigned,
                 Member<PresentationAttributeCacheEntry>,
-                AlreadyHashed>;
+                AlreadyHashedTraits>;
 static PresentationAttributeCache& GetPresentationAttributeCache() {
   DEFINE_STATIC_LOCAL(Persistent<PresentationAttributeCache>, cache,
                       (MakeGarbageCollected<PresentationAttributeCache>()));
@@ -116,7 +116,7 @@ static unsigned MakePresentationAttributeCacheKey(
     result.attributes_and_values.push_back(
         std::make_pair(attr.LocalName().Impl(), attr.Value()));
   }
-  if (result.attributes_and_values.IsEmpty())
+  if (result.attributes_and_values.empty())
     return 0;
   // Attribute order doesn't matter. Sort for easy equality comparison.
   std::sort(result.attributes_and_values.begin(),
@@ -145,15 +145,7 @@ CSSPropertyValueSet* ComputePresentationAttributeStyle(Element& element) {
   // The element can be cached (has non-zero hash) and has an entry in the
   // cache. Hit.
   if (cache_hash && cache_value->value) {
-    // Reference the property set, since if we clean the cache below it may
-    // disappear.
-    CSSPropertyValueSet* style = cache_value->value->value;
-
-    static const unsigned kMinimumPresentationAttributeCacheSizeForCleaning =
-        100;
-    if (cache.size() >= kMinimumPresentationAttributeCacheSizeForCleaning)
-      cache.clear();
-    return style;
+    return cache_value->value->value;
   }
 
   // No entry in the cache or cannot be cached. Miss. Create a new property set.

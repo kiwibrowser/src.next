@@ -1,11 +1,13 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/loader/frame_client_hints_preferences_context.h"
 
-#include "base/cxx17_backports.h"
+#include <algorithm>
+
 #include "base/no_destructor.h"
+#include "services/metrics/public/cpp/ukm_recorder.h"
 #include "services/network/public/cpp/client_hints.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -55,8 +57,6 @@ ClientHintToWebFeatureMap MakeClientHintToWebFeatureMap() {
        WebFeature::kClientHintsPrefersColorScheme},
       {network::mojom::WebClientHintsType::kUABitness,
        WebFeature::kClientHintsUABitness},
-      {network::mojom::WebClientHintsType::kUAReduced,
-       WebFeature::kClientHintsUAReduced},
       {network::mojom::WebClientHintsType::kViewportHeight,
        WebFeature::kClientHintsViewportHeight},
       {network::mojom::WebClientHintsType::kDeviceMemory,
@@ -68,12 +68,16 @@ ClientHintToWebFeatureMap MakeClientHintToWebFeatureMap() {
        WebFeature::kClientHintsViewportWidth},
       {network::mojom::WebClientHintsType::kUAFullVersionList,
        WebFeature::kClientHintsUAFullVersionList},
-      {network::mojom::WebClientHintsType::kFullUserAgent,
-       WebFeature::kClientHintsUAFull},
       {network::mojom::WebClientHintsType::kUAWoW64,
        WebFeature::kClientHintsUAWoW64},
       {network::mojom::WebClientHintsType::kSaveData,
        WebFeature::kClientHintsSaveData},
+      {network::mojom::WebClientHintsType::kPrefersReducedMotion,
+       WebFeature::kClientHintsPrefersReducedMotion},
+      {network::mojom::WebClientHintsType::kUAFormFactors,
+       WebFeature::kClientHintsUAFormFactors},
+      {network::mojom::WebClientHintsType::kPrefersReducedTransparency,
+       WebFeature::kClientHintsPrefersReducedTransparency},
   };
 }
 
@@ -90,6 +94,14 @@ const ClientHintToWebFeatureMap& GetClientHintToWebFeatureMap() {
 FrameClientHintsPreferencesContext::FrameClientHintsPreferencesContext(
     LocalFrame* frame)
     : frame_(frame) {}
+
+ukm::SourceId FrameClientHintsPreferencesContext::GetUkmSourceId() {
+  return frame_->GetDocument()->UkmSourceID();
+}
+
+ukm::UkmRecorder* FrameClientHintsPreferencesContext::GetUkmRecorder() {
+  return frame_->GetDocument()->UkmRecorder();
+}
 
 void FrameClientHintsPreferencesContext::CountClientHints(
     network::mojom::WebClientHintsType type) {

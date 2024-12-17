@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "third_party/blink/public/common/frame/frame_policy.h"
 #include "third_party/blink/public/mojom/frame/color_scheme.mojom-blink.h"
 #include "third_party/blink/public/mojom/scroll/scrollbar_mode.mojom-blink.h"
+#include "third_party/blink/public/mojom/timing/resource_timing.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
@@ -16,7 +17,6 @@ namespace blink {
 
 class Frame;
 class FrameSwapScope;
-class ResourceTimingInfo;
 
 // Oilpan: all FrameOwner instances are GCed objects. FrameOwner additionally
 // derives from GarbageCollectedMixin so that Member<FrameOwner> references can
@@ -40,7 +40,7 @@ class CORE_EXPORT FrameOwner : public GarbageCollectedMixin {
   // Note: there is a subtle ordering dependency here: if a page load needs to
   // report resource timing information, it *must* do so before calling
   // DispatchLoad().
-  virtual void AddResourceTiming(const ResourceTimingInfo&) = 0;
+  virtual void AddResourceTiming(mojom::blink::ResourceTimingInfoPtr) = 0;
   virtual void DispatchLoad() = 0;
 
   // The intrinsic dimensions of the embedded object changed. This is only
@@ -62,14 +62,16 @@ class CORE_EXPORT FrameOwner : public GarbageCollectedMixin {
   virtual bool AllowPaymentRequest() const = 0;
   virtual bool IsDisplayNone() const = 0;
   virtual mojom::blink::ColorScheme GetColorScheme() const = 0;
+  virtual mojom::blink::PreferredColorScheme GetPreferredColorScheme()
+      const = 0;
 
   // Returns whether or not children of the owned frame should be lazily loaded.
   virtual bool ShouldLazyLoadChildren() const = 0;
 
-  // Returns whether this is an iframe with the anonymous attribute set.
+  // Returns whether this is an iframe with the credentialless attribute set.
   // [spec]
-  // https://wicg.github.io/anonymous-iframe/#dom-htmliframeelement-anonymous
-  virtual bool Anonymous() const { return false; }
+  // https://wicg.github.io/anonymous-iframe/#dom-htmliframeelement-credentialless
+  virtual bool Credentialless() const { return false; }
 
  protected:
   virtual void FrameOwnerPropertiesChanged() {}
@@ -108,50 +110,6 @@ class FrameSwapScope {
 
  private:
   FrameOwner* frame_owner_;
-};
-
-// TODO(dcheng): This class is an internal implementation detail of provisional
-// frames. Move this into WebLocalFrameImpl.cpp and remove existing dependencies
-// on it.
-class CORE_EXPORT DummyFrameOwner final
-    : public GarbageCollected<DummyFrameOwner>,
-      public FrameOwner {
- public:
-  void Trace(Visitor* visitor) const override { FrameOwner::Trace(visitor); }
-
-  // FrameOwner overrides:
-  Frame* ContentFrame() const override { return nullptr; }
-  void SetContentFrame(Frame&) override {}
-  void ClearContentFrame() override {}
-  const FramePolicy& GetFramePolicy() const override {
-    DEFINE_STATIC_LOCAL(FramePolicy, frame_policy, ());
-    return frame_policy;
-  }
-  void AddResourceTiming(const ResourceTimingInfo&) override {}
-  void DispatchLoad() override {}
-  void IntrinsicSizingInfoChanged() override {}
-  void SetNeedsOcclusionTracking(bool) override {}
-  AtomicString BrowsingContextContainerName() const override {
-    return AtomicString();
-  }
-  mojom::blink::ScrollbarMode ScrollbarMode() const override {
-    return mojom::blink::ScrollbarMode::kAuto;
-  }
-  int MarginWidth() const override { return -1; }
-  int MarginHeight() const override { return -1; }
-  bool AllowFullscreen() const override { return false; }
-  bool AllowPaymentRequest() const override { return false; }
-  bool IsDisplayNone() const override { return false; }
-  mojom::blink::ColorScheme GetColorScheme() const override {
-    return mojom::blink::ColorScheme::kLight;
-  }
-  bool ShouldLazyLoadChildren() const override { return false; }
-
- private:
-  // Intentionally private to prevent redundant checks when the type is
-  // already DummyFrameOwner.
-  bool IsLocal() const override { return false; }
-  bool IsRemote() const override { return false; }
 };
 
 }  // namespace blink

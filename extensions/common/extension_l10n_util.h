@@ -9,10 +9,10 @@
 
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "base/auto_reset.h"
-#include "base/strings/string_piece.h"
 #include "base/values.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/mojom/manifest.mojom-shared.h"
@@ -110,7 +110,7 @@ void GetAllFallbackLocales(const std::string& default_locale,
 // Fill |valid_locales| with all valid locales under |locale_path|.
 // |valid_locales| is the intersection of the set of locales supported by
 // Chrome and the set of locales specified by |locale_path|.
-// Returns true if vaild_locales contains at least one locale, false otherwise.
+// Returns true if valid_locales contains at least one locale, false otherwise.
 // |error| contains an error message when a locale is corrupt or missing.
 bool GetValidLocales(const base::FilePath& locale_path,
                      std::set<std::string>* valid_locales,
@@ -153,17 +153,17 @@ class ScopedLocaleForTest {
   ScopedLocaleForTest();
 
   // Sets temporary locale for the current scope.
-  explicit ScopedLocaleForTest(base::StringPiece locale);
+  explicit ScopedLocaleForTest(std::string_view locale);
 
   // Sets process and preferred locales for the current scope.
-  ScopedLocaleForTest(base::StringPiece process_locale,
-                      base::StringPiece preferred_locale);
+  ScopedLocaleForTest(std::string_view process_locale,
+                      std::string_view preferred_locale);
 
   ~ScopedLocaleForTest();
 
  private:
-  base::StringPiece process_locale_;    // The process locale at ctor time.
-  base::StringPiece preferred_locale_;  // The preferred locale at ctor time.
+  std::string_view process_locale_;    // The process locale at ctor time.
+  std::string_view preferred_locale_;  // The preferred locale at ctor time.
 };
 
 // Returns a locale like "en-CA".

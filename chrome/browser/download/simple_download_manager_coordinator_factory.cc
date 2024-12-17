@@ -4,7 +4,6 @@
 
 #include "chrome/browser/download/simple_download_manager_coordinator_factory.h"
 
-#include "base/memory/singleton.h"
 #include "base/no_destructor.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/transition_manager/full_browser_transition_manager.h"
@@ -58,8 +57,7 @@ SimpleDownloadManagerCoordinatorFactory::BuildServiceInstanceFor(
   // Use unretained is safe as the key is associated with the callback.
   return std::make_unique<download::SimpleDownloadManagerCoordinator>(
       base::BindRepeating(&DownloadUrlWithDownloadManager,
-                          base::Unretained(key)),
-      !key->IsOffTheRecord());
+                          base::Unretained(key)));
 }
 
 SimpleFactoryKey* SimpleDownloadManagerCoordinatorFactory::GetKeyToUse(

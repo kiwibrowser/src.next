@@ -4,6 +4,11 @@
 
 #include <stddef.h>
 
+#include "ash/webui/settings/public/constants/routes.mojom.h"
+#include "base/memory/raw_ptr.h"
+#include "base/ranges/algorithm.h"
+#include "base/run_loop.h"
+#include "base/test/test_future.h"
 #include "chrome/browser/apps/app_service/app_launch_params.h"
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
@@ -18,13 +23,12 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/settings_window_manager_chromeos.h"
-#include "chrome/browser/ui/webui/settings/chromeos/constants/routes.mojom.h"
-#include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/mixin_based_in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "components/services/app_service/public/cpp/app_launch_util.h"
 #include "components/session_manager/core/session_manager.h"
 #include "content/public/browser/web_contents.h"
@@ -37,11 +41,10 @@ namespace {
 // Return the number of windows that hosts OS Settings.
 size_t GetNumberOfSettingsWindows() {
   auto* browser_list = BrowserList::GetInstance();
-  return std::count_if(browser_list->begin(), browser_list->end(),
-                       [](Browser* browser) {
-                         return ash::IsBrowserForSystemWebApp(
-                             browser, ash::SystemWebAppType::SETTINGS);
-                       });
+  return base::ranges::count_if(*browser_list, [](Browser* browser) {
+    return ash::IsBrowserForSystemWebApp(browser,
+                                         ash::SystemWebAppType::SETTINGS);
+  });
 }
 
 }  // namespace
@@ -55,6 +58,12 @@ class SettingsWindowManagerTest : public InProcessBrowserTest {
     // Install the Settings App.
     ash::SystemWebAppManager::GetForTest(browser()->profile())
         ->InstallSystemAppsForTesting();
+
+    base::test::TestFuture<void> synchronized;
+    ash::SystemWebAppManager::GetForTest(browser()->profile())
+        ->on_apps_synchronized()
+        .Post(FROM_HERE, synchronized.GetCallback());
+    ASSERT_TRUE(synchronized.Wait());
   }
 
   SettingsWindowManagerTest(const SettingsWindowManagerTest&) = delete;
@@ -63,15 +72,9 @@ class SettingsWindowManagerTest : public InProcessBrowserTest {
 
   ~SettingsWindowManagerTest() override = default;
 
-  void ShowSettingsForProfile(Profile* profile) {
-    settings_manager_->ShowChromePageForProfile(
-        profile, GURL(chrome::kChromeUISettingsURL),
-        display::kInvalidDisplayId);
-  }
-
   void CloseNonDefaultBrowsers() {
     std::list<Browser*> browsers_to_close;
-    for (auto* b : *BrowserList::GetInstance()) {
+    for (Browser* b : *BrowserList::GetInstance()) {
       if (b != browser())
         browsers_to_close.push_back(b);
     }
@@ -81,13 +84,21 @@ class SettingsWindowManagerTest : public InProcessBrowserTest {
     }
   }
 
+  void ShowOSSettings() {
+    ui_test_utils::BrowserChangeObserver browser_opened(
+        nullptr, ui_test_utils::BrowserChangeObserver::ChangeType::kAdded);
+    settings_manager_->ShowOSSettings(browser()->profile());
+    browser_opened.Wait();
+  }
+
  protected:
-  chrome::SettingsWindowManager* settings_manager_;
+  raw_ptr<chrome::SettingsWindowManager> settings_manager_;
 };
 
 IN_PROC_BROWSER_TEST_F(SettingsWindowManagerTest, OpenSettingsWindow) {
   // Open a settings window.
-  settings_manager_->ShowOSSettings(browser()->profile());
+  ShowOSSettings();
+
   Browser* settings_browser =
       settings_manager_->FindBrowserForProfile(browser()->profile());
   ASSERT_TRUE(settings_browser);
@@ -95,12 +106,15 @@ IN_PROC_BROWSER_TEST_F(SettingsWindowManagerTest, OpenSettingsWindow) {
 
   // Open the settings again: no new window.
   settings_manager_->ShowOSSettings(browser()->profile());
+  // TODO(crbug.com/41490117): Remove this once we can wait for the
+  // ShowOSSettings call correctly.
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(settings_browser,
             settings_manager_->FindBrowserForProfile(browser()->profile()));
   EXPECT_EQ(1u, GetNumberOfSettingsWindows());
 
   // Launching via LaunchService should also de-dupe to the same browser.
-  web_app::AppId settings_app_id = *ash::GetAppIdForSystemWebApp(
+  webapps::AppId settings_app_id = *ash::GetAppIdForSystemWebApp(
       browser()->profile(), ash::SystemWebAppType::SETTINGS);
   content::WebContents* contents =
       apps::AppServiceProxyFactory::GetForProfile(browser()->profile())
@@ -118,7 +132,7 @@ IN_PROC_BROWSER_TEST_F(SettingsWindowManagerTest, OpenSettingsWindow) {
   EXPECT_FALSE(settings_manager_->FindBrowserForProfile(browser()->profile()));
 
   // Open a new settings window.
-  settings_manager_->ShowOSSettings(browser()->profile());
+  ShowOSSettings();
   Browser* settings_browser2 =
       settings_manager_->FindBrowserForProfile(browser()->profile());
   ASSERT_TRUE(settings_browser2);
@@ -135,7 +149,7 @@ IN_PROC_BROWSER_TEST_F(SettingsWindowManagerTest, OpenChromePages) {
   EXPECT_EQ(1u, chrome::GetTotalBrowserCount());
 
   // Settings should open a new browser window.
-  settings_manager_->ShowOSSettings(browser()->profile());
+  ShowOSSettings();
   EXPECT_EQ(2u, chrome::GetTotalBrowserCount());
 
   // About should reuse the existing Settings window.
@@ -168,7 +182,7 @@ IN_PROC_BROWSER_TEST_F(SettingsWindowManagerTest, OpenSettings) {
   EXPECT_EQ(1u, chrome::GetTotalBrowserCount());
 
   // OS settings opens in a new window.
-  settings_manager_->ShowOSSettings(browser()->profile());
+  ShowOSSettings();
   EXPECT_EQ(1u, GetNumberOfSettingsWindows());
   EXPECT_EQ(2u, chrome::GetTotalBrowserCount());
 

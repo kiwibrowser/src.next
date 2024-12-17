@@ -6,55 +6,32 @@
 
 #include "base/notreached.h"
 #include "build/build_config.h"
+#include "extensions/common/api/types.h"
 
 namespace extensions {
 namespace pref_names {
 
-bool ScopeToPrefName(ExtensionPrefsScope scope, std::string* result) {
+using extensions::api::types::ChromeSettingScope;
+
+bool ScopeToPrefName(ChromeSettingScope scope, std::string* result) {
   switch (scope) {
-    case kExtensionPrefsScopeRegular:
+    case ChromeSettingScope::kRegular:
       *result = kPrefPreferences;
       return true;
-    case kExtensionPrefsScopeRegularOnly:
+    case ChromeSettingScope::kRegularOnly:
       *result = kPrefRegularOnlyPreferences;
       return true;
-    case kExtensionPrefsScopeIncognitoPersistent:
+    case ChromeSettingScope::kIncognitoPersistent:
       *result = kPrefIncognitoPreferences;
       return true;
-    case kExtensionPrefsScopeIncognitoSessionOnly:
+    case ChromeSettingScope::kIncognitoSessionOnly:
       return false;
+    case ChromeSettingScope::kNone:
+      break;
   }
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
   return false;
 }
-
-const char kAlertsInitialized[] = "extensions.alerts.initialized";
-const char kAllowedInstallSites[] = "extensions.allowed_install_sites";
-const char kAllowedTypes[] = "extensions.allowed_types";
-const char kAppFullscreenAllowed[] = "apps.fullscreen.allowed";
-const char kBlockExternalExtensions[] = "extensions.block_external_extensions";
-const char kExtensions[] = "extensions.settings";
-const char kExtensionManagement[] = "extensions.management";
-const char kInstallAllowList[] = "extensions.install.allowlist";
-const char kInstallDenyList[] = "extensions.install.denylist";
-const char kInstallForceList[] = "extensions.install.forcelist";
-const char kLastChromeVersion[] = "extensions.last_chrome_version";
-const char kNativeMessagingBlocklist[] = "native_messaging.blacklist";
-const char kNativeMessagingAllowlist[] = "native_messaging.whitelist";
-const char kNativeMessagingUserLevelHosts[] =
-    "native_messaging.user_level_hosts";
-const char kPinnedExtensions[] = "extensions.pinned_extensions";
-const char kStorageGarbageCollect[] = "extensions.storage.garbagecollect";
-const char kDeletedComponentExtensions[] =
-    "extensions.deleted_component_extensions";
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
-    BUILDFLAG(IS_FUCHSIA)
-extern const char kChromeAppsEnabled[] = "extensions.chrome_apps_enabled";
-#endif
-const char kU2fSecurityKeyApiEnabled[] =
-    "extensions.u2f_security_key_api_enabled";
-const char kLoadCryptoTokenExtension[] =
-    "extensions.load_cryptotoken_extension";
 
 const char kPrefPreferences[] = "preferences";
 const char kPrefIncognitoPreferences[] = "incognito_preferences";

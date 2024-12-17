@@ -6,8 +6,8 @@
 
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/i18n/time_formatting.h"
 #include "base/logging.h"
 #include "base/memory/raw_ptr.h"
@@ -16,10 +16,12 @@
 #include "base/sequence_checker.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/bind_post_task.h"
+#include "base/task/sequenced_task_runner.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/net/nss_service.h"
 #include "chrome/browser/net/nss_service_factory.h"
+#include "chrome/browser/net/system_network_context_manager.h"
 #include "chrome/browser/ui/crypto_module_password_dialog_nss.h"
 #include "chrome/common/net/x509_certificate_model_nss.h"
 #include "chrome/grit/generated_resources.h"
@@ -30,20 +32,28 @@
 #include "crypto/scoped_nss_types.h"
 #include "net/base/net_errors.h"
 #include "net/cert/cert_database.h"
+#include "net/cert/nss_cert_database.h"
 #include "net/cert/x509_certificate.h"
 #include "net/cert/x509_util_nss.h"
+#include "net/net_buildflags.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if BUILDFLAG(IS_CHROMEOS)
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/certificate_provider/certificate_provider.h"
 #include "chrome/browser/certificate_provider/certificate_provider_service.h"
 #include "chrome/browser/certificate_provider/certificate_provider_service_factory.h"
 #include "chrome/browser/policy/networking/user_network_configuration_updater.h"
 #include "chrome/browser/policy/networking/user_network_configuration_updater_factory.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chromeos/ash/components/network/policy_certificate_provider.h"
+#include "chromeos/constants/chromeos_features.h"
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "ash/components/kcer/kcer.h"
+#include "ash/components/kcer/kcer_histograms.h"
+#include "chrome/browser/ash/kcer/kcer_factory_ash.h"
 #include "chrome/browser/policy/networking/user_network_configuration_updater_ash.h"
 #include "chromeos/components/onc/certificate_scope.h"
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
@@ -204,7 +214,11 @@ class CertsSourcePlatformNSS : public CertificateManagerModel::CertsSource,
   ~CertsSourcePlatformNSS() override = default;
 
   // net::CertDatabase::Observer
-  void OnCertDBChanged() override {
+  void OnTrustStoreChanged() override {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    Refresh();
+  }
+  void OnClientCertStoreChanged() override {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     Refresh();
   }
@@ -234,8 +248,8 @@ class CertsSourcePlatformNSS : public CertificateManagerModel::CertsSource,
   void RemoveFromDatabase(net::ScopedCERTCertificate cert,
                           base::OnceCallback<void(bool)> callback) override {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-    auto callback_and_runner = base::BindPostTask(
-        base::SequencedTaskRunnerHandle::Get(), std::move(callback));
+    auto callback_and_runner =
+        base::BindPostTaskToCurrentDefault(std::move(callback));
 
     // Passing Unretained(cert_db_) is safe because the corresponding profile
     // should be alive during this call and therefore the deletion task for the
@@ -251,7 +265,13 @@ class CertsSourcePlatformNSS : public CertificateManagerModel::CertsSource,
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     DVLOG(1) << "refresh listing certs...";
     cert_db_->ListCertsInfo(base::BindOnce(&CertsSourcePlatformNSS::DidGetCerts,
-                                           weak_ptr_factory_.GetWeakPtr()));
+                                           weak_ptr_factory_.GetWeakPtr()),
+#if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
+                            net::NSSCertDatabase::NSSRootsHandling::kExclude
+#else
+                            net::NSSCertDatabase::NSSRootsHandling::kInclude
+#endif
+    );
   }
 
   void DidGetCerts(net::NSSCertDatabase::CertInfoList cert_info_list) {
@@ -353,7 +373,7 @@ class CertsSourcePolicy : public CertificateManagerModel::CertsSource,
                     true /* policy_web_trusted */);
         break;
       default:
-        NOTREACHED();
+        NOTREACHED_IN_MIGRATION();
     }
   }
 
@@ -369,7 +389,7 @@ class CertsSourcePolicy : public CertificateManagerModel::CertsSource,
                           base::OnceCallback<void(bool)> callback) override {
     // Policy-provided certificates can not be deleted.
     LOG(WARNING) << kOperationNotPermitted << "Policy";
-    base::SequencedTaskRunnerHandle::Get()->PostTask(
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE, base::BindOnce(std::move(callback), false));
   }
 
@@ -437,7 +457,7 @@ class CertsSourceExtensions : public CertificateManagerModel::CertsSource {
                           base::OnceCallback<void(bool)> callback) override {
     // Extension-provided certificates can not be deleted.
     LOG(WARNING) << kOperationNotPermitted << "Extension";
-    base::SequencedTaskRunnerHandle::Get()->PostTask(
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE, base::BindOnce(std::move(callback), false));
   }
 
@@ -474,7 +494,32 @@ class CertsSourceExtensions : public CertificateManagerModel::CertsSource {
 
   base::WeakPtrFactory<CertsSourceExtensions> weak_ptr_factory_{this};
 };
+
 #endif  // BUILDFLAG(IS_CHROMEOS)
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+
+void RecordImportFromPKCS12KcerResult(
+    int nss_import_result,
+    base::OnceCallback<void(int nss_import_result)> callback,
+    base::expected<void, kcer::Error> kcer_import_result) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  if (kcer_import_result.has_value()) {
+    kcer::RecordPkcs12MigrationUmaEvent(
+        kcer::Pkcs12MigrationUmaEvent::kPkcs12ImportKcerSuccess);
+  } else {
+    kcer::RecordPkcs12MigrationUmaEvent(
+        kcer::Pkcs12MigrationUmaEvent::kPkcs12ImportKcerFailed);
+    kcer::RecordKcerError(kcer_import_result.error());
+  }
+
+  // Just return the nss_import_result. Kcer will attempt to import only if NSS
+  // succeeds and even if Kcer fails, the cert should be usable.
+  return std::move(callback).Run(nss_import_result);
+}
+
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 }  // namespace
 
@@ -532,6 +577,10 @@ void CertificateManagerModel::Create(
   params->extension_certificate_provider =
       certificate_provider_service->CreateCertificateProvider();
 #endif
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  params->kcer = kcer::KcerFactoryAsh::GetKcer(
+      Profile::FromBrowserContext(browser_context));
+#endif
 
   content::GetIOThreadTaskRunner({})->PostTask(
       FROM_HERE,
@@ -565,6 +614,9 @@ CertificateManagerModel::CertificateManagerModel(
         certs_source_updated_callback, params->policy_certs_provider,
         CertsSourcePolicy::Mode::kPolicyCertsWithWebTrust));
   }
+#endif
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  kcer_ = params->kcer;
 #endif
 
   // Add the main NSS DB based CertsSource.
@@ -644,12 +696,47 @@ void CertificateManagerModel::FilterAndBuildOrgGroupingMap(
   }
 }
 
-int CertificateManagerModel::ImportFromPKCS12(PK11SlotInfo* slot_info,
-                                              const std::string& data,
-                                              const std::u16string& password,
-                                              bool is_extractable) {
-  return cert_db_->ImportFromPKCS12(slot_info, data, password, is_extractable,
-                                    nullptr);
+void CertificateManagerModel::ImportFromPKCS12(
+    PK11SlotInfo* slot_info,
+    const std::string& data,
+    const std::u16string& password,
+    bool is_extractable,
+    base::OnceCallback<void(int nss_import_result)> callback) {
+  int nss_import_result = cert_db_->ImportFromPKCS12(slot_info, data, password,
+                                                     is_extractable, nullptr);
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  if (nss_import_result == net::OK) {
+    kcer::RecordPkcs12MigrationUmaEvent(
+        kcer::Pkcs12MigrationUmaEvent::kPkcs12ImportNssSuccess);
+  } else {
+    kcer::RecordPkcs12MigrationUmaEvent(
+        kcer::Pkcs12MigrationUmaEvent::kPkcs12ImportNssFailed);
+  }
+
+  // `is_extractable` == true indicates that the cert came from the "Import"
+  // button. By default it's imported into the software NSS database (aka public
+  // slot). With the experiment enabled it should also be imported into Chaps.
+  // `is_extractable` == false means that the cert came from the "Import and
+  // Bind" button and it's import into Chaps by default.
+  if ((nss_import_result == net::OK) && is_extractable &&
+      chromeos::features::IsPkcs12ToChapsDualWriteEnabled()) {
+    // Record the dual-write event. Even if the import fails, it's theoretically
+    // possible that some related objects are still created and would need to be
+    // deleted in case of a rollback.
+    kcer::KcerFactoryAsh::RecordPkcs12CertDualWritten();
+    std::string u8_password = base::UTF16ToUTF8(password);
+    return kcer_->ImportPkcs12Cert(
+        kcer::Token::kUser,
+        kcer::Pkcs12Blob(std::vector<uint8_t>(data.begin(), data.end())),
+        std::move(u8_password),
+        /*hardware_backed=*/!is_extractable, /*mark_as_migrated=*/true,
+        base::BindOnce(&RecordImportFromPKCS12KcerResult, nss_import_result,
+                       std::move(callback)));
+  }
+#endif  // BUILDFLAG(IS_CHROMEOS)
+
+  return std::move(callback).Run(nss_import_result);
 }
 
 int CertificateManagerModel::ImportUserCert(const std::string& data) {
@@ -690,7 +777,7 @@ void CertificateManagerModel::RemoveFromDatabase(
     base::OnceCallback<void(bool)> callback) {
   CertsSource* certs_source = FindCertsSourceForCert(cert.get());
   if (!certs_source) {
-    base::SequencedTaskRunnerHandle::Get()->PostTask(
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE, base::BindOnce(std::move(callback), false));
     return;
   }

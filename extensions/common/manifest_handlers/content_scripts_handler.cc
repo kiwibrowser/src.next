@@ -8,19 +8,14 @@
 
 #include <memory>
 
-#include "base/files/file_util.h"
 #include "base/lazy_instance.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/types/optional_util.h"
-#include "base/values.h"
-#include "content/public/common/url_constants.h"
 #include "extensions/common/api/content_scripts.h"
-#include "extensions/common/error_utils.h"
+#include "extensions/common/api/extension_types.h"
+#include "extensions/common/api/scripts_internal.h"
+#include "extensions/common/api/scripts_internal/script_serialization.h"
 #include "extensions/common/extension.h"
-#include "extensions/common/extension_features.h"
-#include "extensions/common/extension_resource.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/permissions_parser.h"
 #include "extensions/common/mojom/host_id.mojom.h"
@@ -30,8 +25,7 @@
 #include "extensions/common/url_pattern.h"
 #include "extensions/common/url_pattern_set.h"
 #include "extensions/common/utils/content_script_utils.h"
-#include "extensions/strings/grit/extensions_strings.h"
-#include "ui/base/l10n/l10n_util.h"
+#include "extensions/common/utils/extension_types_utils.h"
 #include "url/gurl.h"
 
 namespace extensions {
@@ -42,114 +36,105 @@ using ContentScriptsKeys = content_scripts_api::ManifestKeys;
 
 namespace {
 
-void ParseGlobs(const std::vector<std::string>* include_globs,
-                const std::vector<std::string>* exclude_globs,
-                UserScript* result) {
-  // include/exclude globs (mostly for Greasemonkey compatibility).
-  if (include_globs) {
-    for (const std::string& glob : *include_globs)
-      result->add_glob(glob);
-  }
-  if (exclude_globs) {
-    for (const std::string& glob : *exclude_globs)
-      result->add_exclude_glob(glob);
-  }
-}
-
 // Helper method that converts a parsed ContentScript object into a UserScript
 // object.
 std::unique_ptr<UserScript> CreateUserScript(
-    const content_scripts_api::ContentScript& content_script,
+    content_scripts_api::ContentScript content_script,
     int definition_index,
     bool can_execute_script_everywhere,
-    int valid_schemes,
     bool all_urls_includes_chrome_urls,
     Extension* extension,
     std::u16string* error) {
-  auto result = std::make_unique<UserScript>();
+  // We first convert to a `SerializedScript` to then convert that to a
+  // `UserScript` through shared logic. We need a bit of custom handling for
+  // match_origin_as_fallback, since manifest content scripts support
+  // "match_about_blank".
+  api::scripts_internal::SerializedUserScript serialized_script;
+  serialized_script.source =
+      api::scripts_internal::Source::kManifestContentScript;
+  serialized_script.id = UserScript::GenerateUserScriptID();
 
-  // run_at
-  if (content_script.run_at != content_scripts_api::RUN_AT_NONE) {
-    result->set_run_location(
-        script_parsing::ConvertManifestRunLocation(content_script.run_at));
+  serialized_script.matches = std::move(content_script.matches);
+  serialized_script.exclude_matches = std::move(content_script.exclude_matches);
+  if (content_script.css) {
+    serialized_script.css = script_serialization::GetSourcesFromFileNames(
+        std::move(*content_script.css));
   }
-
-  // all_frames
-  if (content_script.all_frames)
-    result->set_match_all_frames(*content_script.all_frames);
+  if (content_script.js) {
+    serialized_script.js = script_serialization::GetSourcesFromFileNames(
+        std::move(*content_script.js));
+  }
+  serialized_script.all_frames = content_script.all_frames;
 
   // match_origin_as_fallback and match_about_blank.
   // Note: `match_about_blank` is ignored if `match_origin_as_fallback` was
-  // specified. `match_origin_as_fallback` can only be specified for extensions
-  // running manifest version 3 or higher. `match_about_blank` can be specified
-  // by any extensions (and is used by MV3+ extensions for compatibility).
-  absl::optional<MatchOriginAsFallbackBehavior> match_origin_as_fallback;
+  // specified.
+  if (content_script.match_origin_as_fallback) {
+    serialized_script.match_origin_as_fallback =
+        content_script.match_origin_as_fallback;
+  }
+  // Manifest content scripts support `match_about_blank` (unlike
+  // `SerializedUserScript`). If `match_about_blank` is specified, we'll
+  // override the `match_origin_as_fallback` behavior on the user script later.
+  std::optional<MatchOriginAsFallbackBehavior>
+      match_origin_as_fallback_override;
+  if (!serialized_script.match_origin_as_fallback.has_value() &&
+      content_script.match_about_blank && *content_script.match_about_blank) {
+    match_origin_as_fallback_override =
+        MatchOriginAsFallbackBehavior::kMatchForAboutSchemeAndClimbTree;
+  }
 
-  if (content_script.match_origin_as_fallback &&
-      base::FeatureList::IsEnabled(
-          extensions_features::kContentScriptsMatchOriginAsFallback)) {
+  serialized_script.include_globs = std::move(content_script.include_globs);
+  serialized_script.exclude_globs = std::move(content_script.exclude_globs);
+  serialized_script.run_at = content_script.run_at;
+
+  // Parse execution world. This should only be possible for MV3.
+  if (content_script.world != api::extension_types::ExecutionWorld::kNone) {
     if (extension->manifest_version() >= 3) {
-      match_origin_as_fallback = *content_script.match_origin_as_fallback
-                                     ? MatchOriginAsFallbackBehavior::kAlways
-                                     : MatchOriginAsFallbackBehavior::kNever;
+      serialized_script.world = content_script.world;
     } else {
       extension->AddInstallWarning(
-          InstallWarning(errors::kMatchOriginAsFallbackRestrictedToMV3,
+          InstallWarning(errors::kExecutionWorldRestrictedToMV3,
                          ContentScriptsKeys::kContentScripts));
     }
   }
 
-  if (!match_origin_as_fallback && content_script.match_about_blank) {
-    match_origin_as_fallback =
-        *content_script.match_about_blank
-            ? MatchOriginAsFallbackBehavior::kMatchForAboutSchemeAndClimbTree
-            : MatchOriginAsFallbackBehavior::kNever;
-  }
-
+  // At this point, no script is allowed in incognito. If the extension is
+  // allowed to run in incognito, this will be updated when loading the
+  // script content.
+  const bool allowed_in_incognito = false;
   bool wants_file_access = false;
-  if (!script_parsing::ParseMatchPatterns(
-          content_script.matches,
-          base::OptionalToPtr(content_script.exclude_matches), definition_index,
-          extension->creation_flags(), can_execute_script_everywhere,
-          valid_schemes, all_urls_includes_chrome_urls, result.get(), error,
-          &wants_file_access)) {
+
+  script_serialization::SerializedUserScriptParseOptions parse_options;
+  parse_options.index_for_error = definition_index;
+  parse_options.can_execute_script_everywhere = can_execute_script_everywhere;
+  parse_options.all_urls_includes_chrome_urls = all_urls_includes_chrome_urls;
+
+  std::unique_ptr<UserScript> user_script =
+      script_serialization::ParseSerializedUserScript(
+          serialized_script, *extension, allowed_in_incognito, error,
+          &wants_file_access, parse_options);
+
+  if (!user_script) {
+    // Parsing failed. `error` should be properly populated.
     return nullptr;
   }
 
-  if (match_origin_as_fallback) {
-    // If the extension is using `match_origin_as_fallback`, we require the
-    // pattern to match all paths. This is because origins don't have a path;
-    // thus, if an extension specified `"match_origin_as_fallback": true` for
-    // a pattern of `"https://google.com/maps/*"`, this script would also run
-    // on about:blank, data:, etc frames from https://google.com (because in
-    // both cases, the precursor origin is https://google.com).
-    if (match_origin_as_fallback == MatchOriginAsFallbackBehavior::kAlways) {
-      for (const auto& pattern : result->url_patterns()) {
-        if (pattern.path() != "/*") {
-          *error =
-              base::ASCIIToUTF16(errors::kMatchOriginAsFallbackCantHavePaths);
-          return nullptr;
-        }
-      }
-    }
-
-    result->set_match_origin_as_fallback(*match_origin_as_fallback);
+  if (match_origin_as_fallback_override) {
+    // Note: No need to call `ValidateMatchOriginAsFallback()` since this
+    // override is restricted to `kMatchForAboutSchemeAndClimbTree`, which
+    // doesn't require validation.
+    user_script->set_match_origin_as_fallback(
+        *match_origin_as_fallback_override);
   }
 
-  if (wants_file_access)
+  // Note: Not just `extension->set_wants_file_access(wants_file_access);` to
+  // avoid overwriting a previous `true` value.
+  if (wants_file_access) {
     extension->set_wants_file_access(true);
-
-  ParseGlobs(base::OptionalToPtr(content_script.include_globs),
-             base::OptionalToPtr(content_script.exclude_globs), result.get());
-
-  if (!script_parsing::ParseFileSources(
-          extension, base::OptionalToPtr(content_script.js),
-          base::OptionalToPtr(content_script.css), definition_index,
-          result.get(), error)) {
-    return nullptr;
   }
 
-  return result;
+  return user_script;
 }
 
 struct EmptyUserScriptList {
@@ -161,9 +146,9 @@ static base::LazyInstance<EmptyUserScriptList>::DestructorAtExit
 
 }  // namespace
 
-ContentScriptsInfo::ContentScriptsInfo() {}
+ContentScriptsInfo::ContentScriptsInfo() = default;
 
-ContentScriptsInfo::~ContentScriptsInfo() {}
+ContentScriptsInfo::~ContentScriptsInfo() = default;
 
 // static
 const UserScriptList& ContentScriptsInfo::GetContentScripts(
@@ -197,9 +182,9 @@ URLPatternSet ContentScriptsInfo::GetScriptableHosts(
   return scriptable_hosts;
 }
 
-ContentScriptsHandler::ContentScriptsHandler() {}
+ContentScriptsHandler::ContentScriptsHandler() = default;
 
-ContentScriptsHandler::~ContentScriptsHandler() {}
+ContentScriptsHandler::~ContentScriptsHandler() = default;
 
 base::span<const char* const> ContentScriptsHandler::Keys() const {
   static constexpr const char* kKeys[] = {ContentScriptsKeys::kContentScripts};
@@ -209,8 +194,7 @@ base::span<const char* const> ContentScriptsHandler::Keys() const {
 bool ContentScriptsHandler::Parse(Extension* extension, std::u16string* error) {
   ContentScriptsKeys manifest_keys;
   if (!ContentScriptsKeys::ParseFromDictionary(
-          extension->manifest()->available_values().GetDict(), &manifest_keys,
-          error)) {
+          extension->manifest()->available_values(), manifest_keys, *error)) {
     return false;
   }
 
@@ -219,14 +203,13 @@ bool ContentScriptsHandler::Parse(Extension* extension, std::u16string* error) {
   const bool can_execute_script_everywhere =
       PermissionsData::CanExecuteScriptEverywhere(extension->id(),
                                                   extension->location());
-  const int valid_schemes =
-      UserScript::ValidUserScriptSchemes(can_execute_script_everywhere);
   const bool all_urls_includes_chrome_urls =
       PermissionsData::AllUrlsIncludesChromeUrls(extension->id());
   for (size_t i = 0; i < manifest_keys.content_scripts.size(); ++i) {
-    std::unique_ptr<UserScript> user_script = CreateUserScript(
-        manifest_keys.content_scripts[i], i, can_execute_script_everywhere,
-        valid_schemes, all_urls_includes_chrome_urls, extension, error);
+    std::unique_ptr<UserScript> user_script =
+        CreateUserScript(std::move(manifest_keys.content_scripts[i]), i,
+                         can_execute_script_everywhere,
+                         all_urls_includes_chrome_urls, extension, error);
     if (!user_script)
       return false;  // Failed to parse script context definition.
 
@@ -237,7 +220,6 @@ bool ContentScriptsHandler::Parse(Extension* extension, std::u16string* error) {
       // Greasemonkey matches all frames.
       user_script->set_match_all_frames(true);
     }
-    user_script->set_id(UserScript::GenerateUserScriptID());
     content_scripts_info->content_scripts.push_back(std::move(user_script));
   }
 
@@ -256,7 +238,7 @@ bool ContentScriptsHandler::Validate(
   // and are UTF-8 encoded.
   return script_parsing::ValidateFileSources(
       ContentScriptsInfo::GetContentScripts(extension),
-      script_parsing::GetSymlinkPolicy(extension), error);
+      script_parsing::GetSymlinkPolicy(extension), error, warnings);
 }
 
 }  // namespace extensions

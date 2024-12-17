@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,8 +18,11 @@ BoxReflection BoxReflectionForPaintLayer(const PaintLayer& layer,
                                          const ComputedStyle& style) {
   const StyleReflection* reflect_style = style.BoxReflect();
 
-  LayoutRect frame_layout_rect = layer.GetLayoutBox()->FrameRect();
-  gfx::RectF frame_rect(frame_layout_rect);
+  const LayoutBox* layout_box = layer.GetLayoutBox();
+  // TODO(crbug.com/962299): Only correct if the paint offset is correct.
+  gfx::Size frame_size = PhysicalRect(layout_box->FirstFragment().PaintOffset(),
+                                      layout_box->Size())
+                             .PixelSnappedSize();
   BoxReflection::ReflectionDirection direction =
       BoxReflection::kVerticalReflection;
   float offset = 0;
@@ -27,48 +30,48 @@ BoxReflection BoxReflectionForPaintLayer(const PaintLayer& layer,
     case kReflectionAbove:
       direction = BoxReflection::kVerticalReflection;
       offset =
-          -FloatValueForLength(reflect_style->Offset(), frame_rect.height());
+          -FloatValueForLength(reflect_style->Offset(), frame_size.height());
       break;
     case kReflectionBelow:
       direction = BoxReflection::kVerticalReflection;
       offset =
-          2 * frame_rect.height() +
-          FloatValueForLength(reflect_style->Offset(), frame_rect.height());
+          2 * frame_size.height() +
+          FloatValueForLength(reflect_style->Offset(), frame_size.height());
       break;
     case kReflectionLeft:
       direction = BoxReflection::kHorizontalReflection;
       offset =
-          -FloatValueForLength(reflect_style->Offset(), frame_rect.width());
+          -FloatValueForLength(reflect_style->Offset(), frame_size.width());
       break;
     case kReflectionRight:
       direction = BoxReflection::kHorizontalReflection;
-      offset = 2 * frame_rect.width() +
-               FloatValueForLength(reflect_style->Offset(), frame_rect.width());
+      offset = 2 * frame_size.width() +
+               FloatValueForLength(reflect_style->Offset(), frame_size.width());
       break;
   }
 
   const NinePieceImage& mask_nine_piece = reflect_style->Mask();
   if (!mask_nine_piece.HasImage())
-    return BoxReflection(direction, offset, nullptr, gfx::RectF());
+    return BoxReflection(direction, offset, PaintRecord(), gfx::RectF());
 
-  PhysicalRect mask_rect(PhysicalOffset(), frame_layout_rect.Size());
+  PhysicalRect mask_rect(PhysicalOffset(), layer.GetLayoutBox()->Size());
   PhysicalRect mask_bounding_rect(mask_rect);
   mask_bounding_rect.Expand(style.ImageOutsets(mask_nine_piece));
 
-  auto* builder = MakeGarbageCollected<PaintRecordBuilder>();
+  PaintRecordBuilder builder;
   {
-    GraphicsContext& context = builder->Context();
+    GraphicsContext& context = builder.Context();
     DrawingRecorder recorder(context, layer.GetLayoutObject(),
                              DisplayItem::kReflectionMask);
     Node* node = nullptr;
     const LayoutObject* layout_object = &layer.GetLayoutObject();
     for (; layout_object && !node; layout_object = layout_object->Parent())
       node = layout_object->GeneratingNode();
-    NinePieceImagePainter::Paint(builder->Context(), layer.GetLayoutObject(),
+    NinePieceImagePainter::Paint(builder.Context(), layer.GetLayoutObject(),
                                  layer.GetLayoutObject().GetDocument(), node,
                                  mask_rect, style, mask_nine_piece);
   }
-  return BoxReflection(direction, offset, builder->EndRecording(),
+  return BoxReflection(direction, offset, builder.EndRecording(),
                        gfx::RectF(mask_bounding_rect));
 }
 

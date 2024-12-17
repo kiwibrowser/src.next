@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "cc/animation/animation_timeline.h"
 #include "cc/layers/picture_layer.h"
 #include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/renderer/core/css/properties/longhands.h"
 #include "third_party/blink/renderer/core/dom/node.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
@@ -61,8 +62,9 @@ void LinkHighlight::SetTapHighlight(Node* node) {
   // Safari documentation for -webkit-tap-highlight-color says if the
   // specified color has 0 alpha, then tap highlighting is disabled.
   // http://developer.apple.com/library/safari/#documentation/appleapplications/reference/safaricssref/articles/standardcssproperties.html
-  if (!highlight_color.Alpha())
+  if (highlight_color.IsFullyTransparent()) {
     return;
+  }
 
   impl_ = std::make_unique<LinkHighlightImpl>(node);
   if (timeline_ && impl_->GetCompositorAnimation())

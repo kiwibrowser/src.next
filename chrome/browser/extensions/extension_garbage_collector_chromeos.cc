@@ -4,7 +4,7 @@
 
 #include <stddef.h>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "chrome/browser/ash/profiles/profile_helper.h"
 #include "chrome/browser/extensions/extension_assets_manager_chromeos.h"
 #include "chrome/browser/extensions/extension_garbage_collector_chromeos.h"
@@ -54,7 +54,7 @@ void ExtensionGarbageCollectorChromeOS::GarbageCollectExtensions() {
 bool ExtensionGarbageCollectorChromeOS::CanGarbageCollectSharedExtensions() {
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
   if (!user_manager) {
-    NOTREACHED();
+    NOTREACHED_IN_MIGRATION();
     return false;
   }
 
@@ -82,9 +82,11 @@ void ExtensionGarbageCollectorChromeOS::GarbageCollectSharedExtensions() {
             FROM_HERE,
             base::BindOnce(
                 &GarbageCollectExtensionsOnFileThread,
-                ExtensionAssetsManagerChromeOS::GetSharedInstallDir(),
-                paths))) {
-      NOTREACHED();
+                ExtensionAssetsManagerChromeOS::GetSharedInstallDir(), paths,
+                // No need to process unpacked because shared extensions can't
+                // be unpacked.
+                /*unpacked=*/false))) {
+      NOTREACHED_IN_MIGRATION();
     }
   }
 }

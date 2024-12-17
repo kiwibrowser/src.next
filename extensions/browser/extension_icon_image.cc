@@ -6,14 +6,13 @@
 
 #include <vector>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/observer_list.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/task/single_thread_task_runner.h"
 #include "extensions/browser/image_loader.h"
 #include "extensions/common/extension.h"
-#include "ui/base/layout.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/geometry/size_conversions.h"
@@ -48,7 +47,7 @@ extensions::ExtensionResource GetExtensionIconResource(
     const extensions::Extension& extension,
     const ExtensionIconSet& icons,
     int size,
-    ExtensionIconSet::MatchType match_type) {
+    ExtensionIconSet::Match match_type) {
   const std::string& path = icons.Get(size, match_type);
   return path.empty() ? extensions::ExtensionResource()
                       : extension.GetResource(path);
@@ -189,16 +188,17 @@ void IconImage::LoadImageForScaleAsync(float scale) {
 
   extensions::ExtensionResource resource;
 
-  // Find extension resource for non bundled component extensions.
+  // Find a bigger extension icon resource for non bundled component extensions.
+  // TODO(crbug.com/329953472): Use a predefined threshold.
   resource =
       GetExtensionIconResource(*extension_, icon_set_, resource_size_in_pixel,
-                               ExtensionIconSet::MATCH_BIGGER);
+                               ExtensionIconSet::Match::kBigger);
 
-  // If resource is not found by now, try matching smaller one.
+  // If a larger icon wasn't found, try matching a smaller one.
   if (resource.empty()) {
     resource =
         GetExtensionIconResource(*extension_, icon_set_, resource_size_in_pixel,
-                                 ExtensionIconSet::MATCH_SMALLER);
+                                 ExtensionIconSet::Match::kSmaller);
   }
 
   if (!resource.empty()) {
@@ -220,7 +220,7 @@ void IconImage::LoadImageForScaleAsync(float scale) {
     // If there is no resource found, update from the default icon.
     const gfx::ImageSkiaRep& rep = default_icon_.GetRepresentation(scale);
     if (!rep.is_null()) {
-      base::ThreadTaskRunnerHandle::Get()->PostTask(
+      base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
           FROM_HERE, base::BindOnce(&IconImage::OnImageRepLoaded,
                                     weak_ptr_factory_.GetWeakPtr(), rep));
     }

@@ -5,25 +5,33 @@
 #ifndef BASE_SEQUENCE_CHECKER_IMPL_H_
 #define BASE_SEQUENCE_CHECKER_IMPL_H_
 
+#include <cstdint>
 #include <memory>
+#include <vector>
 
 #include "base/base_export.h"
+#include "base/sequence_token.h"
 #include "base/synchronization/lock.h"
 #include "base/thread_annotations.h"
+#include "base/threading/platform_thread_ref.h"
 
 namespace base {
 namespace debug {
 class StackTrace;
 }
 
-// Real implementation of SequenceChecker for use in debug mode or for temporary
-// use in release mode (e.g. to CHECK on a threading issue seen only in the
-// wild).
+// Real implementation of SequenceChecker.
 //
-// Note: You should almost always use the SequenceChecker class to get the right
-// version for your build configuration.
-// Note: This is marked with "context" capability in order to support
-// thread_annotations.h.
+// In most cases, SEQUENCE_CHECKER should be used instead of this, get the right
+// implementation for the build configuration. It's possible to temporarily use
+// this directly to get sequence checking in production builds, which can be
+// handy to debug issues only seen in the field. However, when used in a
+// non-DCHECK build, SequenceCheckerImpl::CalledOnValidSequence() will not
+// consider locks as a valid way to guarantee mutual exclusion (returns false if
+// not invoked from the bound sequence, even if all calls are made under the
+// same lock).
+
+// Marked with "context" capability to support thread_annotations.h.
 class THREAD_ANNOTATION_ATTRIBUTE__(capability("context"))
     BASE_EXPORT SequenceCheckerImpl {
  public:
@@ -58,14 +66,26 @@ class THREAD_ANNOTATION_ATTRIBUTE__(capability("context"))
   void DetachFromSequence();
 
  private:
-  class Core;
+  void EnsureAssigned() const EXCLUSIVE_LOCKS_REQUIRED(lock_);
 
-  // Calls straight to ThreadLocalStorage::HasBeenDestroyed(). Exposed purely
-  // for 'friend' to work.
-  static bool HasThreadLocalStorageBeenDestroyed();
+  // Members are mutable so that `CalledOnValidSequence()` can set them.
 
   mutable Lock lock_;
-  mutable std::unique_ptr<Core> core_ GUARDED_BY(lock_);
+
+  // Stack from which this was bound (set if `EnableStackLogging()` was called).
+  mutable std::unique_ptr<debug::StackTrace> bound_at_ GUARDED_BY(lock_);
+
+  // Sequence to which this is bound.
+  mutable internal::SequenceToken sequence_token_ GUARDED_BY(lock_);
+
+#if DCHECK_IS_ON()
+  // Locks to which this is bound.
+  mutable std::vector<uintptr_t> locks_ GUARDED_BY(lock_);
+#endif  // DCHECK_IS_ON()
+
+  // Thread to which this is bound. Only used to evaluate
+  // `CalledOnValidSequence()` after TLS destruction.
+  mutable PlatformThreadRef thread_ref_ GUARDED_BY(lock_);
 };
 
 }  // namespace base

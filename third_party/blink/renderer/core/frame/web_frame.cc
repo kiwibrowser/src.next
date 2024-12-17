@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -153,14 +153,14 @@ WebFrame::WebFrame(mojom::blink::TreeScopeType scope,
   DCHECK(frame_token.value());
 }
 
-void WebFrame::Close() {}
+void WebFrame::Close(DetachReason detach_reason) {}
 
 Frame* WebFrame::ToCoreFrame(const WebFrame& frame) {
   if (auto* web_local_frame = DynamicTo<WebLocalFrameImpl>(&frame))
     return web_local_frame->GetFrame();
   if (frame.IsWebRemoteFrame())
     return To<WebRemoteFrameImpl>(frame).GetFrame();
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
   return nullptr;
 }
 

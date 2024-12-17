@@ -11,6 +11,7 @@
 #include "chrome/browser/google/google_brand.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/account_consistency_mode_manager.h"
+#include "chrome/browser/signin/chrome_signin_pref_names.h"
 #include "chrome/browser/signin/signin_promo_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -72,23 +73,50 @@ GURL GetEmbeddedReauthURLWithEmail(signin_metrics::AccessPoint access_point,
 }
 #endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
-GURL GetChromeSyncURLForDice(const std::string& email,
-                             const std::string& continue_url) {
+GURL GetChromeSyncURLForDice(ChromeSyncUrlArgs args) {
   GURL url = GaiaUrls::GetInstance()->signin_chrome_sync_dice();
-  if (!email.empty())
-    url = net::AppendQueryParameter(url, "email_hint", email);
-  if (!continue_url.empty())
-    url = net::AppendQueryParameter(url, "continue", continue_url);
+  if (!args.email.empty()) {
+    url = net::AppendQueryParameter(url, "email_hint", args.email);
+  }
+  if (!args.continue_url.is_empty()) {
+    url = net::AppendQueryParameter(url, "continue", args.continue_url.spec());
+  }
+  if (args.request_dark_scheme) {
+    url = net::AppendQueryParameter(url, "color_scheme", "dark");
+  }
+  switch (args.flow) {
+    // Default behavior.
+    case Flow::NONE:
+      break;
+    case Flow::PROMO:
+      url = net::AppendQueryParameter(url, "flow", "promo");
+      break;
+    case Flow::EMBEDDED_PROMO:
+      url = net::AppendQueryParameter(url, "flow", "embedded_promo");
+      break;
+  }
+  return url;
+}
+
+GURL GetChromeReauthURL(ChromeSyncUrlArgs args) {
+  GURL url = GaiaUrls::GetInstance()->reauth_chrome_dice();
+  if (!args.email.empty()) {
+    url = net::AppendQueryParameter(url, "Email", args.email);
+  }
+  if (!args.continue_url.is_empty()) {
+    url = net::AppendQueryParameter(url, "continue", args.continue_url.spec());
+  }
   return url;
 }
 
 GURL GetAddAccountURLForDice(const std::string& email,
-                             const std::string& continue_url) {
+                             const GURL& continue_url) {
   GURL url = GaiaUrls::GetInstance()->add_account_url();
   if (!email.empty())
     url = net::AppendQueryParameter(url, "Email", email);
-  if (!continue_url.empty())
-    url = net::AppendQueryParameter(url, "continue", continue_url);
+  if (!continue_url.is_empty()) {
+    url = net::AppendQueryParameter(url, "continue", continue_url.spec());
+  }
   return url;
 }
 
@@ -139,6 +167,10 @@ signin_metrics::Reason GetSigninReasonForEmbeddedPromoURL(const GURL& url) {
 void RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterIntegerPref(prefs::kDiceSigninUserMenuPromoCount, 0);
+  registry->RegisterIntegerPref(
+      prefs::kAutofillSignInPromoDismissCountPerProfile, 0);
+  registry->RegisterIntegerPref(prefs::kPasswordSignInPromoShownCountPerProfile,
+                                0);
 }
 
 }  // namespace signin

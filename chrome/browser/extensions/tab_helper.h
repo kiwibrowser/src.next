@@ -10,10 +10,9 @@
 #include <string>
 
 #include "base/memory/raw_ptr.h"
-#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
-#include "chrome/browser/extensions/active_tab_permission_granter.h"
+#include "chrome/browser/extensions/permissions/active_tab_permission_granter.h"
 #include "chrome/common/extensions/webstore_install_result.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
@@ -21,6 +20,7 @@
 #include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
+#include "extensions/browser/permissions_manager.h"
 #include "extensions/browser/script_executor.h"
 #include "extensions/common/extension_id.h"
 #include "extensions/common/stack_frame.h"
@@ -37,8 +37,6 @@ class Image;
 namespace extensions {
 class ExtensionActionRunner;
 class Extension;
-
-extern const char kIsPrerender2DisabledKey[];
 
 // Per-tab extension helper. Also handles non-extension apps.
 class TabHelper : public content::WebContentsObserver,
@@ -79,6 +77,14 @@ class TabHelper : public content::WebContentsObserver,
   // extension_misc::EXTENSION_ICON_SMALLISH).
   SkBitmap* GetExtensionAppIcon();
 
+  // Sets whether the tab will require a page reload for applying
+  // `site_setting`.
+  void SetReloadRequired(PermissionsManager::UserSiteSetting site_setting);
+
+  // Returns whether a page reload is required to apply the user site settings
+  // in the tab.
+  bool IsReloadRequired();
+
   ScriptExecutor* script_executor() {
     return script_executor_.get();
   }
@@ -107,8 +113,6 @@ class TabHelper : public content::WebContentsObserver,
   void RenderFrameCreated(content::RenderFrameHost* host) override;
   void DidFinishNavigation(
       content::NavigationHandle* navigation_handle) override;
-  bool OnMessageReceived(const IPC::Message& message,
-                         content::RenderFrameHost* sender) override;
   void DidCloneToNewWebContents(
       content::WebContents* old_web_contents,
       content::WebContents* new_web_contents) override;
@@ -124,11 +128,6 @@ class TabHelper : public content::WebContentsObserver,
   void OnExtensionUnloaded(content::BrowserContext* browser_context,
                            const Extension* extension,
                            UnloadedExtensionReason reason) override;
-
-  // Message handlers.
-  void OnContentScriptsExecuting(content::RenderFrameHost* host,
-                                 const ExecutingScriptsMap& extension_ids,
-                                 const GURL& on_url);
 
   // App extensions related methods:
 
@@ -160,6 +159,12 @@ class TabHelper : public content::WebContentsObserver,
   declarative_net_request::WebContentsHelper declarative_net_request_helper_;
 
   std::unique_ptr<ActiveTabPermissionGranter> active_tab_permission_granter_;
+
+  // Whether the tab needs a page reload to apply the user site settings.
+  bool reload_required_ = false;
+
+  // Extensions that have dismissed site access requests for this tab's origin.
+  std::set<ExtensionId> dismissed_extensions_;
 
   base::ScopedObservation<ExtensionRegistry, ExtensionRegistryObserver>
       registry_observation_{this};

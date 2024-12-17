@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,15 +10,17 @@
 #include "third_party/blink/renderer/core/css/resolver/cascade_expansion.h"
 
 #include "third_party/blink/renderer/core/css/properties/css_property.h"
+#include "third_party/blink/renderer/core/css/property_bitsets.h"
 #include "third_party/blink/renderer/core/css/resolver/match_result.h"
 
 namespace blink {
 
-template <class Callback>
+template <class CustomPropertyCallback, class RegularPropertyCallback>
 void ExpandCascade(const MatchedProperties& matched_properties,
                    const Document& document,
                    wtf_size_t matched_properties_index,
-                   Callback&& callback) {
+                   CustomPropertyCallback&& custom_property_callback,
+                   RegularPropertyCallback&& regular_property_callback) {
   CascadeFilter filter = CreateExpansionFilter(matched_properties);
 
   // We can't handle a MatchResult with more than 0xFFFF MatchedProperties,
@@ -37,18 +39,18 @@ void ExpandCascade(const MatchedProperties& matched_properties,
     const auto& metadata = reference.PropertyMetadata();
     CSSPropertyID id = metadata.PropertyID();
     CascadePriority priority(
-        matched_properties.types_.origin, metadata.important_,
-        matched_properties.types_.tree_order,
-        matched_properties.types_.is_inline_style,
-        matched_properties.types_.layer_order,
+        matched_properties.data_.origin, metadata.important_,
+        matched_properties.data_.tree_order,
+        matched_properties.data_.is_inline_style,
+        matched_properties.data_.is_try_style,
+        matched_properties.data_.is_try_tactics_style,
+        matched_properties.data_.layer_order,
         EncodeMatchResultPosition(matched_properties_index, property_idx));
 
     if (id == CSSPropertyID::kVariable) {
       CustomProperty custom(reference.Name().ToAtomicString(), document);
       if (!filter.Rejects(custom)) {
-        callback(priority, custom,
-                 CSSPropertyName(reference.Name().ToAtomicString()),
-                 reference.Value(), matched_properties.types_.tree_order);
+        custom_property_callback(priority, reference.Name().ToAtomicString());
       }
       // Custom properties never have visited counterparts,
       // so no need to check for expand_visited here.
@@ -60,22 +62,18 @@ void ExpandCascade(const MatchedProperties& matched_properties,
         }
         const CSSProperty& property = CSSProperty::Get(expanded_id);
         if (!filter.Rejects(property)) {
-          callback(priority, property, CSSPropertyName(expanded_id),
-                   reference.Value(), matched_properties.types_.tree_order);
+          regular_property_callback(priority, expanded_id);
         }
       }
     } else {
       const CSSProperty& property = CSSProperty::Get(id);
       if (!filter.Rejects(property)) {
-        callback(priority, property, CSSPropertyName(id), reference.Value(),
-                 matched_properties.types_.tree_order);
+        regular_property_callback(priority, id);
       }
       if (expand_visited) {
         const CSSProperty* visited_property = property.GetVisitedProperty();
         if (visited_property && !filter.Rejects(*visited_property)) {
-          callback(priority, *visited_property,
-                   visited_property->GetCSSPropertyName(), reference.Value(),
-                   matched_properties.types_.tree_order);
+          regular_property_callback(priority, visited_property->PropertyID());
         }
       }
     }

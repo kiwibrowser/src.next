@@ -2,6 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "chrome/browser/extensions/chrome_content_verifier_delegate.h"
 
 #include <algorithm>
@@ -13,12 +18,10 @@
 #include "base/command_line.h"
 #include "base/containers/contains.h"
 #include "base/metrics/field_trial.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/strings/escape.h"
-#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/syslog_logging.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "base/version.h"
 #include "build/branding_buildflags.h"
 #include "build/build_config.h"
@@ -35,6 +38,7 @@
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/management_policy.h"
 #include "extensions/browser/pref_types.h"
+#include "extensions/common/extension_id.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/extensions_client.h"
 #include "extensions/common/manifest.h"
@@ -42,7 +46,7 @@
 #include "extensions/common/switches.h"
 #include "net/base/backoff_entry.h"
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/extensions/extension_assets_manager_chromeos.h"
 #endif
 
@@ -50,9 +54,9 @@ namespace extensions {
 
 namespace {
 
-absl::optional<ChromeContentVerifierDelegate::VerifyInfo::Mode>&
+std::optional<ChromeContentVerifierDelegate::VerifyInfo::Mode>&
 GetModeForTesting() {
-  static absl::optional<ChromeContentVerifierDelegate::VerifyInfo::Mode>
+  static std::optional<ChromeContentVerifierDelegate::VerifyInfo::Mode>
       testing_mode;
   return testing_mode;
 }
@@ -60,7 +64,25 @@ GetModeForTesting() {
 const char kContentVerificationExperimentName[] =
     "ExtensionContentVerification";
 
+ChromeContentVerifierDelegate::GetVerifyInfoTestOverride::VerifyInfoCallback*
+    g_verify_info_test_callback = nullptr;
+
 }  // namespace
+
+ChromeContentVerifierDelegate::GetVerifyInfoTestOverride::
+    GetVerifyInfoTestOverride(VerifyInfoCallback callback)
+    : callback_(std::move(callback)) {
+  DCHECK_EQ(nullptr, g_verify_info_test_callback)
+      << "Nested overrides are not supported.";
+  g_verify_info_test_callback = &callback_;
+}
+
+ChromeContentVerifierDelegate::GetVerifyInfoTestOverride::
+    ~GetVerifyInfoTestOverride() {
+  DCHECK_EQ(&callback_, g_verify_info_test_callback)
+      << "Nested overrides are not supported.";
+  g_verify_info_test_callback = nullptr;
+}
 
 ChromeContentVerifierDelegate::VerifyInfo::VerifyInfo(Mode mode,
                                                       bool is_from_webstore,
@@ -77,8 +99,7 @@ ChromeContentVerifierDelegate::GetDefaultMode() {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
 #if BUILDFLAG(PLATFORM_CFM)
-  if (command_line->HasSwitch(
-          extensions::switches::kDisableAppContentVerification)) {
+  if (command_line->HasSwitch(switches::kDisableAppContentVerification)) {
     return VerifyInfo::Mode::NONE;
   }
 #endif  // BUILDFLAG(PLATFORM_CFM)
@@ -138,7 +159,7 @@ ChromeContentVerifierDelegate::GetDefaultMode() {
 
 // static
 void ChromeContentVerifierDelegate::SetDefaultModeForTesting(
-    absl::optional<VerifyInfo::Mode> mode) {
+    std::optional<VerifyInfo::Mode> mode) {
   DCHECK(!GetModeForTesting() || !mode)
       << "Verification mode already overridden, unset it first.";
   GetModeForTesting() = mode;
@@ -168,7 +189,7 @@ ContentVerifierKey ChromeContentVerifierDelegate::GetPublicKey() {
 }
 
 GURL ChromeContentVerifierDelegate::GetSignatureFetchUrl(
-    const std::string& extension_id,
+    const ExtensionId& extension_id,
     const base::Version& version) {
   // TODO(asargent) Factor out common code from the extension updater's
   // ManifestFetchData class that can be shared for use here.
@@ -187,16 +208,16 @@ GURL ChromeContentVerifierDelegate::GetSignatureFetchUrl(
 }
 
 std::set<base::FilePath> ChromeContentVerifierDelegate::GetBrowserImagePaths(
-    const extensions::Extension* extension) {
+    const Extension* extension) {
   return ExtensionsClient::Get()->GetBrowserImagePaths(extension);
 }
 
 void ChromeContentVerifierDelegate::VerifyFailed(
-    const std::string& extension_id,
+    const ExtensionId& extension_id,
     ContentVerifyJob::FailureReason reason) {
   ExtensionRegistry* registry = ExtensionRegistry::Get(context_);
   const Extension* extension =
-      registry->GetExtensionById(extension_id, ExtensionRegistry::ENABLED);
+      registry->enabled_extensions().GetByID(extension_id);
   if (!extension)
     return;
 
@@ -213,13 +234,6 @@ void ChromeContentVerifierDelegate::VerifyFailed(
 
   const VerifyInfo info = GetVerifyInfo(*extension);
 
-  SYSLOG(WARNING) << "Corruption detected in extension " << extension_id
-                  << " installed at: " << extension->path().value()
-                  << ", from webstore: " << info.is_from_webstore
-                  << ", corruption reason: " << reason
-                  << ", should be repaired: " << info.should_repair
-                  << ", extension location: " << extension->location();
-
   if (reason == ContentVerifyJob::MISSING_ALL_HASHES) {
     // If the failure was due to hashes missing, only "enforce_strict" would
     // disable the extension, but not "enforce".
@@ -229,7 +243,7 @@ void ChromeContentVerifierDelegate::VerifyFailed(
     // If a non-webstore extension has no computed hashes for content
     // verification, leave it as is for now.
     // See https://crbug.com/958794#c22 for more details.
-    // TODO(https://crbug.com/1044572): Schedule the extension for reinstall.
+    // TODO(crbug.com/40669814): Schedule the extension for reinstall.
     if (!info.is_from_webstore) {
       if (!base::Contains(would_be_reinstalled_ids_, extension_id)) {
         corrupted_extension_reinstaller->RecordPolicyReinstallReason(
@@ -241,6 +255,13 @@ void ChromeContentVerifierDelegate::VerifyFailed(
     }
   }
 
+  SYSLOG(WARNING) << "Corruption detected in extension " << extension_id
+                  << " installed at: " << extension->path().value()
+                  << ", from webstore: " << info.is_from_webstore
+                  << ", corruption reason: " << reason
+                  << ", should be repaired: " << info.should_repair
+                  << ", extension location: " << extension->location();
+
   const bool should_disable = info.mode >= VerifyInfo::Mode::ENFORCE;
   // Configuration when we should repair extension, but not disable it, is
   // invalid.
@@ -248,7 +269,6 @@ void ChromeContentVerifierDelegate::VerifyFailed(
 
   if (!should_disable) {
     if (!base::Contains(would_be_disabled_ids_, extension_id)) {
-      UMA_HISTOGRAM_BOOLEAN("Extensions.CorruptExtensionWouldBeDisabled", true);
       would_be_disabled_ids_.insert(extension_id);
     }
     return;
@@ -274,11 +294,9 @@ void ChromeContentVerifierDelegate::VerifyFailed(
 
   DCHECK(should_disable);
   service->DisableExtension(extension_id, disable_reason::DISABLE_CORRUPTED);
-  ExtensionPrefs::Get(context_)->IncrementPref(
-      extensions::kCorruptedDisableCount);
-  UMA_HISTOGRAM_BOOLEAN("Extensions.CorruptExtensionBecameDisabled", true);
-  UMA_HISTOGRAM_ENUMERATION("Extensions.CorruptExtensionDisabledReason", reason,
-                            ContentVerifyJob::FAILURE_REASON_MAX);
+  ExtensionPrefs::Get(context_)->IncrementPref(kCorruptedDisableCount);
+  base::UmaHistogramEnumeration("Extensions.CorruptExtensionDisabledReason",
+                                reason, ContentVerifyJob::FAILURE_REASON_MAX);
 }
 
 void ChromeContentVerifierDelegate::Shutdown() {}
@@ -306,6 +324,10 @@ bool ChromeContentVerifierDelegate::IsFromWebstore(
 
 ChromeContentVerifierDelegate::VerifyInfo
 ChromeContentVerifierDelegate::GetVerifyInfo(const Extension& extension) const {
+  if (g_verify_info_test_callback) {
+    return g_verify_info_test_callback->Run(extension);
+  }
+
   ManagementPolicy* management_policy =
       ExtensionSystem::Get(context_)->management_policy();
 
@@ -314,7 +336,7 @@ ChromeContentVerifierDelegate::GetVerifyInfo(const Extension& extension) const {
                        management_policy->ShouldRepairIfCorrupted(&extension);
   bool is_from_webstore = IsFromWebstore(extension);
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   if (ExtensionAssetsManagerChromeOS::IsSharedInstall(&extension)) {
     return VerifyInfo(VerifyInfo::Mode::ENFORCE_STRICT, is_from_webstore,
                       should_repair);

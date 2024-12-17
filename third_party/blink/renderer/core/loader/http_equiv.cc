@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,6 @@
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/network/http_names.h"
 #include "third_party/blink/renderer/platform/network/http_parsers.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/reporting_disposition.h"
 
@@ -56,11 +55,11 @@ void HttpEquiv::Process(Document& document,
   } else if (EqualIgnoringASCIICase(equiv, http_names::kAcceptCH)) {
     HTMLMetaElement::ProcessMetaCH(document, content,
                                    network::MetaCHType::HttpEquivAcceptCH,
-                                   is_sync_parser);
+                                   /*is_doc_preloader=*/false, is_sync_parser);
   } else if (EqualIgnoringASCIICase(equiv, http_names::kDelegateCH)) {
     HTMLMetaElement::ProcessMetaCH(document, content,
                                    network::MetaCHType::HttpEquivDelegateCH,
-                                   is_sync_parser);
+                                   /*is_doc_preloader=*/false, is_sync_parser);
   } else if (EqualIgnoringASCIICase(equiv, "content-security-policy") ||
              EqualIgnoringASCIICase(equiv,
                                     "content-security-policy-report-only")) {
@@ -97,7 +96,7 @@ void HttpEquiv::ProcessHttpEquivContentSecurityPolicy(
                                     "content-security-policy-report-only")) {
     window->GetContentSecurityPolicy()->ReportReportOnlyInMeta(content);
   } else {
-    NOTREACHED();
+    NOTREACHED_IN_MIGRATION();
   }
 }
 
@@ -118,8 +117,8 @@ void HttpEquiv::ProcessHttpEquivOriginTrial(LocalDOMWindow* window,
   // NOTE: The external script origin is not considered security-critical. See
   // the comment thread in the design doc for details:
   // https://docs.google.com/document/d/1xALH9W7rWmX0FpjudhDeS2TNTEOXuPn4Tlc9VmuPdHA/edit?disco=AAAAJyG8StI
-  Vector<String> candidate_scripts =
-      GetScriptUrlsFromCurrentStack(/*unique_url_count=*/3);
+  Vector<String> candidate_scripts = GetScriptUrlsFromCurrentStack(
+      window->GetIsolate(), /*unique_url_count=*/3);
   Vector<scoped_refptr<SecurityOrigin>> external_origins;
   for (const String& external_script : candidate_scripts) {
     KURL external_script_url(external_script);

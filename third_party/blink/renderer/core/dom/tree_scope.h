@@ -40,6 +40,7 @@
 
 namespace blink {
 
+class Animation;
 class ContainerNode;
 class CSSStyleSheet;
 class DOMSelection;
@@ -51,6 +52,10 @@ class IdTargetObserverRegistry;
 class Node;
 class SVGTreeScopeResources;
 class ScopedStyleResolver;
+class StyleSheetList;
+class CreateElementFlags;
+class QualifiedName;
+class V8UnionElementCreationOptionsOrString;
 
 // The root node of a document tree (in which case this is a Document) or of a
 // shadow tree (in which case this is a ShadowRoot). Various things, like
@@ -66,7 +71,25 @@ class CORE_EXPORT TreeScope : public GarbageCollectedMixin {
     kWebExposed = 1 << 2,
   };
 
-  TreeScope* ParentTreeScope() const { return parent_tree_scope_; }
+  // DocumentOrShadowRoot web-exposed:
+  Element* activeElement() const;
+  StyleSheetList* styleSheets() { return &StyleSheets(); }
+  V8ObservableArrayCSSStyleSheet* adoptedStyleSheets() {
+    return &EnsureAdoptedStyleSheets();
+  }
+  DOMSelection* getSelection() { return GetSelection(); }
+  HeapVector<Member<Animation>> getAnimations();
+  Element* elementFromPoint(double x, double y) {
+    return ElementFromPoint(x, y);
+  }
+  HeapVector<Member<Element>> elementsFromPoint(double x, double y) {
+    return ElementsFromPoint(x, y);
+  }
+  Element* pointerLockElement();
+  Element* fullscreenElement();
+  Element* pictureInPictureElement();
+
+  TreeScope* ParentTreeScope() const { return parent_tree_scope_.Get(); }
 
   bool IsInclusiveAncestorTreeScopeOf(const TreeScope&) const;
 
@@ -120,9 +143,11 @@ class CORE_EXPORT TreeScope : public GarbageCollectedMixin {
 
   ContainerNode& RootNode() const { return *root_node_; }
 
-  IdTargetObserverRegistry& GetIdTargetObserverRegistry() const {
-    return *id_target_observer_registry_.Get();
+  IdTargetObserverRegistry* GetIdTargetObserverRegistry() const {
+    return id_target_observer_registry_ ? id_target_observer_registry_.Get()
+                                        : nullptr;
   }
+  IdTargetObserverRegistry& EnsureIdTargetObserverRegistry();
 
   RadioButtonGroupScope& GetRadioButtonGroupScope() {
     return radio_button_group_scope_;
@@ -146,46 +171,66 @@ class CORE_EXPORT TreeScope : public GarbageCollectedMixin {
 
   SVGTreeScopeResources& EnsureSVGTreeScopedResources();
 
+  StyleSheetList& StyleSheets();
+
   V8ObservableArrayCSSStyleSheet* AdoptedStyleSheets() const {
-    return adopted_style_sheets_;
+    return adopted_style_sheets_.Get();
   }
+  V8ObservableArrayCSSStyleSheet& EnsureAdoptedStyleSheets();
   bool HasAdoptedStyleSheets() const;
   void SetAdoptedStyleSheetsForTesting(HeapVector<Member<CSSStyleSheet>>&);
   void ClearAdoptedStyleSheets();
 
+  Element* CreateElementForBinding(const AtomicString& local_name,
+                                   ExceptionState& = ASSERT_NO_EXCEPTION);
+  Element* CreateElementForBinding(
+      const AtomicString& local_name,
+      const V8UnionElementCreationOptionsOrString* string_or_options,
+      ExceptionState& exception_state);
+  Element* createElementNS(const AtomicString& namespace_uri,
+                           const AtomicString& qualified_name,
+                           ExceptionState&);
+  Element* createElementNS(
+      const AtomicString& namespace_uri,
+      const AtomicString& qualified_name,
+      const V8UnionElementCreationOptionsOrString* string_or_options,
+      ExceptionState& exception_state);
+
+  // "create an element" defined in DOM standard. This supports both of
+  // autonomous custom elements and customized built-in elements.
+  Element* CreateElement(const QualifiedName&,
+                         const CreateElementFlags,
+                         const AtomicString& is);
+
  protected:
-  explicit TreeScope(ContainerNode&,
-                     Document&,
-                     V8ObservableArrayCSSStyleSheet::SetAlgorithmCallback,
-                     V8ObservableArrayCSSStyleSheet::DeleteAlgorithmCallback);
-  explicit TreeScope(Document&,
-                     V8ObservableArrayCSSStyleSheet::SetAlgorithmCallback,
-                     V8ObservableArrayCSSStyleSheet::DeleteAlgorithmCallback);
+  TreeScope(ContainerNode&, Document&);
+  explicit TreeScope(Document&);
   virtual ~TreeScope();
 
-  void ResetTreeScope();
   void SetDocument(Document& document) { document_ = &document; }
   void SetParentTreeScope(TreeScope&);
 
-  virtual void OnAdoptedStyleSheetSet(ScriptState*,
-                                      V8ObservableArrayCSSStyleSheet&,
-                                      uint32_t,
-                                      Member<CSSStyleSheet>&,
-                                      ExceptionState&);
-  virtual void OnAdoptedStyleSheetDelete(ScriptState*,
-                                         V8ObservableArrayCSSStyleSheet&,
-                                         uint32_t,
-                                         ExceptionState&);
-
  private:
+  static void OnAdoptedStyleSheetSet(GarbageCollectedMixin*,
+                                     ScriptState*,
+                                     V8ObservableArrayCSSStyleSheet&,
+                                     uint32_t,
+                                     Member<CSSStyleSheet>&,
+                                     ExceptionState&);
+  static void OnAdoptedStyleSheetDelete(GarbageCollectedMixin*,
+                                        ScriptState*,
+                                        V8ObservableArrayCSSStyleSheet&,
+                                        uint32_t,
+                                        ExceptionState&);
+
   Element* HitTestPointInternal(Node*, HitTestPointType) const;
   Element* FindAnchorWithName(const String& name);
 
   void StyleSheetWasAdded(CSSStyleSheet* sheet);
   void StyleSheetWasRemoved(CSSStyleSheet* sheet);
 
+  subtle::UncompressedMember<Document> document_;
   Member<ContainerNode> root_node_;
-  Member<Document> document_;
   Member<TreeScope> parent_tree_scope_;
 
   Member<TreeOrderedMap> elements_by_id_;
@@ -200,6 +245,8 @@ class CORE_EXPORT TreeScope : public GarbageCollectedMixin {
   RadioButtonGroupScope radio_button_group_scope_;
 
   Member<SVGTreeScopeResources> svg_tree_scoped_resources_;
+
+  Member<StyleSheetList> style_sheet_list_;
 
   Member<V8ObservableArrayCSSStyleSheet> adopted_style_sheets_;
 };

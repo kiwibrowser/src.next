@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "base/containers/contains.h"
+#include "base/files/file_path.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -39,7 +40,6 @@ TEST(MimeUtilTest, GetWellKnownMimeTypeFromExtension) {
       {FILE_PATH_LITERAL("webm"), "video/webm"},
       {FILE_PATH_LITERAL("weba"), "audio/webm"},
       {FILE_PATH_LITERAL("avif"), "image/avif"},
-      {FILE_PATH_LITERAL("jxl"), "image/jxl"},
       {FILE_PATH_LITERAL("epub"), "application/epub+zip"},
       {FILE_PATH_LITERAL("apk"), "application/vnd.android.package-archive"},
       {FILE_PATH_LITERAL("cer"), "application/x-x509-ca-cert"},
@@ -81,7 +81,6 @@ TEST(MimeUtilTest, ExtensionTest) {
     {FILE_PATH_LITERAL("webm"), {"video/webm"}},
     {FILE_PATH_LITERAL("weba"), {"audio/webm"}},
     {FILE_PATH_LITERAL("avif"), {"image/avif"}},
-    {FILE_PATH_LITERAL("jxl"), {"image/jxl"}},
 #if BUILDFLAG(IS_CHROMEOS_ASH)
     // These are test cases for testing platform mime types on ChromeOS.
     {FILE_PATH_LITERAL("epub"), {"application/epub+zip"}},
@@ -104,7 +103,6 @@ TEST(MimeUtilTest, ExtensionTest) {
          "application/x-mpegurl",  // Chrome's secondary mapping.
          "audio/x-mpegurl",  // https://crbug.com/1273061, system override for
                              // android-arm[64]-test and Linux. Possibly more.
-         "application/vnd.apple.mpegurl",  // System override for ChromeOS.
          "audio/mpegurl",                  // System override for mac.
      }},
     {FILE_PATH_LITERAL("csv"), {"text/csv"}},
@@ -398,6 +396,65 @@ TEST(MimeUtilTest, TestParseMimeTypeWithoutParameter) {
       ParseMimeTypeWithoutParameter("text/\nplain ", nullptr, nullptr));
 }
 
+class ExtractMIMETypeTestInvalid : public testing::TestWithParam<std::string> {
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    InvalidMediaTypes,
+    ExtractMIMETypeTestInvalid,
+    testing::Values(
+        // Fails because it doesn't contain '/'.
+        "a",
+        "application",
+        // Space is not HTTP token code point.
+        //  https://mimesniff.spec.whatwg.org/#http-token-code-point
+        // U+2003, EM SPACE (UTF-8: E2 80 83).
+        "\xE2\x80\x83text/html",
+        "text\xE2\x80\x83/html",
+        "text / html",
+        "t e x t / h t m l",
+        "text\r\n/\nhtml",
+        "text\n/\nhtml",
+        ", text/html",
+        "; text/html"));
+
+TEST_P(ExtractMIMETypeTestInvalid, MustFail) {
+  // Parsing is expected to fail.
+  EXPECT_EQ(std::nullopt, net::ExtractMimeTypeFromMediaType(GetParam(), true));
+}
+
+class ExtractMIMETypeTestValid : public testing::TestWithParam<std::string> {};
+
+INSTANTIATE_TEST_SUITE_P(
+    ValidMediaTypes,
+    ExtractMIMETypeTestValid,
+    testing::Values("text/html",
+                    "text/html; charset=iso-8859-1",
+                    // Quoted charset parameter.
+                    "text/html; charset=\"quoted\"",
+                    // Multiple parameters.
+                    "text/html; charset=x; foo=bar",
+                    // OWSes are trimmed.
+                    " text/html   ",
+                    "\ttext/html \t",
+                    "text/html ; charset=iso-8859-1"
+                    // Non-standard multiple type/subtype listing using a comma
+                    // as a separator is accepted.
+                    "text/html,text/plain",
+                    "text/html , text/plain",
+                    "text/html\t,\ttext/plain",
+                    "text/html,text/plain;charset=iso-8859-1",
+                    "\r\ntext/html\r\n",
+                    "text/html;wow",
+                    "text/html;;;;;;",
+                    "text/html; = = = "));
+
+TEST_P(ExtractMIMETypeTestValid, MustSucceed) {
+  //  net::ExtractMIMETypeFromMediaType parses well-formed headers correctly.
+  EXPECT_EQ("text/html",
+            net::ExtractMimeTypeFromMediaType(GetParam(), true).value_or(""));
+}
+
 TEST(MimeUtilTest, TestIsValidTopLevelMimeType) {
   EXPECT_TRUE(IsValidTopLevelMimeType("application"));
   EXPECT_TRUE(IsValidTopLevelMimeType("audio"));
@@ -440,7 +497,6 @@ TEST(MimeUtilTest, TestGetExtensionsForMimeType) {
       {"MeSsAge/*", 1, "eml"},
       {"message/", 0, nullptr, true},
       {"image/avif", 1, "avif"},
-      {"image/jxl", 1, "jxl"},
       {"image/bmp", 1, "bmp"},
       {"video/*", 6, "mp4"},
       {"video/*", 6, "mpeg"},
@@ -457,12 +513,8 @@ TEST(MimeUtilTest, TestGetExtensionsForMimeType) {
       ASSERT_EQ(0u, extensions.size());
 
     if (test.contained_result) {
-      // Convert ASCII to FilePath::StringType.
-      base::FilePath::StringType contained_result(
-          test.contained_result,
-          test.contained_result + strlen(test.contained_result));
-
-      bool found = base::Contains(extensions, contained_result);
+      bool found = base::Contains(
+          extensions, base::FilePath::FromASCII(test.contained_result).value());
 
       ASSERT_TRUE(found) << "Must find at least the contained result within "
                          << test.mime_type;

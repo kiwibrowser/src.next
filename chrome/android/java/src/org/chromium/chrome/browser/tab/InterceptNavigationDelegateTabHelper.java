@@ -7,20 +7,24 @@ package org.chromium.chrome.browser.tab;
 import org.chromium.base.UserData;
 import org.chromium.components.external_intents.InterceptNavigationDelegateImpl;
 
-/**
- * Class that glues InterceptNavigationDelegateImpl objects to Tabs.
- */
+/** Class that glues InterceptNavigationDelegateImpl objects to Tabs. */
 public class InterceptNavigationDelegateTabHelper implements UserData {
     private static final Class<InterceptNavigationDelegateTabHelper> USER_DATA_KEY =
             InterceptNavigationDelegateTabHelper.class;
 
-    private final InterceptNavigationDelegateImpl mInterceptNavigationDelegate;
-    private final InterceptNavigationDelegateClientImpl mInterceptNavigationDelegateClient;
+    private InterceptNavigationDelegateImpl mInterceptNavigationDelegate;
+    private InterceptNavigationDelegateClientImpl mInterceptNavigationDelegateClient;
+
+    public static void setDelegateForTesting(Tab tab, InterceptNavigationDelegateImpl delegate) {
+        InterceptNavigationDelegateTabHelper helper =
+                tab.getUserDataHost().getUserData(USER_DATA_KEY);
+        helper.mInterceptNavigationDelegate = delegate;
+    }
 
     public static void createForTab(Tab tab) {
         assert get(tab) == null;
-        tab.getUserDataHost().setUserData(
-                USER_DATA_KEY, new InterceptNavigationDelegateTabHelper(tab));
+        tab.getUserDataHost()
+                .setUserData(USER_DATA_KEY, new InterceptNavigationDelegateTabHelper(tab));
     }
 
     public static InterceptNavigationDelegateImpl get(Tab tab) {

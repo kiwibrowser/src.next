@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,12 +13,11 @@ namespace blink {
 enum class SubtreePaintPropertyUpdateReason : unsigned {
   kNone = 0,
   kContainerChainMayChange = 1 << 0,
-  kFragmentsChanged = 1 << 1,
-  kPreviouslySkipped = 1 << 2,
-  kPrinting = 1 << 3,
-  kTransformStyleChanged = 1 << 4
+  kPreviouslySkipped = 1 << 1,
+  kPrinting = 1 << 2,
+  kTransformStyleChanged = 1 << 3
 };
-enum { kSubtreePaintPropertyUpdateReasonsBitfieldWidth = 5 };
+enum { kSubtreePaintPropertyUpdateReasonsBitfieldWidth = 4 };
 
 PLATFORM_EXPORT String
 SubtreePaintPropertyUpdateReasonsToString(unsigned bitmask);

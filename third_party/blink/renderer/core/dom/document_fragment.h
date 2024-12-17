@@ -32,19 +32,22 @@
 
 namespace blink {
 
+class DocumentPartRoot;
+
 class CORE_EXPORT DocumentFragment : public ContainerNode {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   static DocumentFragment* Create(Document&);
 
-  DocumentFragment(Document*, ConstructionType = kCreateContainer);
+  DocumentFragment(Document*, ConstructionType);
 
   void ParseHTML(const String&,
                  Element* context_element,
                  ParserContentPolicy = kAllowScriptingContent);
   bool ParseXML(const String&,
                 Element* context_element,
+                ExceptionState& exception_state,
                 ParserContentPolicy = kAllowScriptingContent);
 
   bool CanContainRangeEndPoint() const final { return true; }
@@ -53,13 +56,24 @@ class CORE_EXPORT DocumentFragment : public ContainerNode {
   // This will catch anyone doing an unnecessary check.
   bool IsDocumentFragment() const = delete;
 
+  // https://crbug.com/1453291
+  // The DOM Parts API:
+  // https://github.com/WICG/webcomponents/blob/gh-pages/proposals/DOM-Parts.md.
+  DocumentPartRoot& getPartRoot();
+
+  void Trace(Visitor* visitor) const override;
+
  protected:
   String nodeName() const final;
 
  private:
-  NodeType getNodeType() const final;
-  Node* Clone(Document&, CloneChildrenFlag) const override;
+  Node* Clone(Document& factory,
+              NodeCloningData& data,
+              ContainerNode* append_to,
+              ExceptionState& append_exception_state) const override;
   bool ChildTypeAllowed(NodeType) const override;
+
+  Member<DocumentPartRoot> document_part_root_;
 };
 
 template <>

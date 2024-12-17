@@ -1,8 +1,6 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
-#include "third_party/blink/renderer/core/layout/layout_object.h"
 
 #include "third_party/blink/renderer/core/css/resolver/style_adjuster.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
@@ -10,13 +8,15 @@
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/layout/layout_custom_scrollbar_part.h"
 #include "third_party/blink/renderer/core/layout/layout_multi_column_spanner_placeholder.h"
+#include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_object_inl.h"
-#include "third_party/blink/renderer/core/layout/ng/inline/layout_ng_text_combine.h"
-#include "third_party/blink/renderer/core/layout/ng/layout_ng_block_flow.h"
+#include "third_party/blink/renderer/core/layout/layout_text.h"
+#include "third_party/blink/renderer/core/layout/layout_text_combine.h"
 
 namespace blink {
 
 void LayoutObject::Trace(Visitor* visitor) const {
+  visitor->Trace(style_);
   visitor->Trace(node_);
   visitor->Trace(parent_);
   visitor->Trace(previous_);
@@ -79,16 +79,18 @@ LayoutObject* LayoutObject::Container(AncestorSkipInfo* skip_info) const {
   return Parent();
 }
 
-LayoutBox* LayoutObject::EnclosingScrollableBox() const {
+LayoutBox* LayoutObject::DeprecatedEnclosingScrollableBox() const {
   NOT_DESTROYED();
+  DCHECK(!RuntimeEnabledFeatures::IntersectionOptimizationEnabled());
   for (LayoutObject* ancestor = Parent(); ancestor;
        ancestor = ancestor->Parent()) {
     if (!ancestor->IsBox())
       continue;
 
     auto* ancestor_box = To<LayoutBox>(ancestor);
-    if (ancestor_box->CanBeScrolledAndHasScrollableArea())
+    if (ancestor_box->IsUserScrollable()) {
       return ancestor_box;
+    }
   }
 
   return nullptr;
@@ -97,21 +99,21 @@ LayoutBox* LayoutObject::EnclosingScrollableBox() const {
 void LayoutObject::SetNeedsOverflowRecalc(
     OverflowRecalcType overflow_recalc_type) {
   NOT_DESTROYED();
-  if (UNLIKELY(IsLayoutFlowThread())) {
+  if (IsLayoutFlowThread()) [[unlikely]] {
     // If we're a flow thread inside an NG multicol container, just redirect to
     // the multicol container, since the overflow recalculation walks down the
     // NG fragment tree, and the flow thread isn't represented there.
-    if (auto* multicol_container = DynamicTo<LayoutNGBlockFlow>(Parent())) {
+    if (auto* multicol_container = DynamicTo<LayoutBlockFlow>(Parent())) {
       multicol_container->SetNeedsOverflowRecalc(overflow_recalc_type);
       return;
     }
   }
-  bool mark_container_chain_layout_overflow_recalc =
-      !SelfNeedsLayoutOverflowRecalc();
+  bool mark_container_chain_scrollable_overflow_recalc =
+      !SelfNeedsScrollableOverflowRecalc();
 
   if (overflow_recalc_type ==
       OverflowRecalcType::kLayoutAndVisualOverflowRecalc) {
-    SetSelfNeedsLayoutOverflowRecalc();
+    SetSelfNeedsScrollableOverflowRecalc();
   }
 
   DCHECK(overflow_recalc_type ==
@@ -121,7 +123,7 @@ void LayoutObject::SetNeedsOverflowRecalc(
   SetShouldCheckForPaintInvalidation();
   MarkSelfPaintingLayerForVisualOverflowRecalc();
 
-  if (mark_container_chain_layout_overflow_recalc) {
+  if (mark_container_chain_scrollable_overflow_recalc) {
     MarkContainerChainForOverflowRecalcIfNeeded(
         overflow_recalc_type ==
         OverflowRecalcType::kLayoutAndVisualOverflowRecalc);
@@ -146,21 +148,13 @@ void LayoutObject::PropagateStyleToAnonymousChildren() {
     if (child->AnonymousHasStylePropagationOverride())
       continue;
 
-    scoped_refptr<ComputedStyle> new_style =
-        GetDocument().GetStyleResolver().CreateAnonymousStyleWithDisplay(
+    ComputedStyleBuilder new_style_builder =
+        GetDocument().GetStyleResolver().CreateAnonymousStyleBuilderWithDisplay(
             StyleRef(), child->StyleRef().Display());
 
-    // Preserve the position style of anonymous block continuations as they can
-    // have relative position when they contain block descendants of relative
-    // positioned inlines.
-    auto* child_block_flow = DynamicTo<LayoutBlockFlow>(child);
-    if (child->IsInFlowPositioned() && child_block_flow &&
-        child_block_flow->IsAnonymousBlockContinuation())
-      new_style->SetPosition(child->StyleRef().GetPosition());
-
-    if (UNLIKELY(IsA<LayoutNGTextCombine>(child))) {
-      if (new_style->IsHorizontalWritingMode()) {
-        // |LayoutNGTextCombine| will be removed when recalculating style for
+    if (IsA<LayoutTextCombine>(child)) [[unlikely]] {
+      if (blink::IsHorizontalWritingMode(new_style_builder.GetWritingMode())) {
+        // |LayoutTextCombine| will be removed when recalculating style for
         // <br> or <wbr>.
         // See StyleToHorizontalWritingModeWithWordBreak
         DCHECK(child->SlowFirstChild()->IsBR() ||
@@ -168,13 +162,13 @@ void LayoutObject::PropagateStyleToAnonymousChildren() {
                child->SlowFirstChild()->GetNode()->NeedsReattachLayoutTree());
       } else {
         // "text-combine-width-after-style-change.html" reaches here.
-        StyleAdjuster::AdjustStyleForTextCombine(*new_style);
+        StyleAdjuster::AdjustStyleForTextCombine(new_style_builder);
       }
     }
 
-    UpdateAnonymousChildStyle(child, *new_style);
+    UpdateAnonymousChildStyle(child, new_style_builder);
 
-    child->SetStyle(std::move(new_style));
+    child->SetStyle(new_style_builder.TakeStyle());
   }
 
   PseudoId pseudo_id = StyleRef().StyleType();
@@ -205,7 +199,7 @@ void LayoutObject::PropagateStyleToAnonymousChildren() {
       continue;
     }
     if (child->IsText() || child->IsQuote() || child->IsImage())
-      child->SetPseudoElementStyle(Style());
+      child->SetPseudoElementStyle(*this);
     child = child->NextInPreOrder(this);
   }
 }

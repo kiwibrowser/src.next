@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "base/task/sequenced_task_runner.h"
 #include "base/test/bind.h"
 #include "build/build_config.h"
 #include "content/public/browser/browser_context.h"
@@ -15,6 +16,7 @@
 #include "content/public/common/content_client.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/content_browser_test.h"
+#include "content/public/test/content_browser_test_content_browser_client.h"
 #include "content/public/test/simple_url_loader_test_helper.h"
 #include "content/public/test/url_loader_interceptor.h"
 #include "content/shell/browser/shell.h"
@@ -26,6 +28,7 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 #include "services/network/public/mojom/network_service.mojom.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
@@ -52,7 +55,7 @@ class StoragePartitionImplBrowsertest : public ContentBrowserTest {
  private:
 };
 
-class ClientCertBrowserClient : public ContentBrowserClient {
+class ClientCertBrowserClient : public ContentBrowserTestContentBrowserClient {
  public:
   explicit ClientCertBrowserClient(
       base::OnceClosure select_certificate_callback,
@@ -69,6 +72,8 @@ class ClientCertBrowserClient : public ContentBrowserClient {
   // dialog. The callback simulates Android's cancellation callback by deleting
   // |delegate|.
   base::OnceClosure SelectClientCertificate(
+      BrowserContext* browser_context,
+      int process_id,
       WebContents* web_contents,
       net::SSLCertRequestInfo* cert_request_info,
       net::ClientCertIdentityList client_certs,
@@ -102,11 +107,6 @@ class ClientCertBrowserTest : public ContentBrowserTest {
     https_test_server_.ServeFilesFromSourceDirectory(GetTestDataFilePath());
   }
 
-  ~ClientCertBrowserTest() override {
-    // This is to avoid having a dangling pointer in `ContentClient`.
-    content::SetBrowserClientForTesting(nullptr);
-  }
-
  protected:
   void SetUpOnMainThread() override {
     ContentBrowserTest::SetUpOnMainThread();
@@ -117,8 +117,6 @@ class ClientCertBrowserTest : public ContentBrowserTest {
     client_ = std::make_unique<ClientCertBrowserClient>(
         select_certificate_run_loop_->QuitClosure(),
         delete_delegate_run_loop_->QuitClosure());
-
-    content::SetBrowserClientForTesting(client_.get());
   }
 
   net::EmbeddedTestServer https_test_server_;
@@ -140,7 +138,7 @@ std::unique_ptr<network::SimpleURLLoader> DownloadUrl(
   SimpleURLLoaderTestHelper url_loader_helper;
   url_loader->DownloadToString(
       partition->GetURLLoaderFactoryForBrowserProcess().get(),
-      url_loader_helper.GetCallback(),
+      url_loader_helper.GetCallbackDeprecated(),
       /*max_body_size=*/1024 * 1024);
   url_loader_helper.WaitForCallback();
   return url_loader;
@@ -170,7 +168,7 @@ IN_PROC_BROWSER_TEST_F(StoragePartitionImplBrowsertest, NetworkContext) {
       network::mojom::URLLoaderFactoryParams::New();
   params->process_id = network::mojom::kBrowserProcessId;
   params->automatically_assign_isolation_info = true;
-  params->is_corb_enabled = false;
+  params->is_orb_enabled = false;
   mojo::Remote<network::mojom::URLLoaderFactory> loader_factory;
   shell()
       ->web_contents()

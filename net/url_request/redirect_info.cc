@@ -4,6 +4,10 @@
 
 #include "net/url_request/redirect_info.h"
 
+#include <string_view>
+
+#include "base/containers/adapters.h"
+#include "base/containers/fixed_flat_map.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -37,64 +41,13 @@ std::string ComputeMethodForRedirect(const std::string& method,
 // policy that should be used for the request.
 ReferrerPolicy ProcessReferrerPolicyHeaderOnRedirect(
     ReferrerPolicy original_referrer_policy,
-    const absl::optional<std::string>& referrer_policy_header) {
-  ReferrerPolicy new_policy = original_referrer_policy;
-  std::vector<base::StringPiece> policy_tokens;
+    const std::optional<std::string>& referrer_policy_header) {
   if (referrer_policy_header) {
-    policy_tokens = base::SplitStringPiece(*referrer_policy_header, ",",
-                                           base::TRIM_WHITESPACE,
-                                           base::SPLIT_WANT_NONEMPTY);
+    return ReferrerPolicyFromHeader(referrer_policy_header.value())
+        .value_or(original_referrer_policy);
   }
 
-  // Per https://w3c.github.io/webappsec-referrer-policy/#unknown-policy-values,
-  // use the last recognized policy value, and ignore unknown policies.
-  for (const auto& token : policy_tokens) {
-    if (base::CompareCaseInsensitiveASCII(token, "no-referrer") == 0) {
-      new_policy = ReferrerPolicy::NO_REFERRER;
-      continue;
-    }
-
-    if (base::CompareCaseInsensitiveASCII(token,
-                                          "no-referrer-when-downgrade") == 0) {
-      new_policy = ReferrerPolicy::CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE;
-      continue;
-    }
-
-    if (base::CompareCaseInsensitiveASCII(token, "origin") == 0) {
-      new_policy = ReferrerPolicy::ORIGIN;
-      continue;
-    }
-
-    if (base::CompareCaseInsensitiveASCII(token, "origin-when-cross-origin") ==
-        0) {
-      new_policy = ReferrerPolicy::ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN;
-      continue;
-    }
-
-    if (base::CompareCaseInsensitiveASCII(token, "unsafe-url") == 0) {
-      new_policy = ReferrerPolicy::NEVER_CLEAR;
-      continue;
-    }
-
-    if (base::CompareCaseInsensitiveASCII(token, "same-origin") == 0) {
-      new_policy = ReferrerPolicy::CLEAR_ON_TRANSITION_CROSS_ORIGIN;
-      continue;
-    }
-
-    if (base::CompareCaseInsensitiveASCII(token, "strict-origin") == 0) {
-      new_policy =
-          ReferrerPolicy::ORIGIN_CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE;
-      continue;
-    }
-
-    if (base::CompareCaseInsensitiveASCII(
-            token, "strict-origin-when-cross-origin") == 0) {
-      new_policy =
-          ReferrerPolicy::REDUCE_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN;
-      continue;
-    }
-  }
-  return new_policy;
+  return original_referrer_policy;
 }
 
 }  // namespace
@@ -114,7 +67,7 @@ RedirectInfo RedirectInfo::ComputeRedirectInfo(
     const std::string& original_referrer,
     int http_status_code,
     const GURL& new_location,
-    const absl::optional<std::string>& referrer_policy_header,
+    const std::optional<std::string>& referrer_policy_header,
     bool insecure_scheme_was_upgraded,
     bool copy_fragment,
     bool is_signed_exchange_fallback_redirect) {

@@ -194,8 +194,9 @@ template <class NodeType>
 inline Node* NodeTraversal::TraverseNextTemplate(NodeType& current) {
   if (current.hasChildren())
     return current.firstChild();
-  if (current.nextSibling())
+  if (current.HasNextSibling()) {
     return current.nextSibling();
+  }
   return NextAncestorSibling(current);
 }
 
@@ -206,14 +207,16 @@ inline Node* NodeTraversal::TraverseNextTemplate(NodeType& current,
     return current.firstChild();
   if (current == stay_within)
     return nullptr;
-  if (current.nextSibling())
+  if (current.HasNextSibling()) {
     return current.nextSibling();
+  }
   return NextAncestorSibling(current, stay_within);
 }
 
 inline Node* NodeTraversal::NextSkippingChildren(const Node& current) {
-  if (current.nextSibling())
+  if (current.HasNextSibling()) {
     return current.nextSibling();
+  }
   return NextAncestorSibling(current);
 }
 
@@ -221,15 +224,22 @@ inline Node* NodeTraversal::NextSkippingChildren(const Node& current,
                                                  const Node* stay_within) {
   if (current == stay_within)
     return nullptr;
-  if (current.nextSibling())
+  if (current.HasNextSibling()) {
     return current.nextSibling();
+  }
   return NextAncestorSibling(current, stay_within);
 }
 
+// Note that `HighestAncestorOrSelf` is used most commonly in `RemovedFrom` and
+// `InsertedInfo`, during which `current.isConnected()` hasn't yet been
+// updated to its new state. Which means `HighestAncestorOrSelf` cannot use
+// `current.TreeRoot()` because it might return the root of the old tree,
+// rather than the highest ancestor of the newly-removed/inserted node.
 inline Node& NodeTraversal::HighestAncestorOrSelf(const Node& current) {
   Node* highest = const_cast<Node*>(&current);
-  while (highest->parentNode())
+  while (highest->parentNode()) {
     highest = highest->parentNode();
+  }
   return *highest;
 }
 

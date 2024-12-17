@@ -2,77 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {dedupingMixin, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {assert, assertNotReached} from '//resources/js/assert.js';
+import type {PolymerElement} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {dedupingMixin} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {assert, assertNotReached} from '../js/assert.m.js';
-import {isMac} from '../js/cr.m.js';
-import {KeyboardShortcutList} from '../js/cr/ui/keyboard_shortcut_list.js';
-import {isTextInputElement} from '../js/util.m.js';
-
-/**
- * @fileoverview Listens for a find keyboard shortcut (i.e. Ctrl/Cmd+f or /)
- * and keeps track of an stack of potential listeners. Only the listener at the
- * top of the stack will be notified that a find shortcut has been invoked.
- */
-
-export const FindShortcutManager = (() => {
-  /**
-   * Stack of listeners. Only the top listener will handle the shortcut.
-   */
-  const listeners: FindShortcutMixinInterface[] = [];
-
-  /**
-   * Tracks if any modal context is open in settings. This assumes only one
-   * modal can be open at a time. The modals that are being tracked include
-   * cr-dialog and cr-drawer.
-   * @type {boolean}
-   */
-  let modalContextOpen = false;
-
-  const shortcutCtrlF = new KeyboardShortcutList(isMac ? 'meta|f' : 'ctrl|f');
-  const shortcutSlash = new KeyboardShortcutList('/');
-
-  window.addEventListener('keydown', e => {
-    if (e.defaultPrevented || listeners.length === 0) {
-      return;
-    }
-
-    if (!shortcutCtrlF.matchesEvent(e) &&
-        (isTextInputElement(e.composedPath()[0] as Element) ||
-         !shortcutSlash.matchesEvent(e))) {
-      return;
-    }
-
-    const focusIndex =
-        listeners.findIndex(listener => listener.searchInputHasFocus());
-    // If no listener has focus or the first (outer-most) listener has focus,
-    // try the last (inner-most) listener.
-    // If a listener has a search input with focus, the next listener that
-    // should be called is the right before it in |listeners| such that the
-    // goes from inner-most to outer-most.
-    const index = focusIndex <= 0 ? listeners.length - 1 : focusIndex - 1;
-    if (listeners[index]!.handleFindShortcut(modalContextOpen)) {
-      e.preventDefault();
-    }
-  });
-
-  window.addEventListener('cr-dialog-open', () => {
-    modalContextOpen = true;
-  });
-
-  window.addEventListener('cr-drawer-opened', () => {
-    modalContextOpen = true;
-  });
-
-  window.addEventListener('close', e => {
-    if (['CR-DIALOG', 'CR-DRAWER'].includes(
-            (e.composedPath()[0] as Element).nodeName)) {
-      modalContextOpen = false;
-    }
-  });
-
-  return Object.freeze({listeners: listeners});
-})();
+import {FindShortcutManager} from './find_shortcut_manager.js';
+import type {FindShortcutListener} from './find_shortcut_manager.js';
 
 type Constructor<T> = new (...args: any[]) => T;
 
@@ -81,9 +16,9 @@ type Constructor<T> = new (...args: any[]) => T;
  */
 export const FindShortcutMixin = dedupingMixin(
     <T extends Constructor<PolymerElement>>(superClass: T): T&
-    Constructor<FindShortcutMixinInterface> => {
+    Constructor<FindShortcutListener> => {
       class FindShortcutMixin extends superClass implements
-          FindShortcutMixinInterface {
+          FindShortcutListener {
         findShortcutListenOnAttach: boolean = true;
 
         override connectedCallback() {
@@ -108,8 +43,12 @@ export const FindShortcutMixin = dedupingMixin(
           listeners.push(this);
         }
 
+        private handleFindShortcutInternal_() {
+          assertNotReached('Must override handleFindShortcut()');
+        }
+
         handleFindShortcut(_modalContextOpen: boolean) {
-          assertNotReached();
+          this.handleFindShortcutInternal_();
           return false;
         }
 
@@ -120,22 +59,15 @@ export const FindShortcutMixin = dedupingMixin(
           listeners.splice(index, 1);
         }
 
+        private searchInputHasFocusInternal_() {
+          assertNotReached('Must override searchInputHasFocus()');
+        }
+
         searchInputHasFocus() {
-          assertNotReached();
+          this.searchInputHasFocusInternal_();
           return false;
         }
       }
 
       return FindShortcutMixin;
     });
-
-export interface FindShortcutMixinInterface {
-  findShortcutListenOnAttach: boolean;
-  becomeActiveFindShortcutListener(): void;
-
-  /** If handled, return true. */
-  handleFindShortcut(modalContextOpen: boolean): boolean;
-
-  removeSelfAsFindShortcutListener(): void;
-  searchInputHasFocus(): boolean;
-}

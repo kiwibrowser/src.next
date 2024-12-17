@@ -5,44 +5,41 @@
 #ifndef CONTENT_BROWSER_NETWORK_SERVICE_INSTANCE_IMPL_H_
 #define CONTENT_BROWSER_NETWORK_SERVICE_INSTANCE_IMPL_H_
 
-#include "base/callback.h"
-#include "base/callback_list.h"
-#include "content/common/content_export.h"
+#include <stdint.h>
 
-namespace base {
-class TimeDelta;
-}
+#include "base/callback_list.h"
+#include "base/command_line.h"
+#include "base/functional/callback.h"
+#include "content/common/content_export.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "services/cert_verifier/public/mojom/cert_verifier_service_factory.mojom-forward.h"
+#include "services/network/public/mojom/cert_verifier_service_updater.mojom-forward.h"
+#include "services/network/public/mojom/network_context.mojom-forward.h"
 
 namespace content {
 
 // Creates the network::NetworkService object on the IO thread directly instead
 // of trying to go through the ServiceManager.
+// This also calls ForceInProcessNetworkService().
 CONTENT_EXPORT void ForceCreateNetworkServiceDirectlyForTesting();
 
 // Resets the interface ptr to the network service.
 CONTENT_EXPORT void ResetNetworkServiceForTesting();
 
+using NetworkServiceProcessGoneHandler =
+    base::RepeatingCallback<void(bool crashed)>;
+
 // Registers |handler| to run (on UI thread) after mojo::Remote<NetworkService>
-// encounters an error.  Note that there are no ordering guarantees wrt error
+// encounters an error, in which case `crashed` will be true, or after the
+// NetworkService is purposely restarted by the browser, in which case `crashed`
+// will be false.  Note that there are no ordering guarantees wrt error
 // handlers for other interfaces (e.g. mojo::Remote<NetworkContext> and/or
 // mojo::Remote<URLLoaderFactory>).
 //
 // Can only be called on the UI thread.  No-op if NetworkService is disabled.
 CONTENT_EXPORT base::CallbackListSubscription
-RegisterNetworkServiceCrashHandler(base::RepeatingClosure handler);
-
-// Corresponds to the "NetworkServiceAvailability" histogram enumeration type in
-// src/tools/metrics/histograms/enums.xml.
-//
-// DO NOT REORDER OR CHANGE THE MEANING OF THESE VALUES.
-enum class NetworkServiceAvailability {
-  AVAILABLE = 0,
-  NOT_CREATED = 1,
-  NOT_BOUND = 2,
-  ENCOUNTERED_ERROR = 3,
-  NOT_RESPONDING = 4,
-  kMaxValue = NOT_RESPONDING
-};
+RegisterNetworkServiceProcessGoneHandler(
+    NetworkServiceProcessGoneHandler handler);
 
 constexpr char kSSLKeyLogFileHistogram[] = "Net.SSLKeyLogFileUse";
 
@@ -55,16 +52,29 @@ enum class SSLKeyLogFileAction {
   kMaxValue = kEnvVarFound,
 };
 
-// TODO(http://crbug.com/934317): Remove these when done debugging renderer
-// hangs.
-NetworkServiceAvailability GetNetworkServiceAvailability();
-base::TimeDelta GetTimeSinceLastNetworkServiceCrash();
-void PingNetworkService(base::OnceClosure closure);
-
 // Shuts down the in-process network service or disconnects from the out-of-
 // process one, allowing it to shut down.
 CONTENT_EXPORT void ShutDownNetworkService();
 
+// `on_restart` will be called at the end of every RestartNetworkService().
+CONTENT_EXPORT void OnRestartNetworkServiceForTesting(
+    base::RepeatingClosure on_restart);
+
+// Returns a CertVerifierParams that can be placed into a new
+// network::mojom::NetworkContextParams.
+//
+// Like |GetCertVerifierParams| but the |cert_verifier_updater_remote| pipe
+// passed in can be used to update the returned CertVerifierService with new
+// verification parameters.
+CONTENT_EXPORT network::mojom::CertVerifierServiceRemoteParamsPtr
+GetCertVerifierParamsWithUpdater(
+    cert_verifier::mojom::CertVerifierCreationParamsPtr
+        cert_verifier_creation_params,
+    mojo::PendingReceiver<cert_verifier::mojom::CertVerifierServiceUpdater>
+        cert_verifier_updater_remote);
+
+CONTENT_EXPORT uint64_t GetNetLogMaximumFileSizeFromCommandLineForTesting(
+    const base::CommandLine& command_line);
 }  // namespace content
 
 #endif  // CONTENT_BROWSER_NETWORK_SERVICE_INSTANCE_IMPL_H_

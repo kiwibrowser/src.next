@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-#include "base/callback_forward.h"
+#include "base/functional/callback_forward.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
@@ -28,8 +28,8 @@
 #include "components/history/core/browser/url_row.h"
 #include "components/history/core/browser/web_history_service.h"
 #include "components/history/core/browser/web_history_service_observer.h"
-#include "components/sync/driver/sync_service.h"
-#include "components/sync/driver/sync_service_observer.h"
+#include "components/sync/service/sync_service.h"
+#include "components/sync/service/sync_service_observer.h"
 #include "url/gurl.h"
 
 FORWARD_DECLARE_TEST(BrowsingHistoryHandlerTest, ObservingWebHistoryDeletions);
@@ -69,7 +69,8 @@ class BrowsingHistoryService : public HistoryServiceObserver,
                  bool blocked_visit,
                  const GURL& remote_icon_url_for_uma,
                  int visit_count,
-                 int typed_count);
+                 int typed_count,
+                 std::optional<std::string> app_id);
     HistoryEntry();
     HistoryEntry(const HistoryEntry& other);
     virtual ~HistoryEntry();
@@ -113,6 +114,10 @@ class BrowsingHistoryService : public HistoryServiceObserver,
 
     // Number of times this URL has been manually entered in the URL bar.
     int typed_count = 0;
+
+    // ID of the app this entry was generated for. Set to a non-null value
+    // on Android only.
+    std::optional<std::string> app_id;
   };
 
   // Contains information about a completed history query.
@@ -149,6 +154,12 @@ class BrowsingHistoryService : public HistoryServiceObserver,
   virtual void QueryHistory(const std::u16string& search_text,
                             const QueryOptions& options);
 
+  // Fetch all the app IDs used in the database.
+  void GetAllAppIds();
+
+  // Callback invoked when the app ID fetching task is completed.
+  void OnGetAllAppIds(GetAllAppIdsResult result);
+
   // Gets a version of the last time any webpage on the given host was visited,
   // by using the min("last navigation time", x minutes ago) as the upper bound
   // of the GetLastVisitToHost query. This is done in order to provide the user
@@ -166,6 +177,7 @@ class BrowsingHistoryService : public HistoryServiceObserver,
 
   // SyncServiceObserver implementation.
   void OnStateChanged(syncer::SyncService* sync) override;
+  void OnSyncShutdown(syncer::SyncService* sync) override;
 
  protected:
   // Constructor that allows specifying more dependencies for unit tests.
@@ -224,10 +236,11 @@ class BrowsingHistoryService : public HistoryServiceObserver,
   void WebHistoryTimeout(scoped_refptr<QueryHistoryState> state);
 
   // Callback from the WebHistoryService when a query has completed.
-  void WebHistoryQueryComplete(scoped_refptr<QueryHistoryState> state,
-                               base::Time start_time,
-                               WebHistoryService::Request* request,
-                               const base::Value* results_value);
+  void WebHistoryQueryComplete(
+      scoped_refptr<QueryHistoryState> state,
+      base::Time start_time,
+      WebHistoryService::Request* request,
+      base::optional_ref<const base::Value::Dict> results_dict);
 
   // Callback telling us whether other forms of browsing history were found
   // on the history server.
@@ -241,8 +254,8 @@ class BrowsingHistoryService : public HistoryServiceObserver,
   void RemoveWebHistoryComplete(bool success);
 
   // HistoryServiceObserver implementation.
-  void OnURLsDeleted(HistoryService* history_service,
-                     const DeletionInfo& deletion_info) override;
+  void OnHistoryDeletions(HistoryService* history_service,
+                          const DeletionInfo& deletion_info) override;
 
   // WebHistoryServiceObserver implementation.
   void OnWebHistoryDeleted() override;
@@ -254,14 +267,11 @@ class BrowsingHistoryService : public HistoryServiceObserver,
   // Deleting the request will cancel it.
   std::unique_ptr<WebHistoryService::Request> web_history_request_;
 
-  // True if there is a pending delete requests to the history service.
+  // True if there is a pending delete requests to the web service.
   bool has_pending_delete_request_ = false;
 
   // Tracker for delete requests to the history service.
   base::CancelableTaskTracker delete_task_tracker_;
-
-  // The list of URLs that are in the process of being deleted.
-  std::set<GURL> urls_to_be_deleted_;
 
   // Timer used to implement a timeout on a Web History response.
   std::unique_ptr<base::OneShotTimer> web_history_timer_;

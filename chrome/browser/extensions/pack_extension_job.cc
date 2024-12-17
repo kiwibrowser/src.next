@@ -6,10 +6,10 @@
 
 #include <memory>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/threading/sequenced_task_runner_handle.h"
+#include "base/task/sequenced_task_runner.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extension_creator.h"
@@ -36,7 +36,7 @@ PackExtensionJob::~PackExtensionJob() {}
 void PackExtensionJob::Start() {
   if (run_mode_ == RunMode::ASYNCHRONOUS) {
     scoped_refptr<base::SequencedTaskRunner> task_runner =
-        base::SequencedTaskRunnerHandle::Get();
+        base::SequencedTaskRunner::GetCurrentDefault();
     GetExtensionFileTaskRunner()->PostTask(
         FROM_HERE,
         base::BindOnce(&PackExtensionJob::Run,
@@ -56,11 +56,10 @@ void PackExtensionJob::Run(
       root_directory_.AddExtension(kExtensionFileExtension));
 
   auto key_file_out = std::make_unique<base::FilePath>();
-  if (key_file_.empty())
+  if (key_file_.empty()) {
     *key_file_out = root_directory_.AddExtension(kExtensionKeyFileExtension);
+  }
 
-  // TODO(aa): Need to internationalize the errors that ExtensionCreator
-  // returns. See bug 20734.
   ExtensionCreator creator;
   if (creator.Run(root_directory_, *crx_file_out, key_file_, *key_file_out,
                   run_flags_)) {

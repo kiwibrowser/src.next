@@ -35,6 +35,7 @@
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace display {
 struct ScreenInfo;
@@ -44,13 +45,13 @@ namespace blink {
 
 class LocalDOMWindow;
 
-class CORE_EXPORT Screen : public EventTargetWithInlineData,
+class CORE_EXPORT Screen : public EventTarget,
                            public ExecutionContextClient,
                            public Supplementable<Screen> {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  explicit Screen(LocalDOMWindow*, int64_t display_id);
+  Screen(LocalDOMWindow*, int64_t display_id);
 
   static bool AreWebExposedScreenPropertiesEqual(
       const display::ScreenInfo& prev,
@@ -67,15 +68,15 @@ class CORE_EXPORT Screen : public EventTargetWithInlineData,
 
   void Trace(Visitor*) const override;
 
-  // EventTargetWithInlineData:
+  // EventTarget:
   const WTF::AtomicString& InterfaceName() const override;
   ExecutionContext* GetExecutionContext() const override;
 
   // Whether the device’s visual output extends over multiple screens.
-  // https://w3c.github.io/window-placement/
+  // https://w3c.github.io/window-management/
   bool isExtended() const;
   // Fired when the window’s screen or that screen's attributes change.
-  // https://w3c.github.io/window-placement/
+  // https://w3c.github.io/window-management/
   DEFINE_ATTRIBUTE_EVENT_LISTENER(change, kChange)
 
   // Not web-exposed; for internal usage only.
@@ -84,7 +85,11 @@ class CORE_EXPORT Screen : public EventTargetWithInlineData,
   void UpdateDisplayId(int64_t display_id) { display_id_ = display_id; }
 
  protected:
+  // Helpers to access screen information.
+  gfx::Rect GetRect(bool available) const;
   const display::ScreenInfo& GetScreenInfo() const;
+
+  // The internal id of the underlying display, to support multi-screen devices.
   int64_t display_id_;
 };
 

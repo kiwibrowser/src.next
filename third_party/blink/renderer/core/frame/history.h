@@ -44,6 +44,7 @@ class KURL;
 class ExceptionState;
 class HistoryItem;
 class ScriptState;
+class V8ScrollRestoration;
 
 // This class corresponds to the History interface.
 class CORE_EXPORT History final : public ScriptWrappable,
@@ -56,9 +57,9 @@ class CORE_EXPORT History final : public ScriptWrappable,
   unsigned length(ExceptionState&) const;
   ScriptValue state(ScriptState*, ExceptionState&);
 
-  void back(ExceptionState&);
-  void forward(ExceptionState&);
-  void go(int delta, ExceptionState&);
+  void back(ScriptState*, ExceptionState&);
+  void forward(ScriptState*, ExceptionState&);
+  void go(ScriptState*, int delta, ExceptionState&);
 
   void pushState(ScriptState*,
                  const ScriptValue& data,
@@ -72,8 +73,8 @@ class CORE_EXPORT History final : public ScriptWrappable,
                     const String& url,
                     ExceptionState& exception_state);
 
-  void setScrollRestoration(const String& value, ExceptionState&);
-  String scrollRestoration(ExceptionState&);
+  void setScrollRestoration(const V8ScrollRestoration& value, ExceptionState&);
+  V8ScrollRestoration scrollRestoration(ExceptionState&);
 
   bool IsSameAsCurrentState(SerializedScriptValue*) const;
 
@@ -86,6 +87,7 @@ class CORE_EXPORT History final : public ScriptWrappable,
                         const String& title,
                         const String& url,
                         WebFrameLoadType,
+                        ScriptState*,
                         ExceptionState&);
   SerializedScriptValue* StateInternal() const;
   mojom::blink::ScrollRestorationType ScrollRestorationInternal() const;

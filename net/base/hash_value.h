@@ -10,10 +10,10 @@
 #include <string.h>
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "base/containers/span.h"
-#include "base/strings/string_piece.h"
 #include "build/build_config.h"
 #include "net/base/net_export.h"
 
@@ -68,12 +68,11 @@ class NET_EXPORT HashValue {
   //   - logging public-key pins
   //   - serializing public-key pins
 
-  // Deserializes a HashValue from a string. On error, returns
-  // false and MAY change the contents of HashValue to contain invalid data.
-  bool FromString(const base::StringPiece input);
+  // Deserializes a HashValue from a string. Returns false if the input is not
+  // valid.
+  bool FromString(std::string_view input);
 
-  // Serializes the HashValue to a string. If an invalid HashValue
-  // is supplied (eg: an unknown hash tag), returns "unknown"/<base64>
+  // Serializes the HashValue to a string.
   std::string ToString() const;
 
   size_t size() const;

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,11 +40,6 @@ LinkLoadParameters::LinkLoadParameters(
       blocking(blocking),
       reason(reason) {}
 
-// TODO(domfarolino)
-// Eventually we'll want to support a |fetchpriority| value on
-// LinkHeaders. We can communicate a header's fetchpriority value
-// to LinkLoadParameters here, likely after modifying the LinkHeader
-// class. See https://crbug.com/821464 for info on Priority Hints.
 LinkLoadParameters::LinkLoadParameters(const LinkHeader& header,
                                        const KURL& base_url)
     : rel(LinkRelAttribute(header.Rel())),
@@ -54,13 +49,14 @@ LinkLoadParameters::LinkLoadParameters(const LinkHeader& header,
       media(header.Media()),
       nonce(header.Nonce()),
       integrity(header.Integrity()),
+      fetch_priority_hint(header.FetchPriority()),
       referrer_policy(network::mojom::ReferrerPolicy::kDefault),
       href(KURL(base_url, header.Url())),
       image_srcset(header.ImageSrcset()),
       image_sizes(header.ImageSizes()),
       blocking(header.Blocking()),
       reason(Reason::kDefault) {
-  if (!header.ReferrerPolicy().IsEmpty()) {
+  if (!header.ReferrerPolicy().empty()) {
     SecurityPolicy::ReferrerPolicyFromString(
         header.ReferrerPolicy(), kDoNotSupportReferrerPolicyLegacyKeywords,
         &referrer_policy);

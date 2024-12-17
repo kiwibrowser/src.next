@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,11 +14,11 @@
 namespace blink {
 
 BoxReflection::BoxReflection(ReflectionDirection direction, float offset)
-    : BoxReflection(direction, offset, nullptr, gfx::RectF()) {}
+    : BoxReflection(direction, offset, PaintRecord(), gfx::RectF()) {}
 
 BoxReflection::BoxReflection(ReflectionDirection direction,
                              float offset,
-                             sk_sp<PaintRecord> mask,
+                             PaintRecord mask,
                              const gfx::RectF& mask_bounds)
     : direction_(direction),
       offset_(offset),
@@ -42,7 +42,7 @@ SkMatrix BoxReflection::ReflectionMatrix() const {
       break;
     default:
       // MSVC requires that SkMatrix be initialized in this unreachable case.
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       flip_matrix.reset();
       break;
   }

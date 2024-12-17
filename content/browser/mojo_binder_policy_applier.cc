@@ -4,8 +4,28 @@
 
 #include "content/browser/mojo_binder_policy_applier.h"
 
+#include <string_view>
+
+#include "base/containers/contains.h"
+#include "base/containers/fixed_flat_set.h"
 #include "content/public/browser/mojo_binder_policy_map.h"
 #include "mojo/public/cpp/bindings/message.h"
+
+namespace {
+
+// TODO(crbug.com/40196368): It is not sustainable to maintain a list.
+// An ideal solution should:
+// 1. Show a pre-submit warning if a frame-scoped interface is specified with
+//    kDefer but declares synchronous methods.
+// 2. When an interface that can make sync IPC is registered with BinderMap,
+//    change its policy to kCancel by default.
+// 3. Bind these receivers to a generic implementation, and terminate the
+//    execution context if it receives a synchronous message.
+// Stores the list of interface names that declare sync methods.
+constexpr auto kSyncMethodInterfaces = base::MakeFixedFlatSet<std::string_view>(
+    {"blink.mojom.NotificationService"});
+
+}  // namespace
 
 namespace content {
 
@@ -23,6 +43,16 @@ MojoBinderPolicyApplier::CreateForSameOriginPrerendering(
         cancel_callback) {
   return std::make_unique<MojoBinderPolicyApplier>(
       MojoBinderPolicyMapImpl::GetInstanceForSameOriginPrerendering(),
+      std::move(cancel_callback));
+}
+
+// static
+std::unique_ptr<MojoBinderPolicyApplier>
+MojoBinderPolicyApplier::CreateForPreview(
+    base::OnceCallback<void(const std::string& interface_name)>
+        cancel_callback) {
+  return std::make_unique<MojoBinderPolicyApplier>(
+      MojoBinderPolicyMapImpl::GetInstanceForPreview(),
       std::move(cancel_callback));
 }
 
@@ -54,7 +84,11 @@ void MojoBinderPolicyApplier::ApplyPolicyToNonAssociatedBinder(
         std::move(binder_callback).Run();
         break;
       case MojoBinderNonAssociatedPolicy::kDefer:
-        deferred_binders_.push_back(std::move(binder_callback));
+        if (base::Contains(kSyncMethodInterfaces, interface_name)) {
+          std::move(binder_callback).Run();
+        } else {
+          deferred_binders_.push_back(std::move(binder_callback));
+        }
         break;
     }
     return;
@@ -71,7 +105,11 @@ void MojoBinderPolicyApplier::ApplyPolicyToNonAssociatedBinder(
       }
       break;
     case MojoBinderNonAssociatedPolicy::kDefer:
-      deferred_binders_.push_back(std::move(binder_callback));
+      if (base::Contains(kSyncMethodInterfaces, interface_name)) {
+        deferred_sync_binders_.push_back(std::move(binder_callback));
+      } else {
+        deferred_binders_.push_back(std::move(binder_callback));
+      }
       break;
     case MojoBinderNonAssociatedPolicy::kUnexpected:
       mojo::ReportBadMessage("MBPA_BAD_INTERFACE: " + interface_name);
@@ -91,7 +129,7 @@ bool MojoBinderPolicyApplier::ApplyPolicyToAssociatedBinder(
     case Mode::kPrepareToGrantAll:
       return true;
     case Mode::kEnforce:
-      policy = policy_map_.GetAssociatedMojoBinderPolicy(
+      policy = policy_map_->GetAssociatedMojoBinderPolicy(
           interface_name, MojoBinderAssociatedPolicy::kCancel);
       if (policy != MojoBinderAssociatedPolicy::kGrant) {
         if (cancel_callback_)
@@ -104,6 +142,15 @@ bool MojoBinderPolicyApplier::ApplyPolicyToAssociatedBinder(
 
 void MojoBinderPolicyApplier::PrepareToGrantAll() {
   DCHECK_EQ(mode_, Mode::kEnforce);
+
+  // The remote side would think its status has changed after the browser
+  // executes this method, so it is safe to send some synchronous method, so the
+  // browser side should make the IPC pipeline ready.
+  for (auto& deferred_binder : deferred_sync_binders_) {
+    std::move(deferred_binder).Run();
+  }
+  deferred_sync_binders_.clear();
+
   mode_ = Mode::kPrepareToGrantAll;
 }
 
@@ -113,7 +160,7 @@ void MojoBinderPolicyApplier::GrantAll() {
   // Check that we are in a Mojo message dispatch, since the deferred binders
   // might call mojo::ReportBadMessage().
   //
-  // TODO(https://crbug.com/1217977): Give the deferred_binders_ a
+  // TODO(crbug.com/40185437): Give the deferred_binders_ a
   // BadMessageCallback and forbid them from using mojo::ReportBadMessage()
   // directly. We are currently in the message stack of one of the PageBroadcast
   // Mojo callbacks handled by RenderViewHost, so if a binder calls
@@ -140,8 +187,8 @@ void MojoBinderPolicyApplier::DropDeferredBinders() {
 MojoBinderNonAssociatedPolicy
 MojoBinderPolicyApplier::GetNonAssociatedMojoBinderPolicy(
     const std::string& interface_name) const {
-  return policy_map_.GetNonAssociatedMojoBinderPolicy(interface_name,
-                                                      default_policy_);
+  return policy_map_->GetNonAssociatedMojoBinderPolicy(interface_name,
+                                                       default_policy_);
 }
 
 }  // namespace content

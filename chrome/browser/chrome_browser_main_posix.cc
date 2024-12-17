@@ -13,12 +13,14 @@
 
 #include <string>
 
-#include "base/bind.h"
 #include "base/check_op.h"
+#include "base/functional/bind.h"
 #include "base/notreached.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
+#include "chrome/browser/devtools/chrome_devtools_manager_delegate.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/lifetime/application_lifetime_desktop.h"
 #include "chrome/browser/sessions/session_restore.h"
 #include "chrome/browser/shutdown_signal_handlers_posix.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -66,11 +68,16 @@ class ExitHandler {
 // static
 void ExitHandler::ExitWhenPossibleOnUIThread(int signal) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  // DevTools delegate's browser keeplive may prevent browser from closing so
+  // remove it before proceeding because we have an explicit shutdown request.
+  ChromeDevToolsManagerDelegate::AllowBrowserToClose();
+
   if (SessionRestore::IsRestoringSynchronously()) {
     // ExitHandler takes care of deleting itself.
     new ExitHandler();
   } else {
-// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// TODO(crbug.com/40118868): Revisit the macro expression once build flag switch
 // of lacros-chrome is complete.
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
     switch (signal) {
@@ -93,7 +100,7 @@ void ExitHandler::ExitWhenPossibleOnUIThread(int signal) {
         chrome::SessionEnding();
         break;
       default:
-        NOTREACHED();
+        NOTREACHED_IN_MIGRATION();
     }
 #else
     Exit();
@@ -166,14 +173,14 @@ void ChromeBrowserMainPartsPosix::PostCreateMainMessageLoop() {
 
 void ChromeBrowserMainPartsPosix::ShowMissingLocaleMessageBox() {
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-  NOTREACHED();  // Should not ever happen on ChromeOS.
+  NOTREACHED_IN_MIGRATION();  // Should not ever happen on ChromeOS.
 #elif BUILDFLAG(IS_MAC)
   // Not called on Mac because we load the locale files differently.
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
 #elif defined(USE_AURA)
   // TODO(port): We may want a views based message dialog here eventually, but
   // for now, crash.
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
 #else
 #error "Need MessageBox implementation."
 #endif

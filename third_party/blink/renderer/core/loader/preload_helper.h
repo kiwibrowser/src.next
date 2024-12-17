@@ -1,11 +1,12 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_PRELOAD_HELPER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_PRELOAD_HELPER_H_
 
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include <optional>
+
 #include "third_party/blink/renderer/platform/loader/fetch/resource.h"
 
 namespace blink {
@@ -24,26 +25,25 @@ class PreloadHelper final {
   STATIC_ONLY(PreloadHelper);
 
  public:
-  enum CanLoadResources {
-    kOnlyLoadResources,
-    kDoNotLoadResources,
-    kLoadResourcesAndPreconnect
+  enum class LoadLinksFromHeaderMode {
+    kDocumentBeforeCommit,
+    kDocumentAfterCommitWithoutViewport,
+    kDocumentAfterCommitWithViewport,
+    kDocumentAfterLoadCompleted,
+    kSubresourceFromMemoryCache,
+    kSubresourceNotFromMemoryCache,
   };
-
-  // Media links cannot be preloaded until the first chunk is parsed. The rest
-  // can be preloaded at commit time.
-  enum MediaPreloadPolicy { kLoadAll, kOnlyLoadNonMedia, kOnlyLoadMedia };
 
   static void LoadLinksFromHeader(
       const String& header_value,
       const KURL& base_url,
       LocalFrame&,
       Document*,  // can be nullptr
-      CanLoadResources,
-      MediaPreloadPolicy,
+      LoadLinksFromHeaderMode,
       const ViewportDescription*,  // can be nullptr
       std::unique_ptr<AlternateSignedExchangeResourceInfo>,
-      const base::UnguessableToken* /* can be nullptr */);
+      const base::UnguessableToken*
+          recursive_prefetch_token /* can be nullptr */);
   static Resource* StartPreload(ResourceType, FetchParameters&, Document&);
 
   // Currently only used for UseCounter.
@@ -74,8 +74,11 @@ class PreloadHelper final {
                                     Document&,
                                     const ViewportDescription*,
                                     PendingLinkPreload*);
+  static void FetchCompressionDictionaryIfNeeded(const LinkLoadParameters&,
+                                                 Document&,
+                                                 PendingLinkPreload*);
 
-  static absl::optional<ResourceType> GetResourceTypeFromAsAttribute(
+  static std::optional<ResourceType> GetResourceTypeFromAsAttribute(
       const String& as);
 };
 

@@ -7,8 +7,8 @@
 #include <set>
 #include <vector>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/version.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/pending_extension_manager.h"
@@ -50,7 +50,7 @@ SharedModuleService::ImportStatus SharedModuleService::CheckImports(
 
   ImportStatus status = IMPORT_STATUS_OK;
 
-  // TODO(crbug.com/420147): Code like this lives in CrxInstaller and
+  // TODO(crbug.com/40387578): Code like this lives in CrxInstaller and
   // UnpackedInstaller.  If a change is made here that is important to enforce
   // at install time, those locations need to be updated.
   ExtensionRegistry* registry = ExtensionRegistry::Get(browser_context_);
@@ -148,7 +148,7 @@ InstallGate::Action SharedModuleService::ShouldDelay(const Extension* extension,
       return ABORT;
   }
 
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
   return INSTALL;
 }
 

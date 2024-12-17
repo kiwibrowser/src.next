@@ -1,11 +1,10 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/platform/graphics/canvas_color_params.h"
 
 #include "cc/paint/skia_paint_canvas.h"
-#include "components/viz/common/resources/resource_format_utils.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
@@ -36,7 +35,7 @@ gfx::ColorSpace PredefinedColorSpaceToGfxColorSpace(
     case PredefinedColorSpace::kSRGBLinear:
       return gfx::ColorSpace::CreateSRGBLinear();
   }
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
 }
 
 sk_sp<SkColorSpace> PredefinedColorSpaceToSkColorSpace(
@@ -72,7 +71,7 @@ SkColorType CanvasPixelFormatToSkColorType(CanvasPixelFormat pixel_format) {
     case CanvasPixelFormat::kUint8:
       return kN32_SkColorType;
   }
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
   return kN32_SkColorType;
 }
 

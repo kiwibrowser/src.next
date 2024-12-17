@@ -16,12 +16,12 @@
 
 class Profile;
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
 namespace chromeos {
 class DeviceLocalAccountManagementPolicyProvider;
 class SigninScreenPolicyProvider;
 }
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 namespace value_store {
 class ValueStoreFactory;
@@ -31,7 +31,6 @@ class ValueStoreFactoryImpl;
 namespace extensions {
 
 class ExtensionSystemSharedFactory;
-class NavigationObserver;
 class UninstallPingSender;
 class InstallGate;
 class ExtensionsPermissionsTracker;
@@ -65,18 +64,9 @@ class ExtensionSystemImpl : public ExtensionSystem {
   StateStore* rules_store() override;                              // shared
   StateStore* dynamic_user_scripts_store() override;               // shared
   scoped_refptr<value_store::ValueStoreFactory> store_factory()
-      override;                                                    // shared
-  InfoMap* info_map() override;                                    // shared
+      override;                            // shared
   QuotaService* quota_service() override;  // shared
-  AppSorting* app_sorting() override;  // shared
-
-  void RegisterExtensionWithRequestContexts(
-      const Extension* extension,
-      base::OnceClosure callback) override;
-
-  void UnregisterExtensionWithRequestContexts(
-      const std::string& extension_id) override;
-
+  AppSorting* app_sorting() override;      // shared
   const base::OneShotEvent& ready() const override;
   bool is_ready() const override;
   ContentVerifier* content_verifier() override;  // shared
@@ -89,7 +79,7 @@ class ExtensionSystemImpl : public ExtensionSystem {
                      InstallUpdateCallback install_update_callback) override;
   void PerformActionBasedOnOmahaAttributes(
       const std::string& extension_id,
-      const base::Value& attributes) override;
+      const base::Value::Dict& attributes) override;
   bool FinishDelayedInstallationIfReady(const std::string& extension_id,
                                         bool install_immediately) override;
 
@@ -121,7 +111,6 @@ class ExtensionSystemImpl : public ExtensionSystem {
     ManagementPolicy* management_policy();
     ServiceWorkerManager* service_worker_manager();
     UserScriptManager* user_script_manager();
-    InfoMap* info_map();
     QuotaService* quota_service();
     AppSorting* app_sorting();
     const base::OneShotEvent& ready() const { return ready_; }
@@ -137,7 +126,6 @@ class ExtensionSystemImpl : public ExtensionSystem {
     std::unique_ptr<StateStore> rules_store_;
     std::unique_ptr<StateStore> dynamic_user_scripts_store_;
     scoped_refptr<value_store::ValueStoreFactoryImpl> store_factory_;
-    std::unique_ptr<NavigationObserver> navigation_observer_;
     std::unique_ptr<ServiceWorkerManager> service_worker_manager_;
     // Shared memory region manager for scripts statically declared in extension
     // manifests. This region is shared between all extensions.
@@ -145,8 +133,6 @@ class ExtensionSystemImpl : public ExtensionSystem {
     // ExtensionService depends on StateStore and Blocklist.
     std::unique_ptr<ExtensionService> extension_service_;
     std::unique_ptr<ManagementPolicy> management_policy_;
-    // extension_info_map_ needs to outlive process_manager_.
-    scoped_refptr<InfoMap> extension_info_map_;
     std::unique_ptr<QuotaService> quota_service_;
     std::unique_ptr<AppSorting> app_sorting_;
     std::unique_ptr<InstallGate> update_install_gate_;
@@ -156,7 +142,7 @@ class ExtensionSystemImpl : public ExtensionSystem {
 
     std::unique_ptr<UninstallPingSender> uninstall_ping_sender_;
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
     std::unique_ptr<chromeos::DeviceLocalAccountManagementPolicyProvider>
         device_local_account_management_policy_provider_;
     std::unique_ptr<chromeos::SigninScreenPolicyProvider>

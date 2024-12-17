@@ -5,7 +5,6 @@
 #include "chrome/browser/extensions/test_blocklist_state_fetcher.h"
 
 #include "base/containers/contains.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "components/safe_browsing/core/browser/db/v4_test_util.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
@@ -35,12 +34,12 @@ class DummySharedURLLoaderFactory : public network::SharedURLLoaderFactory {
 
   void Clone(mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver)
       override {
-    NOTREACHED();
+    NOTREACHED_IN_MIGRATION();
   }
 
   // network::PendingSharedURLLoaderFactory implementation
   std::unique_ptr<network::PendingSharedURLLoaderFactory> Clone() override {
-    NOTREACHED();
+    NOTREACHED_IN_MIGRATION();
     return nullptr;
   }
 
@@ -79,14 +78,16 @@ bool TestBlocklistStateFetcher::HandleFetcher(const std::string& id) {
     }
   }
 
-  if (!url_loader)
+  if (!url_loader) {
     return false;
+  }
 
   ClientCRXListInfoResponse response;
-  if (base::Contains(verdicts_, id))
+  if (base::Contains(verdicts_, id)) {
     response.set_verdict(verdicts_[id]);
-  else
+  } else {
     response.set_verdict(ClientCRXListInfoResponse::NOT_IN_BLOCKLIST);
+  }
 
   std::string response_str;
   response.SerializeToString(&response_str);

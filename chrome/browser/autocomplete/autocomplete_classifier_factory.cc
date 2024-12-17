@@ -31,7 +31,8 @@ AutocompleteClassifier* AutocompleteClassifierFactory::GetForProfile(
 
 // static
 AutocompleteClassifierFactory* AutocompleteClassifierFactory::GetInstance() {
-  return base::Singleton<AutocompleteClassifierFactory>::get();
+  static base::NoDestructor<AutocompleteClassifierFactory> instance;
+  return instance.get();
 }
 
 // static
@@ -48,7 +49,15 @@ std::unique_ptr<KeyedService> AutocompleteClassifierFactory::BuildInstanceFor(
 AutocompleteClassifierFactory::AutocompleteClassifierFactory()
     : ProfileKeyedServiceFactory(
           "AutocompleteClassifier",
-          ProfileSelections::BuildRedirectedInIncognito()) {
+          ProfileSelections::Builder()
+              .WithRegular(ProfileSelection::kRedirectedToOriginal)
+              // TODO(crbug.com/40257657): Check if this service is needed in
+              // Guest mode.
+              .WithGuest(ProfileSelection::kRedirectedToOriginal)
+              // TODO(crbug.com/41488885): Check if this service is needed for
+              // Ash Internals.
+              .WithAshInternals(ProfileSelection::kRedirectedToOriginal)
+              .Build()) {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   DependsOn(
       extensions::ExtensionsBrowserClient::Get()->GetExtensionSystemFactory());
@@ -59,14 +68,14 @@ AutocompleteClassifierFactory::AutocompleteClassifierFactory()
   DependsOn(RemoteSuggestionsServiceFactory::GetInstance());
 }
 
-AutocompleteClassifierFactory::~AutocompleteClassifierFactory() {
-}
+AutocompleteClassifierFactory::~AutocompleteClassifierFactory() = default;
 
 bool AutocompleteClassifierFactory::ServiceIsNULLWhileTesting() const {
   return true;
 }
 
-KeyedService* AutocompleteClassifierFactory::BuildServiceInstanceFor(
+std::unique_ptr<KeyedService>
+AutocompleteClassifierFactory::BuildServiceInstanceForBrowserContext(
     content::BrowserContext* profile) const {
-  return BuildInstanceFor(static_cast<Profile*>(profile)).release();
+  return BuildInstanceFor(static_cast<Profile*>(profile));
 }

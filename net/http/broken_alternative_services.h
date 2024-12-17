@@ -13,7 +13,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "net/base/network_isolation_key.h"
+#include "net/base/network_anonymization_key.h"
 #include "net/http/alternative_service.h"
 
 namespace base {
@@ -25,11 +25,12 @@ namespace net {
 // Contains information about a broken alternative service, and the context in
 // which it's known to be broken.
 struct NET_EXPORT_PRIVATE BrokenAlternativeService {
-  // If |use_network_isolation_key| is false, |network_isolation_key| is
-  // ignored, and an empty NetworkIsolationKey is used instead.
-  BrokenAlternativeService(const AlternativeService& alternative_service,
-                           const NetworkIsolationKey& network_isolation_key,
-                           bool use_network_isolation_key);
+  // If |use_network_anonymization_key| is false, |network_anonymization_key| is
+  // ignored, and an empty NetworkAnonymizationKey is used instead.
+  BrokenAlternativeService(
+      const AlternativeService& alternative_service,
+      const NetworkAnonymizationKey& network_anonymization_key,
+      bool use_network_anonymization_key);
 
   ~BrokenAlternativeService();
 
@@ -38,8 +39,8 @@ struct NET_EXPORT_PRIVATE BrokenAlternativeService {
   AlternativeService alternative_service;
 
   // The context in which the alternative service is known to be broken in. Used
-  // to avoid cross-NetworkIsolationKey communication.
-  NetworkIsolationKey network_isolation_key;
+  // to avoid cross-NetworkAnonymizationKey communication.
+  NetworkAnonymizationKey network_anonymization_key;
 };
 
 // Stores broken alternative services and when their brokenness expires.
@@ -73,7 +74,7 @@ class NET_EXPORT_PRIVATE BrokenAlternativeServices {
     // Called when a broken alternative service's expiration time is reached.
     virtual void OnExpireBrokenAlternativeService(
         const AlternativeService& expired_alternative_service,
-        const NetworkIsolationKey& network_isolation_key) = 0;
+        const NetworkAnonymizationKey& network_anonymization_key) = 0;
     virtual ~Delegate() = default;
   };
 
@@ -111,8 +112,8 @@ class NET_EXPORT_PRIVATE BrokenAlternativeServices {
 
   // Marks |broken_alternative_service| as recently broken. Being recently
   // broken will cause WasAlternativeServiceRecentlyBroken(alternative_service,
-  // network_isolation_key) to return true until Confirm(alternative_service,
-  // network_isolation_key) is called.
+  // network_anonymization_key) to return true until
+  // Confirm(alternative_service, network_anonymization_key) is called.
   void MarkRecentlyBroken(
       const BrokenAlternativeService& broken_alternative_service);
 
@@ -158,9 +159,8 @@ class NET_EXPORT_PRIVATE BrokenAlternativeServices {
   // If values are present, sets initial_delay_ and
   // exponential_backoff_on_initial_delay_ which are used to calculate delay of
   // broken alternative services.
-  void SetDelayParams(
-      absl::optional<base::TimeDelta> initial_delay,
-      absl::optional<bool> exponential_backoff_on_initial_delay);
+  void SetDelayParams(std::optional<base::TimeDelta> initial_delay,
+                      std::optional<bool> exponential_backoff_on_initial_delay);
 
   const BrokenAlternativeServiceList& broken_alternative_service_list() const;
 
@@ -173,7 +173,7 @@ class NET_EXPORT_PRIVATE BrokenAlternativeServices {
   friend class HttpServerPropertiesPeer;
 
   struct AlternativeServiceHash {
-    size_t operator()(const net::AlternativeService& entry) const {
+    size_t operator()(const AlternativeService& entry) const {
       return entry.protocol ^ std::hash<std::string>()(entry.host) ^ entry.port;
     }
   };

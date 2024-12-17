@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/features.gni")
 import("//build/config/nacl/config.gni")
 import("//ppapi/buildflags/buildflags.gni")
 import("//tools/grit/grit_rule.gni")
@@ -12,7 +13,7 @@ config("content_implementation") {
   configs = [ "//build/config/compiler:wexit_time_destructors" ]
 }
 
-assert(!is_ios, "Chromium/iOS shouldn't use anything in //content")
+assert(use_blink, "Chromium without blink shouldn't use anything in //content")
 
 # When targets depend on, e.g. //content/public/browser, what happens? To
 # facilitate the complexity here, the "public" targets are groups that forward
@@ -65,6 +66,7 @@ content_shared_components = [
   "//content/public/child:child_sources",
   "//content/public/common:common_sources",
   "//content/public/gpu:gpu_sources",
+  "//content/public/renderer:render_frame_media_playback_options",
   "//content/public/renderer:renderer_sources",
   "//content/public/utility:utility_sources",
 ]
@@ -93,36 +95,15 @@ grit("content_resources") {
     "grit/content_resources_map.h",
     "content_resources.pak",
   ]
-  deps = [
-    "//components/ukm/debug:build_ts",
-    "//content/browser/resources/histograms:build_ts",
-    "//gpu/ipc/common:vulkan_interface_webui_js",
-    "//ui/base/mojom:mojom_js",
-    "//ui/gfx/geometry/mojom:mojom_js",
-    "//ui/gfx/image/mojom:mojom_js",
-    "//ui/gfx/range/mojom:mojom_js",
-    "//url/mojom:url_mojom_origin_js",
-    "//url/mojom:url_mojom_origin_webui_js",
-  ]
-}
 
-grit("dev_ui_content_resources") {
-  source = "dev_ui_content_resources.grd"
-
-  outputs = [
-    "grit/dev_ui_content_resources.h",
-    "dev_ui_content_resources.pak",
-  ]
-  deps = [
-    "//content/browser/aggregation_service:mojo_bindings_webui_js",
-    "//content/browser/attribution_reporting:mojo_bindings_webui_js",
-    "//content/browser/preloading/prerender:mojo_bindings_webui_js",
-    "//content/browser/resources/aggregation_service:build_ts",
-    "//content/browser/resources/attribution_reporting:build_ts",
-    "//content/browser/resources/gpu:html_wrapper_files",
-    "//content/browser/resources/process:build_ts",
-    "//storage/browser/quota:mojo_bindings_webui_js",
-  ]
+  if (is_chromeos_ash) {
+    deps = [
+      "//mojo/public/mojom/base:base_js__generator",
+      "//ui/base/mojom:mojom_js__generator",
+      "//url/mojom:url_mojom_gurl_js__generator",
+      "//url/mojom:url_mojom_origin_js__generator",
+    ]
+  }
 }
 
 # This target exists to "hold" the content_export header so we can do proper

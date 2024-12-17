@@ -41,14 +41,14 @@ class ClipboardExtensionHelper::ClipboardImageDataDecoder
 
     ImageDecoder::ImageCodec codec = ImageDecoder::DEFAULT_CODEC;
     switch (type) {
-      case clipboard::IMAGE_TYPE_PNG:
+      case clipboard::ImageType::kPng:
         codec = ImageDecoder::PNG_CODEC;
         break;
-      case clipboard::IMAGE_TYPE_JPEG:
+      case clipboard::ImageType::kJpeg:
         codec = ImageDecoder::DEFAULT_CODEC;
         break;
-      case clipboard::IMAGE_TYPE_NONE:
-        NOTREACHED();
+      case clipboard::ImageType::kNone:
+        NOTREACHED_IN_MIGRATION();
         break;
     }
 
@@ -119,10 +119,11 @@ void ClipboardExtensionHelper::OnImageDecoded(const SkBitmap& bitmap) {
       scw.WriteImage(bitmap);
 
     for (const clipboard::AdditionalDataItem& item : additonal_items_) {
-      if (item.type == clipboard::DATA_ITEM_TYPE_TEXTPLAIN)
+      if (item.type == clipboard::DataItemType::kTextPlain) {
         scw.WriteText(base::UTF8ToUTF16(item.data));
-      else if (item.type == clipboard::DATA_ITEM_TYPE_TEXTHTML)
+      } else if (item.type == clipboard::DataItemType::kTextHtml) {
         scw.WriteHTML(base::UTF8ToUTF16(item.data), std::string());
+      }
     }
   }
   std::move(image_save_success_callback_).Run();

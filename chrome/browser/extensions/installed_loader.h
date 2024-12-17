@@ -10,6 +10,8 @@
 #include "base/files/file_path.h"
 #include "base/memory/raw_ptr.h"
 
+class Profile;
+
 namespace extensions {
 
 class ExtensionPrefs;
@@ -45,17 +47,26 @@ class InstalledLoader {
   // Loads all installed extensions (used by startup and testing code).
   void LoadAllExtensions();
 
+  // Loads all installed extensions (used by testing code).
+  void LoadAllExtensions(Profile* profile);
+
   // Allows tests to verify metrics without needing to go through
   // LoadAllExtensions().
   void RecordExtensionsMetricsForTesting();
+
+  // Allows tests to verify incremented metrics.
+  void RecordExtensionsIncrementedMetricsForTesting(Profile* profile);
 
  private:
   // Returns the flags that should be used with Extension::Create() for an
   // extension that is already installed.
   int GetCreationFlags(const ExtensionInfo* info);
 
-  // Record metrics related to the loaded extensions.
-  void RecordExtensionsMetrics();
+  // Records metrics related to the loaded extensions.
+  // `is_user_profile` indicates that this is a profile where users can install
+  // extensions, specifically profiles that can have non-component extensions
+  // installed. This causes incremented histograms to emit.
+  void RecordExtensionsMetrics(Profile* profile, bool is_user_profile);
 
   raw_ptr<ExtensionService> extension_service_;
   raw_ptr<ExtensionRegistry> extension_registry_;

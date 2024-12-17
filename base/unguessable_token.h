@@ -7,12 +7,15 @@
 
 #include <stdint.h>
 #include <string.h>
+
+#include <compare>
 #include <iosfwd>
+#include <string_view>
 #include <tuple>
 
 #include "base/base_export.h"
 #include "base/check.h"
-#include "base/hash/hash.h"
+#include "base/containers/span.h"
 #include "base/token.h"
 
 namespace base {
@@ -43,11 +46,11 @@ struct UnguessableTokenHash;
 // NOTE: It is illegal to send empty UnguessableTokens across processes, and
 // sending/receiving empty tokens should be treated as a security issue. If
 // there is a valid scenario for sending "no token" across processes, use
-// absl::optional instead of an empty token.
+// std::optional instead of an empty token.
 
 class BASE_EXPORT UnguessableToken {
  public:
-  // Create a unique UnguessableToken.
+  // Create a unique UnguessableToken. It's guaranteed to be nonempty.
   static UnguessableToken Create();
 
   // Returns a reference to a global null UnguessableToken. This should only be
@@ -56,12 +59,23 @@ class BASE_EXPORT UnguessableToken {
   // default constructor.
   static const UnguessableToken& Null();
 
-  // Return a UnguessableToken built from the high/low bytes provided.
+  // Return an UnguessableToken built from the high/low bytes provided.
   // It should only be used in deserialization scenarios.
   //
-  // NOTE: If the deserialized token is empty, it means that it was never
+  // NOTE: If the returned `std::optional` does not have a value, it means that
+  // `high` and `low` correspond to an `UnguesssableToken` that was never
   // initialized via Create(). This is a security issue, and should be handled.
-  static UnguessableToken Deserialize(uint64_t high, uint64_t low);
+  static std::optional<UnguessableToken> Deserialize(uint64_t high,
+                                                     uint64_t low);
+
+  // Returns an `UnguessableToken` built from its string representation. It
+  // should only be used in deserialization scenarios.
+  //
+  // NOTE: If the returned `std::optional` does not have a value, it means that
+  // the given string does not represent a valid serialized `UnguessableToken`.
+  // This should be handled as a security issue.
+  static std::optional<UnguessableToken> DeserializeFromString(
+      std::string_view string_representation);
 
   // Creates an empty UnguessableToken.
   // Assign to it with Create() before using it.
@@ -93,19 +107,18 @@ class BASE_EXPORT UnguessableToken {
 
   span<const uint8_t, 16> AsBytes() const { return token_.AsBytes(); }
 
-  constexpr bool operator<(const UnguessableToken& other) const {
-    return token_ < other.token_;
-  }
+  friend constexpr auto operator<=>(const UnguessableToken& lhs,
+                                    const UnguessableToken& rhs) = default;
 
-  bool operator==(const UnguessableToken& other) const;
-
-  bool operator!=(const UnguessableToken& other) const {
-    return !(*this == other);
-  }
+  // operator== uses constant-time comparison for security where available.
+  friend BASE_EXPORT bool operator==(const UnguessableToken& lhs,
+                                     const UnguessableToken& rhs);
 
 #if defined(UNIT_TEST)
   static UnguessableToken CreateForTesting(uint64_t high, uint64_t low) {
-    return Deserialize(high, low);
+    std::optional<UnguessableToken> token = Deserialize(high, low);
+    DCHECK(token.has_value());
+    return token.value();
   }
 #endif
 
@@ -115,6 +128,9 @@ class BASE_EXPORT UnguessableToken {
 
   base::Token token_;
 };
+
+BASE_EXPORT bool operator==(const UnguessableToken& lhs,
+                            const UnguessableToken& rhs);
 
 BASE_EXPORT std::ostream& operator<<(std::ostream& out,
                                      const UnguessableToken& token);

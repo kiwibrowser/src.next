@@ -6,7 +6,7 @@
 
 #include <memory>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/values.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher.h"
 #include "content/public/browser/browser_thread.h"
@@ -114,13 +114,12 @@ void WebstoreInstallHelper::OnJSONParsed(
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   manifest_parse_complete_ = true;
   if (result.has_value() && result->is_dict()) {
-    parsed_manifest_ = base::DictionaryValue::From(
-        base::Value::ToUniquePtrValue(std::move(*result)));
+    parsed_manifest_ = std::move(*result).TakeDict();
   } else {
     error_ = (!result.has_value() || result.error().empty())
                  ? "Invalid JSON response"
                  : result.error();
-    parse_error_ = Delegate::MANIFEST_ERROR;
+    parse_error_ = Delegate::kManifestError;
   }
   ReportResultsIfComplete();
 }
@@ -132,7 +131,7 @@ void WebstoreInstallHelper::ReportResultsIfComplete() {
     return;
 
   if (error_.empty() && parsed_manifest_)
-    delegate_->OnWebstoreParseSuccess(id_, icon_, std::move(parsed_manifest_));
+    delegate_->OnWebstoreParseSuccess(id_, icon_, std::move(*parsed_manifest_));
   else
     delegate_->OnWebstoreParseFailure(id_, parse_error_, error_);
 }

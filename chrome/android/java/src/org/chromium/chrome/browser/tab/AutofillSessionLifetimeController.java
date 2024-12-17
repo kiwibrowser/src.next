@@ -6,10 +6,10 @@ package org.chromium.chrome.browser.tab;
 
 import android.app.Activity;
 import android.os.Build;
+import android.view.autofill.AutofillManager;
 
 import androidx.annotation.RequiresApi;
 
-import org.chromium.base.compat.ApiHelperForO;
 import org.chromium.chrome.browser.ActivityTabProvider;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.lifecycle.DestroyObserver;
@@ -46,32 +46,45 @@ public class AutofillSessionLifetimeController implements DestroyObserver {
     private final ActivityTabProvider.ActivityTabTabObserver mActivityTabObserver;
 
     @RequiresApi(Build.VERSION_CODES.O)
-    public AutofillSessionLifetimeController(Activity activity,
+    public AutofillSessionLifetimeController(
+            Activity activity,
             ActivityLifecycleDispatcher lifecycleDispatcher,
             ActivityTabProvider activityTabProvider) {
         mActivity = activity;
-        mActivityTabObserver = new ActivityTabProvider.ActivityTabTabObserver(activityTabProvider) {
-            @Override
-            public void onDidStartNavigationInPrimaryMainFrame(
-                    Tab tab, NavigationHandle navigationHandle) {
-                if (!navigationHandle.isRendererInitiated()) {
-                    ApiHelperForO.cancelAutofillSession(mActivity);
-                }
-            }
+        mActivityTabObserver =
+                new ActivityTabProvider.ActivityTabTabObserver(activityTabProvider) {
+                    @Override
+                    public void onDidStartNavigationInPrimaryMainFrame(
+                            Tab tab, NavigationHandle navigationHandle) {
+                        if (!navigationHandle.isRendererInitiated()) {
+                            cancel();
+                        }
+                    }
 
-            @Override
-            public void onInteractabilityChanged(Tab tab, boolean isInteractable) {
-                // While onInteractabilityChanged is called in ChromeActivity.onStop(), the session
-                // must remain active to allow Autofill services' fullscreen authentication flows to
-                // succeed.
-                boolean isStopped = lifecycleDispatcher.getCurrentActivityState() ==
-                        ActivityLifecycleDispatcher.ActivityState.STOPPED_WITH_NATIVE;
-                if (!isInteractable && !isStopped) {
-                    ApiHelperForO.cancelAutofillSession(mActivity);
-                }
-            }
-        };
+                    @Override
+                    public void onInteractabilityChanged(Tab tab, boolean isInteractable) {
+                        // While onInteractabilityChanged is called in ChromeActivity.onStop(), the
+                        // session must remain active to allow Autofill services' fullscreen
+                        // authentication flows to succeed.
+                        boolean isStopped =
+                                lifecycleDispatcher.getCurrentActivityState()
+                                        == ActivityLifecycleDispatcher.ActivityState
+                                                .STOPPED_WITH_NATIVE;
+                        if (!isInteractable && !isStopped) {
+                            cancel();
+                        }
+                    }
+                };
         lifecycleDispatcher.register(this);
+    }
+
+    private void cancel() {
+        // The AutofillManager has to be retrieved from an activity context.
+        // https://cs.android.com/android/platform/superproject/+/master:frameworks/base/core/java/android/app/Application.java;l=624;drc=5d123b67756dffcfdebdb936ab2de2b29c799321
+        AutofillManager afm = mActivity.getSystemService(AutofillManager.class);
+        if (afm != null) {
+            afm.cancel();
+        }
     }
 
     // DestroyObserver

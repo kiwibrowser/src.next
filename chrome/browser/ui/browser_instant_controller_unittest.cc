@@ -2,6 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "chrome/browser/ui/browser_instant_controller.h"
 
 #include <stddef.h>
@@ -10,9 +15,9 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/raw_ref.h"
 #include "base/metrics/field_trial.h"
 #include "base/run_loop.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/search/instant_service.h"
 #include "chrome/browser/search/instant_unittest_base.h"
 #include "chrome/browser/search/search.h"
@@ -39,9 +44,10 @@ class BrowserInstantControllerTest : public InstantUnitTestBase {
 
   // BrowserWithTestWindowTest:
   TestingProfile::TestingFactories GetTestingFactories() override {
-    return {{ChromeSigninClientFactory::GetInstance(),
-             base::BindRepeating(&BuildChromeSigninClientWithURLLoader,
-                                 test_url_loader_factory())}};
+    return {TestingProfile::TestingFactory{
+        ChromeSigninClientFactory::GetInstance(),
+        base::BindRepeating(&BuildChromeSigninClientWithURLLoader,
+                            test_url_loader_factory())}};
   }
 };
 
@@ -71,12 +77,12 @@ class FakeWebContentsObserver : public content::WebContentsObserver {
   void DidStartNavigation(content::NavigationHandle* navigation) override {
     if (navigation->GetReloadType() == content::ReloadType::NONE)
       return;
-    if (url_ == navigation->GetURL())
+    if (*url_ == navigation->GetURL())
       num_reloads_++;
     current_url_ = navigation->GetURL();
   }
 
-  const GURL& url() const { return url_; }
+  const GURL& url() const { return *url_; }
 
   const GURL& current_url() const { return contents_->GetURL(); }
 
@@ -95,7 +101,7 @@ class FakeWebContentsObserver : public content::WebContentsObserver {
  private:
   raw_ptr<content::WebContents> contents_;
   content::DidStartNavigationObserver did_start_observer_;
-  const GURL& url_;
+  const raw_ref<const GURL> url_;
   GURL current_url_;
   int num_reloads_;
 };

@@ -20,8 +20,8 @@
 
 #include "third_party/blink/renderer/core/css/css_property_value.h"
 
-#include "third_party/blink/renderer/core/css/css_custom_property_declaration.h"
 #include "third_party/blink/renderer/core/css/css_property_name.h"
+#include "third_party/blink/renderer/core/css/css_unparsed_declaration_value.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/core/style_property_shorthand.h"
 #include "third_party/blink/renderer/platform/wtf/size_assertions.h"
@@ -47,13 +47,15 @@ CSSPropertyValueMetadata::CSSPropertyValueMetadata(
       index_in_shorthands_vector_(index_in_shorthands_vector),
       important_(important),
       implicit_(implicit) {
-  if (name.IsCustomProperty())
+  if (name.IsCustomProperty()) {
     custom_name_ = name.ToAtomicString();
+  }
 }
 
 CSSPropertyID CSSPropertyValueMetadata::ShorthandID() const {
-  if (!is_set_from_shorthand_)
+  if (!is_set_from_shorthand_) {
     return CSSPropertyID::kInvalid;
+  }
 
   Vector<StylePropertyShorthand, 4> shorthands;
   getMatchingShorthandsForLonghand(PropertyID(), &shorthands);
@@ -64,8 +66,9 @@ CSSPropertyID CSSPropertyValueMetadata::ShorthandID() const {
 }
 
 CSSPropertyName CSSPropertyValueMetadata::Name() const {
-  if (PropertyID() != CSSPropertyID::kVariable)
+  if (PropertyID() != CSSPropertyID::kVariable) {
     return CSSPropertyName(PropertyID());
+  }
   return CSSPropertyName(custom_name_);
 }
 

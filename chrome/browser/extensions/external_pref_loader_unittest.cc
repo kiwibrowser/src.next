@@ -8,19 +8,15 @@
 #include <utility>
 
 #include "ash/constants/ash_pref_names.h"
-#include "base/bind.h"
+#include "base/functional/bind.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
 #include "chrome/browser/extensions/external_provider_impl.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/sync_service_factory.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/prefs/pref_service.h"
-#include "components/sync/test/fake_sync_change_processor.h"
-#include "components/sync/test/sync_error_factory_mock.h"
 #include "components/sync/test/test_sync_service.h"
-#include "components/sync_preferences/pref_model_associator.h"
-#include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/browser_task_environment.h"
@@ -57,7 +53,7 @@ class TestSyncService : public syncer::TestSyncService {
   }
 
  private:
-  syncer::SyncServiceObserver* observer_ = nullptr;
+  raw_ptr<syncer::SyncServiceObserver, DanglingUntriaged> observer_ = nullptr;
 };
 
 std::unique_ptr<KeyedService> TestingSyncFactoryFunction(
@@ -102,7 +98,7 @@ class ExternalPrefLoaderTest : public ::testing::Test {
     sync_service_ = static_cast<TestSyncService*>(
         SyncServiceFactory::GetInstance()->SetTestingFactoryAndUse(
             profile(), base::BindRepeating(&TestingSyncFactoryFunction)));
-    sync_service_->SetFirstSetupComplete(true);
+    sync_service_->SetInitialSyncFeatureSetupComplete(true);
   }
 
   void TearDown() override { profile_.reset(); }
@@ -120,15 +116,14 @@ class ExternalPrefLoaderTest : public ::testing::Test {
  private:
   content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<TestingProfile> profile_;
-  TestSyncService* sync_service_ = nullptr;
+  raw_ptr<TestSyncService, DanglingUntriaged> sync_service_ = nullptr;
 };
 
 // TODO(lazyboy): Add a test to cover
 // PrioritySyncReadyWaiter::OnIsSyncingChanged().
 
 // Tests that we fire pref reading correctly after priority sync state
-// is resolved by ExternalPrefLoader. This test checks that the flow works
-// regardless of the state of SyncSettingsCategorization.
+// is resolved by ExternalPrefLoader.
 TEST_F(ExternalPrefLoaderTest, PrefReadInitiatesCorrectly) {
   base::RunLoop run_loop;
   scoped_refptr<ExternalPrefLoader> loader(
@@ -140,8 +135,7 @@ TEST_F(ExternalPrefLoaderTest, PrefReadInitiatesCorrectly) {
 
   // Initially CanSyncFeatureStart() returns true, returning false will let
   // |loader| proceed.
-  sync_service()->SetDisableReasons(
-      syncer::SyncService::DISABLE_REASON_USER_CHOICE);
+  sync_service()->SetSignedIn(signin::ConsentLevel::kSignin);
   ASSERT_FALSE(sync_service()->CanSyncFeatureStart());
   sync_service()->FireOnStateChanged();
   run_loop.Run();

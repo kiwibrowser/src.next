@@ -8,6 +8,7 @@
 #include "base/test/scoped_feature_list.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "extensions/browser/disable_reason.h"
 #include "extensions/browser/extension_prefs.h"
@@ -15,7 +16,6 @@
 #include "extensions/browser/uninstall_reason.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/manifest.h"
-#include "extensions/common/value_builder.h"
 
 namespace {
 
@@ -55,7 +55,7 @@ class ExtensionSettingsOverriddenDialogUnitTest
     extensions::ExtensionBuilder builder(name);
     builder.SetLocation(location);
     if (include_extra_perms)
-      builder.AddPermission("storage");
+      builder.AddAPIPermission("storage");
     scoped_refptr<const extensions::Extension> extension = builder.Build();
     service()->AddExtension(extension.get());
     return extension.get();
@@ -92,9 +92,8 @@ TEST_F(ExtensionSettingsOverriddenDialogUnitTest,
 TEST_F(ExtensionSettingsOverriddenDialogUnitTest,
        WontShowForAnAcknowledgedExtension) {
   const extensions::Extension* extension = AddExtension();
-  GetExtensionPrefs()->UpdateExtensionPref(extension->id(),
-                                           kTestAcknowledgedPreference,
-                                           std::make_unique<base::Value>(true));
+  GetExtensionPrefs()->UpdateExtensionPref(
+      extension->id(), kTestAcknowledgedPreference, base::Value(true));
 
   ExtensionSettingsOverriddenDialog controller(
       CreateTestDialogParams(extension->id()), profile());

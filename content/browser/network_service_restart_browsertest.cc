@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/bind.h"
-#include "base/callback.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/run_loop.h"
 #include "base/scoped_environment_variable_override.h"
 #include "base/strings/strcat.h"
@@ -23,23 +23,22 @@
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/service_worker/embedded_worker_instance.h"
-#include "content/browser/service_worker/embedded_worker_status.h"
 #include "content/browser/service_worker/service_worker_context_core_observer.h"
 #include "content/browser/storage_partition_impl.h"
-#include "content/browser/url_loader_factory_getter.h"
 #include "content/browser/worker_host/test_shared_worker_service_impl.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/network_service_instance.h"
+#include "content/public/browser/network_service_util.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/network_service_util.h"
+#include "content/public/common/isolated_world_ids.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/commit_message_delayer.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
-#include "content/public/test/frame_test_utils.h"
 #include "content/public/test/simple_url_loader_test_helper.h"
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
@@ -49,28 +48,30 @@
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/bindings/sync_call_restrictions.h"
+#include "net/base/features.h"
 #include "net/cookies/canonical_cookie_test_helpers.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "services/cert_verifier/public/mojom/cert_verifier_service_factory.mojom.h"
 #include "services/network/public/cpp/network_switches.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 #include "services/network/public/mojom/network_service.mojom.h"
 #include "services/network/public/mojom/network_service_test.mojom.h"
+#include "services/network/test/test_url_loader_client.h"
 #include "testing/gmock/include/gmock/gmock-matchers.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/common/service_worker/embedded_worker_status.h"
 
 namespace content {
 
 namespace {
 
 const char kHostA[] = "a.test";
-const char kSamePartyCookieName[] = "SamePartyCookie";
-
-using SharedURLLoaderFactoryGetterCallback =
-    base::OnceCallback<scoped_refptr<network::SharedURLLoaderFactory>()>;
+const char kCookieName[] = "Cookie";
 
 mojo::PendingRemote<network::mojom::NetworkContext> CreateNetworkContext() {
   mojo::PendingRemote<network::mojom::NetworkContext> network_context;
@@ -78,7 +79,7 @@ mojo::PendingRemote<network::mojom::NetworkContext> CreateNetworkContext() {
       network::mojom::NetworkContextParams::New();
   context_params->cert_verifier_params = GetCertVerifierParams(
       cert_verifier::mojom::CertVerifierCreationParams::New());
-  GetNetworkService()->CreateNetworkContext(
+  CreateNetworkContextInNetworkService(
       network_context.InitWithNewPipeAndPassReceiver(),
       std::move(context_params));
   return network_context;
@@ -96,7 +97,7 @@ int LoadBasicRequestOnUIThread(
       network::SimpleURLLoader::Create(std::move(request),
                                        TRAFFIC_ANNOTATION_FOR_TESTS);
   simple_loader->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
-      url_loader_factory, simple_loader_helper.GetCallback());
+      url_loader_factory, simple_loader_helper.GetCallbackDeprecated());
   simple_loader_helper.WaitForCallback();
   return simple_loader->NetError();
 }
@@ -135,10 +136,6 @@ class NetworkServiceRestartBrowserTest : public ContentBrowserTest {
   NetworkServiceRestartBrowserTest& operator=(
       const NetworkServiceRestartBrowserTest&) = delete;
 
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    ContentBrowserTest::SetUpCommandLine(command_line);
-  }
-
   void SetUpOnMainThread() override {
     embedded_test_server()->RegisterRequestMonitor(
         base::BindRepeating(&NetworkServiceRestartBrowserTest::MonitorRequest,
@@ -170,17 +167,19 @@ class NetworkServiceRestartBrowserTest : public ContentBrowserTest {
         "xhr.open('GET', '");
     script += test_url.spec() +
               "', true);"
-              "xhr.onload = function (e) {"
-              "  if (xhr.readyState === 4) {"
-              "    window.domAutomationController.send(xhr.status === 200);"
-              "  }"
-              "};"
-              "xhr.onerror = function () {"
-              "  window.domAutomationController.send(false);"
-              "};"
-              "xhr.send(null)";
+              "new Promise(resolve => {"
+              "  xhr.onload = function (e) {"
+              "    if (xhr.readyState === 4) {"
+              "      resolve(xhr.status === 200);"
+              "    }"
+              "  };"
+              "  xhr.onerror = function () {"
+              "    resolve(false);"
+              "  };"
+              "  xhr.send(null);"
+              "});";
     // The JS call will fail if disallowed because the process will be killed.
-    return EvalJs(shell, script, EXECUTE_SCRIPT_USE_MANUAL_REPLY).ExtractBool();
+    return EvalJs(shell, script).ExtractBool();
   }
 
   // Will reuse the single opened windows through the test case.
@@ -191,24 +190,28 @@ class NetworkServiceRestartBrowserTest : public ContentBrowserTest {
         "xhr.open('GET', '%s', true);"
         "xhr.onload = function (e) {"
         "  if (xhr.readyState === 4) {"
-        "    window.opener.domAutomationController.send(xhr.status === 200);"
+        "    window.opener.postMessage(xhr.status === 200, '*');"
         "  }"
         "};"
         "xhr.onerror = function () {"
-        "  window.opener.domAutomationController.send(false);"
+        "  window.opener.postMessage(false, '*');"
         "};"
         "xhr.send(null)",
         test_url.spec().c_str());
     std::string window_open_script = base::StringPrintf(
         "var new_window = new_window || window.open('');"
         "var inject_script = document.createElement('script');"
-        "inject_script.innerHTML = \"%s\";"
-        "new_window.document.body.appendChild(inject_script);",
+        "new Promise(resolve => {"
+        "  window.addEventListener('message', (event) => {"
+        "    resolve(event.data);"
+        "  });"
+        "  inject_script.innerHTML = \"%s\";"
+        "  new_window.document.body.appendChild(inject_script);"
+        "});",
         inject_script.c_str());
 
     // The JS call will fail if disallowed because the process will be killed.
-    return EvalJs(shell(), window_open_script, EXECUTE_SCRIPT_USE_MANUAL_REPLY)
-        .ExtractBool();
+    return EvalJs(shell(), window_open_script).ExtractBool();
   }
 
   // Workers will live throughout the test case unless terminated.
@@ -221,21 +224,22 @@ class NetworkServiceRestartBrowserTest : public ContentBrowserTest {
         "var workers = workers || {};"
         "var worker_name = '%s';"
         "workers[worker_name] = workers[worker_name] || new Worker('%s');"
-        "workers[worker_name].onmessage = evt => {"
-        "  if (evt.data != 'wait')"
-        "    window.domAutomationController.send(evt.data === 200);"
-        "};"
-        "workers[worker_name].postMessage(\"eval "
-        "  fetch(new Request('%s'))"
-        "    .then(res => postMessage(res.status))"
-        "    .catch(error => postMessage(error.toString()));"
-        "  'wait'"
-        "\");",
+        "new Promise(resolve => {"
+        "  workers[worker_name].onmessage = evt => {"
+        "    if (evt.data != 'wait')"
+        "      resolve(evt.data === 200);"
+        "  };"
+        "  workers[worker_name].postMessage(\"eval "
+        "    fetch(new Request('%s'))"
+        "      .then(res => postMessage(res.status))"
+        "      .catch(error => postMessage(error.toString()));"
+        "    'wait'"
+        "  \");"
+        "});",
         worker_name.c_str(), worker_url.spec().c_str(),
         fetch_url.spec().c_str());
     // The JS call will fail if disallowed because the process will be killed.
-    return EvalJs(shell(), script, EXECUTE_SCRIPT_USE_MANUAL_REPLY)
-        .ExtractBool();
+    return EvalJs(shell(), script).ExtractBool();
   }
 
   // Terminate and delete the worker.
@@ -246,14 +250,13 @@ class NetworkServiceRestartBrowserTest : public ContentBrowserTest {
         "if (workers[worker_name]) {"
         "  workers[worker_name].terminate();"
         "  delete workers[worker_name];"
-        "  window.domAutomationController.send(true);"
+        "  true;"
         "} else {"
-        "  window.domAutomationController.send(false);"
+        "  false;"
         "}",
         worker_name.c_str());
     // The JS call will fail if disallowed because the process will be killed.
-    return EvalJs(shell(), script, EXECUTE_SCRIPT_USE_MANUAL_REPLY)
-        .ExtractBool();
+    return EvalJs(shell(), script).ExtractBool();
   }
 
   // Called by |embedded_test_server()|.
@@ -265,6 +268,25 @@ class NetworkServiceRestartBrowserTest : public ContentBrowserTest {
   std::string last_request_relative_url() const {
     base::AutoLock lock(last_request_lock_);
     return last_request_relative_url_;
+  }
+
+  std::unique_ptr<network::TestURLLoaderClient> FetchRequest(
+      const network::ResourceRequest& request,
+      network::mojom::NetworkContext* network_context,
+      network::mojom::URLLoaderFactoryParamsPtr params) {
+    mojo::Remote<network::mojom::URLLoaderFactory> loader_factory_remote;
+    network_context->CreateURLLoaderFactory(
+        loader_factory_remote.BindNewPipeAndPassReceiver(), std::move(params));
+
+    auto client = std::make_unique<network::TestURLLoaderClient>();
+
+    mojo::PendingRemote<network::mojom::URLLoader> loader;
+    loader_factory_remote->CreateLoaderAndStart(
+        loader.InitWithNewPipeAndPassReceiver(), 0,
+        network::mojom::kURLLoadOptionNone, request, client->CreateRemote(),
+        net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS));
+
+    return client;
   }
 
  private:
@@ -303,15 +325,17 @@ IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest,
   EXPECT_TRUE(network_context2.is_connected());
 }
 
-void IncrementInt(int* i) {
+void IncrementIntExpectingCrash(int* i, bool crashed) {
   *i = *i + 1;
+  EXPECT_TRUE(crashed);
 }
 
 // This test verifies basic functionality of RegisterNetworkServiceCrashHandler
 // and UnregisterNetworkServiceCrashHandler.
 IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest, CrashHandlers) {
-  if (IsInProcessNetworkService())
+  if (IsInProcessNetworkService()) {
     return;
+  }
   mojo::Remote<network::mojom::NetworkContext> network_context(
       CreateNetworkContext());
   EXPECT_TRUE(network_context.is_bound());
@@ -320,11 +344,11 @@ IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest, CrashHandlers) {
   int counter1 = 0;
   int counter2 = 0;
   base::CallbackListSubscription subscription1 =
-      RegisterNetworkServiceCrashHandler(
-          base::BindRepeating(&IncrementInt, base::Unretained(&counter1)));
+      RegisterNetworkServiceProcessGoneHandler(base::BindRepeating(
+          &IncrementIntExpectingCrash, base::Unretained(&counter1)));
   base::CallbackListSubscription subscription2 =
-      RegisterNetworkServiceCrashHandler(
-          base::BindRepeating(&IncrementInt, base::Unretained(&counter2)));
+      RegisterNetworkServiceProcessGoneHandler(base::BindRepeating(
+          &IncrementIntExpectingCrash, base::Unretained(&counter2)));
 
   // Crash the NetworkService process.
   SimulateNetworkServiceCrash();
@@ -387,18 +411,17 @@ IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest,
             LoadBasicRequest(partition->GetNetworkContext(), GetTestURL()));
 }
 
-// Make sure |URLLoaderFactoryGetter| returns valid interface after crash.
+// Make sure `GetURLLoaderFactoryForBrowserProcessIOThread` returns valid
+// interface after crash.
 IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest,
-                       URLLoaderFactoryGetterGetNetworkFactory) {
+                       GetURLLoaderFactoryForBrowserProcessIOThread) {
   if (IsInProcessNetworkService())
     return;
   StoragePartitionImpl* partition = static_cast<StoragePartitionImpl*>(
       browser_context()->GetDefaultStoragePartition());
-  scoped_refptr<URLLoaderFactoryGetter> url_loader_factory_getter =
-      partition->url_loader_factory_getter();
 
   auto factory_owner = IOThreadSharedURLLoaderFactoryOwner::Create(
-      url_loader_factory_getter.get());
+      partition->GetURLLoaderFactoryForBrowserProcessIOThread());
   EXPECT_EQ(net::OK, factory_owner->LoadBasicRequestOnIOThread(GetTestURL()));
 
   // Crash the NetworkService process. Existing interfaces should receive error
@@ -406,17 +429,17 @@ IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest,
   SimulateNetworkServiceCrash();
   // Flush the interface to make sure the error notification was received.
   partition->FlushNetworkInterfaceForTesting();
-  url_loader_factory_getter->FlushNetworkInterfaceOnIOThreadForTesting();
+  partition->FlushNetworkInterfaceOnIOThreadForTesting();
 
-  // |url_loader_factory_getter| should be able to get a valid new pointer after
-  // crash.
+  // |GetURLLoaderFactoryForBrowserProcessIOThread| should be able to get a
+  // valid new pointer after crash.
   factory_owner = IOThreadSharedURLLoaderFactoryOwner::Create(
-      url_loader_factory_getter.get());
+      partition->GetURLLoaderFactoryForBrowserProcessIOThread());
   EXPECT_EQ(net::OK, factory_owner->LoadBasicRequestOnIOThread(GetTestURL()));
 }
 
 // Make sure the factory returned from
-// |URLLoaderFactoryGetter::GetNetworkFactory()| continues to work after
+// `GetURLLoaderFactoryForBrowserProcessIOThread` continues to work after
 // crashes.
 IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest,
                        BrowserIOSharedURLLoaderFactory) {
@@ -426,7 +449,7 @@ IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest,
       browser_context()->GetDefaultStoragePartition());
 
   auto factory_owner = IOThreadSharedURLLoaderFactoryOwner::Create(
-      partition->url_loader_factory_getter().get());
+      partition->GetURLLoaderFactoryForBrowserProcessIOThread());
 
   EXPECT_EQ(net::OK, factory_owner->LoadBasicRequestOnIOThread(GetTestURL()));
 
@@ -435,15 +458,14 @@ IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest,
   SimulateNetworkServiceCrash();
   // Flush the interface to make sure the error notification was received.
   partition->FlushNetworkInterfaceForTesting();
-  partition->url_loader_factory_getter()
-      ->FlushNetworkInterfaceOnIOThreadForTesting();
+  partition->FlushNetworkInterfaceOnIOThreadForTesting();
 
   // |shared_factory| should continue to work.
   EXPECT_EQ(net::OK, factory_owner->LoadBasicRequestOnIOThread(GetTestURL()));
 }
 
 // Make sure the factory returned from
-// |URLLoaderFactoryGetter::GetNetworkFactory()| doesn't crash if
+// `GetURLLoaderFactoryForBrowserProcessIOThread` doesn't crash if
 // it's called after the StoragePartition is deleted.
 IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest,
                        BrowserIOSharedFactoryAfterStoragePartitionGone) {
@@ -455,7 +477,7 @@ IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest,
   auto* partition = static_cast<StoragePartitionImpl*>(
       browser_context->GetDefaultStoragePartition());
   auto factory_owner = IOThreadSharedURLLoaderFactoryOwner::Create(
-      partition->url_loader_factory_getter().get());
+      partition->GetURLLoaderFactoryForBrowserProcessIOThread());
 
   EXPECT_EQ(net::OK, factory_owner->LoadBasicRequestOnIOThread(GetTestURL()));
 
@@ -481,8 +503,7 @@ IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest,
   SimulateNetworkServiceCrash();
   // Flush the interface to make sure the error notification was received.
   partition->FlushNetworkInterfaceForTesting();
-  partition->url_loader_factory_getter()
-      ->FlushNetworkInterfaceOnIOThreadForTesting();
+  partition->FlushNetworkInterfaceOnIOThreadForTesting();
 
   EXPECT_TRUE(
       NavigateToURL(shell(), embedded_test_server()->GetURL("/title2.html")));
@@ -507,7 +528,8 @@ IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest, BasicXHR) {
   // Flush the interface to make sure the frame host has received error
   // notification and the new URLLoaderFactoryBundle has been received by the
   // frame.
-  main_frame()->FlushNetworkAndNavigationInterfacesForTesting();
+  main_frame()->FlushNetworkAndNavigationInterfacesForTesting(
+      /*do_nothing_if_no_network_service_connection=*/false);
 
   EXPECT_TRUE(CheckCanLoadHttp(shell(), "/title2.html"));
   EXPECT_EQ(last_request_relative_url(), "/title2.html");
@@ -574,7 +596,6 @@ IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest,
   // Flush the interface to make sure the error notification was received.
   partition->FlushNetworkInterfaceForTesting();
   static_cast<StoragePartitionImpl*>(partition)
-      ->url_loader_factory_getter()
       ->FlushNetworkInterfaceOnIOThreadForTesting();
 
   auto factory_owner = IOThreadSharedURLLoaderFactoryOwner::Create(
@@ -599,7 +620,6 @@ IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest, BrowserIOFactory) {
   // Flush the interface to make sure the error notification was received.
   partition->FlushNetworkInterfaceForTesting();
   static_cast<StoragePartitionImpl*>(partition)
-      ->url_loader_factory_getter()
       ->FlushNetworkInterfaceOnIOThreadForTesting();
 
   EXPECT_EQ(net::OK, factory_owner->LoadBasicRequestOnIOThread(GetTestURL()));
@@ -624,14 +644,15 @@ IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest, WindowOpenXHR) {
   // Flush the interface to make sure the frame host has received error
   // notification and the new URLLoaderFactoryBundle has been received by the
   // frame.
-  main_frame()->FlushNetworkAndNavigationInterfacesForTesting();
+  main_frame()->FlushNetworkAndNavigationInterfacesForTesting(
+      /*do_nothing_if_no_network_service_connection=*/false);
 
   EXPECT_TRUE(CheckCanLoadHttpInWindowOpen("/title2.html"));
   EXPECT_EQ(last_request_relative_url(), "/title2.html");
 }
 
 // Run tests with PlzDedicatedWorker.
-// TODO(https://crbug.com/906991): Merge this test fixture into
+// TODO(crbug.com/40093136): Merge this test fixture into
 // NetworkServiceRestartBrowserTest once PlzDedicatedWorker is enabled by
 // default.
 class NetworkServiceRestartForWorkerBrowserTest
@@ -675,7 +696,8 @@ IN_PROC_BROWSER_TEST_P(NetworkServiceRestartForWorkerBrowserTest, WorkerFetch) {
   // Flush the interface to make sure the frame host has received error
   // notification and the new URLLoaderFactoryBundle has been received by the
   // frame.
-  main_frame()->FlushNetworkAndNavigationInterfacesForTesting();
+  main_frame()->FlushNetworkAndNavigationInterfacesForTesting(
+      /*do_nothing_if_no_network_service_connection=*/false);
 
   EXPECT_TRUE(CheckCanWorkerFetch("worker1", "/title2.html"));
   EXPECT_EQ(last_request_relative_url(), "/title2.html");
@@ -702,7 +724,8 @@ IN_PROC_BROWSER_TEST_P(NetworkServiceRestartForWorkerBrowserTest,
   // Flush the interface to make sure the frame host has received error
   // notification and the new URLLoaderFactoryBundle has been received by the
   // frame.
-  main_frame()->FlushNetworkAndNavigationInterfacesForTesting();
+  main_frame()->FlushNetworkAndNavigationInterfacesForTesting(
+      /*do_nothing_if_no_network_service_connection=*/false);
 
   // Both workers should work after crash.
   EXPECT_TRUE(CheckCanWorkerFetch("worker1", "/title2.html"));
@@ -717,7 +740,8 @@ IN_PROC_BROWSER_TEST_P(NetworkServiceRestartForWorkerBrowserTest,
   // Crash the NetworkService process again. "worker2" should still work.
   SimulateNetworkServiceCrash();
   partition->FlushNetworkInterfaceForTesting();
-  main_frame()->FlushNetworkAndNavigationInterfacesForTesting();
+  main_frame()->FlushNetworkAndNavigationInterfacesForTesting(
+      /*do_nothing_if_no_network_service_connection=*/false);
 
   EXPECT_TRUE(CheckCanWorkerFetch("worker2", "/title2.html"));
   EXPECT_EQ(last_request_relative_url(), "/title2.html");
@@ -892,7 +916,7 @@ IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest, ServiceWorkerFetch) {
   service_worker_context->RemoveObserver(&observer);
 }
 
-// TODO(crbug.com/154571): Shared workers are not available on Android.
+// TODO(crbug.com/40290702): Shared workers are not available on Android.
 #if BUILDFLAG(IS_ANDROID)
 #define MAYBE_SharedWorker DISABLED_SharedWorker
 #else
@@ -1002,7 +1026,7 @@ IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest, Cookies) {
   EXPECT_EQ("foo=bar", EvalJs(web_contents, "document.cookie;"));
 }
 
-// TODO(crbug.com/901026): Fix deadlock on process startup on Android.
+// TODO(crbug.com/41423903): Fix deadlock on process startup on Android.
 #if BUILDFLAG(IS_ANDROID)
 IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest,
                        DISABLED_SyncCallDuringRestart) {
@@ -1010,7 +1034,7 @@ IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest,
     return;
   base::RunLoop run_loop;
   mojo::Remote<network::mojom::NetworkServiceTest> network_service_test;
-  content::GetNetworkService()->BindTestInterface(
+  content::GetNetworkService()->BindTestInterfaceForTesting(
       network_service_test.BindNewPipeAndPassReceiver());
 
   // Crash the network service, but do not wait for full startup.
@@ -1020,7 +1044,7 @@ IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest,
   run_loop.Run();
 
   network_service_test.reset();
-  content::GetNetworkService()->BindTestInterface(
+  content::GetNetworkService()->BindTestInterfaceForTesting(
       network_service_test.BindNewPipeAndPassReceiver());
 
   // Sync call should be fine, even though network process is still starting up.
@@ -1088,27 +1112,84 @@ IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest,
                                 final_resource_url)));
 }
 
+// Nonces whose network access is revoked should be restored in `NetworkContext`
+// in case of a `NetworkService` crash, which destroys the `NetworkContext`
+// owned by `NetworkService` and the set of network revocation nonces in
+// `NetworkContext`.
+IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest,
+                       RestoreNetworkRevocationNonces) {
+  if (IsInProcessNetworkService()) {
+    return;
+  }
+  StoragePartitionImpl* partition = static_cast<StoragePartitionImpl*>(
+      browser_context()->GetDefaultStoragePartition());
+
+  network::mojom::NetworkContext* old_network_context =
+      partition->GetNetworkContext();
+
+  // Revoke network access for the generated nonce.
+  base::UnguessableToken nonce = base::UnguessableToken::Create();
+  partition->RevokeNetworkForNoncesInNetworkContext({nonce}, base::DoNothing());
+
+  // Make a get request, which should be blocked.
+  network::mojom::URLLoaderFactoryParamsPtr params =
+      network::mojom::URLLoaderFactoryParams::New();
+  params->process_id = network::mojom::kBrowserProcessId;
+  params->is_orb_enabled = false;
+  params->isolation_info = net::IsolationInfo::CreateTransientWithNonce(nonce);
+
+  network::ResourceRequest request;
+  request.url = GetTestURL();
+  std::unique_ptr<network::TestURLLoaderClient> old_client =
+      FetchRequest(request, old_network_context, std::move(params));
+
+  old_client->RunUntilComplete();
+  EXPECT_EQ(net::ERR_NETWORK_ACCESS_REVOKED,
+            old_client->completion_status().error_code);
+
+  // Crash the NetworkService process. Existing interfaces should receive error
+  // notifications at some point.
+  SimulateNetworkServiceCrash();
+  // Flush the interface to make sure the error notification was received.
+  partition->FlushNetworkInterfaceForTesting();
+
+  // |partition->GetNetworkContext()| should return a valid new pointer after
+  // crash. The revoked nonces should be restored in the new NetworkContext.
+  network::mojom::NetworkContext* new_network_context =
+      partition->GetNetworkContext();
+  EXPECT_NE(old_network_context, new_network_context);
+
+  // Make another get request, which should still be blocked.
+  network::mojom::URLLoaderFactoryParamsPtr new_params =
+      network::mojom::URLLoaderFactoryParams::New();
+  new_params->process_id = network::mojom::kBrowserProcessId;
+  new_params->is_orb_enabled = false;
+  new_params->isolation_info =
+      net::IsolationInfo::CreateTransientWithNonce(nonce);
+
+  std::unique_ptr<network::TestURLLoaderClient> new_client =
+      FetchRequest(request, new_network_context, std::move(new_params));
+
+  new_client->RunUntilComplete();
+  EXPECT_EQ(net::ERR_NETWORK_ACCESS_REVOKED,
+            new_client->completion_status().error_code);
+}
+
 class NetworkServiceRestartWithFirstPartySetBrowserTest
-    : public NetworkServiceRestartBrowserTest,
-      public testing::WithParamInterface<bool> {
+    : public NetworkServiceRestartBrowserTest {
  public:
   NetworkServiceRestartWithFirstPartySetBrowserTest()
       : https_server_(net::EmbeddedTestServer::TYPE_HTTPS) {
-    if (IsFirstPartySetsEnabled()) {
-      scoped_feature_list_.InitAndEnableFeature(features::kFirstPartySets);
-    } else {
-      scoped_feature_list_.InitAndDisableFeature(features::kFirstPartySets);
-    }
+    scoped_feature_list_.InitWithFeatures(
+        {net::features::kWaitForFirstPartySetsInit}, {});
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     NetworkServiceRestartBrowserTest::SetUpCommandLine(command_line);
-    if (IsFirstPartySetsEnabled()) {
-      command_line->AppendSwitchASCII(
-          network::switches::kUseFirstPartySet,
-          R"({"primary": "https://a.test",)"
-          R"("associatedSites": ["https://b.test","https://c.test"]})");
-    }
+    command_line->AppendSwitchASCII(
+        network::switches::kUseRelatedWebsiteSet,
+        R"({"primary": "https://a.test",)"
+        R"("associatedSites": ["https://b.test","https://c.test"]})");
   }
 
   void SetUpOnMainThread() override {
@@ -1123,69 +1204,48 @@ class NetworkServiceRestartWithFirstPartySetBrowserTest
     return https_server_.GetURL(host, "/echoheader?Cookie");
   }
 
-  GURL HostURL(const std::string& host) {
-    return https_server()->GetURL(host, "/");
-  }
-
-  std::vector<std::string> ExpectedSamePartyCookieNames() const {
-    // This function assumes that it is used with a cross-site context which may
-    // or may not be same-party, depending on whether First-Party Sets is
-    // enabled or not.
-    if (IsFirstPartySetsEnabled())
-      return {kSamePartyCookieName};
-    return {};
-  }
-
-  void SetSamePartyCookie(const std::string& host) {
-    ASSERT_TRUE(content::SetCookie(
-        web_contents()->GetBrowserContext(), HostURL(host),
-        base::StrCat(
-            {kSamePartyCookieName, "=1; samesite=lax; secure; sameparty"})));
-  }
-
-  std::string EmbedFrameAndGetCookieString() {
-    return ArrangeFramesAndGetContentFromLeaf(web_contents(), https_server(),
-                                              "b.test(%s)", {0},
-                                              EchoCookiesUrl(kHostA));
+  void SetCookie(const std::string& host) {
+    ASSERT_TRUE(content::SetCookie(web_contents()->GetBrowserContext(),
+                                   https_server()->GetURL(host, "/"),
+                                   base::StrCat({kCookieName, "=1; secure"})));
   }
 
   net::EmbeddedTestServer* https_server() { return &https_server_; }
 
   WebContents* web_contents() { return shell()->web_contents(); }
 
-  bool IsFirstPartySetsEnabled() const { return GetParam(); }
-
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
   net::test_server::EmbeddedTestServer https_server_;
 };
 
-IN_PROC_BROWSER_TEST_P(NetworkServiceRestartWithFirstPartySetBrowserTest,
+IN_PROC_BROWSER_TEST_F(NetworkServiceRestartWithFirstPartySetBrowserTest,
                        GetsUseFirstPartySetSwitch) {
   // Network service is not running out of process, so cannot be crashed.
-  if (!content::IsOutOfProcessNetworkService())
+  if (!content::IsOutOfProcessNetworkService()) {
     return;
+  }
 
-  SetSamePartyCookie(kHostA);
+  SetCookie(kHostA);
 
-  EXPECT_THAT(EmbedFrameAndGetCookieString(),
-              net::CookieStringIs(testing::UnorderedPointwise(
-                  net::NameIs(), ExpectedSamePartyCookieNames())));
+  ASSERT_TRUE(content::NavigateToURL(web_contents(), EchoCookiesUrl(kHostA)));
+  EXPECT_THAT(content::EvalJs(web_contents(), "document.body.textContent")
+                  .ExtractString(),
+              net::CookieStringIs(
+                  testing::UnorderedElementsAre(testing::Key(kCookieName))));
 
   SimulateNetworkServiceCrash();
 
   // content_shell uses an in-memory cookie store, so cookies are not persisted,
-  // but that's ok. What matters is that the command-line set is re-plumbed to
-  // the network service upon restart.
-  SetSamePartyCookie(kHostA);
+  // but that's ok. What matters is that the FPS data is re-plumbed to the
+  // network service upon restart, so network requests don't deadlock.
+  SetCookie(kHostA);
 
-  EXPECT_THAT(EmbedFrameAndGetCookieString(),
-              net::CookieStringIs(testing::UnorderedPointwise(
-                  net::NameIs(), ExpectedSamePartyCookieNames())));
+  ASSERT_TRUE(content::NavigateToURL(web_contents(), EchoCookiesUrl(kHostA)));
+  EXPECT_THAT(content::EvalJs(web_contents(), "document.body.textContent")
+                  .ExtractString(),
+              net::CookieStringIs(
+                  testing::UnorderedElementsAre(testing::Key(kCookieName))));
 }
-
-INSTANTIATE_TEST_SUITE_P(/* no prefix */,
-                         NetworkServiceRestartWithFirstPartySetBrowserTest,
-                         testing::Bool());
 
 }  // namespace content

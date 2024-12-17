@@ -8,7 +8,9 @@
 #include <stdint.h>
 
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "base/containers/flat_set.h"
@@ -17,6 +19,8 @@
 #include "base/supports_user_data.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
+#include "base/types/pass_key.h"
+#include "base/values.h"
 #include "net/base/auth.h"
 #include "net/base/completion_repeating_callback.h"
 #include "net/base/idempotency.h"
@@ -29,10 +33,13 @@
 #include "net/base/net_errors.h"
 #include "net/base/net_export.h"
 #include "net/base/network_delegate.h"
-#include "net/base/proxy_server.h"
+#include "net/base/proxy_chain.h"
 #include "net/base/request_priority.h"
 #include "net/base/upload_progress.h"
 #include "net/cookies/canonical_cookie.h"
+#include "net/cookies/cookie_partition_key.h"
+#include "net/cookies/cookie_setting_override.h"
+#include "net/cookies/cookie_util.h"
 #include "net/cookies/site_for_cookies.h"
 #include "net/dns/public/secure_dns_policy.h"
 #include "net/filter/source_stream.h"
@@ -44,22 +51,21 @@
 #include "net/log/net_log_source.h"
 #include "net/log/net_log_with_source.h"
 #include "net/net_buildflags.h"
+#include "net/shared_dictionary/shared_dictionary.h"
+#include "net/shared_dictionary/shared_dictionary_getter.h"
 #include "net/socket/connection_attempts.h"
 #include "net/socket/socket_tag.h"
+#include "net/storage_access_api/status.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/redirect_info.h"
 #include "net/url_request/referrer_policy.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 #include "url/origin.h"
-
-namespace base {
-class Value;
-}  // namespace base
 
 namespace net {
 
 class CookieOptions;
+class CookieInclusionStatus;
 class IOBuffer;
 struct LoadTimingInfo;
 struct RedirectInfo;
@@ -113,6 +119,12 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   // there is an error.
   class NET_EXPORT Delegate {
    public:
+    Delegate() = default;
+
+    // Forbid copy and assign to prevent slicing.
+    Delegate(const Delegate&) = delete;
+    Delegate& operator=(const Delegate&) = delete;
+
     // Called each time a connection is obtained, before any data is sent.
     //
     // |request| is never nullptr. Caller retains ownership.
@@ -157,6 +169,10 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
     // or request->CancelAuth() to cancel the login and display the error page.
     // When it does so, the request will be reissued, restarting the sequence
     // of On* callbacks.
+    //
+    // NOTE: If auth_info.scheme is AUTH_SCHEME_NEGOTIATE on ChromeOS, this
+    // method should not call SetAuth(). Instead, it should show ChromeOS
+    // specific UI and cancel the request. (See b/260522530).
     virtual void OnAuthRequired(URLRequest* request,
                                 const AuthChallengeInfo& auth_info);
 
@@ -203,6 +219,16 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
    protected:
     virtual ~Delegate() = default;
   };
+
+  // URLRequests are always created by calling URLRequestContext::CreateRequest.
+  URLRequest(base::PassKey<URLRequestContext> pass_key,
+             const GURL& url,
+             RequestPriority priority,
+             Delegate* delegate,
+             const URLRequestContext* context,
+             NetworkTrafficAnnotationTag traffic_annotation,
+             bool is_for_websockets,
+             std::optional<net::NetLogSource> net_log_source);
 
   URLRequest(const URLRequest&) = delete;
   URLRequest& operator=(const URLRequest&) = delete;
@@ -260,16 +286,38 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   void set_site_for_cookies(const SiteForCookies& site_for_cookies);
 
   // Sets IsolationInfo for the request, which affects whether SameSite cookies
-  // are sent, what NetworkIsolationKey is used for cached resources, and how
-  // that behavior changes when following redirects. This may only be changed
-  // before Start() is called.
+  // are sent, what NetworkAnonymizationKey is used for cached resources, and
+  // how that behavior changes when following redirects. This may only be
+  // changed before Start() is called. Setting this value causes the
+  // cookie_partition_key_ to be recalculated. When the isolation information is
+  // set through a redirect, the request_site used to create the partition key
+  // should come from the new_url associated with the redirect_info object
+  // associated with the redirect to ensure the cookie partition key's ancestor
+  // chain bit is set correctly.
   //
-  // TODO(https://crbug.com/1060631): This isn't actually used yet for SameSite
+  // TODO(crbug.com/40093296): This isn't actually used yet for SameSite
   // cookies. Update consumers and fix that.
-  void set_isolation_info(const IsolationInfo& isolation_info) {
-    isolation_info_ = isolation_info;
-  }
+  void set_isolation_info(
+      const IsolationInfo& isolation_info,
+      std::optional<GURL> redirect_info_new_url = std::nullopt);
+
+  // This will convert the passed NetworkAnonymizationKey to an IsolationInfo.
+  // This IsolationInfo mmay be assigned an inaccurate frame origin because the
+  // NetworkAnonymizationKey might not contain all the information to populate
+  // it. Additionally the NetworkAnonymizationKey uses sites which will be
+  // converted to origins when set on the IsolationInfo. If using this method it
+  // is required to skip the cache and not use credentials. Before starting the
+  // request, it must have the LoadFlag LOAD_DISABLE_CACHE set, and must be set
+  // to not allow credentials, to ensure that the inaccurate frame origin has no
+  // impact. The request will DCHECK otherwise.
+  void set_isolation_info_from_network_anonymization_key(
+      const NetworkAnonymizationKey& network_anonymization_key);
+
   const IsolationInfo& isolation_info() const { return isolation_info_; }
+
+  const std::optional<CookiePartitionKey>& cookie_partition_key() const {
+    return cookie_partition_key_;
+  }
 
   // Indicate whether SameSite cookies should be attached even though the
   // request is cross-site.
@@ -280,16 +328,6 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
     force_ignore_site_for_cookies_ = attach;
   }
 
-  // Indicates whether the top frame party will be considered same-party to the
-  // request URL (regardless of what it is), for the purpose of SameParty
-  // cookies.
-  bool force_ignore_top_frame_party_for_cookies() const {
-    return force_ignore_top_frame_party_for_cookies_;
-  }
-  void set_force_ignore_top_frame_party_for_cookies(bool force) {
-    force_ignore_top_frame_party_for_cookies_ = force;
-  }
-
   // Indicates if the request should be treated as a main frame navigation for
   // SameSite cookie computations.  This flag overrides the IsolationInfo
   // request type associated with fetches from a service worker context.
@@ -298,6 +336,14 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   }
   void set_force_main_frame_for_same_site_cookies(bool value) {
     force_main_frame_for_same_site_cookies_ = value;
+  }
+
+  // Overrides pertaining to cookie settings for this particular request.
+  CookieSettingOverrides& cookie_setting_overrides() {
+    return cookie_setting_overrides_;
+  }
+  const CookieSettingOverrides& cookie_setting_overrides() const {
+    return cookie_setting_overrides_;
   }
 
   // The first-party URL policy to apply when updating the first party URL
@@ -329,15 +375,16 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   // Note: the initiator can be null for browser-initiated top level
   // navigations. This is different from a unique Origin (e.g. in sandboxed
   // iframes).
-  const absl::optional<url::Origin>& initiator() const { return initiator_; }
+  const std::optional<url::Origin>& initiator() const { return initiator_; }
   // This method may only be called before Start().
-  void set_initiator(const absl::optional<url::Origin>& initiator);
+  void set_initiator(const std::optional<url::Origin>& initiator);
 
-  // The request method, as an uppercase string.  "GET" is the default value.
-  // The request method may only be changed before Start() is called and
-  // should only be assigned an uppercase value.
+  // The request method.  "GET" is the default value. The request method may
+  // only be changed before Start() is called. Request methods are
+  // case-sensitive, so standard HTTP methods like GET or POST should be
+  // specified in uppercase.
   const std::string& method() const { return method_; }
-  void set_method(const std::string& method);
+  void set_method(std::string_view method);
 
 #if BUILDFLAG(ENABLE_REPORTING)
   // Reporting upload nesting depth of this request.
@@ -360,7 +407,7 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   // the request is started. The referrer URL may be suppressed or changed
   // during the course of the request, for example because of a referrer policy
   // set with set_referrer_policy().
-  void SetReferrer(const std::string& referrer);
+  void SetReferrer(std::string_view referrer);
 
   // The referrer policy to apply when updating the referrer during redirects.
   // The referrer policy may only be changed before Start() is called. Any
@@ -391,10 +438,10 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   // Set or remove a extra request header.  These methods may only be called
   // before Start() is called, or between receiving a redirect and trying to
   // follow it.
-  void SetExtraRequestHeaderByName(const std::string& name,
-                                   const std::string& value,
+  void SetExtraRequestHeaderByName(std::string_view name,
+                                   std::string_view value,
                                    bool overwrite);
-  void RemoveRequestHeaderByName(const std::string& name);
+  void RemoveRequestHeaderByName(std::string_view name);
 
   // Sets all extra request headers.  Any extra request headers set by other
   // methods are overwritten by this method.  This method may only be called
@@ -430,20 +477,18 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
 
   // Returns a partial representation of the request's state as a value, for
   // debugging.
-  base::Value GetStateAsValue() const;
+  base::Value::Dict GetStateAsValue() const;
 
   // Logs information about the what external object currently blocking the
   // request.  LogUnblocked must be called before resuming the request.  This
   // can be called multiple times in a row either with or without calling
-  // LogUnblocked between calls.  |blocked_by| must not be NULL or have length
-  // 0.
-  void LogBlockedBy(const char* blocked_by);
+  // LogUnblocked between calls.  |blocked_by| must not be empty.
+  void LogBlockedBy(std::string_view blocked_by);
 
   // Just like LogBlockedBy, but also makes GetLoadState return source as the
   // |param| in the value returned by GetLoadState.  Calling LogUnblocked or
-  // LogBlockedBy will clear the load param.  |blocked_by| must not be NULL or
-  // have length 0.
-  void LogAndReportBlockedBy(const char* blocked_by);
+  // LogBlockedBy will clear the load param.  |blocked_by| must not be empty.
+  void LogAndReportBlockedBy(std::string_view blocked_by);
 
   // Logs that the request is no longer blocked by the last caller to
   // LogBlockedBy.
@@ -458,8 +503,7 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   // that appear more than once in the response are coalesced, with values
   // separated by commas (per RFC 2616). This will not work with cookies since
   // comma can be used in cookie values.
-  void GetResponseHeaderByName(const std::string& name,
-                               std::string* value) const;
+  void GetResponseHeaderByName(std::string_view name, std::string* value) const;
 
   // The time when |this| was constructed.
   base::TimeTicks creation_time() const { return creation_time_; }
@@ -493,7 +537,7 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   // Get the SSL connection info.
   const SSLInfo& ssl_info() const { return response_info_.ssl_info; }
 
-  const absl::optional<AuthChallengeInfo>& auth_challenge_info() const;
+  const std::optional<AuthChallengeInfo>& auth_challenge_info() const;
 
   // Gets timing information related to the request.  Events that have not yet
   // occurred are left uninitialized.  After a second request starts, due to
@@ -537,7 +581,17 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   const HttpResponseInfo& response_info() const { return response_info_; }
 
   // Access the LOAD_* flags modifying this request (see load_flags.h).
-  int load_flags() const { return load_flags_; }
+  int load_flags() const {
+    if (cookie_setting_overrides().Has(
+            CookieSettingOverride::kStorageAccessGrantEligibleViaHeader)) {
+      return partial_load_flags_ | LOAD_BYPASS_CACHE;
+    }
+    return partial_load_flags_;
+  }
+
+  bool is_created_from_network_anonymization_key() const {
+    return is_created_from_network_anonymization_key_;
+  }
 
   // Returns the Secure DNS Policy for the request.
   SecureDnsPolicy secure_dns_policy() const { return secure_dns_policy_; }
@@ -627,8 +681,8 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   // |modified_headers| are changes applied to the request headers after
   // updating them for the redirect.
   void FollowDeferredRedirect(
-      const absl::optional<std::vector<std::string>>& removed_headers,
-      const absl::optional<net::HttpRequestHeaders>& modified_headers);
+      const std::optional<std::vector<std::string>>& removed_headers,
+      const std::optional<net::HttpRequestHeaders>& modified_headers);
 
   // One of the following two methods should be called in response to an
   // OnAuthRequired() callback (and only then).
@@ -680,10 +734,16 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   // Returns the priority level for this request.
   RequestPriority priority() const { return priority_; }
 
+  // Returns the incremental loading priority flag for this request.
+  bool priority_incremental() const { return priority_incremental_; }
+
   // Sets the priority level for this request and any related
   // jobs. Must not change the priority to anything other than
   // MAXIMUM_PRIORITY if the IGNORE_LIMITS load flag is set.
   void SetPriority(RequestPriority priority);
+
+  // Sets the incremental priority flag for this request.
+  void SetPriorityIncremental(bool priority_incremental);
 
   void set_received_response_content_length(int64_t received_content_length) {
     received_response_content_length_ = received_content_length;
@@ -697,7 +757,7 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
 
   // Available when the request headers are sent, which is before the more
   // general response_info() is available.
-  const ProxyServer& proxy_server() const { return proxy_server_; }
+  const ProxyChain& proxy_chain() const { return proxy_chain_; }
 
   // Gets the connection attempts made in the process of servicing this
   // URLRequest. Only guaranteed to be valid if called after the request fails
@@ -708,13 +768,13 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
     return traffic_annotation_;
   }
 
-  const absl::optional<base::flat_set<net::SourceStream::SourceType>>&
+  const std::optional<base::flat_set<net::SourceStream::SourceType>>&
   accepted_stream_types() const {
     return accepted_stream_types_;
   }
 
   void set_accepted_stream_types(
-      const absl::optional<base::flat_set<net::SourceStream::SourceType>>&
+      const std::optional<base::flat_set<net::SourceStream::SourceType>>&
           types) {
     if (types) {
       DCHECK(!types->contains(net::SourceStream::SourceType::TYPE_NONE));
@@ -741,6 +801,11 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   // is received from the remote party.
   void SetEarlyResponseHeadersCallback(ResponseHeadersCallback callback);
 
+  // Set a callback that will be invoked when a matching shared dictionary is
+  // available to determine whether it is allowed to use the dictionary.
+  void SetIsSharedDictionaryReadAllowedCallback(
+      base::RepeatingCallback<bool()> callback);
+
   // Sets socket tag to be applied to all sockets used to execute this request.
   // Must be set before Start() is called.  Only currently supported for HTTP
   // and HTTPS requests on Android; UID tagging requires
@@ -760,6 +825,11 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   }
   bool upgrade_if_insecure() const { return upgrade_if_insecure_; }
 
+  // `ad_tagged` should be set to true if the request is thought to be related
+  // to advertising.
+  void set_ad_tagged(bool ad_tagged) { ad_tagged_ = ad_tagged; }
+  bool ad_tagged() const { return ad_tagged_; }
+
   // By default, client certs will be sent (provided via
   // Delegate::OnCertificateRequested) when cookies are disabled
   // (LOAD_DO_NOT_SEND_COOKIES / LOAD_DO_NOT_SAVE_COOKIES). As described at
@@ -768,7 +838,7 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   // Delegate::OnCertificateRequested callback when cookies/credentials are also
   // suppressed. This method has no effect if credentials are enabled (cookies
   // saved and sent).
-  // TODO(https://crbug.com/775438): Remove this when the underlying
+  // TODO(crbug.com/40089326): Remove this when the underlying
   // issue is fixed.
   void set_send_client_certs(bool send_client_certs) {
     send_client_certs_ = send_client_certs;
@@ -780,28 +850,34 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   void SetIdempotency(Idempotency idempotency) { idempotency_ = idempotency; }
   Idempotency GetIdempotency() const { return idempotency_; }
 
-  int pervasive_payloads_index_for_logging() const {
-    return pervasive_payloads_index_for_logging_;
+  // Set a SharedDictionaryGetter which will be used to get a shared dictionary
+  // for this request. This must not be called after Start() is called.
+  void SetSharedDictionaryGetter(
+      SharedDictionaryGetter shared_dictionary_getter);
+
+  void set_storage_access_status(
+      std::optional<cookie_util::StorageAccessStatus> status) {
+    storage_access_status_ = status;
   }
 
-  void set_pervasive_payloads_index_for_logging(int index) {
-    pervasive_payloads_index_for_logging_ = index;
-  }
-
-  const std::string& expected_response_checksum() const {
-    return expected_response_checksum_;
-  }
-
-  void set_expected_response_checksum(const std::string& checksum) {
-    expected_response_checksum_ = checksum;
+  // Returns the StorageAccessStatus for this request.
+  // TODO(https://crbug.com/366284840): move this state out of //net (into
+  // network::URLLoader) to respect layering rules.
+  std::optional<cookie_util::StorageAccessStatus> storage_access_status()
+      const {
+    return storage_access_status_;
   }
 
   static bool DefaultCanUseCookies();
 
-  base::WeakPtr<URLRequest> GetWeakPtr();
+  // Calculates the StorageAccessStatus for this request, according to the
+  // NetworkDelegate. Also records metrics.
+  // TODO(https://crbug.com/366284840): Move this to URLLoader once the
+  // "Activate-Storage-Access: retry" header is handled in URLLoader.
+  std::optional<net::cookie_util::StorageAccessStatus>
+  CalculateStorageAccessStatus() const;
 
-  bool HasPartitionedCookie() { return has_partitioned_cookie_; }
-  void SetHasPartitionedCookie() { has_partitioned_cookie_ = true; }
+  base::WeakPtr<URLRequest> GetWeakPtr();
 
  protected:
   // Allow the URLRequestJob class to control the is_pending() flag.
@@ -820,31 +896,24 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   // Allow the URLRequestJob to redirect this request. If non-null,
   // |removed_headers| and |modified_headers| are changes
   // applied to the request headers after updating them for the redirect.
-  void Redirect(
-      const RedirectInfo& redirect_info,
-      const absl::optional<std::vector<std::string>>& removed_headers,
-      const absl::optional<net::HttpRequestHeaders>& modified_headers);
+  void Redirect(const RedirectInfo& redirect_info,
+                const std::optional<std::vector<std::string>>& removed_headers,
+                const std::optional<net::HttpRequestHeaders>& modified_headers);
 
-  // Called by URLRequestJob to allow interception when a redirect occurs.
-  void NotifyReceivedRedirect(const RedirectInfo& redirect_info,
-                              bool* defer_redirect);
+  // Allow the URLRequestJob to retry this request, after having activated
+  // Storage Access (if possible).
+  void RetryWithStorageAccess();
+
+  // Called by URLRequestJob when a redirect occurs. Notifies delegates, and
+  // follows the redirect (possibly asynchronously), unless they block it.
+  void ReceivedRedirect(RedirectInfo redirect_info);
 
  private:
   friend class URLRequestJob;
-  friend class URLRequestContext;
 
   // For testing purposes.
   // TODO(maksims): Remove this.
   friend class TestNetworkDelegate;
-
-  // URLRequests are always created by calling URLRequestContext::CreateRequest.
-  URLRequest(const GURL& url,
-             RequestPriority priority,
-             Delegate* delegate,
-             const URLRequestContext* context,
-             NetworkTrafficAnnotationTag traffic_annotation,
-             bool is_for_websockets,
-             absl::optional<net::NetLogSource> net_log_source);
 
   // Resumes or blocks a request paused by the NetworkDelegate::OnBeforeRequest
   // handler. If |blocked| is true, the request is blocked and an error page is
@@ -892,7 +961,9 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   // Otherwise, cookies can be used unless SetDefaultCookiePolicyToBlock() has
   // been called.
   bool CanSetCookie(const net::CanonicalCookie& cookie,
-                    CookieOptions* options) const;
+                    CookieOptions* options,
+                    const net::FirstPartySetMetadata& first_party_set_metadata,
+                    CookieInclusionStatus* inclusion_status) const;
 
   // Called just before calling a delegate that may block a request. |type|
   // should be the delegate's event type,
@@ -910,6 +981,11 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   // checking.
   void RecordReferrerGranularityMetrics(bool request_is_same_origin) const;
 
+  // Creates a partial IsolationInfo with the information accessible from the
+  // NetworkAnonymiationKey.
+  net::IsolationInfo CreateIsolationInfoFromNetworkAnonymizationKey(
+      const NetworkAnonymizationKey& network_anonymization_key);
+
   // Contextual information used for this request. Cannot be NULL. This contains
   // most of the dependencies which are shared between requests (disk cache,
   // cookie store, socket pool, etc.)
@@ -925,13 +1001,21 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   SiteForCookies site_for_cookies_;
 
   IsolationInfo isolation_info_;
+  // The cookie partition key for the request. Partitioned cookies should be set
+  // using this key and only partitioned cookies with this partition key should
+  // be sent. The cookie partition key is optional(nullopt) if cookie
+  // partitioning is not enabled, or if the NIK has no top-frame site.
+  //
+  // Unpartitioned cookies are unaffected by this field.
+  std::optional<CookiePartitionKey> cookie_partition_key_ = std::nullopt;
 
   bool force_ignore_site_for_cookies_ = false;
-  bool force_ignore_top_frame_party_for_cookies_ = false;
   bool force_main_frame_for_same_site_cookies_ = false;
-  absl::optional<url::Origin> initiator_;
+  CookieSettingOverrides cookie_setting_overrides_;
+
+  std::optional<url::Origin> initiator_;
   GURL delegate_redirect_url_;
-  std::string method_;  // "GET", "POST", etc. Should be all uppercase.
+  std::string method_;  // "GET", "POST", etc. Case-sensitive.
   std::string referrer_;
   ReferrerPolicy referrer_policy_ =
       ReferrerPolicy::CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE;
@@ -940,7 +1024,7 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   HttpRequestHeaders extra_request_headers_;
   // Flags indicating the request type for the load. Expected values are LOAD_*
   // enums above.
-  int load_flags_ = LOAD_NORMAL;
+  int partial_load_flags_ = LOAD_NORMAL;
   // Whether the request is allowed to send credentials in general. Set by
   // caller.
   bool allow_credentials_ = true;
@@ -955,7 +1039,7 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
 
   // Never access methods of the |delegate_| directly. Always use the
   // Notify... methods for this.
-  raw_ptr<Delegate, DanglingUntriaged> delegate_;
+  raw_ptr<Delegate> delegate_;
 
   const bool is_for_websockets_;
 
@@ -972,6 +1056,8 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   // have been encountered, this will be the first error encountered.
   int status_ = OK;
 
+  bool is_created_from_network_anonymization_key_ = false;
+
   // The HTTP response info, lazily initialized.
   HttpResponseInfo response_info_;
 
@@ -985,6 +1071,10 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   // new request begins.
   bool is_redirecting_ = false;
 
+  // Set when a redirect is deferred. Redirects are deferred after validity
+  // checks are performed, so this field must not be modified.
+  std::optional<RedirectInfo> deferred_redirect_info_;
+
   // Number of times we're willing to redirect.  Used to guard against
   // infinite redirects.
   int redirect_limit_;
@@ -997,6 +1087,12 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   // ClientSocketPool use this to determine which URLRequest to
   // allocate sockets to first.
   RequestPriority priority_;
+
+  // The incremental flag for this request that indicates if it should be
+  // loaded concurrently with other resources of the same priority for
+  // protocols that support HTTP extensible priorities (RFC 9218).
+  // Currently only used in HTTP/3.
+  bool priority_incremental_ = kDefaultPriorityIncremental;
 
   // If |calling_delegate_| is true, the event type of the delegate being
   // called.
@@ -1024,13 +1120,13 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   // populated during Start(), and the rest are populated in OnResponseReceived.
   LoadTimingInfo load_timing_info_;
 
-  // The proxy server used for this request, if any.
-  ProxyServer proxy_server_;
+  // The proxy chain used for this request, if any.
+  ProxyChain proxy_chain_;
 
   // If not null, the network service will not advertise any stream types
   // (via Accept-Encoding) that are not listed. Also, it will not attempt
   // decoding any non-listed stream types.
-  absl::optional<base::flat_set<net::SourceStream::SourceType>>
+  std::optional<base::flat_set<net::SourceStream::SourceType>>
       accepted_stream_types_;
 
   const NetworkTrafficAnnotationTag traffic_annotation_;
@@ -1042,28 +1138,23 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   ResponseHeadersCallback early_response_headers_callback_;
   ResponseHeadersCallback response_headers_callback_;
 
-  // The index of the request URL in Cache Transparency's Pervasive Payloads
-  // List. This is only used for logging purposes. It is initialized as -1 to
-  // signify that the index has not been set.
-  int pervasive_payloads_index_for_logging_ = -1;
-
-  // A SHA-256 checksum of the response and selected headers, stored as
-  // upper-case hexadecimal. If this is set to a non-empty value the transaction
-  // will attempt to use the single-keyed cache. On failure to match the cache
-  // entry will be marked as unusable and will not be re-used.
-  std::string expected_response_checksum_;
+  // See SetIsSharedDictionaryReadAllowedCallback() above for details.
+  base::RepeatingCallback<bool()> is_shared_dictionary_read_allowed_callback_;
 
   bool upgrade_if_insecure_ = false;
 
-  bool send_client_certs_ = true;
+  bool ad_tagged_ = false;
 
-  // This boolean is set to true if the response has a Set-Cookie header with
-  // the Partitioned attribute.
-  // TODO(https://crbug.com/1296161): Delete this field.
-  bool has_partitioned_cookie_ = false;
+  bool send_client_certs_ = true;
 
   // Idempotency of the request.
   Idempotency idempotency_ = DEFAULT_IDEMPOTENCY;
+
+  SharedDictionaryGetter shared_dictionary_getter_;
+
+  // The storage access status for this request. If this is nullopt, this
+  // request will not include the Sec-Fetch-Storage-Access header.
+  std::optional<net::cookie_util::StorageAccessStatus> storage_access_status_;
 
   THREAD_CHECKER(thread_checker_);
 

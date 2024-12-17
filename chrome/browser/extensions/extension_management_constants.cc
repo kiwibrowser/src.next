@@ -2,6 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "chrome/browser/extensions/extension_management_constants.h"
 
 namespace extensions {
@@ -41,6 +46,8 @@ const char kBlockedInstallMessage[] = "blocked_install_message";
 const char kToolbarPin[] = "toolbar_pin";
 const char kForcePinned[] = "force_pinned";
 const char kDefaultUnpinned[] = "default_unpinned";
+
+const char kFileUrlNavigationAllowed[] = "file_url_navigation_allowed";
 
 const AllowedTypesMapEntry kAllowedTypesMap[] = {
     {"extension", Manifest::TYPE_EXTENSION},

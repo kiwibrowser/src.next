@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,21 +7,20 @@
 #include "third_party/blink/renderer/core/layout/layout_box_model_object.h"
 #include "third_party/blink/renderer/core/layout/layout_image_resource.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_image.h"
-#include "third_party/blink/renderer/core/paint/image_element_timing.h"
 #include "third_party/blink/renderer/core/paint/paint_auto_dark_mode.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
-#include "third_party/blink/renderer/core/paint/paint_timing.h"
-#include "third_party/blink/renderer/core/paint/paint_timing_detector.h"
 #include "third_party/blink/renderer/core/paint/scoped_svg_paint_state.h"
 #include "third_party/blink/renderer/core/paint/svg_model_object_painter.h"
-#include "third_party/blink/renderer/core/svg/graphics/svg_image.h"
+#include "third_party/blink/renderer/core/paint/timing/image_element_timing.h"
+#include "third_party/blink/renderer/core/paint/timing/paint_timing.h"
+#include "third_party/blink/renderer/core/paint/timing/paint_timing_detector.h"
 #include "third_party/blink/renderer/core/svg/svg_animated_preserve_aspect_ratio.h"
 #include "third_party/blink/renderer/core/svg/svg_animated_rect.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/core/svg/svg_image_element.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
-#include "third_party/blink/renderer/platform/graphics/scoped_interpolation_quality.h"
+#include "third_party/blink/renderer/platform/graphics/scoped_image_rendering_settings.h"
 
 namespace blink {
 
@@ -41,9 +40,10 @@ ImagePaintTimingInfo ComputeImagePaintTimingInfo(
 
 void SVGImagePainter::Paint(const PaintInfo& paint_info) {
   if (paint_info.phase != PaintPhase::kForeground ||
-      layout_svg_image_.StyleRef().Visibility() != EVisibility::kVisible ||
-      !layout_svg_image_.ImageResource()->HasImage())
+      layout_svg_image_.StyleRef().UsedVisibility() != EVisibility::kVisible ||
+      !layout_svg_image_.ImageResource()->HasImage()) {
     return;
+  }
 
   if (SVGModelObjectPainter::CanUseCullRect(layout_svg_image_.StyleRef())) {
     if (!paint_info.GetCullRect().IntersectsTransformed(
@@ -71,13 +71,12 @@ void SVGImagePainter::Paint(const PaintInfo& paint_info) {
 }
 
 void SVGImagePainter::PaintForeground(const PaintInfo& paint_info) {
-  const LayoutImageResource& image_resource =
-      *layout_svg_image_.ImageResource();
   gfx::SizeF image_viewport_size = ComputeImageViewportSize();
-  image_viewport_size.Scale(layout_svg_image_.StyleRef().EffectiveZoom());
   if (image_viewport_size.IsEmpty())
     return;
 
+  const LayoutImageResource& image_resource =
+      *layout_svg_image_.ImageResource();
   scoped_refptr<Image> image = image_resource.GetImage(image_viewport_size);
   gfx::RectF dest_rect = layout_svg_image_.ObjectBoundingBox();
   auto* image_element = To<SVGImageElement>(layout_svg_image_.GetElement());
@@ -111,16 +110,17 @@ void SVGImagePainter::PaintForeground(const PaintInfo& paint_info) {
   PaintTiming& timing = PaintTiming::From(layout_svg_image_.GetDocument());
   timing.MarkFirstContentfulPaint();
 
-  ScopedInterpolationQuality interpolation_quality_scope(
+  ScopedImageRenderingSettings image_rendering_settings_scope(
       paint_info.context,
-      layout_svg_image_.StyleRef().GetInterpolationQuality());
+      layout_svg_image_.StyleRef().GetInterpolationQuality(),
+      layout_svg_image_.StyleRef().GetDynamicRangeLimit());
   Image::ImageDecodingMode decode_mode =
       image_element->GetDecodingModeForPainting(image->paint_image_id());
   auto image_auto_dark_mode = ImageClassifierHelper::GetImageAutoDarkMode(
       *layout_svg_image_.GetFrame(), layout_svg_image_.StyleRef(), dest_rect,
       src_rect);
   paint_info.context.DrawImage(
-      image.get(), decode_mode, image_auto_dark_mode,
+      *image, decode_mode, image_auto_dark_mode,
       ComputeImagePaintTimingInfo(layout_svg_image_, *image, image_content,
                                   paint_info.context,
                                   gfx::ToEnclosingRect(dest_rect)),
@@ -130,14 +130,16 @@ void SVGImagePainter::PaintForeground(const PaintInfo& paint_info) {
 gfx::SizeF SVGImagePainter::ComputeImageViewportSize() const {
   DCHECK(layout_svg_image_.ImageResource()->HasImage());
 
+  const float zoom = layout_svg_image_.StyleRef().EffectiveZoom();
+  const gfx::SizeF default_object_size =
+      gfx::ScaleSize(layout_svg_image_.ObjectBoundingBox().size(), zoom);
+
   if (To<SVGImageElement>(layout_svg_image_.GetElement())
           ->preserveAspectRatio()
           ->CurrentValue()
-          ->Align() != SVGPreserveAspectRatio::kSvgPreserveaspectratioNone)
-    return layout_svg_image_.ObjectBoundingBox().size();
-
-  ImageResourceContent* cached_image =
-      layout_svg_image_.ImageResource()->CachedImage();
+          ->Align() != SVGPreserveAspectRatio::kSvgPreserveaspectratioNone) {
+    return default_object_size;
+  }
 
   // Images with preserveAspectRatio=none should force non-uniform scaling. This
   // can be achieved by setting the image's container size to its viewport size
@@ -145,16 +147,13 @@ gfx::SizeF SVGImagePainter::ComputeImageViewportSize() const {
   // https://www.w3.org/TR/SVG/single-page.html#coords-PreserveAspectRatioAttribute
   // and https://drafts.csswg.org/css-images-3/#default-sizing.
 
+  const LayoutImageResource& image_resource =
+      *layout_svg_image_.ImageResource();
   // Avoid returning the size of the broken image.
-  if (cached_image->ErrorOccurred())
+  if (image_resource.ErrorOccurred()) {
     return gfx::SizeF();
-  Image* image = cached_image->GetImage();
-  if (auto* svg_image = DynamicTo<SVGImage>(image)) {
-    return svg_image->ConcreteObjectSize(
-        layout_svg_image_.ObjectBoundingBox().size());
   }
-  // The orientation here does not matter. Just use kRespectImageOrientation.
-  return image->SizeAsFloat(kRespectImageOrientation);
+  return image_resource.ConcreteObjectSize(zoom, default_object_size);
 }
 
 }  // namespace blink

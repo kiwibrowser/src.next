@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,15 +16,16 @@
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
+
+using mojom::blink::FormControlType;
+
 namespace {
 
 // Returns |true| if |frame| contains (or should be assumed to contain)
 // a html document.
 bool DoesFrameContainHtmlDocument(Frame* frame, Element* element) {
-  if (frame->IsLocalFrame()) {
-    Document* document = LocalFrame::FromFrameToken(
-                             frame->GetFrameToken().GetAs<LocalFrameToken>())
-                             ->GetDocument();
+  if (auto* local_frame = DynamicTo<LocalFrame>(frame)) {
+    Document* document = local_frame->GetDocument();
     return document->IsHTMLDocument() || document->IsXHTMLDocument();
   }
 
@@ -103,7 +104,7 @@ bool SavableResources::GetSavableResourceLinksForFrame(
   DCHECK(current_document);
 
   // Go through all descent nodes.
-  HTMLAllCollection* collection = current_document->all();
+  HTMLCollection* collection = current_document->all();
 
   // Go through all elements in this frame.
   for (unsigned i = 0; i < collection->length(); ++i) {
@@ -116,47 +117,47 @@ bool SavableResources::GetSavableResourceLinksForFrame(
 
 // static
 String SavableResources::GetSubResourceLinkFromElement(Element* element) {
-  const char* attribute_name = nullptr;
+  const QualifiedName* attribute_name = nullptr;
   if (element->HasTagName(html_names::kImgTag) ||
       element->HasTagName(html_names::kFrameTag) ||
       element->HasTagName(html_names::kIFrameTag) ||
       element->HasTagName(html_names::kScriptTag)) {
-    attribute_name = "src";
+    attribute_name = &html_names::kSrcAttr;
   } else if (element->HasTagName(html_names::kInputTag)) {
     HTMLInputElement* input = To<HTMLInputElement>(element);
-    if (input->type() == input_type_names::kImage) {
-      attribute_name = "src";
+    if (input->FormControlType() == FormControlType::kInputImage) {
+      attribute_name = &html_names::kSrcAttr;
     }
   } else if (element->HasTagName(html_names::kBodyTag) ||
              element->HasTagName(html_names::kTableTag) ||
              element->HasTagName(html_names::kTrTag) ||
              element->HasTagName(html_names::kTdTag)) {
-    attribute_name = "background";
+    attribute_name = &html_names::kBackgroundAttr;
   } else if (element->HasTagName(html_names::kBlockquoteTag) ||
              element->HasTagName(html_names::kQTag) ||
              element->HasTagName(html_names::kDelTag) ||
              element->HasTagName(html_names::kInsTag)) {
-    attribute_name = "cite";
+    attribute_name = &html_names::kCiteAttr;
   } else if (element->HasTagName(html_names::kObjectTag)) {
-    attribute_name = "data";
+    attribute_name = &html_names::kDataAttr;
   } else if (element->HasTagName(html_names::kLinkTag)) {
     // If the link element is not linked to css, ignore it.
-    String type = element->getAttribute("type");
-    String rel = element->getAttribute("rel");
-    if ((type.ContainsOnlyASCIIOrEmpty() && type.LowerASCII() == "text/css") ||
-        (rel.ContainsOnlyASCIIOrEmpty() && rel.LowerASCII() == "stylesheet")) {
+    String type = element->getAttribute(html_names::kTypeAttr);
+    String rel = element->getAttribute(html_names::kRelAttr);
+    if (EqualIgnoringASCIICase(type, "text/css") ||
+        EqualIgnoringASCIICase(rel, "stylesheet")) {
       // TODO(jnd): Add support for extracting links of sub-resources which
       // are inside style-sheet such as @import, url(), etc.
       // See bug: http://b/issue?id=1111667.
-      attribute_name = "href";
+      attribute_name = &html_names::kHrefAttr;
     }
   }
   if (!attribute_name)
     return String();
-  String value = element->getAttribute(attribute_name);
+  String value = element->getAttribute(*attribute_name);
   // If value has content and not start with "javascript:" then return it,
   // otherwise return an empty string.
-  if (!value.IsNull() && !value.IsEmpty() &&
+  if (!value.IsNull() && !value.empty() &&
       !value.StartsWith("javascript:", kTextCaseASCIIInsensitive))
     return value;
 

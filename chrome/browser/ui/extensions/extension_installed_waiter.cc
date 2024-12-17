@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/extensions/extension_installed_waiter.h"
 
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/task/single_thread_task_runner.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -41,16 +41,13 @@ ExtensionInstalledWaiter::ExtensionInstalledWaiter(
       done_callback_(std::move(done_callback)) {
   extension_registry_observation_.Observe(
       extensions::ExtensionRegistry::Get(browser->profile()));
-  removal_watcher_ = std::make_unique<ExtensionRemovalWatcher>(
-      browser, extension,
-      base::BindOnce(
-          &ExtensionInstalledWaiter::OnExtensionRemovedOrBrowserClosed,
-          weak_factory_.GetWeakPtr()));
+  BrowserList::AddObserver(this);
 }
 
 ExtensionInstalledWaiter::~ExtensionInstalledWaiter() {
   if (done_callback_ && g_giving_up_callback)
     g_giving_up_callback->Run();
+  BrowserList::RemoveObserver(this);
 }
 
 void ExtensionInstalledWaiter::RunCallbackIfExtensionInstalled() {
@@ -75,12 +72,21 @@ void ExtensionInstalledWaiter::OnExtensionLoaded(
 
   // Only call Wait() after all the other extension observers have had a chance
   // to run.
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE,
       base::BindOnce(&ExtensionInstalledWaiter::RunCallbackIfExtensionInstalled,
                      weak_factory_.GetWeakPtr()));
 }
 
-void ExtensionInstalledWaiter::OnExtensionRemovedOrBrowserClosed() {
-  delete this;
+void ExtensionInstalledWaiter::OnExtensionUnloaded(
+    content::BrowserContext* browser_context,
+    const extensions::Extension* extension,
+    extensions::UnloadedExtensionReason reason) {
+  if (extension == extension_.get())
+    delete this;
+}
+
+void ExtensionInstalledWaiter::OnBrowserRemoved(Browser* browser) {
+  if (browser == browser_)
+    delete this;
 }

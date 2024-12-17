@@ -12,17 +12,18 @@
 #include <string>
 #include <vector>
 
-#include "base/bind.h"
-#include "base/callback.h"
 #include "base/check_op.h"
 #include "base/files/file_path.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/string_search.h"
+#include "base/i18n/time_formatting.h"
+#include "base/memory/raw_ref.h"
 #include "base/notreached.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "base/time/time_to_iso8601.h"
 #include "base/values.h"
 #include "components/download/public/common/download_item.h"
 #include "components/url_formatter/url_formatter.h"
@@ -47,7 +48,7 @@ template<> bool GetAs(const base::Value& in, bool* out) {
 template <>
 bool GetAs(const base::Value& in, double* out) {
   // `GetIfDouble()` incapsulates type verification logic.
-  const absl::optional<double> maybe_value = in.GetIfDouble();
+  const std::optional<double> maybe_value = in.GetIfDouble();
   if (maybe_value.has_value()) {
     *out = maybe_value.value();
     return true;
@@ -72,7 +73,7 @@ bool GetAs(const base::Value& in, std::vector<std::u16string>* out) {
   out->clear();
   if (!in.is_list())
     return false;
-  for (const auto& value : in.GetListDeprecated()) {
+  for (const auto& value : in.GetList()) {
     if (!value.is_string()) {
       out->clear();
       return false;
@@ -94,11 +95,11 @@ int64_t GetEndTimeMsEpoch(const DownloadItem& item) {
 }
 
 std::string GetStartTime(const DownloadItem& item) {
-  return base::TimeToISO8601(item.GetStartTime());
+  return base::TimeFormatAsIso8601(item.GetStartTime());
 }
 
 std::string GetEndTime(const DownloadItem& item) {
-  return base::TimeToISO8601(item.GetEndTime());
+  return base::TimeFormatAsIso8601(item.GetEndTime());
 }
 
 bool GetDangerAccepted(const DownloadItem& item) {
@@ -169,7 +170,7 @@ bool FieldMatches(
     case EQ: return accessor.Run(item) == value;
     case GT: return accessor.Run(item) > value;
   }
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
   return false;
 }
 
@@ -261,14 +262,14 @@ class DownloadQuery::DownloadComparator {
   bool operator()(const DownloadItem* left, const DownloadItem* right);
 
  private:
-  const DownloadQuery::SorterVector& terms_;
+  const raw_ref<const DownloadQuery::SorterVector> terms_;
 
   // std::sort requires this class to be copyable.
 };
 
 bool DownloadQuery::DownloadComparator::operator()(const DownloadItem* left,
                                                    const DownloadItem* right) {
-  for (auto term = terms_.begin(); term != terms_.end(); ++term) {
+  for (auto term = terms_->begin(); term != terms_->end(); ++term) {
     switch (term->sorter.Run(*left, *right)) {
       case LT:
         return term->direction == DownloadQuery::ASCENDING;
@@ -278,7 +279,7 @@ bool DownloadQuery::DownloadComparator::operator()(const DownloadItem* left,
         break;  // break the switch but not the loop
     }
   }
-  CHECK_NE(left->GetId(), right->GetId());
+  CHECK(left == right || left->GetId() != right->GetId());
   return left->GetId() < right->GetId();
 }
 
@@ -364,7 +365,8 @@ bool DownloadQuery::AddFilter(DownloadQuery::FilterType type,
       std::vector<std::u16string> query_terms;
       return GetAs(value, &query_terms) &&
              (query_terms.empty() ||
-              AddFilter(base::BindRepeating(&MatchesQuery, query_terms)));
+              AddFilter(
+                  base::BindRepeating(&MatchesQuery, std::move(query_terms))));
     }
     case FILTER_ENDED_AFTER:
       return AddFilter(BuildFilter<std::string>(value, GT, &GetEndTime));

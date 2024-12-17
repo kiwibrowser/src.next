@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,10 +37,13 @@ void ScreenMetricsEmulator::DisableAndApply() {
   frame_widget_->SetScreenMetricsEmulationParameters(false, emulation_params_);
   frame_widget_->SetScreenRects(original_view_screen_rect_,
                                 original_window_screen_rect_);
-  frame_widget_->SetWindowSegments(original_root_window_segments_);
+  frame_widget_->SetViewportSegments(original_root_viewport_segments_);
   frame_widget_->SetScreenInfoAndSize(original_screen_infos_,
                                       original_widget_size_,
                                       original_visible_viewport_size_);
+  // The posture service will restore the original device posture coming from
+  // the platform.
+  frame_widget_->DisableDevicePostureOverrideForEmulation();
 }
 
 void ScreenMetricsEmulator::ChangeEmulationParams(
@@ -140,17 +143,20 @@ void ScreenMetricsEmulator::Apply() {
   frame_widget_->SetScreenRects(gfx::Rect(widget_pos, widget_size),
                                 gfx::Rect(window_pos, window_size));
 
-  // If there are no emulated window segments, use the emulated widget size
+  // If there are no emulated viewport segments, use the emulated widget size
   // instead. When we switch from emulated segments to not having any, we should
   // have a single segment that matches the widget size.
-  bool has_emulated_segments = emulation_params_.window_segments.size();
+  bool has_emulated_segments = emulation_params_.viewport_segments.size();
   if (has_emulated_segments) {
-    frame_widget_->SetWindowSegments(emulation_params_.window_segments);
+    frame_widget_->SetViewportSegments(emulation_params_.viewport_segments);
   } else {
     std::vector<gfx::Rect> emulated_segments{
         {0, 0, widget_size.width(), widget_size.height()}};
-    frame_widget_->SetWindowSegments(emulated_segments);
+    frame_widget_->SetViewportSegments(emulated_segments);
   }
+
+  frame_widget_->OverrideDevicePostureForEmulation(
+      emulation_params_.device_posture);
 
   display::ScreenInfos emulated_screen_infos = original_screen_infos_;
   display::ScreenInfo& emulated_screen_info =
@@ -174,8 +180,8 @@ void ScreenMetricsEmulator::UpdateVisualProperties(
   original_screen_infos_ = visual_properties.screen_infos;
   original_widget_size_ = visual_properties.new_size;
   original_visible_viewport_size_ = visual_properties.visible_viewport_size;
-  original_root_window_segments_ =
-      visual_properties.root_widget_window_segments;
+  original_root_viewport_segments_ =
+      visual_properties.root_widget_viewport_segments;
   Apply();
 
   // Appy the compositor viewport rect and surface id allocation. The screen

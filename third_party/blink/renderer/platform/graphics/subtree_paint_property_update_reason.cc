@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,8 +29,6 @@ String SubtreePaintPropertyUpdateReasonsToString(unsigned bitmask) {
     append("kNone");
   if (bitmask & SubtreePaintPropertyUpdateReason::kContainerChainMayChange)
     append("kContainerChainMayChange");
-  if (bitmask & SubtreePaintPropertyUpdateReason::kFragmentsChanged)
-    append("kFragmentsChanged");
   if (bitmask & SubtreePaintPropertyUpdateReason::kPreviouslySkipped)
     append("kPreviouslySkipped");
   if (bitmask & SubtreePaintPropertyUpdateReason::kPrinting)

@@ -48,66 +48,87 @@
 #include "third_party/blink/renderer/core/css/properties/longhands/variable.h"
 #include "third_party/blink/renderer/core/css/resolver/style_builder.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver_state.h"
-#include "third_party/blink/renderer/core/css/scoped_css_value.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 
 namespace blink {
 
 void StyleBuilder::ApplyProperty(const CSSPropertyName& name,
                                  StyleResolverState& state,
-                                 const ScopedCSSValue& scoped_value) {
+                                 const CSSValue& value,
+                                 ValueMode value_mode) {
   CSSPropertyRef ref(name, state.GetDocument());
   DCHECK(ref.IsValid());
 
-  ApplyProperty(ref.GetProperty(), state, scoped_value);
+  ApplyProperty(ref.GetProperty(), state, value, value_mode);
 }
 
 void StyleBuilder::ApplyProperty(const CSSProperty& property,
                                  StyleResolverState& state,
-                                 const ScopedCSSValue& scoped_value) {
+                                 const CSSValue& value,
+                                 ValueMode value_mode) {
+  const CSSProperty* physical = &property;
+  if (property.IsSurrogate()) {
+    physical =
+        property.SurrogateFor(state.StyleBuilder().GetWritingDirection());
+    DCHECK(physical);
+  }
+  ApplyPhysicalProperty(*physical, state, value, value_mode);
+}
+
+void StyleBuilder::ApplyPhysicalProperty(const CSSProperty& property,
+                                         StyleResolverState& state,
+                                         const CSSValue& value,
+                                         ValueMode value_mode) {
   DCHECK(!Variable::IsStaticInstance(property))
       << "Please use a CustomProperty instance to apply custom properties";
+  DCHECK(!property.IsSurrogate())
+      << "Please use ApplyProperty for surrogate properties";
 
   CSSPropertyID id = property.PropertyID();
-  const CSSValue& value = scoped_value.GetCSSValue();
 
   // These values must be resolved by StyleCascade before application:
-  DCHECK(!value.IsVariableReferenceValue());
   DCHECK(!value.IsPendingSubstitutionValue());
   DCHECK(!value.IsRevertValue());
   DCHECK(!value.IsRevertLayerValue());
+  // CSSUnparsedDeclarationValues should have been resolved as well,
+  // *except* for custom properties, which either don't resolve this
+  // at all and leaves it unparsed (most cases), or resolves it
+  // during CustomProperty::ApplyValue() (registered custom properties
+  // with non-universal syntax).
+  DCHECK(!value.IsUnparsedDeclaration() || IsA<CustomProperty>(property));
 
   DCHECK(!property.IsShorthand())
       << "Shorthand property id = " << static_cast<int>(id)
       << " wasn't expanded at parsing time";
 
-  bool is_inherit = state.ParentNode() && value.IsInheritedValue();
-  bool is_initial = value.IsInitialValue() ||
-                    (!state.ParentNode() && value.IsInheritedValue());
-
-  // isInherit => !isInitial && isInitial => !isInherit
+  bool is_inherit = value.IsInheritedValue();
+  bool is_initial = value.IsInitialValue();
+  if (is_inherit && !state.ParentStyle()) {
+    is_inherit = false;
+    is_initial = true;
+  }
   DCHECK(!is_inherit || !is_initial);
-  // isInherit => (state.parentNode() && state.parentStyle())
-  DCHECK(!is_inherit || (state.ParentNode() && state.ParentStyle()));
 
   bool is_inherited_for_unset = state.IsInheritedForUnset(property);
   if (is_inherit && !is_inherited_for_unset) {
-    state.Style()->SetHasExplicitInheritance();
+    state.StyleBuilder().SetHasExplicitInheritance();
     state.ParentStyle()->SetChildHasExplicitInheritance();
   } else if (value.IsUnsetValue()) {
     DCHECK(!is_inherit && !is_initial);
-    if (is_inherited_for_unset)
+    if (is_inherited_for_unset) {
       is_inherit = true;
-    else
+    } else {
       is_initial = true;
+    }
   }
 
-  if (is_initial)
+  if (is_initial) {
     To<Longhand>(property).ApplyInitial(state);
-  else if (is_inherit)
+  } else if (is_inherit) {
     To<Longhand>(property).ApplyInherit(state);
-  else
-    To<Longhand>(property).ApplyValue(state, scoped_value);
+  } else {
+    To<Longhand>(property).ApplyValue(state, value, value_mode);
+  }
 }
 
 }  // namespace blink

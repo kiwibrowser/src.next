@@ -7,17 +7,13 @@
 
 #include <memory>
 
+#include "base/android/scoped_java_ref.h"
+#include "base/functional/callback_helpers.h"
 #include "chrome/browser/chrome_browser_main.h"
-
-namespace android {
-class ChromeBackupWatcher;
-}
 
 namespace crash_reporter {
 class ChildExitObserver;
 }
-
-class ProfileManagerAndroid;
 
 class ChromeBrowserMainPartsAndroid : public ChromeBrowserMainParts {
  public:
@@ -34,7 +30,6 @@ class ChromeBrowserMainPartsAndroid : public ChromeBrowserMainParts {
   int PreCreateThreads() override;
   void PostProfileInit(Profile* profile, bool is_initial_profile) override;
   int PreEarlyInitialization() override;
-  void PostEarlyInitialization() override;
 
   // ChromeBrowserMainParts overrides.
   void PostBrowserStart() override;
@@ -42,8 +37,9 @@ class ChromeBrowserMainPartsAndroid : public ChromeBrowserMainParts {
 
  private:
   std::unique_ptr<crash_reporter::ChildExitObserver> child_exit_observer_;
-  std::unique_ptr<android::ChromeBackupWatcher> backup_watcher_;
-  std::unique_ptr<ProfileManagerAndroid> profile_manager_android_;
+  // Owns the Java ChromeBackupWatcher object and invokes destroy() on
+  // destruction.
+  base::ScopedClosureRunner backup_watcher_runner_;
 };
 
 #endif  // CHROME_BROWSER_CHROME_BROWSER_MAIN_ANDROID_H_

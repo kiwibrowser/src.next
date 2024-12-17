@@ -22,6 +22,7 @@
 #include "base/nix/xdg_util.h"
 #include "base/notreached.h"
 #include "base/path_service.h"
+#include "base/posix/sysctl.h"
 #include "base/process/process_metrics.h"
 #include "build/build_config.h"
 
@@ -42,28 +43,21 @@ bool PathProviderPosix(int key, FilePath* result) {
       FilePath bin_dir;
       if (!ReadSymbolicLink(FilePath(kProcSelfExe), &bin_dir)) {
         NOTREACHED() << "Unable to resolve " << kProcSelfExe << ".";
-        return false;
       }
       *result = bin_dir;
       return true;
 #elif BUILDFLAG(IS_FREEBSD)
       int name[] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1 };
-      char bin_dir[PATH_MAX + 1];
-      size_t length = sizeof(bin_dir);
-      // Upon return, |length| is the number of bytes written to |bin_dir|
-      // including the string terminator.
-      int error = sysctl(name, 4, bin_dir, &length, NULL, 0);
-      if (error < 0 || length <= 1) {
+      std::optional<std::string> bin_dir = StringSysctl(name, std::size(name));
+      if (!bin_dir.has_value() || bin_dir.value().length() <= 1) {
         NOTREACHED() << "Unable to resolve path.";
-        return false;
       }
-      *result = FilePath(FilePath::StringType(bin_dir, length - 1));
+      *result = FilePath(bin_dir.value());
       return true;
 #elif BUILDFLAG(IS_SOLARIS)
       char bin_dir[PATH_MAX + 1];
       if (realpath(getexecname(), bin_dir) == NULL) {
         NOTREACHED() << "Unable to resolve " << getexecname() << ".";
-        return false;
       }
       *result = FilePath(bin_dir);
       return true;
@@ -78,20 +72,7 @@ bool PathProviderPosix(int key, FilePath* result) {
 #endif
     }
     case DIR_SRC_TEST_DATA_ROOT: {
-      // Allow passing this in the environment, for more flexibility in build
-      // tree configurations (sub-project builds, gyp --output_dir, etc.)
-      std::unique_ptr<Environment> env(Environment::Create());
-      std::string cr_source_root;
       FilePath path;
-      if (env->GetVar("CR_SOURCE_ROOT", &cr_source_root)) {
-        path = FilePath(cr_source_root);
-        if (PathExists(path)) {
-          *result = path;
-          return true;
-        }
-        DLOG(WARNING) << "CR_SOURCE_ROOT is set, but it appears to not "
-                      << "point to a directory.";
-      }
       // On POSIX, unit tests execute two levels deep from the source root.
       // For example:  out/{Debug|Release}/net_unittest
       if (PathService::Get(DIR_EXE, &path)) {

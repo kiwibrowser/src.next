@@ -6,10 +6,15 @@
 #define CHROME_RENDERER_CHROME_CONTENT_SETTINGS_AGENT_DELEGATE_H_
 
 #include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
 #include "components/content_settings/renderer/content_settings_agent_impl.h"
 #include "extensions/buildflags/buildflags.h"
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
+namespace blink {
+class WebSecurityOrigin;
+}  // namespace blink
+
 namespace extensions {
 class Dispatcher;
 class Extension;
@@ -36,10 +41,12 @@ class ChromeContentSettingsAgentDelegate
   void AllowPluginTemporarily(const std::string& identifier);
 
   // content_settings::ContentSettingsAgentImpl::Delegate:
+  bool IsFrameAllowlistedForStorageAccess(
+      blink::WebFrame* frame) const override;
   bool IsSchemeAllowlisted(const std::string& scheme) override;
-  absl::optional<bool> AllowReadFromClipboard() override;
-  absl::optional<bool> AllowWriteToClipboard() override;
-  absl::optional<bool> AllowMutationEvents() override;
+  bool AllowReadFromClipboard() override;
+  bool AllowWriteToClipboard() override;
+  std::optional<bool> AllowMutationEvents() override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ChromeContentSettingsAgentDelegateBrowserTest,
@@ -62,12 +69,12 @@ class ChromeContentSettingsAgentDelegate
       const blink::WebSecurityOrigin& origin) const;
 
   // Owned by ChromeContentRendererClient and outlive us.
-  extensions::Dispatcher* extension_dispatcher_ = nullptr;
+  raw_ptr<extensions::Dispatcher> extension_dispatcher_ = nullptr;
 #endif
 
   base::flat_set<std::string> temporarily_allowed_plugins_;
 
-  content::RenderFrame* render_frame_ = nullptr;
+  raw_ptr<content::RenderFrame> render_frame_ = nullptr;
 };
 
 #endif  // CHROME_RENDERER_CHROME_CONTENT_SETTINGS_AGENT_DELEGATE_H_

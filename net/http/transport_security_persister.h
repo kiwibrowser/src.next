@@ -33,13 +33,16 @@
 #ifndef NET_HTTP_TRANSPORT_SECURITY_PERSISTER_H_
 #define NET_HTTP_TRANSPORT_SECURITY_PERSISTER_H_
 
+#include <optional>
 #include <string>
 
+#include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/files/important_file_writer.h"
 #include "base/memory/raw_ptr.h"
-#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "net/base/net_export.h"
 #include "net/http/transport_security_state.h"
 
@@ -48,6 +51,10 @@ class SequencedTaskRunner;
 }
 
 namespace net {
+
+// Exists only to hold a "commit-interval" param. If disabled, the default
+// ImportantFileWriter commit interval is used.
+NET_EXPORT BASE_DECLARE_FEATURE(kTransportSecurityFileWriterSchedule);
 
 // Reads and updates on-disk TransportSecurity state. Clients of this class
 // should create, destroy, and call into it from one thread.
@@ -82,13 +89,12 @@ class NET_EXPORT TransportSecurityPersister
   // ImportantFileWriter::DataSerializer:
   //
   // Serializes |transport_security_state_| into |*output|. Returns true if
-  // all STS and Expect_CT states were serialized correctly.
+  // all STS states were serialized correctly.
   //
   // The serialization format is JSON; the JSON represents a dictionary of
-  // host:DomainState pairs (host is a string). The DomainState contains
-  // the STS and Expect-CT states and is represented as a dictionary containing
-  // the following keys and value types (not all keys will always be
-  // present):
+  // host:DomainState pairs (host is a string). The DomainState contains the STS
+  // states and is represented as a dictionary containing the following keys and
+  // value types (not all keys will always be present):
   //
   //     "sts_include_subdomains": true|false
   //     "created": double
@@ -99,6 +105,9 @@ class NET_EXPORT TransportSecurityPersister
   //             legacy value "spdy-only" is unused and ignored
   //     "report-uri": string
   //     "sts_observed": double
+  //
+  // Legacy data (see https://crbug.com/1232560) may also contain a top-level
+  // "expect_ct" key, which will be deleted when read:
   //     "expect_ct": dictionary with keys:
   //         "expect_ct_expiry": double
   //         "expect_ct_observed": double
@@ -110,16 +119,20 @@ class NET_EXPORT TransportSecurityPersister
   // The reason for hashing them is so that the stored state does not
   // trivially reveal a user's browsing history to an attacker reading the
   // serialized state on disk.
-  bool SerializeData(std::string* data) override;
+  std::optional<std::string> SerializeData() override;
 
   // Clears any existing non-static entries, and then re-populates
   // |transport_security_state_|.
   void LoadEntries(const std::string& serialized);
 
+  // Returns the commit interval used by the ImportantFileWriter.
+  static base::TimeDelta GetCommitInterval();
+
  private:
   // Populates |state| from the JSON string |serialized|.
   static void Deserialize(const std::string& serialized,
-                          TransportSecurityState* state);
+                          TransportSecurityState* state,
+                          bool& contains_legacy_expect_ct_data);
 
   void CompleteLoad(const std::string& state);
   void OnWriteFinished(base::OnceClosure callback);

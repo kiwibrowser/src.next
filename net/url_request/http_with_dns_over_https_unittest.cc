@@ -6,12 +6,11 @@
 #include <vector>
 
 #include "base/big_endian.h"
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/string_piece.h"
 #include "base/test/scoped_feature_list.h"
 #include "net/base/features.h"
 #include "net/base/network_change_notifier.h"
@@ -32,6 +31,9 @@
 #include "net/dns/public/secure_dns_policy.h"
 #include "net/dns/public/util.h"
 #include "net/http/http_stream_factory_test_util.h"
+#include "net/http/http_stream_pool.h"
+#include "net/http/http_stream_pool_group.h"
+#include "net/http/http_stream_pool_test_util.h"
 #include "net/log/net_log.h"
 #include "net/socket/transport_client_socket_pool.h"
 #include "net/ssl/ssl_config_service.h"
@@ -140,7 +142,7 @@ class DnsOverHttpsIntegrationTest : public TestWithTaskEnvironment {
   URLRequestContext* context() { return request_context_.get(); }
 
   void ResetContext(SecureDnsMode mode = SecureDnsMode::kSecure) {
-    // TODO(crbug.com/1252155): Simplify this.
+    // TODO(crbug.com/40198637): Simplify this.
     HostResolver::ManagerOptions manager_options;
     // Without a DnsConfig, HostResolverManager will not use DoH, even in
     // kSecure mode. See https://crbug.com/1251715. However,
@@ -161,7 +163,8 @@ class DnsOverHttpsIntegrationTest : public TestWithTaskEnvironment {
     // HostResolverManager::HaveTestProcOverride disables the built-in DNS
     // client.
     auto* resolver_raw = resolver.get();
-    resolver->SetProcParamsForTesting(ProcTaskParams(host_resolver_proc_, 1));
+    resolver->SetHostResolverSystemParamsForTest(
+        HostResolverSystemTask::Params(host_resolver_proc_, 1));
 
     auto context_builder = CreateTestURLRequestContextBuilder();
     context_builder->set_host_resolver(std::move(resolver));
@@ -226,47 +229,57 @@ class HttpsWithDnsOverHttpsTest : public DnsOverHttpsIntegrationTest {
 
 class TestHttpDelegate : public HttpStreamRequest::Delegate {
  public:
-  explicit TestHttpDelegate(base::RunLoop* loop) : loop_(loop) {}
+  explicit TestHttpDelegate(HttpNetworkSession* session) : session_(session) {}
   ~TestHttpDelegate() override = default;
-  void OnStreamReady(const SSLConfig& used_ssl_config,
-                     const ProxyInfo& used_proxy_info,
+
+  void WaitForCompletion(std::unique_ptr<HttpStreamRequest> request) {
+    request_ = std::move(request);
+    loop_.Run();
+  }
+
+  void OnStreamReady(const ProxyInfo& used_proxy_info,
                      std::unique_ptr<HttpStream> stream) override {
     stream->Close(false);
-    loop_->Quit();
+    loop_.Quit();
   }
 
   void OnWebSocketHandshakeStreamReady(
-      const SSLConfig& used_ssl_config,
       const ProxyInfo& used_proxy_info,
       std::unique_ptr<WebSocketHandshakeStreamBase> stream) override {}
 
   void OnBidirectionalStreamImplReady(
-      const SSLConfig& used_ssl_config,
       const ProxyInfo& used_proxy_info,
       std::unique_ptr<BidirectionalStreamImpl> stream) override {}
 
   void OnStreamFailed(int status,
                       const NetErrorDetails& net_error_details,
-                      const SSLConfig& used_ssl_config,
                       const ProxyInfo& used_proxy_info,
                       ResolveErrorInfo resolve_eror_info) override {}
 
-  void OnCertificateError(int status,
-                          const SSLConfig& used_ssl_config,
-                          const SSLInfo& ssl_info) override {}
+  void OnCertificateError(int status, const SSLInfo& ssl_info) override {}
 
   void OnNeedsProxyAuth(const HttpResponseInfo& proxy_response,
-                        const SSLConfig& used_ssl_config,
                         const ProxyInfo& used_proxy_info,
                         HttpAuthController* auth_controller) override {}
 
-  void OnNeedsClientAuth(const SSLConfig& used_ssl_config,
-                         SSLCertRequestInfo* cert_info) override {}
+  void OnNeedsClientAuth(SSLCertRequestInfo* cert_info) override {}
 
   void OnQuicBroken() override {}
 
+  void OnSwitchesToHttpStreamPool(
+      HttpStreamPoolSwitchingInfo switching_info) override {
+    CHECK(base::FeatureList::IsEnabled(features::kHappyEyeballsV3));
+    request_ = session_->http_stream_pool()->RequestStream(
+        this, std::move(switching_info), DEFAULT_PRIORITY,
+        /*allowed_bad_certs=*/{},
+        /*enable_ip_based_pooling=*/false,
+        /*enable_alternative_services=*/false, NetLogWithSource());
+  }
+
  private:
-  raw_ptr<base::RunLoop> loop_;
+  raw_ptr<HttpNetworkSession> session_;
+  base::RunLoop loop_;
+  std::unique_ptr<HttpStreamRequest> request_;
 };
 
 // This test sets up a request which will reenter the connection pools by
@@ -285,8 +298,7 @@ TEST_F(HttpsWithDnsOverHttpsTest, EndToEnd) {
       request_context_->http_transaction_factory();
   HttpStreamFactory::JobFactory default_job_factory;
   HttpNetworkSession* network_session = transaction_factory->GetSession();
-  base::RunLoop loop;
-  TestHttpDelegate request_delegate(&loop);
+  TestHttpDelegate request_delegate(network_session);
 
   HttpStreamFactory* factory = network_session->http_stream_factory();
   HttpRequestInfo request_info;
@@ -294,18 +306,28 @@ TEST_F(HttpsWithDnsOverHttpsTest, EndToEnd) {
   request_info.url = http_server.GetURL("localhost", "/preconnect");
 
   std::unique_ptr<HttpStreamRequest> request(factory->RequestStream(
-      request_info, DEFAULT_PRIORITY, SSLConfig(), SSLConfig(),
+      request_info, DEFAULT_PRIORITY, /*allowed_bad_certs=*/{},
       &request_delegate, false, false, NetLogWithSource()));
-  loop.Run();
+  request_delegate.WaitForCompletion(std::move(request));
 
+  size_t idle_socket_count = 0;
   ClientSocketPool::GroupId group_id(
       url::SchemeHostPort(request_info.url), PrivacyMode::PRIVACY_MODE_DISABLED,
-      NetworkIsolationKey(), SecureDnsPolicy::kAllow);
-  EXPECT_EQ(network_session
-                ->GetSocketPool(HttpNetworkSession::NORMAL_SOCKET_POOL,
-                                ProxyServer::Direct())
-                ->IdleSocketCountInGroup(group_id),
-            1u);
+      NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
+      /*disable_cert_network_fetches=*/false);
+  if (base::FeatureList::IsEnabled(features::kHappyEyeballsV3)) {
+    idle_socket_count =
+        network_session->http_stream_pool()
+            ->GetOrCreateGroupForTesting(GroupIdToHttpStreamKey(group_id))
+            .IdleStreamSocketCount();
+  } else {
+    idle_socket_count =
+        network_session
+            ->GetSocketPool(HttpNetworkSession::NORMAL_SOCKET_POOL,
+                            ProxyChain::Direct())
+            ->IdleSocketCountInGroup(group_id);
+  }
+  EXPECT_EQ(idle_socket_count, 1u);
 
   // The domain "localhost" is resolved locally, so no DNS lookups should have
   // occurred.
@@ -320,7 +342,7 @@ TEST_F(HttpsWithDnsOverHttpsTest, EndToEnd) {
   std::unique_ptr<URLRequest> req(context()->CreateRequest(
       main_url, DEFAULT_PRIORITY, &d, TRAFFIC_ANNOTATION_FOR_TESTS));
   req->Start();
-  base::RunLoop().Run();
+  d.RunUntilComplete();
   EXPECT_TRUE(https_server_.ShutdownAndWaitUntilComplete());
   EXPECT_TRUE(http_server.ShutdownAndWaitUntilComplete());
   EXPECT_TRUE(doh_server_.ShutdownAndWaitUntilComplete());
@@ -348,7 +370,7 @@ TEST_F(HttpsWithDnsOverHttpsTest, EndToEndFail) {
   std::unique_ptr<URLRequest> req(context()->CreateRequest(
       main_url, DEFAULT_PRIORITY, &d, TRAFFIC_ANNOTATION_FOR_TESTS));
   req->Start();
-  base::RunLoop().Run();
+  d.RunUntilComplete();
   EXPECT_TRUE(https_server_.ShutdownAndWaitUntilComplete());
   EXPECT_TRUE(doh_server_.ShutdownAndWaitUntilComplete());
 
@@ -369,13 +391,10 @@ TEST_F(HttpsWithDnsOverHttpsTest, HttpsUpgrade) {
   base::test::ScopedFeatureList features;
   features.InitAndEnableFeatureWithParameters(
       features::kUseDnsHttpsSvcb,
-      {{"UseDnsHttpsSvcbHttpUpgrade", "true"},
-       // Disable timeouts.
+      {// Disable timeouts.
        {"UseDnsHttpsSvcbSecureExtraTimeMax", "0"},
        {"UseDnsHttpsSvcbSecureExtraTimePercent", "0"},
-       {"UseDnsHttpsSvcbSecureExtraTimeMin", "0"},
-       {"UseDnsHttpsSvcbExtraTimeAbsolute", "0"},
-       {"UseDnsHttpsSvcbExtraTimePercent", "0"}});
+       {"UseDnsHttpsSvcbSecureExtraTimeMin", "0"}});
   ResetContext();
 
   GURL https_url = https_server_.GetURL(kHostname, "/test");
@@ -400,7 +419,7 @@ TEST_F(HttpsWithDnsOverHttpsTest, HttpsUpgrade) {
     std::unique_ptr<URLRequest> req(context()->CreateRequest(
         http_url, DEFAULT_PRIORITY, &d, TRAFFIC_ANNOTATION_FOR_TESTS));
     req->Start();
-    base::RunLoop().Run();
+    d.RunUntilComplete();
     ASSERT_THAT(d.request_status(), IsOk());
 
     // The request should have been redirected to https.
@@ -420,13 +439,10 @@ TEST_F(HttpsWithDnsOverHttpsTest, HttpsMetadata) {
   base::test::ScopedFeatureList features;
   features.InitAndEnableFeatureWithParameters(
       features::kUseDnsHttpsSvcb,
-      {{"UseDnsHttpsSvcbHttpUpgrade", "true"},
-       // Disable timeouts.
+      {// Disable timeouts.
        {"UseDnsHttpsSvcbSecureExtraTimeMax", "0"},
        {"UseDnsHttpsSvcbSecureExtraTimePercent", "0"},
-       {"UseDnsHttpsSvcbSecureExtraTimeMin", "0"},
-       {"UseDnsHttpsSvcbExtraTimeAbsolute", "0"},
-       {"UseDnsHttpsSvcbExtraTimePercent", "0"}});
+       {"UseDnsHttpsSvcbSecureExtraTimeMin", "0"}});
   ResetContext();
 
   GURL main_url = https_server_.GetURL(kHostname, "/test");
@@ -442,7 +458,7 @@ TEST_F(HttpsWithDnsOverHttpsTest, HttpsMetadata) {
   std::unique_ptr<URLRequest> req(context()->CreateRequest(
       main_url, DEFAULT_PRIORITY, &d, TRAFFIC_ANNOTATION_FOR_TESTS));
   req->Start();
-  base::RunLoop().Run();
+  d.RunUntilComplete();
   ASSERT_THAT(d.request_status(), IsOk());
 
   // There should be three DoH lookups for kHostname (A, AAAA, and HTTPS).
@@ -454,6 +470,15 @@ TEST_F(HttpsWithDnsOverHttpsTest, HttpsMetadata) {
 }
 
 TEST_F(DnsOverHttpsIntegrationTest, EncryptedClientHello) {
+  base::test::ScopedFeatureList features;
+  features.InitWithFeaturesAndParameters(
+      /*enabled_features=*/{{features::kUseDnsHttpsSvcb,
+                             {// Disable timeouts.
+                              {"UseDnsHttpsSvcbSecureExtraTimeMax", "0"},
+                              {"UseDnsHttpsSvcbSecureExtraTimePercent", "0"},
+                              {"UseDnsHttpsSvcbSecureExtraTimeMin", "0"}}}},
+      /*disabled_features=*/{});
+
   // Configure a test server that speaks ECH.
   static constexpr char kRealName[] = "secret.example";
   static constexpr char kPublicName[] = "public.example";
@@ -477,60 +502,30 @@ TEST_F(DnsOverHttpsIntegrationTest, EncryptedClientHello) {
   AddHostWithEch(url::SchemeHostPort(url), addr.front().address(),
                  ech_config_list);
 
-  for (bool feature_enabled : {true, false}) {
-    SCOPED_TRACE(feature_enabled);
-    base::test::ScopedFeatureList features;
-    if (feature_enabled) {
-      features.InitWithFeaturesAndParameters(
-          /*enabled_features=*/{{features::kUseDnsHttpsSvcb,
-                                 {// Disable timeouts.
-                                  {"UseDnsHttpsSvcbSecureExtraTimeMax", "0"},
-                                  {"UseDnsHttpsSvcbSecureExtraTimePercent",
-                                   "0"},
-                                  {"UseDnsHttpsSvcbSecureExtraTimeMin", "0"},
-                                  {"UseDnsHttpsSvcbExtraTimeAbsolute", "0"},
-                                  {"UseDnsHttpsSvcbExtraTimePercent", "0"}}},
-                                {features::kEncryptedClientHello, {}}},
-          /*disabled_features=*/{});
-    } else {
-      features.InitWithFeaturesAndParameters(
-          /*enabled_features=*/{{features::kUseDnsHttpsSvcb,
-                                 {// Disable timeouts.
-                                  {"UseDnsHttpsSvcbSecureExtraTimeMax", "0"},
-                                  {"UseDnsHttpsSvcbSecureExtraTimePercent",
-                                   "0"},
-                                  {"UseDnsHttpsSvcbSecureExtraTimeMin", "0"},
-                                  {"UseDnsHttpsSvcbExtraTimeAbsolute", "0"},
-                                  {"UseDnsHttpsSvcbExtraTimePercent", "0"}}}},
-          /*disabled_features=*/{features::kEncryptedClientHello});
-    }
+  for (bool ech_enabled : {true, false}) {
+    SCOPED_TRACE(ech_enabled);
 
-    for (bool config_enabled : {true, false}) {
-      SCOPED_TRACE(config_enabled);
-      bool ech_enabled = feature_enabled && config_enabled;
+    // Create a new `URLRequestContext`, to ensure there are no cached
+    // sockets, etc., from the previous loop iteration.
+    ResetContext();
 
-      // Create a new `URLRequestContext`, to ensure there are no cached
-      // sockets, etc., from the previous loop iteration.
-      ResetContext();
+    SSLContextConfig config;
+    config.ech_enabled = ech_enabled;
+    ssl_config_service_->UpdateSSLConfigAndNotify(config);
 
-      SSLContextConfig config;
-      config.ech_enabled = config_enabled;
-      ssl_config_service_->UpdateSSLConfigAndNotify(config);
+    TestDelegate d;
+    std::unique_ptr<URLRequest> r = context()->CreateRequest(
+        url, DEFAULT_PRIORITY, &d, TRAFFIC_ANNOTATION_FOR_TESTS);
+    r->Start();
+    EXPECT_TRUE(r->is_pending());
 
-      TestDelegate d;
-      std::unique_ptr<URLRequest> r = context()->CreateRequest(
-          url, DEFAULT_PRIORITY, &d, TRAFFIC_ANNOTATION_FOR_TESTS);
-      r->Start();
-      EXPECT_TRUE(r->is_pending());
+    d.RunUntilComplete();
 
-      d.RunUntilComplete();
-
-      EXPECT_THAT(d.request_status(), IsOk());
-      EXPECT_EQ(1, d.response_started_count());
-      EXPECT_FALSE(d.received_data_before_response());
-      EXPECT_NE(0, d.bytes_received());
-      EXPECT_EQ(ech_enabled, r->ssl_info().encrypted_client_hello);
-    }
+    EXPECT_THAT(d.request_status(), IsOk());
+    EXPECT_EQ(1, d.response_started_count());
+    EXPECT_FALSE(d.received_data_before_response());
+    EXPECT_NE(0, d.bytes_received());
+    EXPECT_EQ(ech_enabled, r->ssl_info().encrypted_client_hello);
   }
 }
 
@@ -540,14 +535,11 @@ TEST_F(DnsOverHttpsIntegrationTest, EncryptedClientHello) {
 TEST_F(DnsOverHttpsIntegrationTest, EncryptedClientHelloStaleKey) {
   base::test::ScopedFeatureList features;
   features.InitWithFeaturesAndParameters(
-      /*enabled_features=*/{{features::kEncryptedClientHello, {}},
-                            {features::kUseDnsHttpsSvcb,
+      /*enabled_features=*/{{features::kUseDnsHttpsSvcb,
                              {// Disable timeouts.
                               {"UseDnsHttpsSvcbSecureExtraTimeMax", "0"},
                               {"UseDnsHttpsSvcbSecureExtraTimePercent", "0"},
-                              {"UseDnsHttpsSvcbSecureExtraTimeMin", "0"},
-                              {"UseDnsHttpsSvcbExtraTimeAbsolute", "0"},
-                              {"UseDnsHttpsSvcbExtraTimePercent", "0"}}}},
+                              {"UseDnsHttpsSvcbSecureExtraTimeMin", "0"}}}},
       /*disabled_features=*/{});
   ResetContext();
 
@@ -627,14 +619,11 @@ TEST_F(DnsOverHttpsIntegrationTest, EncryptedClientHelloStaleKey) {
 TEST_F(DnsOverHttpsIntegrationTest, EncryptedClientHelloFallback) {
   base::test::ScopedFeatureList features;
   features.InitWithFeaturesAndParameters(
-      /*enabled_features=*/{{features::kEncryptedClientHello, {}},
-                            {features::kUseDnsHttpsSvcb,
+      /*enabled_features=*/{{features::kUseDnsHttpsSvcb,
                              {// Disable timeouts.
                               {"UseDnsHttpsSvcbSecureExtraTimeMax", "0"},
                               {"UseDnsHttpsSvcbSecureExtraTimePercent", "0"},
-                              {"UseDnsHttpsSvcbSecureExtraTimeMin", "0"},
-                              {"UseDnsHttpsSvcbExtraTimeAbsolute", "0"},
-                              {"UseDnsHttpsSvcbExtraTimePercent", "0"}}}},
+                              {"UseDnsHttpsSvcbSecureExtraTimeMin", "0"}}}},
       /*disabled_features=*/{});
   ResetContext();
 
@@ -704,14 +693,11 @@ TEST_F(DnsOverHttpsIntegrationTest, EncryptedClientHelloFallback) {
 TEST_F(DnsOverHttpsIntegrationTest, EncryptedClientHelloFallbackTLS12) {
   base::test::ScopedFeatureList features;
   features.InitWithFeaturesAndParameters(
-      /*enabled_features=*/{{features::kEncryptedClientHello, {}},
-                            {features::kUseDnsHttpsSvcb,
+      /*enabled_features=*/{{features::kUseDnsHttpsSvcb,
                              {// Disable timeouts.
                               {"UseDnsHttpsSvcbSecureExtraTimeMax", "0"},
                               {"UseDnsHttpsSvcbSecureExtraTimePercent", "0"},
-                              {"UseDnsHttpsSvcbSecureExtraTimeMin", "0"},
-                              {"UseDnsHttpsSvcbExtraTimeAbsolute", "0"},
-                              {"UseDnsHttpsSvcbExtraTimePercent", "0"}}}},
+                              {"UseDnsHttpsSvcbSecureExtraTimeMin", "0"}}}},
       /*disabled_features=*/{});
   ResetContext();
 

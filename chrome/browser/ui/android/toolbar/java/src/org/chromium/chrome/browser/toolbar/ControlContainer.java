@@ -6,6 +6,8 @@ package org.chromium.chrome.browser.toolbar;
 
 import android.view.View;
 
+import androidx.coordinatorlayout.widget.CoordinatorLayout;
+
 import org.chromium.components.browser_ui.widget.ClipDrawableProgressBar;
 import org.chromium.components.browser_ui.widget.gesture.SwipeGestureListener.SwipeHandler;
 import org.chromium.ui.resources.dynamics.ViewResourceAdapter;
@@ -35,6 +37,9 @@ public interface ControlContainer {
 
     int getToolbarBackgroundColor();
 
+    /** Gets the height of the toolbar contained by the control container. */
+    int getToolbarHeight();
+
     /**
      * @param handler The swipe handler to be notified of swipe events on this container.
      */
@@ -44,4 +49,27 @@ public interface ControlContainer {
      * @return The {@link View} associated with this container.
      */
     View getView();
+
+    /**
+     * Triggered when the current tab or model has changed.
+     *
+     * @param incognito Whether or not the current tab model is incognito.
+     */
+    void onTabOrModelChanged(boolean incognito);
+
+    /** Set the compositor background is initialized. */
+    void setCompositorBackgroundInitialized();
+
+    /**
+     * Returns an instance of the underlying view's layout params that can be mutated; changes will
+     * take effect with the next layout pass. A layout pass is requested with each call to this
+     * method.
+     */
+    CoordinatorLayout.LayoutParams mutateLayoutParams();
+
+    /**
+     * Destroys the control container, causing it to release any owned native resources and cancel
+     * pending tasks.
+     */
+    void destroy();
 }

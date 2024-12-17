@@ -11,6 +11,14 @@
 namespace net {
 
 const char* GetHttpReasonPhrase(HttpStatusCode code) {
+  if (const char* phrase = TryToGetHttpReasonPhrase(code)) {
+    return phrase;
+  }
+  DUMP_WILL_BE_NOTREACHED() << "unknown HTTP status code " << code;
+  return nullptr;
+}
+
+const char* TryToGetHttpReasonPhrase(HttpStatusCode code) {
   switch (code) {
 #define HTTP_STATUS_ENUM_VALUE(label, code, reason) \
   case HTTP_##label:                                \
@@ -19,10 +27,21 @@ const char* GetHttpReasonPhrase(HttpStatusCode code) {
 #undef HTTP_STATUS_ENUM_VALUE
 
     default:
-      NOTREACHED() << "unknown HTTP status code " << code;
+      return nullptr;
   }
+}
 
-  return "";
+const std::optional<HttpStatusCode> TryToGetHttpStatusCode(int response_code) {
+  switch (response_code) {
+#define HTTP_STATUS_ENUM_VALUE(label, code, reason) \
+  case code:                                        \
+    return HTTP_##label;
+#include "net/http/http_status_code_list.h"
+#undef HTTP_STATUS_ENUM_VALUE
+
+    default:
+      return std::nullopt;
+  }
 }
 
 }  // namespace net

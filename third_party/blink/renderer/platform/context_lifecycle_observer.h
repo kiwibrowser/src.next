@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,15 +13,16 @@ namespace blink {
 
 class ContextLifecycleNotifier;
 
-// Observer that gets notified when the context is destroyed. Used to observe
-// ExecutionContext from platform/.
+// Observer that gets notified when the context lifecycle is changed (e.g.
+// destroyed, moved into back/forward cache). Used to observe ExecutionContext
+// from platform/.
 class PLATFORM_EXPORT ContextLifecycleObserver : public GarbageCollectedMixin {
  public:
   virtual ~ContextLifecycleObserver();
   void NotifyContextDestroyed();
 
   ContextLifecycleNotifier* GetContextLifecycleNotifier() const {
-    return notifier_;
+    return notifier_.Get();
   }
   void SetContextLifecycleNotifier(ContextLifecycleNotifier*);
 

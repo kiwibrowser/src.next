@@ -627,6 +627,8 @@
 "fullscreen"
 "standalone"
 "minimal-ui"
+"borderless"
+"window-controls-overlay"
 "browser"
 "sticky"
 "coarse"
@@ -690,6 +692,7 @@
 "-webkit-repeating-linear-gradient"
 "-webkit-repeating-radial-gradient"
 "-webkit-image-set"
+"image-set"
 "from"
 "to"
 "color-stop"
@@ -716,7 +719,7 @@
 "hsl"
 "hsla"
 "hwb"
-"-internal-light-dark"
+"light-dark"
 "matrix"
 "matrix3d"
 "perspective"
@@ -934,6 +937,15 @@
 "spelling-error"
 "grammar-error"
 "color-contrast"
+"accentcolor"
+"accentcolortext"
+"-internal-auto-base-select"
+
+# display-state
+# normal
+# fullscreen
+"minimized"
+"maximized"
 
 # at-rules
 "@charset"
@@ -944,7 +956,6 @@
 "@page"
 "@font-face"
 "@keyframes"
-"@viewport"
 
 # HTML elements
 "display"
@@ -1172,7 +1183,6 @@
 "light-level"
 "line-grid"
 "line-height"
-"line-height-step"
 "line-snap"
 "list-style"
 "list-style-image"

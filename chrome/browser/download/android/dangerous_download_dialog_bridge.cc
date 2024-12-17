@@ -8,15 +8,19 @@
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
+#include "base/containers/contains.h"
 #include "base/files/file_path.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/android/android_theme_resources.h"
 #include "chrome/browser/android/resource_mapper.h"
 #include "chrome/browser/download/android/download_dialog_utils.h"
-#include "chrome/browser/download/android/jni_headers/DangerousDownloadDialogBridge_jni.h"
 #include "chrome/grit/generated_resources.h"
 #include "ui/android/window_android.h"
 #include "ui/base/l10n/l10n_util.h"
+
+// Must come after all headers that specialize FromJniType() / ToJniType().
+#include "chrome/browser/download/android/jni_headers/DangerousDownloadDialogBridge_jni.h"
 
 using base::android::ConvertJavaStringToUTF8;
 using base::android::JavaParamRef;
@@ -28,17 +32,17 @@ DangerousDownloadDialogBridge::DangerousDownloadDialogBridge() {
 }
 
 DangerousDownloadDialogBridge::~DangerousDownloadDialogBridge() {
-  for (auto* download_item : download_items_)
+  for (download::DownloadItem* download_item : download_items_) {
     download_item->RemoveObserver(this);
+  }
   Java_DangerousDownloadDialogBridge_destroy(
       base::android::AttachCurrentThread(), java_object_);
 }
 
 void DangerousDownloadDialogBridge::Show(download::DownloadItem* download_item,
                                          ui::WindowAndroid* window_android) {
-  // Don't shown dangerous download again if it is already showing.
-  if (std::find(download_items_.begin(), download_items_.end(),
-                download_item) != download_items_.end()) {
+  // Don't show dangerous download again if it is already showing.
+  if (base::Contains(download_items_, download_item)) {
     return;
   }
   if (!window_android) {
@@ -62,10 +66,11 @@ void DangerousDownloadDialogBridge::Show(download::DownloadItem* download_item,
 
 void DangerousDownloadDialogBridge::OnDownloadDestroyed(
     download::DownloadItem* download_item) {
-  auto iter =
-      std::find(download_items_.begin(), download_items_.end(), download_item);
-  if (iter != download_items_.end())
+  auto iter = base::ranges::find(download_items_, download_item);
+  if (iter != download_items_.end()) {
+    (*iter)->RemoveObserver(this);
     download_items_.erase(iter);
+  }
 }
 
 void DangerousDownloadDialogBridge::Accepted(
@@ -73,8 +78,10 @@ void DangerousDownloadDialogBridge::Accepted(
     const JavaParamRef<jstring>& jdownload_guid) {
   download::DownloadItem* download = DownloadDialogUtils::FindAndRemoveDownload(
       &download_items_, ConvertJavaStringToUTF8(env, jdownload_guid));
-  if (download)
+  if (download) {
+    download->RemoveObserver(this);
     download->ValidateDangerousDownload();
+  }
 }
 
 void DangerousDownloadDialogBridge::Cancelled(
@@ -82,6 +89,8 @@ void DangerousDownloadDialogBridge::Cancelled(
     const JavaParamRef<jstring>& jdownload_guid) {
   download::DownloadItem* download = DownloadDialogUtils::FindAndRemoveDownload(
       &download_items_, ConvertJavaStringToUTF8(env, jdownload_guid));
-  if (download)
+  if (download) {
+    download->RemoveObserver(this);
     download->Remove();
+  }
 }

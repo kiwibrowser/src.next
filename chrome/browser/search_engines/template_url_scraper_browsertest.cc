@@ -3,22 +3,25 @@
 // found in the LICENSE file.
 
 #include <stddef.h>
+
 #include <utility>
 
-#include "base/bind.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/bind.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search_engine_choice/search_engine_choice_service_factory.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/search_engines/search_engine_choice/search_engine_choice_service.h"
 #include "components/search_engines/template_url_data.h"
 #include "components/search_engines/template_url_prepopulate_data.h"
 #include "components/search_engines/template_url_service.h"
@@ -83,6 +86,9 @@ IN_PROC_BROWSER_TEST_F(TemplateURLScraperTest, ScrapeWithOnSubmit) {
       base::BindRepeating(&SendResponse));
   ASSERT_TRUE(embedded_test_server()->Start());
 
+  search_engines::SearchEngineChoiceService* search_engine_choice_service =
+      search_engines::SearchEngineChoiceServiceFactory::GetForProfile(
+          browser()->profile());
   TemplateURLService* template_urls =
       TemplateURLServiceFactory::GetInstance()->GetForProfile(
           browser()->profile());
@@ -95,7 +101,7 @@ IN_PROC_BROWSER_TEST_F(TemplateURLScraperTest, ScrapeWithOnSubmit) {
   // set up with.
   std::vector<std::unique_ptr<TemplateURLData>> prepopulate_urls =
       TemplateURLPrepopulateData::GetPrepopulatedEngines(
-          browser()->profile()->GetPrefs(), nullptr);
+          browser()->profile()->GetPrefs(), search_engine_choice_service);
   std::vector<std::unique_ptr<TemplateURLData>> starter_pack_urls =
       TemplateURLStarterPackData::GetStarterPackEngines();
 
@@ -113,7 +119,7 @@ IN_PROC_BROWSER_TEST_F(TemplateURLScraperTest, ScrapeWithOnSubmit) {
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   content::TestNavigationObserver observer(web_contents);
-  EXPECT_TRUE(content::ExecuteScript(web_contents, "submit_form()"));
+  EXPECT_TRUE(content::ExecJs(web_contents, "submit_form()"));
   observer.Wait();
 
   all_urls = template_urls->GetTemplateURLs();

@@ -27,57 +27,43 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_IMAGE_SET_VALUE_H_
 
 #include "third_party/blink/renderer/core/css/css_value_list.h"
-#include "third_party/blink/renderer/platform/loader/fetch/cross_origin_attribute_value.h"
-#include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 
+namespace WTF {
+class String;
+}  // namespace WTF
+
 namespace blink {
 
-class Document;
+class CSSImageSetOptionValue;
 class StyleImage;
 
-class CSSImageSetValue : public CSSValueList {
+class CORE_EXPORT CSSImageSetValue : public CSSValueList {
  public:
   explicit CSSImageSetValue();
   ~CSSImageSetValue();
 
-  bool IsCachePending(float device_scale_factor) const;
-  StyleImage* CachedImage(float device_scale_factor) const;
-  StyleImage* CacheImage(
-      const Document&,
-      float device_scale_factor,
-      FetchParameters::ImageRequestBehavior,
-      CrossOriginAttributeValue = kCrossOriginAttributeNotSet);
+  bool IsCachePending(const float device_scale_factor) const;
+  StyleImage* CachedImage(const float device_scale_factor) const;
+  StyleImage* CacheImage(StyleImage*,
+                         const float device_scale_factor,
+                         bool is_origin_clean);
 
-  String CustomCSSText() const;
+  const CSSImageSetOptionValue* GetBestOption(const float device_scale_factor);
 
-  CSSImageSetValue* ValueWithURLsMadeAbsolute();
+  WTF::String CustomCSSText() const;
 
   bool HasFailedOrCanceledSubresources() const;
 
   void TraceAfterDispatch(blink::Visitor*) const;
 
- protected:
-  struct ImageWithScale {
-    DISALLOW_NEW();
-    wtf_size_t index;
-    float scale_factor;
-  };
-
-  ImageWithScale BestImageForScaleFactor(float scale_factor);
-
  private:
-  void FillImageSet();
-  static inline bool CompareByScaleFactor(ImageWithScale first,
-                                          ImageWithScale second) {
-    return first.scale_factor < second.scale_factor;
-  }
-
   Member<StyleImage> cached_image_;
-  float cached_scale_factor_;
+  float cached_device_scale_factor_{1.0f};
 
-  Vector<ImageWithScale> images_in_set_;
+  HeapVector<Member<const CSSImageSetOptionValue>> options_;
 };
 
 template <>

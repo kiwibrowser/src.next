@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,9 +27,24 @@ class CORE_EXPORT CSSNumericLiteralValue : public CSSPrimitiveValue {
 
   bool IsAngle() const { return CSSPrimitiveValue::IsAngle(GetType()); }
   bool IsFontRelativeLength() const {
-    return GetType() == UnitType::kQuirkyEms || GetType() == UnitType::kEms ||
-           GetType() == UnitType::kExs || GetType() == UnitType::kRems ||
-           GetType() == UnitType::kChs || GetType() == UnitType::kIcs;
+    switch (GetType()) {
+      case UnitType::kQuirkyEms:
+      case UnitType::kEms:
+      case UnitType::kExs:
+      case UnitType::kRems:
+      case UnitType::kChs:
+      case UnitType::kIcs:
+      case UnitType::kLhs:
+      case UnitType::kCaps:
+      case UnitType::kRcaps:
+      case UnitType::kRexs:
+      case UnitType::kRchs:
+      case UnitType::kRics:
+      case UnitType::kRlhs:
+        return true;
+      default:
+        return false;
+    }
   }
   bool IsQuirkyEms() const { return GetType() == UnitType::kQuirkyEms; }
   bool IsViewportPercentageLength() const {
@@ -48,7 +63,18 @@ class CORE_EXPORT CSSNumericLiteralValue : public CSSPrimitiveValue {
   }
   bool IsFlex() const { return CSSPrimitiveValue::IsFlex(GetType()); }
 
-  bool IsZero() const { return !DoubleValue(); }
+  BoolStatus IsZero() const {
+    return !DoubleValue() ? BoolStatus::kTrue : BoolStatus::kFalse;
+  }
+  BoolStatus IsOne() const {
+    return DoubleValue() == 1.0 ? BoolStatus::kTrue : BoolStatus::kFalse;
+  }
+  BoolStatus IsHundred() const {
+    return DoubleValue() == 100.0 ? BoolStatus::kTrue : BoolStatus::kFalse;
+  }
+  BoolStatus IsNegative() const {
+    return DoubleValue() < 0.0 ? BoolStatus::kTrue : BoolStatus::kFalse;
+  }
 
   bool IsComputationallyIndependent() const;
 
@@ -56,7 +82,12 @@ class CORE_EXPORT CSSNumericLiteralValue : public CSSPrimitiveValue {
   double ComputeSeconds() const;
   double ComputeDegrees() const;
   double ComputeDotsPerPixel() const;
+  double ComputeInCanonicalUnit() const;
+  double ComputeInCanonicalUnit(const CSSLengthResolver&) const;
 
+  int ComputeInteger() const;
+  double ComputeNumber() const;
+  double ComputePercentage() const;
   double ComputeLengthPx(const CSSLengthResolver&) const;
   bool AccumulateLengthArray(CSSLengthArray& length_array,
                              double multiplier) const;
@@ -65,10 +96,13 @@ class CORE_EXPORT CSSNumericLiteralValue : public CSSPrimitiveValue {
   String CustomCSSText() const;
   bool Equals(const CSSNumericLiteralValue& other) const;
 
+  UnitType CanonicalUnit() const;
+  CSSNumericLiteralValue* CreateCanonicalUnitValue() const;
+
   void TraceAfterDispatch(blink::Visitor* visitor) const;
 
  private:
-  double num_;
+  const double num_;
 };
 
 template <>

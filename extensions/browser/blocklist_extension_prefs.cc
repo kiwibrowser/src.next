@@ -4,8 +4,11 @@
 
 #include "extensions/browser/blocklist_extension_prefs.h"
 
+#include <optional>
+
 #include "extensions/browser/blocklist_state.h"
 #include "extensions/browser/extension_prefs.h"
+#include "extensions/common/extension_id.h"
 
 namespace extensions {
 
@@ -20,6 +23,10 @@ constexpr const char kPrefAcknowledgedBlocklistState[] =
 
 // If extension is blocklisted or greylisted.
 constexpr const char kPrefBlocklistState[] = "blacklist_state";
+
+// If extension is blocklisted by the Extension Telemetry service.
+constexpr const char kPrefExtensionTelemetryServiceBlocklistState[] =
+    "extension_telemetry_service_blocklist_state";
 
 // The default value to use for getting blocklist state from the pref.
 constexpr BitMapBlocklistState kDefaultBitMapBlocklistState =
@@ -72,20 +79,25 @@ BitMapBlocklistState BlocklistStateToBitMapBlocklistState(
     case BLOCKLISTED_POTENTIALLY_UNWANTED:
       return BitMapBlocklistState::BLOCKLISTED_POTENTIALLY_UNWANTED;
     case BLOCKLISTED_UNKNOWN:
-      NOTREACHED() << "The unknown state should not be added into prefs.";
+      NOTREACHED_IN_MIGRATION()
+          << "The unknown state should not be added into prefs.";
       return BitMapBlocklistState::NOT_BLOCKLISTED;
   }
 }
 
 BitMapBlocklistState GetExtensionBlocklistState(
-    const std::string& extension_id,
-    ExtensionPrefs* extension_prefs) {
+    const ExtensionId& extension_id,
+    const ExtensionPrefs* extension_prefs) {
   BitMapBlocklistState sb_state =
       GetSafeBrowsingExtensionBlocklistState(extension_id, extension_prefs);
+  BitMapBlocklistState extension_telemetry_service_state =
+      GetExtensionTelemetryServiceBlocklistState(extension_id, extension_prefs);
   if (sb_state == BitMapBlocklistState::BLOCKLISTED_MALWARE ||
       HasOmahaBlocklistState(extension_id,
                              BitMapBlocklistState::BLOCKLISTED_MALWARE,
-                             extension_prefs)) {
+                             extension_prefs) ||
+      extension_telemetry_service_state ==
+          BitMapBlocklistState::BLOCKLISTED_MALWARE) {
     return BitMapBlocklistState::BLOCKLISTED_MALWARE;
   }
 
@@ -99,39 +111,40 @@ BitMapBlocklistState GetExtensionBlocklistState(
   return BitMapBlocklistState::NOT_BLOCKLISTED;
 }
 
-bool IsExtensionBlocklisted(const std::string& extension_id,
+bool IsExtensionBlocklisted(const ExtensionId& extension_id,
                             ExtensionPrefs* extension_prefs) {
   return GetExtensionBlocklistState(extension_id, extension_prefs) ==
          BitMapBlocklistState::BLOCKLISTED_MALWARE;
 }
 
-void AddOmahaBlocklistState(const std::string& extension_id,
+void AddOmahaBlocklistState(const ExtensionId& extension_id,
                             BitMapBlocklistState state,
                             ExtensionPrefs* extension_prefs) {
   extension_prefs->ModifyBitMapPrefBits(
-      extension_id, static_cast<int>(state), ExtensionPrefs::BIT_MAP_PREF_ADD,
-      kPrefOmahaBlocklistState, static_cast<int>(kDefaultBitMapBlocklistState));
+      extension_id, static_cast<int>(state),
+      ExtensionPrefs::BitMapPrefOperation::kAdd, kPrefOmahaBlocklistState,
+      static_cast<int>(kDefaultBitMapBlocklistState));
 }
 
-void RemoveOmahaBlocklistState(const std::string& extension_id,
+void RemoveOmahaBlocklistState(const ExtensionId& extension_id,
                                BitMapBlocklistState state,
                                ExtensionPrefs* extension_prefs) {
   extension_prefs->ModifyBitMapPrefBits(
       extension_id, static_cast<int>(state),
-      ExtensionPrefs::BIT_MAP_PREF_REMOVE, kPrefOmahaBlocklistState,
+      ExtensionPrefs::BitMapPrefOperation::kRemove, kPrefOmahaBlocklistState,
       static_cast<int>(kDefaultBitMapBlocklistState));
 }
 
-bool HasOmahaBlocklistState(const std::string& extension_id,
+bool HasOmahaBlocklistState(const ExtensionId& extension_id,
                             BitMapBlocklistState state,
-                            ExtensionPrefs* extension_prefs) {
+                            const ExtensionPrefs* extension_prefs) {
   int current_states = extension_prefs->GetBitMapPrefBits(
       extension_id, kPrefOmahaBlocklistState,
       static_cast<int>(kDefaultBitMapBlocklistState));
   return (current_states & static_cast<int>(state)) != 0;
 }
 
-bool HasAnyOmahaGreylistState(const std::string& extension_id,
+bool HasAnyOmahaGreylistState(const ExtensionId& extension_id,
                               ExtensionPrefs* extension_prefs) {
   int current_states = extension_prefs->GetBitMapPrefBits(
       extension_id, kPrefOmahaBlocklistState,
@@ -139,33 +152,35 @@ bool HasAnyOmahaGreylistState(const std::string& extension_id,
   return (current_states & kAllGreylistStates) != 0;
 }
 
-void AddAcknowledgedBlocklistState(const std::string& extension_id,
+void AddAcknowledgedBlocklistState(const ExtensionId& extension_id,
                                    BitMapBlocklistState state,
                                    ExtensionPrefs* extension_prefs) {
   extension_prefs->ModifyBitMapPrefBits(
-      extension_id, static_cast<int>(state), ExtensionPrefs::BIT_MAP_PREF_ADD,
+      extension_id, static_cast<int>(state),
+      ExtensionPrefs::BitMapPrefOperation::kAdd,
       kPrefAcknowledgedBlocklistState,
       static_cast<int>(kDefaultBitMapBlocklistState));
 }
 
 void RemoveAcknowledgedBlocklistState(
-    const std::string& extension_id,
+    const ExtensionId& extension_id,
     BitMapBlocklistState state,
     extensions::ExtensionPrefs* extension_prefs) {
   extension_prefs->ModifyBitMapPrefBits(
       extension_id, static_cast<int>(state),
-      ExtensionPrefs::BIT_MAP_PREF_REMOVE, kPrefAcknowledgedBlocklistState,
+      ExtensionPrefs::BitMapPrefOperation::kRemove,
+      kPrefAcknowledgedBlocklistState,
       static_cast<int>(kDefaultBitMapBlocklistState));
 }
 
-void ClearAcknowledgedGreylistStates(const std::string& extension_id,
+void ClearAcknowledgedGreylistStates(const ExtensionId& extension_id,
                                      ExtensionPrefs* extension_prefs) {
   for (auto state : kGreylistStates) {
     RemoveAcknowledgedBlocklistState(extension_id, state, extension_prefs);
   }
 }
 
-bool HasAcknowledgedBlocklistState(const std::string& extension_id,
+bool HasAcknowledgedBlocklistState(const ExtensionId& extension_id,
                                    BitMapBlocklistState state,
                                    const ExtensionPrefs* extension_prefs) {
   int current_states = extension_prefs->GetBitMapPrefBits(
@@ -175,7 +190,7 @@ bool HasAcknowledgedBlocklistState(const std::string& extension_id,
 }
 
 void UpdateCurrentGreylistStatesAsAcknowledged(
-    const std::string& extension_id,
+    const ExtensionId& extension_id,
     ExtensionPrefs* extension_prefs) {
   for (auto state : kGreylistStates) {
     bool is_on_sb_list = (GetSafeBrowsingExtensionBlocklistState(
@@ -191,27 +206,59 @@ void UpdateCurrentGreylistStatesAsAcknowledged(
 }
 
 void SetSafeBrowsingExtensionBlocklistState(
-    const std::string& extension_id,
+    const ExtensionId& extension_id,
     BitMapBlocklistState bitmap_blocklist_state,
     ExtensionPrefs* extension_prefs) {
   if (bitmap_blocklist_state == BitMapBlocklistState::NOT_BLOCKLISTED) {
     extension_prefs->UpdateExtensionPref(extension_id, kPrefBlocklistState,
-                                         nullptr);
+                                         std::nullopt);
     extension_prefs->DeleteExtensionPrefsIfPrefEmpty(extension_id);
   } else {
     extension_prefs->UpdateExtensionPref(
         extension_id, kPrefBlocklistState,
-        std::make_unique<base::Value>(
+        base::Value(
             BitMapBlocklistStateToBlocklistState(bitmap_blocklist_state)));
   }
 }
 
 BitMapBlocklistState GetSafeBrowsingExtensionBlocklistState(
-    const std::string& extension_id,
-    ExtensionPrefs* extension_prefs) {
+    const ExtensionId& extension_id,
+    const ExtensionPrefs* extension_prefs) {
   int int_value = -1;
   if (extension_prefs->ReadPrefAsInteger(extension_id, kPrefBlocklistState,
                                          &int_value) &&
+      int_value >= 0) {
+    return BlocklistStateToBitMapBlocklistState(
+        static_cast<BlocklistState>(int_value));
+  }
+
+  return BitMapBlocklistState::NOT_BLOCKLISTED;
+}
+
+void SetExtensionTelemetryServiceBlocklistState(
+    const ExtensionId& extension_id,
+    BitMapBlocklistState bitmap_blocklist_state,
+    ExtensionPrefs* extension_prefs) {
+  if (bitmap_blocklist_state == BitMapBlocklistState::NOT_BLOCKLISTED) {
+    extension_prefs->UpdateExtensionPref(
+        extension_id, kPrefExtensionTelemetryServiceBlocklistState,
+        std::nullopt);
+    extension_prefs->DeleteExtensionPrefsIfPrefEmpty(extension_id);
+  } else {
+    extension_prefs->UpdateExtensionPref(
+        extension_id, kPrefExtensionTelemetryServiceBlocklistState,
+        base::Value(
+            BitMapBlocklistStateToBlocklistState(bitmap_blocklist_state)));
+  }
+}
+
+BitMapBlocklistState GetExtensionTelemetryServiceBlocklistState(
+    const ExtensionId& extension_id,
+    const ExtensionPrefs* extension_prefs) {
+  int int_value = -1;
+  if (extension_prefs->ReadPrefAsInteger(
+          extension_id, kPrefExtensionTelemetryServiceBlocklistState,
+          &int_value) &&
       int_value >= 0) {
     return BlocklistStateToBitMapBlocklistState(
         static_cast<BlocklistState>(int_value));

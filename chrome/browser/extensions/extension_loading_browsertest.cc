@@ -10,12 +10,14 @@
 #include "base/strings/stringprintf.h"
 #include "base/version.h"
 #include "build/build_config.h"
+#include "chrome/browser/browser_features.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/devtools/devtools_window_testing.h"
 #include "chrome/browser/extensions/devtools_util.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/api/tabs.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -202,10 +204,22 @@ IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest,
       process_manager->GetLazyKeepaliveActivities(extension);
   EXPECT_TRUE(activities.empty());
 
-  devtools_util::InspectBackgroundPage(extension, profile());
-  EXPECT_EQ(1, process_manager->GetLazyKeepaliveCount(extension));
-  activities = process_manager->GetLazyKeepaliveActivities(extension);
-  EXPECT_THAT(activities, testing::UnorderedElementsAre(dev_tools_activity));
+  DevToolsWindowCreationObserver observer;
+  devtools_util::InspectBackgroundPage(extension, profile(),
+                                       DevToolsOpenedByAction::kUnknown);
+  observer.WaitForLoad();
+
+  // This is due to how these keepalive counters are managed by the extension
+  // process manager:
+  // https://source.chromium.org/chromium/chromium/src/+/refs/heads/main:extensions/browser/process_manager.cc;drc=8ce14ef97f8607b1b57f8d02da575ed5150eea9e;l=924
+  // It bumps them each time it sees a DevToolsAgentHost associated to an
+  // extension, and in case of the tab target mode, there's one agent host for
+  // the WebContents and one for the render frame.
+  const int expected_keepalive_count = 2;
+
+  EXPECT_EQ(expected_keepalive_count,
+            process_manager->GetLazyKeepaliveCount(extension));
+  EXPECT_THAT(activities, testing::Each(dev_tools_activity));
 
   // Opening DevTools will cause the background page to load. Wait for it.
   WaitForExtensionViewsToLoad();
@@ -230,16 +244,26 @@ IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest,
   extension = ExtensionRegistry::Get(profile())
       ->enabled_extensions().GetByID(extension_id);
 
-  // Keepalive count should stabilize back to 1, because DevTools is still open.
-  EXPECT_EQ(1, process_manager->GetLazyKeepaliveCount(extension));
+  // Keepalive count should stabilize back to original count, because DevTools
+  // is still open.
+  EXPECT_EQ(expected_keepalive_count,
+            process_manager->GetLazyKeepaliveCount(extension));
   activities = process_manager->GetLazyKeepaliveActivities(extension);
-  EXPECT_THAT(activities, testing::UnorderedElementsAre(dev_tools_activity));
+  EXPECT_THAT(activities, testing::Each(dev_tools_activity));
 }
 
 // Tests whether the extension runtime stays valid when an extension reloads
 // while a devtools extension is hammering the frame with eval requests.
 // Regression test for https://crbug.com/544182
-IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest, RuntimeValidWhileDevToolsOpen) {
+// TODO(crbug.com/40893499): Flaky with dbg and sanitizers.
+#if !defined(NDEBUG) || defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER)
+#define MAYBE_RuntimeValidWhileDevToolsOpen \
+  DISABLED_RuntimeValidWhileDevToolsOpen
+#else
+#define MAYBE_RuntimeValidWhileDevToolsOpen RuntimeValidWhileDevToolsOpen
+#endif
+IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest,
+                       MAYBE_RuntimeValidWhileDevToolsOpen) {
   TestExtensionDir devtools_dir;
   TestExtensionDir inspect_dir;
 
@@ -288,7 +312,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest, RuntimeValidWhileDevToolsOpen) {
 
   // Open the devtools and wait until the devtools_page is ready.
   ExtensionTestMessageListener devtools_ready("devtools_page_ready");
-  devtools_util::InspectBackgroundPage(inspect_ext, profile());
+  devtools_util::InspectBackgroundPage(inspect_ext, profile(),
+                                       DevToolsOpenedByAction::kUnknown);
   ASSERT_TRUE(devtools_ready.WaitUntilSatisfied());
 
   // Reload the extension. The devtools window will stay open, but temporarily
@@ -304,15 +329,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest, RuntimeValidWhileDevToolsOpen) {
   ASSERT_TRUE(bg_contents);
 
   // Now check whether the extension runtime is valid (see kTargetJs).
-  bool is_valid = false;
-  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-      bg_contents, "domAutomationController.send(is_valid);", &is_valid));
-  EXPECT_TRUE(is_valid);
+  EXPECT_EQ(true, content::EvalJs(bg_contents, "is_valid;"));
 
   // Tidy up.
+  scoped_refptr<content::DevToolsAgentHost> agent_host(
+      content::DevToolsAgentHost::GetOrCreateForTab(bg_contents));
   DevToolsWindowTesting::CloseDevToolsWindowSync(
-      DevToolsWindow::FindDevToolsWindow(
-          content::DevToolsAgentHost::GetOrCreateFor(bg_contents).get()));
+      DevToolsWindow::FindDevToolsWindow(agent_host.get()));
 }
 
 // Tests that changing a Service Worker based extension to an event page doesn't
@@ -355,7 +378,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest, PRE_ChangeBackgroundScriptType) {
 
 IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest, ChangeBackgroundScriptType) {
   // The goal of this test step is to not crash.
-  const extensions::Extension* extension =
+  const Extension* extension =
       extension_registry()->enabled_extensions().GetByID(
           kChangeBackgroundScriptTypeExtensionId);
   ASSERT_TRUE(extension);

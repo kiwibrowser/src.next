@@ -17,12 +17,13 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/user_manager/user_manager.h"
+#include "extensions/browser/extensions_browser_client.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/browser/process_manager_factory.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/permissions/permissions_data.h"
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
 #include "ash/constants/ash_switches.h"
 #include "chrome/browser/ash/profiles/profile_helper.h"
 #include "chrome/browser/extensions/component_extensions_allowlist/allowlist.h"
@@ -34,20 +35,15 @@ ChromeProcessManagerDelegate::ChromeProcessManagerDelegate() {
   BrowserList::AddObserver(this);
   DCHECK(g_browser_process);
   // The profile manager can be null in unit tests.
-  if (g_browser_process->profile_manager()) {
-    g_browser_process->profile_manager()->AddObserver(this);
-    // All profiles must be observed, so make sure none have been created that
-    // we missed.
-    DCHECK_EQ(0U,
-              g_browser_process->profile_manager()->GetLoadedProfiles().size());
+  if (ProfileManager* profile_manager = g_browser_process->profile_manager()) {
+    profile_manager_observation_.Observe(profile_manager);
+    // All profiles must be observed, so make sure none have been created
+    // that we missed.
+    DCHECK_EQ(0U, profile_manager->GetLoadedProfiles().size());
   }
 }
 
 ChromeProcessManagerDelegate::~ChromeProcessManagerDelegate() {
-  // |this| is owned by the BrowserProcess and outlives the ProfileManager, so
-  // we don't call RemoveObserver. The |g_browser_process| pointer is already
-  // set to null so we can't directly verify that the profile manager is already
-  // destroyed.
   DCHECK(!g_browser_process)
       << "ChromeProcessManagerDelegate expects to be shut down during "
          "BrowserProcess shutdown, after |g_browser_process| is set to null";
@@ -71,7 +67,7 @@ bool ChromeProcessManagerDelegate::AreBackgroundPagesAllowedForContext(
 bool ChromeProcessManagerDelegate::IsExtensionBackgroundPageAllowed(
     content::BrowserContext* context,
     const Extension& extension) const {
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   Profile* profile = Profile::FromBrowserContext(context);
 
   const bool is_signin_profile = ash::ProfileHelper::IsSigninProfile(profile) &&
@@ -85,13 +81,13 @@ bool ChromeProcessManagerDelegate::IsExtensionBackgroundPageAllowed(
     }
 
     // Get login screen apps installed by policy.
-    std::unique_ptr<base::DictionaryValue> login_screen_apps_list =
+    base::Value::Dict login_screen_apps_list =
         ExtensionManagementFactory::GetForBrowserContext(context)
             ->GetForceInstallList();
 
     // For the ChromeOS login profile, only allow apps installed by device
     // policy or that are explicitly allowlisted.
-    return login_screen_apps_list->FindKey(extension.id()) ||
+    return login_screen_apps_list.Find(extension.id()) ||
            IsComponentExtensionAllowlistedForSignInProfile(extension.id());
   }
 
@@ -107,15 +103,10 @@ bool ChromeProcessManagerDelegate::IsExtensionBackgroundPageAllowed(
 
 bool ChromeProcessManagerDelegate::DeferCreatingStartupBackgroundHosts(
     content::BrowserContext* context) const {
-  Profile* profile = Profile::FromBrowserContext(context);
-
   // The profile may not be valid yet if it is still being initialized.
   // In that case, defer loading, since it depends on an initialized profile.
   // Background hosts will be loaded later via OnProfileAdded.
-  // http://crbug.com/222473
-  // Unit tests may not have a profile manager.
-  return (g_browser_process->profile_manager() &&
-          !g_browser_process->profile_manager()->IsValidProfile(profile));
+  return !ExtensionsBrowserClient::Get()->IsValidContext(context);
 }
 
 void ChromeProcessManagerDelegate::OnBrowserAdded(Browser* browser) {
@@ -143,7 +134,16 @@ void ChromeProcessManagerDelegate::OnProfileAdded(Profile* profile) {
   // The profile might have been initialized asynchronously (in parallel with
   // extension system startup). Now that initialization is complete the
   // ProcessManager can load deferred background pages.
-  ProcessManager::Get(profile)->MaybeCreateStartupBackgroundHosts();
+  //
+  // The process manager service might not be available for some irregular
+  // profiles, like the System Profile.
+  if (ProcessManager* process_manager = ProcessManager::Get(profile)) {
+    process_manager->MaybeCreateStartupBackgroundHosts();
+  }
+}
+
+void ChromeProcessManagerDelegate::OnProfileManagerDestroying() {
+  profile_manager_observation_.Reset();
 }
 
 void ChromeProcessManagerDelegate::OnOffTheRecordProfileCreated(
@@ -161,8 +161,9 @@ void ChromeProcessManagerDelegate::OnProfileWillBeDestroyed(Profile* profile) {
   auto close_background_hosts = [](Profile* profile) {
     ProcessManager* manager =
         ProcessManagerFactory::GetForBrowserContextIfExists(profile);
-    if (manager)
+    if (manager) {
       manager->CloseBackgroundHosts();
+    }
   };
 
   close_background_hosts(profile);
@@ -173,8 +174,9 @@ void ChromeProcessManagerDelegate::OnProfileWillBeDestroyed(Profile* profile) {
   if (!profile->IsOffTheRecord() && profile->HasPrimaryOTRProfile()) {
     Profile* otr = profile->GetPrimaryOTRProfile(/*create_if_needed=*/true);
     close_background_hosts(otr);
-    if (observed_profiles_.IsObservingSource(otr))
+    if (observed_profiles_.IsObservingSource(otr)) {
       observed_profiles_.RemoveObservation(otr);
+    }
   }
 }
 

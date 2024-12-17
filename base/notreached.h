@@ -7,41 +7,58 @@
 
 #include "base/base_export.h"
 #include "base/check.h"
+#include "base/compiler_specific.h"
 #include "base/dcheck_is_on.h"
 #include "base/logging_buildflags.h"
 
+// TODO(crbug.com/41493641): Remove once NOTIMPLEMENTED() call sites include
+// base/notimplemented.h.
+#include "base/notimplemented.h"
+
 namespace logging {
 
-// Under these conditions NOTREACHED() will effectively either log or DCHECK.
-#if BUILDFLAG(ENABLE_LOG_ERROR_NOT_REACHED) || DCHECK_IS_ON()
-#define NOTREACHED() \
-  LAZY_CHECK_STREAM( \
-      ::logging::CheckError::NotReached(__FILE__, __LINE__).stream(), true)
+// Migration in progress: For new code use NOTREACHED() or
+// NOTREACHED(base::NotFatalUntil::M*). NOTREACHED_IN_MIGRATION() is equally
+// fatal to NOTREACHED() without parameters but not annotated as [[noreturn]].
+#if CHECK_WILL_STREAM() || BUILDFLAG(ENABLE_LOG_ERROR_NOT_REACHED)
+#define NOTREACHED_IN_MIGRATION() \
+  LOGGING_CHECK_FUNCTION_IMPL(::logging::NotReachedError::NotReached(), false)
 #else
-#define NOTREACHED() EAT_CHECK_STREAM_PARAMS()
-#endif  // BUILDFLAG(ENABLE_LOG_ERROR_NOT_REACHED) || DCHECK_IS_ON()
-
-// The NOTIMPLEMENTED() macro annotates codepaths which have not been
-// implemented yet. If output spam is a serious concern,
-// NOTIMPLEMENTED_LOG_ONCE can be used.
-#if DCHECK_IS_ON()
-#define NOTIMPLEMENTED()                                     \
-  ::logging::CheckError::NotImplemented(__FILE__, __LINE__,  \
-                                        __PRETTY_FUNCTION__) \
-      .stream()
-#else
-#define NOTIMPLEMENTED() EAT_CHECK_STREAM_PARAMS()
+#define NOTREACHED_IN_MIGRATION()                          \
+  (true) ? ::logging::NotReachedError::TriggerNotReached() \
+         : EAT_CHECK_STREAM_PARAMS()
 #endif
 
-#define NOTIMPLEMENTED_LOG_ONCE()    \
-  {                                  \
-    static bool logged_once = false; \
-    if (!logged_once) {              \
-      NOTIMPLEMENTED();              \
-      logged_once = true;            \
-    }                                \
-  }                                  \
-  EAT_CHECK_STREAM_PARAMS()
+// Migration in progress: Use NOTREACHED() directly without parameters instead.
+// TODO(crbug.com/40580068): Merge this with NOTREACHED().
+#if CHECK_WILL_STREAM()
+#define NOTREACHED_NORETURN() ::logging::NotReachedNoreturnError()
+#else
+// This function is used to be able to detect NOTREACHED() failures in stack
+// traces where this symbol is preserved (even if inlined). Its implementation
+// matches logging::CheckFailure() but intentionally uses a different signature.
+[[noreturn]] NOMERGE IMMEDIATE_CRASH_ALWAYS_INLINE void NotReachedFailure() {
+  base::ImmediateCrash();
+}
+
+#define NOTREACHED_NORETURN() \
+  (true) ? ::logging::NotReachedFailure() : EAT_CHECK_STREAM_PARAMS()
+#endif
+
+// NOTREACHED() annotates should-be unreachable code. When a base::NotFatalUntil
+// milestone is provided the instance is non-fatal (dumps without crashing)
+// until that milestone is hit. That is: `NOTREACHED(base::NotFatalUntil::M120)`
+// starts crashing in M120. See base/check.h.
+#define NOTREACHED(...)                                      \
+  BASE_IF(BASE_IS_EMPTY(__VA_ARGS__), NOTREACHED_NORETURN(), \
+          LOGGING_CHECK_FUNCTION_IMPL(                       \
+              ::logging::NotReachedError::NotReached(__VA_ARGS__), false))
+
+// The DUMP_WILL_BE_NOTREACHED() macro provides a convenient way to
+// non-fatally dump in official builds if ever hit. See DUMP_WILL_BE_CHECK for
+// suggested usage.
+#define DUMP_WILL_BE_NOTREACHED() \
+  ::logging::CheckError::DumpWillBeNotReachedNoreturn()
 
 }  // namespace logging
 

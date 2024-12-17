@@ -6,19 +6,17 @@
 
 #include <memory>
 
-#include "base/bind.h"
+#include "base/android/jni_android.h"
+#include "base/functional/bind.h"
 #include "base/path_service.h"
 #include "base/task/current_thread.h"
 #include "base/task/thread_pool.h"
 #include "base/trace_event/trace_event.h"
-#include "chrome/browser/android/chrome_backup_watcher.h"
 #include "chrome/browser/android/mojo/chrome_interface_registrar_android.h"
 #include "chrome/browser/android/preferences/clipboard_android.h"
 #include "chrome/browser/android/seccomp_support_detector.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/data_saver/data_saver.h"
-#include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/profiles/profile_manager_android.h"
 #include "chrome/browser/webauthn/android/cable_module_android.h"
 #include "components/crash/content/browser/child_exit_observer_android.h"
 #include "components/crash/content/browser/child_process_crash_observer_android.h"
@@ -31,6 +29,9 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/resource/resource_bundle_android.h"
 #include "ui/base/ui_base_paths.h"
+
+// Must come after all headers that specialize FromJniType() / ToJniType().
+#include "chrome/android/chrome_jni_headers/ChromeBackupWatcher_jni.h"
 
 ChromeBrowserMainPartsAndroid::ChromeBrowserMainPartsAndroid(
     bool is_integration_test,
@@ -73,7 +74,12 @@ void ChromeBrowserMainPartsAndroid::PostProfileInit(Profile* profile,
 
   // Start watching the preferences that need to be backed up backup using
   // Android backup, so that we create a new backup if they change.
-  backup_watcher_ = std::make_unique<android::ChromeBackupWatcher>(profile);
+  base::android::ScopedJavaGlobalRef<jobject> watcher;
+  watcher.Reset(android::Java_ChromeBackupWatcher_Constructor(
+      base::android::AttachCurrentThread()));
+  backup_watcher_runner_.ReplaceClosure(
+      base::BindOnce(&android::Java_ChromeBackupWatcher_destroy,
+                     base::android::AttachCurrentThread(), watcher));
 
   // The GCM driver can be used at this point because the primary profile has
   // been created. Register non-profile-specific things that use GCM so that no
@@ -92,13 +98,6 @@ int ChromeBrowserMainPartsAndroid::PreEarlyInitialization() {
   return ChromeBrowserMainParts::PreEarlyInitialization();
 }
 
-void ChromeBrowserMainPartsAndroid::PostEarlyInitialization() {
-  profile_manager_android_ = std::make_unique<ProfileManagerAndroid>();
-  g_browser_process->profile_manager()->AddObserver(
-      profile_manager_android_.get());
-  ChromeBrowserMainParts::PostEarlyInitialization();
-}
-
 void ChromeBrowserMainPartsAndroid::PostBrowserStart() {
   ChromeBrowserMainParts::PostBrowserStart();
 
@@ -110,5 +109,5 @@ void ChromeBrowserMainPartsAndroid::PostBrowserStart() {
 }
 
 void ChromeBrowserMainPartsAndroid::ShowMissingLocaleMessageBox() {
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
 }

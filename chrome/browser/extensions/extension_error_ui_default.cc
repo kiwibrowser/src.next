@@ -6,15 +6,17 @@
 
 #include "base/check.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/notreached.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/global_error/global_error_bubble_view_base.h"
-#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/branded_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/strings/grit/components_strings.h"
 #include "extensions/browser/blocklist_extension_prefs.h"
@@ -64,14 +66,15 @@ std::vector<std::u16string> GenerateEnterpriseMessage(
     message.push_back(l10n_util::GetStringUTF16(
         IDS_POLICY_BLOCKED_EXTENSIONS_ALERT_ITEM_TITLE));
     for (const auto& extension : forbidden) {
-      message.push_back(
-          l10n_util::GetStringFUTF16(IDS_BLOCKLISTED_EXTENSIONS_ALERT_ITEM,
-                                     base::UTF8ToUTF16(extension->name())));
+      message.push_back(l10n_util::GetStringFUTF16(
+          IDS_BLOCKLISTED_EXTENSIONS_ALERT_ITEM,
+          util::GetFixupExtensionNameForUIDisplay(extension->name())));
     }
   } else {
     message.push_back(l10n_util::GetStringFUTF16(
         IDS_POLICY_BLOCKED_EXTENSION_ALERT_ITEM_DETAIL,
-        base::UTF8ToUTF16(forbidden.begin()->get()->name())));
+        util::GetFixupExtensionNameForUIDisplay(
+            forbidden.begin()->get()->name())));
   }
   return message;
 }
@@ -90,17 +93,18 @@ std::vector<std::u16string> GenerateMessage(
   }
 
   if (forbidden.size() == 1) {
-    message.push_back(l10n_util::GetStringFUTF16(
-        IDS_EXTENSION_ALERT_ITEM_BLOCKLISTED_MALWARE,
-        base::UTF8ToUTF16(forbidden.begin()->get()->name())));
+    message.push_back(
+        l10n_util::GetStringFUTF16(IDS_EXTENSION_ALERT_ITEM_BLOCKLISTED_MALWARE,
+                                   util::GetFixupExtensionNameForUIDisplay(
+                                       forbidden.begin()->get()->name())));
     return message;
   }
   message.push_back(l10n_util::GetStringUTF16(
       IDS_EXTENSIONS_ALERT_ITEM_BLOCKLISTED_MALWARE_TITLE));
   for (const auto& extension : forbidden) {
-    message.push_back(
-        l10n_util::GetStringFUTF16(IDS_BLOCKLISTED_EXTENSIONS_ALERT_ITEM,
-                                   base::UTF8ToUTF16(extension->name())));
+    message.push_back(l10n_util::GetStringFUTF16(
+        IDS_BLOCKLISTED_EXTENSIONS_ALERT_ITEM,
+        util::GetFixupExtensionNameForUIDisplay(extension->name())));
   }
   return message;
 }
@@ -148,16 +152,16 @@ class ExtensionGlobalError : public GlobalErrorWithStandardBubble {
   bool HasMenuItem() override { return false; }
 
   int MenuItemCommandID() override {
-    NOTREACHED();
+    NOTREACHED_IN_MIGRATION();
     return 0;
   }
 
   std::u16string MenuItemLabel() override {
-    NOTREACHED();
+    NOTREACHED_IN_MIGRATION();
     return {};
   }
 
-  void ExecuteMenuItem(Browser* browser) override { NOTREACHED(); }
+  void ExecuteMenuItem(Browser* browser) override { NOTREACHED_IN_MIGRATION(); }
 
   std::u16string GetBubbleViewTitle() override {
     return GenerateTitle(delegate_->GetBlocklistedExtensions(),
@@ -189,7 +193,13 @@ class ExtensionGlobalError : public GlobalErrorWithStandardBubble {
   }
 
   void BubbleViewCancelButtonPressed(Browser* browser) override {
-    NOTREACHED();
+    // Even though there is no cancel button, users can still cancel the dialog
+    // by pressing escape.
+    delegate_->OnAlertClosed();
+  }
+
+  base::WeakPtr<GlobalErrorWithStandardBubble> AsWeakPtr() override {
+    return weak_ptr_factory_.GetWeakPtr();
   }
 
   void BubbleViewDetailsButtonPressed(Browser* browser) override {
@@ -197,10 +207,11 @@ class ExtensionGlobalError : public GlobalErrorWithStandardBubble {
   }
 
   raw_ptr<ExtensionErrorUI::Delegate> delegate_;
-  raw_ptr<ManagementPolicy> management_policy_;
+  raw_ptr<ManagementPolicy, DanglingUntriaged> management_policy_;
   int app_count_ = 0;
   int extension_count_ = 0;
   bool item_blocked_by_policy_exists_ = false;
+  base::WeakPtrFactory<ExtensionGlobalError> weak_ptr_factory_{this};
 
   ExtensionGlobalError(const ExtensionGlobalError&) = delete;
   ExtensionGlobalError& operator=(const ExtensionGlobalError&) = delete;
@@ -225,7 +236,7 @@ bool ExtensionErrorUIDefault::ShowErrorInBubbleView() {
 
 void ExtensionErrorUIDefault::ShowExtensions() {
   DCHECK(browser_);
-  chrome::ShowExtensions(browser_, std::string());
+  chrome::ShowExtensions(browser_);
 }
 
 void ExtensionErrorUIDefault::Close() {

@@ -2,13 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/base_paths.h"
+
 #include <windows.h>
+
 #include <KnownFolders.h>
 #include <shlobj.h>
 
-#include "base/base_paths.h"
 #include "base/environment.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -70,7 +73,8 @@ bool PathProviderWin(int key, FilePath* result) {
       break;
     case base::DIR_PROGRAM_FILES6432:
 #if !defined(_WIN64)
-      if (base::win::OSInfo::GetInstance()->IsWowX86OnAMD64()) {
+      if (base::win::OSInfo::GetInstance()->IsWowX86OnAMD64() ||
+          base::win::OSInfo::GetInstance()->IsWowX86OnARM64()) {
         std::unique_ptr<base::Environment> env(base::Environment::Create());
         std::string programfiles_w6432;
         // 32-bit process running in WOW64 sets ProgramW6432 environment
@@ -145,9 +149,6 @@ bool PathProviderWin(int key, FilePath* result) {
       break;
     }
     case base::DIR_APP_SHORTCUTS: {
-      if (win::GetVersion() < win::Version::WIN8)
-        return false;
-
       base::win::ScopedCoMem<wchar_t> path_buf;
       if (FAILED(SHGetKnownFolderPath(FOLDERID_ApplicationShortcuts, 0, NULL,
                                       &path_buf)))
@@ -202,6 +203,22 @@ bool PathProviderWin(int key, FilePath* result) {
         return false;
       }
       cur = FilePath(system_buffer);
+      break;
+    case base::DIR_SYSTEM_TEMP:
+      // Try C:\Windows\SystemTemp, which was introduced sometime before Windows
+      // 10 build 19042. Do not use GetTempPath2, as it only appeared later and
+      // will only return the path for processes running as SYSTEM.
+      if (PathService::Get(DIR_WINDOWS, &cur)) {
+        cur = cur.Append(FILE_PATH_LITERAL("SystemTemp"));
+        if (PathIsWritable(cur)) {
+          break;
+        }
+      }
+      // Failing that, use C:\Program Files or C:\Program Files (x86) for older
+      // versions of Windows 10.
+      if (!PathService::Get(DIR_PROGRAM_FILES, &cur) || !PathIsWritable(cur)) {
+        return false;
+      }
       break;
     default:
       return false;

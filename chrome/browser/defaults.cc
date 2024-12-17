@@ -25,11 +25,11 @@ const bool kShowExitMenuItem = true;
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 const bool kShowUpgradeMenuItem = false;
 const bool kShowImportOnBookmarkBar = false;
-const bool kAlwaysOpenIncognitoWindow = true;
+const bool kAlwaysOpenIncognitoBrowserIfStartedWithIncognitoSwitch = true;
 #else
 const bool kShowUpgradeMenuItem = true;
 const bool kShowImportOnBookmarkBar = true;
-const bool kAlwaysOpenIncognitoWindow = false;
+const bool kAlwaysOpenIncognitoBrowserIfStartedWithIncognitoSwitch = false;
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS)
@@ -44,26 +44,12 @@ const bool kShowHelpMenuItemIcon = true;
 const bool kShowHelpMenuItemIcon = false;
 #endif
 
-const bool kDownloadPageHasShowInFolder = true;
-
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-const bool kSyncAutoStarts = true;
-#else
-const bool kSyncAutoStarts = false;
-#endif
-
 #if BUILDFLAG(IS_LINUX)
 const bool kScrollEventChangesTab = true;
 #else
 const bool kScrollEventChangesTab = false;
 #endif
 
-#if !BUILDFLAG(IS_ANDROID)
-const bool kPasswordEchoEnabled = false;
-#endif
-
 bool bookmarks_enabled = true;
-
-bool enable_help_app = true;
 
 }  // namespace browser_defaults

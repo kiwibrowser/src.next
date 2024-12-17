@@ -9,26 +9,35 @@ import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.util.Size;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+
 import org.chromium.base.Callback;
+import org.chromium.base.supplier.ObservableSupplier;
 import org.chromium.base.task.PostTask;
-import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
+import org.chromium.base.task.TaskTraits;
+import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabUtils;
-import org.chromium.chrome.browser.tabmodel.TabModel;
-import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.chrome.browser.tabmodel.TabModelSelectorObserver;
-import org.chromium.chrome.browser.tasks.pseudotab.PseudoTab;
+import org.chromium.chrome.browser.tab_ui.TabContentManager;
+import org.chromium.chrome.browser.tab_ui.TabContentManagerThumbnailProvider;
+import org.chromium.chrome.browser.tab_ui.TabListFaviconProvider;
+import org.chromium.chrome.browser.tab_ui.TabUiThemeUtils;
+import org.chromium.chrome.browser.tab_ui.ThumbnailProvider;
+import org.chromium.chrome.browser.tabmodel.TabGroupModelFilter;
 import org.chromium.chrome.tab_ui.R;
 import org.chromium.components.browser_ui.styles.SemanticColorUtils;
-import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.url.GURL;
 
 import java.util.ArrayList;
@@ -37,13 +46,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * A {@link TabListMediator.ThumbnailProvider} that will create a single Bitmap Thumbnail for all
- * the related tabs for the given tabs.
+ * A {@link ThumbnailProvider} that will create a single Bitmap Thumbnail for all the related tabs
+ * for the given tabs.
  */
-public class MultiThumbnailCardProvider implements TabListMediator.ThumbnailProvider {
+public class MultiThumbnailCardProvider implements ThumbnailProvider {
     private final TabContentManager mTabContentManager;
-    private final TabModelSelector mTabModelSelector;
-    private final TabModelSelectorObserver mTabModelSelectorObserver;
+    private final TabContentManagerThumbnailProvider mTabContentManagerThumbnailProvider;
+    private final ObservableSupplier<TabGroupModelFilter> mCurrentTabGroupModelFilterSupplier;
+    private final Callback<TabGroupModelFilter> mOnTabGroupModelFilterChanged =
+            this::onTabGroupModelFilterChanged;
 
     private final float mRadius;
     private final float mFaviconFrameCornerRadius;
@@ -57,14 +68,13 @@ public class MultiThumbnailCardProvider implements TabListMediator.ThumbnailProv
     private final int mFaviconBackgroundPaintColor;
     private TabListFaviconProvider mTabListFaviconProvider;
     private Context mContext;
+    private final BrowserControlsStateProvider mBrowserControlsStateProvider;
 
     private class MultiThumbnailFetcher {
-        private final PseudoTab mInitialTab;
-        private final Callback<Bitmap> mFinalCallback;
-        private final boolean mForceUpdate;
-        private final boolean mWriteToCache;
+        private final Tab mInitialTab;
+        private final Callback<Drawable> mResultCallback;
         private final boolean mIsTabSelected;
-        private final List<PseudoTab> mTabs = new ArrayList<>(4);
+        private final List<Tab> mTabs = new ArrayList<>(4);
         private final AtomicInteger mThumbnailsToFetch = new AtomicInteger();
 
         private Canvas mCanvas;
@@ -79,27 +89,32 @@ public class MultiThumbnailCardProvider implements TabListMediator.ThumbnailProv
 
         /**
          * Fetcher that get the thumbnail drawable depending on if the tab is selected.
+         *
          * @see TabContentManager#getTabThumbnailWithCallback
          * @param initialTab Thumbnail is generated for tabs related to initialTab.
          * @param thumbnailSize Desired size of multi-thumbnail.
-         * @param finalCallback Callback which receives generated bitmap.
-         * @param forceUpdate, writeToCache Required for bitmap generator.
          * @param isTabSelected Whether the thumbnail is for a currently selected tab.
+         * @param resultCallback Callback which receives generated bitmap.
          */
-        MultiThumbnailFetcher(PseudoTab initialTab, Size thumbnailSize,
-                Callback<Bitmap> finalCallback, boolean forceUpdate, boolean writeToCache,
-                boolean isTabSelected) {
-            mFinalCallback = finalCallback;
+        MultiThumbnailFetcher(
+                Tab initialTab,
+                Size thumbnailSize,
+                boolean isTabSelected,
+                Callback<Drawable> resultCallback) {
+            mResultCallback = resultCallback;
             mInitialTab = initialTab;
-            mForceUpdate = forceUpdate;
-            mWriteToCache = writeToCache;
             mIsTabSelected = isTabSelected;
 
-            if (thumbnailSize == null || thumbnailSize.getHeight() <= 0
+            if (thumbnailSize == null
+                    || thumbnailSize.getHeight() <= 0
                     || thumbnailSize.getWidth() <= 0) {
-                float expectedThumbnailAspectRatio = TabUtils.getTabThumbnailAspectRatio(mContext);
-                mThumbnailWidth = (int) mContext.getResources().getDimension(
-                        R.dimen.tab_grid_thumbnail_card_default_size);
+                float expectedThumbnailAspectRatio =
+                        TabUtils.getTabThumbnailAspectRatio(
+                                mContext, mBrowserControlsStateProvider);
+                mThumbnailWidth =
+                        (int)
+                                mContext.getResources()
+                                        .getDimension(R.dimen.tab_grid_thumbnail_card_default_size);
                 mThumbnailHeight = (int) (mThumbnailWidth / expectedThumbnailAspectRatio);
             } else {
                 mThumbnailWidth = thumbnailSize.getWidth();
@@ -107,9 +122,7 @@ public class MultiThumbnailCardProvider implements TabListMediator.ThumbnailProv
             }
         }
 
-        /**
-         * Initialize rects used for thumbnails.
-         */
+        /** Initialize rects used for thumbnails. */
         private void initializeRects(Context context) {
             float thumbnailHorizontalPadding =
                     TabUiThemeProvider.getTabMiniThumbnailPaddingDimension(context);
@@ -120,34 +133,56 @@ public class MultiThumbnailCardProvider implements TabListMediator.ThumbnailProv
             float halfThumbnailHorizontalPadding = thumbnailHorizontalPadding / 2;
             float halfThumbnailVerticalPadding = thumbnailVerticalPadding / 2;
 
-            mThumbnailRects.add(new RectF(0, 0, centerX - halfThumbnailHorizontalPadding,
-                    centerY - halfThumbnailVerticalPadding));
-            mThumbnailRects.add(new RectF(centerX + halfThumbnailHorizontalPadding, 0,
-                    mThumbnailWidth, centerY - halfThumbnailVerticalPadding));
-            mThumbnailRects.add(new RectF(0, centerY + halfThumbnailVerticalPadding,
-                    centerX - halfThumbnailHorizontalPadding, mThumbnailHeight));
-            mThumbnailRects.add(new RectF(centerX + halfThumbnailHorizontalPadding,
-                    centerY + halfThumbnailVerticalPadding, mThumbnailWidth, mThumbnailHeight));
+            mThumbnailRects.add(
+                    new RectF(
+                            0,
+                            0,
+                            centerX - halfThumbnailHorizontalPadding,
+                            centerY - halfThumbnailVerticalPadding));
+            mThumbnailRects.add(
+                    new RectF(
+                            centerX + halfThumbnailHorizontalPadding,
+                            0,
+                            mThumbnailWidth,
+                            centerY - halfThumbnailVerticalPadding));
+            mThumbnailRects.add(
+                    new RectF(
+                            0,
+                            centerY + halfThumbnailVerticalPadding,
+                            centerX - halfThumbnailHorizontalPadding,
+                            mThumbnailHeight));
+            mThumbnailRects.add(
+                    new RectF(
+                            centerX + halfThumbnailHorizontalPadding,
+                            centerY + halfThumbnailVerticalPadding,
+                            mThumbnailWidth,
+                            mThumbnailHeight));
 
             // Initialize Rects for favicons and favicon frame.
             final float halfFaviconFrameSize =
-                    mContext.getResources().getDimension(
-                            R.dimen.tab_grid_thumbnail_favicon_frame_size)
-                    / 2f;
-            float thumbnailFaviconPaddingFromBackground = mContext.getResources().getDimension(
-                    R.dimen.tab_grid_thumbnail_favicon_padding_from_frame);
+                    mContext.getResources()
+                                    .getDimension(R.dimen.tab_grid_thumbnail_favicon_frame_size)
+                            / 2f;
+            float thumbnailFaviconPaddingFromBackground =
+                    mContext.getResources()
+                            .getDimension(R.dimen.tab_grid_thumbnail_favicon_padding_from_frame);
             for (int i = 0; i < 4; i++) {
                 RectF thumbnailRect = mThumbnailRects.get(i);
 
                 float thumbnailRectCenterX = thumbnailRect.centerX();
                 float thumbnailRectCenterY = thumbnailRect.centerY();
-                RectF faviconBackgroundRect = new RectF(thumbnailRectCenterX, thumbnailRectCenterY,
-                        thumbnailRectCenterX, thumbnailRectCenterY);
+                RectF faviconBackgroundRect =
+                        new RectF(
+                                thumbnailRectCenterX,
+                                thumbnailRectCenterY,
+                                thumbnailRectCenterX,
+                                thumbnailRectCenterY);
                 faviconBackgroundRect.inset(-halfFaviconFrameSize, -halfFaviconFrameSize);
                 mFaviconBackgroundRects.add(faviconBackgroundRect);
 
                 RectF faviconRectF = new RectF(faviconBackgroundRect);
-                faviconRectF.inset(thumbnailFaviconPaddingFromBackground,
+                faviconRectF.inset(
+                        thumbnailFaviconPaddingFromBackground,
                         thumbnailFaviconPaddingFromBackground);
                 Rect faviconRect = new Rect();
                 faviconRectF.roundOut(faviconRect);
@@ -155,7 +190,7 @@ public class MultiThumbnailCardProvider implements TabListMediator.ThumbnailProv
             }
         }
 
-        private void initializeAndStartFetching(PseudoTab tab) {
+        private void initializeAndStartFetching(Tab initialTab) {
             // Initialize mMultiThumbnailBitmap.
             mMultiThumbnailBitmap =
                     Bitmap.createBitmap(mThumbnailWidth, mThumbnailHeight, Bitmap.Config.ARGB_8888);
@@ -163,63 +198,83 @@ public class MultiThumbnailCardProvider implements TabListMediator.ThumbnailProv
             mCanvas.drawColor(Color.TRANSPARENT);
 
             // Initialize Tabs.
-            List<PseudoTab> relatedTabList =
-                    PseudoTab.getRelatedTabs(mContext, tab, mTabModelSelector);
+            List<Tab> relatedTabList =
+                    mCurrentTabGroupModelFilterSupplier.get().getRelatedTabList(initialTab.getId());
             if (relatedTabList.size() <= 4) {
-                mThumbnailsToFetch.set(relatedTabList.size());
+                int thumbnailCount = relatedTabList.size();
+                mThumbnailsToFetch.set(thumbnailCount);
 
-                mTabs.add(tab);
-                relatedTabList.remove(tab);
+                mTabs.add(initialTab);
 
-                for (int i = 0; i < 3; i++) {
-                    mTabs.add(i < relatedTabList.size() ? relatedTabList.get(i) : null);
+                for (int i = 0; i < thumbnailCount; i++) {
+                    if (relatedTabList.get(i) == initialTab) continue;
+
+                    mTabs.add(relatedTabList.get(i));
+                }
+                for (int i = 0; i < 4 - thumbnailCount; i++) {
+                    mTabs.add(null);
                 }
             } else {
-                mText = "+" + (relatedTabList.size() - 3);
-                mThumbnailsToFetch.set(3);
+                int thumbnailCount = 3;
+                mText = "+" + (relatedTabList.size() - thumbnailCount);
+                mThumbnailsToFetch.set(thumbnailCount);
 
-                mTabs.add(tab);
-                relatedTabList.remove(tab);
+                mTabs.add(initialTab);
 
-                mTabs.add(relatedTabList.get(0));
-                mTabs.add(relatedTabList.get(1));
+                for (int i = 0; i < thumbnailCount; i++) {
+                    if (relatedTabList.get(i) == initialTab) continue;
+
+                    mTabs.add(relatedTabList.get(i));
+                    if (mTabs.size() == thumbnailCount) break;
+                }
                 mTabs.add(null);
             }
 
             // Fetch and draw all.
             for (int i = 0; i < 4; i++) {
-                if (mTabs.get(i) != null) {
+                Tab tab = mTabs.get(i);
+                RectF thumbnailRect = mThumbnailRects.get(i);
+                if (tab != null) {
                     final int index = i;
-                    final GURL url = mTabs.get(i).getUrl();
-                    final boolean isIncognito = mTabs.get(i).isIncognito();
-                    final Size tabThumbnailSize = new Size((int) mThumbnailRects.get(i).width(),
-                            (int) mThumbnailRects.get(i).height());
+                    final GURL url = tab.getUrl();
+                    final boolean isIncognito = tab.isIncognito();
+                    final Size tabThumbnailSize =
+                            new Size((int) thumbnailRect.width(), (int) thumbnailRect.height());
                     // getTabThumbnailWithCallback() might call the callback up to twice,
                     // so use |lastFavicon| to avoid fetching the favicon the second time.
                     // Fetching the favicon after getting the live thumbnail would lead to
                     // visible flicker.
                     final AtomicReference<Drawable> lastFavicon = new AtomicReference<>();
                     mTabContentManager.getTabThumbnailWithCallback(
-                            mTabs.get(i).getId(), tabThumbnailSize, thumbnail -> {
+                            tab.getId(),
+                            tabThumbnailSize,
+                            thumbnail -> {
+                                if (tab.isClosing() || tab.isDestroyed()) return;
+
                                 drawThumbnailBitmapOnCanvasWithFrame(thumbnail, index);
                                 if (lastFavicon.get() != null) {
                                     drawFaviconThenMaybeSendBack(lastFavicon.get(), index);
                                 } else {
                                     mTabListFaviconProvider.getFaviconDrawableForUrlAsync(
-                                            url, isIncognito, (Drawable favicon) -> {
+                                            url,
+                                            isIncognito,
+                                            (Drawable favicon) -> {
+                                                if (tab.isClosing() || tab.isDestroyed()) return;
+
                                                 lastFavicon.set(favicon);
                                                 drawFaviconThenMaybeSendBack(favicon, index);
                                             });
                                 }
-                            }, mForceUpdate && i == 0, mWriteToCache && i == 0);
+                            });
                 } else {
                     drawThumbnailBitmapOnCanvasWithFrame(null, i);
                     if (mText != null && i == 3) {
                         // Draw the text exactly centered on the thumbnail rect.
                         Paint textPaint = mIsTabSelected ? mSelectedTextPaint : mTextPaint;
-                        mCanvas.drawText(mText,
-                                (mThumbnailRects.get(i).left + mThumbnailRects.get(i).right) / 2,
-                                (mThumbnailRects.get(i).top + mThumbnailRects.get(i).bottom) / 2
+                        mCanvas.drawText(
+                                mText,
+                                (thumbnailRect.left + thumbnailRect.right) / 2,
+                                (thumbnailRect.top + thumbnailRect.bottom) / 2
                                         - ((mTextPaint.descent() + mTextPaint.ascent()) / 2),
                                 textPaint);
                     }
@@ -228,43 +283,58 @@ public class MultiThumbnailCardProvider implements TabListMediator.ThumbnailProv
         }
 
         private void drawThumbnailBitmapOnCanvasWithFrame(Bitmap thumbnail, int index) {
+            final RectF rect = mThumbnailRects.get(index);
             if (thumbnail == null) {
                 Paint emptyThumbnailPaint =
                         mIsTabSelected ? mSelectedEmptyThumbnailPaint : mEmptyThumbnailPaint;
-                mCanvas.drawRoundRect(
-                        mThumbnailRects.get(index), mRadius, mRadius, emptyThumbnailPaint);
+                mCanvas.drawRoundRect(rect, mRadius, mRadius, emptyThumbnailPaint);
                 return;
             }
+
+            mCanvas.save();
+            mCanvas.clipRect(rect);
+            Matrix m = new Matrix();
+
+            final float newWidth = rect.width();
+            final float scale =
+                    Math.max(
+                            newWidth / thumbnail.getWidth(), rect.height() / thumbnail.getHeight());
+            m.setScale(scale, scale);
+            final float xOffset =
+                    rect.left + (int) ((newWidth - (thumbnail.getWidth() * scale)) / 2);
+            final float yOffset = rect.top;
+            m.postTranslate(xOffset, yOffset);
 
             // Draw the base paint first and set the base for thumbnail to draw. Setting the xfer
             // mode as SRC_OVER so the thumbnail can be drawn on top of this paint. See
             // https://crbug.com/1227619.
             mThumbnailBasePaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC_OVER));
-            mCanvas.drawRoundRect(
-                    mThumbnailRects.get(index), mRadius, mRadius, mThumbnailBasePaint);
+            mCanvas.drawRoundRect(rect, mRadius, mRadius, mThumbnailBasePaint);
 
-            thumbnail =
-                    Bitmap.createScaledBitmap(thumbnail, (int) mThumbnailRects.get(index).width(),
-                            (int) mThumbnailRects.get(index).height(), true);
             mThumbnailBasePaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC_IN));
-            mCanvas.drawBitmap(thumbnail,
-                    new Rect(0, 0, thumbnail.getWidth(), thumbnail.getHeight()),
-                    mThumbnailRects.get(index), mThumbnailBasePaint);
+            mCanvas.drawBitmap(thumbnail, m, mThumbnailBasePaint);
+            mCanvas.restore();
             thumbnail.recycle();
         }
 
         private void drawFaviconDrawableOnCanvasWithFrame(Drawable favicon, int index) {
-            mCanvas.drawRoundRect(mFaviconBackgroundRects.get(index), mFaviconFrameCornerRadius,
-                    mFaviconFrameCornerRadius, mFaviconBackgroundPaint);
+            mCanvas.drawRoundRect(
+                    mFaviconBackgroundRects.get(index),
+                    mFaviconFrameCornerRadius,
+                    mFaviconFrameCornerRadius,
+                    mFaviconBackgroundPaint);
+            Rect oldBounds = new Rect(favicon.getBounds());
             favicon.setBounds(mFaviconRects.get(index));
             favicon.draw(mCanvas);
+            // Restore the bounds since this may be a shared drawable.
+            favicon.setBounds(oldBounds);
         }
 
         private void drawFaviconThenMaybeSendBack(Drawable favicon, int index) {
             drawFaviconDrawableOnCanvasWithFrame(favicon, index);
             if (mThumbnailsToFetch.decrementAndGet() == 0) {
-                PostTask.postTask(UiThreadTaskTraits.USER_VISIBLE,
-                        mFinalCallback.bind(mMultiThumbnailBitmap));
+                BitmapDrawable drawable = new BitmapDrawable(mMultiThumbnailBitmap);
+                PostTask.postTask(TaskTraits.UI_USER_VISIBLE, mResultCallback.bind(drawable));
             }
         }
 
@@ -274,29 +344,36 @@ public class MultiThumbnailCardProvider implements TabListMediator.ThumbnailProv
         }
     }
 
-    MultiThumbnailCardProvider(Context context, TabContentManager tabContentManager,
-            TabModelSelector tabModelSelector) {
+    MultiThumbnailCardProvider(
+            @NonNull Context context,
+            @NonNull BrowserControlsStateProvider browserControlsStateProvider,
+            @NonNull TabContentManager tabContentManager,
+            @NonNull ObservableSupplier<TabGroupModelFilter> currentTabGroupModelFilterSupplier) {
         mContext = context;
-        Resources resource = context.getResources();
+        mBrowserControlsStateProvider = browserControlsStateProvider;
+        Resources resources = context.getResources();
 
         mTabContentManager = tabContentManager;
-        mTabModelSelector = tabModelSelector;
-        mRadius = resource.getDimension(R.dimen.tab_list_mini_card_radius);
+        mTabContentManagerThumbnailProvider =
+                new TabContentManagerThumbnailProvider(tabContentManager);
+        mCurrentTabGroupModelFilterSupplier = currentTabGroupModelFilterSupplier;
+        mRadius = resources.getDimension(R.dimen.tab_list_mini_card_radius);
         mFaviconFrameCornerRadius =
-                resource.getDimension(R.dimen.tab_grid_thumbnail_favicon_frame_corner_radius);
+                resources.getDimension(R.dimen.tab_grid_thumbnail_favicon_frame_corner_radius);
 
-        mTabListFaviconProvider = new TabListFaviconProvider(context, false);
+        mTabListFaviconProvider =
+                new TabListFaviconProvider(context, false, R.dimen.default_favicon_corner_radius);
 
         // Initialize Paints to use.
         mEmptyThumbnailPaint = new Paint();
         mEmptyThumbnailPaint.setStyle(Paint.Style.FILL);
         mEmptyThumbnailPaint.setAntiAlias(true);
         mEmptyThumbnailPaint.setColor(
-                TabUiThemeProvider.getMiniThumbnailPlaceHolderColor(context, false, false));
+                TabUiThemeUtils.getMiniThumbnailPlaceholderColor(context, false, false));
 
         mSelectedEmptyThumbnailPaint = new Paint(mEmptyThumbnailPaint);
         mSelectedEmptyThumbnailPaint.setColor(
-                TabUiThemeProvider.getMiniThumbnailPlaceHolderColor(context, false, true));
+                TabUiThemeUtils.getMiniThumbnailPlaceholderColor(context, false, true));
 
         // Paint used to set base for thumbnails, in case mEmptyThumbnailPaint has transparency.
         mThumbnailBasePaint = new Paint(mEmptyThumbnailPaint);
@@ -306,14 +383,15 @@ public class MultiThumbnailCardProvider implements TabListMediator.ThumbnailProv
         mThumbnailFramePaint = new Paint();
         mThumbnailFramePaint.setStyle(Paint.Style.STROKE);
         mThumbnailFramePaint.setStrokeWidth(
-                resource.getDimension(R.dimen.tab_list_mini_card_frame_size));
+                resources.getDimension(R.dimen.tab_list_mini_card_frame_size));
         mThumbnailFramePaint.setColor(SemanticColorUtils.getDividerLineBgColor(context));
         mThumbnailFramePaint.setAntiAlias(true);
 
-        // TODO(996048): Use pre-defined styles to avoid style out of sync if any text/color styles
+        // TODO(crbug.com/41477335): Use pre-defined styles to avoid style out of sync if any
+        // text/color styles
         // changes.
         mTextPaint = new Paint();
-        mTextPaint.setTextSize(resource.getDimension(R.dimen.compositor_tab_title_text_size));
+        mTextPaint.setTextSize(resources.getDimension(R.dimen.compositor_tab_title_text_size));
         mTextPaint.setFakeBoldText(true);
         mTextPaint.setAntiAlias(true);
         mTextPaint.setTextAlign(Paint.Align.CENTER);
@@ -329,59 +407,64 @@ public class MultiThumbnailCardProvider implements TabListMediator.ThumbnailProv
         mFaviconBackgroundPaint.setColor(mFaviconBackgroundPaintColor);
         mFaviconBackgroundPaint.setStyle(Paint.Style.FILL);
         mFaviconBackgroundPaint.setShadowLayer(
-                resource.getDimension(R.dimen.tab_grid_thumbnail_favicon_background_radius), 0,
-                resource.getDimension(R.dimen.tab_grid_thumbnail_favicon_background_down_shift),
-                resource.getColor(R.color.modern_grey_800_alpha_38));
+                resources.getDimension(R.dimen.tab_grid_thumbnail_favicon_background_radius),
+                0,
+                resources.getDimension(R.dimen.tab_grid_thumbnail_favicon_background_down_shift),
+                context.getColor(R.color.modern_grey_800_alpha_38));
 
-        mTabModelSelectorObserver = new TabModelSelectorObserver() {
-            @Override
-            public void onTabModelSelected(TabModel newModel, TabModel oldModel) {
-                boolean isIncognito = newModel.isIncognito();
-                mEmptyThumbnailPaint.setColor(TabUiThemeProvider.getMiniThumbnailPlaceHolderColor(
-                        context, isIncognito, false));
-                mTextPaint.setColor(
-                        TabUiThemeProvider.getTabGroupNumberTextColor(context, isIncognito, false));
-                mThumbnailFramePaint.setColor(
-                        TabUiThemeProvider.getMiniThumbnailFrameColor(context, isIncognito));
-                mFaviconBackgroundPaint.setColor(
-                        TabUiThemeProvider.getFaviconBackgroundColor(context, isIncognito));
-
-                mSelectedEmptyThumbnailPaint.setColor(
-                        TabUiThemeProvider.getMiniThumbnailPlaceHolderColor(
-                                context, isIncognito, true));
-                mSelectedTextPaint.setColor(
-                        TabUiThemeProvider.getTabGroupNumberTextColor(context, isIncognito, true));
-            }
-        };
-        mTabModelSelector.addObserver(mTabModelSelectorObserver);
+        // Run this immediately if non-null as in the TabListEditor context we might try to load
+        // tabs thumbnails before the post task normally run by ObservableSupplier#addObserver is
+        // run.
+        @Nullable
+        TabGroupModelFilter currentFilter =
+                mCurrentTabGroupModelFilterSupplier.addObserver(mOnTabGroupModelFilterChanged);
+        if (currentFilter != null) {
+            mOnTabGroupModelFilterChanged.onResult(currentFilter);
+        }
     }
 
-    public void initWithNative() {
-        // TODO (https://crbug.com/1048632): Use the current profile (i.e., regular profile or
-        // incognito profile) instead of always using regular profile. It works correctly now, but
-        // it is not safe.
-        mTabListFaviconProvider.initWithNative(Profile.getLastUsedRegularProfile());
+    private void onTabGroupModelFilterChanged(TabGroupModelFilter filter) {
+        boolean isIncognito = filter.isIncognito();
+        mEmptyThumbnailPaint.setColor(
+                TabUiThemeUtils.getMiniThumbnailPlaceholderColor(mContext, isIncognito, false));
+        mTextPaint.setColor(
+                TabUiThemeProvider.getTabGroupNumberTextColor(mContext, isIncognito, false));
+        mThumbnailFramePaint.setColor(
+                TabUiThemeProvider.getMiniThumbnailFrameColor(mContext, isIncognito));
+        mFaviconBackgroundPaint.setColor(
+                TabUiThemeProvider.getFaviconBackgroundColor(mContext, isIncognito));
+
+        mSelectedEmptyThumbnailPaint.setColor(
+                TabUiThemeUtils.getMiniThumbnailPlaceholderColor(mContext, isIncognito, true));
+        mSelectedTextPaint.setColor(
+                TabUiThemeProvider.getTabGroupNumberTextColor(mContext, isIncognito, true));
     }
 
     /**
-     * Destroy any member that needs clean up.
+     * @param regularProfile The regular profile to use for favicons.
      */
+    public void initWithNative(Profile regularProfile) {
+        mTabListFaviconProvider.initWithNative(regularProfile);
+    }
+
+    /** Destroy any member that needs clean up. */
     public void destroy() {
-        mTabModelSelector.removeObserver(mTabModelSelectorObserver);
+        mCurrentTabGroupModelFilterSupplier.removeObserver(mOnTabGroupModelFilterChanged);
     }
 
     @Override
-    public void getTabThumbnailWithCallback(int tabId, Size thumbnailSize,
-            Callback<Bitmap> finalCallback, boolean forceUpdate, boolean writeToCache) {
-        PseudoTab tab = PseudoTab.fromTabId(tabId);
-        if (tab == null || PseudoTab.getRelatedTabs(mContext, tab, mTabModelSelector).size() == 1) {
-            mTabContentManager.getTabThumbnailWithCallback(
-                    tabId, thumbnailSize, finalCallback, forceUpdate, writeToCache);
+    public void getTabThumbnailWithCallback(
+            int tabId, Size thumbnailSize, boolean isSelected, Callback<Drawable> callback) {
+        TabGroupModelFilter filter = mCurrentTabGroupModelFilterSupplier.get();
+        assert filter.isTabModelRestored();
+        Tab tab = filter.getTabModel().getTabById(tabId);
+        boolean useMultiThumbnail = filter.isTabInTabGroup(tab);
+        if (useMultiThumbnail) {
+            assert tab != null;
+            new MultiThumbnailFetcher(tab, thumbnailSize, isSelected, callback).fetch();
             return;
         }
-        boolean isSelected = tabId == mTabModelSelector.getCurrentTabId();
-        new MultiThumbnailFetcher(
-                tab, thumbnailSize, finalCallback, forceUpdate, writeToCache, isSelected)
-                .fetch();
+        mTabContentManagerThumbnailProvider.getTabThumbnailWithCallback(
+                tabId, thumbnailSize, isSelected, callback);
     }
 }

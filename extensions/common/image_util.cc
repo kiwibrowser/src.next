@@ -10,15 +10,12 @@
 #include <algorithm>
 
 #include "base/check.h"
-#include "base/cxx17_backports.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
 #include "content/public/common/color_parser.h"
@@ -28,11 +25,10 @@
 #include "third_party/skia/include/core/SkImage.h"
 #include "ui/gfx/codec/png_codec.h"
 
-namespace extensions {
-namespace image_util {
+namespace extensions::image_util {
 
 bool IsIconSufficientlyVisible(const SkBitmap& bitmap) {
-  // TODO(crbug.com/805600): Currently, we only consider if there are enough
+  // TODO(crbug.com/40559794): Currently, we only consider if there are enough
   // visible pixels that it won't be difficult for the user to see. Future
   // revisions will consider the background color of the display context.
 
@@ -73,22 +69,8 @@ bool IsIconAtPathSufficientlyVisible(const base::FilePath& path) {
 
 const SkColor kDefaultToolbarColor = SK_ColorWHITE;
 
-struct ScopedUmaMicrosecondHistogramTimer {
-  ScopedUmaMicrosecondHistogramTimer() : timer() {}
-
-  ~ScopedUmaMicrosecondHistogramTimer() {
-    UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
-        "Extensions.IsRenderedIconSufficientlyVisibleTime", timer.Elapsed(),
-        base::Microseconds(1), base::Seconds(5), 50);
-  }
-
-  const base::ElapsedTimer timer;
-};
-
 bool IsRenderedIconSufficientlyVisible(const SkBitmap& icon,
                                        SkColor background_color) {
-  const ScopedUmaMicrosecondHistogramTimer timer;
-
   // If any of a pixel's RGB values is greater than this number, the pixel is
   // considered visible.
   constexpr unsigned int kThreshold = 7;
@@ -107,8 +89,9 @@ bool IsRenderedIconSufficientlyVisible(const SkBitmap& icon,
   // values against the threshold. Any pixel with a value greater than the
   // threshold is considered visible. If analysis fails, don't render the icon.
   SkBitmap bitmap;
-  if (!RenderIconForVisibilityAnalysis(icon, background_color, &bitmap))
+  if (!RenderIconForVisibilityAnalysis(icon, background_color, &bitmap)) {
     return false;
+  }
 
   int visible_pixels = 0;
   for (int x = 0; x < icon.width(); ++x) {
@@ -140,7 +123,7 @@ bool RenderIconForVisibilityAnalysis(const SkBitmap& icon,
   }
   rendered_icon->eraseColor(background_color);
   SkCanvas offscreen(*rendered_icon, SkSurfaceProps{});
-  offscreen.drawImage(SkImage::MakeFromBitmap(icon), 0, 0);
+  offscreen.drawImage(SkImages::RasterFromBitmap(icon), 0, 0);
   offscreen.drawColor(background_color, SkBlendMode::kDifference);
 
   return true;
@@ -165,5 +148,4 @@ bool LoadPngFromFile(const base::FilePath& path, SkBitmap* dst) {
       png_bytes.length(), dst);
 }
 
-}  // namespace image_util
-}  // namespace extensions
+}  // namespace extensions::image_util

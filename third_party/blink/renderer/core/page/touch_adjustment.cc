@@ -17,6 +17,11 @@
  * Boston, MA 02110-1301, USA.
  */
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "third_party/blink/renderer/core/page/touch_adjustment.h"
 
 #include "third_party/blink/renderer/core/dom/container_node.h"
@@ -30,6 +35,8 @@
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
+#include "third_party/blink/renderer/core/html/html_iframe_element.h"
+#include "third_party/blink/renderer/core/input/touch_action_util.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_text.h"
@@ -64,7 +71,7 @@ class SubtargetGeometry {
       : node_(node), quad_(quad) {}
   void Trace(Visitor* visitor) const { visitor->Trace(node_); }
 
-  Node* GetNode() const { return node_; }
+  Node* GetNode() const { return node_.Get(); }
   gfx::QuadF Quad() const { return quad_; }
   gfx::Rect BoundingBox() const {
     return gfx::ToEnclosingRect(quad_.BoundingBox());
@@ -103,8 +110,9 @@ bool NodeRespondsToTapGesture(Node* node) {
     // Tapping on a text field or other focusable item should trigger
     // adjustment, except that iframe elements are hard-coded to support focus
     // but the effect is often invisible so they should be excluded.
-    if (element->IsMouseFocusable() && !IsA<HTMLIFrameElement>(element))
+    if (element->IsMouseFocusable() && !IsA<HTMLIFrameElement>(element)) {
       return true;
+    }
     // Accept nodes that has a CSS effect when touched.
     if (element->ChildrenOrSiblingsAffectedByActive() ||
         element->ChildrenOrSiblingsAffectedByHover())
@@ -127,8 +135,8 @@ bool NodeIsZoomTarget(Node* node) {
 
 bool ProvidesContextMenuItems(Node* node) {
   // This function tries to match the nodes that receive special context-menu
-  // items in ContextMenuController::populate(), and should be kept up to date
-  // with those.
+  // items in ContextMenuController::ShowContextMenu(), and should be kept up
+  // to date with those.
   DCHECK(node->GetLayoutObject() || node->IsShadowRoot());
   if (!node->GetLayoutObject())
     return false;
@@ -141,6 +149,9 @@ bool ProvidesContextMenuItems(Node* node) {
     return true;
   if (node->GetLayoutObject()->IsMedia())
     return true;
+  if (node->GetLayoutObject()->IsSVGImage()) {
+    return true;
+  }
   if (node->GetLayoutObject()->CanBeSelectionLeaf()) {
     // If the context menu gesture will trigger a selection all selectable nodes
     // are valid targets.
@@ -158,14 +169,36 @@ bool ProvidesContextMenuItems(Node* node) {
   return false;
 }
 
+bool NodeRespondsToTapOrMove(Node* node) {
+  // This method considers nodes from NodeRespondsToTapGesture, those where pan
+  // touch action is disabled, and ones that are stylus writable. We do this to
+  // avoid adjusting the pointer position on drawable area or slidable control
+  // to the nearby writable input node.
+  node->GetDocument().UpdateStyleAndLayoutTree();
+
+  if (NodeRespondsToTapGesture(node))
+    return true;
+
+  TouchAction effective_touch_action =
+      touch_action_util::ComputeEffectiveTouchAction(*node);
+
+  if ((effective_touch_action & TouchAction::kPan) != TouchAction::kPan)
+    return true;
+
+  if ((effective_touch_action & TouchAction::kInternalNotWritable) !=
+      TouchAction::kInternalNotWritable) {
+    return true;
+  }
+  return false;
+}
+
 static inline void AppendQuadsToSubtargetList(
     Vector<gfx::QuadF>& quads,
     Node* node,
     SubtargetGeometryList& subtargets) {
-  Vector<gfx::QuadF>::const_iterator it = quads.begin();
-  const Vector<gfx::QuadF>::const_iterator end = quads.end();
-  for (; it != end; ++it)
-    subtargets.push_back(SubtargetGeometry(node, *it));
+  for (const auto& quad : quads) {
+    subtargets.push_back(SubtargetGeometry(node, quad));
+  }
 }
 
 static inline void AppendBasicSubtargetsForNode(
@@ -396,33 +429,35 @@ gfx::PointF ConvertToRootFrame(LocalFrameView* view, gfx::PointF pt) {
 // Adjusts 'point' to the nearest point inside rect, and leaves it unchanged if
 // already inside.
 void AdjustPointToRect(gfx::PointF& point, const gfx::Rect& rect) {
-  if (point.x() < rect.x())
+  if (point.x() < rect.x()) {
     point.set_x(rect.x());
-  else if (point.x() > rect.right())
-    point.set_x(rect.right());
+  } else if (point.x() >= rect.right()) {
+    point.set_x(rect.right() - 1);
+  }
 
-  if (point.y() < rect.y())
+  if (point.y() < rect.y()) {
     point.set_y(rect.y());
-  else if (point.y() > rect.bottom())
-    point.set_y(rect.bottom());
+  } else if (point.y() >= rect.bottom()) {
+    point.set_y(rect.bottom() - 1);
+  }
 }
 
 bool SnapTo(const SubtargetGeometry& geom,
             const gfx::Point& touch_point,
             const gfx::Rect& touch_area,
-            gfx::Point& adjusted_point) {
+            gfx::Point& snapped_point) {
   LocalFrameView* view = geom.GetNode()->GetDocument().View();
   gfx::QuadF quad = geom.Quad();
 
   if (quad.IsRectilinear()) {
     gfx::Rect bounds = view->ConvertToRootFrame(geom.BoundingBox());
     if (bounds.Contains(touch_point)) {
-      adjusted_point = touch_point;
+      snapped_point = touch_point;
       return true;
     }
     if (bounds.Intersects(touch_area)) {
       bounds.Intersect(touch_area);
-      adjusted_point = bounds.CenterPoint();
+      snapped_point = bounds.CenterPoint();
       return true;
     }
     return false;
@@ -442,7 +477,7 @@ bool SnapTo(const SubtargetGeometry& geom,
   quad = gfx::QuadF(p1, p2, p3, p4);
 
   if (quad.Contains(gfx::PointF(touch_point))) {
-    adjusted_point = touch_point;
+    snapped_point = touch_point;
     return true;
   }
 
@@ -450,106 +485,119 @@ bool SnapTo(const SubtargetGeometry& geom,
   gfx::PointF center = quad.CenterPoint();
 
   AdjustPointToRect(center, touch_area);
-  adjusted_point = gfx::ToRoundedPoint(center);
+  snapped_point = gfx::ToRoundedPoint(center);
 
-  return quad.Contains(gfx::PointF(adjusted_point));
+  return quad.Contains(gfx::PointF(snapped_point));
 }
 
 // A generic function for finding the target node with the lowest distance
 // metric. A distance metric here is the result of a distance-like function,
 // that computes how well the touch hits the node.  Distance functions could for
 // instance be distance squared or area of intersection.
-bool FindNodeWithLowestDistanceMetric(Node*& target_node,
-                                      gfx::Point& target_point,
-                                      gfx::Rect& target_area,
+bool FindNodeWithLowestDistanceMetric(Node*& adjusted_node,
+                                      gfx::Point& adjusted_point,
                                       const gfx::Point& touch_hotspot,
                                       const gfx::Rect& touch_area,
                                       SubtargetGeometryList& subtargets,
                                       DistanceFunction distance_function) {
-  target_node = nullptr;
+  adjusted_node = nullptr;
   float best_distance_metric = std::numeric_limits<float>::infinity();
-  SubtargetGeometryList::const_iterator it = subtargets.begin();
-  const SubtargetGeometryList::const_iterator end = subtargets.end();
-  gfx::Point adjusted_point;
+  gfx::Point snapped_point;
 
-  for (; it != end; ++it) {
-    Node* node = it->GetNode();
-    float distance_metric = distance_function(touch_hotspot, touch_area, *it);
+  for (const auto& subtarget : subtargets) {
+    Node* node = subtarget.GetNode();
+    float distance_metric =
+        distance_function(touch_hotspot, touch_area, subtarget);
     if (distance_metric < best_distance_metric) {
-      if (SnapTo(*it, touch_hotspot, touch_area, adjusted_point)) {
-        target_point = adjusted_point;
-        target_area = it->BoundingBox();
-        target_node = node;
+      if (SnapTo(subtarget, touch_hotspot, touch_area, snapped_point)) {
+        adjusted_point = snapped_point;
+        adjusted_node = node;
         best_distance_metric = distance_metric;
       }
     } else if (distance_metric - best_distance_metric < kZeroTolerance) {
-      if (SnapTo(*it, touch_hotspot, touch_area, adjusted_point)) {
-        if (node->IsDescendantOf(target_node)) {
+      if (SnapTo(subtarget, touch_hotspot, touch_area, snapped_point)) {
+        if (node->IsDescendantOf(adjusted_node)) {
           // Try to always return the inner-most element.
-          target_point = adjusted_point;
-          target_node = node;
-          target_area = it->BoundingBox();
+          adjusted_point = snapped_point;
+          adjusted_node = node;
         }
       }
     }
   }
 
   // As for HitTestResult.innerNode, we skip over pseudo elements.
-  if (target_node && target_node->IsPseudoElement())
-    target_node = target_node->ParentOrShadowHostNode();
-
-  if (target_node) {
-    target_area =
-        target_node->GetDocument().View()->ConvertToRootFrame(target_area);
+  if (adjusted_node && adjusted_node->IsPseudoElement() &&
+      !adjusted_node->IsScrollMarkerPseudoElement()) {
+    adjusted_node = adjusted_node->ParentOrShadowHostNode();
   }
 
-  return (target_node);
+  return adjusted_node != nullptr;
+}
+
+bool FindBestCandidate(Node*& adjusted_node,
+                       gfx::Point& adjusted_point,
+                       const gfx::Point& touch_hotspot,
+                       const gfx::Rect& touch_area,
+                       const HeapVector<Member<Node>>& nodes,
+                       NodeFilter node_filter,
+                       AppendSubtargetsForNode append_subtargets_for_node) {
+  touch_adjustment::SubtargetGeometryList subtargets;
+  touch_adjustment::CompileSubtargetList(nodes, subtargets, node_filter,
+                                         append_subtargets_for_node);
+  return touch_adjustment::FindNodeWithLowestDistanceMetric(
+      adjusted_node, adjusted_point, touch_hotspot, touch_area, subtargets,
+      touch_adjustment::HybridDistanceFunction);
 }
 
 }  // namespace touch_adjustment
 
-bool FindBestClickableCandidate(Node*& target_node,
-                                gfx::Point& target_point,
-                                const gfx::Point& touch_hotspot,
-                                const gfx::Rect& touch_area,
-                                const HeapVector<Member<Node>>& nodes) {
-  gfx::Rect target_area;
-  touch_adjustment::SubtargetGeometryList subtargets;
-  touch_adjustment::CompileSubtargetList(
-      nodes, subtargets, touch_adjustment::NodeRespondsToTapGesture,
-      touch_adjustment::AppendBasicSubtargetsForNode);
-  return touch_adjustment::FindNodeWithLowestDistanceMetric(
-      target_node, target_point, target_area, touch_hotspot, touch_area,
-      subtargets, touch_adjustment::HybridDistanceFunction);
+bool FindBestTouchAdjustmentCandidate(
+    TouchAdjustmentCandidateType candidate_type,
+    Node*& candidate_node,
+    gfx::Point& candidate_point,
+    const gfx::Point& touch_hotspot,
+    const gfx::Rect& touch_area,
+    const HeapVector<Member<Node>>& nodes) {
+  touch_adjustment::NodeFilter node_filter;
+  touch_adjustment::AppendSubtargetsForNode append_subtargets_for_node;
+
+  switch (candidate_type) {
+    case TouchAdjustmentCandidateType::kClickable:
+      node_filter = touch_adjustment::NodeRespondsToTapGesture;
+      append_subtargets_for_node =
+          touch_adjustment::AppendBasicSubtargetsForNode;
+      break;
+    case TouchAdjustmentCandidateType::kContextMenu:
+      node_filter = touch_adjustment::ProvidesContextMenuItems;
+      append_subtargets_for_node =
+          touch_adjustment::AppendContextSubtargetsForNode;
+      break;
+    case TouchAdjustmentCandidateType::kStylusWritable:
+      node_filter = touch_adjustment::NodeRespondsToTapOrMove;
+      append_subtargets_for_node =
+          touch_adjustment::AppendBasicSubtargetsForNode;
+      break;
+  }
+  return FindBestCandidate(candidate_node, candidate_point, touch_hotspot,
+                           touch_area, nodes, node_filter,
+                           append_subtargets_for_node);
 }
 
-bool FindBestContextMenuCandidate(Node*& target_node,
-                                  gfx::Point& target_point,
-                                  const gfx::Point& touch_hotspot,
-                                  const gfx::Rect& touch_area,
-                                  const HeapVector<Member<Node>>& nodes) {
-  gfx::Rect target_area;
-  touch_adjustment::SubtargetGeometryList subtargets;
-  touch_adjustment::CompileSubtargetList(
-      nodes, subtargets, touch_adjustment::ProvidesContextMenuItems,
-      touch_adjustment::AppendContextSubtargetsForNode);
-  return touch_adjustment::FindNodeWithLowestDistanceMetric(
-      target_node, target_point, target_area, touch_hotspot, touch_area,
-      subtargets, touch_adjustment::HybridDistanceFunction);
-}
-
-LayoutSize GetHitTestRectForAdjustment(LocalFrame& frame,
-                                       const LayoutSize& touch_area) {
+PhysicalSize GetHitTestRectForAdjustment(LocalFrame& frame,
+                                         const PhysicalSize& touch_area) {
   ChromeClient& chrome_client = frame.GetChromeClient();
   float device_scale_factor =
       chrome_client.GetScreenInfo(frame).device_scale_factor;
+  if (frame.GetPage()->InspectorDeviceScaleFactorOverride() != 1) {
+    device_scale_factor = 1;
+  }
 
   float page_scale_factor = frame.GetPage()->PageScaleFactor();
-  const LayoutSize max_size_in_dip(touch_adjustment::kMaxAdjustmentSizeDip,
-                                   touch_adjustment::kMaxAdjustmentSizeDip);
+  const PhysicalSize max_size_in_dip(touch_adjustment::kMaxAdjustmentSizeDip,
+                                     touch_adjustment::kMaxAdjustmentSizeDip);
 
-  const LayoutSize min_size_in_dip(touch_adjustment::kMinAdjustmentSizeDip,
-                                   touch_adjustment::kMinAdjustmentSizeDip);
+  const PhysicalSize min_size_in_dip(touch_adjustment::kMinAdjustmentSizeDip,
+                                     touch_adjustment::kMinAdjustmentSizeDip);
   // (when use-zoom-for-dsf enabled) touch_area is in physical pixel scaled,
   // max_size_in_dip should be converted to physical pixel and scale too.
   return touch_area

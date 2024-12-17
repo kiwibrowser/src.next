@@ -18,7 +18,6 @@
 
 #include <string>
 
-#include "base/memory/ref_counted.h"
 #include "base/notreached.h"
 #include "build/build_config.h"
 #include "content/common/content_export.h"
@@ -71,7 +70,7 @@ struct ParamTraits<gfx::NativeWindow> {
       memcpy(r, data, sizeof(gfx::NativeWindow));
     } else {
       result = false;
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
     }
     return result;
 #endif

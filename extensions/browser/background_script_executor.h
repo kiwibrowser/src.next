@@ -6,6 +6,7 @@
 #define EXTENSIONS_BROWSER_BACKGROUND_SCRIPT_EXECUTOR_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "base/memory/raw_ptr.h"
@@ -13,7 +14,6 @@
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/browsertest_util.h"
 #include "extensions/common/extension_id.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace content {
 class BrowserContext;
@@ -33,7 +33,8 @@ class ScriptResultQueue;
 //  For compatibility with legacy scripts, background page contexts can choose
 //  send results via window.domAutomationController.send(). New code should not
 //  do this.
-// This class is designed for single-use executions.
+// This class is designed for single-use executions and is only meant to be used
+// in tests.
 class BackgroundScriptExecutor {
  public:
   // The manner in which the script will use to send the result.
@@ -123,7 +124,7 @@ class BackgroundScriptExecutor {
 
   // The type of background context the extension uses; lazily instantiated in
   // ExecuteScript*().
-  absl::optional<BackgroundType> background_type_;
+  std::optional<BackgroundType> background_type_;
 
   // The method the script will use to send the result.
   ResultCapture result_capture_method_ = ResultCapture::kNone;
@@ -137,7 +138,7 @@ class BackgroundScriptExecutor {
   std::unique_ptr<ScriptResultQueue> script_result_queue_;
 
   // The associated Extension.
-  raw_ptr<const Extension> extension_ = nullptr;
+  raw_ptr<const Extension, FlakyDanglingUntriaged> extension_ = nullptr;
 
   // The script to inject; cached mostly for logging purposes.
   std::string script_;

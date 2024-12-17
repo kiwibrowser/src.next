@@ -22,8 +22,7 @@ void CollectedCookiesInfoBarDelegate::Create(
           new CollectedCookiesInfoBarDelegate())));
 }
 
-CollectedCookiesInfoBarDelegate::CollectedCookiesInfoBarDelegate()
-    : ConfirmInfoBarDelegate() {}
+CollectedCookiesInfoBarDelegate::CollectedCookiesInfoBarDelegate() = default;
 
 CollectedCookiesInfoBarDelegate::~CollectedCookiesInfoBarDelegate() {}
 
@@ -33,7 +32,7 @@ CollectedCookiesInfoBarDelegate::GetIdentifier() const {
 }
 
 const gfx::VectorIcon& CollectedCookiesInfoBarDelegate::GetVectorIcon() const {
-  return vector_icons::kCookieIcon;
+  return vector_icons::kSettingsChromeRefreshIcon;
 }
 
 std::u16string CollectedCookiesInfoBarDelegate::GetMessageText() const {

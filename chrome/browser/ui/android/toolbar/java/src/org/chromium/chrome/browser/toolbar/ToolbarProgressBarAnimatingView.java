@@ -13,11 +13,12 @@ import android.animation.ValueAnimator.AnimatorUpdateListener;
 import android.content.Context;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
+import android.view.animation.Interpolator;
 import android.widget.FrameLayout.LayoutParams;
 import android.widget.ImageView;
 
 import org.chromium.ui.base.LocalizationUtils;
-import org.chromium.ui.interpolators.BakedBezierInterpolator;
+import org.chromium.ui.interpolators.Interpolators;
 
 /**
  * An animating ImageView that is drawn on top of the progress bar. This will animate over the
@@ -54,8 +55,7 @@ public class ToolbarProgressBarAnimatingView extends ImageView {
     /** The maximum size of the animating view. */
     private static final float ANIMATING_VIEW_MAX_WIDTH_DP = 400;
 
-    /** Interpolator for enter and exit animation. */
-    private final BakedBezierInterpolator mBezier = BakedBezierInterpolator.FADE_OUT_CURVE;
+    private final Interpolator mInterpolator = Interpolators.FAST_OUT_LINEAR_IN_INTERPOLATOR;
 
     /** The current width of the progress bar. */
     private float mProgressWidth;
@@ -87,9 +87,7 @@ public class ToolbarProgressBarAnimatingView extends ImageView {
     /** The ratio of px to dp. */
     private float mDpToPx;
 
-    /**
-     * An animation update listener that moves an ImageView across the progress bar.
-     */
+    /** An animation update listener that moves an ImageView across the progress bar. */
     private class ProgressBarUpdateListener implements AnimatorUpdateListener {
         @Override
         public void onAnimationUpdate(ValueAnimator animation) {
@@ -113,6 +111,7 @@ public class ToolbarProgressBarAnimatingView extends ImageView {
         mAnimationDrawable = new ColorDrawable(Color.WHITE);
 
         setImageDrawable(mAnimationDrawable);
+        setAlpha(0.0f);
 
         mListener = new ProgressBarUpdateListener();
         mAnimatorSet = new AnimatorSet();
@@ -129,32 +128,31 @@ public class ToolbarProgressBarAnimatingView extends ImageView {
 
         mAnimatorSet.playSequentially(mSlowAnimation, mFastAnimation);
 
-        AnimatorListener listener = new AnimatorListenerAdapter() {
-            @Override
-            public void onAnimationEnd(Animator a) {
-                // Replay the animation if it has not been canceled.
-                if (mIsCanceled) return;
-                // Repeats of the animation should have a start delay.
-                mAnimatorSet.setStartDelay(ANIMATION_DELAY_MS);
-                updateAnimationDuration();
-                // Only restart the animation if the last animation is ending.
-                if (a == mFastAnimation) mAnimatorSet.start();
-            }
-        };
+        AnimatorListener listener =
+                new AnimatorListenerAdapter() {
+                    @Override
+                    public void onAnimationEnd(Animator a) {
+                        // Replay the animation if it has not been canceled.
+                        if (mIsCanceled) return;
+                        // Repeats of the animation should have a start delay.
+                        mAnimatorSet.setStartDelay(ANIMATION_DELAY_MS);
+                        updateAnimationDuration();
+                        // Only restart the animation if the last animation is ending.
+                        if (a == mFastAnimation) mAnimatorSet.start();
+                    }
+                };
 
         mSlowAnimation.addListener(listener);
         mFastAnimation.addListener(listener);
     }
 
-    /**
-     * Update the duration of the animation based on the width of the progress bar.
-     */
+    /** Update the duration of the animation based on the width of the progress bar. */
     private void updateAnimationDuration() {
         // If progress is <= 0, the duration is also 0.
         if (mProgressWidth <= 0) return;
 
         // Total duration: logE(progress_dp) * 200 * 1.3
-        long totalDuration = (long) (Math.log(mProgressWidth / mDpToPx) / Math.log(Math.E)) * 260;
+        long totalDuration = (long) ((Math.log(mProgressWidth / mDpToPx) / Math.log(Math.E)) * 260);
         if (totalDuration <= 0) return;
 
         mSlowAnimation.setDuration((long) (totalDuration * SLOW_ANIMATION_FRACTION));
@@ -162,9 +160,7 @@ public class ToolbarProgressBarAnimatingView extends ImageView {
         mFastAnimation.setDuration((long) (totalDuration * FAST_ANIMATION_FRACTION));
     }
 
-    /**
-     * Start the animation if it hasn't been already.
-     */
+    /** Start the animation if it hasn't been already. */
     public void startAnimation() {
         mIsCanceled = false;
         if (!mAnimatorSet.isStarted()) {
@@ -178,8 +174,10 @@ public class ToolbarProgressBarAnimatingView extends ImageView {
             mAnimatorSet.start();
 
             // Fade in to look nice on sites that trigger many loads that end quickly.
-            animate().alpha(1.0f).setDuration(500).setInterpolator(
-                    BakedBezierInterpolator.FADE_IN_CURVE);
+            animate()
+                    .alpha(1.0f)
+                    .setDuration(500)
+                    .setInterpolator(Interpolators.LINEAR_OUT_SLOW_IN_INTERPOLATOR);
         }
     }
 
@@ -190,7 +188,7 @@ public class ToolbarProgressBarAnimatingView extends ImageView {
      */
     private void updateAnimation(ValueAnimator animator, float animatedFraction) {
         if (mIsCanceled) return;
-        float bezierProgress = mBezier.getInterpolation(animatedFraction);
+        float interpolatorProgress = mInterpolator.getInterpolation(animatedFraction);
 
         // Left and right bound change based on if the layout is RTL.
         float leftBound = mIsRtl ? -mProgressWidth : 0.0f;
@@ -216,7 +214,7 @@ public class ToolbarProgressBarAnimatingView extends ImageView {
                 Math.min(ANIMATING_VIEW_MAX_WIDTH_DP * mDpToPx, mProgressWidth * barScale);
 
         float animatorCenter =
-                ((mProgressWidth + animatingWidth) * bezierProgress) - animatingWidth / 2.0f;
+                ((mProgressWidth + animatingWidth) * interpolatorProgress) - animatingWidth / 2.0f;
         if (mIsRtl) animatorCenter *= -1.0f;
 
         // The left and right x-coordinate of the animating view.
@@ -243,9 +241,7 @@ public class ToolbarProgressBarAnimatingView extends ImageView {
         return !mIsCanceled;
     }
 
-    /**
-     * Cancel the animation.
-     */
+    /** Cancel the animation. */
     public void cancelAnimation() {
         mIsCanceled = true;
         mAnimatorSet.cancel();

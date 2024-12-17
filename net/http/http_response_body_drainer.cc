@@ -4,9 +4,9 @@
 
 #include "net/http/http_response_body_drainer.h"
 
-#include "base/bind.h"
 #include "base/check_op.h"
 #include "base/compiler_specific.h"
+#include "base/functional/bind.h"
 #include "base/memory/ptr_util.h"
 #include "base/notreached.h"
 #include "net/base/io_buffer.h"
@@ -26,7 +26,7 @@ HttpResponseBodyDrainer::~HttpResponseBodyDrainer() = default;
 
 void HttpResponseBodyDrainer::Start(HttpNetworkSession* session) {
   session_ = session;
-  read_buf_ = base::MakeRefCounted<IOBuffer>(kDrainBodyBufferSize);
+  read_buf_ = base::MakeRefCounted<IOBufferWithSize>(kDrainBodyBufferSize);
   next_state_ = STATE_DRAIN_RESPONSE_BODY;
   int rv = DoLoop(OK);
 
@@ -55,7 +55,7 @@ int HttpResponseBodyDrainer::DoLoop(int result) {
         rv = DoDrainResponseBodyComplete(rv);
         break;
       default:
-        NOTREACHED() << "bad state";
+        NOTREACHED_IN_MIGRATION() << "bad state";
         rv = ERR_UNEXPECTED;
         break;
     }

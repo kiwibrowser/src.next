@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/functional/bind.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/profiles/profile.h"
@@ -18,6 +18,7 @@
 #include "components/embedder_support/switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/spare_render_process_host_manager.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -53,7 +54,7 @@ IN_PROC_BROWSER_TEST_F(FastShutdown, DISABLED_SlowTermination) {
 
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), url, WindowOpenDisposition::NEW_FOREGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_NONE);
+      ui_test_utils::BROWSER_TEST_NO_WAIT);
   ui_test_utils::WaitForBrowserToOpen();
 
   // Close the new window, removing the one and only beforeunload handler.
@@ -82,7 +83,7 @@ IN_PROC_BROWSER_TEST_F(FastShutdown, DISABLED_SlowTermination) {
 // Therefore, it is important that the test below is a //chrome-level test, even
 // though the test doesn't have any explicit dependencies on the //chrome layer.
 IN_PROC_BROWSER_TEST_F(FastShutdown, SpareRenderProcessHostDuringShutdown) {
-  content::RenderProcessHost::WarmupSpareRenderProcessHost(
+  content::SpareRenderProcessHostManager::Get().WarmupSpare(
       browser()->profile());
 
   // The verification is that there are no DCHECKs anywhere during test tear

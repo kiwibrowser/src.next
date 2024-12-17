@@ -40,6 +40,7 @@ class BASE_EXPORT SupportsUserData {
   // NOTE: SetUserData() with an empty unique_ptr behaves the same as
   // RemoveUserData().
   Data* GetUserData(const void* key) const;
+  [[nodiscard]] std::unique_ptr<Data> TakeUserData(const void* key);
   void SetUserData(const void* key, std::unique_ptr<Data> data);
   void RemoveUserData(const void* key);
 
@@ -62,11 +63,10 @@ class BASE_EXPORT SupportsUserData {
   void ClearAllUserData();
 
  private:
-  using DataMap = std::map<const void*, std::unique_ptr<Data>>;
-
-  // Externally-defined data accessible by key.
-  DataMap user_data_;
-  // Guards usage of |user_data_|
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+  bool in_clear_ = false;
+  // Guards usage of |impl_|
   SEQUENCE_CHECKER(sequence_checker_);
 };
 

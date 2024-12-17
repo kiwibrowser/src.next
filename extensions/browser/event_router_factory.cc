@@ -38,15 +38,21 @@ EventRouterFactory::EventRouterFactory()
 EventRouterFactory::~EventRouterFactory() {
 }
 
-KeyedService* EventRouterFactory::BuildServiceInstanceFor(
+std::unique_ptr<KeyedService>
+EventRouterFactory::BuildServiceInstanceForBrowserContext(
     BrowserContext* context) const {
-  return new EventRouter(context, ExtensionPrefs::Get(context));
+  return std::make_unique<EventRouter>(context, ExtensionPrefs::Get(context));
 }
 
 BrowserContext* EventRouterFactory::GetBrowserContextToUse(
     BrowserContext* context) const {
   // Redirected in incognito.
-  return ExtensionsBrowserClient::Get()->GetOriginalContext(context);
+  return ExtensionsBrowserClient::Get()->GetContextRedirectedToOriginal(
+      context, /*force_guest_profile=*/true);
+}
+
+bool EventRouterFactory::ServiceIsNULLWhileTesting() const {
+  return true;
 }
 
 }  // namespace extensions

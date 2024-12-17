@@ -2,8 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <algorithm>
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include "base/base64.h"
 #include "base/containers/span.h"
@@ -11,7 +13,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
-#include "net/base/network_isolation_key.h"
+#include "net/base/network_anonymization_key.h"
 #include "net/base/test_completion_callback.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/http/http_auth_challenge_tokenizer.h"
@@ -56,16 +58,13 @@ class HttpAuthHandlerNtlmPortableTest : public PlatformTest {
     SSLInfo null_ssl_info;
 
     return factory_->CreateAuthHandlerFromString(
-        "NTLM", HttpAuth::AUTH_SERVER, null_ssl_info, NetworkIsolationKey(),
+        "NTLM", HttpAuth::AUTH_SERVER, null_ssl_info, NetworkAnonymizationKey(),
         scheme_host_port, NetLogWithSource(), nullptr, &auth_handler_);
   }
 
   std::string CreateNtlmAuthHeader(base::span<const uint8_t> buffer) {
-    std::string output;
-    base::Base64Encode(
-        base::StringPiece(reinterpret_cast<const char*>(buffer.data()),
-                          buffer.size()),
-        &output);
+    std::string output = base::Base64Encode(std::string_view(
+        reinterpret_cast<const char*>(buffer.data()), buffer.size()));
 
     return "NTLM " + output;
   }
@@ -73,12 +72,12 @@ class HttpAuthHandlerNtlmPortableTest : public PlatformTest {
 
   HttpAuth::AuthorizationResult HandleAnotherChallenge(
       const std::string& challenge) {
-    HttpAuthChallengeTokenizer tokenizer(challenge.begin(), challenge.end());
+    HttpAuthChallengeTokenizer tokenizer(challenge);
     return GetAuthHandler()->HandleAnotherChallenge(&tokenizer);
   }
 
   bool DecodeChallenge(const std::string& challenge, std::string* decoded) {
-    HttpAuthChallengeTokenizer tokenizer(challenge.begin(), challenge.end());
+    HttpAuthChallengeTokenizer tokenizer(challenge);
     return base::Base64Decode(tokenizer.base64_param(), decoded);
   }
 
@@ -104,10 +103,8 @@ class HttpAuthHandlerNtlmPortableTest : public PlatformTest {
     if (!reader->ReadSecurityBuffer(&sec_buf))
       return false;
 
-    if (!reader->ReadBytesFrom(
-            sec_buf,
-            base::as_writable_bytes(base::make_span(
-                base::WriteInto(str, sec_buf.length + 1), sec_buf.length)))) {
+    str->resize(sec_buf.length);
+    if (!reader->ReadBytesFrom(sec_buf, base::as_writable_byte_span(*str))) {
       return false;
     }
 
@@ -146,10 +143,10 @@ class HttpAuthHandlerNtlmPortableTest : public PlatformTest {
     return static_cast<HttpAuthHandlerNTLM*>(auth_handler_.get());
   }
 
-  static void MockRandom(uint8_t* output, size_t n) {
+  static void MockRandom(base::span<uint8_t> output) {
     // This is set to 0xaa because the client challenge for testing in
     // [MS-NLMP] Section 4.2.1 is 8 bytes of 0xaa.
-    memset(output, 0xaa, n);
+    std::ranges::fill(output, 0xaa);
   }
 
   static uint64_t MockGetMSTime() {

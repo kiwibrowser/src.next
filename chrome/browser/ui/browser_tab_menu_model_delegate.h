@@ -22,9 +22,9 @@ class BrowserTabMenuModelDelegate : public TabMenuModelDelegate {
 
  private:
   // TabMenuModelDelegate:
-  std::vector<Browser*> GetExistingWindowsForMoveMenu() override;
+  std::vector<Browser*> GetOtherBrowserWindows(bool is_app) override;
 
-  const raw_ptr<Browser> browser_;
+  const raw_ptr<Browser, DanglingUntriaged> browser_;
 };
 
 }  // namespace chrome

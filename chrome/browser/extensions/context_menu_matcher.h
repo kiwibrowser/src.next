@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "chrome/browser/extensions/menu_manager.h"
 #include "ui/base/models/simple_menu_model.h"
@@ -56,10 +56,12 @@ class ContextMenuMatcher {
   // each item actually added. |is_action_menu| is used for browser and page
   // action context menus, in which menu items are not placed in submenus
   // and the extension's icon is not shown.
-  void AppendExtensionItems(const MenuItem::ExtensionKey& extension_key,
-                            const std::u16string& selection_text,
-                            int* index,
-                            bool is_action_menu);
+  void AppendExtensionItems(
+      const MenuItem::ExtensionKey& extension_key,
+      const std::u16string& selection_text,
+      int* index,
+      bool is_action_menu,
+      const std::u16string& group_title = std::u16string());
 
   // Returns true if the given menu_model has any visible items.
   bool HasVisibleItems(ui::MenuModel* menu_model) const;
@@ -93,8 +95,8 @@ class ContextMenuMatcher {
 
   bool GetRelevantExtensionTopLevelItems(
       const MenuItem::ExtensionKey& extension_key,
-      const Extension** extension,
-      bool* can_cross_incognito,
+      const Extension*& extension,
+      bool& can_cross_incognito,
       MenuItem::List* items);
 
   MenuItem::List GetRelevantExtensionItems(const MenuItem::OwnedList& items,
@@ -112,11 +114,11 @@ class ContextMenuMatcher {
   extensions::MenuItem* GetExtensionMenuItem(int id) const;
 
   // This will set the icon on the most recently-added item in the menu_model_.
-  void SetExtensionIcon(const std::string& extension_id);
+  void SetExtensionIcon(const MenuItem::ExtensionKey& extension_key);
 
-  raw_ptr<content::BrowserContext> browser_context_;
-  raw_ptr<ui::SimpleMenuModel> menu_model_;
-  raw_ptr<ui::SimpleMenuModel::Delegate> delegate_;
+  raw_ptr<content::BrowserContext, DanglingUntriaged> browser_context_;
+  raw_ptr<ui::SimpleMenuModel, DanglingUntriaged> menu_model_;
+  raw_ptr<ui::SimpleMenuModel::Delegate, DanglingUntriaged> delegate_;
 
   base::RepeatingCallback<bool(const MenuItem*)> filter_;
 

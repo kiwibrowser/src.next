@@ -26,6 +26,7 @@
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
+#include "third_party/blink/renderer/core/html/forms/html_button_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_data_list_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_data_list_options_collection.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
@@ -42,6 +43,7 @@
 #include "third_party/blink/renderer/platform/graphics/graphics_context_state_saver.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_canvas.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+#include "third_party/blink/renderer/platform/text/writing_mode.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/native_theme/native_theme.h"
 
@@ -49,14 +51,17 @@
 
 namespace blink {
 
+using mojom::blink::FormControlType;
+
 namespace {
 
-bool IsMultipleFieldsTemporalInput(const AtomicString& type) {
+bool IsMultipleFieldsTemporalInput(FormControlType type) {
 #if !BUILDFLAG(IS_ANDROID)
-  return type == input_type_names::kDate ||
-         type == input_type_names::kDatetimeLocal ||
-         type == input_type_names::kMonth || type == input_type_names::kTime ||
-         type == input_type_names::kWeek;
+  return type == FormControlType::kInputDate ||
+         type == FormControlType::kInputDatetimeLocal ||
+         type == FormControlType::kInputMonth ||
+         type == FormControlType::kInputTime ||
+         type == FormControlType::kInputWeek;
 #else
   return false;
 #endif
@@ -71,8 +76,8 @@ ThemePainter::ThemePainter() = default;
 
 void CountAppearanceTextFieldPart(const Element& element) {
   if (auto* input = DynamicTo<HTMLInputElement>(element)) {
-    const AtomicString& type = input->type();
-    if (type == input_type_names::kSearch) {
+    FormControlType type = input->FormControlType();
+    if (type == FormControlType::kInputSearch) {
       UseCounter::Count(element.GetDocument(),
                         WebFeature::kCSSValueAppearanceTextFieldForSearch);
     } else if (input->IsTextField()) {
@@ -102,18 +107,15 @@ bool ThemePainter::Paint(const LayoutObject& o,
   if (part == kButtonPart) {
     if (IsA<HTMLButtonElement>(element)) {
       UseCounter::Count(doc, WebFeature::kCSSValueAppearanceButtonForButton);
-    } else if (IsA<HTMLInputElement>(element) &&
-               To<HTMLInputElement>(element).IsTextButton()) {
+    } else if (auto* input_element = DynamicTo<HTMLInputElement>(element);
+               input_element && input_element->IsTextButton()) {
       // Text buttons (type=button, reset, submit) has
       // -webkit-appearance:push-button by default.
       UseCounter::Count(doc,
                         WebFeature::kCSSValueAppearanceButtonForOtherButtons);
-    } else if (IsA<HTMLInputElement>(element) &&
-               To<HTMLInputElement>(element).type() ==
-                   input_type_names::kColor) {
-      //  'button' for input[type=color], of which default appearance is
-      // 'square-button', is not deprecated.
     }
+    //  'button' for input[type=color], of which default appearance is
+    // 'square-button', is not deprecated.
   }
 
   // Call the appropriate paint method based off the appearance value.
@@ -167,9 +169,16 @@ bool ThemePainter::Paint(const LayoutObject& o,
       return PaintSliderThumb(element, style, paint_info, r);
     }
     case kMediaSliderPart:
+      COUNT_APPEARANCE(doc, MediaSlider);
+      return true;
     case kMediaSliderThumbPart:
+      COUNT_APPEARANCE(doc, MediaSliderThumb);
+      return true;
     case kMediaVolumeSliderPart:
+      COUNT_APPEARANCE(doc, MediaVolumeSlider);
+      return true;
     case kMediaVolumeSliderThumbPart:
+      COUNT_APPEARANCE(doc, MediaVolumeSliderThumb);
       return true;
     case kMenulistButtonPart:
       return true;
@@ -229,7 +238,22 @@ bool ThemePainter::PaintBorderOnly(const Node* node,
     case kSquareButtonPart:
       // Supported appearance values don't need CSS border painting.
       return false;
-    default:
+    case kBaseSelectPart:
+      return true;
+    case kNoControlPart:
+    case kAutoPart:
+      // kNoControlPart isn't possible because callers should only call this
+      // function when HasEffectiveAppearance is true.
+      // kAutoPart isn't possible because it can't be an effective appearance.
+      NOTREACHED();
+    // TODO(dbaron): The following values were previously covered by a
+    // default: case and should be classified correctly:
+    case kMediaControlPart:
+    case kMeterPart:
+    case kMediaSliderPart:
+    case kMediaSliderThumbPart:
+    case kMediaVolumeSliderPart:
+    case kMediaVolumeSliderThumbPart:
       UseCounter::Count(
           element.GetDocument(),
           WebFeature::kCSSValueAppearanceNoImplementationSkipBorder);
@@ -283,9 +307,10 @@ void ThemePainter::PaintSliderTicks(const LayoutObject& o,
   if (!input)
     return;
 
-  if (input->type() != input_type_names::kRange ||
-      !input->UserAgentShadowRoot()->HasChildren())
+  if (input->FormControlType() != FormControlType::kInputRange ||
+      !input->UserAgentShadowRoot()->HasChildren()) {
     return;
+  }
 
   HTMLDataListElement* data_list = input->DataList();
   if (!data_list)
@@ -296,11 +321,18 @@ void ThemePainter::PaintSliderTicks(const LayoutObject& o,
   if (min >= max)
     return;
 
-  ControlPart part = o.StyleRef().EffectiveAppearance();
+  const ComputedStyle& style = o.StyleRef();
+  ControlPart part = style.EffectiveAppearance();
   // We don't support ticks on alternate sliders like MediaVolumeSliders.
-  if (part != kSliderHorizontalPart && part != kSliderVerticalPart)
+  bool is_slider_vertical =
+      RuntimeEnabledFeatures::
+          NonStandardAppearanceValueSliderVerticalEnabled() &&
+      part == kSliderVerticalPart;
+  bool is_writing_mode_vertical = !style.IsHorizontalWritingMode();
+  if (!(part == kSliderHorizontalPart || is_slider_vertical)) {
     return;
-  bool is_horizontal = part == kSliderHorizontalPart;
+  }
+  bool is_horizontal = !is_writing_mode_vertical && !is_slider_vertical;
 
   gfx::Size thumb_size;
   LayoutObject* thumb_layout_object =
@@ -311,7 +343,7 @@ void ThemePainter::PaintSliderTicks(const LayoutObject& o,
     thumb_size = ToFlooredSize(To<LayoutBox>(thumb_layout_object)->Size());
 
   gfx::Size tick_size = LayoutTheme::GetTheme().SliderTickSize();
-  float zoom_factor = o.StyleRef().EffectiveZoom();
+  float zoom_factor = style.EffectiveZoom();
   gfx::RectF tick_rect;
   int tick_region_side_margin = 0;
   int tick_region_width = 0;
@@ -326,43 +358,50 @@ void ThemePainter::PaintSliderTicks(const LayoutObject& o,
         ToFlooredSize(To<LayoutBox>(track_layout_object)->Size()));
   }
 
+  const float tick_offset_from_center =
+      LayoutTheme::GetTheme().SliderTickOffsetFromTrackCenter() * zoom_factor;
+  const float tick_inline_size = tick_size.width() * zoom_factor;
+  const float tick_block_size = tick_size.height() * zoom_factor;
+  const auto writing_direction = style.GetWritingDirection();
   if (is_horizontal) {
-    tick_rect.set_width(floor(tick_size.width() * zoom_factor));
-    tick_rect.set_height(floor(tick_size.height() * zoom_factor));
+    tick_rect.set_size({floor(tick_inline_size), floor(tick_block_size)});
     tick_rect.set_y(
-        floor(rect.y() + rect.height() / 2.0 +
-              LayoutTheme::GetTheme().SliderTickOffsetFromTrackCenter() *
-                  zoom_factor));
+        floor(rect.y() + rect.height() / 2.0 + tick_offset_from_center));
     tick_region_side_margin =
-        track_bounds.x() +
-        (thumb_size.width() - tick_size.width() * zoom_factor) / 2.0;
+        track_bounds.x() + (thumb_size.width() - tick_inline_size) / 2.0;
     tick_region_width = track_bounds.width() - thumb_size.width();
   } else {
-    tick_rect.set_width(floor(tick_size.height() * zoom_factor));
-    tick_rect.set_height(floor(tick_size.width() * zoom_factor));
-    tick_rect.set_x(
-        floor(rect.x() + rect.width() / 2.0 +
-              LayoutTheme::GetTheme().SliderTickOffsetFromTrackCenter() *
-                  zoom_factor));
+    tick_rect.set_size({floor(tick_block_size), floor(tick_inline_size)});
+    const float slider_center = rect.x() + rect.width() / 2.0;
+    const float tick_x =
+        (style.IsHorizontalTypographicMode() &&
+         writing_direction.LineUnder() == PhysicalDirection::kLeft)
+            ? (slider_center - tick_offset_from_center - tick_block_size)
+            : (slider_center + tick_offset_from_center);
+    tick_rect.set_x(floor(tick_x));
     tick_region_side_margin =
-        track_bounds.y() +
-        (thumb_size.height() - tick_size.width() * zoom_factor) / 2.0;
+        track_bounds.y() + (thumb_size.height() - tick_inline_size) / 2.0;
     tick_region_width = track_bounds.height() - thumb_size.height();
   }
   HTMLDataListOptionsCollection* options = data_list->options();
+  bool flip_tick_direction = true;
+  if (is_horizontal || is_writing_mode_vertical) {
+    PhysicalDirection inline_end = writing_direction.InlineEnd();
+    flip_tick_direction = inline_end == PhysicalDirection::kLeft ||
+                          inline_end == PhysicalDirection::kUp;
+  }
   for (unsigned i = 0; HTMLOptionElement* option_element = options->Item(i);
        i++) {
     String value = option_element->value();
-    if (option_element->IsDisabledFormControl() || value.IsEmpty())
+    if (option_element->IsDisabledFormControl() || value.empty())
       continue;
     if (!input->IsValidValue(value))
       continue;
     double parsed_value =
         ParseToDoubleForNumberType(input->SanitizeValue(value));
     double tick_fraction = (parsed_value - min) / (max - min);
-    double tick_ratio = is_horizontal && o.StyleRef().IsLeftToRightDirection()
-                            ? tick_fraction
-                            : 1.0 - tick_fraction;
+    double tick_ratio =
+        flip_tick_direction ? 1.0 - tick_fraction : tick_fraction;
     double tick_position =
         round(tick_region_side_margin + tick_region_width * tick_ratio);
     if (is_horizontal)
@@ -371,8 +410,7 @@ void ThemePainter::PaintSliderTicks(const LayoutObject& o,
       tick_rect.set_y(tick_position);
     paint_info.context.FillRect(
         tick_rect, o.ResolveColor(GetCSSPropertyColor()),
-        PaintAutoDarkMode(o.StyleRef(),
-                          DarkModeFilter::ElementRole::kBackground));
+        PaintAutoDarkMode(style, DarkModeFilter::ElementRole::kBackground));
   }
 }
 

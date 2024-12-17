@@ -6,25 +6,52 @@
 
 #include <memory>
 
+#include "base/files/file_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "extensions/common/api/extension_action/action_info.h"
+#include "extensions/common/error_utils.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/file_util.h"
 #include "extensions/common/image_util.h"
 #include "extensions/common/manifest_constants.h"
 
+// Adds `extensions::InstallWarning`s to `warnings` if the`default_popup` value
+// for the action doesn't exist in the filesystem.
+void SetWarningsForNonExistentDefaultPopup(
+    const extensions::ActionInfo* action,
+    const char* manifest_key,
+    const extensions::Extension* extension,
+    std::vector<extensions::InstallWarning>* warnings) {
+  GURL default_popup_url = action->default_popup_url;
+  if (default_popup_url.is_empty())
+    return;
+
+  GURL extension_base_url =
+      extension->GetBaseURLFromExtensionId(extension->id());
+  base::FilePath relative_path =
+      extensions::file_util::ExtensionURLToRelativeFilePath(default_popup_url);
+  base::FilePath resource_path =
+      extension->GetResource(relative_path).GetFilePath();
+
+  if (resource_path.empty() || !base::PathExists(resource_path)) {
+    warnings->emplace_back(
+        extensions::manifest_errors::kNonexistentDefaultPopup, manifest_key,
+        extensions::manifest_keys::kActionDefaultPopup);
+  }
+}
+
 namespace extensions {
 
-ExtensionActionHandler::ExtensionActionHandler() {}
+ExtensionActionHandler::ExtensionActionHandler() = default;
 
-ExtensionActionHandler::~ExtensionActionHandler() {}
+ExtensionActionHandler::~ExtensionActionHandler() = default;
 
 bool ExtensionActionHandler::Parse(Extension* extension,
                                    std::u16string* error) {
   const char* key = nullptr;
   const char* error_key = nullptr;
-  ActionInfo::Type type = ActionInfo::TYPE_ACTION;
+  ActionInfo::Type type = ActionInfo::Type::kAction;
   if (extension->manifest()->FindKey(manifest_keys::kAction)) {
     key = manifest_keys::kAction;
     error_key = manifest_errors::kInvalidAction;
@@ -39,7 +66,7 @@ bool ExtensionActionHandler::Parse(Extension* extension,
     }
     key = manifest_keys::kPageAction;
     error_key = manifest_errors::kInvalidPageAction;
-    type = ActionInfo::TYPE_PAGE;
+    type = ActionInfo::Type::kPage;
   }
 
   if (extension->manifest()->FindKey(manifest_keys::kBrowserAction)) {
@@ -50,18 +77,21 @@ bool ExtensionActionHandler::Parse(Extension* extension,
     }
     key = manifest_keys::kBrowserAction;
     error_key = manifest_errors::kInvalidBrowserAction;
-    type = ActionInfo::TYPE_BROWSER;
+    type = ActionInfo::Type::kBrowser;
   }
 
   if (key) {
-    const base::DictionaryValue* dict = nullptr;
-    if (!extension->manifest()->GetDictionary(key, &dict)) {
+    const base::Value::Dict* dict =
+        extension->manifest()->available_values().FindDict(key);
+    if (!dict) {
       *error = base::ASCIIToUTF16(error_key);
       return false;
     }
 
+    std::vector<InstallWarning> install_warnings;
     std::unique_ptr<ActionInfo> action_info =
-        ActionInfo::Load(extension, type, dict, error);
+        ActionInfo::Load(extension, type, *dict, &install_warnings, error);
+    extension->AddInstallWarnings(std::move(install_warnings));
     if (!action_info)
       return false;  // Failed to parse extension action definition.
 
@@ -77,12 +107,13 @@ bool ExtensionActionHandler::Parse(Extension* extension,
     // browser action) for MV2 because the action should not be seen as enabled
     // on every page. We achieve the same in MV3 by adjusting the default
     // state to be disabled by default.
-    type = extension->manifest_version() >= 3 ? ActionInfo::TYPE_ACTION
-                                              : ActionInfo::TYPE_PAGE;
+    type = extension->manifest_version() >= 3 ? ActionInfo::Type::kAction
+                                              : ActionInfo::Type::kPage;
     auto action_info = std::make_unique<ActionInfo>(type);
     action_info->synthesized = true;
-    if (type == ActionInfo::TYPE_ACTION)
-      action_info->default_state = ActionInfo::STATE_DISABLED;
+    if (type == ActionInfo::Type::kAction) {
+      action_info->default_state = ActionInfo::DefaultState::kDisabled;
+    }
 
     ActionInfo::SetExtensionActionInfo(extension, std::move(action_info));
   }
@@ -95,28 +126,25 @@ bool ExtensionActionHandler::Validate(
     std::string* error,
     std::vector<InstallWarning>* warnings) const {
   const ActionInfo* action = ActionInfo::GetExtensionActionInfo(extension);
-  if (!action || action->default_icon.empty())
+
+  if (!action)
     return true;
 
-  const char* manifest_key = nullptr;
-  switch (action->type) {
-    case ActionInfo::TYPE_ACTION:
-      manifest_key = manifest_keys::kAction;
-      break;
-    case ActionInfo::TYPE_BROWSER:
-      manifest_key = manifest_keys::kBrowserAction;
-      break;
-    case ActionInfo::TYPE_PAGE:
-      manifest_key = manifest_keys::kPageAction;
-      break;
-  }
+  const char* manifest_key =
+      ActionInfo::GetManifestKeyForActionType(action->type);
   DCHECK(manifest_key);
+
+  SetWarningsForNonExistentDefaultPopup(action, manifest_key, extension,
+                                        warnings);
+
+  // Empty default icon is valid.
+  if (action->default_icon.empty())
+    return true;
 
   // Analyze the icons for visibility using the default toolbar color, since
   // the majority of Chrome users don't modify their theme.
-  return file_util::ValidateExtensionIconSet(
-      action->default_icon, extension, manifest_key,
-      image_util::kDefaultToolbarColor, error);
+  return file_util::ValidateExtensionIconSet(action->default_icon, extension,
+                                             manifest_key, error);
 }
 
 bool ExtensionActionHandler::AlwaysParseForType(Manifest::Type type) const {

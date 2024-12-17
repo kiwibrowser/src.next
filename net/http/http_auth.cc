@@ -2,9 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "net/http/http_auth.h"
 
 #include <algorithm>
+#include <optional>
+#include <string_view>
 
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
@@ -36,7 +43,7 @@ void HttpAuth::ChooseBestChallenge(
     HttpAuthHandlerFactory* http_auth_handler_factory,
     const HttpResponseHeaders& response_headers,
     const SSLInfo& ssl_info,
-    const NetworkIsolationKey& network_isolation_key,
+    const NetworkAnonymizationKey& network_anonymization_key,
     Target target,
     const url::SchemeHostPort& scheme_host_port,
     const std::set<Scheme>& disabled_schemes,
@@ -54,7 +61,7 @@ void HttpAuth::ChooseBestChallenge(
   while (response_headers.EnumerateHeader(&iter, header_name, &cur_challenge)) {
     std::unique_ptr<HttpAuthHandler> cur;
     int rv = http_auth_handler_factory->CreateAuthHandlerFromString(
-        cur_challenge, target, ssl_info, network_isolation_key,
+        cur_challenge, target, ssl_info, network_anonymization_key,
         scheme_host_port, net_log, host_resolver, &cur);
     if (rv != OK) {
       VLOG(1) << "Unable to create AuthHandler. Status: "
@@ -85,17 +92,16 @@ HttpAuth::AuthorizationResult HttpAuth::HandleChallengeResponse(
   const char* current_scheme_name = SchemeToString(current_scheme);
   const std::string header_name = GetChallengeHeaderName(target);
   size_t iter = 0;
-  std::string challenge;
+  std::optional<std::string_view> challenge;
   HttpAuth::AuthorizationResult authorization_result =
       HttpAuth::AUTHORIZATION_RESULT_INVALID;
-  while (response_headers.EnumerateHeader(&iter, header_name, &challenge)) {
-    HttpAuthChallengeTokenizer challenge_tokens(challenge.begin(),
-                                                challenge.end());
+  while ((challenge = response_headers.EnumerateHeader(&iter, header_name))) {
+    HttpAuthChallengeTokenizer challenge_tokens(*challenge);
     if (challenge_tokens.auth_scheme() != current_scheme_name)
       continue;
     authorization_result = handler->HandleAnotherChallenge(&challenge_tokens);
     if (authorization_result != HttpAuth::AUTHORIZATION_RESULT_INVALID) {
-      *challenge_used = challenge;
+      *challenge_used = *challenge;
       return authorization_result;
     }
   }
@@ -111,7 +117,7 @@ std::string HttpAuth::GetChallengeHeaderName(Target target) {
     case AUTH_SERVER:
       return "WWW-Authenticate";
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       return std::string();
   }
 }
@@ -124,7 +130,7 @@ std::string HttpAuth::GetAuthorizationHeaderName(Target target) {
     case AUTH_SERVER:
       return HttpRequestHeaders::kAuthorization;
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       return std::string();
   }
 }
@@ -137,7 +143,7 @@ std::string HttpAuth::GetAuthTargetString(Target target) {
     case AUTH_SERVER:
       return "server";
     default:
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       return std::string();
   }
 }
@@ -147,7 +153,7 @@ const char* HttpAuth::SchemeToString(Scheme scheme) {
   static_assert(std::size(kSchemeNames) == AUTH_SCHEME_MAX,
                 "http auth scheme names incorrect size");
   if (scheme < AUTH_SCHEME_BASIC || scheme >= AUTH_SCHEME_MAX) {
-    NOTREACHED();
+    NOTREACHED_IN_MIGRATION();
     return "invalid_scheme";
   }
   return kSchemeNames[scheme];
@@ -159,7 +165,7 @@ HttpAuth::Scheme HttpAuth::StringToScheme(const std::string& str) {
     if (str == kSchemeNames[i])
       return static_cast<Scheme>(i);
   }
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
   return AUTH_SCHEME_MAX;
 }
 
@@ -178,12 +184,12 @@ const char* HttpAuth::AuthorizationResultToString(
     case AUTHORIZATION_RESULT_DIFFERENT_REALM:
       return "different_realm";
   }
-  NOTREACHED();
+  NOTREACHED_IN_MIGRATION();
   return "(invalid result)";
 }
 
 // static
-base::Value HttpAuth::NetLogAuthorizationResultParams(
+base::Value::Dict HttpAuth::NetLogAuthorizationResultParams(
     const char* name,
     AuthorizationResult authorization_result) {
   return NetLogParamsWithString(

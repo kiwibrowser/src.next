@@ -2,6 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "extensions/common/manifest_handlers/externally_connectable.h"
 
 #include <stddef.h>
@@ -23,8 +28,8 @@ namespace errors = externally_connectable_errors;
 
 class ExternallyConnectableTest : public ManifestTest {
  public:
-  ExternallyConnectableTest() {}
-  ~ExternallyConnectableTest() override {}
+  ExternallyConnectableTest() = default;
+  ~ExternallyConnectableTest() override = default;
 
  protected:
   ExternallyConnectableInfo* GetExternallyConnectableInfo(
@@ -193,11 +198,11 @@ TEST_F(ExternallyConnectableTest, AllIDs) {
 
 TEST_F(ExternallyConnectableTest, IdCanConnect) {
   // Not in order to test that ExternallyConnectableInfo sorts it.
-  std::string matches_ids_array[] = {"g", "h", "c", "i", "a", "z", "b"};
-  std::vector<std::string> matches_ids(
+  ExtensionId matches_ids_array[] = {"g", "h", "c", "i", "a", "z", "b"};
+  std::vector<ExtensionId> matches_ids(
       matches_ids_array, matches_ids_array + std::size(matches_ids_array));
 
-  std::string nomatches_ids_array[] = {"2", "3", "1"};
+  ExtensionId nomatches_ids_array[] = {"2", "3", "1"};
 
   // all_ids = false.
   {
@@ -269,13 +274,26 @@ TEST_F(ExternallyConnectableTest, TLD) {
 }
 
 TEST_F(ExternallyConnectableTest, WarningNothingSpecified) {
+  LoadAndExpectWarning("externally_connectable_empty_ids.json",
+                       errors::kErrorNothingSpecified);
+  LoadAndExpectWarning("externally_connectable_empty_matches.json",
+                       errors::kErrorNothingSpecified);
   LoadAndExpectWarning("externally_connectable_nothing_specified.json",
                        errors::kErrorNothingSpecified);
 }
 
+TEST_F(ExternallyConnectableTest, WarningUnusedAcceptsTlsChannelId) {
+  std::vector<std::string> expected_warnings;
+  expected_warnings.emplace_back(errors::kErrorNothingSpecified);
+  expected_warnings.emplace_back(errors::kErrorUnusedAcceptsTlsChannelId);
+  LoadAndExpectWarnings(
+      "externally_connectable_accepts_tls_channel_id_without_matches.json",
+      expected_warnings);
+}
+
 // Tests that the deprecated externally_connectable.all_urls permission doesn't
 // trigger a warning for an extension that requests it.
-// TODO(https://crbug.com/1363485): Remove this test when we remove the
+// TODO(crbug.com/40864987): Remove this test when we remove the
 // externally_connectable.all_urls permission.
 TEST_F(ExternallyConnectableTest, DeprecatedAllUrlsPermission) {
   scoped_refptr<const Extension> extension =

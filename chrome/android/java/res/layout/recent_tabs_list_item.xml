@@ -5,12 +5,14 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
 
+
 <RelativeLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/recent_tabs_list_item_layout"
-    android:layout_height="@dimen/recent_tabs_foreign_session_group_item_height"
+    android:layout_height="wrap_content"
     android:layout_width="match_parent"
+    android:minHeight="@dimen/recent_tabs_foreign_session_group_item_height"
     android:background="?attr/selectableItemBackground"
     android:paddingStart="@dimen/recent_tabs_list_item_side_padding"
     android:paddingEnd="@dimen/recent_tabs_list_item_side_padding">
@@ -29,13 +31,32 @@ found in the LICENSE file.
         android:orientation="vertical"
         android:layout_centerVertical="true" >
 
-        <TextView
-            android:id="@+id/title_row"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:textAppearance="@style/TextAppearance.TextLarge.Primary"
-            android:singleLine="true"/>
+            android:orientation="horizontal"
+            tools:ignore="UseCompoundDrawables" >
+
+            <ImageView
+                android:id="@+id/row_icon"
+                android:layout_marginStart="2dp"
+                android:layout_marginEnd="8dp"
+                android:layout_marginTop="6dp"
+                android:layout_marginBottom="4dp"
+                android:layout_width="12dp"
+                android:layout_height="12dp"
+                android:background="@drawable/tab_group_dialog_color_icon"
+                android:importantForAccessibility="no"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/title_row"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:textAppearance="@style/TextAppearance.TextLarge.Primary"
+                android:singleLine="true"/>
+        </LinearLayout>
 
         <TextView
             android:layout_width="match_parent"

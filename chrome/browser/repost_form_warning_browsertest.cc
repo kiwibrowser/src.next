@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/test/run_until.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/login/login_handler.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/test/test_browser_dialog.h"
 #include "chrome/common/url_constants.h"
@@ -89,14 +90,13 @@ IN_PROC_BROWSER_TEST_F(RepostFormWarningTest, TestLoginAfterRepost) {
 
   // Navigate to a page that requires authentication, bringing up another
   // tab-modal sheet.
-  content::NavigationController& controller = web_contents->GetController();
-  content::WindowedNotificationObserver observer(
-      chrome::NOTIFICATION_AUTH_NEEDED,
-      content::Source<content::NavigationController>(&controller));
-  browser()->OpenURL(content::OpenURLParams(
-      embedded_test_server()->GetURL("/auth-basic"), content::Referrer(),
-      WindowOpenDisposition::CURRENT_TAB, ui::PAGE_TRANSITION_TYPED, false));
-  observer.Wait();
+  browser()->OpenURL(
+      content::OpenURLParams(
+          embedded_test_server()->GetURL("/auth-basic"), content::Referrer(),
+          WindowOpenDisposition::CURRENT_TAB, ui::PAGE_TRANSITION_TYPED, false),
+      /*navigation_handle_callback=*/{});
+  ASSERT_TRUE(base::test::RunUntil(
+      []() { return LoginHandler::GetAllLoginHandlersForTest().size() == 1; }));
 
   // Try to reload it again.
   web_contents->GetController().Reload(content::ReloadType::NORMAL, true);
@@ -105,9 +105,11 @@ IN_PROC_BROWSER_TEST_F(RepostFormWarningTest, TestLoginAfterRepost) {
   // because that waits for the current page to stop loading first, which won't
   // happen while the auth dialog is up.
   content::TestNavigationObserver navigation_observer(web_contents);
-  browser()->OpenURL(content::OpenURLParams(
-      embedded_test_server()->GetURL("/bar"), content::Referrer(),
-      WindowOpenDisposition::CURRENT_TAB, ui::PAGE_TRANSITION_TYPED, false));
+  browser()->OpenURL(
+      content::OpenURLParams(
+          embedded_test_server()->GetURL("/bar"), content::Referrer(),
+          WindowOpenDisposition::CURRENT_TAB, ui::PAGE_TRANSITION_TYPED, false),
+      /*navigation_handle_callback=*/{});
   navigation_observer.Wait();
 }
 

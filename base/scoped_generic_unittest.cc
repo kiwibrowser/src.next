@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/containers/contains.h"
+#include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -28,7 +29,7 @@ struct IntTraits {
     freed_ints->push_back(value);
   }
 
-  std::vector<int>* freed_ints;
+  raw_ptr<std::vector<int>> freed_ints;
 };
 
 using ScopedInt = ScopedGeneric<int, IntTraits>;
@@ -160,8 +161,9 @@ TEST(ScopedGenericTest, Receive) {
 namespace {
 
 struct TrackedIntTraits : public ScopedGenericOwnershipTracking {
-  using OwnerMap =
-      std::unordered_map<int, const ScopedGeneric<int, TrackedIntTraits>*>;
+  using OwnerMap = std::unordered_map<
+      int,
+      raw_ptr<const ScopedGeneric<int, TrackedIntTraits>, CtnExperimental>>;
   TrackedIntTraits(std::unordered_set<int>* freed, OwnerMap* owners)
       : freed(freed), owners(owners) {}
 
@@ -187,8 +189,8 @@ struct TrackedIntTraits : public ScopedGenericOwnershipTracking {
     owners->erase(it);
   }
 
-  std::unordered_set<int>* freed;
-  OwnerMap* owners;
+  raw_ptr<std::unordered_set<int>> freed;
+  raw_ptr<OwnerMap> owners;
 };
 
 using ScopedTrackedInt = ScopedGeneric<int, TrackedIntTraits>;

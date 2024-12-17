@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,7 +41,7 @@ TEST_F(ForceDarkTest, ForcedColorScheme) {
   };
 
   auto run_test = [&document = GetDocument()](const TestCase& test_case) {
-    auto* element = document.getElementById(test_case.id);
+    auto* element = document.getElementById(AtomicString(test_case.id));
     ASSERT_TRUE(element);
 
     const auto* style = element->GetComputedStyle();
@@ -51,7 +51,7 @@ TEST_F(ForceDarkTest, ForcedColorScheme) {
     EXPECT_EQ(test_case.expected_forced, style->ColorSchemeForced())
         << "Element #" << test_case.id;
 
-    const auto* child_style = element->firstChild()->GetComputedStyle();
+    const auto* child_style = element->firstElementChild()->GetComputedStyle();
     ASSERT_TRUE(child_style);
     EXPECT_EQ(test_case.expected_dark, child_style->DarkColorScheme())
         << "Element #" << test_case.id << " > span";
@@ -65,8 +65,9 @@ TEST_F(ForceDarkTest, ForcedColorScheme) {
       {"t7", true, false}, {"t8", true, true},
   };
 
-  for (const auto& test_case : test_cases_preferred_dark)
+  for (const auto& test_case : test_cases_preferred_dark) {
     run_test(test_case);
+  }
 
   GetDocument().GetSettings()->SetPreferredColorScheme(
       mojom::blink::PreferredColorScheme::kLight);
@@ -78,8 +79,9 @@ TEST_F(ForceDarkTest, ForcedColorScheme) {
       {"t7", true, true}, {"t8", true, true},
   };
 
-  for (const auto& test_case : test_cases_preferred_light)
+  for (const auto& test_case : test_cases_preferred_light) {
     run_test(test_case);
+  }
 }
 
 TEST_F(ForceDarkTest, ForcedColorSchemeInvalidation) {
@@ -99,7 +101,7 @@ TEST_F(ForceDarkTest, ForcedColorSchemeInvalidation) {
   };
 
   auto run_test = [&document = GetDocument()](const TestCase& test_case) {
-    auto* element = document.getElementById(test_case.id);
+    auto* element = document.getElementById(AtomicString(test_case.id));
     ASSERT_TRUE(element);
 
     const auto* style = element->GetComputedStyle();
@@ -115,7 +117,7 @@ TEST_F(ForceDarkTest, ForcedColorSchemeInvalidation) {
 
   ASSERT_TRUE(GetDocument().GetSettings()->GetForceDarkModeEnabled());
   GetDocument().GetSettings()->SetForceDarkModeEnabled(false);
-  auto* t3 = GetDocument().getElementById("t3");
+  auto* t3 = GetDocument().getElementById(AtomicString("t3"));
   t3->SetInlineStyleProperty(CSSPropertyID::kColorScheme, "dark");
   GetDocument().UpdateStyleAndLayoutTree();
 
@@ -126,8 +128,9 @@ TEST_F(ForceDarkTest, ForcedColorSchemeInvalidation) {
       {"t3", true, false, true},
   };
 
-  for (const TestCase& test_case : test_cases_disable_force)
+  for (const TestCase& test_case : test_cases_disable_force) {
     run_test(test_case);
+  }
 
   UpdateAllLifecyclePhasesForTest();
   GetDocument().GetSettings()->SetForceDarkModeEnabled(true);
@@ -141,8 +144,9 @@ TEST_F(ForceDarkTest, ForcedColorSchemeInvalidation) {
       {"t3", true, true, true},
   };
 
-  for (const TestCase& test_case : test_cases_enable_force)
+  for (const TestCase& test_case : test_cases_enable_force) {
     run_test(test_case);
+  }
 }
 
 }  // namespace blink

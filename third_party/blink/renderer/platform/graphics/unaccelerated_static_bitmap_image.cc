@@ -1,6 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
+#pragma allow_unsafe_buffers
+#endif
 
 #include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
 
@@ -14,6 +19,7 @@
 #include "third_party/blink/renderer/platform/graphics/web_graphics_context_3d_provider_wrapper.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_copier_skia.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/skia/include/core/SkImage.h"
@@ -101,7 +107,7 @@ void UnacceleratedStaticBitmapImage::Transfer() {
 
   original_skia_image_ = paint_image_.GetSwSkImage();
   original_skia_image_task_runner_ =
-      Thread::Current()->GetDeprecatedTaskRunner();
+      ThreadScheduler::Current()->CleanupTaskRunner();
 }
 
 scoped_refptr<StaticBitmapImage>
@@ -113,12 +119,13 @@ UnacceleratedStaticBitmapImage::ConvertToColorSpace(
   sk_sp<SkImage> skia_image = PaintImageForCurrentFrame().GetSwSkImage();
   // If we don't need to change the color type, use SkImage::makeColorSpace()
   if (skia_image->colorType() == color_type) {
-    skia_image = skia_image->makeColorSpace(color_space);
+    skia_image = skia_image->makeColorSpace(
+        static_cast<GrDirectContext*>(nullptr), color_space);
   } else {
-    skia_image =
-        skia_image->makeColorTypeAndColorSpace(color_type, color_space);
+    skia_image = skia_image->makeColorTypeAndColorSpace(
+        static_cast<GrDirectContext*>(nullptr), color_type, color_space);
   }
-  if (UNLIKELY(!skia_image)) {
+  if (!skia_image) [[unlikely]] {
     // Null value indicates that skia failed to allocate the destination
     // bitmap.
     base::TerminateBecauseOutOfMemory(
@@ -128,9 +135,13 @@ UnacceleratedStaticBitmapImage::ConvertToColorSpace(
 }
 
 bool UnacceleratedStaticBitmapImage::CopyToResourceProvider(
-    CanvasResourceProvider* resource_provider) {
+    CanvasResourceProvider* resource_provider,
+    const gfx::Rect& copy_rect) {
   DCHECK(resource_provider);
+  DCHECK(IsOriginTopLeft());
 
+  // Extract content to SkPixmap. Pixels are CPU backed resource and this
+  // should be freed.
   sk_sp<SkImage> image = paint_image_.GetSwSkImage();
   if (!image)
     return false;
@@ -140,25 +151,44 @@ bool UnacceleratedStaticBitmapImage::CopyToResourceProvider(
     return false;
 
   const void* pixels = pixmap.addr();
-  const size_t row_bytes = pixmap.rowBytes();
-  std::vector<uint8_t> flipped;
-  DCHECK(IsOriginTopLeft());
-  if (!resource_provider->IsOriginTopLeft()) {
-    const int height = pixmap.height();
-    flipped.resize(row_bytes * height);
-    for (int i = 0; i < height; ++i) {
-      memcpy(flipped.data() + i * row_bytes,
-             static_cast<const uint8_t*>(pixels) + (height - 1 - i) * row_bytes,
-             row_bytes);
+  const size_t source_row_bytes = pixmap.rowBytes();
+  const size_t source_height = pixmap.height();
+
+  SkImageInfo copy_rect_info = paint_image_.GetSkImageInfo().makeWH(
+      copy_rect.width(), copy_rect.height());
+  const size_t dest_row_bytes =
+      copy_rect_info.bytesPerPixel() * static_cast<size_t>(copy_rect.width());
+  const size_t dest_height = static_cast<size_t>(copy_rect.height());
+
+  // Source image has top left origin but destination resource provider doesn't.
+  // Usually it means resource provider has bottom left origin. Apply flip op
+  // on copy result to fix it.
+  bool dest_flipped = !resource_provider->IsOriginTopLeft();
+
+  std::vector<uint8_t> dest_pixels;
+  if (dest_flipped || source_row_bytes != dest_row_bytes ||
+      source_height != dest_height) {
+    dest_pixels.resize(dest_row_bytes * dest_height);
+
+    const size_t x_offset_bytes =
+        copy_rect_info.bytesPerPixel() * static_cast<size_t>(copy_rect.x());
+    const size_t y_offset = copy_rect.y();
+
+    for (size_t dst_y = 0; dst_y < dest_height; ++dst_y) {
+      size_t src_y = dest_flipped ? dest_height - dst_y - 1 : dst_y;
+      memcpy(dest_pixels.data() + dst_y * dest_row_bytes,
+             static_cast<const uint8_t*>(pixels) +
+                 (y_offset + src_y) * source_row_bytes + x_offset_bytes,
+             dest_row_bytes);
     }
-    pixels = flipped.data();
+    pixels = dest_pixels.data();
   }
 
-  return resource_provider->WritePixels(pixmap.info(), pixels, row_bytes,
+  return resource_provider->WritePixels(copy_rect_info, pixels, dest_row_bytes,
                                         /*x=*/0, /*y=*/0);
 }
 
-SkImageInfo UnacceleratedStaticBitmapImage::GetSkImageInfoInternal() const {
+SkImageInfo UnacceleratedStaticBitmapImage::GetSkImageInfo() const {
   return paint_image_.GetSkImageInfo().makeWH(paint_image_.width(),
                                               paint_image_.height());
 }

@@ -23,6 +23,8 @@
 
 #include "third_party/blink/renderer/core/dom/container_node.h"
 
+#include "third_party/blink/renderer/bindings/core/v8/v8_get_html_options.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_get_inner_html_options.h"
 #include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
 #include "third_party/blink/renderer/core/css/selector_query.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
@@ -30,40 +32,61 @@
 #include "third_party/blink/renderer/core/dom/child_frame_disconnector.h"
 #include "third_party/blink/renderer/core/dom/child_list_mutation_scope.h"
 #include "third_party/blink/renderer/core/dom/class_collection.h"
+#include "third_party/blink/renderer/core/dom/document_part_root.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/events/event_dispatch_forbidden_scope.h"
 #include "third_party/blink/renderer/core/dom/events/scoped_event_queue.h"
+#include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
+#include "third_party/blink/renderer/core/dom/layout_tree_builder_traversal.h"
 #include "third_party/blink/renderer/core/dom/name_node_list.h"
+#include "third_party/blink/renderer/core/dom/node.h"
 #include "third_party/blink/renderer/core/dom/node_child_removal_tracker.h"
+#include "third_party/blink/renderer/core/dom/node_cloning_data.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/node_lists_node_data.h"
 #include "third_party/blink/renderer/core/dom/node_rare_data.h"
 #include "third_party/blink/renderer/core/dom/node_traversal.h"
+#include "third_party/blink/renderer/core/dom/part.h"
+#include "third_party/blink/renderer/core/dom/part_root.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/dom/slot_assignment_recalc_forbidden_scope.h"
 #include "third_party/blink/renderer/core/dom/static_node_list.h"
 #include "third_party/blink/renderer/core/dom/whitespace_attacher.h"
+#include "third_party/blink/renderer/core/editing/serializers/serialization.h"
 #include "third_party/blink/renderer/core/events/mutation_event.h"
+#include "third_party/blink/renderer/core/execution_context/agent.h"
+#include "third_party/blink/renderer/core/frame/deprecation/deprecation.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
+#include "third_party/blink/renderer/core/html/forms/html_field_set_element.h"
+#include "third_party/blink/renderer/core/html/forms/html_form_element.h"
+#include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html/forms/radio_node_list.h"
 #include "third_party/blink/renderer/core/html/html_collection.h"
+#include "third_party/blink/renderer/core/html/html_dialog_element.h"
 #include "third_party/blink/renderer/core/html/html_document.h"
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
 #include "third_party/blink/renderer/core/html/html_tag_collection.h"
+#include "third_party/blink/renderer/core/html/html_template_element.h"
+#include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/layout/layout_block_flow.h"
+#include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/layout/layout_inline.h"
 #include "third_party/blink/renderer/core/layout/layout_text.h"
-#include "third_party/blink/renderer/core/layout/line/inline_text_box.h"
-#include "third_party/blink/renderer/core/layout/line/root_inline_box.h"
-#include "third_party/blink/renderer/core/layout/ng/inline/layout_ng_text_combine.h"
+#include "third_party/blink/renderer/core/layout/layout_text_combine.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
+#include "third_party/blink/renderer/core/timing/soft_navigation_heuristics.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/runtime_call_stats.h"
 #include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
-#include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
+#include "third_party/blink/renderer/platform/bindings/script_regexp.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
+#include "third_party/blink/renderer/platform/wtf/wtf_size_t.h"
 
 namespace blink {
 
@@ -148,12 +171,12 @@ static inline bool CollectChildrenAndRemoveFromOldParent(
   if (auto* fragment = DynamicTo<DocumentFragment>(node)) {
     GetChildNodes(*fragment, nodes);
     fragment->RemoveChildren();
-    return !nodes.IsEmpty();
+    return !nodes.empty();
   }
   nodes.push_back(&node);
   if (ContainerNode* old_parent = node.parentNode())
     old_parent->RemoveChild(&node, exception_state);
-  return !exception_state.HadException() && !nodes.IsEmpty();
+  return !exception_state.HadException() && !nodes.empty();
 }
 
 void ContainerNode::ParserTakeAllChildrenFrom(ContainerNode& old_parent) {
@@ -316,8 +339,7 @@ void ContainerNode::InsertNodeVector(
     const NodeVector& targets,
     Node* next,
     const Functor& mutator,
-    NodeVector* post_insertion_notification_targets) {
-  DCHECK(post_insertion_notification_targets);
+    NodeVector& post_insertion_notification_targets) {
   probe::WillInsertDOMNode(this);
   {
     EventDispatchForbiddenScope assert_no_event_dispatch;
@@ -331,7 +353,7 @@ void ContainerNode::InsertNodeVector(
       if (GetDocument().MayContainShadowRoots())
         child.CheckSlotChangeAfterInserted();
       probe::DidInsertDOMNode(&child);
-      NotifyNodeInsertedInternal(child, *post_insertion_notification_targets);
+      NotifyNodeInsertedInternal(child, post_insertion_notification_targets);
     }
   }
 }
@@ -342,9 +364,11 @@ void ContainerNode::DidInsertNodeVector(
     const NodeVector& post_insertion_notification_targets) {
   Node* unchanged_previous =
       targets.size() > 0 ? targets[0]->previousSibling() : nullptr;
+  const Document& document = GetDocument();
   for (const auto& target_node : targets) {
     ChildrenChanged(ChildrenChange::ForInsertion(
         *target_node, unchanged_previous, next, ChildrenChangeSource::kAPI));
+    CheckSoftNavigationHeuristicsTracking(document, *target_node);
   }
   for (const auto& descendant : post_insertion_notification_targets) {
     if (descendant->isConnected())
@@ -355,9 +379,6 @@ void ContainerNode::DidInsertNodeVector(
       DispatchChildInsertionEvents(*target_node);
   }
   DispatchSubtreeModifiedEvent();
-
-  if (AXObjectCache* cache = GetDocument().ExistingAXObjectCache())
-    cache->DidInsertChildrenOfNode(this);
 }
 
 class ContainerNode::AdoptAndInsertBefore {
@@ -398,9 +419,10 @@ Node* ContainerNode::InsertBefore(Node* new_child,
   // 2. Let reference child be child.
   // 3. If reference child is node, set it to node’s next sibling.
   if (ref_child == new_child) {
-    ref_child = new_child->nextSibling();
-    if (!ref_child)
+    if (!new_child->HasNextSibling()) {
       return AppendChild(new_child, exception_state);
+    }
+    ref_child = new_child->nextSibling();
   }
 
   // 4. Adopt node into parent’s node document.
@@ -421,7 +443,7 @@ Node* ContainerNode::InsertBefore(Node* new_child,
     SlotAssignmentRecalcForbiddenScope forbid_slot_recalc(GetDocument());
     ChildListMutationScope mutation(*this);
     InsertNodeVector(targets, ref_child, AdoptAndInsertBefore(),
-                     &post_insertion_notification_targets);
+                     post_insertion_notification_targets);
   }
   DidInsertNodeVector(targets, ref_child, post_insertion_notification_targets);
   return new_child;
@@ -439,8 +461,8 @@ void ContainerNode::InsertBeforeCommon(Node& next_child, Node& new_child) {
   // Use insertBefore if you need to handle reparenting (and want DOM mutation
   // events).
   DCHECK(!new_child.parentNode());
-  DCHECK(!new_child.nextSibling());
-  DCHECK(!new_child.previousSibling());
+  DCHECK(!new_child.HasNextSibling());
+  DCHECK(!new_child.HasPreviousSibling());
   DCHECK(!new_child.IsShadowRoot());
 
   Node* prev = next_child.previousSibling();
@@ -607,10 +629,10 @@ Node* ContainerNode::ReplaceChild(Node* new_child,
     // observers flag set.
     if (next) {
       InsertNodeVector(targets, next, AdoptAndInsertBefore(),
-                       &post_insertion_notification_targets);
+                       post_insertion_notification_targets);
     } else {
       InsertNodeVector(targets, nullptr, AdoptAndAppendChild(),
-                       &post_insertion_notification_targets);
+                       post_insertion_notification_targets);
     }
   }
   DidInsertNodeVector(targets, next, post_insertion_notification_targets);
@@ -628,7 +650,23 @@ void ContainerNode::WillRemoveChild(Node& child) {
   ChildListMutationScope(*this).WillRemoveChild(child);
   child.NotifyMutationObserversNodeWillDetach();
   DispatchChildRemovalEvents(child);
-  ChildFrameDisconnector(child).Disconnect();
+
+  // Only disconnect subframes in the non-state-preserving-atomic-move case,
+  // i.e., the traditional case where we intend to *fully* remove a node from
+  // the tree, instead of atomically re-inserting it.
+  if (!GetDocument().StatePreservingAtomicMoveInProgress()) {
+    // TODO(crbug.com/40150299): Mutation events should be suppressed during a
+    // state-preserving atomic move. Once this is implemented, enable the
+    // following CHECK which asserts that during this kind of move, the child
+    // node could not have moved documents during `DispatchChildRemovalEvents()`
+    // above.
+    //
+    // CHECK_EQ(GetDocument(), child.GetDocument());
+    ChildFrameDisconnector(
+        child, ChildFrameDisconnector::DisconnectReason::kDisconnectSelf)
+        .Disconnect();
+  }
+
   if (GetDocument() != child.GetDocument()) {
     // |child| was moved to another document by the DOM mutation event handler.
     return;
@@ -661,12 +699,22 @@ void ContainerNode::WillRemoveChildren() {
     DispatchChildRemovalEvents(child);
   }
 
-  ChildFrameDisconnector(*this).Disconnect(
-      ChildFrameDisconnector::kDescendantsOnly);
+  // Only disconnect subframes in the non-state-preserving-atomic-move case,
+  // i.e., the traditional case where we intend to *fully* remove a node from
+  // the tree, instead of atomically re-inserting it.
+  if (!GetDocument().StatePreservingAtomicMoveInProgress()) {
+    ChildFrameDisconnector(
+        *this, ChildFrameDisconnector::DisconnectReason::kDisconnectSelf)
+        .Disconnect(ChildFrameDisconnector::kDescendantsOnly);
+  }
 }
 
 LayoutBox* ContainerNode::GetLayoutBoxForScrolling() const {
   return GetLayoutBox();
+}
+
+bool ContainerNode::IsReadingFlowContainer() const {
+  return GetLayoutBox() ? GetLayoutBox()->IsReadingFlowContainer() : false;
 }
 
 void ContainerNode::Trace(Visitor* visitor) const {
@@ -682,7 +730,7 @@ static bool ShouldMergeCombinedTextAfterRemoval(const Node& old_child) {
   if (!layout_object)
     return false;
 
-  // Request to merge previous and next |LayoutNGTextCombine| of |child|.
+  // Request to merge previous and next |LayoutTextCombine| of |child|.
   // See http:://crbug.com/1227066
   auto* const previous_sibling = layout_object->PreviousSibling();
   if (!previous_sibling)
@@ -690,9 +738,10 @@ static bool ShouldMergeCombinedTextAfterRemoval(const Node& old_child) {
   auto* const next_sibling = layout_object->NextSibling();
   if (!next_sibling)
     return false;
-  if (UNLIKELY(IsA<LayoutNGTextCombine>(previous_sibling)) &&
-      UNLIKELY(IsA<LayoutNGTextCombine>(next_sibling)))
+  if (IsA<LayoutTextCombine>(previous_sibling) &&
+      IsA<LayoutTextCombine>(next_sibling)) [[unlikely]] {
     return true;
+  }
 
   // Request to merge combined texts in anonymous block.
   // See http://crbug.com/1233432
@@ -700,9 +749,11 @@ static bool ShouldMergeCombinedTextAfterRemoval(const Node& old_child) {
       !next_sibling->IsAnonymousBlock())
     return false;
 
-  return UNLIKELY(
-             IsA<LayoutNGTextCombine>(previous_sibling->SlowLastChild())) &&
-         UNLIKELY(IsA<LayoutNGTextCombine>(next_sibling->SlowFirstChild()));
+  if (IsA<LayoutTextCombine>(previous_sibling->SlowLastChild()) &&
+      IsA<LayoutTextCombine>(next_sibling->SlowFirstChild())) [[unlikely]] {
+    return true;
+  }
+  return false;
 }
 
 Node* ContainerNode::RemoveChild(Node* old_child,
@@ -721,7 +772,9 @@ Node* ContainerNode::RemoveChild(Node* old_child,
 
   Node* child = old_child;
 
-  GetDocument().RemoveFocusedElementOfSubtree(*child);
+  if (!GetDocument().StatePreservingAtomicMoveInProgress()) {
+    GetDocument().RemoveFocusedElementOfSubtree(*child);
+  }
 
   // Events fired when blurring currently focused node might have moved this
   // child into a different parent.
@@ -751,8 +804,9 @@ Node* ContainerNode::RemoveChild(Node* old_child,
   }
 
   if (!GetForceReattachLayoutTree() &&
-      UNLIKELY(ShouldMergeCombinedTextAfterRemoval(*child)))
+      ShouldMergeCombinedTextAfterRemoval(*child)) [[unlikely]] {
     SetForceReattachLayoutTree();
+  }
 
   {
     HTMLFrameOwnerElement::PluginDisposeSuspendScope suspend_plugin_dispose;
@@ -785,8 +839,10 @@ void ContainerNode::RemoveBetween(Node* previous_child,
 
   DCHECK_EQ(old_child.parentNode(), this);
 
-  if (InActiveDocument())
+  if (InActiveDocument() &&
+      !GetDocument().StatePreservingAtomicMoveInProgress()) {
     old_child.DetachLayoutTree();
+  }
 
   if (next_child)
     next_child->SetPreviousSibling(previous_child);
@@ -809,9 +865,12 @@ void ContainerNode::ParserRemoveChild(Node& old_child) {
   DCHECK(!old_child.IsDocumentFragment());
 
   // This may cause arbitrary Javascript execution via onunload handlers.
-  if (old_child.ConnectedSubframeCount())
-    ChildFrameDisconnector(old_child).Disconnect();
-
+  CHECK(!GetDocument().StatePreservingAtomicMoveInProgress());
+  if (old_child.ConnectedSubframeCount()) {
+    ChildFrameDisconnector(
+        old_child, ChildFrameDisconnector::DisconnectReason::kDisconnectSelf)
+        .Disconnect();
+  }
   if (old_child.parentNode() != this)
     return;
 
@@ -866,6 +925,7 @@ void ContainerNode::RemoveChildren(SubtreeModificationAction action) {
     TreeOrderedMap::RemoveScope tree_remove_scope;
     StyleEngine& engine = GetDocument().GetStyleEngine();
     StyleEngine::DetachLayoutTreeScope detach_scope(engine);
+    bool has_element_child = false;
     {
       SlotAssignmentRecalcForbiddenScope forbid_slot_recalc(GetDocument());
       StyleEngine::DOMRemovalScope style_scope(engine);
@@ -873,6 +933,9 @@ void ContainerNode::RemoveChildren(SubtreeModificationAction action) {
       ScriptForbiddenScope forbid_script;
 
       while (Node* child = first_child_) {
+        if (child->IsElementNode()) {
+          has_element_child = true;
+        }
         RemoveBetween(nullptr, child->nextSibling(), *child);
         NotifyNodeRemoved(*child);
         if (children_changed)
@@ -880,13 +943,13 @@ void ContainerNode::RemoveChildren(SubtreeModificationAction action) {
       }
     }
 
-    ChildrenChange change = {ChildrenChangeType::kAllChildrenRemoved,
-                             ChildrenChangeSource::kAPI,
-                             nullptr,
-                             nullptr,
-                             nullptr,
-                             std::move(removed_nodes),
-                             String()};
+    ChildrenChange change = {
+        .type = ChildrenChangeType::kAllChildrenRemoved,
+        .by_parser = ChildrenChangeSource::kAPI,
+        .affects_elements = has_element_child
+                                ? ChildrenChangeAffectsElements::kYes
+                                : ChildrenChangeAffectsElements::kNo,
+        .removed_nodes = std::move(removed_nodes)};
     ChildrenChanged(change);
   }
 
@@ -918,7 +981,7 @@ Node* ContainerNode::AppendChild(Node* new_child,
     SlotAssignmentRecalcForbiddenScope forbid_slot_recalc(GetDocument());
     ChildListMutationScope mutation(*this);
     InsertNodeVector(targets, nullptr, AdoptAndAppendChild(),
-                     &post_insertion_notification_targets);
+                     post_insertion_notification_targets);
   }
   DidInsertNodeVector(targets, nullptr, post_insertion_notification_targets);
   return new_child;
@@ -933,7 +996,7 @@ void ContainerNode::ParserAppendChild(Node* new_child) {
   DCHECK(!new_child->IsDocumentFragment());
   DCHECK(!IsA<HTMLTemplateElement>(this));
 
-  RUNTIME_CALL_TIMER_SCOPE(V8PerIsolateData::MainThreadIsolate(),
+  RUNTIME_CALL_TIMER_SCOPE(GetDocument().GetAgent().isolate(),
                            RuntimeCallStats::CounterId::kParserAppendChild);
 
   if (!CheckParserAcceptChild(*new_child))
@@ -958,6 +1021,83 @@ void ContainerNode::ParserAppendChild(Node* new_child) {
   }
 
   NotifyNodeInserted(*new_child, ChildrenChangeSource::kParser);
+}
+
+void ContainerNode::ParserAppendChildInDocumentFragment(Node* new_child) {
+  DCHECK(new_child);
+  DCHECK(CheckParserAcceptChild(*new_child));
+  DCHECK(!new_child->IsDocumentFragment());
+  DCHECK(!IsA<HTMLTemplateElement>(this));
+  DCHECK_EQ(new_child->GetDocument(), GetDocument());
+  DCHECK_EQ(&new_child->GetTreeScope(), &GetTreeScope());
+  DCHECK_EQ(new_child->parentNode(), nullptr);
+  EventDispatchForbiddenScope assert_no_event_dispatch;
+  ScriptForbiddenScope forbid_script;
+  AppendChildCommon(*new_child);
+  DCHECK_EQ(new_child->ConnectedSubframeCount(), 0u);
+  // TODO(sky): This has to happen for every add. It seems like it should be
+  // better factored.
+  ChildListMutationScope(*this).ChildAdded(*new_child);
+  probe::DidInsertDOMNode(this);
+}
+
+void ContainerNode::ParserFinishedBuildingDocumentFragment() {
+  EventDispatchForbiddenScope assert_no_event_dispatch;
+  ScriptForbiddenScope forbid_script;
+  const bool may_contain_shadow_roots = GetDocument().MayContainShadowRoots();
+
+  const ChildrenChange change =
+      ChildrenChange::ForFinishingBuildingDocumentFragmentTree();
+  for (Node& node : NodeTraversal::DescendantsOf(*this)) {
+    NotifyNodeAtEndOfBuildingFragmentTree(node, change,
+                                          may_contain_shadow_roots);
+  }
+
+  if (GetDocument().ShouldInvalidateNodeListCaches(nullptr)) {
+    GetDocument().InvalidateNodeListCaches(nullptr);
+  }
+}
+
+void ContainerNode::NotifyNodeAtEndOfBuildingFragmentTree(
+    Node& node,
+    const ChildrenChange& change,
+    bool may_contain_shadow_roots) {
+  // Fast path parser only creates disconnected nodes.
+  DCHECK(!node.isConnected());
+
+  if (may_contain_shadow_roots) {
+    node.CheckSlotChangeAfterInserted();
+  }
+
+  // As an optimization we don't notify leaf nodes when when inserting
+  // into detached subtrees that are not in a shadow tree, unless the
+  // node has DOM Parts attached.
+  if (!node.IsContainerNode() && !IsInShadowTree() && !node.GetDOMParts()) {
+    return;
+  }
+
+  // NotifyNodeInserted() keeps a list of nodes to call
+  // DidNotifySubtreeInsertionsToDocument() on if InsertedInto() returns
+  // kInsertionShouldCallDidNotifySubtreeInsertions, but only if the node
+  // is connected. None of the nodes are connected at this point, so it's
+  // not needed here.
+  node.InsertedInto(*this);
+
+  if (ShadowRoot* shadow_root = node.GetShadowRoot()) {
+    for (Node& shadow_node :
+         NodeTraversal::InclusiveDescendantsOf(*shadow_root)) {
+      NotifyNodeAtEndOfBuildingFragmentTree(shadow_node, change,
+                                            may_contain_shadow_roots);
+    }
+  }
+
+  // No node-lists should have been created at this (otherwise
+  // InvalidateNodeListCaches() would need to be called).
+  DCHECK(!RareData() || !RareData()->NodeLists());
+
+  if (node.IsContainerNode()) {
+    DynamicTo<ContainerNode>(node)->ChildrenChanged(change);
+  }
 }
 
 DISABLE_CFI_PERF
@@ -989,20 +1129,34 @@ DISABLE_CFI_PERF
 void ContainerNode::NotifyNodeInsertedInternal(
     Node& root,
     NodeVector& post_insertion_notification_targets) {
+  const bool is_state_preserving_atomic_insert =
+      GetDocument().StatePreservingAtomicMoveInProgress();
   EventDispatchForbiddenScope assert_no_event_dispatch;
   ScriptForbiddenScope forbid_script;
 
   for (Node& node : NodeTraversal::InclusiveDescendantsOf(root)) {
-    // As an optimization we don't notify leaf nodes when when inserting
-    // into detached subtrees that are not in a shadow tree.
-    if (!isConnected() && !IsInShadowTree() && !node.IsContainerNode())
+    // As an optimization we don't notify leaf nodes when inserting into
+    // detached subtrees that are not in a shadow tree, unless the node has DOM
+    // Parts attached.
+    if (!isConnected() && !IsInShadowTree() && !node.IsContainerNode() &&
+        !node.GetDOMParts()) {
       continue;
+    }
+
+    // Only tag the target as one that we need to call post-insertion steps on
+    // if it is being *fully* inserted, and not re-inserted as part of a
+    // state-preserving atomic move. That's because the post-insertion steps can
+    // run script and modify the frame tree, neither of which are allowed in a
+    // state-preserving atomic move.
     if (Node::kInsertionShouldCallDidNotifySubtreeInsertions ==
-        node.InsertedInto(*this))
+            node.InsertedInto(*this) &&
+        !is_state_preserving_atomic_insert) {
       post_insertion_notification_targets.push_back(&node);
-    if (ShadowRoot* shadow_root = node.GetShadowRoot())
+    }
+    if (ShadowRoot* shadow_root = node.GetShadowRoot()) {
       NotifyNodeInsertedInternal(*shadow_root,
                                  post_insertion_notification_targets);
+    }
   }
 }
 
@@ -1012,10 +1166,13 @@ void ContainerNode::NotifyNodeRemoved(Node& root) {
 
   for (Node& node : NodeTraversal::InclusiveDescendantsOf(root)) {
     // As an optimization we skip notifying Text nodes and other leaf nodes
-    // of removal when they're not in the Document tree and not in a shadow root
-    // since the virtual call to removedFrom is not needed.
-    if (!node.IsContainerNode() && !node.IsInTreeScope())
+    // of removal when they're not in the Document tree, not in a shadow root,
+    // and don't have DOM Parts, since the virtual call to removedFrom is not
+    // needed.
+    if (!node.IsContainerNode() && !node.IsInTreeScope() &&
+        !node.GetDOMParts()) {
       continue;
+    }
     node.RemovedFrom(*this);
     if (ShadowRoot* shadow_root = node.GetShadowRoot())
       NotifyNodeRemoved(*shadow_root);
@@ -1053,6 +1210,12 @@ void ContainerNode::DetachLayoutTree(bool performing_reattach) {
 void ContainerNode::ChildrenChanged(const ChildrenChange& change) {
   GetDocument().IncDOMTreeVersion();
   GetDocument().NotifyChangeChildren(*this, change);
+  if (change.type ==
+      ChildrenChangeType::kFinishedBuildingDocumentFragmentTree) {
+    // The rest of this is not necessary when building a DocumentFragment.
+    return;
+  }
+
   InvalidateNodeListCachesInAncestors(nullptr, nullptr, &change);
   if (change.IsChildRemoval() ||
       change.type == ChildrenChangeType::kAllChildrenRemoved) {
@@ -1066,13 +1229,19 @@ void ContainerNode::ChildrenChanged(const ChildrenChange& change) {
     inserted_node->ClearFlatTreeNodeDataIfHostChanged(*this);
   if (!InActiveDocument())
     return;
-  if (IsElementNode() && !GetComputedStyle()) {
-    // There is no need to mark for style recalc if the parent element does not
-    // Already have a ComputedStyle. For instance if we insert nodes into a
-    // display:none subtree. If this ContainerNode gets a ComputedStyle during
-    // the next style recalc, we will traverse into the inserted children since
-    // the ComputedStyle goes from null to non-null.
-    return;
+  if (Element* element = DynamicTo<Element>(this)) {
+    if (GetDocument().StatePreservingAtomicMoveInProgress()) {
+      CHECK(inserted_node->IsElementNode());
+      inserted_node->FlatTreeParentChanged();
+    }
+    if (!element->GetComputedStyle()) {
+      // There is no need to mark for style recalc if the parent element does
+      // not already have a ComputedStyle. For instance if we insert nodes into
+      // a display:none subtree. If this ContainerNode gets a ComputedStyle
+      // during the next style recalc, we will traverse into the inserted
+      // children since the ComputedStyle goes from null to non-null.
+      return;
+    }
   }
   if (inserted_node->IsContainerNode() || inserted_node->IsTextNode())
     inserted_node->SetStyleChangeOnInsertion();
@@ -1083,10 +1252,11 @@ bool ContainerNode::ChildrenChangedAllChildrenRemovedNeedsList() const {
 }
 
 void ContainerNode::CloneChildNodesFrom(const ContainerNode& node,
-                                        CloneChildrenFlag flag) {
-  DCHECK_NE(flag, CloneChildrenFlag::kSkip);
-  for (const Node& child : NodeTraversal::ChildrenOf(node))
-    AppendChild(child.Clone(GetDocument(), flag));
+                                        NodeCloningData& data) {
+  CHECK(data.Has(CloneOption::kIncludeDescendants));
+  for (const Node& child : NodeTraversal::ChildrenOf(node)) {
+    child.Clone(GetDocument(), data, this);
+  }
 }
 
 PhysicalRect ContainerNode::BoundingBox() const {
@@ -1095,166 +1265,36 @@ PhysicalRect ContainerNode::BoundingBox() const {
   return GetLayoutObject()->AbsoluteBoundingBoxRectHandlingEmptyInline();
 }
 
-// This is used by FrameSelection to denote when the active-state of the page
-// has changed independent of the focused element changing.
-void ContainerNode::FocusStateChanged() {
-  // If we're just changing the window's active state and the focused node has
-  // no layoutObject we can just ignore the state change.
-  if (!GetLayoutObject())
-    return;
-
-  StyleChangeType change_type =
-      GetComputedStyle()->HasPseudoElementStyle(kPseudoIdFirstLetter)
-          ? kSubtreeStyleChange
-          : kLocalStyleChange;
-  SetNeedsStyleRecalc(
-      change_type,
-      StyleChangeReasonForTracing::CreateWithExtraData(
-          style_change_reason::kPseudoClass, style_change_extra_data::g_focus));
-
-  if (auto* this_element = DynamicTo<Element>(this))
-    this_element->PseudoStateChanged(CSSSelector::kPseudoFocus);
-
-  InvalidateIfHasEffectiveAppearance();
-  FocusVisibleStateChanged();
-  FocusWithinStateChanged();
-}
-
-void ContainerNode::FocusVisibleStateChanged() {
-  if (!RuntimeEnabledFeatures::CSSFocusVisibleEnabled())
-    return;
-  StyleChangeType change_type =
-      GetComputedStyle()->HasPseudoElementStyle(kPseudoIdFirstLetter)
-          ? kSubtreeStyleChange
-          : kLocalStyleChange;
-  SetNeedsStyleRecalc(change_type,
-                      StyleChangeReasonForTracing::CreateWithExtraData(
-                          style_change_reason::kPseudoClass,
-                          style_change_extra_data::g_focus_visible));
-
-  if (auto* this_element = DynamicTo<Element>(this))
-    this_element->PseudoStateChanged(CSSSelector::kPseudoFocusVisible);
-}
-
-void ContainerNode::FocusWithinStateChanged() {
-  if (GetComputedStyle() && GetComputedStyle()->AffectedByFocusWithin()) {
-    StyleChangeType change_type =
-        GetComputedStyle()->HasPseudoElementStyle(kPseudoIdFirstLetter)
-            ? kSubtreeStyleChange
-            : kLocalStyleChange;
-    SetNeedsStyleRecalc(change_type,
-                        StyleChangeReasonForTracing::CreateWithExtraData(
-                            style_change_reason::kPseudoClass,
-                            style_change_extra_data::g_focus_within));
-  }
-  if (auto* this_element = DynamicTo<Element>(this))
-    this_element->PseudoStateChanged(CSSSelector::kPseudoFocusWithin);
-}
-
-void ContainerNode::SetFocused(bool received,
-                               mojom::blink::FocusType focus_type) {
-  // Recurse up author shadow trees to mark shadow hosts if it matches :focus.
-  // TODO(kochi): Handle UA shadows which marks multiple nodes as focused such
-  // as <input type="date"> the same way as author shadow.
-  if (ShadowRoot* root = ContainingShadowRoot()) {
-    if (!root->IsUserAgent())
-      OwnerShadowHost()->SetFocused(received, focus_type);
-  }
-
-  if (IsFocused() == received)
-    return;
-
-  Node::SetFocused(received, focus_type);
-
-  FocusStateChanged();
-
-  if (GetLayoutObject() || received)
-    return;
-
-  auto* this_element = DynamicTo<Element>(this);
-  // If :focus sets display: none, we lose focus but still need to recalc our
-  // style.
-  if (!this_element || !this_element->ChildrenOrSiblingsAffectedByFocus()) {
-    SetNeedsStyleRecalc(kLocalStyleChange,
-                        StyleChangeReasonForTracing::CreateWithExtraData(
-                            style_change_reason::kPseudoClass,
-                            style_change_extra_data::g_focus));
-  }
-  if (this_element)
-    this_element->PseudoStateChanged(CSSSelector::kPseudoFocus);
-
-  if (RuntimeEnabledFeatures::CSSFocusVisibleEnabled()) {
-    if (!this_element ||
-        !this_element->ChildrenOrSiblingsAffectedByFocusVisible()) {
-      SetNeedsStyleRecalc(kLocalStyleChange,
-                          StyleChangeReasonForTracing::CreateWithExtraData(
-                              style_change_reason::kPseudoClass,
-                              style_change_extra_data::g_focus_visible));
-    }
-    if (this_element)
-      this_element->PseudoStateChanged(CSSSelector::kPseudoFocusVisible);
-  }
-
-  if (!this_element ||
-      !this_element->ChildrenOrSiblingsAffectedByFocusWithin()) {
-    SetNeedsStyleRecalc(kLocalStyleChange,
-                        StyleChangeReasonForTracing::CreateWithExtraData(
-                            style_change_reason::kPseudoClass,
-                            style_change_extra_data::g_focus_within));
-  }
-  if (this_element)
-    this_element->PseudoStateChanged(CSSSelector::kPseudoFocusWithin);
-}
-
-void ContainerNode::SetHasFocusWithinUpToAncestor(bool flag, Node* ancestor) {
-  for (ContainerNode* node = this; node && node != ancestor;
-       node = FlatTreeTraversal::Parent(*node)) {
-    node->SetHasFocusWithin(flag);
-    node->FocusWithinStateChanged();
-  }
-}
-
-void ContainerNode::SetDragged(bool new_value) {
-  if (new_value == IsDragged())
-    return;
-
-  Node::SetDragged(new_value);
-
-  // If :-webkit-drag sets display: none we lose our dragging but still need
-  // to recalc our style.
-  if (!GetLayoutObject()) {
-    if (new_value)
-      return;
-    auto* this_element = DynamicTo<Element>(this);
-    if (this_element && this_element->ChildrenOrSiblingsAffectedByDrag()) {
-      this_element->PseudoStateChanged(CSSSelector::kPseudoDrag);
-
-    } else {
-      SetNeedsStyleRecalc(kLocalStyleChange,
-                          StyleChangeReasonForTracing::CreateWithExtraData(
-                              style_change_reason::kPseudoClass,
-                              style_change_extra_data::g_drag));
-    }
-    return;
-  }
-
-  if (GetComputedStyle()->AffectedByDrag()) {
-    StyleChangeType change_type =
-        GetComputedStyle()->HasPseudoElementStyle(kPseudoIdFirstLetter)
-            ? kSubtreeStyleChange
-            : kLocalStyleChange;
-    SetNeedsStyleRecalc(change_type,
-                        StyleChangeReasonForTracing::CreateWithExtraData(
-                            style_change_reason::kPseudoClass,
-                            style_change_extra_data::g_drag));
-  }
-  auto* this_element = DynamicTo<Element>(this);
-  if (this_element && this_element->ChildrenOrSiblingsAffectedByDrag())
-    this_element->PseudoStateChanged(CSSSelector::kPseudoDrag);
-}
-
-HTMLCollection* ContainerNode::Children() {
+HTMLCollection* ContainerNode::children() {
   return EnsureCachedCollection<HTMLCollection>(kNodeChildren);
+}
+
+Element* ContainerNode::firstElementChild() {
+  return ElementTraversal::FirstChild(*this);
+}
+
+Element* ContainerNode::lastElementChild() {
+  return ElementTraversal::LastChild(*this);
+}
+
+unsigned ContainerNode::childElementCount() {
+  unsigned count = 0;
+  for (Element* child = ElementTraversal::FirstChild(*this); child;
+       child = ElementTraversal::NextSibling(*child)) {
+    ++count;
+  }
+  return count;
+}
+
+Element* ContainerNode::querySelector(const AtomicString& selectors,
+                                      ExceptionState& exception_state) {
+  return QuerySelector(selectors, exception_state);
+}
+
+StaticElementList* ContainerNode::querySelectorAll(
+    const AtomicString& selectors,
+    ExceptionState& exception_state) {
+  return QuerySelectorAll(selectors, exception_state);
 }
 
 unsigned ContainerNode::CountChildren() const {
@@ -1262,6 +1302,24 @@ unsigned ContainerNode::CountChildren() const {
   for (Node* node = firstChild(); node; node = node->nextSibling())
     count++;
   return count;
+}
+
+bool ContainerNode::HasOnlyText() const {
+  bool has_text = false;
+  for (Node* child = firstChild(); child; child = child->nextSibling()) {
+    switch (child->getNodeType()) {
+      case kTextNode:
+      case kCdataSectionNode:
+        has_text = has_text || !To<Text>(child)->data().empty();
+        break;
+      case kCommentNode:
+        // Ignore comments.
+        break;
+      default:
+        return false;
+    }
+  }
+  return has_text;
 }
 
 Element* ContainerNode::QuerySelector(const AtomicString& selectors,
@@ -1293,25 +1351,26 @@ StaticElementList* ContainerNode::QuerySelectorAll(
 }
 
 static void DispatchChildInsertionEvents(Node& child) {
-  if (child.IsInShadowTree())
+  Document& document = child.GetDocument();
+  if (child.IsInShadowTree() || document.ShouldSuppressMutationEvents()) {
     return;
+  }
 
 #if DCHECK_IS_ON()
   DCHECK(!EventDispatchForbiddenScope::IsEventDispatchForbidden());
 #endif
 
   Node* c = &child;
-  Document* document = &child.GetDocument();
 
   if (c->parentNode() &&
-      document->HasListenerType(Document::kDOMNodeInsertedListener)) {
+      document.HasListenerType(Document::kDOMNodeInsertedListener)) {
     c->DispatchScopedEvent(
         *MutationEvent::Create(event_type_names::kDOMNodeInserted,
                                Event::Bubbles::kYes, c->parentNode()));
   }
 
   // dispatch the DOMNodeInsertedIntoDocument event to all descendants
-  if (c->isConnected() && document->HasListenerType(
+  if (c->isConnected() && document.HasListenerType(
                               Document::kDOMNodeInsertedIntoDocumentListener)) {
     for (; c; c = NodeTraversal::Next(*c, &child)) {
       c->DispatchScopedEvent(*MutationEvent::Create(
@@ -1321,8 +1380,10 @@ static void DispatchChildInsertionEvents(Node& child) {
 }
 
 static void DispatchChildRemovalEvents(Node& child) {
-  if (child.IsInShadowTree()) {
-    probe::WillRemoveDOMNode(&child);
+  probe::WillRemoveDOMNode(&child);
+
+  Document& document = child.GetDocument();
+  if (child.IsInShadowTree() || document.ShouldSuppressMutationEvents()) {
     return;
   }
 
@@ -1330,10 +1391,7 @@ static void DispatchChildRemovalEvents(Node& child) {
   DCHECK(!EventDispatchForbiddenScope::IsEventDispatchForbidden());
 #endif
 
-  probe::WillRemoveDOMNode(&child);
-
   Node* c = &child;
-  Document& document = child.GetDocument();
 
   // Dispatch pre-removal mutation events.
   if (c->parentNode() &&
@@ -1355,14 +1413,6 @@ static void DispatchChildRemovalEvents(Node& child) {
   }
 }
 
-bool ContainerNode::HasRestyleFlagInternal(DynamicRestyleFlags mask) const {
-  return RareData()->HasRestyleFlag(mask);
-}
-
-bool ContainerNode::HasRestyleFlagsInternal() const {
-  return RareData()->HasRestyleFlags();
-}
-
 void ContainerNode::SetRestyleFlag(DynamicRestyleFlags mask) {
   DCHECK(IsElementNode() || IsShadowRoot());
   EnsureRareData().SetRestyleFlag(mask);
@@ -1374,31 +1424,15 @@ void ContainerNode::RecalcDescendantStyles(
   DCHECK(GetDocument().InStyleRecalc());
   DCHECK(!NeedsStyleRecalc());
 
-  StyleRecalcChange local_change = change;
   for (Node* child = firstChild(); child; child = child->nextSibling()) {
-    if (!local_change.TraverseChild(*child))
+    if (!change.TraverseChild(*child)) {
       continue;
+    }
     if (auto* child_text_node = DynamicTo<Text>(child))
-      child_text_node->RecalcTextStyle(local_change);
+      child_text_node->RecalcTextStyle(change);
 
     if (auto* child_element = DynamicTo<Element>(child)) {
-      local_change = local_change.Combine(
-          child_element->RecalcStyle(local_change, style_recalc_context));
-    }
-  }
-}
-
-void ContainerNode::RecalcSubsequentSiblingStyles(
-    const StyleRecalcChange change,
-    const StyleRecalcContext& style_recalc_context) {
-  DCHECK(GetDocument().InStyleRecalc());
-  DCHECK(!NeedsStyleRecalc());
-
-  // TODO(crbug.com/1356098): Use flat-tree siblings.
-  for (Node* sibling = nextSibling(); sibling;
-       sibling = sibling->nextSibling()) {
-    if (auto* sibling_element = DynamicTo<Element>(sibling)) {
-      sibling_element->RecalcStyle(change, style_recalc_context);
+      child_element->RecalcStyle(change, style_recalc_context);
     }
   }
 }
@@ -1521,17 +1555,24 @@ void ContainerNode::InvalidateNodeListCachesInAncestors(
   if (change && change->type == ChildrenChangeType::kTextChanged)
     return;
 
-  if (HasRareData() && (!attr_name || IsAttributeNode())) {
-    if (NodeListsNodeData* lists = RareData()->NodeLists()) {
-      if (ChildNodeList* child_node_list = lists->GetChildNodeList(*this)) {
-        if (change) {
-          child_node_list->ChildrenChanged(*change);
-        } else {
-          child_node_list->InvalidateCache();
+  if (!attr_name || IsAttributeNode()) {
+    if (const NodeRareData* data = RareData()) {
+      if (NodeListsNodeData* lists = data->NodeLists()) {
+        if (ChildNodeList* child_node_list = lists->GetChildNodeList(*this)) {
+          if (change) {
+            child_node_list->ChildrenChanged(*change);
+          } else {
+            child_node_list->InvalidateCache();
+          }
         }
       }
     }
   }
+
+  // This is a performance optimization, NodeList cache invalidation is
+  // not necessary for non-element nodes.
+  if (change && change->affects_elements == ChildrenChangeAffectsElements::kNo)
+    return;
 
   // Modifications to attributes that are not associated with an Element can't
   // invalidate NodeList caches.
@@ -1565,8 +1606,8 @@ HTMLCollection* ContainerNode::getElementsByTagNameNS(
     const AtomicString& namespace_uri,
     const AtomicString& local_name) {
   return EnsureCachedCollection<TagCollectionNS>(
-      kTagCollectionNSType,
-      namespace_uri.IsEmpty() ? g_null_atom : namespace_uri, local_name);
+      kTagCollectionNSType, namespace_uri.empty() ? g_null_atom : namespace_uri,
+      local_name);
 }
 
 // Takes an AtomicString in argument because it is common for elements to share
@@ -1593,17 +1634,67 @@ RadioNodeList* ContainerNode::GetRadioNodeList(const AtomicString& name,
   return EnsureCachedCollection<RadioNodeList>(type, name);
 }
 
+String ContainerNode::FindTextInElementWith(
+    const AtomicString& substring,
+    base::FunctionRef<bool(const String&)> validity_checker) const {
+  for (Element& element : ElementTraversal::DescendantsOf(*this)) {
+    String text;
+    if (element.HasTagName(html_names::kInputTag) &&
+        element.FastHasAttribute(html_names::kReadonlyAttr) &&
+        EqualIgnoringASCIICase(element.FastGetAttribute(html_names::kTypeAttr),
+                               "text") &&
+        RuntimeEnabledFeatures::FindTextInReadonlyTextInputEnabled()) {
+      text = To<HTMLInputElement>(element).Value();
+    } else if (element.HasOnlyText()) {
+      text = element.TextFromChildren();
+    }
+
+    if (text.empty()) {
+      continue;
+    }
+
+    if (text.FindIgnoringASCIICase(substring) != WTF::kNotFound &&
+        validity_checker(text)) {
+      return text;
+    }
+  }
+
+  return String();
+}
+
+StaticNodeList* ContainerNode::FindAllTextNodesMatchingRegex(
+    const String& regex) const {
+  blink::HeapVector<Member<Node>> nodes_matching_regex;
+  Node* node = FlatTreeTraversal::FirstWithin(*this);
+  ScriptRegexp* raw_regexp = MakeGarbageCollected<ScriptRegexp>(
+      GetDocument().GetAgent().isolate(), regex, kTextCaseASCIIInsensitive);
+  while (node) {
+    if (node->IsTextNode()) {
+      String text = To<Text>(node)->data();
+      if (!text.empty()) {
+        int match_offset = raw_regexp->Match(text);
+        if (match_offset >= 0) {
+          nodes_matching_regex.push_back(node);
+        }
+      }
+    }
+    node = FlatTreeTraversal::Next(*node, this);
+  }
+
+  return StaticNodeList::Adopt(nodes_matching_regex);
+}
+
 Element* ContainerNode::getElementById(const AtomicString& id) const {
   // According to https://dom.spec.whatwg.org/#concept-id, empty IDs are
   // treated as equivalent to the lack of an id attribute.
-  if (id.IsEmpty()) {
+  if (id.empty()) {
     return nullptr;
   }
 
   if (IsInTreeScope()) {
     // Fast path if we are in a tree scope: call getElementById() on tree scope
     // and check if the matching element is in our subtree.
-    Element* element = ContainingTreeScope().getElementById(id);
+    Element* element = GetTreeScope().getElementById(id);
     if (!element)
       return nullptr;
     if (element->IsDescendantOf(this))
@@ -1621,6 +1712,141 @@ Element* ContainerNode::getElementById(const AtomicString& id) const {
 
 NodeListsNodeData& ContainerNode::EnsureNodeLists() {
   return EnsureRareData().EnsureNodeLists();
+}
+
+// https://html.spec.whatwg.org/C/#autofocus-delegate
+Element* ContainerNode::GetAutofocusDelegate() const {
+  Element* element = ElementTraversal::Next(*this, this);
+  while (element) {
+    if (!element->IsAutofocusable()) {
+      element = ElementTraversal::Next(*element, this);
+      continue;
+    }
+
+    Element* focusable_area =
+        element->IsFocusable() ? element : element->GetFocusableArea();
+    if (!focusable_area) {
+      element = ElementTraversal::Next(*element, this);
+      continue;
+    }
+
+    // The spec says to continue instead of returning focusable_area if
+    // focusable_area is not click-focusable and the call was initiated by the
+    // user clicking. I don't believe this is currently possible, so DCHECK
+    // instead.
+    DCHECK(focusable_area->IsMouseFocusable());
+
+    return focusable_area;
+  }
+
+  return nullptr;
+}
+
+// https://dom.spec.whatwg.org/#dom-parentnode-replacechildren
+void ContainerNode::ReplaceChildren(const VectorOf<Node>& nodes,
+                                    ExceptionState& exception_state) {
+  // 1. Let node be the result of converting nodes into a node given nodes and
+  // this’s node document.
+  Node* node =
+      ConvertNodesIntoNode(this, nodes, GetDocument(), exception_state);
+  if (exception_state.HadException()) {
+    return;
+  }
+
+  // 2. Ensure pre-insertion validity of node into this before null.
+  if (!EnsurePreInsertionValidity(*node, nullptr, nullptr, exception_state)) {
+    return;
+  }
+
+  // 3. Replace all with node within this.
+  ChildListMutationScope mutation(*this);
+  while (Node* first_child = firstChild()) {
+    RemoveChild(first_child, exception_state);
+    if (exception_state.HadException()) {
+      return;
+    }
+  }
+
+  AppendChild(node, exception_state);
+}
+
+void ContainerNode::CheckSoftNavigationHeuristicsTracking(
+    const Document& document,
+    Node& inserted_node) {
+  if (!document.IsTrackingSoftNavigationHeuristics()) {
+    return;
+  }
+  LocalDOMWindow* window = document.domWindow();
+  if (!window) {
+    return;
+  }
+  LocalFrame* frame = window->GetFrame();
+  if (!frame || !frame->IsMainFrame()) {
+    return;
+  }
+
+  if (SoftNavigationHeuristics* heuristics =
+          SoftNavigationHeuristics::From(*window)) {
+    // TODO(crbug.com/1521100): This does not filter out updates from isolated
+    // worlds. Should it?
+    if (heuristics->ModifiedDOM()) {
+      if (inserted_node.IsHTMLElement()) {
+        inserted_node.SetIsModifiedBySoftNavigation();
+      } else {
+        SetIsModifiedBySoftNavigation();
+      }
+    }
+  }
+}
+
+String ContainerNode::getInnerHTML(const GetInnerHTMLOptions* options) const {
+  CHECK(RuntimeEnabledFeatures::ElementGetInnerHTMLEnabled());
+  DCHECK(IsShadowRoot() || IsElementNode());
+
+  auto* context = GetExecutionContext();
+  context->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
+      mojom::blink::ConsoleMessageSource::kDeprecation,
+      mojom::blink::ConsoleMessageLevel::kWarning,
+      "The getInnerHTML() function is non-standard, deprecated, and will "
+      "be removed from this browser very soon. At that point, this console "
+      "warning will become a JavaScript exception. Please use getHTML() "
+      "instead. See https://chromestatus.com/feature/5081733588582400 for "
+      "more information."));
+  Deprecation::CountDeprecation(context, WebFeature::kElementGetInnerHTML);
+
+  // This is the deprecated behavior: if includeShadowRoots is true, then
+  // include *all* open shadow roots (even if they aren't marked serializable).
+  // If includeShadowRoots is true and closedRoots is provided, also serialize
+  // the provided shadow roots, even if they're closed.
+  ShadowRootInclusion shadow_root_inclusion{
+      options->includeShadowRoots()
+          ? ShadowRootInclusion::Behavior::kIncludeAllOpenShadowRoots
+          : ShadowRootInclusion::Behavior::kOnlyProvidedShadowRoots};
+  if (options->includeShadowRoots() && options->hasClosedRoots()) {
+    for (auto& shadow_root : options->closedRoots()) {
+      shadow_root_inclusion.include_shadow_roots.insert(shadow_root);
+    }
+  }
+
+  return CreateMarkup(this, kChildrenOnly, kDoNotResolveURLs,
+                      shadow_root_inclusion);
+}
+
+String ContainerNode::getHTML(const GetHTMLOptions* options,
+                              ExceptionState& exception_state) const {
+  DCHECK(options && options->hasSerializableShadowRoots())
+      << "Should have IDL default";
+  DCHECK(options->hasShadowRoots()) << "Should have IDL default";
+  DCHECK(IsShadowRoot() || IsElementNode());
+  ShadowRootInclusion shadow_root_inclusion{
+      options->serializableShadowRoots()
+          ? ShadowRootInclusion::Behavior::kIncludeAnySerializableShadowRoots
+          : ShadowRootInclusion::Behavior::kOnlyProvidedShadowRoots};
+  for (auto& shadow_root : options->shadowRoots()) {
+    shadow_root_inclusion.include_shadow_roots.insert(shadow_root);
+  }
+  return CreateMarkup(this, kChildrenOnly, kDoNotResolveURLs,
+                      shadow_root_inclusion);
 }
 
 }  // namespace blink

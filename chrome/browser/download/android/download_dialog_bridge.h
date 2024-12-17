@@ -5,14 +5,17 @@
 #ifndef CHROME_BROWSER_DOWNLOAD_ANDROID_DOWNLOAD_DIALOG_BRIDGE_H_
 #define CHROME_BROWSER_DOWNLOAD_ANDROID_DOWNLOAD_DIALOG_BRIDGE_H_
 
+#include <optional>
+
 #include "base/android/jni_android.h"
 #include "base/android/scoped_java_ref.h"
-#include "base/callback.h"
 #include "base/files/file_path.h"
+#include "base/functional/callback.h"
 #include "chrome/browser/download/download_dialog_types.h"
 #include "net/base/network_change_notifier.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/native_widget_types.h"
+
+class Profile;
 
 // Contains all the user selection from download dialogs.
 struct DownloadDialogResult {
@@ -33,9 +36,6 @@ class DownloadDialogBridge {
  public:
   using DialogCallback = base::OnceCallback<void(DownloadDialogResult)>;
 
-  static long GetDownloadLaterMinFileSize();
-  static bool ShouldShowDateTimePicker();
-
   DownloadDialogBridge();
   DownloadDialogBridge(const DownloadDialogBridge&) = delete;
   DownloadDialogBridge& operator=(const DownloadDialogBridge&) = delete;
@@ -49,14 +49,12 @@ class DownloadDialogBridge {
       net::NetworkChangeNotifier::ConnectionType connection_type,
       DownloadLocationDialogType dialog_type,
       const base::FilePath& suggested_path,
-      bool is_incognito,
+      Profile* profile,
       DialogCallback dialog_callback);
 
   void OnComplete(JNIEnv* env,
                   const base::android::JavaParamRef<jobject>& obj,
-                  const base::android::JavaParamRef<jstring>& returned_path,
-                  jboolean on_wifi,
-                  jlong start_time);
+                  const base::android::JavaParamRef<jstring>& returned_path);
 
   void OnCanceled(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
 

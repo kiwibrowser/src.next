@@ -6,8 +6,7 @@
 #include <utility>
 #include <vector>
 
-#include "ash/public/cpp/app_list/app_list_config.h"
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/run_loop.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/chrome_app_icon.h"
@@ -26,13 +25,14 @@
 #include "ui/gfx/image/image_skia_rep.h"
 #include "ui/gfx/image/image_unittest_util.h"
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
 #include "ash/components/arc/test/fake_app_instance.h"
+#include "ash/public/cpp/app_list/app_list_config.h"
+#include "chrome/browser/ash/app_list/arc/arc_app_test.h"
 #include "chrome/browser/ash/arc/arc_util.h"
-#include "chrome/browser/chromeos/extensions/gfx_utils.h"
-#include "chrome/browser/ui/app_list/arc/arc_app_test.h"
+#include "chrome/browser/ash/extensions/gfx_utils.h"
 #include "ui/chromeos/resources/grit/ui_chromeos_resources.h"
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 namespace extensions {
 
@@ -113,8 +113,11 @@ class TestAppIconLoader : public AppIconLoaderDelegate {
   ~TestAppIconLoader() override = default;
 
   // AppIconLoaderDelegate:
-  void OnAppImageUpdated(const std::string& app_id,
-                         const gfx::ImageSkia& image) override {
+  void OnAppImageUpdated(
+      const std::string& app_id,
+      const gfx::ImageSkia& image,
+      bool is_placeholder_icon,
+      const std::optional<gfx::ImageSkia>& badge_image) override {
     image_skia_ = image;
   }
 
@@ -165,7 +168,7 @@ bool AreEqual(const gfx::ImageSkia& image1, const gfx::ImageSkia& image2) {
   return gfx::test::AreImagesEqual(gfx::Image(image1), gfx::Image(image2));
 }
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
 // Returns true if |res| image is the |src| image with badge identified by
 // |badge_type| resource. If |grayscale| is true applies HSL shift for the
 // comparison.
@@ -201,11 +204,10 @@ class ChromeAppIconTest : public ExtensionServiceTestBase {
   void SetUp() override {
     ExtensionServiceTestBase::SetUp();
 
-    const base::FilePath source_install_dir =
-        data_dir().AppendASCII("app_list").AppendASCII("Extensions");
-    const base::FilePath pref_path =
-        source_install_dir.DirName().Append(chrome::kPreferencesFilename);
-    InitializeInstalledExtensionService(pref_path, source_install_dir);
+    ExtensionServiceInitParams params;
+    ASSERT_TRUE(params.ConfigureByTestDataDirectory(
+        data_dir().AppendASCII("app_list")));
+    InitializeExtensionService(std::move(params));
     service_->Init();
   }
 };
@@ -240,7 +242,7 @@ TEST_F(ChromeAppIconTest, IconLifeCycle) {
   const size_t update_count_after_disable = reference_icon.icon_update_count();
   EXPECT_NE(2U, update_count_after_disable);
   EXPECT_FALSE(IsBlankImage(reference_icon.image_skia()));
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   EXPECT_TRUE(IsBadgeApplied(image_before_disable, reference_icon.image_skia(),
                              ChromeAppIcon::Badge::kBlocked,
                              true /* grayscale */));
@@ -271,7 +273,7 @@ TEST_F(ChromeAppIconTest, IconRelease) {
   test_icon2.Reset();
 }
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
 
 TEST_F(ChromeAppIconTest, ChromeBadging) {
   ArcAppTest arc_test;
@@ -312,6 +314,6 @@ TEST_F(ChromeAppIconTest, ChromeBadging) {
   EXPECT_TRUE(AreEqual(reference_icon.image_skia(), image_before_badging));
 }
 
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 }  // namespace extensions

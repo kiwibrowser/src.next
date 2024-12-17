@@ -11,31 +11,37 @@
 #include <string>
 #include <unordered_map>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "base/timer/elapsed_timer.h"
 #include "content/public/browser/media_stream_request.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "extensions/browser/deferred_start_render_host.h"
 #include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/browser/extension_registry_observer.h"
+#include "extensions/common/extension_id.h"
 #include "extensions/common/mojom/view_type.mojom.h"
 #include "extensions/common/stack_frame.h"
+
+namespace base {
+class ElapsedTimer;
+}  // namespace base
 
 namespace content {
 class BrowserContext;
 class RenderProcessHost;
 class SiteInstance;
-}
+}  // namespace content
 
 namespace extensions {
 class Extension;
 class ExtensionHostDelegate;
 class ExtensionHostObserver;
 class ExtensionHostQueue;
+
+enum class EventDispatchSource;
 
 // This class is the browser component of an extension component's page.
 // It handles setting up the renderer process, if needed, with special
@@ -65,7 +71,7 @@ class ExtensionHost : public DeferredStartRenderHost,
   // This may be null if the extension has been or is being unloaded.
   const Extension* extension() const { return extension_; }
 
-  const std::string& extension_id() const { return extension_id_; }
+  const ExtensionId& extension_id() const { return extension_id_; }
   content::WebContents* host_contents() const { return host_contents_.get(); }
   content::RenderFrameHost* main_frame_host() const { return main_frame_host_; }
   content::RenderProcessHost* render_process_host() const;
@@ -105,9 +111,13 @@ class ExtensionHost : public DeferredStartRenderHost,
   void AddObserver(ExtensionHostObserver* observer);
   void RemoveObserver(ExtensionHostObserver* observer);
 
-  // Called when an event is dispatched to the event page associated with this
-  // ExtensionHost.
-  void OnBackgroundEventDispatched(const std::string& event_name, int event_id);
+  // Called when an event is dispatched to a lazy background page associated
+  // with this ExtensionHost.
+  void OnBackgroundEventDispatched(const std::string& event_name,
+                                   base::TimeTicks dispatch_start_time,
+                                   int event_id,
+                                   EventDispatchSource dispatch_source,
+                                   bool lazy_background_active_on_dispatch);
 
   // Called by the ProcessManager when a network request is started by the
   // extension corresponding to this ExtensionHost.
@@ -120,9 +130,11 @@ class ExtensionHost : public DeferredStartRenderHost,
   // Returns true if the ExtensionHost is allowed to be navigated.
   bool ShouldAllowNavigations() const;
 
+  std::size_t GetUnackedMessagesSizeForTesting() const {
+    return unacked_messages_.size();
+  }
+
   // content::WebContentsObserver:
-  bool OnMessageReceived(const IPC::Message& message,
-                         content::RenderFrameHost* host) override;
   void RenderFrameCreated(content::RenderFrameHost* frame_host) override;
   void RenderFrameHostChanged(content::RenderFrameHost* old_host,
                               content::RenderFrameHost* new_host) override;
@@ -134,20 +146,21 @@ class ExtensionHost : public DeferredStartRenderHost,
   // content::WebContentsDelegate:
   content::JavaScriptDialogManager* GetJavaScriptDialogManager(
       content::WebContents* source) override;
-  void AddNewContents(content::WebContents* source,
-                      std::unique_ptr<content::WebContents> new_contents,
-                      const GURL& target_url,
-                      WindowOpenDisposition disposition,
-                      const blink::mojom::WindowFeatures& window_features,
-                      bool user_gesture,
-                      bool* was_blocked) override;
+  content::WebContents* AddNewContents(
+      content::WebContents* source,
+      std::unique_ptr<content::WebContents> new_contents,
+      const GURL& target_url,
+      WindowOpenDisposition disposition,
+      const blink::mojom::WindowFeatures& window_features,
+      bool user_gesture,
+      bool* was_blocked) override;
   void CloseContents(content::WebContents* contents) override;
   void RequestMediaAccessPermission(
       content::WebContents* web_contents,
       const content::MediaStreamRequest& request,
       content::MediaResponseCallback callback) override;
   bool CheckMediaAccessPermission(content::RenderFrameHost* render_frame_host,
-                                  const GURL& security_origin,
+                                  const url::Origin& security_origin,
                                   blink::mojom::MediaStreamType type) override;
   bool IsNeverComposited(content::WebContents* web_contents) override;
   content::PictureInPictureResult EnterPictureInPicture(
@@ -163,6 +176,16 @@ class ExtensionHost : public DeferredStartRenderHost,
                            const Extension* extension,
                            UnloadedExtensionReason reason) override;
 
+  // Notifies observers when an event has been acknowledged from the renderer to
+  // the browser. `event_has_listener_in_background_context` being set to true
+  // emits histograms for some events that (when dispatched) should have ran in
+  // the extension's background page. Of note:
+  // `event_has_listener_in_background_context` is provided by the renderer when
+  // the event is dispatched and is therefore not a reliable confirmation that
+  // an event ran in the background page, but instead that it should have run in
+  // the background page and is good enough for metrics purposes.
+  void OnEventAck(int event_id, bool event_has_listener_in_background_context);
+
  protected:
   // Called each time this ExtensionHost completes a load finishes loading,
   // before any stop-loading notifications or observer methods are called.
@@ -175,11 +198,31 @@ class ExtensionHost : public DeferredStartRenderHost,
   virtual bool IsBackgroundPage() const;
 
  private:
+  struct UnackedEventData {
+    // The event to dispatch.
+    std::string event_name;
+
+    // When the event router received the event to be dispatched to the
+    // extension. Used in UMA histograms.
+    base::TimeTicks dispatch_start_time;
+
+    // The event dispatching processing flow that was followed for this event.
+    EventDispatchSource dispatch_source;
+
+    // `true` if the event was dispatched to a active/running lazy background.
+    // Used in UMA histograms.
+    bool lazy_background_active_on_dispatch;
+  };
+
+  // Emits a stale event ack metric if an event with `event_id` is not present
+  // in `unacked_messages_`. Meaning that the event was not yet acked by the
+  // renderer to the browser.
+  void EmitLateAckedEventTask(int event_id);
+
   // DeferredStartRenderHost:
   void CreateRendererNow() override;
 
   // Message handlers.
-  void OnEventAck(int event_id);
   void OnIncrementLazyKeepaliveCount();
   void OnDecrementLazyKeepaliveCount();
 
@@ -196,7 +239,7 @@ class ExtensionHost : public DeferredStartRenderHost,
   raw_ptr<const Extension> extension_;
 
   // Id of extension that we're hosting in this view.
-  const std::string extension_id_;
+  const ExtensionId extension_id_;
 
   // The browser context that this host is tied to.
   raw_ptr<content::BrowserContext> browser_context_;
@@ -231,18 +274,11 @@ class ExtensionHost : public DeferredStartRenderHost,
   GURL initial_url_;
 
   // Messages sent out to the renderer that have not been acknowledged yet.
-  // Maps event ID to event name.
-  std::unordered_map<int, std::string> unacked_messages_;
+  // Maps event ID to unacknowledged event information.
+  std::map<int, UnackedEventData> unacked_messages_;
 
   // The type of view being hosted.
   mojom::ViewType extension_host_type_;
-
-  // Measures how long since the ExtensionHost object was created. This can be
-  // used to measure the responsiveness of UI. For example, it's important to
-  // keep this as low as possible for popups. Contrast this to |load_start_|,
-  // for which a low value does not necessarily mean a responsive UI, as
-  // ExtensionHosts may sit in an ExtensionHostQueue for a long time.
-  base::ElapsedTimer create_start_;
 
   // Measures how long since the initial URL started loading. This timer is
   // started only once the ExtensionHost has exited the ExtensionHostQueue.

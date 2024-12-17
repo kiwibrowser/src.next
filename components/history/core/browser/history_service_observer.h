@@ -38,6 +38,15 @@ class HistoryServiceObserver {
                             const URLRow& url_row,
                             const VisitRow& new_visit) {}
 
+  // Same as above, but including the navigation_id from the underlying
+  // `content::NavigationHandle`. Observers only need to override `OnURLVisited`
+  // or `OnNavigationURLVisited`, but not both.
+  virtual void OnURLVisitedWithNavigationId(
+      HistoryService* history_service,
+      const URLRow& url_row,
+      const VisitRow& new_visit,
+      std::optional<int64_t> local_navigation_id) {}
+
   // Called when a URL has a metadata-only update. In situations where a URL has
   // a metadata-only update AND new visits, both `OnURLsModified` and
   // `OnURLVisited` will be called. Therefore observers that only care about new
@@ -45,9 +54,7 @@ class HistoryServiceObserver {
   //
   // These metadata-only updates happen in these scenarios:
   //  1. When the Page Title is updated shortly after the page loads.
-  //  2. When `TypedURLSyncBridge` updates the `URLRow` data. This often happens
-  //     in addition to adding new visits, so `OnURLVisited` will be called too.
-  //  3. When History expiration expires some, but not all visits related to
+  //  2. When History expiration expires some, but not all visits related to
   //     a URL. In that case, the URL's metadata is updated.
   //
   // `changed_urls` lists the information for each of the URLs affected. The
@@ -56,11 +63,10 @@ class HistoryServiceObserver {
   virtual void OnURLsModified(HistoryService* history_service,
                               const URLRows& changed_urls) {}
 
-  // Called when one or more URLs are deleted.
-  //
-  // `deletion_info` describes the urls that have been removed from history.
-  virtual void OnURLsDeleted(HistoryService* history_service,
-                             const DeletionInfo& deletion_info) {}
+  // Called when one or more URLs and/or Visits are deleted.
+  // `deletion_info` describes all the deletions that have occurred.
+  virtual void OnHistoryDeletions(HistoryService* history_service,
+                                  const DeletionInfo& deletion_info) {}
 
   // Is called to notify when `history_service` has finished loading.
   virtual void OnHistoryServiceLoaded(HistoryService* history_service) {}
@@ -81,13 +87,6 @@ class HistoryServiceObserver {
   // `url_id` is the id of the url row.
   virtual void OnKeywordSearchTermDeleted(HistoryService* history_service,
                                           URLID url_id) {}
-
-  // Called when content model annotation is modified for a url.
-  // `url_id` is the id of the url row.
-  virtual void OnContentModelAnnotationModified(
-      HistoryService* history_service,
-      const URLRow& row,
-      const VisitContentModelAnnotations& model_annotations) {}
 };
 
 }  // namespace history

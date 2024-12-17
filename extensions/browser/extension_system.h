@@ -5,18 +5,20 @@
 #ifndef EXTENSIONS_BROWSER_EXTENSION_SYSTEM_H_
 #define EXTENSIONS_BROWSER_EXTENSION_SYSTEM_H_
 
+#include <optional>
 #include <string>
 
-#include "base/callback.h"
-#include "base/memory/ref_counted.h"
+#include "base/functional/callback.h"
+#include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "extensions/browser/install/crx_install_error.h"
 #include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "extensions/common/extension_id.h"
 
-#if !BUILDFLAG(ENABLE_EXTENSIONS)
+#if !BUILDFLAG(ENABLE_EXTENSIONS) && \
+    !BUILDFLAG(ENABLE_DESKTOP_ANDROID_EXTENSIONS)
 #error "Extensions must be enabled"
 #endif
 
@@ -39,7 +41,6 @@ class ContentVerifier;
 class Extension;
 class ExtensionService;
 class ExtensionSet;
-class InfoMap;
 class ManagementPolicy;
 class QuotaService;
 class ServiceWorkerManager;
@@ -55,7 +56,7 @@ class ExtensionSystem : public KeyedService {
  public:
   // A callback to be executed when InstallUpdate finishes.
   using InstallUpdateCallback =
-      base::OnceCallback<void(const absl::optional<CrxInstallError>& result)>;
+      base::OnceCallback<void(const std::optional<CrxInstallError>& result)>;
 
   ExtensionSystem();
   ~ExtensionSystem() override;
@@ -98,31 +99,12 @@ class ExtensionSystem : public KeyedService {
   // Returns the |ValueStore| factory created at startup.
   virtual scoped_refptr<value_store::ValueStoreFactory> store_factory() = 0;
 
-  // Returns the IO-thread-accessible extension data.
-  virtual InfoMap* info_map() = 0;
-
   // Returns the QuotaService that limits calls to certain extension functions.
   // Lives on the UI thread. Created at startup.
   virtual QuotaService* quota_service() = 0;
 
   // Returns the AppSorting which provides an ordering for all installed apps.
   virtual AppSorting* app_sorting() = 0;
-
-  // Called by the ExtensionService that lives in this system. Gives the
-  // info map a chance to react to the load event before the EXTENSION_LOADED
-  // notification has fired. The purpose for handling this event first is to
-  // avoid race conditions by making sure URLRequestContexts learn about new
-  // extensions before anything else needs them to know. This operation happens
-  // asynchronously. |callback| is run on the calling thread once completed.
-  virtual void RegisterExtensionWithRequestContexts(
-      const Extension* extension,
-      base::OnceClosure callback) {}
-
-  // Called by the ExtensionService that lives in this system. Lets the
-  // info map clean up its RequestContexts once all the listeners to the
-  // EXTENSION_UNLOADED notification have finished running.
-  virtual void UnregisterExtensionWithRequestContexts(
-      const std::string& extension_id) {}
 
   // Signaled when the extension system has completed its startup tasks.
   virtual const base::OneShotEvent& ready() const = 0;
@@ -144,7 +126,7 @@ class ExtensionSystem : public KeyedService {
   // the given extension immediately instead of waiting until idle. Ownership
   // of |unpacked_dir| in the filesystem is transferred and implementors of
   // this function are responsible for cleaning it up on errors, etc.
-  virtual void InstallUpdate(const std::string& extension_id,
+  virtual void InstallUpdate(const ExtensionId& extension_id,
                              const std::string& public_key,
                              const base::FilePath& unpacked_dir,
                              bool install_immediately,
@@ -152,15 +134,15 @@ class ExtensionSystem : public KeyedService {
 
   // Perform various actions depending on the Omaga attributes on the extension.
   virtual void PerformActionBasedOnOmahaAttributes(
-      const std::string& extension_id,
-      const base::Value& attributes) = 0;
+      const ExtensionId& extension_id,
+      const base::Value::Dict& attributes) = 0;
 
   // Attempts finishing installation of an update for an extension with the
   // specified id, when installation of that extension was previously delayed.
   // |install_immediately| - Install the extension should be installed if it is
   // currently in use.
   // Returns whether the extension installation was finished.
-  virtual bool FinishDelayedInstallationIfReady(const std::string& extension_id,
+  virtual bool FinishDelayedInstallationIfReady(const ExtensionId& extension_id,
                                                 bool install_immediately) = 0;
 };
 

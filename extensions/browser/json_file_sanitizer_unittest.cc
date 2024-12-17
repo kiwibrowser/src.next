@@ -6,9 +6,9 @@
 
 #include <memory>
 
-#include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/functional/bind.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "content/public/test/browser_task_environment.h"
@@ -35,14 +35,12 @@ class JsonFileSanitizerTest : public testing::Test {
 
   void CreateValidJsonFile(const base::FilePath& path) {
     std::string kJson = "{\"hello\":\"bonjour\"}";
-    ASSERT_EQ(static_cast<int>(kJson.size()),
-              base::WriteFile(path, kJson.data(), kJson.size()));
+    ASSERT_TRUE(base::WriteFile(path, kJson));
   }
 
   void CreateInvalidJsonFile(const base::FilePath& path) {
     std::string kJson = "sjkdsk;'<?js";
-    ASSERT_EQ(static_cast<int>(kJson.size()),
-              base::WriteFile(path, kJson.data(), kJson.size()));
+    ASSERT_TRUE(base::WriteFile(path, kJson));
   }
 
   const base::FilePath& GetJsonFilePath() const { return temp_dir_.GetPath(); }
@@ -75,8 +73,9 @@ class JsonFileSanitizerTest : public testing::Test {
                         const std::string& error_msg) {
     last_status_ = status;
     last_error_ = error_msg;
-    if (done_callback_)
+    if (done_callback_) {
       std::move(done_callback_).Run();
+    }
   }
 
   content::BrowserTaskEnvironment task_environment_;
