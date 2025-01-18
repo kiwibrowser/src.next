@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,7 @@ class CORE_EXPORT CSSPaintValue : public CSSImageGeneratorValue {
   explicit CSSPaintValue(CSSCustomIdentValue* name);
   CSSPaintValue(CSSCustomIdentValue* name, bool threaded_compositing_enabled);
   CSSPaintValue(CSSCustomIdentValue* name,
-                Vector<scoped_refptr<CSSVariableData>>&);
+                HeapVector<Member<CSSVariableData>>&&);
   ~CSSPaintValue();
 
   String CustomCSSText() const;
@@ -47,7 +47,7 @@ class CORE_EXPORT CSSPaintValue : public CSSImageGeneratorValue {
       const Document&) const;
 
   const CSSStyleValueVector* GetParsedInputArgumentsForTesting() {
-    return parsed_input_arguments_;
+    return parsed_input_arguments_.Get();
   }
   void BuildInputArgumentValuesForTesting(
       Vector<std::unique_ptr<CrossThreadStyleValue>>& style_value) {
@@ -102,7 +102,7 @@ class CORE_EXPORT CSSPaintValue : public CSSImageGeneratorValue {
       generators_;
   Member<Observer> paint_image_generator_observer_;
   Member<CSSStyleValueVector> parsed_input_arguments_;
-  Vector<scoped_refptr<CSSVariableData>> argument_variable_data_;
+  HeapVector<Member<CSSVariableData>> argument_variable_data_;
   enum class OffThreadPaintState { kUnknown, kOffThread, kMainThread };
   // Indicates whether this paint worklet is composited or not. kUnknown
   // indicates that it has not been decided yet.

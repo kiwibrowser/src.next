@@ -5,8 +5,11 @@
 #ifndef EXTENSIONS_BROWSER_PATH_UTIL_H_
 #define EXTENSIONS_BROWSER_PATH_UTIL_H_
 
-#include "base/callback_forward.h"
+#include <cstdint>
+#include <string>
+
 #include "base/files/file_path.h"
+#include "base/functional/callback_forward.h"
 
 namespace extensions {
 namespace path_util {
@@ -17,6 +20,12 @@ namespace path_util {
 // path. Additionally, if the path is inside the user's home directory, then
 // replace the home directory component with "~".
 base::FilePath PrettifyPath(const base::FilePath& source_path);
+
+// Calculates the size of the directory containing an extension, returning the
+// size value without formatting.
+void CalculateExtensionDirectorySize(
+    const base::FilePath& extension_path,
+    base::OnceCallback<void(const int64_t)> callback);
 
 // Calculates the size of the directory containing an extension, and formats it
 // to a localized string that can be placed directly in the UI. |message_id| is

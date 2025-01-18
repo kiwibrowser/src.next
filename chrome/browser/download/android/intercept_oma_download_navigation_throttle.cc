@@ -4,7 +4,7 @@
 
 #include "chrome/browser/download/android/intercept_oma_download_navigation_throttle.h"
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/memory/ptr_util.h"
 #include "chrome/browser/download/android/download_controller_base.h"
 #include "components/embedder_support/user_agent_utils.h"
@@ -91,16 +91,18 @@ void InterceptOMADownloadNavigationThrottle::InterceptDownload() {
   if (!url_chain.empty())
     original_url = url_chain.front();
 
-  std::string content_disposition;
   std::string mime_type;
   const net::HttpResponseHeaders* headers =
       navigation_handle()->GetResponseHeaders();
   headers->GetMimeType(&mime_type);
-  headers->GetNormalizedHeader("content-disposition", &content_disposition);
+  std::string content_disposition =
+      headers->GetNormalizedHeader("content-disposition")
+          .value_or(std::string());
   content::WebContents* web_contents = navigation_handle()->GetWebContents();
   int process_id =
-      web_contents ? web_contents->GetRenderViewHost()->GetProcess()->GetID()
-                   : 0;
+      web_contents
+          ? web_contents->GetRenderViewHost()->GetProcess()->GetDeprecatedID()
+          : 0;
   int routing_id =
       web_contents ? web_contents->GetRenderViewHost()->GetRoutingID() : 0;
 

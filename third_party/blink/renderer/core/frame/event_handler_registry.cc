@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
+#include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/scrolling/scrolling_coordinator.h"
 #include "third_party/blink/renderer/platform/heap/thread_state_scopes.h"
 #include "third_party/blink/renderer/platform/heap/visitor.h"
@@ -188,9 +189,10 @@ void EventHandlerRegistry::DidMoveIntoPage(EventTarget& target) {
       continue;
     for (wtf_size_t count = listeners->size(); count > 0; --count) {
       EventHandlerClass handler_class;
-      if (!EventTypeToClass(event_types[i], (*listeners)[count - 1].Options(),
-                            &handler_class))
+      if (!EventTypeToClass(event_types[i], (*listeners)[count - 1]->Options(),
+                            &handler_class)) {
         continue;
+      }
 
       DidAddEventHandler(target, handler_class);
     }
@@ -202,7 +204,7 @@ void EventHandlerRegistry::DidMoveOutOfPage(EventTarget& target) {
 }
 
 void EventHandlerRegistry::DidRemoveAllEventHandlers(EventTarget& target) {
-  bool handlers_changed[kEventHandlerClassCount];
+  std::array<bool, kEventHandlerClassCount> handlers_changed;
 
   for (int i = 0; i < kEventHandlerClassCount; ++i) {
     EventHandlerClass handler_class = static_cast<EventHandlerClass>(i);
@@ -279,7 +281,6 @@ void EventHandlerRegistry::NotifyHandlersChanged(
 #endif
     default:
       NOTREACHED();
-      break;
   }
 
   if (handler_class == kTouchStartOrMoveEventBlocking ||
@@ -287,11 +288,6 @@ void EventHandlerRegistry::NotifyHandlersChanged(
     if (auto* node = target->ToNode()) {
       if (auto* layout_object = node->GetLayoutObject()) {
         layout_object->MarkEffectiveAllowedTouchActionChanged();
-        auto* continuation = layout_object->VirtualContinuation();
-        while (continuation) {
-          continuation->MarkEffectiveAllowedTouchActionChanged();
-          continuation = continuation->VirtualContinuation();
-        }
       }
     } else if (auto* dom_window = target->ToLocalDOMWindow()) {
       // This event handler is on a window. Ensure the layout view is
@@ -304,11 +300,6 @@ void EventHandlerRegistry::NotifyHandlersChanged(
     if (auto* node = target->ToNode()) {
       if (auto* layout_object = node->GetLayoutObject()) {
         layout_object->MarkBlockingWheelEventHandlerChanged();
-        auto* continuation = layout_object->VirtualContinuation();
-        while (continuation) {
-          continuation->MarkBlockingWheelEventHandlerChanged();
-          continuation = continuation->VirtualContinuation();
-        }
       }
     } else if (auto* dom_window = target->ToLocalDOMWindow()) {
       // This event handler is on a window. Ensure the layout view is

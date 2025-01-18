@@ -4,12 +4,12 @@
 
 #include "content/browser/mojo_binder_policy_applier.h"
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "base/test/bind.h"
 #include "base/test/task_environment.h"
 #include "content/browser/mojo_binder_policy_map_impl.h"
-#include "content/test/test_mojo_binder_policy_applier_unittest.mojom.h"
+#include "content/public/test/mojo_capability_control_test_interfaces.mojom.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"

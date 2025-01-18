@@ -12,7 +12,8 @@
 
 #include "base/observer_list.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "extensions/browser/extension_prefs_scope.h"
+#include "extensions/common/api/types.h"
+#include "extensions/common/extension_id.h"
 
 class PrefValueMap;
 
@@ -60,6 +61,8 @@ class Value;
 // Extension B has higher precedence than A.
 class ExtensionPrefValueMap : public KeyedService {
  public:
+  using ChromeSettingScope = extensions::api::types::ChromeSettingScope;
+
   // Observer interface for monitoring ExtensionPrefValueMap.
   class Observer {
    public:
@@ -93,14 +96,14 @@ class ExtensionPrefValueMap : public KeyedService {
   // Precondition: the extension must be registered.
   void SetExtensionPref(const std::string& ext_id,
                         const std::string& key,
-                        extensions::ExtensionPrefsScope scope,
+                        ChromeSettingScope scope,
                         base::Value value);
 
   // Remove the extension preference value for |key| of extension |ext_id|.
   // Precondition: the extension must be registered.
   void RemoveExtensionPref(const std::string& ext_id,
                            const std::string& key,
-                           extensions::ExtensionPrefsScope scope);
+                           ChromeSettingScope scope);
 
   // Returns true if currently no extension with higher precedence controls the
   // preference. If |incognito| is true and the extension does not have
@@ -108,7 +111,7 @@ class ExtensionPrefValueMap : public KeyedService {
   // Note that this function does does not consider the existence of
   // policies. An extension is only really able to control a preference if
   // PrefService::Preference::IsExtensionModifiable() returns true as well.
-  bool CanExtensionControlPref(const std::string& extension_id,
+  bool CanExtensionControlPref(const extensions::ExtensionId& extension_id,
                                const std::string& pref_key,
                                bool incognito) const;
 
@@ -124,7 +127,7 @@ class ExtensionPrefValueMap : public KeyedService {
   // Note that the this function does does not consider the existence of
   // policies. An extension is only really able to control a preference if
   // PrefService::Preference::IsExtensionModifiable() returns true as well.
-  bool DoesExtensionControlPref(const std::string& extension_id,
+  bool DoesExtensionControlPref(const extensions::ExtensionId& extension_id,
                                 const std::string& pref_key,
                                 bool* from_incognito) const;
 
@@ -169,13 +172,11 @@ class ExtensionPrefValueMap : public KeyedService {
   typedef std::map<std::string, std::unique_ptr<ExtensionEntry>>
       ExtensionEntryMap;
 
-  const PrefValueMap* GetExtensionPrefValueMap(
-      const std::string& ext_id,
-      extensions::ExtensionPrefsScope scope) const;
+  const PrefValueMap* GetExtensionPrefValueMap(const std::string& ext_id,
+                                               ChromeSettingScope scope) const;
 
-  PrefValueMap* GetExtensionPrefValueMap(
-      const std::string& ext_id,
-      extensions::ExtensionPrefsScope scope);
+  PrefValueMap* GetExtensionPrefValueMap(const std::string& ext_id,
+                                         ChromeSettingScope scope);
 
   // Returns all keys of pref values that are set by the extension of |entry|,
   // regardless whether they are set for incognito or regular pref values.

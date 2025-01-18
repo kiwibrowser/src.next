@@ -1,11 +1,9 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_COLOR_CORRECTION_TEST_UTILS_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_COLOR_CORRECTION_TEST_UTILS_H_
-
-#include "third_party/blink/renderer/platform/graphics/canvas_color_params.h"
 
 #include "third_party/blink/renderer/platform/graphics/graphics_types.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -54,7 +52,7 @@ class ColorCorrectionTestUtils {
       ImageDataStorageFormat src_storage_format,
       PredefinedColorSpace dst_color_space,
       CanvasPixelFormat dst_canvas_pixel_format,
-      std::unique_ptr<uint8_t[]>& converted_pixels,
+      base::span<uint8_t> converted_pixels,
       PixelFormat pixel_format_for_f16_canvas);
 
   static bool MatchColorSpace(sk_sp<SkColorSpace> src_color_space,

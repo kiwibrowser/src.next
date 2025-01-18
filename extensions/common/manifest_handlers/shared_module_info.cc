@@ -6,12 +6,13 @@
 
 #include <stddef.h>
 
-#include <algorithm>
 #include <iterator>
 #include <memory>
 #include <utility>
 
+#include "base/containers/contains.h"
 #include "base/lazy_instance.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -34,6 +35,7 @@ namespace errors = manifest_errors;
 namespace {
 
 const char kSharedModule[] = "shared_module";
+const char kAllowlist[] = "allowlist";
 
 using ManifestKeys = api::shared_module::ManifestKeys;
 
@@ -58,7 +60,7 @@ SharedModuleInfo::~SharedModuleInfo() {
 
 // static
 void SharedModuleInfo::ParseImportedPath(const std::string& path,
-                                         std::string* import_id,
+                                         ExtensionId* import_id,
                                          std::string* import_relative_path) {
   std::vector<std::string> tokens = base::SplitString(
       path, "/", base::KEEP_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
@@ -90,7 +92,7 @@ bool SharedModuleInfo::IsSharedModule(const Extension* extension) {
 
 // static
 bool SharedModuleInfo::IsExportAllowedByAllowlist(const Extension* extension,
-                                                  const std::string& other_id) {
+                                                  const ExtensionId& other_id) {
   // Sanity check. In case the caller did not check |extension| to make sure it
   // is a shared module, we do not want it to appear that the extension with
   // |other_id| importing |extension| is valid.
@@ -99,14 +101,12 @@ bool SharedModuleInfo::IsExportAllowedByAllowlist(const Extension* extension,
   const SharedModuleInfo& info = GetSharedModuleInfo(extension);
   if (info.export_allowlist_.empty())
     return true;
-  if (info.export_allowlist_.find(other_id) != info.export_allowlist_.end())
-    return true;
-  return false;
+  return base::Contains(info.export_allowlist_, other_id);
 }
 
 // static
 bool SharedModuleInfo::ImportsExtensionById(const Extension* extension,
-                                            const std::string& other_id) {
+                                            const ExtensionId& other_id) {
   const SharedModuleInfo& info = GetSharedModuleInfo(extension);
   for (size_t i = 0; i < info.imports_.size(); i++) {
     if (info.imports_[i].extension_id == other_id)
@@ -130,10 +130,11 @@ SharedModuleHandler::SharedModuleHandler() = default;
 SharedModuleHandler::~SharedModuleHandler() = default;
 
 bool SharedModuleHandler::Parse(Extension* extension, std::u16string* error) {
+  CHECK(extension);
+  CHECK(error);
   ManifestKeys manifest_keys;
   if (!ManifestKeys::ParseFromDictionary(
-          extension->manifest()->available_values().GetDict(), &manifest_keys,
-          error)) {
+          extension->manifest()->available_values(), manifest_keys, *error)) {
     return false;
   }
 
@@ -148,25 +149,37 @@ bool SharedModuleHandler::Parse(Extension* extension, std::u16string* error) {
     return false;
   }
 
+  // An empty allowlist results in any extension being able to import modules
+  // from this extension. Since the developer included the "allowlist" key,
+  // it implies they wanted to restrict it. Let them know that the empty
+  // list was probably a mistake.
+  if (has_export && manifest_keys.export_->allowlist &&
+      manifest_keys.export_->allowlist->empty()) {
+    extension->AddInstallWarning(
+        extensions::InstallWarning(errors::kInvalidExportAllowlistEmpty,
+                                   ManifestKeys::kExport, kAllowlist));
+  }
+
   if (has_export && manifest_keys.export_->allowlist) {
     auto begin = manifest_keys.export_->allowlist->begin();
     auto end = manifest_keys.export_->allowlist->end();
-    auto it = std::find_if_not(begin, end, [](const std::string& id) {
-      return crx_file::id_util::IdIsValid(id);
-    });
+    auto it = base::ranges::find_if_not(*manifest_keys.export_->allowlist,
+                                        &crx_file::id_util::IdIsValid);
     if (it != end) {
       *error = ErrorUtils::FormatErrorMessageUTF16(
           errors::kInvalidExportAllowlistString,
           base::NumberToString(it - begin));
       return false;
     }
-    info->set_export_allowlist(std::set<std::string>(
+    info->set_export_allowlist(std::set<ExtensionId>(
         std::make_move_iterator(begin), std::make_move_iterator(end)));
   }
 
   if (has_import) {
     std::vector<SharedModuleInfo::ImportInfo> imports;
     imports.reserve(manifest_keys.import->size());
+    std::set<ExtensionId> unique_imports;
+    bool unique_imports_warning = false;
     for (size_t i = 0; i < manifest_keys.import->size(); i++) {
       auto& import = manifest_keys.import->at(i);
       if (!crx_file::id_util::IdIsValid(import.id)) {
@@ -188,7 +201,23 @@ bool SharedModuleHandler::Parse(Extension* extension, std::u16string* error) {
         import_info.minimum_version = std::move(*import.minimum_version);
       }
       imports.push_back(std::move(import_info));
+
+      // The extension system does not have a way to represent different
+      // module versions for the same importer. Repeats of a particular module
+      // ID may be interpreted as "requires a version satisfying both version
+      // strings", but this behavior is not specified. Warn the developer since
+      // this is likely a mistake.
+      if (!unique_imports_warning) {
+        if (unique_imports.contains(import.id)) {
+          unique_imports_warning = true;
+          extension->AddInstallWarning(InstallWarning(
+              errors::kInvalidImportRepeatedImport, ManifestKeys::kImport));
+        } else {
+          unique_imports.insert(import.id);
+        }
+      }
     }
+
     info->set_imports(std::move(imports));
   }
 

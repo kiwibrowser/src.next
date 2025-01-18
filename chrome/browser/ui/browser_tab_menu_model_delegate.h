@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_BROWSER_TAB_MENU_MODEL_DELEGATE_H_
 
 #include <vector>
+
 #include "base/memory/raw_ptr.h"
 #include "chrome/browser/ui/tabs/tab_menu_model_delegate.h"
 
@@ -22,9 +23,9 @@ class BrowserTabMenuModelDelegate : public TabMenuModelDelegate {
 
  private:
   // TabMenuModelDelegate:
-  std::vector<Browser*> GetExistingWindowsForMoveMenu() override;
+  std::vector<Browser*> GetOtherBrowserWindows(bool is_app) override;
 
-  const raw_ptr<Browser> browser_;
+  const raw_ptr<Browser, DanglingUntriaged> browser_;
 };
 
 }  // namespace chrome

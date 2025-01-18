@@ -5,7 +5,6 @@
 #include "base/command_line.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "build/chromeos_buildflags.h"
 #include "cc/base/switches.h"
 #include "chrome/browser/ui/browser.h"
@@ -38,13 +37,13 @@ class RendererEventInjectionTest
     : public InProcessBrowserTest,
       public ::testing::WithParamInterface<const char*> {
  public:
-  RendererEventInjectionTest() {}
+  RendererEventInjectionTest() = default;
 
   RendererEventInjectionTest(const RendererEventInjectionTest&) = delete;
   RendererEventInjectionTest& operator=(const RendererEventInjectionTest&) =
       delete;
 
-  ~RendererEventInjectionTest() override {}
+  ~RendererEventInjectionTest() override = default;
 
   // InProcessBrowserTest:
   void SetUp() override {
@@ -55,7 +54,7 @@ class RendererEventInjectionTest
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kDisableRendererBackgrounding);
-    command_line->AppendSwitch(cc::switches::kEnableGpuBenchmarking);
+    command_line->AppendSwitch(switches::kEnableGpuBenchmarking);
     // kHostWindowBounds is unique to ChromeOS.
 #if BUILDFLAG(IS_CHROMEOS_ASH)
     command_line->AppendSwitchASCII(switches::kHostWindowBounds, GetParam());
@@ -87,7 +86,8 @@ class TouchEventObserver
 
  private:
   // content::RenderWidgetHost::InputEventObserver:
-  void OnInputEvent(const blink::WebInputEvent& event) override {
+  void OnInputEvent(const content::RenderWidgetHost& widget,
+                    const blink::WebInputEvent& event) override {
     if (blink::WebInputEvent::IsTouchEventType(event.GetType())) {
       const blink::WebTouchEvent& web_touch =
           static_cast<const blink::WebTouchEvent&>(event);

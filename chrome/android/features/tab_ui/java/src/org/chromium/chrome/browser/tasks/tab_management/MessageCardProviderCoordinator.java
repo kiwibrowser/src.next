@@ -9,6 +9,7 @@ import android.content.Context;
 import androidx.annotation.Nullable;
 
 import org.chromium.base.supplier.Supplier;
+import org.chromium.chrome.browser.profiles.Profile;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -23,15 +24,17 @@ public class MessageCardProviderCoordinator {
     private final MessageCardProviderMediator mMediator;
     private final List<MessageService> mMessageServices = new ArrayList<>();
 
-    MessageCardProviderCoordinator(Context context, Supplier<Boolean> isIncognitoSupplier,
+    MessageCardProviderCoordinator(
+            Context context,
+            Supplier<Profile> profileSupplier,
             MessageCardView.DismissActionProvider uiDismissActionProvider) {
-        mMediator = new MessageCardProviderMediator(
-                context, isIncognitoSupplier, uiDismissActionProvider);
+        mMediator =
+                new MessageCardProviderMediator(context, profileSupplier, uiDismissActionProvider);
     }
 
     /**
-     * Subscribes to a {@link MessageService} to get any message changes. @see
-     * MessageObserver.
+     * Subscribes to a {@link MessageService} to get any message changes. @see MessageObserver.
+     *
      * @param service The {@link MessageService} to subscribe.
      */
     public void subscribeMessageService(MessageService service) {
@@ -67,9 +70,7 @@ public class MessageCardProviderCoordinator {
         return mMediator.isMessageShown(messageType, identifier);
     }
 
-    /**
-     * Clean up all member fields.
-     */
+    /** Clean up all member fields. */
     public void destroy() {
         for (int i = 0; i < mMessageServices.size(); i++) {
             mMessageServices.get(i).removeObserver(mMediator);

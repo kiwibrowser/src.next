@@ -5,6 +5,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/extensions/extension_action_test_helper.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -26,18 +27,20 @@ namespace extensions {
 
 class ManifestV3BrowserTest : public ExtensionBrowserTest {
  public:
-  ManifestV3BrowserTest() {}
+  ManifestV3BrowserTest() = default;
 
   ManifestV3BrowserTest(const ManifestV3BrowserTest&) = delete;
   ManifestV3BrowserTest& operator=(const ManifestV3BrowserTest&) = delete;
 
-  ~ManifestV3BrowserTest() override {}
+  ~ManifestV3BrowserTest() override = default;
 
   void SetUpOnMainThread() override {
     ExtensionBrowserTest::SetUpOnMainThread();
     host_resolver()->AddRule("*", "127.0.0.1");
     ASSERT_TRUE(embedded_test_server()->Start());
   }
+
+  bool ShouldAllowMV2Extensions() override { return false; }
 
  private:
   ScopedCurrentChannel channel_override_{version_info::Channel::UNKNOWN};

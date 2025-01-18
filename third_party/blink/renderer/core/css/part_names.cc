@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,8 +30,9 @@ void PartNames::PushMap(const NamesMap& names_map) {
 void PartNames::ApplyMap(const NamesMap& names_map) {
   HashSet<AtomicString> new_names;
   for (const AtomicString& name : names_) {
-    if (absl::optional<SpaceSplitString> mapped_names = names_map.Get(name))
-      AddToSet(mapped_names.value(), &new_names);
+    if (SpaceSplitString* mapped_names = names_map.Get(name)) {
+      AddToSet(*mapped_names, &new_names);
+    }
   }
   std::swap(names_, new_names);
 }

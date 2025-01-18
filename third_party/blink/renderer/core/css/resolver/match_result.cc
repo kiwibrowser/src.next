@@ -40,58 +40,57 @@
 
 namespace blink {
 
-MatchedProperties::MatchedProperties() {
-  memset(&types_, 0, sizeof(types_));
-}
-
 void MatchedProperties::Trace(Visitor* visitor) const {
   visitor->Trace(properties);
 }
 
-void MatchResult::AddMatchedProperties(
-    const CSSPropertyValueSet* properties,
-    const AddMatchedPropertiesOptions& options) {
-  matched_properties_.Grow(matched_properties_.size() + 1);
-  MatchedProperties& new_properties = matched_properties_.back();
-  new_properties.properties = const_cast<CSSPropertyValueSet*>(properties);
-  new_properties.types_.link_match_type = options.GetLinkMatchType();
-  new_properties.types_.valid_property_filter =
-      static_cast<std::underlying_type_t<ValidPropertyFilter>>(
-          options.GetValidPropertyFilter());
-  new_properties.types_.layer_order =
-      ClampTo<uint16_t>(options.GetLayerOrder());
-  new_properties.types_.is_inline_style = options.IsInlineStyle();
-  new_properties.types_.origin = current_origin_;
-  new_properties.types_.tree_order = current_tree_order_;
+void MatchResult::AddMatchedProperties(const CSSPropertyValueSet* properties,
+                                       const MatchedProperties::Data& data) {
+  MatchedProperties::Data new_data = data;
+  new_data.tree_order = current_tree_order_;
+  matched_properties_.emplace_back(const_cast<CSSPropertyValueSet*>(properties),
+                                   new_data);
+  matched_properties_hashes_.emplace_back(properties->GetHash(), new_data);
+
+  if (properties->ModifiedSinceHashing()) {
+    // These properties were mutated as some point after original
+    // insertion, so it is not safe to use them in the MPC.
+    // In particular, the hash is wrong, but also, it's probably
+    // not a good idea performance-wise, since if something has
+    // been modified once, it might keep being modified, making
+    // it less useful for caching.
+    //
+    // There is a separate check for the case where we insert
+    // something into the MPC and then the properties used in the key
+    // change afterwards; see CachedMatchedProperties::CorrespondsTo().
+    is_cacheable_ = false;
+  }
+
+#if DCHECK_IS_ON()
+  DCHECK_NE(data.origin, CascadeOrigin::kNone);
+  DCHECK_GE(data.origin, last_origin_);
+  if (!tree_scopes_.empty()) {
+    DCHECK_EQ(data.origin, CascadeOrigin::kAuthor);
+  }
+  last_origin_ = data.origin;
+#endif
 }
 
-void MatchResult::FinishAddingUARules() {
-  DCHECK_EQ(current_origin_, CascadeOrigin::kUserAgent);
-  current_origin_ = CascadeOrigin::kUser;
-}
-
-void MatchResult::FinishAddingUserRules() {
-  DCHECK_EQ(current_origin_, CascadeOrigin::kUser);
-  current_origin_ = CascadeOrigin::kAuthorPresentationalHint;
-}
-
-void MatchResult::FinishAddingPresentationalHints() {
-  DCHECK_EQ(current_origin_, CascadeOrigin::kAuthorPresentationalHint);
-  current_origin_ = CascadeOrigin::kAuthor;
-}
-
-void MatchResult::FinishAddingAuthorRulesForTreeScope(
+void MatchResult::BeginAddingAuthorRulesForTreeScope(
     const TreeScope& tree_scope) {
-  DCHECK_EQ(current_origin_, CascadeOrigin::kAuthor);
+  current_tree_order_ =
+      ClampTo<decltype(current_tree_order_)>(tree_scopes_.size());
   tree_scopes_.push_back(&tree_scope);
-  current_tree_order_ = base::ClampAdd(current_tree_order_, 1);
 }
 
 void MatchResult::Reset() {
   matched_properties_.clear();
+  matched_properties_hashes_.clear();
   is_cacheable_ = true;
   depends_on_size_container_queries_ = false;
-  current_origin_ = CascadeOrigin::kUserAgent;
+#if DCHECK_IS_ON()
+  last_origin_ = CascadeOrigin::kNone;
+#endif
   current_tree_order_ = 0;
   tree_scopes_.clear();
 }

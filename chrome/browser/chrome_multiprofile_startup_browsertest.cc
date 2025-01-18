@@ -10,7 +10,6 @@
 #include "base/test/bind.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
-#include "chrome/browser/browser_features.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_browser_main.h"
 #include "chrome/browser/chrome_browser_main_extra_parts.h"
@@ -21,7 +20,7 @@
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/profile_picker.h"
+#include "chrome/browser/ui/profiles/profile_picker.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -64,9 +63,6 @@ Matcher<Profile*> HasBaseName(const char* basename) {
 }
 
 struct MultiProfileStartupTestParam {
-  // Whether features::kObserverBasedPostProfileInit should be enabled.
-  const bool should_enable_profile_observer;
-
   // Whether the profile picker should be shown on startup.
   const bool should_show_profile_picker;
 
@@ -88,26 +84,14 @@ struct MultiProfileStartupTestParam {
 };
 
 const MultiProfileStartupTestParam kTestParams[] = {
-    {false, false, {{HasBaseName(chrome::kInitialProfile), true}}},
-    {false, true, {{Property(&Profile::IsGuestSession, true), true}}},
-    {true,
-     false,
-     {{HasBaseName(chrome::kInitialProfile), true},
-      {HasBaseName(kOtherProfileDirPath), false}}},
-    {true,
-     true,
-     {// TODO(https://crbug.com/1150326): The first call with guest profile
-      // should be skipped.
-      {Property(&Profile::IsGuestSession, true), true},
-#if !BUILDFLAG(IS_CHROMEOS_LACROS)
-      // Lacros loads the primary profile earlier and it is already loaded when
-      // `PostProfileInit()` is called for the first time.
-      // TODO(https://crbug.com/1150326): Re-add the primary profile once
-      // `PostProfileInit()` is called for profiles that were created before
-      // the initial startup profile.
-      {HasBaseName(chrome::kInitialProfile), false},
-#endif
-      {HasBaseName(kOtherProfileDirPath), false}}}};
+    {.should_show_profile_picker = false,
+     .expected_post_profile_init_call_args =
+         {{HasBaseName(chrome::kInitialProfile), true},
+          {HasBaseName(kOtherProfileDirPath), false}}},
+    {.should_show_profile_picker = true,
+     .expected_post_profile_init_call_args = {
+         {HasBaseName(chrome::kInitialProfile), true},
+         {HasBaseName(kOtherProfileDirPath), false}}}};
 
 // Creates a new profile to be picked up on the actual test.
 void SetUpSecondaryProfileForPreTest(
@@ -142,14 +126,6 @@ class ChromeMultiProfileStartupBrowserTestBase
     // Avoid providing a URL for the browser to open, allows the profile picker
     // to be displayed on startup when it is enabled.
     set_open_about_blank_on_browser_launch(false);
-
-    if (GetParam().should_enable_profile_observer) {
-      feature_list_.InitAndEnableFeature(
-          features::kObserverBasedPostProfileInit);
-    } else {
-      feature_list_.InitWithFeatures({},
-                                     {features::kObserverBasedPostProfileInit});
-    }
   }
 
   void CreatedBrowserMainParts(content::BrowserMainParts* parts) override {
@@ -183,10 +159,7 @@ class ChromeMultiProfileStartupBrowserTestBase
     }
   }
 
-  raw_ptr<MockMainExtraParts> mock_part_;
-
- protected:
-  base::test::ScopedFeatureList feature_list_;
+  raw_ptr<MockMainExtraParts, AcrossTasksDanglingUntriaged> mock_part_;
 };
 
 IN_PROC_BROWSER_TEST_P(ChromeMultiProfileStartupBrowserTestBase,
@@ -217,7 +190,7 @@ IN_PROC_BROWSER_TEST_P(ChromeMultiProfileStartupBrowserTestBase,
     EXPECT_FALSE(ProfilePicker::IsOpen());
   }
 
-  // TODO(https://crbug.com/1288766): In some cases, profile creation is
+  // TODO(crbug.com/40817107): In some cases, profile creation is
   // triggered by restoring the previously opened profile, and the test
   // expectations in terms of `PostProfileInit()` calls can
   // be met without opening browsers. We still open them for consistency, at

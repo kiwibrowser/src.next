@@ -68,28 +68,31 @@ static String ConvertAttributeNameToPropertyName(const String& name) {
 }
 
 template <typename CharType1, typename CharType2>
-static bool PropertyNameMatchesAttributeName(const CharType1* property_name,
-                                             const CharType2* attribute_name,
-                                             unsigned property_length,
-                                             unsigned attribute_length) {
-  unsigned a = 5;
-  unsigned p = 0;
+static bool PropertyNameMatchesAttributeName(
+    base::span<const CharType1> property_name,
+    base::span<const CharType2> attribute_name) {
+  size_t a = 5;
+  size_t p = 0;
   bool word_boundary = false;
-  while (a < attribute_length && p < property_length) {
-    if (attribute_name[a] == '-' && a + 1 < attribute_length &&
+  while (a < attribute_name.size() && p < property_name.size()) {
+    const CharType2 current_attribute_char = attribute_name[a];
+    if (current_attribute_char == '-' && a + 1 < attribute_name.size() &&
         IsASCIILower(attribute_name[a + 1])) {
       word_boundary = true;
     } else {
-      if ((word_boundary ? ToASCIIUpper(attribute_name[a])
-                         : attribute_name[a]) != property_name[p])
+      const CharType2 current_attribute_char_to_compare =
+          word_boundary ? ToASCIIUpper(current_attribute_char)
+                        : current_attribute_char;
+      if (current_attribute_char_to_compare != property_name[p]) {
         return false;
+      }
       p++;
       word_boundary = false;
     }
     a++;
   }
 
-  return (a == attribute_length && p == property_length);
+  return (a == attribute_name.size() && p == property_name.size());
 }
 
 static bool PropertyNameMatchesAttributeName(const String& property_name,
@@ -97,26 +100,21 @@ static bool PropertyNameMatchesAttributeName(const String& property_name,
   if (!attribute_name.StartsWith("data-"))
     return false;
 
-  unsigned property_length = property_name.length();
-  unsigned attribute_length = attribute_name.length();
-
   if (property_name.Is8Bit()) {
-    if (attribute_name.Is8Bit())
-      return PropertyNameMatchesAttributeName(
-          property_name.Characters8(), attribute_name.Characters8(),
-          property_length, attribute_length);
-    return PropertyNameMatchesAttributeName(property_name.Characters8(),
-                                            attribute_name.Characters16(),
-                                            property_length, attribute_length);
+    if (attribute_name.Is8Bit()) {
+      return PropertyNameMatchesAttributeName(property_name.Span8(),
+                                              attribute_name.Span8());
+    }
+    return PropertyNameMatchesAttributeName(property_name.Span8(),
+                                            attribute_name.Span16());
   }
 
-  if (attribute_name.Is8Bit())
-    return PropertyNameMatchesAttributeName(property_name.Characters16(),
-                                            attribute_name.Characters8(),
-                                            property_length, attribute_length);
-  return PropertyNameMatchesAttributeName(property_name.Characters16(),
-                                          attribute_name.Characters16(),
-                                          property_length, attribute_length);
+  if (attribute_name.Is8Bit()) {
+    return PropertyNameMatchesAttributeName(property_name.Span16(),
+                                            attribute_name.Span8());
+  }
+  return PropertyNameMatchesAttributeName(property_name.Span16(),
+                                          attribute_name.Span16());
 }
 
 static bool IsValidPropertyName(const String& name) {
@@ -202,6 +200,7 @@ bool DatasetDOMStringMap::DeleteItem(const String& name) {
 
 void DatasetDOMStringMap::Trace(Visitor* visitor) const {
   visitor->Trace(element_);
+  ElementRareDataField::Trace(visitor);
   DOMStringMap::Trace(visitor);
 }
 

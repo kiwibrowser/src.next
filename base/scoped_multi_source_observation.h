@@ -13,6 +13,7 @@
 #include "base/containers/contains.h"
 #include "base/memory/raw_ptr.h"
 #include "base/ranges/algorithm.h"
+#include "base/scoped_observation_traits.h"
 
 namespace base {
 
@@ -35,21 +36,16 @@ namespace base {
 //     foo_observations_.AddObservation(foo);
 //   }
 //
-// For cases with methods not named AddObserver/RemoveObserver:
+////////////////////////////////////////////////////////////////////////////////
 //
-//   class MyFooStateObserver : public FooStateObserver {
-//     ...
-//    private:
-//      ScopedMultiSourceObservation<Foo,
-//                                  FooStateObserver,
-//                                  &Foo::AddStateObserver,
-//                                  &Foo::RemoveStateObserver>
-//          foo_observations_{this};
-//   };
-template <class Source,
-          class Observer,
-          void (Source::*AddObsFn)(Observer*) = &Source::AddObserver,
-          void (Source::*RemoveObsFn)(Observer*) = &Source::RemoveObserver>
+// By default `ScopedMultiSourceObservation` only works with sources that expose
+// `AddObserver` and `RemoveObserver`. However, it's also possible to
+// adapt it to custom function names (say `AddFoo` and `RemoveFoo` accordingly)
+// by tailoring ScopedObservationTraits<> for the given Source and Observer --
+// see `base/scoped_observation_traits.h` for details.
+//
+
+template <class Source, class Observer>
 class ScopedMultiSourceObservation {
  public:
   explicit ScopedMultiSourceObservation(Observer* observer)
@@ -61,23 +57,25 @@ class ScopedMultiSourceObservation {
 
   // Adds the object passed to the constructor as an observer on |source|.
   void AddObservation(Source* source) {
+    CHECK(!IsObservingSource(source));
     sources_.push_back(source);
-    (source->*AddObsFn)(observer_);
+    Traits::AddObserver(source, observer_);
   }
 
   // Remove the object passed to the constructor as an observer from |source|.
   void RemoveObservation(Source* source) {
     auto it = base::ranges::find(sources_, source);
-    DCHECK(it != sources_.end());
+    CHECK(it != sources_.end());
     sources_.erase(it);
-    (source->*RemoveObsFn)(observer_);
+    Traits::RemoveObserver(source, observer_);
   }
 
   // Remove the object passed to the constructor as an observer from all sources
   // it's observing.
   void RemoveAllObservations() {
-    for (Source* source : sources_)
-      (source->*RemoveObsFn)(observer_);
+    for (Source* source : sources_) {
+      Traits::RemoveObserver(source, observer_);
+    }
     sources_.clear();
   }
 
@@ -93,10 +91,20 @@ class ScopedMultiSourceObservation {
   // Returns the number of sources being observed.
   size_t GetSourcesCount() const { return sources_.size(); }
 
+  // Returns a pointer to the observer that observes the sources.
+  Observer* observer() { return observer_; }
+  const Observer* observer() const { return observer_; }
+
+  // Returns the sources being observed. Note: It is invalid to add or remove
+  // sources while iterating on it.
+  const std::vector<raw_ptr<Source>>& sources() const { return sources_; }
+
  private:
+  using Traits = ScopedObservationTraits<Source, Observer>;
+
   const raw_ptr<Observer> observer_;
 
-  std::vector<Source*> sources_;
+  std::vector<raw_ptr<Source>> sources_;
 };
 
 }  // namespace base

@@ -17,7 +17,8 @@ TemplateURLFetcher* TemplateURLFetcherFactory::GetForProfile(
 
 // static
 TemplateURLFetcherFactory* TemplateURLFetcherFactory::GetInstance() {
-  return base::Singleton<TemplateURLFetcherFactory>::get();
+  static base::NoDestructor<TemplateURLFetcherFactory> instance;
+  return instance.get();
 }
 
 // static
@@ -30,15 +31,23 @@ void TemplateURLFetcherFactory::ShutdownForProfile(Profile* profile) {
 TemplateURLFetcherFactory::TemplateURLFetcherFactory()
     : ProfileKeyedServiceFactory(
           "TemplateURLFetcher",
-          ProfileSelections::BuildRedirectedInIncognito()) {
+          ProfileSelections::Builder()
+              .WithRegular(ProfileSelection::kRedirectedToOriginal)
+              // TODO(crbug.com/40257657): Check if this service is needed in
+              // Guest mode.
+              .WithGuest(ProfileSelection::kRedirectedToOriginal)
+              // TODO(crbug.com/41488885): Check if this service is needed for
+              // Ash Internals.
+              .WithAshInternals(ProfileSelection::kRedirectedToOriginal)
+              .Build()) {
   DependsOn(TemplateURLServiceFactory::GetInstance());
 }
 
-TemplateURLFetcherFactory::~TemplateURLFetcherFactory() {
-}
+TemplateURLFetcherFactory::~TemplateURLFetcherFactory() = default;
 
-KeyedService* TemplateURLFetcherFactory::BuildServiceInstanceFor(
+std::unique_ptr<KeyedService>
+TemplateURLFetcherFactory::BuildServiceInstanceForBrowserContext(
     content::BrowserContext* profile) const {
-  return new TemplateURLFetcher(
+  return std::make_unique<TemplateURLFetcher>(
       TemplateURLServiceFactory::GetForProfile(static_cast<Profile*>(profile)));
 }

@@ -5,10 +5,13 @@
 #ifndef BASE_BASE64URL_H_
 #define BASE_BASE64URL_H_
 
+#include <optional>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "base/base_export.h"
-#include "base/strings/string_piece.h"
+#include "base/containers/span.h"
 
 namespace base {
 
@@ -20,12 +23,17 @@ enum class Base64UrlEncodePolicy {
   OMIT_PADDING
 };
 
-// Encodes the |input| string in base64url, defined in RFC 4648:
+// Encodes the |input| binary data in base64url, defined in RFC 4648:
 // https://tools.ietf.org/html/rfc4648#section-5
 //
 // The |policy| defines whether padding should be included or omitted from the
 // encoded |*output|. |input| and |*output| may reference the same storage.
-BASE_EXPORT void Base64UrlEncode(const StringPiece& input,
+BASE_EXPORT void Base64UrlEncode(span<const uint8_t> input,
+                                 Base64UrlEncodePolicy policy,
+                                 std::string* output);
+
+// Same as the previous function, but accepts an input string.
+BASE_EXPORT void Base64UrlEncode(std::string_view input,
                                  Base64UrlEncodePolicy policy,
                                  std::string* output);
 
@@ -45,9 +53,14 @@ enum class Base64UrlDecodePolicy {
 //
 // The |policy| defines whether padding will be required, ignored or disallowed
 // altogether. |input| and |*output| may reference the same storage.
-[[nodiscard]] BASE_EXPORT bool Base64UrlDecode(const StringPiece& input,
+[[nodiscard]] BASE_EXPORT bool Base64UrlDecode(std::string_view input,
                                                Base64UrlDecodePolicy policy,
                                                std::string* output);
+
+// Same as the previous function, but writing to a `std::vector`.
+[[nodiscard]] BASE_EXPORT std::optional<std::vector<uint8_t>> Base64UrlDecode(
+    std::string_view input,
+    Base64UrlDecodePolicy policy);
 
 }  // namespace base
 

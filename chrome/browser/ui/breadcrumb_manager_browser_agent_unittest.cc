@@ -4,33 +4,29 @@
 
 #include "chrome/browser/ui/breadcrumb_manager_browser_agent.h"
 
-#include "base/feature_list.h"
-#include "base/memory/raw_ptr.h"
-#include "chrome/browser/breadcrumbs/breadcrumb_manager_keyed_service_factory.h"
-#include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
+#include <memory>
+#include <string>
+
+#include "base/containers/circular_deque.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
-#include "components/breadcrumbs/core/breadcrumb_manager_keyed_service.h"
-#include "components/breadcrumbs/core/features.h"
+#include "components/breadcrumbs/core/breadcrumb_manager.h"
+#include "components/breadcrumbs/core/breadcrumbs_status.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/web_contents_tester.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+namespace {
+
+const base::circular_deque<std::string>& GetEvents() {
+  return breadcrumbs::BreadcrumbManager::GetInstance().GetEvents();
+}
+
+}  // namespace
+
 // Test fixture for testing BreadcrumbManagerBrowserAgent class.
 class BreadcrumbManagerBrowserAgentTest : public BrowserWithTestWindowTest {
  protected:
-  BreadcrumbManagerBrowserAgentTest() {
-    scoped_feature_list_.InitWithFeatures({breadcrumbs::kLogBreadcrumbs}, {});
-  }
-
-  void SetUp() override {
-    BrowserWithTestWindowTest::SetUp();
-    breadcrumb_service_ =
-        static_cast<breadcrumbs::BreadcrumbManagerKeyedService*>(
-            BreadcrumbManagerKeyedServiceFactory::GetForBrowserContext(
-                profile()));
-  }
-
   void InsertTab(Browser* browser) {
     std::unique_ptr<content::WebContents> contents =
         content::WebContentsTester::CreateTestWebContents(profile(), nullptr);
@@ -38,14 +34,8 @@ class BreadcrumbManagerBrowserAgentTest : public BrowserWithTestWindowTest {
                                                   /*foreground=*/true);
   }
 
-  std::list<std::string> GetEvents() const {
-    return breadcrumb_service_->GetEvents();
-  }
-
  private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-  raw_ptr<breadcrumbs::BreadcrumbManagerKeyedService> breadcrumb_service_ =
-      nullptr;
+  breadcrumbs::ScopedEnableBreadcrumbsForTesting scoped_enable_breadcrumbs_;
 };
 
 // Tests that an event logged by the BrowserAgent is returned with events for
@@ -75,7 +65,7 @@ TEST_F(BreadcrumbManagerBrowserAgentTest, MultipleBrowsers) {
   // Insert tab into `browser2`.
   InsertTab(browser2.get());
 
-  const std::list<std::string> events = GetEvents();
+  const auto& events = GetEvents();
   EXPECT_EQ(2u, events.size());
   const std::string event1 = events.front();
   const std::string event2 = events.back();
@@ -112,7 +102,7 @@ TEST_F(BreadcrumbManagerBrowserAgentTest, BatchOperations) {
 
   // Close multiple tabs.
   browser()->tab_strip_model()->CloseAllTabs();
-  const std::list<std::string> events = GetEvents();
+  const auto& events = GetEvents();
   ASSERT_EQ(3u, events.size());
   EXPECT_NE(std::string::npos, events.back().find("Closed 2 tabs"))
       << events.back();

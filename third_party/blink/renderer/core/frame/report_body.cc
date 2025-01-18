@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,10 @@
 
 namespace blink {
 
-ScriptValue ReportBody::toJSON(ScriptState* script_state) const {
+ScriptObject ReportBody::toJSON(ScriptState* script_state) const {
   V8ObjectBuilder result(script_state);
   BuildJSONValue(result);
-  return result.GetScriptValue();
+  return result.ToScriptObject();
 }
 
 }  // namespace blink

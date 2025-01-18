@@ -5,8 +5,8 @@
 #include <tuple>
 
 #include "base/run_loop.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/test/bind.h"
-#include "base/threading/sequenced_task_runner_handle.h"
 #include "build/build_config.h"
 #include "components/services/storage/public/mojom/storage_service.mojom.h"
 #include "components/services/storage/public/mojom/storage_usage_info.mojom.h"
@@ -40,13 +40,13 @@ class StorageServiceRestartBrowserTest : public ContentBrowserTest {
   void WaitForAnyLocalStorageDataAsync(base::OnceClosure callback) {
     dom_storage()->GetLocalStorageControl()->GetUsage(base::BindOnce(
         [](StorageServiceRestartBrowserTest* test, base::OnceClosure callback,
-           std::vector<storage::mojom::StorageUsageInfoV2Ptr> usage) {
+           std::vector<storage::mojom::StorageUsageInfoPtr> usage) {
           if (!usage.empty()) {
             std::move(callback).Run();
             return;
           }
 
-          base::SequencedTaskRunnerHandle::Get()->PostDelayedTask(
+          base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
               FROM_HERE,
               base::BindOnce(&StorageServiceRestartBrowserTest::
                                  WaitForAnyLocalStorageDataAsync,
@@ -59,12 +59,6 @@ class StorageServiceRestartBrowserTest : public ContentBrowserTest {
   void WaitForAnyLocalStorageData() {
     base::RunLoop loop;
     WaitForAnyLocalStorageDataAsync(loop.QuitClosure());
-    loop.Run();
-  }
-
-  void FlushLocalStorage() {
-    base::RunLoop loop;
-    dom_storage()->GetLocalStorageControl()->Flush(loop.QuitClosure());
     loop.Run();
   }
 
@@ -122,15 +116,7 @@ IN_PROC_BROWSER_TEST_F(StorageServiceRestartBrowserTest,
                          R"(getSessionStorageValue("foo"))"));
 }
 
-// Flaky on Linux, Windows, and Mac. See crbug.com/1066138.
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_WIN) || \
-    BUILDFLAG(IS_MAC)
-#define MAYBE_LocalStorageRecovery DISABLED_LocalStorageRecovery
-#else
-#define MAYBE_LocalStorageRecovery LocalStorageRecovery
-#endif
-IN_PROC_BROWSER_TEST_F(StorageServiceRestartBrowserTest,
-                       MAYBE_LocalStorageRecovery) {
+IN_PROC_BROWSER_TEST_F(StorageServiceRestartBrowserTest, LocalStorageRecovery) {
   // Tests that the Local Storage API can recover and continue normal operation
   // after a Storage Service crash.
   EXPECT_TRUE(
@@ -138,14 +124,25 @@ IN_PROC_BROWSER_TEST_F(StorageServiceRestartBrowserTest,
   std::ignore =
       EvalJs(shell()->web_contents(), R"(setLocalStorageValue("foo", 42))");
 
-  // We wait for the above storage request to be fully committed to disk. This
-  // ensures that renderer gets the correct value when recovering from the
-  // impending crash.
   WaitForAnyLocalStorageData();
-  FlushLocalStorage();
 
   CrashStorageServiceAndWaitForRestart();
-  EXPECT_EQ("42",
+
+  // Unlike Session Storage, Local Storage clobbers its renderer-side cache when
+  // the backend connection is lost. Thus, whether the data still exists depends
+  // on whether it managed to be flushed to disk before crashing, which is
+  // unpredictable.
+  EvalJsResult result =
+      EvalJs(shell()->web_contents(), R"(getLocalStorageValue("foo"))");
+  ASSERT_THAT(result, content::EvalJsResult::IsOk());
+  EXPECT_TRUE(result.value.GetString().empty() ||
+              result.value.GetString() == "42");
+
+  // Local Storage should resume working as expected after the service is
+  // restarted.
+  std::ignore =
+      EvalJs(shell()->web_contents(), R"(setLocalStorageValue("foo", 420))");
+  EXPECT_EQ("420",
             EvalJs(shell()->web_contents(), R"(getLocalStorageValue("foo"))"));
 }
 

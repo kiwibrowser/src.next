@@ -12,7 +12,6 @@
 #include "base/files/file_path.h"
 #include "base/memory/singleton.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/android/chrome_jni_headers/DownloadMessageBridge_jni.h"
 #include "chrome/browser/android/android_theme_resources.h"
 #include "chrome/browser/download/android/download_dialog_utils.h"
 #include "chrome/browser/profiles/profile.h"
@@ -22,6 +21,9 @@
 #include "content/public/browser/web_contents.h"
 #include "ui/android/window_android.h"
 #include "ui/base/l10n/l10n_util.h"
+
+// Must come after all headers that specialize FromJniType() / ToJniType().
+#include "chrome/android/chrome_jni_headers/DownloadMessageBridge_jni.h"
 
 using base::android::JavaParamRef;
 
@@ -48,6 +50,20 @@ void DownloadMessageBridge::ShowIncognitoDownloadMessage(
   validator_.AddJavaCallback(callback_id);
   Java_DownloadMessageBridge_showIncognitoDownloadMessage(env, java_object_,
                                                           callback_id);
+}
+
+void DownloadMessageBridge::ShowUnsupportedDownloadMessage(
+    content::WebContents* web_contents) {
+  DCHECK(web_contents);
+  JNIEnv* env = base::android::AttachCurrentThread();
+  ui::WindowAndroid* window_android = web_contents->GetTopLevelNativeWindow();
+
+  if (!window_android) {
+    return;
+  }
+
+  Java_DownloadMessageBridge_showUnsupportedDownloadMessage(
+      env, java_object_, window_android->GetJavaObject());
 }
 
 void DownloadMessageBridge::OnConfirmed(JNIEnv* env,

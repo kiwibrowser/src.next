@@ -7,6 +7,7 @@
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/extensions/extension_enable_flow_test_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/browser/web_contents.h"
@@ -29,13 +30,13 @@ class TestManagementProvider : public extensions::ManagementPolicy::Provider {
   TestManagementProvider(const TestManagementProvider&) = delete;
   TestManagementProvider& operator=(const TestManagementProvider&) = delete;
 
-  ~TestManagementProvider() override {}
+  ~TestManagementProvider() override = default;
 
   // MananagementPolicy::Provider:
   std::string GetDebugPolicyProviderName() const override { return "test"; }
-  bool MustRemainDisabled(const extensions::Extension* extension,
-                          extensions::disable_reason::DisableReason* reason,
-                          std::u16string* error) const override {
+  bool MustRemainDisabled(
+      const extensions::Extension* extension,
+      extensions::disable_reason::DisableReason* reason) const override {
     return extension->id() == extension_id_;
   }
 

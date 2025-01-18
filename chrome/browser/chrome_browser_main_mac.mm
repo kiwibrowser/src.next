@@ -6,12 +6,16 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "base/bind.h"
+#include <memory>
+
+#include "base/apple/bundle_locations.h"
+#import "base/apple/foundation_util.h"
+#include "base/base_paths.h"
+#include "base/check_op.h"
 #include "base/command_line.h"
-#include "base/mac/bundle_locations.h"
-#import "base/mac/foundation_util.h"
+#include "base/files/file_path.h"
+#include "base/functional/bind.h"
 #include "base/mac/mac_util.h"
-#include "base/mac/scoped_nsobject.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/path_service.h"
 #include "base/strings/sys_string_conversions.h"
@@ -22,39 +26,56 @@
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/buildflags.h"
 #import "chrome/browser/chrome_browser_application_mac.h"
-#include "chrome/browser/chrome_for_testing/buildflags.h"
+#include "chrome/browser/enterprise/platform_auth/platform_auth_policy_observer.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/mac/install_from_dmg.h"
-#import "chrome/browser/mac/keystone_glue.h"
-#include "chrome/browser/mac/mac_startup_profiler.h"
+#include "chrome/browser/mac/metrics.h"
 #include "chrome/browser/ui/cocoa/main_menu_builder.h"
+#include "chrome/browser/ui/cocoa/renderer_context_menu/chrome_swizzle_services_menu_updater.h"
+#include "chrome/browser/updater/browser_updater_client_util.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/branded_strings.h"
 #include "components/metrics/metrics_service.h"
-#include "components/os_crypt/os_crypt.h"
+#include "components/os_crypt/sync/os_crypt.h"
 #include "components/version_info/channel.h"
 #include "content/public/common/main_function_params.h"
 #include "content/public/common/result_codes.h"
 #include "net/cert/internal/system_trust_store.h"
-#include "services/network/public/cpp/features.h"
 #include "ui/base/cocoa/permissions_utils.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/resource/resource_handle.h"
 #include "ui/native_theme/native_theme_mac.h"
 
-#if BUILDFLAG(ENABLE_CHROMIUM_UPDATER)
-#include "chrome/browser/mac/install_updater.h"
-#endif  // BUILDFLAG(ENABLE_CHROMIUM_UPDATER)
-
 // ChromeBrowserMainPartsMac ---------------------------------------------------
+
+namespace {
+
+base::FilePath GetBundlePath() {
+  if (!base::apple::AmIBundled()) {
+    return base::FilePath();
+  }
+  return base::apple::OuterBundlePath();
+}
+
+base::FilePath GetMainExecutableName() {
+  if (!base::apple::AmIBundled()) {
+    return base::FilePath();
+  }
+  base::FilePath path;
+  base::PathService::Get(base::FILE_EXE, &path);
+  return path.BaseName();
+}
+
+}  // namespace
 
 ChromeBrowserMainPartsMac::ChromeBrowserMainPartsMac(bool is_integration_test,
                                                      StartupData* startup_data)
-    : ChromeBrowserMainPartsPosix(is_integration_test, startup_data) {}
+    : ChromeBrowserMainPartsPosix(is_integration_test, startup_data),
+      code_sign_clone_manager_(GetBundlePath(), GetMainExecutableName()) {}
 
 ChromeBrowserMainPartsMac::~ChromeBrowserMainPartsMac() = default;
 
@@ -68,27 +89,20 @@ int ChromeBrowserMainPartsMac::PreEarlyInitialization() {
         base::CommandLine::ForCurrentProcess();
     singleton_command_line->AppendSwitch(switches::kNoStartupWindow);
   }
+
+  [ChromeSwizzleServicesMenuUpdater install];
+
   return ChromeBrowserMainPartsPosix::PreEarlyInitialization();
 }
 
 void ChromeBrowserMainPartsMac::PreCreateMainMessageLoop() {
-  MacStartupProfiler::GetInstance()->Profile(
-      MacStartupProfiler::PRE_MAIN_MESSAGE_LOOP_START);
   ChromeBrowserMainPartsPosix::PreCreateMainMessageLoop();
 
   // ChromeBrowserMainParts should have loaded the resource bundle by this
   // point (needed to load the nib).
   CHECK(ui::ResourceBundle::HasSharedInstance());
 
-#if !BUILDFLAG(GOOGLE_CHROME_FOR_TESTING_BRANDING)
-#if BUILDFLAG(ENABLE_CHROMIUM_UPDATER)
-  InstallUpdaterAndRegisterBrowser();
-#else
-  // This is a no-op if the KeystoneRegistration framework is not present.
-  // The framework is only distributed with branded Google Chrome builds.
-  [[KeystoneGlue defaultKeystoneGlue] registerWithKeystone];
-#endif  // BUILDFLAG(ENABLE_CHROMIUM_UPDATER)
-
+#if !BUILDFLAG(CHROME_FOR_TESTING)
   // Disk image installation is sort of a first-run task, so it shares the
   // no first run switches.
   //
@@ -109,18 +123,21 @@ void ChromeBrowserMainPartsMac::PreCreateMainMessageLoop() {
       exit(0);
     }
   }
-#endif  // !BUILDFLAG(GOOGLE_CHROME_FOR_TESTING_BRANDING)
+#endif  // !BUILDFLAG(CHROME_FOR_TESTING)
 
-  // Create the app delegate. This object is intentionally leaked as a global
-  // singleton. It is accessed through -[NSApp delegate].
-  AppController* app_controller = [[AppController alloc] init];
-  [NSApp setDelegate:app_controller];
+  // Create the app delegate by requesting the shared AppController.
+  CHECK_EQ(nil, NSApp.delegate);
+  AppController* app_controller = AppController.sharedController;
+  CHECK_NE(nil, NSApp.delegate);
 
   chrome::BuildMainMenu(NSApp, app_controller,
                         l10n_util::GetStringUTF16(IDS_PRODUCT_NAME), false);
   [app_controller mainMenuCreated];
 
   ui::WarmScreenCapture();
+
+  metrics_ = std::make_unique<mac_metrics::Metrics>();
+  metrics_->RecordAppFileSystemType();
 
   PrefService* local_state = g_browser_process->local_state();
   DCHECK(local_state);
@@ -137,47 +154,38 @@ void ChromeBrowserMainPartsMac::PreCreateMainMessageLoop() {
 }
 
 void ChromeBrowserMainPartsMac::PostCreateMainMessageLoop() {
-  MacStartupProfiler::GetInstance()->Profile(
-      MacStartupProfiler::POST_MAIN_MESSAGE_LOOP_START);
   ChromeBrowserMainPartsPosix::PostCreateMainMessageLoop();
 
   net::InitializeTrustStoreMacCache();
 }
 
 void ChromeBrowserMainPartsMac::PreProfileInit() {
-  MacStartupProfiler::GetInstance()->Profile(
-      MacStartupProfiler::PRE_PROFILE_INIT);
   ChromeBrowserMainPartsPosix::PreProfileInit();
 
   // This is called here so that the app shim socket is only created after
   // taking the singleton lock.
   g_browser_process->platform_part()->app_shim_listener()->Init();
+
+  // Start up the platform auth SSO policy observer.
+  if (auto* local_state = g_browser_process->local_state(); local_state) {
+    platform_auth_policy_observer_ =
+        std::make_unique<PlatformAuthPolicyObserver>(local_state);
+  }
 }
 
 void ChromeBrowserMainPartsMac::PostProfileInit(Profile* profile,
                                                 bool is_initial_profile) {
-  if (is_initial_profile) {
-    MacStartupProfiler::GetInstance()->Profile(
-        MacStartupProfiler::POST_PROFILE_INIT);
-  }
-
   ChromeBrowserMainPartsPosix::PostProfileInit(profile, is_initial_profile);
+}
 
-  if (!is_initial_profile)
-    return;
+void ChromeBrowserMainPartsMac::PostMainMessageLoopRun() {
+  // The `ProfileManager` has been destroyed, so no new platform authentication
+  // requests will be created.
+  platform_auth_policy_observer_.reset();
 
-  // Activation of Keystone is not automatic but done in response to the
-  // counting and reporting of profiles.
-  KeystoneGlue* glue = [KeystoneGlue defaultKeystoneGlue];
-  if (glue && ![glue isRegisteredAndActive]) {
-    // If profile loading has failed, we still need to handle other tasks
-    // like marking of the product as active.
-    [glue setRegistrationActive];
-  }
+  ChromeBrowserMainParts::PostMainMessageLoopRun();
 }
 
 void ChromeBrowserMainPartsMac::DidEndMainMessageLoop() {
-  AppController* appController =
-      base::mac::ObjCCastStrict<AppController>([NSApp delegate]);
-  [appController didEndMainMessageLoop];
+  [AppController.sharedController didEndMainMessageLoop];
 }

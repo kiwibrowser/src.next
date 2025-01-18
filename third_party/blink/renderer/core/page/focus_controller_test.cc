@@ -1,20 +1,40 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/page/focus_controller.h"
 
 #include <memory>
+
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
+#include "third_party/blink/renderer/core/css/properties/longhands.h"
+#include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/dom/scroll_marker_group_pseudo_element.h"
+#include "third_party/blink/renderer/core/dom/scroll_marker_pseudo_element.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
+#include "third_party/blink/renderer/core/html/html_slot_element.h"
+#include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 
 namespace blink {
 
 class FocusControllerTest : public PageTestBase {
+ public:
+  Element* FindFocusableElementAfter(Element& element,
+                                     mojom::blink::FocusType type) {
+    if (type != mojom::blink::FocusType::kForward &&
+        type != mojom::blink::FocusType::kBackward) {
+      return nullptr;
+    }
+    element.GetDocument().UpdateStyleAndLayout(DocumentUpdateReason::kFocus);
+    FocusController::OwnerMap owner_map;
+    return GetFocusController().FindFocusableElementForImeAutofillAndTesting(
+        type, element, owner_map);
+  }
+
  private:
   void SetUp() override { PageTestBase::SetUp(gfx::Size()); }
 };
@@ -37,7 +57,7 @@ TEST_F(FocusControllerTest, DoNotCrash1) {
       "tabindex='0'></p>");
   // <div> with shadow root
   auto* host = To<Element>(GetDocument().body()->firstChild());
-  host->AttachShadowRootInternal(ShadowRootType::kOpen);
+  host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
   // "This test is for crbug.com/609012"
   Node* text = host->nextSibling();
   // <p>
@@ -61,7 +81,7 @@ TEST_F(FocusControllerTest, DoNotCrash2) {
   Node* text = target->nextSibling();
   // <div> with shadow root
   auto* host = To<Element>(text->nextSibling());
-  host->AttachShadowRootInternal(ShadowRootType::kOpen);
+  host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
 
   // Set sequential focus navigation point at text node.
   GetDocument().SetSequentialFocusNavigationStartingPoint(text);
@@ -95,12 +115,12 @@ TEST_F(FocusControllerTest, SVGFocusableElementInForm) {
   auto* first = To<Element>(form->firstChild());
   auto* last = To<Element>(form->lastChild());
 
-  Element* next = GetFocusController().NextFocusableElementForIME(
+  Element* next = GetFocusController().NextFocusableElementForImeAndAutofill(
       first, mojom::blink::FocusType::kForward);
   EXPECT_EQ(next, last)
       << "SVG Element should be skipped even when focusable in form.";
 
-  Element* prev = GetFocusController().NextFocusableElementForIME(
+  Element* prev = GetFocusController().NextFocusableElementForImeAndAutofill(
       next, mojom::blink::FocusType::kBackward);
   EXPECT_EQ(prev, first)
       << "SVG Element should be skipped even when focusable in form.";
@@ -114,29 +134,29 @@ TEST_F(FocusControllerTest, FindFocusableAfterElement) {
   Element* second = GetElementById("second");
   Element* third = GetElementById("third");
   Element* fourth = GetElementById("fourth");
-  EXPECT_EQ(third, GetFocusController().FindFocusableElementAfter(
+  EXPECT_EQ(third, FindFocusableElementAfter(
                        *first, mojom::blink::FocusType::kForward));
-  EXPECT_EQ(third, GetFocusController().FindFocusableElementAfter(
+  EXPECT_EQ(third, FindFocusableElementAfter(
                        *second, mojom::blink::FocusType::kForward));
-  EXPECT_EQ(fourth, GetFocusController().FindFocusableElementAfter(
+  EXPECT_EQ(fourth, FindFocusableElementAfter(
                         *third, mojom::blink::FocusType::kForward));
-  EXPECT_EQ(nullptr, GetFocusController().FindFocusableElementAfter(
+  EXPECT_EQ(nullptr, FindFocusableElementAfter(
                          *fourth, mojom::blink::FocusType::kForward));
 
-  EXPECT_EQ(nullptr, GetFocusController().FindFocusableElementAfter(
+  EXPECT_EQ(nullptr, FindFocusableElementAfter(
                          *first, mojom::blink::FocusType::kBackward));
-  EXPECT_EQ(first, GetFocusController().FindFocusableElementAfter(
+  EXPECT_EQ(first, FindFocusableElementAfter(
                        *second, mojom::blink::FocusType::kBackward));
-  EXPECT_EQ(first, GetFocusController().FindFocusableElementAfter(
+  EXPECT_EQ(first, FindFocusableElementAfter(
                        *third, mojom::blink::FocusType::kBackward));
-  EXPECT_EQ(third, GetFocusController().FindFocusableElementAfter(
+  EXPECT_EQ(third, FindFocusableElementAfter(
                        *fourth, mojom::blink::FocusType::kBackward));
 
-  EXPECT_EQ(nullptr, GetFocusController().FindFocusableElementAfter(
-                         *first, mojom::blink::FocusType::kNone));
+  EXPECT_EQ(nullptr,
+            FindFocusableElementAfter(*first, mojom::blink::FocusType::kNone));
 }
 
-TEST_F(FocusControllerTest, NextFocusableElementForIME) {
+TEST_F(FocusControllerTest, NextFocusableElementForImeAndAutofill) {
   GetDocument().body()->setInnerHTML(
       "<form>"
       "  <input type='text' id='username'>"
@@ -148,18 +168,20 @@ TEST_F(FocusControllerTest, NextFocusableElementForIME) {
   ASSERT_TRUE(username);
   ASSERT_TRUE(password);
 
-  EXPECT_EQ(password, GetFocusController().NextFocusableElementForIME(
-                          username, mojom::blink::FocusType::kForward));
-  EXPECT_EQ(nullptr, GetFocusController().NextFocusableElementForIME(
+  EXPECT_EQ(password,
+            GetFocusController().NextFocusableElementForImeAndAutofill(
+                username, mojom::blink::FocusType::kForward));
+  EXPECT_EQ(nullptr, GetFocusController().NextFocusableElementForImeAndAutofill(
                          username, mojom::blink::FocusType::kBackward));
 
-  EXPECT_EQ(nullptr, GetFocusController().NextFocusableElementForIME(
+  EXPECT_EQ(nullptr, GetFocusController().NextFocusableElementForImeAndAutofill(
                          password, mojom::blink::FocusType::kForward));
-  EXPECT_EQ(username, GetFocusController().NextFocusableElementForIME(
-                          password, mojom::blink::FocusType::kBackward));
+  EXPECT_EQ(username,
+            GetFocusController().NextFocusableElementForImeAndAutofill(
+                password, mojom::blink::FocusType::kBackward));
 }
 
-TEST_F(FocusControllerTest, NextFocusableElementForIME_NoFormTag) {
+TEST_F(FocusControllerTest, NextFocusableElementForImeAndAutofill_NoFormTag) {
   GetDocument().body()->setInnerHTML(
       "  <input type='text' id='username'>"
       "  <input type='password' id='password'>"
@@ -169,19 +191,21 @@ TEST_F(FocusControllerTest, NextFocusableElementForIME_NoFormTag) {
   ASSERT_TRUE(username);
   ASSERT_TRUE(password);
 
-  EXPECT_EQ(password, GetFocusController().NextFocusableElementForIME(
-                          username, mojom::blink::FocusType::kForward));
-  EXPECT_EQ(nullptr, GetFocusController().NextFocusableElementForIME(
+  EXPECT_EQ(password,
+            GetFocusController().NextFocusableElementForImeAndAutofill(
+                username, mojom::blink::FocusType::kForward));
+  EXPECT_EQ(nullptr, GetFocusController().NextFocusableElementForImeAndAutofill(
                          username, mojom::blink::FocusType::kBackward));
 
-  EXPECT_EQ(nullptr, GetFocusController().NextFocusableElementForIME(
+  EXPECT_EQ(nullptr, GetFocusController().NextFocusableElementForImeAndAutofill(
                          password, mojom::blink::FocusType::kForward));
-  EXPECT_EQ(username, GetFocusController().NextFocusableElementForIME(
-                          password, mojom::blink::FocusType::kBackward));
+  EXPECT_EQ(username,
+            GetFocusController().NextFocusableElementForImeAndAutofill(
+                password, mojom::blink::FocusType::kBackward));
 }
 
 // Ignore a checkbox to streamline form submission.
-TEST_F(FocusControllerTest, NextFocusableElementForIME_Checkbox) {
+TEST_F(FocusControllerTest, NextFocusableElementForImeAndAutofill_Checkbox) {
   GetDocument().body()->setInnerHTML(
       "<form>"
       "  <input type='text' id='username'>"
@@ -194,19 +218,21 @@ TEST_F(FocusControllerTest, NextFocusableElementForIME_Checkbox) {
   ASSERT_TRUE(username);
   ASSERT_TRUE(password);
 
-  EXPECT_EQ(password, GetFocusController().NextFocusableElementForIME(
-                          username, mojom::blink::FocusType::kForward));
-  EXPECT_EQ(nullptr, GetFocusController().NextFocusableElementForIME(
+  EXPECT_EQ(password,
+            GetFocusController().NextFocusableElementForImeAndAutofill(
+                username, mojom::blink::FocusType::kForward));
+  EXPECT_EQ(nullptr, GetFocusController().NextFocusableElementForImeAndAutofill(
                          username, mojom::blink::FocusType::kBackward));
 
-  EXPECT_EQ(nullptr, GetFocusController().NextFocusableElementForIME(
+  EXPECT_EQ(nullptr, GetFocusController().NextFocusableElementForImeAndAutofill(
                          password, mojom::blink::FocusType::kForward));
-  EXPECT_EQ(username, GetFocusController().NextFocusableElementForIME(
-                          password, mojom::blink::FocusType::kBackward));
+  EXPECT_EQ(username,
+            GetFocusController().NextFocusableElementForImeAndAutofill(
+                password, mojom::blink::FocusType::kBackward));
 }
 
 // A <select> element should block a form submission.
-TEST_F(FocusControllerTest, NextFocusableElementForIME_Select) {
+TEST_F(FocusControllerTest, NextFocusableElementForImeAndAutofill_Select) {
   GetDocument().body()->setInnerHTML(
       "<form>"
       "  <input type='text' id='username'>"
@@ -224,15 +250,617 @@ TEST_F(FocusControllerTest, NextFocusableElementForIME_Select) {
   ASSERT_TRUE(password);
   ASSERT_TRUE(login_type);
 
-  EXPECT_EQ(password, GetFocusController().NextFocusableElementForIME(
-                          username, mojom::blink::FocusType::kForward));
-  EXPECT_EQ(nullptr, GetFocusController().NextFocusableElementForIME(
+  EXPECT_EQ(password,
+            GetFocusController().NextFocusableElementForImeAndAutofill(
+                username, mojom::blink::FocusType::kForward));
+  EXPECT_EQ(nullptr, GetFocusController().NextFocusableElementForImeAndAutofill(
                          username, mojom::blink::FocusType::kBackward));
 
-  EXPECT_EQ(login_type, GetFocusController().NextFocusableElementForIME(
-                            password, mojom::blink::FocusType::kForward));
-  EXPECT_EQ(username, GetFocusController().NextFocusableElementForIME(
-                          password, mojom::blink::FocusType::kBackward));
+  EXPECT_EQ(login_type,
+            GetFocusController().NextFocusableElementForImeAndAutofill(
+                password, mojom::blink::FocusType::kForward));
+  EXPECT_EQ(username,
+            GetFocusController().NextFocusableElementForImeAndAutofill(
+                password, mojom::blink::FocusType::kBackward));
+}
+
+// A submit button is used to detect the end of a user form within a combined
+// form. Combined form is a <form> element that encloses several user form (e.g.
+// signin and signup). See the HTML in the test for clarity.
+TEST_F(FocusControllerTest,
+       NextFocusableElementForImeAndAutofill_SubmitButton) {
+  GetDocument().body()->setInnerHTML(
+      "<form>"
+      "  <div>Login</div>"
+      "    <input type='email' id='login_username'>"
+      "    <input type='password' id='login_password'>"
+      "    <input type='submit' id='login_submit'>"
+      "  <div>Create an account</div>"
+      "    <input type='email' id='signup_username'>"
+      "    <input type='text' id='signup_full_name'>"
+      "    <input type='password' id='signup_password'>"
+      "    <button type='submit' id='signup_submit'>"
+      "  <div>Forgot password?</div>"
+      "    <input type='email' id='recover_username'>"
+      "    <span>Request a recovery link</span>"
+      "</form>");
+  // "login_submit" closes the signin form.
+  Element* login_password = GetElementById("login_password");
+  ASSERT_TRUE(login_password);
+  EXPECT_EQ(nullptr, GetFocusController().NextFocusableElementForImeAndAutofill(
+                         login_password, mojom::blink::FocusType::kForward));
+  Element* signup_username = GetElementById("signup_username");
+  ASSERT_TRUE(signup_username);
+  EXPECT_EQ(nullptr, GetFocusController().NextFocusableElementForImeAndAutofill(
+                         signup_username, mojom::blink::FocusType::kBackward));
+
+  // "signup_password" closes the signup form.
+  Element* signup_password = GetElementById("signup_password");
+  ASSERT_TRUE(signup_password);
+  EXPECT_EQ(nullptr, GetFocusController().NextFocusableElementForImeAndAutofill(
+                         signup_password, mojom::blink::FocusType::kForward));
+  Element* recover_username = GetElementById("recover_username");
+  ASSERT_TRUE(recover_username);
+  EXPECT_EQ(nullptr, GetFocusController().NextFocusableElementForImeAndAutofill(
+                         recover_username, mojom::blink::FocusType::kBackward));
+
+  // The end of the recovery form is detected just because it the end of <form>.
+  EXPECT_EQ(nullptr, GetFocusController().NextFocusableElementForImeAndAutofill(
+                         recover_username, mojom::blink::FocusType::kForward));
+}
+
+// Test for FocusController::FindScopeOwnerSlotOrReadingFlowContainer().
+TEST_F(FocusControllerTest, FindScopeOwnerSlotOrReadingFlowContainer) {
+  const char* main_html =
+      "<div id='host'>"
+      "<div id='inner1'></div>"
+      "<div id='inner2'></div>"
+      "</div>";
+
+  GetDocument().body()->setInnerHTML(String::FromUTF8(main_html));
+  auto* host = To<Element>(GetDocument().body()->firstChild());
+  ShadowRoot& shadow_root =
+      host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
+  shadow_root.setInnerHTML(String::FromUTF8("<slot></slot>"));
+
+  Element* inner1 = GetDocument().QuerySelector(AtomicString("#inner1"));
+  Element* inner2 = GetDocument().QuerySelector(AtomicString("#inner2"));
+  auto* slot =
+      To<HTMLSlotElement>(shadow_root.QuerySelector(AtomicString("slot")));
+
+  EXPECT_EQ(nullptr,
+            FocusController::FindScopeOwnerSlotOrReadingFlowContainer(*host));
+  EXPECT_EQ(nullptr,
+            FocusController::FindScopeOwnerSlotOrReadingFlowContainer(*slot));
+  EXPECT_EQ(slot,
+            FocusController::FindScopeOwnerSlotOrReadingFlowContainer(*inner1));
+  EXPECT_EQ(slot,
+            FocusController::FindScopeOwnerSlotOrReadingFlowContainer(*inner2));
+}
+
+// crbug.com/1508258
+TEST_F(FocusControllerTest, FocusHasChangedShouldInvalidateFocusStyle) {
+  SetBodyInnerHTML(
+      "<style>#host:focus { color:#A0A0A0; }</style>"
+      "<div id=host></div>");
+  auto& controller = GetFocusController();
+  controller.SetFocused(false);
+
+  auto* host = GetElementById("host");
+  ShadowRoot& shadow_root =
+      host->AttachShadowRootForTesting(ShadowRootMode::kOpen);
+  shadow_root.setInnerHTML("<div tabindex=0></div>");
+  To<Element>(shadow_root.firstChild())->Focus();
+
+  controller.SetActive(true);
+  controller.SetFocused(true);
+  GetDocument().UpdateStyleAndLayoutTree();
+  const auto* style = host->GetComputedStyle();
+  EXPECT_EQ(Color(0xA0, 0xA0, 0xA0),
+            style->VisitedDependentColor(GetCSSPropertyColor()));
+}
+
+class FocusControllerTestWithIframes : public RenderingTest {
+ public:
+  FocusControllerTestWithIframes()
+      : RenderingTest(MakeGarbageCollected<SingleChildLocalFrameClient>()) {}
+};
+
+// A captcha should block a form submission.
+TEST_F(FocusControllerTestWithIframes,
+       NextFocusableElementForImeAndAutofill_Captcha) {
+  SetBodyInnerHTML(
+      "<!DOCTYPE html>"
+      "<form>"
+      "  <input type='text' id='username'>"
+      "  <input type='password' id='password'>"
+      "  <iframe id='captcha' src='https://captcha.com'></iframe>"
+      "  <button type='submit' value='Login'>"
+      "</form>");
+  SetChildFrameHTML(
+      "<!DOCTYPE html>"
+      "<div id='checkbox' tabindex='0'>");
+  UpdateAllLifecyclePhasesForTest();
+
+  Element* password = GetElementById("password");
+  ASSERT_TRUE(password);
+
+  LocalFrame* child_frame = To<LocalFrame>(GetFrame().Tree().FirstChild());
+  ASSERT_TRUE(child_frame);
+  Document* child_document = child_frame->GetDocument();
+  ASSERT_TRUE(child_document);
+  Element* checkbox = child_document->getElementById(AtomicString("checkbox"));
+  ASSERT_TRUE(checkbox);
+
+  // |NextFocusableElementForImeAndAutofill| finds another element that needs
+  // user input - don't auto-submit after filling in the username and password
+  // fields.
+  EXPECT_EQ(checkbox,
+            GetFocusController().NextFocusableElementForImeAndAutofill(
+                password, mojom::blink::FocusType::kForward));
+}
+
+TEST_F(FocusControllerTest, FullCarouselFocusOrder) {
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      .scroller { overflow: hidden; width: 100px; height: 100px; }
+      .before { scroll-marker-group: before; }
+      .after { scroll-marker-group: after; }
+      .scroller::scroll-marker-group { height: 100px; }
+      .scroller::scroll-button(block-start) { content: "u"; }
+      .scroller::scroll-button(inline-start) { content: "l"; }
+      .scroller::scroll-button(inline-end) { content: "r"; }
+      .scroller::scroll-button(block-end) { content: "d"; }
+      .scroller::scroll-button(block-start):focus { outline: 1px solid blue; }
+      .scroller::scroll-button(inline-start):focus { outline: 1px solid blue; }
+      .scroller::scroll-button(inline-end):focus { outline: 1px solid blue; }
+      .scroller::scroll-button(block-end):focus { outline: 1px solid blue; }
+      .item { width: 100px; height: 100px; }
+      .item::scroll-marker:focus { outline: 1px solid blue; opacity: 0.5; }
+      .item::scroll-marker { content: "*" }
+      .item::scroll-marker:target-current { color: red; }
+    </style>
+    <input id="pre-input">
+    <div id="before-scroller" class="before scroller" tabindex="0">
+      <div id="01" class="item" tabindex="0">1</div>
+      <div id="02" class="item" tabindex="0">2</div>
+      <div id="03" class="item">3</div>
+    </div>
+
+    <div id="after-scroller" class="after scroller" tabindex="0">
+      <div id="11" class="item" tabindex="0">1</div>
+      <div id="12" class="item">2</div>
+      <div id="13" class="item" tabindex="0">3</div>
+    </div>
+    <input id="post-input">
+  )HTML");
+
+  UpdateAllLifecyclePhasesForTest();
+  Element* pre_input = GetElementById("pre-input");
+  Element* before_scroller = GetElementById("before-scroller");
+  Element* after_scroller = GetElementById("after-scroller");
+  Element* post_input = GetElementById("post-input");
+
+  Element* before_block_start_button =
+      before_scroller->GetPseudoElement(kPseudoIdScrollButtonBlockStart);
+  Element* before_inline_start_button =
+      before_scroller->GetPseudoElement(kPseudoIdScrollButtonInlineStart);
+  Element* before_block_end_button =
+      before_scroller->GetPseudoElement(kPseudoIdScrollButtonBlockEnd);
+  Element* before_inline_end_button =
+      before_scroller->GetPseudoElement(kPseudoIdScrollButtonInlineEnd);
+
+  Element* before_first_child = before_scroller->firstElementChild();
+  Element* before_second_child = before_first_child->nextElementSibling();
+
+  auto* before_scroll_marker_group = To<ScrollMarkerGroupPseudoElement>(
+      before_scroller->GetPseudoElement(kPseudoIdScrollMarkerGroupBefore));
+  Element* before_first_scroll_marker =
+      before_first_child->GetPseudoElement(kPseudoIdScrollMarker);
+  Element* before_second_scroll_marker =
+      before_second_child->GetPseudoElement(kPseudoIdScrollMarker);
+
+  Element* after_block_start_button =
+      after_scroller->GetPseudoElement(kPseudoIdScrollButtonBlockStart);
+  Element* after_inline_start_button =
+      after_scroller->GetPseudoElement(kPseudoIdScrollButtonInlineStart);
+  Element* after_block_end_button =
+      after_scroller->GetPseudoElement(kPseudoIdScrollButtonBlockEnd);
+  Element* after_inline_end_button =
+      after_scroller->GetPseudoElement(kPseudoIdScrollButtonInlineEnd);
+
+  Element* after_first_child = after_scroller->firstElementChild();
+  Element* after_last_child = after_scroller->lastElementChild();
+
+  Element* after_first_scroll_marker =
+      after_first_child->GetPseudoElement(kPseudoIdScrollMarker);
+
+  std::array<Element*, 18> order = {pre_input,
+                                    before_first_scroll_marker,
+                                    before_block_start_button,
+                                    before_inline_start_button,
+                                    before_block_end_button,
+                                    before_inline_end_button,
+                                    before_scroller,
+                                    before_first_child,
+                                    before_second_child,
+                                    after_block_start_button,
+                                    after_inline_start_button,
+                                    after_block_end_button,
+                                    after_inline_end_button,
+                                    after_scroller,
+                                    after_first_child,
+                                    after_last_child,
+                                    after_first_scroll_marker,
+                                    post_input};
+
+  for (std::size_t i = 0u; i < order.size() - 1; ++i) {
+    EXPECT_EQ(order[i + 1], FindFocusableElementAfter(
+                                *order[i], mojom::blink::FocusType::kForward));
+  }
+  for (std::size_t i = 0u; i < order.size() - 1; ++i) {
+    EXPECT_EQ(order[i], FindFocusableElementAfter(
+                            *order[i + 1], mojom::blink::FocusType::kBackward));
+  }
+
+  before_second_scroll_marker->Focus();
+  GetFocusController().SetActive(true);
+  GetFocusController().SetFocused(true);
+  before_scroll_marker_group->SetSelected(
+      *To<ScrollMarkerPseudoElement>(before_second_scroll_marker));
+  const auto* style = before_second_scroll_marker->GetComputedStyle();
+  EXPECT_TRUE(before_second_scroll_marker->IsFocused());
+  EXPECT_EQ(0.5, style->Opacity());
+  EXPECT_EQ(before_block_start_button,
+            FindFocusableElementAfter(*before_second_scroll_marker,
+                                      mojom::blink::FocusType::kForward));
+}
+
+TEST_F(FocusControllerTest, CarouselWithOnlyButtonsFocusOrder) {
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      .scroller { overflow: hidden; width: 100px; height: 100px; }
+      .scroller::scroll-button(block-start) { content: "u"; }
+      .scroller::scroll-button(inline-start) { content: "l"; }
+      .scroller::scroll-button(inline-end) { content: "r"; }
+      .scroller::scroll-button(block-end) { content: "d"; }
+      .scroller::scroll-button(block-start):focus { outline: 1px solid blue; opacity: 0.5; }
+      .scroller::scroll-button(inline-start):focus { outline: 1px solid blue; }
+      .scroller::scroll-button(inline-end):focus { outline: 1px solid blue; }
+      .scroller::scroll-button(block-end):focus { outline: 1px solid blue; }
+      .item { width: 100px; height: 100px; }
+    </style>
+    <input id="pre-input">
+    <div id="before-scroller" class="before scroller" tabindex="0">
+      <div id="01" class="item" tabindex="0">1</div>
+      <div id="02" class="item" tabindex="0">2</div>
+      <div id="03" class="item">3</div>
+    </div>
+
+    <div id="after-scroller" class="after scroller" tabindex="0">
+      <div id="11" class="item" tabindex="0">1</div>
+      <div id="12" class="item">2</div>
+      <div id="13" class="item" tabindex="0">3</div>
+    </div>
+    <input id="post-input">
+  )HTML");
+
+  UpdateAllLifecyclePhasesForTest();
+  Element* pre_input = GetElementById("pre-input");
+  Element* before_scroller = GetElementById("before-scroller");
+  Element* after_scroller = GetElementById("after-scroller");
+  Element* post_input = GetElementById("post-input");
+
+  Element* before_block_start_button =
+      before_scroller->GetPseudoElement(kPseudoIdScrollButtonBlockStart);
+  Element* before_inline_start_button =
+      before_scroller->GetPseudoElement(kPseudoIdScrollButtonInlineStart);
+  Element* before_block_end_button =
+      before_scroller->GetPseudoElement(kPseudoIdScrollButtonBlockEnd);
+  Element* before_inline_end_button =
+      before_scroller->GetPseudoElement(kPseudoIdScrollButtonInlineEnd);
+
+  Element* before_first_child = before_scroller->firstElementChild();
+  Element* before_second_child =
+      before_scroller->firstElementChild()->nextElementSibling();
+
+  Element* after_block_start_button =
+      after_scroller->GetPseudoElement(kPseudoIdScrollButtonBlockStart);
+  Element* after_inline_start_button =
+      after_scroller->GetPseudoElement(kPseudoIdScrollButtonInlineStart);
+  Element* after_block_end_button =
+      after_scroller->GetPseudoElement(kPseudoIdScrollButtonBlockEnd);
+  Element* after_inline_end_button =
+      after_scroller->GetPseudoElement(kPseudoIdScrollButtonInlineEnd);
+
+  Element* after_first_child = after_scroller->firstElementChild();
+  Element* after_last_child = after_scroller->lastElementChild();
+
+  std::array<Element*, 16> order = {pre_input,
+                                    before_block_start_button,
+                                    before_inline_start_button,
+                                    before_block_end_button,
+                                    before_inline_end_button,
+                                    before_scroller,
+                                    before_first_child,
+                                    before_second_child,
+                                    after_block_start_button,
+                                    after_inline_start_button,
+                                    after_block_end_button,
+                                    after_inline_end_button,
+                                    after_scroller,
+                                    after_first_child,
+                                    after_last_child,
+                                    post_input};
+
+  for (std::size_t i = 0u; i < order.size() - 1; ++i) {
+    EXPECT_EQ(order[i + 1], FindFocusableElementAfter(
+                                *order[i], mojom::blink::FocusType::kForward));
+  }
+  for (std::size_t i = 0u; i < order.size() - 1; ++i) {
+    EXPECT_EQ(order[i], FindFocusableElementAfter(
+                            *order[i + 1], mojom::blink::FocusType::kBackward));
+  }
+
+  before_block_start_button->Focus();
+  GetFocusController().SetActive(true);
+  GetFocusController().SetFocused(true);
+  const auto* style = before_block_start_button->GetComputedStyle();
+  EXPECT_TRUE(before_block_start_button->IsFocused());
+  EXPECT_EQ(0.5, style->Opacity());
+}
+
+TEST_F(FocusControllerTest, CarouselWithOnlyScrollMarkersFocusOrder) {
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      .scroller { overflow: hidden; width: 100px; height: 100px; }
+      .before { scroll-marker-group: before; }
+      .after { scroll-marker-group: after; }
+      .scroller::scroll-marker-group { height: 100px; }
+      .item { width: 100px; height: 100px; }
+      .item::scroll-marker:focus { outline: 1px solid blue; opacity: 0.5; }
+      .item::scroll-marker { content: "*" }
+      .item::scroll-marker:target-current { color: red; }
+    </style>
+    <input id="pre-input">
+    <div id="before-scroller" class="before scroller" tabindex="0">
+      <div id="01" class="item" tabindex="0">1</div>
+      <div id="02" class="item" tabindex="0">2</div>
+      <div id="03" class="item">3</div>
+    </div>
+
+    <div id="after-scroller" class="after scroller" tabindex="0">
+      <div id="11" class="item" tabindex="0">1</div>
+      <div id="12" class="item">2</div>
+      <div id="13" class="item" tabindex="0">3</div>
+    </div>
+    <input id="post-input">
+  )HTML");
+
+  UpdateAllLifecyclePhasesForTest();
+  Element* pre_input = GetElementById("pre-input");
+  Element* before_scroller = GetElementById("before-scroller");
+  Element* after_scroller = GetElementById("after-scroller");
+  Element* post_input = GetElementById("post-input");
+
+  Element* before_first_child = before_scroller->firstElementChild();
+  Element* before_second_child =
+      before_scroller->firstElementChild()->nextElementSibling();
+
+  Element* before_first_scroll_marker =
+      before_first_child->GetPseudoElement(kPseudoIdScrollMarker);
+
+  Element* after_first_child = after_scroller->firstElementChild();
+  Element* after_last_child = after_scroller->lastElementChild();
+
+  Element* after_first_scroll_marker =
+      after_first_child->GetPseudoElement(kPseudoIdScrollMarker);
+
+  std::array<Element*, 10> order = {
+      pre_input,          before_first_scroll_marker, before_scroller,
+      before_first_child, before_second_child,        after_scroller,
+      after_first_child,  after_last_child,           after_first_scroll_marker,
+      post_input};
+
+  for (std::size_t i = 0u; i < order.size() - 1; ++i) {
+    EXPECT_EQ(order[i + 1], FindFocusableElementAfter(
+                                *order[i], mojom::blink::FocusType::kForward));
+  }
+  for (std::size_t i = 0u; i < order.size() - 1; ++i) {
+    EXPECT_EQ(order[i], FindFocusableElementAfter(
+                            *order[i + 1], mojom::blink::FocusType::kBackward));
+  }
+}
+
+TEST_F(FocusControllerTest,
+       CarouselWithOnlyScrollMarkersAndChildrenFocusOrder) {
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      .scroller { overflow: hidden; width: 100px; height: 100px; }
+      .before { scroll-marker-group: before; }
+      .after { scroll-marker-group: after; }
+      .scroller::scroll-marker-group { height: 100px; }
+      .item { width: 100px; height: 100px; }
+    </style>
+    <input id="pre-input">
+    <div id="before-scroller" class="before scroller" tabindex="0">
+      <div id="01" class="item" tabindex="0">1</div>
+      <div id="02" class="item" tabindex="0">2</div>
+      <div id="03" class="item">3</div>
+    </div>
+
+    <div id="after-scroller" class="after scroller" tabindex="0">
+      <div id="11" class="item" tabindex="0">1</div>
+      <div id="12" class="item">2</div>
+      <div id="13" class="item" tabindex="0">3</div>
+    </div>
+    <input id="post-input">
+  )HTML");
+
+  UpdateAllLifecyclePhasesForTest();
+  Element* pre_input = GetElementById("pre-input");
+  Element* before_scroller = GetElementById("before-scroller");
+  Element* after_scroller = GetElementById("after-scroller");
+  Element* post_input = GetElementById("post-input");
+
+  Element* before_first_child = before_scroller->firstElementChild();
+  Element* before_second_child =
+      before_scroller->firstElementChild()->nextElementSibling();
+
+
+  Element* after_first_child = after_scroller->firstElementChild();
+  Element* after_last_child = after_scroller->lastElementChild();
+
+  std::array<Element*, 8> order = {pre_input,          before_scroller,
+                                   before_first_child, before_second_child,
+                                   after_scroller,     after_first_child,
+                                   after_last_child,   post_input};
+
+  for (std::size_t i = 0u; i < order.size() - 1; ++i) {
+    EXPECT_EQ(order[i + 1], FindFocusableElementAfter(
+                                *order[i], mojom::blink::FocusType::kForward));
+  }
+  for (std::size_t i = 0u; i < order.size() - 1; ++i) {
+    EXPECT_EQ(order[i], FindFocusableElementAfter(
+                            *order[i + 1], mojom::blink::FocusType::kBackward));
+  }
+}
+
+TEST_F(FocusControllerTest, CarouselWithOnlyScrollMarkerGroupFocusOrder) {
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      .scroller { overflow: hidden; width: 100px; height: 100px; }
+      .before { scroll-marker-group: before; }
+      .after { scroll-marker-group: after; }
+      .scroller::scroll-marker-group { height: 100px; }
+    </style>
+    <input id="pre-input">
+    <div id="before-scroller" class="before scroller" tabindex="0"></div>
+
+    <div id="after-scroller" class="after scroller" tabindex="0"></div>
+    <input id="post-input">
+  )HTML");
+
+  UpdateAllLifecyclePhasesForTest();
+  Element* pre_input = GetElementById("pre-input");
+  Element* before_scroller = GetElementById("before-scroller");
+  Element* after_scroller = GetElementById("after-scroller");
+  Element* post_input = GetElementById("post-input");
+
+  std::array<Element*, 4> order = {pre_input, before_scroller, after_scroller,
+                                   post_input};
+
+  for (std::size_t i = 0u; i < order.size() - 1; ++i) {
+    EXPECT_EQ(order[i + 1], FindFocusableElementAfter(
+                                *order[i], mojom::blink::FocusType::kForward));
+  }
+  for (std::size_t i = 0u; i < order.size() - 1; ++i) {
+    EXPECT_EQ(order[i], FindFocusableElementAfter(
+                            *order[i + 1], mojom::blink::FocusType::kBackward));
+  }
+}
+
+TEST_F(FocusControllerTest, FullCarouselWithExtraPseudoElementsFocusOrder) {
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <style>
+      .scroller { overflow: hidden; width: 100px; height: 100px; }
+      .before { scroll-marker-group: before; }
+      .after { scroll-marker-group: after; }
+      .scroller::after { content: "after"; }
+      .scroller::before { content: "before"; }
+      .scroller::scroll-marker-group { height: 100px; }
+      .scroller::scroll-button(block-start) { content: "u"; }
+      .scroller::scroll-button(inline-start) { content: "l"; }
+      .scroller::scroll-button(inline-end) { content: "r"; }
+      .scroller::scroll-button(block-end) { content: "d"; }
+      .scroller::scroll-button(block-start):focus { outline: 1px solid blue; }
+      .scroller::scroll-button(inline-start):focus { outline: 1px solid blue; }
+      .scroller::scroll-button(inline-end):focus { outline: 1px solid blue; }
+      .scroller::scroll-button(block-end):focus { outline: 1px solid blue; }
+      .item { width: 100px; height: 100px; }
+      .item::scroll-marker:focus { outline: 1px solid blue; opacity: 0.5; }
+      .item::scroll-marker { content: "*" }
+      .item::scroll-marker:target-current { color: red; }
+    </style>
+    <input id="pre-input">
+    <div id="before-scroller" class="before scroller" tabindex="0">
+      <div id="01" class="item" tabindex="0">1</div>
+      <div id="02" class="item" tabindex="0">2</div>
+      <div id="03" class="item">3</div>
+    </div>
+
+    <div id="after-scroller" class="after scroller" tabindex="0">
+      <div id="11" class="item" tabindex="0">1</div>
+      <div id="12" class="item">2</div>
+      <div id="13" class="item" tabindex="0">3</div>
+    </div>
+    <input id="post-input">
+  )HTML");
+
+  UpdateAllLifecyclePhasesForTest();
+  Element* pre_input = GetElementById("pre-input");
+  Element* before_scroller = GetElementById("before-scroller");
+  Element* after_scroller = GetElementById("after-scroller");
+  Element* post_input = GetElementById("post-input");
+
+  Element* before_block_start_button =
+      before_scroller->GetPseudoElement(kPseudoIdScrollButtonBlockStart);
+  Element* before_inline_start_button =
+      before_scroller->GetPseudoElement(kPseudoIdScrollButtonInlineStart);
+  Element* before_block_end_button =
+      before_scroller->GetPseudoElement(kPseudoIdScrollButtonBlockEnd);
+  Element* before_inline_end_button =
+      before_scroller->GetPseudoElement(kPseudoIdScrollButtonInlineEnd);
+
+  Element* before_first_child = before_scroller->firstElementChild();
+  Element* before_second_child =
+      before_scroller->firstElementChild()->nextElementSibling();
+
+  Element* before_first_scroll_marker =
+      before_first_child->GetPseudoElement(kPseudoIdScrollMarker);
+
+  Element* after_block_start_button =
+      after_scroller->GetPseudoElement(kPseudoIdScrollButtonBlockStart);
+  Element* after_inline_start_button =
+      after_scroller->GetPseudoElement(kPseudoIdScrollButtonInlineStart);
+  Element* after_block_end_button =
+      after_scroller->GetPseudoElement(kPseudoIdScrollButtonBlockEnd);
+  Element* after_inline_end_button =
+      after_scroller->GetPseudoElement(kPseudoIdScrollButtonInlineEnd);
+
+  Element* after_first_child = after_scroller->firstElementChild();
+  Element* after_last_child = after_scroller->lastElementChild();
+
+  Element* after_first_scroll_marker =
+      after_first_child->GetPseudoElement(kPseudoIdScrollMarker);
+
+  std::array<Element*, 18> order = {pre_input,
+                                    before_first_scroll_marker,
+                                    before_block_start_button,
+                                    before_inline_start_button,
+                                    before_block_end_button,
+                                    before_inline_end_button,
+                                    before_scroller,
+                                    before_first_child,
+                                    before_second_child,
+                                    after_block_start_button,
+                                    after_inline_start_button,
+                                    after_block_end_button,
+                                    after_inline_end_button,
+                                    after_scroller,
+                                    after_first_child,
+                                    after_last_child,
+                                    after_first_scroll_marker,
+                                    post_input};
+
+  for (std::size_t i = 0u; i < order.size() - 1; ++i) {
+    EXPECT_EQ(order[i + 1], FindFocusableElementAfter(
+                                *order[i], mojom::blink::FocusType::kForward));
+  }
+  for (std::size_t i = 0u; i < order.size() - 1; ++i) {
+    EXPECT_EQ(order[i], FindFocusableElementAfter(
+                            *order[i + 1], mojom::blink::FocusType::kBackward));
+  }
 }
 
 }  // namespace blink

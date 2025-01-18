@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <algorithm>
 
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/dom/node_list_invalidation_type.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -16,7 +17,6 @@
 namespace blink {
 
 class LiveNodeListBase;
-enum NodeListInvalidationType : int;
 
 // Weakly holds (node list, invalidation type) pairs, and allows efficient
 // queries of whether nodes matching particular invalidation types are present.
@@ -42,6 +42,11 @@ class CORE_EXPORT LiveNodeListRegistry {
 
   bool ContainsInvalidationType(NodeListInvalidationType type) const {
     return mask_ & MaskForInvalidationType(type);
+  }
+
+  bool NeedsInvalidateOnAttributeChange() const {
+    return mask_ != 0 &&
+           mask_ != MaskForInvalidationType(kDoNotInvalidateOnAttributeChanges);
   }
 
   void Trace(Visitor*) const;

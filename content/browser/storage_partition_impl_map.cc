@@ -8,27 +8,27 @@
 #include <utility>
 
 #include "base/barrier_closure.h"
-#include "base/bind.h"
-#include "base/callback.h"
-#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/containers/contains.h"
+#include "base/containers/map_util.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
+#include "base/functional/callback_helpers.h"
 #include "base/location.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/task/thread_pool.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "content/browser/background_fetch/background_fetch_context.h"
 #include "content/browser/blob_storage/chrome_blob_storage_context.h"
 #include "content/browser/code_cache/generated_code_cache_context.h"
 #include "content/browser/cookie_store/cookie_store_manager.h"
 #include "content/browser/file_system/browser_file_system_helper.h"
-#include "content/browser/loader/prefetch_url_loader_service.h"
+#include "content/browser/loader/subresource_proxying_url_loader_service.h"
 #include "content/browser/resource_context_impl.h"
 #include "content/browser/storage_partition_impl.h"
 #include "content/browser/webui/url_data_manager_backend.h"
@@ -38,13 +38,13 @@
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_client.h"
-#include "content/public/common/content_constants.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "crypto/sha2.h"
 #include "services/network/public/cpp/features.h"
 #include "storage/browser/blob/blob_storage_context.h"
+#include "storage/browser/database/database_tracker.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
 
 namespace content {
@@ -304,10 +304,9 @@ base::FilePath StoragePartitionImplMap::GetStoragePartitionPath(
   if (!partition_name.empty()) {
     // For analysis of why we can ignore collisions, see the comment above
     // kPartitionNameHashBytes.
-    char buffer[kPartitionNameHashBytes];
-    crypto::SHA256HashString(partition_name, &buffer[0],
-                             sizeof(buffer));
-    return path.AppendASCII(base::HexEncode(buffer, sizeof(buffer)));
+    uint8_t buffer[kPartitionNameHashBytes];
+    crypto::SHA256HashString(partition_name, buffer, sizeof(buffer));
+    return path.AppendASCII(base::HexEncode(buffer));
   }
 
   return path.Append(kDefaultPartitionDirname);
@@ -327,9 +326,9 @@ StoragePartitionImpl* StoragePartitionImplMap::Get(
     const StoragePartitionConfig& partition_config,
     bool can_create) {
   // Find the previously created partition if it's available.
-  PartitionMap::const_iterator it = partitions_.find(partition_config);
-  if (it != partitions_.end())
-    return it->second.get();
+  if (auto* partition = base::FindPtrOrNull(partitions_, partition_config)) {
+    return partition;
+  }
 
   if (!can_create)
     return nullptr;
@@ -337,7 +336,7 @@ StoragePartitionImpl* StoragePartitionImplMap::Get(
   base::FilePath relative_partition_path = GetStoragePartitionPath(
       partition_config.partition_domain(), partition_config.partition_name());
 
-  absl::optional<StoragePartitionConfig> fallback_config =
+  std::optional<StoragePartitionConfig> fallback_config =
       partition_config.GetFallbackForBlobUrls();
   StoragePartitionImpl* fallback_for_blob_urls =
       fallback_config.has_value() ? Get(*fallback_config, /*can_create=*/false)
@@ -409,7 +408,7 @@ void StoragePartitionImplMap::AsyncObliterate(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&BlockingObliteratePath, browser_context_->GetPath(),
                      domain_root, paths_to_keep,
-                     base::ThreadTaskRunnerHandle::Get(),
+                     base::SingleThreadTaskRunner::GetCurrentDefault(),
                      std::move(on_gc_required)),
       subtask_done_callback);
 }
@@ -437,22 +436,9 @@ void StoragePartitionImplMap::GarbageCollect(
 }
 
 void StoragePartitionImplMap::ForEach(
-    BrowserContext::StoragePartitionCallback callback) {
-  for (PartitionMap::const_iterator it = partitions_.begin();
-       it != partitions_.end();
-       ++it) {
-    callback.Run(it->second.get());
-  }
-}
-
-void StoragePartitionImplMap::DisposeInMemory(StoragePartition* partition) {
-  for (PartitionMap::const_iterator it = partitions_.begin();
-       it != partitions_.end(); ++it) {
-    if (it->second.get() == partition) {
-      DCHECK(it->first.in_memory());
-      partitions_.erase(it);
-      return;
-    }
+    base::FunctionRef<void(StoragePartition*)> fn) {
+  for (const auto& [config, partition] : partitions_) {
+    fn(partition.get());
   }
 }
 
@@ -469,15 +455,18 @@ void StoragePartitionImplMap::PostCreateInitialization(
     InitializeResourceContext(browser_context_);
   }
 
+#if !BUILDFLAG(IS_ANDROID)
   if (!in_memory) {
-    // Clean up any lingering AppCache user data on disk, now that AppCache
-    // has been deprecated and removed.
+    // Clean up any lingering WebSQL user data on disk, now that WebSQL
+    // has been deprecated and removed for all platforms except Android
+    // WebView (crbug.com/333756088).
     base::ThreadPool::PostTask(
         FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
         base::BindOnce(
             [](const base::FilePath& dir) { base::DeletePathRecursively(dir); },
-            partition->GetPath().Append(kAppCacheDirname)));
+            partition->GetPath().Append(storage::kDatabaseDirectoryName)));
   }
+#endif  // !BUILDFLAG(IS_ANDROID)
 
   partition->GetBackgroundFetchContext()->Initialize();
 }

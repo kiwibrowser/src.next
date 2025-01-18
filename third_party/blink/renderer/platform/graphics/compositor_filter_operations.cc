@@ -1,10 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/platform/graphics/compositor_filter_operations.h"
 
 #include "third_party/blink/renderer/platform/graphics/color.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 
@@ -67,7 +68,7 @@ void CompositorFilterOperations::AppendBlurFilter(float amount,
       cc::FilterOperation::CreateBlurFilter(amount, tile_mode));
 }
 
-void CompositorFilterOperations::AppendDropShadowFilter(gfx::Point offset,
+void CompositorFilterOperations::AppendDropShadowFilter(gfx::Vector2d offset,
                                                         float std_deviation,
                                                         const Color& color) {
   gfx::Point gfx_offset(offset.x(), offset.y());
@@ -109,8 +110,8 @@ bool CompositorFilterOperations::IsEmpty() const {
 
 gfx::RectF CompositorFilterOperations::MapRect(
     const gfx::RectF& input_rect) const {
-  return gfx::RectF(filter_operations_.MapRect(gfx::ToEnclosingRect(input_rect),
-                                               SkMatrix::I()));
+  return gfx::RectF(
+      filter_operations_.MapRect(gfx::ToEnclosingRect(input_rect)));
 }
 
 bool CompositorFilterOperations::HasFilterThatMovesPixels() const {

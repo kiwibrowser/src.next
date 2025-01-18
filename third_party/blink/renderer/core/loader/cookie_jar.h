@@ -1,23 +1,35 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_COOKIE_JAR_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_COOKIE_JAR_H_
 
-#include "services/network/public/mojom/restricted_cookie_manager.mojom-blink.h"
+#include <optional>
 
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "mojo/public/cpp/base/shared_memory_version.h"
+#include "services/network/public/mojom/restricted_cookie_manager.mojom-blink.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
-#include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 class Document;
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+//
+// LINT.IfChange(FirstCookieRequest)
+enum class FirstCookieRequest {
+  kFirstOperationWasSet = 0,
+  kFirstOperationWasGet = 1,
+  kFirstOperationWasCookiesEnabled = 2,
+  kMaxValue = kFirstOperationWasCookiesEnabled,
+};
+// LINT.ThenChange(//tools/metrics/histograms/metadata/blink/enums.xml:FirstCookieRequest)
 
-class CookieJar : public GarbageCollected<CookieJar> {
+class CORE_EXPORT CookieJar : public GarbageCollected<CookieJar> {
  public:
   explicit CookieJar(blink::Document* document);
   virtual ~CookieJar();
@@ -30,18 +42,22 @@ class CookieJar : public GarbageCollected<CookieJar> {
       mojo::PendingRemote<network::mojom::blink::RestrictedCookieManager>
           cookie_manager);
 
-  // This function checks subresource requests for the partitioned cookies
-  // origin trial. We only consider requests that:
-  // - have a Set-Cookie header
-  // - have Partitioned in the cookie line
-  // If both of these conditions are met, we check if the response contains an
-  // Origin-Trial header with a valid token. If it does not, we revert that
-  // URL's partitioned cookies to unpartitioned.
-  // TODO(https://crbug.com/1296161): Delete this function.
-  void CheckPartitionedCookiesOriginTrial(const ResourceResponse& response);
+  // Invalidate cached string. To be called explicitly from Document. This is
+  // used in cases where a Document action could change the ability for
+  // CookieJar to return values to JS without changing the value of the cookies
+  // themselves. For example changing storage access can stop the JS from being
+  // able to access the document's Cookie without the value ever changing. In
+  // that case it's faulty to treat a subsequent request as a cache hit so we
+  // invalidate.
+  void InvalidateCache();
 
  private:
-  bool RequestRestrictedCookieManagerIfNeeded();
+  void RequestRestrictedCookieManagerIfNeeded();
+  void OnBackendDisconnect();
+
+  // Returns true if last_cookies_ is not guaranteed to be up to date and an IPC
+  // is needed to get the current cookie string.
+  bool IPCNeeded();
 
   // Updates the fake cookie cache after a
   // RestrictedCookieManager::GetCookiesString request returns.
@@ -51,7 +67,17 @@ class CookieJar : public GarbageCollected<CookieJar> {
   // to determine if the current request could have been served from a real
   // cache.
   void UpdateCacheAfterGetRequest(const KURL& cookie_url,
-                                  const String& cookie_string);
+                                  const String& cookie_string,
+                                  uint64_t new_version);
+
+  // This mechanism is designed to capture and isolate only the very first
+  // request to cookie. We specifically focus on whether this initial action is
+  // a GET or a SET operation or check to CookiesEnabled.
+
+  // We want to evaluate the possible performance gain of returning the local
+  // cache version and/or cookie string on SET. Especially, if SET is the first
+  // request.
+  void LogFirstCookieRequest(FirstCookieRequest first_cookie_request);
 
   HeapMojoRemote<network::mojom::blink::RestrictedCookieManager> backend_;
   Member<blink::Document> document_;
@@ -66,11 +92,19 @@ class CookieJar : public GarbageCollected<CookieJar> {
   // ATTENTION: Just use hashes for now to keep space overhead low, but more
   // importantly, because keeping cookies around is tricky from a security
   // perspective.
-  absl::optional<unsigned> last_cookies_hash_;
+  std::optional<unsigned> last_cookies_hash_;
   // Whether the last operation performed on this jar was a set or get. Used
   // along with `last_cookies_hash_` when updating the histogram that tracks
   // cookie access results.
   bool last_operation_was_set_{false};
+
+  std::optional<mojo::SharedMemoryVersionClient> shared_memory_version_client_;
+  uint64_t last_version_ = mojo::shared_memory_version::kInvalidVersion;
+
+  // Last received cookie string. Null if there is no last cached-version. Can
+  // be empty since that is a valid cookie string.
+  String last_cookies_;
+  bool is_first_operation_ = true;
 };
 
 }  // namespace blink

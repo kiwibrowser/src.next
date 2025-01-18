@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,11 @@ DEFINE_WEAK_IDENTIFIER_MAP(Node, DOMNodeId)
 DOMNodeId DOMNodeIds::ExistingIdForNode(Node* node) {
   return node ? WeakIdentifierMap<Node, DOMNodeId>::ExistingIdentifier(node)
               : kInvalidDOMNodeId;
+}
+
+// static
+DOMNodeId DOMNodeIds::ExistingIdForNode(const Node* node) {
+  return ExistingIdForNode(const_cast<Node*>(node));
 }
 
 // static

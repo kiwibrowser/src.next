@@ -4,12 +4,14 @@
 
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/user_script_listener.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
+#include "extensions/browser/extensions_browser_client.h"
 
 namespace extensions {
 
@@ -32,7 +34,7 @@ IN_PROC_BROWSER_TEST_F(UserScriptListenerTest,
 
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), embedded_test_server()->GetURL("/echo"),
-      WindowOpenDisposition::CURRENT_TAB, ui_test_utils::BROWSER_TEST_NONE);
+      WindowOpenDisposition::CURRENT_TAB, ui_test_utils::BROWSER_TEST_NO_WAIT);
 
   start_observer.Wait();
   ASSERT_TRUE(start_observer.navigation_handle());

@@ -1,30 +1,51 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "third_party/blink/renderer/core/frame/web_frame_widget_impl.h"
-
-#include "base/callback_helpers.h"
+#include "base/functional/callback_helpers.h"
 #include "base/run_loop.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/unguessable_token.h"
 #include "build/build_config.h"
+#include "cc/base/features.h"
 #include "cc/layers/solid_color_layer.h"
 #include "cc/test/property_tree_test_utils.h"
 #include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/input/synthetic_web_input_event_builders.h"
+#include "third_party/blink/public/mojom/page/widget.mojom-shared.h"
+#include "third_party/blink/renderer/core/css/properties/css_property_ref.h"
+#include "third_party/blink/renderer/core/css/properties/longhands.h"
+#include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/events/add_event_listener_options_resolved.h"
 #include "third_party/blink/renderer/core/dom/events/native_event_listener.h"
+#include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/web_frame_widget_impl.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
+#include "third_party/blink/renderer/core/geometry/dom_rect.h"
+#include "third_party/blink/renderer/core/html/forms/html_input_element.h"
+#include "third_party/blink/renderer/core/html/forms/html_text_area_element.h"
+#include "third_party/blink/renderer/core/html/html_div_element.h"
+#include "third_party/blink/renderer/core/html/html_image_element.h"
+#include "third_party/blink/renderer/core/input/event_handler.h"
+#include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
 #include "third_party/blink/renderer/platform/scheduler/test/fake_task_runner.h"
+#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
+#include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
+#include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 #include "third_party/blink/renderer/platform/widget/input/widget_input_handler_manager.h"
 #include "third_party/blink/renderer/platform/widget/widget_base.h"
+#include "ui/base/mojom/window_show_state.mojom-blink.h"
+
+#if BUILDFLAG(IS_WIN)
+#include "components/stylus_handwriting/win/features.h"
+#endif  // BUILDFLAG(IS_WIN)
 
 namespace blink {
 
@@ -221,11 +242,11 @@ class MockHandledEventCallback {
                  void(mojom::InputEventResultState,
                       const ui::LatencyInfo&,
                       InputHandlerProxy::DidOverscrollParams*,
-                      absl::optional<cc::TouchAction>));
+                      std::optional<cc::TouchAction>));
 
   WidgetBaseInputHandler::HandledEventCallback GetCallback() {
-    return base::BindOnce(&MockHandledEventCallback::HandleCallback,
-                          base::Unretained(this));
+    return WTF::BindOnce(&MockHandledEventCallback::HandleCallback,
+                         WTF::Unretained(this));
   }
 
  private:
@@ -233,16 +254,14 @@ class MockHandledEventCallback {
       mojom::InputEventResultState ack_state,
       const ui::LatencyInfo& latency_info,
       std::unique_ptr<InputHandlerProxy::DidOverscrollParams> overscroll,
-      absl::optional<cc::TouchAction> touch_action) {
+      std::optional<cc::TouchAction> touch_action) {
     Run(ack_state, latency_info, overscroll.get(), touch_action);
   }
 };
 
-class MockWebFrameWidgetImpl : public SimWebFrameWidget {
+class MockWebFrameWidgetImpl : public frame_test_helpers::TestWebFrameWidget {
  public:
-  template <typename... Args>
-  explicit MockWebFrameWidgetImpl(Args&&... args)
-      : SimWebFrameWidget(std::forward<Args>(args)...) {}
+  using frame_test_helpers::TestWebFrameWidget::TestWebFrameWidget;
 
   MOCK_METHOD1(HandleInputEvent,
                WebInputEventResult(const WebCoalescedInputEvent&));
@@ -254,16 +273,13 @@ class MockWebFrameWidgetImpl : public SimWebFrameWidget {
                     const cc::OverscrollBehavior& overscroll_behavior,
                     bool event_processed));
 
-  MOCK_METHOD2(WillHandleGestureEvent,
-               void(const WebGestureEvent& event, bool* suppress));
-
-  // mojom::blink::WidgetHost overrides:
-  using SimWebFrameWidget::SetCursor;
+  MOCK_METHOD2(RequestDecode,
+               void(const cc::DrawImage&, base::OnceCallback<void(bool)>));
 };
 
 class WebFrameWidgetImplSimTest : public SimTest {
  public:
-  SimWebFrameWidget* CreateSimWebFrameWidget(
+  frame_test_helpers::TestWebFrameWidget* CreateWebFrameWidget(
       base::PassKey<WebLocalFrame> pass_key,
       CrossVariantMojoAssociatedRemote<
           mojom::blink::FrameWidgetHostInterfaceBase> frame_widget_host,
@@ -279,18 +295,20 @@ class WebFrameWidgetImplSimTest : public SimTest {
       bool never_composited,
       bool is_for_child_local_root,
       bool is_for_nested_main_frame,
-      bool is_for_scalable_page,
-      SimCompositor* compositor) override {
+      bool is_for_scalable_page) override {
     return MakeGarbageCollected<MockWebFrameWidgetImpl>(
-        compositor, pass_key, std::move(frame_widget_host),
-        std::move(frame_widget), std::move(widget_host), std::move(widget),
-        std::move(task_runner), frame_sink_id, hidden, never_composited,
-        is_for_child_local_root, is_for_nested_main_frame,
-        is_for_scalable_page);
+        pass_key, std::move(frame_widget_host), std::move(frame_widget),
+        std::move(widget_host), std::move(widget), std::move(task_runner),
+        frame_sink_id, hidden, never_composited, is_for_child_local_root,
+        is_for_nested_main_frame, is_for_scalable_page);
   }
 
   MockWebFrameWidgetImpl* MockMainFrameWidget() {
     return static_cast<MockWebFrameWidgetImpl*>(MainFrame().FrameWidget());
+  }
+
+  EventHandler& GetEventHandler() {
+    return GetDocument().GetFrame()->GetEventHandler();
   }
 
   void SendInputEvent(const WebInputEvent& event,
@@ -299,19 +317,13 @@ class WebFrameWidgetImplSimTest : public SimTest {
         WebCoalescedInputEvent(event.Clone(), {}, {}, ui::LatencyInfo()),
         std::move(callback));
   }
-  void WillHandleGestureEvent(const blink::WebGestureEvent& event,
-                              bool* suppress) {
-    if (event.GetType() == WebInputEvent::Type::kGestureScrollUpdate) {
-      MockMainFrameWidget()->DidOverscroll(
-          gfx::Vector2dF(event.data.scroll_update.delta_x,
-                         event.data.scroll_update.delta_y),
-          gfx::Vector2dF(event.data.scroll_update.delta_x,
-                         event.data.scroll_update.delta_y),
-          event.PositionInWidget(),
-          gfx::Vector2dF(event.data.scroll_update.velocity_x,
-                         event.data.scroll_update.velocity_y));
-      *suppress = true;
-    }
+
+  void OnStartStylusWriting() {
+    MockMainFrameWidget()->OnStartStylusWriting(
+#if BUILDFLAG(IS_WIN)
+        /*focus_widget_rect_in_dips=*/gfx::Rect(),
+#endif  // BUILDFLAG(IS_WIN)
+        base::DoNothing());
   }
 
   const base::HistogramTester& histogram_tester() const {
@@ -347,33 +359,6 @@ TEST_F(WebFrameWidgetImplSimTest, CursorChange) {
   MockMainFrameWidget()->SetCursor(cursor);
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(widget_host.CursorSetCount(), 2u);
-}
-
-TEST_F(WebFrameWidgetImplSimTest, EventOverscroll) {
-  ON_CALL(*MockMainFrameWidget(), WillHandleGestureEvent(_, _))
-      .WillByDefault(testing::Invoke(
-          this, &WebFrameWidgetImplSimTest::WillHandleGestureEvent));
-  EXPECT_CALL(*MockMainFrameWidget(), HandleInputEvent(_))
-      .WillRepeatedly(::testing::Return(WebInputEventResult::kNotHandled));
-
-  WebGestureEvent scroll(WebInputEvent::Type::kGestureScrollUpdate,
-                         WebInputEvent::kNoModifiers, base::TimeTicks::Now());
-  scroll.SetPositionInWidget(gfx::PointF(-10, 0));
-  scroll.data.scroll_update.delta_y = 10;
-  MockHandledEventCallback handled_event;
-
-  InputHandlerProxy::DidOverscrollParams expected_overscroll;
-  expected_overscroll.latest_overscroll_delta = gfx::Vector2dF(0, 10);
-  expected_overscroll.accumulated_overscroll = gfx::Vector2dF(0, 10);
-  expected_overscroll.causal_event_viewport_point = gfx::PointF(-10, 0);
-  expected_overscroll.current_fling_velocity = gfx::Vector2dF();
-  // Overscroll notifications received while handling an input event should
-  // be bundled with the event ack IPC.
-  EXPECT_CALL(handled_event, Run(mojom::InputEventResultState::kConsumed, _,
-                                 testing::Pointee(expected_overscroll), _))
-      .Times(1);
-
-  SendInputEvent(scroll, handled_event.GetCallback());
 }
 
 TEST_F(WebFrameWidgetImplSimTest, RenderWidgetInputEventUmaMetrics) {
@@ -479,6 +464,698 @@ TEST_F(WebFrameWidgetImplSimTest, SendElasticOverscrollForTouchscreen) {
   SendInputEvent(scroll, base::DoNothing());
 }
 
+TEST_F(WebFrameWidgetImplSimTest, TestStartStylusWritingForInputElement) {
+  ScopedStylusHandwritingForTest enable_stylus_handwriting(true);
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(400, 400));
+  SimRequest request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  request.Complete(
+      R"HTML(
+      <!doctype html>
+      <body style='padding: 0px; width: 400px; height: 400px;'>
+      <input type='text' id='first' style='width: 100px; height: 100px;'>
+      </body>
+      )HTML");
+  Compositor().BeginFrame();
+  Element* first =
+      DynamicTo<Element>(GetDocument().getElementById(AtomicString("first")));
+  WebPointerEvent event(
+      WebInputEvent::Type::kPointerDown,
+      WebPointerProperties(1, WebPointerProperties::PointerType::kPen,
+                           WebPointerProperties::Button::kLeft,
+                           gfx::PointF(100, 100), gfx::PointF(100, 100)),
+      1, 1);
+  GetEventHandler().HandlePointerEvent(event, Vector<WebPointerEvent>(),
+                                       Vector<WebPointerEvent>());
+  EXPECT_EQ(nullptr, GetDocument().FocusedElement());
+  OnStartStylusWriting();
+  EXPECT_EQ(first, GetDocument().FocusedElement());
+}
+
+TEST_F(WebFrameWidgetImplSimTest,
+       TestStartStylusWritingForContentEditableElement) {
+  ScopedStylusHandwritingForTest enable_stylus_handwriting(true);
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(400, 400));
+  SimRequest request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  request.Complete(
+      R"HTML(
+      <!doctype html>
+      <body style='padding: 0px; width: 400px; height: 400px;'>
+      <div contenteditable='true' id='first' style='width: 100px; height: 100px;'></div>
+      </body>
+      )HTML");
+  Compositor().BeginFrame();
+  Element* first =
+      DynamicTo<Element>(GetDocument().getElementById(AtomicString("first")));
+  WebPointerEvent event(
+      WebInputEvent::Type::kPointerDown,
+      WebPointerProperties(1, WebPointerProperties::PointerType::kPen,
+                           WebPointerProperties::Button::kLeft,
+                           gfx::PointF(100, 100), gfx::PointF(100, 100)),
+      1, 1);
+  GetEventHandler().HandlePointerEvent(event, Vector<WebPointerEvent>(),
+                                       Vector<WebPointerEvent>());
+  EXPECT_EQ(nullptr, GetDocument().FocusedElement());
+  OnStartStylusWriting();
+  EXPECT_EQ(first, GetDocument().FocusedElement());
+}
+
+TEST_F(WebFrameWidgetImplSimTest,
+       TestStartStylusWritingForContentEditableChildElement) {
+  ScopedStylusHandwritingForTest enable_stylus_handwriting(true);
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(400, 400));
+  SimRequest request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  request.Complete(
+      R"HTML(
+      <!doctype html>
+      <body style='padding: 0px; width: 400px; height: 400px;'>
+      <div contenteditable='true' id='first'>
+      <div id='second' style='width: 100px; height: 100px;'>Hello</div>
+      </div>
+      </body>
+      )HTML");
+  Compositor().BeginFrame();
+  Element* first =
+      DynamicTo<Element>(GetDocument().getElementById(AtomicString("first")));
+  Element* second =
+      DynamicTo<Element>(GetDocument().getElementById(AtomicString("second")));
+  WebPointerEvent event(
+      WebInputEvent::Type::kPointerDown,
+      WebPointerProperties(1, WebPointerProperties::PointerType::kPen,
+                           WebPointerProperties::Button::kLeft,
+                           gfx::PointF(100, 100), gfx::PointF(100, 100)),
+      1, 1);
+  GetEventHandler().HandlePointerEvent(event, Vector<WebPointerEvent>(),
+                                       Vector<WebPointerEvent>());
+  EXPECT_EQ(second, GetEventHandler().CurrentTouchDownElement());
+  EXPECT_EQ(nullptr, GetDocument().FocusedElement());
+  OnStartStylusWriting();
+  EXPECT_EQ(first, GetDocument().FocusedElement());
+}
+
+TEST_F(WebFrameWidgetImplSimTest, SpeculativeDecodeSimple) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitWithFeatures(
+      /*enabled_features=*/
+      {features::kSpeculativeImageDecodes,
+       ::features::kSendExplicitDecodeRequestsImmediately},
+      /*disabled_features=*/{});
+  url_test_helpers::RegisterMockedURLLoad(
+      url_test_helpers::ToKURL("https://example.com/image.png"),
+      test::CoreTestDataPath("background_image.png"));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
+  SimRequest doc_request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  EXPECT_CALL(*MockMainFrameWidget(), RequestDecode(_, _)).Times(1);
+  doc_request.Complete(
+      R"HTML(
+<!DOCTYPE html>
+<img id="img" width=300 height=300 src="image.png">
+      )HTML");
+  url_test_helpers::ServeAsynchronousRequests();
+}
+
+TEST_F(WebFrameWidgetImplSimTest, NoSpeculativeDecodeOutsideViewport) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitWithFeatures(
+      /*enabled_features=*/
+      {features::kSpeculativeImageDecodes,
+       ::features::kSendExplicitDecodeRequestsImmediately},
+      /*disabled_features=*/{});
+  url_test_helpers::RegisterMockedURLLoad(
+      url_test_helpers::ToKURL("https://example.com/image.png"),
+      test::CoreTestDataPath("background_image.png"));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
+  SimRequest doc_request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  EXPECT_CALL(*MockMainFrameWidget(), RequestDecode(_, _)).Times(0);
+  doc_request.Complete(
+      R"HTML(
+<!DOCTYPE html>
+<div id="spacer" style="height:110vh"></div>
+<img id="img" width=300 height=300 src="image.png">
+      )HTML");
+  url_test_helpers::ServeAsynchronousRequests();
+  Compositor().BeginFrame();
+}
+
+TEST_F(WebFrameWidgetImplSimTest, SpeculativeDecodeIgnoresBackgroundImage) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitWithFeatures(
+      /*enabled_features=*/
+      {features::kSpeculativeImageDecodes,
+       ::features::kSendExplicitDecodeRequestsImmediately},
+      /*disabled_features=*/{});
+  url_test_helpers::RegisterMockedURLLoad(
+      url_test_helpers::ToKURL("https://example.com/image.png"),
+      test::CoreTestDataPath("background_image.png"));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
+  SimRequest doc_request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  EXPECT_CALL(*MockMainFrameWidget(), RequestDecode(_, _)).Times(0);
+  doc_request.Complete(
+      R"HTML(
+<!DOCTYPE html>
+<div style="background-image:url('image.png');height:300px;width:300px"></div>
+      )HTML");
+  url_test_helpers::ServeAsynchronousRequests();
+}
+
+// Without extrinsic sizing (e.g., css width & height), an image's final decode
+// size can depend on both the image's intrinsic size and layout. Using only the
+// image's intrinsic size can result in a speculative decode that is too small
+// (will not be used), or too big (can cause small rendering differences as the
+// larger decode will be re-used and scaled). To avoid these issues, we should
+// wait for layout if the decoded size depends on it.
+TEST_F(WebFrameWidgetImplSimTest, SpeculativeDecodeNoSizeWaitsForLayout) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitWithFeatures(
+      /*enabled_features=*/
+      {features::kSpeculativeImageDecodes,
+       ::features::kSendExplicitDecodeRequestsImmediately},
+      /*disabled_features=*/{});
+  SimRequest image_request("https://example.com/image.png", "image/png");
+  auto* widget = WebView().MainFrameViewWidget();
+  widget->Resize(gfx::Size(800, 600));
+  SimRequest doc_request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+
+  {
+    EXPECT_CALL(*MockMainFrameWidget(), RequestDecode(_, _)).Times(0);
+    doc_request.Complete(
+        R"HTML(<!DOCTYPE html>
+        <img id="i1" src="image.png">
+        <img id="i2" style="height: auto; max-height: 50px;" src="image.png">
+      )HTML");
+    Compositor().BeginFrame();
+    test::RunPendingTasks();
+    image_request.Complete(
+        *test::ReadFromFile(test::CoreTestDataPath("background_image.png")));
+  }
+
+  {
+    EXPECT_CALL(*MockMainFrameWidget(), RequestDecode(_, _)).Times(1);
+    widget->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  }
+}
+
+// A speculative decode of an image with extrinsic sizes does not need to wait
+// for layout.
+TEST_F(WebFrameWidgetImplSimTest, SpeculativeDecodeWithExtrinsicSize) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitWithFeatures(
+      /*enabled_features=*/
+      {features::kSpeculativeImageDecodes,
+       ::features::kSendExplicitDecodeRequestsImmediately},
+      /*disabled_features=*/{});
+  SimRequest image_request("https://example.com/image.png", "image/png");
+  auto* widget = WebView().MainFrameViewWidget();
+  widget->Resize(gfx::Size(800, 600));
+  SimRequest doc_request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+
+  {
+    EXPECT_CALL(*MockMainFrameWidget(), RequestDecode(_, _)).Times(1);
+    doc_request.Complete(
+        R"HTML(<!DOCTYPE html>
+        <img style="width: 100px" src="image.png">
+      )HTML");
+    Compositor().BeginFrame();
+    test::RunPendingTasks();
+    image_request.Complete(
+        *test::ReadFromFile(test::CoreTestDataPath("background_image.png")));
+    test::RunPendingTasks();
+  }
+}
+
+#if BUILDFLAG(IS_WIN)
+struct ProximateBoundsCollectionArgs final {
+  base::RepeatingCallback<gfx::Rect(const Document&)>
+      get_focus_widget_rect_in_dips;
+  std::string expected_focus_id;
+  bool expect_null_proximate_bounds;
+  gfx::Range expected_range;
+  std::vector<gfx::Rect> expected_bounds;
+};
+
+std::ostream& operator<<(std::ostream& os,
+                         const ProximateBoundsCollectionArgs& args) {
+  os << "\nexpected_focus_id: " << args.expected_focus_id;
+  os << "\nexpect_null_proximate_bounds: " << args.expect_null_proximate_bounds;
+  os << "\nexpected_range: " << args.expected_range;
+  os << "\nexpected_bounds.size: [";
+  for (const auto& bounds : args.expected_bounds) {
+    os << "{" << bounds.ToString() << "}, ";
+  }
+  os << "]";
+  return os;
+}
+
+struct WebFrameWidgetProximateBoundsCollectionSimTestParam {
+  using TupleType = std::tuple</*enable_stylus_handwriting_win=*/bool,
+                               /*html_document=*/std::string,
+                               /*args=*/ProximateBoundsCollectionArgs>;
+  explicit WebFrameWidgetProximateBoundsCollectionSimTestParam(TupleType tup)
+      : enable_stylus_handwriting_win_(std::get<0>(tup)),
+        html_document_(std::get<1>(tup)),
+        proximate_bounds_collection_args_(std::get<2>(tup)) {}
+
+  bool IsStylusHandwritingWinEnabled() const {
+    return enable_stylus_handwriting_win_;
+  }
+
+  const std::string& GetHTMLDocument() const { return html_document_; }
+
+  const std::string& GetExpectedFocusId() const {
+    return proximate_bounds_collection_args_.expected_focus_id;
+  }
+
+  gfx::Rect GetFocusWidgetRectInDips(const Document& document) const {
+    return proximate_bounds_collection_args_.get_focus_widget_rect_in_dips.Run(
+        document);
+  }
+
+  bool ExpectNullProximateBounds() const {
+    return proximate_bounds_collection_args_.expect_null_proximate_bounds;
+  }
+
+  const gfx::Range& GetExpectedRange() const {
+    return proximate_bounds_collection_args_.expected_range;
+  }
+
+  const std::vector<gfx::Rect>& GetExpectedBounds() const {
+    return proximate_bounds_collection_args_.expected_bounds;
+  }
+
+ private:
+  friend std::ostream& operator<<(
+      std::ostream& os,
+      const WebFrameWidgetProximateBoundsCollectionSimTestParam& param);
+  const bool enable_stylus_handwriting_win_;
+  const std::string html_document_;
+  const ProximateBoundsCollectionArgs proximate_bounds_collection_args_;
+};
+
+std::ostream& operator<<(
+    std::ostream& os,
+    const WebFrameWidgetProximateBoundsCollectionSimTestParam& param) {
+  return os << "\nenable_stylus_handwriting_win: "
+            << param.enable_stylus_handwriting_win_
+            << "\nhtml_document: " << param.html_document_
+            << "\nproximate_bounds_collection_args: {"
+            << param.proximate_bounds_collection_args_ << "}";
+}
+
+class WebFrameWidgetProximateBoundsCollectionSimTestBase
+    : public WebFrameWidgetImplSimTest {
+ public:
+  void LoadDocument(const String& html_document) {
+    WebView().MainFrameViewWidget()->Resize(gfx::Size(400, 400));
+    SimRequest request("https://example.com/test.html", "text/html");
+    SimSubresourceRequest style_resource("https://example.com/styles.css",
+                                         "text/css");
+    SimSubresourceRequest font_resource("https://example.com/Ahem.woff2",
+                                        "font/woff2");
+    LoadURL("https://example.com/test.html");
+    request.Complete(html_document);
+    style_resource.Complete(R"CSS(
+      @font-face {
+        font-family: custom-font;
+        src: url(https://example.com/Ahem.woff2) format("woff2");
+      }
+      body {
+        margin: 0;
+        padding: 0;
+        border: 0;
+        width: 400px;
+        height: 400px;
+      }
+      #target_editable,
+      #target_readonly,
+      #second,
+      #touch_fallback {
+        font: 10px/1 custom-font, monospace;
+        margin: 0;
+        padding: 0;
+        border: none;
+        width: 260px;
+      }
+      #touch_fallback {
+        position: absolute;
+        left: 0px;
+        top: 200px;
+      }
+    )CSS");
+    Compositor().BeginFrame();
+    // Finish font loading, and trigger invalidations.
+    font_resource.Complete(
+        *test::ReadFromFile(test::CoreTestDataPath("Ahem.woff2")));
+    Compositor().BeginFrame();
+  }
+
+  void HandlePointerDownEventOverTouchFallback() {
+    const Element* touch_fallback = GetElementById("touch_fallback");
+    const gfx::Point tap_point = touch_fallback->BoundsInWidget().CenterPoint();
+    const WebPointerEvent event(
+        WebInputEvent::Type::kPointerDown,
+        WebPointerProperties(1, WebPointerProperties::PointerType::kPen,
+                             WebPointerProperties::Button::kLeft,
+                             gfx::PointF(tap_point), gfx::PointF(tap_point)),
+        1, 1);
+    GetEventHandler().HandlePointerEvent(event, Vector<WebPointerEvent>(),
+                                         Vector<WebPointerEvent>());
+    EXPECT_EQ(GetDocument().FocusedElement(), nullptr);
+  }
+
+  void OnStartStylusWriting(const gfx::Rect& focus_widget_rect_in_dips) {
+    MockMainFrameWidget()->OnStartStylusWriting(
+        focus_widget_rect_in_dips,
+        base::BindOnce(&WebFrameWidgetProximateBoundsCollectionSimTestBase::
+                           OnStartStylusWritingComplete,
+                       weak_factory_.GetWeakPtr()));
+  }
+
+  Element* GetElementById(const char* id) {
+    return GetDocument().getElementById(AtomicString(id));
+  }
+
+  const mojom::blink::ProximateCharacterRangeBounds* GetLastProximateBounds()
+      const {
+    return last_proximate_bounds_.get();
+  }
+
+ protected:
+  explicit WebFrameWidgetProximateBoundsCollectionSimTestBase(
+      bool enable_stylus_handwriting_win) {
+    if (enable_stylus_handwriting_win) {
+      // Note: kProximateBoundsCollectionHalfLimit is negative here to exercise
+      // the absolute value logic in `ProximateBoundsCollectionHalfLimit()`.
+      // Logically positive and negative values are equivalent for this, so it
+      // has no special meaning.
+      scoped_feature_list_.InitWithFeaturesAndParameters(
+          /*enabled_features=*/
+          {{stylus_handwriting::win::kStylusHandwritingWin,
+            base::FieldTrialParams()},
+           {stylus_handwriting::win::kProximateBoundsCollection,
+            base::FieldTrialParams(
+                {{stylus_handwriting::win::kProximateBoundsCollectionHalfLimit
+                      .name,
+                  base::NumberToString(-2)}})}},
+          /*disabled_features=*/{});
+      enable_stylus_handwriting_.emplace(true);
+    } else {
+      scoped_feature_list_.InitWithFeaturesAndParameters(
+          /*enabled_features=*/{},
+          /*disabled_features=*/{
+              stylus_handwriting::win::kStylusHandwritingWin});
+    }
+  }
+
+ private:
+  void OnStartStylusWritingComplete(
+      mojom::blink::StylusWritingFocusResultPtr focus_result) {
+    last_proximate_bounds_ =
+        focus_result ? std::move(focus_result->proximate_bounds) : nullptr;
+  }
+
+  base::test::ScopedFeatureList scoped_feature_list_;
+  // Needed in tests because StyleAdjuster::AdjustEffectiveTouchAction depends
+  // on `RuntimeEnabledFeatures::StylusHandwritingEnabled()` to remove
+  // TouchAction::kInternalNotWritable from TouchAction::kAuto.
+  // In production this will be handled by web contents prefs propagation.
+  std::optional<ScopedStylusHandwritingForTest> enable_stylus_handwriting_;
+  mojom::blink::ProximateCharacterRangeBoundsPtr last_proximate_bounds_;
+  base::WeakPtrFactory<WebFrameWidgetProximateBoundsCollectionSimTestBase>
+      weak_factory_{this};
+};
+
+class WebFrameWidgetProximateBoundsCollectionSimTestF
+    : public WebFrameWidgetProximateBoundsCollectionSimTestBase {
+ public:
+  WebFrameWidgetProximateBoundsCollectionSimTestF()
+      : WebFrameWidgetProximateBoundsCollectionSimTestBase(
+            /*enable_stylus_handwriting_win=*/true) {}
+
+  void StartStylusWritingOnElementCenter(const Element& element) {
+    gfx::Rect focus_widget_rect_in_dips(element.BoundsInWidget().CenterPoint(),
+                                        gfx::Size());
+    focus_widget_rect_in_dips.Outset(gfx::Outsets(25));
+    OnStartStylusWriting(focus_widget_rect_in_dips);
+  }
+};
+
+class WebFrameWidgetProximateBoundsCollectionSimTestP
+    : public WebFrameWidgetProximateBoundsCollectionSimTestBase,
+      public testing::WithParamInterface<
+          WebFrameWidgetProximateBoundsCollectionSimTestParam> {
+ public:
+  WebFrameWidgetProximateBoundsCollectionSimTestP()
+      : WebFrameWidgetProximateBoundsCollectionSimTestBase(
+            /*enable_stylus_handwriting_win=*/GetParam()
+                .IsStylusHandwritingWinEnabled()) {}
+};
+
+TEST_F(WebFrameWidgetProximateBoundsCollectionSimTestF,
+       ProximateBoundsDisabled) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitWithFeaturesAndParameters(
+      /*enabled_features=*/
+      {{stylus_handwriting::win::kProximateBoundsCollection,
+        base::FieldTrialParams(
+            {{stylus_handwriting::win::kProximateBoundsCollectionHalfLimit.name,
+              base::NumberToString(0)}})}},
+      /*disabled_features=*/{});
+  LoadDocument(String(R"HTML(
+    <!doctype html>
+    <link rel="stylesheet" href="styles.css">
+    <body>
+      <div id='target_editable' contenteditable>ABCDEFGHIJKLMNOPQRSTUVWXYZ</div>
+      <div id="touch_fallback" contenteditable>Fallback Text</div>
+    </body>
+  )HTML"));
+  HandlePointerDownEventOverTouchFallback();
+  const Element& target_editable = *GetElementById("target_editable");
+  StartStylusWritingOnElementCenter(target_editable);
+  EXPECT_EQ(GetDocument().FocusedElement(), target_editable);
+  EXPECT_EQ(GetLastProximateBounds(), nullptr);
+}
+
+TEST_F(WebFrameWidgetProximateBoundsCollectionSimTestF, EmptyTextRange) {
+  LoadDocument(String(R"HTML(
+    <!doctype html>
+    <link rel="stylesheet" href="styles.css">
+    <body>
+      <div id='target_editable' contenteditable></div>
+      <div id="touch_fallback" contenteditable></div>
+    </body>
+  )HTML"));
+  HandlePointerDownEventOverTouchFallback();
+  const Element& target_editable = *GetElementById("target_editable");
+  StartStylusWritingOnElementCenter(target_editable);
+  EXPECT_EQ(GetDocument().FocusedElement(), target_editable);
+  EXPECT_EQ(GetLastProximateBounds(), nullptr);
+}
+
+TEST_F(WebFrameWidgetProximateBoundsCollectionSimTestF, EmptyFocusRect) {
+  LoadDocument(String(R"HTML(
+    <!doctype html>
+    <link rel="stylesheet" href="styles.css">
+    <body>
+      <div id='target_editable' contenteditable></div>
+      <div id="touch_fallback" contenteditable>ABCDEFGHIJKLMNOPQRSTUVWXYZ</div>
+    </body>
+  )HTML"));
+  HandlePointerDownEventOverTouchFallback();
+  OnStartStylusWriting(gfx::Rect());
+  EXPECT_EQ(GetDocument().FocusedElement(), GetElementById("touch_fallback"));
+  EXPECT_EQ(GetLastProximateBounds(), nullptr);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    All,
+    WebFrameWidgetProximateBoundsCollectionSimTestP,
+    ::testing::ConvertGenerator<
+        WebFrameWidgetProximateBoundsCollectionSimTestParam::TupleType>(
+        testing::Combine(
+            // std::get<0> enable_stylus_handwriting_win
+            testing::Bool(),
+            // std::get<1> document
+            testing::Values(
+                // input element test
+                R"HTML(
+                <!doctype html>
+                <link rel="stylesheet" href="styles.css">
+                <body>
+                <input type='text' id='target_editable'
+                       value='ABCDEFGHIJKLMNOPQRSTUVWXYZ'/>
+                <div id="target_readonly">ABCDEFGHIJKLMNOPQRSTUVWXYZ</div>
+                <div id="touch_fallback" contenteditable>Fallback Text</div>
+                </body>
+                )HTML",
+                // contenteditable element test
+                R"HTML(
+                <!doctype html>
+                <link rel="stylesheet" href="styles.css">
+                <body>
+                <div id='target_editable' contenteditable>ABCDEFGHIJKLMNOPQRSTUVWXYZ</div>
+                <div id="target_readonly">ABCDEFGHIJKLMNOPQRSTUVWXYZ</div>
+                <div id="touch_fallback" contenteditable>Fallback Text</div>
+                </body>
+                )HTML",
+                // contenteditable child element test
+                R"HTML(
+                <!doctype html>
+                <link rel="stylesheet" href="styles.css">
+                <body>
+                <div id='target_editable' contenteditable><span id='second'>ABCDEFGHIJKLMNOPQRSTUVWXYZ</span></div>
+                <div id="target_readonly">ABCDEFGHIJKLMNOPQRSTUVWXYZ</div>
+                <div id="touch_fallback" contenteditable>Fallback Text</div>
+                </body>
+                )HTML",
+                // contenteditable inside <svg> <foreignObject> test
+                R"HTML(
+                <!doctype html>
+                <link rel="stylesheet" href="styles.css">
+                <svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+                  <foreignObject x="0" y="0" width="400" height="400">
+                    <div id='target_editable' contenteditable>ABCDEFGHIJKLMNOPQRSTUVWXYZ</div>
+                    <div id="target_readonly">ABCDEFGHIJKLMNOPQRSTUVWXYZ</div>
+                    <div id="touch_fallback" contenteditable>Fallback Text</div>
+                  </foreignObject>
+                </svg>
+                )HTML"),
+            // std::get<2> proximate_bounds_collection_args
+            testing::Values(
+                // Test that bounds collection expands in both
+                // directions relative to the pivot position up-to
+                // the `ProximateBoundsCollectionHalfLimit()`.
+                ProximateBoundsCollectionArgs{
+                    /*get_focus_widget_rect_in_dips=*/base::BindRepeating(
+                        [](const Document& document) -> gfx::Rect {
+                          const Element* target = document.getElementById(
+                              AtomicString("target_editable"));
+                          gfx::Rect focus_widget_rect_in_dips(
+                              target->BoundsInWidget().top_center(),
+                              gfx::Size());
+                          focus_widget_rect_in_dips.Outset(gfx::Outsets(25));
+                          return focus_widget_rect_in_dips;
+                        }),
+                    /*expected_focus_id=*/"target_editable",
+                    /*expect_null_proximate_bounds=*/false,
+                    /*expected_range=*/gfx::Range(11, 15),
+                    /*expected_bounds=*/
+                    {gfx::Rect(110, 0, 10, 10), gfx::Rect(120, 0, 10, 10),
+                     gfx::Rect(130, 0, 10, 10), gfx::Rect(140, 0, 10, 10)}},
+                // Test that bounds collection at the start of a text
+                // range only expands in one direction up-to the
+                // `ProximateBoundsCollectionHalfLimit()`.
+                ProximateBoundsCollectionArgs{
+                    /*get_focus_widget_rect_in_dips=*/base::BindRepeating(
+                        [](const Document& document) -> gfx::Rect {
+                          const Element* target = document.getElementById(
+                              AtomicString("target_editable"));
+                          gfx::Rect focus_widget_rect_in_dips(
+                              target->BoundsInWidget().origin(), gfx::Size());
+                          focus_widget_rect_in_dips.Outset(gfx::Outsets(25));
+                          return focus_widget_rect_in_dips;
+                        }),
+                    /*expected_focus_id=*/"target_editable",
+                    /*expect_null_proximate_bounds=*/false,
+                    /*expected_range=*/gfx::Range(0, 2),
+                    /*expected_bounds=*/
+                    {gfx::Rect(0, 0, 10, 10), gfx::Rect(10, 0, 10, 10)}},
+                // Test that bounds collection at the end of a text
+                // range only expands in one direction up-to the
+                // `ProximateBoundsCollectionHalfLimit()`.
+                ProximateBoundsCollectionArgs{
+                    /*get_focus_widget_rect_in_dips=*/base::BindRepeating(
+                        [](const Document& document) -> gfx::Rect {
+                          const Element* target = document.getElementById(
+                              AtomicString("target_editable"));
+                          gfx::Rect focus_widget_rect_in_dips(
+                              target->BoundsInWidget().top_right() -
+                                  gfx::Vector2d(1, 0),
+                              gfx::Size());
+                          focus_widget_rect_in_dips.Outset(gfx::Outsets(25));
+                          return focus_widget_rect_in_dips;
+                        }),
+                    /*expected_focus_id=*/"target_editable",
+                    /*expect_null_proximate_bounds=*/false,
+                    /*expected_range=*/gfx::Range(24, 26),
+                    /*expected_bounds=*/
+                    {gfx::Rect(240, 0, 10, 10), gfx::Rect(250, 0, 9, 10)}},
+                // Test that `touch_fallback` is focused when
+                // `focus_widget_rect_in_dips` misses, but it shouldn't collect
+                // bounds because the pivot offset cannot be determined.
+                ProximateBoundsCollectionArgs{
+                    /*get_focus_widget_rect_in_dips=*/base::BindRepeating(
+                        [](const Document& document) -> gfx::Rect {
+                          const Element* target = document.getElementById(
+                              AtomicString("target_editable"));
+                          gfx::Rect focus_widget_rect_in_dips(
+                              target->BoundsInWidget().right_center() +
+                                  gfx::Vector2d(100, 0),
+                              gfx::Size());
+                          focus_widget_rect_in_dips.Outset(gfx::Outsets(25));
+                          return focus_widget_rect_in_dips;
+                        }),
+                    /*expected_focus_id=*/"touch_fallback",
+                    /*expect_null_proximate_bounds=*/true,
+                    /*expected_range=*/gfx::Range(),
+                    /*expected_bounds=*/{}},
+                // Test that `touch_fallback` is focused when
+                // `focus_widget_rect_in_dips` hits non-editable content, but it
+                // shouldn't collect bounds because the pivot offset cannot be
+                // determined.
+                ProximateBoundsCollectionArgs{
+                    /*get_focus_widget_rect_in_dips=*/base::BindRepeating(
+                        [](const Document& document) -> gfx::Rect {
+                          const Element* target = document.getElementById(
+                              AtomicString("target_readonly"));
+                          gfx::Rect focus_widget_rect_in_dips(
+                              target->BoundsInWidget().CenterPoint(),
+                              gfx::Size());
+                          focus_widget_rect_in_dips.Outset(gfx::Outsets(25));
+                          return focus_widget_rect_in_dips;
+                        }),
+                    /*expected_focus_id=*/"touch_fallback",
+                    /*expect_null_proximate_bounds=*/true,
+                    /*expected_range=*/gfx::Range(),
+                    /*expected_bounds=*/{}}))));
+
+TEST_P(WebFrameWidgetProximateBoundsCollectionSimTestP,
+       TestProximateBoundsCollection) {
+  LoadDocument(String(GetParam().GetHTMLDocument()));
+  HandlePointerDownEventOverTouchFallback();
+  OnStartStylusWriting(GetParam().GetFocusWidgetRectInDips(GetDocument()));
+  if (!GetParam().IsStylusHandwritingWinEnabled()) {
+    EXPECT_EQ(GetDocument().FocusedElement(), nullptr);
+    EXPECT_EQ(GetLastProximateBounds(), nullptr);
+    return;
+  }
+
+  // Focus expectations.
+  const Element* expected_focus =
+      GetElementById(GetParam().GetExpectedFocusId().c_str());
+  const Element* actual_focus = GetDocument().FocusedElement();
+  ASSERT_NE(actual_focus, nullptr);
+  EXPECT_EQ(actual_focus, expected_focus);
+
+  // `Proximate` bounds cache expectations.
+  EXPECT_EQ(!GetLastProximateBounds(), GetParam().ExpectNullProximateBounds());
+  if (!GetParam().ExpectNullProximateBounds()) {
+    EXPECT_EQ(GetLastProximateBounds()->range, GetParam().GetExpectedRange());
+    EXPECT_TRUE(
+        std::equal(GetLastProximateBounds()->widget_bounds_in_dips.begin(),
+                   GetLastProximateBounds()->widget_bounds_in_dips.end(),
+                   GetParam().GetExpectedBounds().begin(),
+                   GetParam().GetExpectedBounds().end()));
+  }
+}
+#endif  // BUILDFLAG(IS_WIN)
+
 class NotifySwapTimesWebFrameWidgetTest : public SimTest {
  public:
   void SetUp() override {
@@ -512,18 +1189,20 @@ class NotifySwapTimesWebFrameWidgetTest : public SimTest {
     base::TimeTicks swap_time;
     static_cast<WebFrameWidgetImpl*>(MainFrame().FrameWidget())
         ->NotifySwapAndPresentationTimeForTesting(
-            {base::BindOnce(
+            {WTF::BindOnce(
                  [](base::OnceClosure swap_quit_closure,
                     base::TimeTicks* swap_time, base::TimeTicks timestamp) {
-                   DCHECK(!timestamp.is_null());
+                   CHECK(!timestamp.is_null());
                    *swap_time = timestamp;
                    std::move(swap_quit_closure).Run();
                  },
-                 swap_run_loop.QuitClosure(), &swap_time),
-             base::BindOnce(
+                 swap_run_loop.QuitClosure(), WTF::Unretained(&swap_time)),
+             WTF::BindOnce(
                  [](base::OnceClosure presentation_quit_closure,
-                    base::TimeTicks timestamp) {
-                   DCHECK(!timestamp.is_null());
+                    const viz::FrameTimingDetails& presentation_details) {
+                   base::TimeTicks timestamp =
+                       presentation_details.presentation_feedback.timestamp;
+                   CHECK(!timestamp.is_null());
                    std::move(presentation_quit_closure).Run();
                  },
                  presentation_run_loop.QuitClosure())});
@@ -543,49 +1222,6 @@ class NotifySwapTimesWebFrameWidgetTest : public SimTest {
     presentation_run_loop.Run();
   }
 };
-
-TEST_F(NotifySwapTimesWebFrameWidgetTest, PresentationTimestampValid) {
-  base::HistogramTester histograms;
-
-  CompositeAndWaitForPresentation(base::Milliseconds(2));
-
-  EXPECT_THAT(histograms.GetAllSamples(
-                  "PageLoad.Internal.Renderer.PresentationTime.Valid"),
-              testing::ElementsAre(base::Bucket(true, 1)));
-  EXPECT_THAT(
-      histograms.GetAllSamples(
-          "PageLoad.Internal.Renderer.PresentationTime.DeltaFromSwapTime"),
-      testing::ElementsAre(base::Bucket(2, 1)));
-}
-
-TEST_F(NotifySwapTimesWebFrameWidgetTest, PresentationTimestampInvalid) {
-  base::HistogramTester histograms;
-
-  CompositeAndWaitForPresentation(base::TimeDelta());
-
-  EXPECT_THAT(histograms.GetAllSamples(
-                  "PageLoad.Internal.Renderer.PresentationTime.Valid"),
-              testing::ElementsAre(base::Bucket(false, 1)));
-  EXPECT_THAT(
-      histograms.GetAllSamples(
-          "PageLoad.Internal.Renderer.PresentationTime.DeltaFromSwapTime"),
-      testing::IsEmpty());
-}
-
-TEST_F(NotifySwapTimesWebFrameWidgetTest,
-       PresentationTimestampEarlierThanSwaptime) {
-  base::HistogramTester histograms;
-
-  CompositeAndWaitForPresentation(base::Milliseconds(-2));
-
-  EXPECT_THAT(histograms.GetAllSamples(
-                  "PageLoad.Internal.Renderer.PresentationTime.Valid"),
-              testing::ElementsAre(base::Bucket(false, 1)));
-  EXPECT_THAT(
-      histograms.GetAllSamples(
-          "PageLoad.Internal.Renderer.PresentationTime.DeltaFromSwapTime"),
-      testing::IsEmpty());
-}
 
 // Verifies that the presentation callback is called after the first successful
 // presentation (skips failed presentations in between).
@@ -616,18 +1252,21 @@ TEST_F(NotifySwapTimesWebFrameWidgetTest, NotifyOnSuccessfulPresentation) {
 
         swap_run_loop.Quit();
       }),
-      base::BindLambdaForTesting([&](base::TimeTicks timestamp) {
-        DCHECK(!timestamp.is_null());
-        DCHECK(!failed_presentation_time.is_null());
-        DCHECK(!successful_presentation_time.is_null());
+      base::BindLambdaForTesting(
+          [&](const viz::FrameTimingDetails& presentation_details) {
+            base::TimeTicks timestamp =
+                presentation_details.presentation_feedback.timestamp;
+            CHECK(!timestamp.is_null());
+            CHECK(!failed_presentation_time.is_null());
+            CHECK(!successful_presentation_time.is_null());
 
-        // Verify that this callback is run in response to the
-        // successful presentation, not the failed one before that.
-        EXPECT_NE(timestamp, failed_presentation_time);
-        EXPECT_EQ(timestamp, successful_presentation_time);
+            // Verify that this callback is run in response to the
+            // successful presentation, not the failed one before that.
+            EXPECT_NE(timestamp, failed_presentation_time);
+            EXPECT_EQ(timestamp, successful_presentation_time);
 
-        presentation_run_loop.Quit();
-      })};
+            presentation_run_loop.Quit();
+          })};
 
 #if BUILDFLAG(IS_MAC)
   // Assign a ca_layer error code.
@@ -676,25 +1315,12 @@ TEST_F(NotifySwapTimesWebFrameWidgetTest, NotifyOnSuccessfulPresentation) {
   // Wait for the presentation callback to be called. It should be called with
   // the timestamp of the successful presentation.
   presentation_run_loop.Run();
-
-  EXPECT_THAT(histograms.GetAllSamples(
-                  "PageLoad.Internal.Renderer.PresentationTime.Valid"),
-              testing::ElementsAre(base::Bucket(true, 1)));
-  const auto expected_sample = static_cast<base::HistogramBase::Sample>(
-      (swap_to_failed + failed_to_successful).InMilliseconds());
-  EXPECT_THAT(
-      histograms.GetAllSamples(
-          "PageLoad.Internal.Renderer.PresentationTime.DeltaFromSwapTime"),
-      testing::ElementsAre(base::Bucket(expected_sample, 1)));
 }
 
 // Tests that the presentation callback is only triggered if there’s
 // a successful commit to the compositor.
 TEST_F(NotifySwapTimesWebFrameWidgetTest,
        ReportPresentationOnlyOnSuccessfulCommit) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(features::kReportFCPOnlyOnSuccessfulCommit);
-
   base::HistogramTester histograms;
   constexpr base::TimeDelta delta = base::Milliseconds(16);
   constexpr base::TimeDelta delta_from_swap_time = base::Microseconds(2);
@@ -714,15 +1340,18 @@ TEST_F(NotifySwapTimesWebFrameWidgetTest,
              presentation_time = timestamp + delta_from_swap_time;
              swap_run_loop.Quit();
            }),
-           base::BindLambdaForTesting([&](base::TimeTicks timestamp) {
-             DCHECK(!timestamp.is_null());
-             DCHECK(!presentation_time.is_null());
+           base::BindLambdaForTesting(
+               [&](const viz::FrameTimingDetails& presentation_details) {
+                 base::TimeTicks timestamp =
+                     presentation_details.presentation_feedback.timestamp;
+                 CHECK(!timestamp.is_null());
+                 CHECK(!presentation_time.is_null());
 
-             // Verify that the presentation is only reported on the successful
-             // commit to the compositor.
-             EXPECT_EQ(timestamp, presentation_time);
-             presentation_run_loop.Quit();
-           })});
+                 // Verify that the presentation is only reported on the
+                 // successful commit to the compositor.
+                 EXPECT_EQ(timestamp, presentation_time);
+                 presentation_run_loop.Quit();
+               })});
 
   // Simulate a failed commit to the compositor, which should not trigger either
   // a swap or a presentation callback in response.
@@ -749,12 +1378,6 @@ TEST_F(NotifySwapTimesWebFrameWidgetTest,
 
   // Wait for the presentation callback to be called.
   presentation_run_loop.Run();
-  const auto expected_sample = static_cast<base::HistogramBase::Sample>(
-      delta_from_swap_time.InMilliseconds());
-  EXPECT_THAT(
-      histograms.GetAllSamples(
-          "PageLoad.Internal.Renderer.PresentationTime.DeltaFromSwapTime"),
-      testing::ElementsAre(base::Bucket(expected_sample, 1)));
 }
 
 // Tests that the value of VisualProperties::is_pinch_gesture_active is
@@ -778,9 +1401,31 @@ TEST_F(WebFrameWidgetSimTest, ActivePinchGestureUpdatesLayerTreeHost) {
   EXPECT_FALSE(layer_tree_host->is_external_pinch_gesture_active_for_testing());
 }
 
+class WebFrameWidgetInputEventsSimTest
+    : public WebFrameWidgetSimTest,
+      public testing::WithParamInterface<bool> {
+ public:
+  WebFrameWidgetInputEventsSimTest() {
+    if (GetParam()) {
+      feature_list_.InitAndEnableFeature(
+          features::kPausePagesPerBrowsingContextGroup);
+    } else {
+      feature_list_.InitAndDisableFeature(
+          features::kPausePagesPerBrowsingContextGroup);
+    }
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+INSTANTIATE_TEST_SUITE_P(All,
+                         WebFrameWidgetInputEventsSimTest,
+                         testing::Values(true, false));
+
 // Tests that dispatch buffered touch events does not process events during
 // drag and devtools handling.
-TEST_F(WebFrameWidgetSimTest, DispatchBufferedTouchEvents) {
+TEST_P(WebFrameWidgetInputEventsSimTest, DispatchBufferedTouchEvents) {
   auto* widget = WebView().MainFrameViewWidget();
 
   auto* listener = MakeGarbageCollected<TouchMoveEventListener>();
@@ -804,25 +1449,31 @@ TEST_F(WebFrameWidgetSimTest, DispatchBufferedTouchEvents) {
       base::DoNothing());
   EXPECT_TRUE(listener->GetInvokedStateAndReset());
 
+  const base::UnguessableToken browsing_context_group_token =
+      WebView().GetPage()->BrowsingContextGroupToken();
+
   // Expect listener does not get called, due to devtools flag.
   touch.MovePoint(0, 12, 12);
-  WebFrameWidgetImpl::SetIgnoreInputEvents(true);
+  WebFrameWidgetImpl::SetIgnoreInputEvents(browsing_context_group_token, true);
   widget->ProcessInputEventSynchronouslyForTesting(
       WebCoalescedInputEvent(touch.Clone(), {}, {}, ui::LatencyInfo()),
       base::DoNothing());
-  EXPECT_TRUE(WebFrameWidgetImpl::IgnoreInputEvents());
+  EXPECT_TRUE(
+      WebFrameWidgetImpl::IgnoreInputEvents(browsing_context_group_token));
   EXPECT_FALSE(listener->GetInvokedStateAndReset());
-  WebFrameWidgetImpl::SetIgnoreInputEvents(false);
+  WebFrameWidgetImpl::SetIgnoreInputEvents(browsing_context_group_token, false);
 
   // Expect listener does not get called, due to drag.
   touch.MovePoint(0, 14, 14);
-  widget->StartDragging(WebDragData(), kDragOperationCopy, SkBitmap(),
-                        gfx::Vector2d(), gfx::Rect());
+  widget->StartDragging(MainFrame().GetFrame(), WebDragData(),
+                        kDragOperationCopy, SkBitmap(), gfx::Vector2d(),
+                        gfx::Rect());
   widget->ProcessInputEventSynchronouslyForTesting(
       WebCoalescedInputEvent(touch.Clone(), {}, {}, ui::LatencyInfo()),
       base::DoNothing());
   EXPECT_TRUE(widget->DoingDragAndDrop());
-  EXPECT_FALSE(WebFrameWidgetImpl::IgnoreInputEvents());
+  EXPECT_FALSE(
+      WebFrameWidgetImpl::IgnoreInputEvents(browsing_context_group_token));
   EXPECT_FALSE(listener->GetInvokedStateAndReset());
 }
 
@@ -858,6 +1509,766 @@ TEST_F(WebFrameWidgetSimTest, PropagateScaleToRemoteFrames) {
   WebView().MainFrame()->FirstChild()->FirstChild()->Detach();
 }
 
+#if BUILDFLAG(IS_ANDROID)
+TEST_F(WebFrameWidgetSimTest, TestLineBoundsAreEmptyBeforeFocus) {
+  WebView().ResizeVisualViewport(gfx::Size(1000, 1000));
+  auto* widget = WebView().MainFrameViewWidget();
+  SimRequest request("https://example.com/test.html", "text/html");
+  SimSubresourceRequest font_resource("https://example.com/Ahem.woff2",
+                                      "font/woff2");
+  LoadURL("https://example.com/test.html");
+  request.Complete(
+      R"HTML(
+      <!doctype html>
+      <style>
+        @font-face {
+          font-family: custom-font;
+          src: url(https://example.com/Ahem.woff2) format("woff2");
+        }
+        body {
+          margin: 0;
+          padding: 0;
+          border: 0;
+        }
+        .target {
+          font: 10px/1 custom-font, monospace;
+          margin: 0;
+          padding: 0;
+          border: none;
+        }
+      </style>
+      <input type='text' id='first' class='target' />
+      )HTML");
+  Compositor().BeginFrame();
+  // Finish font loading, and trigger invalidations.
+  font_resource.Complete(
+      *test::ReadFromFile(test::CoreTestDataPath("Ahem.woff2")));
+  Compositor().BeginFrame();
+  widget->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  Vector<gfx::Rect>& actual = widget->GetVisibleLineBoundsOnScreen();
+  EXPECT_EQ(0U, actual.size());
+}
+
+TEST_F(WebFrameWidgetSimTest, TestLineBoundsAreCorrectAfterFocusChange) {
+  WebView().ResizeVisualViewport(gfx::Size(1000, 1000));
+  auto* widget = WebView().MainFrameViewWidget();
+  SimRequest request("https://example.com/test.html", "text/html");
+  SimSubresourceRequest font_resource("https://example.com/Ahem.woff2",
+                                      "font/woff2");
+  LoadURL("https://example.com/test.html");
+  request.Complete(
+      R"HTML(
+      <!doctype html>
+      <style>
+        @font-face {
+          font-family: custom-font;
+          src: url(https://example.com/Ahem.woff2) format("woff2");
+        }
+        body {
+          margin: 0;
+          padding: 0;
+          border: 0;
+        }
+        .target {
+          font: 10px/1 custom-font, monospace;
+          margin: 0;
+          padding: 0;
+          border: none;
+        }
+      </style>
+      <input type='text' id='first' class='target' />
+      <input type='text' id='second' class='target' />
+      )HTML");
+  Compositor().BeginFrame();
+  // Finish font loading, and trigger invalidations.
+  font_resource.Complete(
+      *test::ReadFromFile(test::CoreTestDataPath("Ahem.woff2")));
+  Compositor().BeginFrame();
+  HTMLInputElement* first = DynamicTo<HTMLInputElement>(
+      GetDocument().getElementById(AtomicString("first")));
+  HTMLInputElement* second = DynamicTo<HTMLInputElement>(
+      GetDocument().getElementById(AtomicString("second")));
+  // Focus the first element and check the line bounds.
+  first->SetValue("ABCD");
+  first->Focus();
+  widget->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  Vector<gfx::Rect> expected(Vector({gfx::Rect(0, 0, 40, 10)}));
+  Vector<gfx::Rect>& actual = widget->GetVisibleLineBoundsOnScreen();
+  EXPECT_EQ(expected.size(), actual.size());
+  for (wtf_size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(expected.at(i), actual.at(i));
+  }
+
+  // Focus the second element and check the line bounds have updated.
+  second->SetValue("ABCD EFGH");
+  second->Focus();
+  gfx::Point origin =
+      second->GetBoundingClientRect()->ToEnclosingRect().origin();
+  widget->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  expected = Vector({gfx::Rect(origin.x(), origin.y(), 90, 10)});
+  actual = widget->GetVisibleLineBoundsOnScreen();
+  EXPECT_EQ(expected.size(), actual.size());
+  for (wtf_size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(expected.at(i), actual.at(i));
+  }
+}
+
+TEST_F(WebFrameWidgetSimTest, DisplayStateMatchesWindowShowState) {
+  base::test::ScopedFeatureList feature_list(
+      ScopedDesktopPWAsAdditionalWindowingControlsForTest);
+
+  SimRequest request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  request.Complete(
+      R"HTML(
+        <!doctype html>
+        <style>
+        body {
+          background-color: white;
+        }
+        @media (display-state: normal) {
+          body {
+            background-color: yellow;
+          }
+        }
+        @media (display-state: minimized) {
+          body {
+            background-color: cyan;
+          }
+        }
+        @media (display-state: maximized) {
+          body {
+            background-color: red;
+          }
+        }
+        @media (display-state: fullscreen) {
+          body {
+            background-color: blue;
+          }
+        }
+      </style>
+      <body></body>
+      )HTML");
+
+  auto* widget = WebView().MainFrameViewWidget();
+  VisualProperties visual_properties;
+  visual_properties.screen_infos = display::ScreenInfos(display::ScreenInfo());
+
+  // display-state: normal
+  // Default is set in /third_party/blink/renderer/core/frame/settings.json5.
+  widget->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  EXPECT_EQ(Color::FromRGB(/*yellow*/ 255, 255, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyBackgroundColor()));
+
+  WTF::Vector<std::pair<ui::mojom::blink::WindowShowState, Color>> test_cases =
+      {{ui::mojom::blink::WindowShowState::kMinimized,
+        Color::FromRGB(/*cyan*/ 0, 255, 255)},
+       {ui::mojom::blink::WindowShowState::kMaximized,
+        Color::FromRGB(/*red*/ 255, 0, 0)},
+       {ui::mojom::blink::WindowShowState::kFullscreen,
+        Color::FromRGB(/*blue*/ 0, 0, 255)}};
+
+  for (const auto& [show_state, color] : test_cases) {
+    visual_properties.window_show_state = show_state;
+    WebView().MainFrameWidget()->ApplyVisualProperties(visual_properties);
+    widget->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+    EXPECT_EQ(color,
+              GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                  GetCSSPropertyBackgroundColor()));
+  }
+}
+
+TEST_F(WebFrameWidgetSimTest, ResizableMatchesCanResize) {
+  base::test::ScopedFeatureList feature_list(
+      ScopedDesktopPWAsAdditionalWindowingControlsForTest);
+
+  SimRequest request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  request.Complete(
+      R"HTML(
+        <!doctype html>
+        <style>
+          body {
+            /* This should never activate. */
+            background-color: white;
+          }
+          @media (resizable: true) {
+            body {
+              background-color: yellow;
+            }
+          }
+          @media (resizable: false) {
+            body {
+              background-color: cyan;
+            }
+          }
+        </style>
+        <body></body>
+      )HTML");
+
+  auto* widget = WebView().MainFrameViewWidget();
+  VisualProperties visual_properties;
+  visual_properties.screen_infos = display::ScreenInfos(display::ScreenInfo());
+
+  // resizable: true
+  // Default is set in /third_party/blink/renderer/core/frame/settings.json5.
+  WebView().MainFrameWidget()->ApplyVisualProperties(visual_properties);
+  widget->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  EXPECT_EQ(Color::FromRGB(/*yellow*/ 255, 255, 0),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyBackgroundColor()));
+
+  // resizable: false
+  visual_properties.resizable = false;
+  WebView().MainFrameWidget()->ApplyVisualProperties(visual_properties);
+  widget->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  EXPECT_EQ(Color::FromRGB(/*cyan*/ 0, 255, 255),
+            GetDocument().body()->GetComputedStyle()->VisitedDependentColor(
+                GetCSSPropertyBackgroundColor()));
+}
+
+TEST_F(WebFrameWidgetSimTest, TestLineBoundsAreCorrectAfterLayoutChange) {
+  WebView().ResizeVisualViewport(gfx::Size(1000, 1000));
+  auto* widget = WebView().MainFrameViewWidget();
+  SimRequest request("https://example.com/test.html", "text/html");
+  SimSubresourceRequest font_resource("https://example.com/Ahem.woff2",
+                                      "font/woff2");
+  LoadURL("https://example.com/test.html");
+  request.Complete(
+      R"HTML(
+      <!doctype html>
+      <style>
+        @font-face {
+          font-family: custom-font;
+          src: url(https://example.com/Ahem.woff2) format("woff2");
+        }
+        body {
+          margin: 0;
+          padding: 0;
+          border: 0;
+        }
+        .target {
+          font: 10px/1 custom-font, monospace;
+          margin: 0;
+          padding: 0;
+          border: none;
+        }
+      </style>
+      <div id='d' style='height: 0;'/>
+      <input type='text' id='first' class='target' />
+      )HTML");
+  Compositor().BeginFrame();
+  // Finish font loading, and trigger invalidations.
+  font_resource.Complete(
+      *test::ReadFromFile(test::CoreTestDataPath("Ahem.woff2")));
+  Compositor().BeginFrame();
+  HTMLInputElement* first = DynamicTo<HTMLInputElement>(
+      GetDocument().getElementById(AtomicString("first")));
+  // Focus the element and check the line bounds.
+  first->Focus();
+  first->SetValue("hello world");
+  widget->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  Vector<gfx::Rect>& expected = widget->GetVisibleLineBoundsOnScreen();
+  // Offset each line bound by 200 pixels downwards (for after layout shift).
+  for (auto& i : expected) {
+    i.Offset(0, 200);
+  }
+
+  GetDocument()
+      .getElementById(AtomicString("d"))
+      ->setAttribute(html_names::kStyleAttr, AtomicString("height: 200px"));
+  widget->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  Vector<gfx::Rect>& actual = widget->GetVisibleLineBoundsOnScreen();
+  for (wtf_size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(expected.at(i), actual.at(i));
+  }
+}
+
+TEST_F(WebFrameWidgetSimTest, TestLineBoundsAreCorrectAfterPageScroll) {
+  WebView().ResizeVisualViewport(gfx::Size(1000, 1000));
+  auto* widget = WebView().MainFrameViewWidget();
+  SimRequest request("https://example.com/test.html", "text/html");
+  SimSubresourceRequest font_resource("https://example.com/Ahem.woff2",
+                                      "font/woff2");
+  LoadURL("https://example.com/test.html");
+  request.Complete(
+      R"HTML(
+      <!doctype html>
+      <style>
+        @font-face {
+          font-family: custom-font;
+          src: url(https://example.com/Ahem.woff2) format("woff2");
+        }
+        body {
+          margin: 0;
+          padding: 0;
+          border: 0;
+          height: 150vh;
+          overflow: scrollY;
+        }
+        .target {
+          font: 10px/1 custom-font, monospace;
+          margin: 0;
+          padding: 0;
+          border: none;
+          position: absolute;
+          top: 100px;
+        }
+      </style>
+      <textarea type='text' id='first' class='target' >
+          The quick brown fox jumps over the lazy dog.
+      </textarea>
+      )HTML");
+  Compositor().BeginFrame();
+  // Finish font loading, and trigger invalidations.
+  font_resource.Complete(
+      *test::ReadFromFile(test::CoreTestDataPath("Ahem.woff2")));
+  Compositor().BeginFrame();
+  HTMLTextAreaElement* first = DynamicTo<HTMLTextAreaElement>(
+      GetDocument().getElementById(AtomicString("first")));
+  // Focus the element and check the line bounds.
+  first->Focus();
+  widget->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+
+  Vector<gfx::Rect> expected;
+  for (auto& i : widget->GetVisibleLineBoundsOnScreen()) {
+    gfx::Rect bound(i.origin(), i.size());
+    bound.Offset(0, -50);
+    expected.push_back(bound);
+  }
+
+  // Scroll by 50 pixels down.
+  widget->FocusedLocalFrameInWidget()->View()->LayoutViewport()->ScrollBy(
+      ScrollOffset(0, 50), mojom::blink::ScrollType::kUser);
+  widget->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+
+  // As line bounds are calculated in document coordinates, a document scroll
+  // should not have any effect. Assert that they are the same as before.
+  Vector<gfx::Rect>& actual = widget->GetVisibleLineBoundsOnScreen();
+  for (wtf_size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(expected.at(i).ToString(), actual.at(i).ToString());
+  }
+}
+
+TEST_F(WebFrameWidgetSimTest, TestLineBoundsAreCorrectAfterElementScroll) {
+  WebView().ResizeVisualViewport(gfx::Size(1000, 1000));
+  auto* widget = WebView().MainFrameViewWidget();
+  SimRequest request("https://example.com/test.html", "text/html");
+  SimSubresourceRequest font_resource("https://example.com/Ahem.woff2",
+                                      "font/woff2");
+  LoadURL("https://example.com/test.html");
+  request.Complete(
+      R"HTML(
+      <!doctype html>
+      <style>
+        @font-face {
+          font-family: custom-font;
+          src: url(https://example.com/Ahem.woff2) format("woff2");
+        }
+        body {
+          margin: 0;
+          padding: 0;
+          border: 0;
+          height: 150vh;
+          overflow: scrollY;
+        }
+        .target {
+          font: 10px/1 custom-font, monospace;
+          margin: 0;
+          padding: 0;
+          border: none;
+          overflow-y: scroll;
+          position: absolute;
+          top: 150px;
+        }
+      </style>
+      <textarea type='text' id='first' class='target' >
+          The quick brown fox jumps over the lazy dog.
+          The quick brown fox jumps over the lazy dog.
+          The quick brown fox jumps over the lazy dog.
+          The quick brown fox jumps over the lazy dog.
+      </textarea>
+      )HTML");
+  Compositor().BeginFrame();
+  // Finish font loading, and trigger invalidations.
+  font_resource.Complete(
+      *test::ReadFromFile(test::CoreTestDataPath("Ahem.woff2")));
+  Compositor().BeginFrame();
+  HTMLTextAreaElement* first = DynamicTo<HTMLTextAreaElement>(
+      GetDocument().getElementById(AtomicString("first")));
+  // Focus the element and check the line bounds.
+  first->Focus();
+  widget->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  Vector<gfx::Rect> expected;
+
+  // Offset each line bound by 50 pixels upwards (for after a scroll down).
+  for (auto& i : widget->GetVisibleLineBoundsOnScreen()) {
+    gfx::Rect bound(i.origin(), i.size());
+    bound.Offset(0, -50);
+    expected.push_back(bound);
+  }
+
+  // Scroll element by 50 pixels down.
+  GetDocument().FocusedElement()->scrollBy(0, 50);
+  widget->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+
+  Vector<gfx::Rect>& actual = widget->GetVisibleLineBoundsOnScreen();
+  EXPECT_EQ(expected.size(), actual.size());
+  for (wtf_size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(expected.at(i), actual.at(i));
+  }
+}
+
+TEST_F(WebFrameWidgetSimTest, TestLineBoundsAreCorrectAfterCommit) {
+  WebView().ResizeVisualViewport(gfx::Size(1000, 1000));
+  auto* widget = WebView().MainFrameViewWidget();
+  SimRequest request("https://example.com/test.html", "text/html");
+  SimSubresourceRequest font_resource("https://example.com/Ahem.woff2",
+                                      "font/woff2");
+  LoadURL("https://example.com/test.html");
+  request.Complete(
+      R"HTML(
+      <!doctype html>
+      <style>
+        @font-face {
+          font-family: custom-font;
+          src: url(https://example.com/Ahem.woff2) format("woff2");
+        }
+        body {
+          margin: 0;
+          padding: 0;
+          border: 0;
+          height: 150vh;
+          overflow: scrollY;
+        }
+        .target {
+          font: 10px/1 custom-font, monospace;
+          margin: 0;
+          padding: 0;
+          border: none;
+          overflow-y: scroll;
+        }
+      </style>
+      <textarea type='text' id='first' class='target' ></textarea>
+      )HTML");
+  Compositor().BeginFrame();
+  // Finish font loading, and trigger invalidations.
+  font_resource.Complete(
+      *test::ReadFromFile(test::CoreTestDataPath("Ahem.woff2")));
+  Compositor().BeginFrame();
+  HTMLTextAreaElement* first = DynamicTo<HTMLTextAreaElement>(
+      GetDocument().getElementById(AtomicString("first")));
+  // Focus the element and check the line bounds.
+  first->Focus();
+  gfx::Point origin =
+      first->GetBoundingClientRect()->ToEnclosingRect().origin();
+  String text = "hello world";
+  for (wtf_size_t i = 0; i < text.length(); ++i) {
+    first->SetValue(first->Value() + text[i]);
+    widget->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+    EXPECT_EQ(1U, widget->GetVisibleLineBoundsOnScreen().size());
+    EXPECT_EQ(gfx::Rect(origin.x(), origin.y(), 10 * (i + 1), 10),
+              widget->GetVisibleLineBoundsOnScreen().at(0));
+  }
+  first->SetValue(first->Value() + "\n");
+  String new_text = "goodbye world";
+  for (wtf_size_t i = 0; i < new_text.length(); ++i) {
+    first->SetValue(first->Value() + new_text[i]);
+    widget->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+    EXPECT_EQ(2U, widget->GetVisibleLineBoundsOnScreen().size());
+    EXPECT_EQ(gfx::Rect(origin.x(), origin.y() + 10, 10 * (i + 1), 10),
+              widget->GetVisibleLineBoundsOnScreen().at(1));
+  }
+}
+
+TEST_F(WebFrameWidgetSimTest, TestLineBoundsAreCorrectAfterDelete) {
+  WebView().ResizeVisualViewport(gfx::Size(1000, 1000));
+  auto* widget = WebView().MainFrameViewWidget();
+  SimRequest request("https://example.com/test.html", "text/html");
+  SimSubresourceRequest font_resource("https://example.com/Ahem.woff2",
+                                      "font/woff2");
+  LoadURL("https://example.com/test.html");
+  request.Complete(
+      R"HTML(
+      <!doctype html>
+      <style>
+        @font-face {
+          font-family: custom-font;
+          src: url(https://example.com/Ahem.woff2) format("woff2");
+        }
+        body {
+          margin: 0;
+          padding: 0;
+          border: 0;
+          height: 150vh;
+          overflow: scrollY;
+        }
+        .target {
+          font: 10px/1 custom-font, monospace;
+          margin: 0;
+          padding: 0;
+          border: none;
+          overflow-y: scroll;
+        }
+      </style>
+      <textarea type='text' id='first' class='target' ></textarea>
+      )HTML");
+  Compositor().BeginFrame();
+  // Finish font loading, and trigger invalidations.
+  font_resource.Complete(
+      *test::ReadFromFile(test::CoreTestDataPath("Ahem.woff2")));
+  Compositor().BeginFrame();
+  HTMLTextAreaElement* first = DynamicTo<HTMLTextAreaElement>(
+      GetDocument().getElementById(AtomicString("first")));
+
+  first->Focus();
+  first->SetValue("hello world\rgoodbye world");
+  gfx::Point origin =
+      first->GetBoundingClientRect()->ToEnclosingRect().origin();
+
+  String last_line = "goodbye world";
+  for (wtf_size_t i = last_line.length() - 1; i > 0; --i) {
+    widget->FocusedWebLocalFrameInWidget()->DeleteSurroundingText(1, 0);
+    widget->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+    EXPECT_EQ(2U, widget->GetVisibleLineBoundsOnScreen().size());
+    EXPECT_EQ(gfx::Rect(origin.x(), origin.y() + 10, 10 * i, 10),
+              widget->GetVisibleLineBoundsOnScreen().at(1));
+  }
+
+  // Remove the last character on the second line.
+  // This is outside the for loop as after this happens, there should only be 1
+  // line bound.
+  widget->FocusedWebLocalFrameInWidget()->DeleteSurroundingText(1, 0);
+  widget->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  EXPECT_EQ(1U, widget->GetVisibleLineBoundsOnScreen().size());
+
+  // Remove the new line character.
+  widget->FocusedWebLocalFrameInWidget()->DeleteSurroundingText(1, 0);
+  widget->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  EXPECT_EQ(1U, widget->GetVisibleLineBoundsOnScreen().size());
+
+  String first_line = "hello world";
+  for (wtf_size_t i = first_line.length() - 1; i > 0; --i) {
+    widget->FocusedWebLocalFrameInWidget()->DeleteSurroundingText(1, 0);
+    widget->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+    EXPECT_EQ(1U, widget->GetVisibleLineBoundsOnScreen().size());
+    EXPECT_EQ(gfx::Rect(origin.x(), origin.y(), 10 * i, 10),
+              widget->GetVisibleLineBoundsOnScreen().at(0));
+  }
+
+  // Remove last character
+  widget->FocusedWebLocalFrameInWidget()->DeleteSurroundingText(1, 0);
+  widget->UpdateAllLifecyclePhases(DocumentUpdateReason::kTest);
+  EXPECT_EQ(0U, widget->GetVisibleLineBoundsOnScreen().size());
+}
+
+TEST_F(WebFrameWidgetSimTest, TestLineBoundsInFrame) {
+  WebView().ResizeVisualViewport(gfx::Size(1000, 1000));
+  auto* widget = WebView().MainFrameViewWidget();
+  SimRequest main_resource("https://example.com/test.html", "text/html");
+  SimRequest child_frame_resource("https://example.com/child_frame.html",
+                                  "text/html");
+  SimSubresourceRequest child_font_resource("https://example.com/Ahem.woff2",
+                                            "font/woff2");
+
+  LoadURL("https://example.com/test.html");
+  main_resource.Complete(
+      R"HTML(
+        <!doctype html>
+        <style>
+          html, body, iframe {
+            margin: 0;
+            padding: 0;
+            border: 0;
+          }
+        </style>
+        <div style='height: 123px;'></div>
+        <iframe src='https://example.com/child_frame.html'
+                id='child_frame' width='300px' height='300px'></iframe>)HTML");
+  Compositor().BeginFrame();
+
+  child_frame_resource.Complete(
+      R"HTML(
+      <!doctype html>
+      <style>
+        @font-face {
+          font-family: custom-font;
+          src: url(https://example.com/Ahem.woff2) format("woff2");
+        }
+        body {
+          margin: 0;
+          padding: 0;
+        }
+        .target {
+          font: 10px/1 custom-font, monospace;
+          margin: 0;
+          padding: 0;
+          border: none;
+        }
+      </style>
+      <div style='height: 42px;'></div>
+      <input type='text' id='first' class='target' value='ABCD' />
+      <script>
+        first.focus();
+      </script>
+      )HTML");
+  Compositor().BeginFrame();
+
+  child_font_resource.Complete(
+      *test::ReadFromFile(test::CoreTestDataPath("Ahem.woff2")));
+  Compositor().BeginFrame();
+
+  Vector<gfx::Rect> expected(Vector({gfx::Rect(0, /* 123+42= */ 165, 40, 10)}));
+  Vector<gfx::Rect>& actual = widget->GetVisibleLineBoundsOnScreen();
+  EXPECT_EQ(expected.size(), actual.size());
+  for (wtf_size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(expected.at(i), actual.at(i));
+  }
+}
+
+TEST_F(WebFrameWidgetSimTest, TestLineBoundsWithDifferentZoom) {
+  WebView().ResizeVisualViewport(gfx::Size(1000, 1000));
+  auto* widget = WebView().MainFrameViewWidget();
+  SimRequest main_resource("https://example.com/test.html", "text/html");
+  SimRequest child_frame_resource("https://example.com/child_frame.html",
+                                  "text/html");
+  SimSubresourceRequest child_font_resource("https://example.com/Ahem.woff2",
+                                            "font/woff2");
+
+  LoadURL("https://example.com/test.html");
+  main_resource.Complete(
+      R"HTML(
+        <!doctype html>
+        <style>
+          html, body, iframe {
+            margin: 0;
+            padding: 0;
+            border: 0;
+          }
+          html {
+            zoom: 1.2;
+          }
+        </style>
+        <div style='height: 70px;'></div>
+        <iframe src='https://example.com/child_frame.html'
+                id='child_frame' width='300px' height='300px'></iframe>)HTML");
+  Compositor().BeginFrame();
+
+  child_frame_resource.Complete(
+      R"HTML(
+      <!doctype html>
+      <style>
+        @font-face {
+          font-family: custom-font;
+          src: url(https://example.com/Ahem.woff2) format("woff2");
+        }
+        html {
+          zoom: 1.5;
+        }
+        body {
+          margin: 0;
+          padding: 0;
+        }
+        .target {
+          font: 10px/1 custom-font, monospace;
+          margin: 0;
+          padding: 0;
+          border: none;
+        }
+      </style>
+      <div style='height: 40px;'></div>
+      <input type='text' id='first' class='target' value='ABCD' />
+      <script>
+        first.focus();
+      </script>
+      )HTML");
+  Compositor().BeginFrame();
+
+  child_font_resource.Complete(
+      *test::ReadFromFile(test::CoreTestDataPath("Ahem.woff2")));
+  Compositor().BeginFrame();
+
+  Vector<gfx::Rect> expected(
+      Vector({gfx::Rect(0, /* 70*1.2+40*1.2*1.5= */ 156, /* 40*1.2*1.5= */ 72,
+                        /* 10*1.2*1.5= */ 18)}));
+  Vector<gfx::Rect>& actual = widget->GetVisibleLineBoundsOnScreen();
+  EXPECT_EQ(expected.size(), actual.size());
+  for (wtf_size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(expected.at(i), actual.at(i));
+  }
+}
+
+TEST_F(WebFrameWidgetSimTest, TestLineBoundsAreClippedInSubframe) {
+  WebView().ResizeVisualViewport(gfx::Size(200, 200));
+  auto* widget = WebView().MainFrameViewWidget();
+  SimRequest main_resource("https://example.com/test.html", "text/html");
+  SimRequest child_frame_resource("https://example.com/child_frame.html",
+                                  "text/html");
+  SimSubresourceRequest child_font_resource("https://example.com/Ahem.woff2",
+                                            "font/woff2");
+
+  LoadURL("https://example.com/test.html");
+  main_resource.Complete(
+      R"HTML(
+        <!doctype html>
+        <style>
+          html, body, iframe {
+            margin: 0;
+            padding: 0;
+            border: 0;
+          }
+        </style>
+        <div style='height: 100px;'></div>
+        <iframe src='https://example.com/child_frame.html'
+                id='child_frame' width='200px' height='100px'></iframe>)HTML");
+  Compositor().BeginFrame();
+
+  child_frame_resource.Complete(
+      R"HTML(
+      <!doctype html>
+      <style>
+        @font-face {
+          font-family: custom-font;
+          src: url(https://example.com/Ahem.woff2) format("woff2");
+        }
+        body {
+          margin: 0;
+          padding: 0;
+          zoom: 11;
+        }
+        .target {
+          font: 10px/1 custom-font, monospace;
+          margin: 0;
+          padding: 0;
+          border: none;
+        }
+      </style>
+      <input type='text' id='first' class='target' value='ABCD' />
+      <script>
+        first.focus();
+      </script>
+      )HTML");
+  Compositor().BeginFrame();
+
+  child_font_resource.Complete(
+      *test::ReadFromFile(test::CoreTestDataPath("Ahem.woff2")));
+  Compositor().BeginFrame();
+
+  // The expected top value is 100 because of the spacer div in the main frame.
+  // The expected width is 40 * 11 = 440 but this should be clipped to the
+  // screen width which is 200px.
+  // The expected height is 10 * 11 = 110 but this should be clipped as to the
+  // screen height of 200px - 100px for the top of the bound.
+  Vector<gfx::Rect> expected(Vector({gfx::Rect(0, 100, 200, 100)}));
+  Vector<gfx::Rect>& actual = widget->GetVisibleLineBoundsOnScreen();
+  EXPECT_EQ(expected.size(), actual.size());
+  for (wtf_size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(expected.at(i), actual.at(i));
+  }
+}
+#endif  // BUILDFLAG(IS_ANDROID)
+
 class EventHandlingWebFrameWidgetSimTest : public SimTest {
  public:
   void SetUp() override {
@@ -868,7 +2279,7 @@ class EventHandlingWebFrameWidgetSimTest : public SimTest {
     Compositor().BeginFrame();
   }
 
-  SimWebFrameWidget* CreateSimWebFrameWidget(
+  frame_test_helpers::TestWebFrameWidget* CreateWebFrameWidget(
       base::PassKey<WebLocalFrame> pass_key,
       CrossVariantMojoAssociatedRemote<
           mojom::blink::FrameWidgetHostInterfaceBase> frame_widget_host,
@@ -884,14 +2295,12 @@ class EventHandlingWebFrameWidgetSimTest : public SimTest {
       bool never_composited,
       bool is_for_child_local_root,
       bool is_for_nested_main_frame,
-      bool is_for_scalable_page,
-      SimCompositor* compositor) override {
+      bool is_for_scalable_page) override {
     return MakeGarbageCollected<TestWebFrameWidget>(
-        compositor, pass_key, std::move(frame_widget_host),
-        std::move(frame_widget), std::move(widget_host), std::move(widget),
-        std::move(task_runner), frame_sink_id, hidden, never_composited,
-        is_for_child_local_root, is_for_nested_main_frame,
-        is_for_scalable_page);
+        pass_key, std::move(frame_widget_host), std::move(frame_widget),
+        std::move(widget_host), std::move(widget), std::move(task_runner),
+        frame_sink_id, hidden, never_composited, is_for_child_local_root,
+        is_for_nested_main_frame, is_for_scalable_page);
   }
 
  protected:
@@ -920,7 +2329,8 @@ class EventHandlingWebFrameWidgetSimTest : public SimTest {
       *state_ = State::kResolved;
     }
 
-    DidNotSwapAction DidNotSwap(DidNotSwapReason reason) override {
+    DidNotSwapAction DidNotSwap(DidNotSwapReason reason,
+                                base::TimeTicks) override {
       DCHECK_EQ(State::kPending, *state_);
       *state_ = State::kBroken;
       return DidNotSwapAction::BREAK_PROMISE;
@@ -933,16 +2343,15 @@ class EventHandlingWebFrameWidgetSimTest : public SimTest {
   };
 
   // A test `WebFrameWidget` implementation that fakes handling of an event.
-  class TestWebFrameWidget : public SimWebFrameWidget {
+  class TestWebFrameWidget : public frame_test_helpers::TestWebFrameWidget {
    public:
-    template <typename... Args>
-    explicit TestWebFrameWidget(Args&&... args)
-        : SimWebFrameWidget(std::forward<Args>(args)...) {}
+    using frame_test_helpers::TestWebFrameWidget::TestWebFrameWidget;
 
     WebInputEventResult HandleInputEvent(
         const WebCoalescedInputEvent& coalesced_event) override {
-      if (event_causes_update_)
+      if (event_causes_update_) {
         RequestUpdateIfNecessary();
+      }
       return WebInputEventResult::kHandledApplication;
     }
 
@@ -951,8 +2360,9 @@ class EventHandlingWebFrameWidgetSimTest : public SimTest {
     }
 
     void RequestUpdateIfNecessary() {
-      if (update_requested_)
+      if (update_requested_) {
         return;
+      }
 
       LayerTreeHost()->SetNeedsCommit();
       update_requested_ = true;
@@ -983,18 +2393,20 @@ class EventHandlingWebFrameWidgetSimTest : public SimTest {
       // Register callbacks for swap and presentation times.
       base::TimeTicks swap_time;
       NotifySwapAndPresentationTimeForTesting(
-          {base::BindOnce(
+          {WTF::BindOnce(
                [](base::OnceClosure swap_quit_closure,
                   base::TimeTicks* swap_time, base::TimeTicks timestamp) {
                  DCHECK(!timestamp.is_null());
                  *swap_time = timestamp;
                  std::move(swap_quit_closure).Run();
                },
-               swap_run_loop.QuitClosure(), &swap_time),
-           base::BindOnce(
+               swap_run_loop.QuitClosure(), WTF::Unretained(&swap_time)),
+           WTF::BindOnce(
                [](base::OnceClosure presentation_quit_closure,
-                  base::TimeTicks timestamp) {
-                 DCHECK(!timestamp.is_null());
+                  const viz::FrameTimingDetails& presentation_details) {
+                 base::TimeTicks timestamp =
+                     presentation_details.presentation_feedback.timestamp;
+                 CHECK(!timestamp.is_null());
                  std::move(presentation_quit_closure).Run();
                },
                presentation_run_loop.QuitClosure())});

@@ -6,10 +6,11 @@
 
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback.h"
 #include "base/containers/contains.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/run_loop.h"
+#include "base/task/single_thread_task_runner.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/external_install_info.h"
 #include "extensions/browser/updater/extension_downloader.h"
@@ -22,8 +23,8 @@ namespace extensions {
 
 namespace content_verifier_test {
 
-DownloaderTestDelegate::DownloaderTestDelegate() {}
-DownloaderTestDelegate::~DownloaderTestDelegate() {}
+DownloaderTestDelegate::DownloaderTestDelegate() = default;
+DownloaderTestDelegate::~DownloaderTestDelegate() = default;
 
 void DownloaderTestDelegate::AddResponse(const ExtensionId& extension_id,
                                          const std::string& version_string,
@@ -57,7 +58,7 @@ void DownloaderTestDelegate::StartUpdateCheck(
       // immeditately, because the calling code isn't expecting a synchronous
       // response (in non-test situations there are at least 2 network
       // requests needed before a file could be returned).
-      base::ThreadTaskRunnerHandle::Get()->PostTask(
+      base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
           FROM_HERE,
           base::BindOnce(
               &ExtensionDownloaderDelegate::OnExtensionDownloadFinished,
@@ -70,7 +71,7 @@ void DownloaderTestDelegate::StartUpdateCheck(
 }
 
 ForceInstallProvider::ForceInstallProvider(const ExtensionId& id) : id_(id) {}
-ForceInstallProvider::~ForceInstallProvider() {}
+ForceInstallProvider::~ForceInstallProvider() = default;
 
 std::string ForceInstallProvider::GetDebugPolicyProviderName() const {
   return "ForceInstallProvider";

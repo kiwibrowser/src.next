@@ -25,11 +25,16 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_DOCUMENT_PARSER_H_
 
 #include <memory>
+
+#include "base/containers/span.h"
+#include "base/functional/callback.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/dom/document_encoding_data.h"
 #include "third_party/blink/renderer/platform/bindings/name_client.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
+#include "third_party/blink/renderer/platform/wtf/functional.h"
 
 namespace blink {
 
@@ -56,11 +61,17 @@ class CORE_EXPORT DocumentParser : public GarbageCollected<DocumentParser>,
   virtual void insert(const String&) = 0;
 
   // The below functions are used by DocumentWriter (the loader).
-  virtual void AppendBytes(const char* bytes, size_t length) = 0;
+  virtual void AppendBytes(base::span<const uint8_t> bytes) = 0;
   virtual bool NeedsDecoder() const { return false; }
   virtual void SetDecoder(std::unique_ptr<TextResourceDecoder>);
-  virtual TextResourceDecoder* Decoder();
   virtual void SetHasAppendedData() {}
+  virtual void AppendDecodedData(const String& data,
+                                 const DocumentEncodingData& encoding_data) {}
+  using BackgroundScanCallback =
+      WTF::CrossThreadRepeatingFunction<void(const String&)>;
+  virtual BackgroundScanCallback TakeBackgroundScanCallback() {
+    return BackgroundScanCallback();
+  }
 
   // FIXME: append() should be private, but DocumentLoader and DOMPatchSupport
   // uses it for now.
@@ -68,15 +79,14 @@ class CORE_EXPORT DocumentParser : public GarbageCollected<DocumentParser>,
 
   virtual void Finish() = 0;
 
-  // document() will return 0 after detach() is called.
+  // GetDocument() returns null after detach() is called.
   Document* GetDocument() const {
-    DCHECK(document_);
-    return document_;
+    return document_.Get();
   }
 
   bool IsParsing() const { return state_ == kParsingState; }
   bool IsStopping() const { return state_ == kStoppingState; }
-  bool IsStopped() const { return state_ >= kStoppedState; }
+  ALWAYS_INLINE bool IsStopped() const { return state_ >= kStoppedState; }
   bool IsDetached() const { return state_ == kDetachedState; }
 
   // prepareToStop() is used when the EOF token is encountered and parsing is to

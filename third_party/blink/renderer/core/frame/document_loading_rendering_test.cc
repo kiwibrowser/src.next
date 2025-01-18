@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/frame_request_callback_collection.h"
-#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/geometry/dom_rect.h"
 #include "third_party/blink/renderer/core/html/html_iframe_element.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
@@ -213,9 +212,9 @@ TEST_F(DocumentLoadingRenderingTest, ShouldScheduleFrameAfterSheetsLoaded) {
   Compositor().BeginFrame();
 
   // Replace the stylesheet by changing href.
-  auto* element = GetDocument().getElementById("link");
+  auto* element = GetDocument().getElementById(AtomicString("link"));
   EXPECT_NE(nullptr, element);
-  element->setAttribute(html_names::kHrefAttr, "second.css");
+  element->setAttribute(html_names::kHrefAttr, AtomicString("second.css"));
   EXPECT_FALSE(Compositor().NeedsBeginFrame());
 
   second_css_resource.Complete("body { color: red; }");
@@ -260,8 +259,8 @@ TEST_F(DocumentLoadingRenderingTest,
 
   // Trigger a layout with a blocking sheet. For example, a parent frame
   // executing a script that reads offsetTop in the child frame could do this.
-  auto* child_frame =
-      To<HTMLIFrameElement>(GetDocument().getElementById("frame"));
+  auto* child_frame = To<HTMLIFrameElement>(
+      GetDocument().getElementById(AtomicString("frame")));
   child_frame->contentDocument()->UpdateStyleAndLayout(
       DocumentUpdateReason::kTest);
 
@@ -330,8 +329,8 @@ TEST_F(DocumentLoadingRenderingTest,
     <body style='background: blue'>
   )HTML");
 
-  auto* child_frame =
-      To<HTMLIFrameElement>(GetDocument().getElementById("frame"));
+  auto* child_frame = To<HTMLIFrameElement>(
+      GetDocument().getElementById(AtomicString("frame")));
 
   // Frame while the child frame still has pending sheets.
   auto* frame1_callback = MakeGarbageCollected<CheckRafCallback>();

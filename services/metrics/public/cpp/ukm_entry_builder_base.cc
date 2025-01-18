@@ -13,6 +13,13 @@ namespace ukm {
 
 namespace internal {
 
+UkmEntryBuilderBase::UkmEntryBuilderBase(UkmEntryBuilderBase&&) = default;
+
+UkmEntryBuilderBase& UkmEntryBuilderBase::operator=(UkmEntryBuilderBase&&) =
+    default;
+
+UkmEntryBuilderBase::~UkmEntryBuilderBase() = default;
+
 UkmEntryBuilderBase::UkmEntryBuilderBase(ukm::SourceId source_id,
                                          uint64_t event_hash)
     : entry_(mojom::UkmEntry::New()) {
@@ -27,11 +34,9 @@ UkmEntryBuilderBase::UkmEntryBuilderBase(ukm::SourceIdObj source_id,
   entry_->event_hash = event_hash;
 }
 
-UkmEntryBuilderBase::~UkmEntryBuilderBase() = default;
-
 void UkmEntryBuilderBase::SetMetricInternal(uint64_t metric_hash,
                                             int64_t value) {
-  entry_->metrics.emplace(metric_hash, value);
+  entry_->metrics.insert_or_assign(metric_hash, value);
 }
 
 void UkmEntryBuilderBase::Record(UkmRecorder* recorder) {
@@ -41,8 +46,8 @@ void UkmEntryBuilderBase::Record(UkmRecorder* recorder) {
     entry_.reset();
 }
 
-mojom::UkmEntryPtr UkmEntryBuilderBase::TakeEntry() {
-  return std::move(entry_);
+mojom::UkmEntryPtr UkmEntryBuilderBase::GetEntryForTesting() {
+  return entry_.Clone();
 }
 
 }  // namespace internal

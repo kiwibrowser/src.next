@@ -38,7 +38,7 @@ ChromeAppIconLoader::ChromeAppIconLoader(Profile* profile,
                           ResizeFunction(),
                           delegate) {}
 
-ChromeAppIconLoader::~ChromeAppIconLoader() {}
+ChromeAppIconLoader::~ChromeAppIconLoader() = default;
 
 bool ChromeAppIconLoader::CanLoadImageForApp(const std::string& id) {
   if (map_.find(id) != map_.end())
@@ -90,7 +90,9 @@ void ChromeAppIconLoader::SetExtensionsOnly() {
 }
 
 void ChromeAppIconLoader::OnIconUpdated(ChromeAppIcon* icon) {
-  delegate()->OnAppImageUpdated(icon->app_id(), icon->image_skia());
+  delegate()->OnAppImageUpdated(icon->app_id(), icon->image_skia(),
+                                /*is_placeholder_icon=*/false,
+                                /*badge_image=*/std::nullopt);
 }
 
 }  // namespace extensions

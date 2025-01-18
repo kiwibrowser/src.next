@@ -1,13 +1,15 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/loader/pending_link_preload.h"
 
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/loader/link_loader.h"
 #include "third_party/blink/renderer/core/loader/preload_helper.h"
 #include "third_party/blink/renderer/core/loader/render_blocking_resource_manager.h"
+#include "third_party/blink/renderer/core/timing/render_blocking_metrics_reporter.h"
 #include "third_party/blink/renderer/platform/heap/prefinalizer.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_finish_observer.h"
 
@@ -27,6 +29,10 @@ class PendingLinkPreload::FinishObserver final : public ResourceFinishObserver {
   void NotifyFinished() override {
     if (!resource_)
       return;
+    if (resource_->GetType() == ResourceType::kFont) {
+      RenderBlockingMetricsReporter::From(*pending_preload_->document_)
+          .PreloadedFontFinishedLoading();
+    }
     pending_preload_->NotifyFinished();
     Dispose();
   }
@@ -34,7 +40,7 @@ class PendingLinkPreload::FinishObserver final : public ResourceFinishObserver {
     return "PendingLinkPreload::FinishObserver";
   }
 
-  Resource* GetResource() { return resource_; }
+  Resource* GetResource() { return resource_.Get(); }
   void Dispose() {
     if (!resource_)
       return;
@@ -60,8 +66,13 @@ PendingLinkPreload::~PendingLinkPreload() = default;
 
 void PendingLinkPreload::AddResource(Resource* resource) {
   DCHECK(!finish_observer_);
-  if (resource)
+  if (resource) {
+    if (resource->GetType() == ResourceType::kFont) {
+      RenderBlockingMetricsReporter::From(*document_)
+          .PreloadedFontStartedLoading();
+    }
     finish_observer_ = MakeGarbageCollected<FinishObserver>(this, resource);
+  }
 }
 
 // https://html.spec.whatwg.org/C/#link-type-modulepreload
@@ -82,7 +93,7 @@ void PendingLinkPreload::NotifyFinished() {
 void PendingLinkPreload::UnblockRendering() {
   if (RenderBlockingResourceManager* manager =
           document_->GetRenderBlockingResourceManager()) {
-    manager->RemovePendingPreload(*this);
+    manager->RemovePendingFontPreload(*this);
   }
 }
 
@@ -99,7 +110,7 @@ void PendingLinkPreload::Dispose() {
   document_->RemovePendingLinkHeaderPreloadIfNeeded(*this);
 }
 
-Resource* PendingLinkPreload::GetResourceForTesting() {
+Resource* PendingLinkPreload::GetResourceForTesting() const {
   return finish_observer_ ? finish_observer_->GetResource() : nullptr;
 }
 

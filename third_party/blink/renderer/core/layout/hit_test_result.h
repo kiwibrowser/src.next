@@ -27,7 +27,7 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
 #include "third_party/blink/renderer/core/layout/geometry/physical_offset.h"
-#include "third_party/blink/renderer/core/layout/hit_test_location.h"
+#include "third_party/blink/renderer/core/layout/geometry/physical_rect.h"
 #include "third_party/blink/renderer/core/layout/hit_test_request.h"
 #include "third_party/blink/renderer/platform/graphics/compositor_element_id.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_linked_hash_set.h"
@@ -35,7 +35,6 @@
 #include "third_party/blink/renderer/platform/text/text_direction.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
-#include "third_party/blink/renderer/platform/wtf/vector_traits.h"
 #include "ui/gfx/geometry/quad_f.h"
 #include "ui/gfx/geometry/rect_f.h"
 
@@ -46,22 +45,17 @@ class Region;
 namespace blink {
 
 class Element;
-class LocalFrame;
 class HTMLAreaElement;
 class HTMLMediaElement;
+class HitTestLocation;
 class Image;
 class KURL;
+class LocalFrame;
 class MediaSourceHandle;
 class MediaStreamDescriptor;
-class NGPhysicalBoxFragment;
 class Node;
+class PhysicalBoxFragment;
 class Scrollbar;
-struct PhysicalOffset;
-
-// List-based hit test testing can continue even after a hit has been found.
-// This is used to support fuzzy matching with rect-based hit tests as well as
-// penetrating tests which collect all nodes (see: HitTestRequest::RequestType).
-enum ListBasedHitTestBehavior { kContinueHitTesting, kStopHitTesting };
 
 class CORE_EXPORT HitTestResult {
   DISALLOW_NEW();
@@ -127,7 +121,7 @@ class CORE_EXPORT HitTestResult {
     SetInnerNode(node);
   }
   void SetNodeAndPosition(Node*,
-                          const NGPhysicalBoxFragment*,
+                          const PhysicalBoxFragment*,
                           const PhysicalOffset&);
 
   // Override an inner node previously set. The new node needs to be monolithic
@@ -140,7 +134,7 @@ class CORE_EXPORT HitTestResult {
   PositionWithAffinity GetPosition() const;
   PositionWithAffinity GetPositionForInnerNodeOrImageMapImage() const;
 
-  void SetToShadowHostIfInRestrictedShadowRoot();
+  void SetToShadowHostIfInUAShadowRoot();
 
   const HitTestRequest& GetHitTestRequest() const { return hit_test_request_; }
 
@@ -151,6 +145,15 @@ class CORE_EXPORT HitTestResult {
   void SetIsOverEmbeddedContentView(bool b) {
     is_over_embedded_content_view_ = b;
   }
+  void SetIsOverResizer(bool is_over_resizer) {
+    is_over_resizer_ = is_over_resizer;
+  }
+  bool IsOverResizer() const { return is_over_resizer_; }
+
+  void SetIsOverScrollCorner(bool is_over_scroll_corner) {
+    is_over_scroll_corner_ = is_over_scroll_corner;
+  }
+  bool IsOverScrollCorner() const { return is_over_scroll_corner_; }
 
   bool IsSelected(const HitTestLocation& location) const;
   String Title(TextDirection&) const;
@@ -167,9 +170,6 @@ class CORE_EXPORT HitTestResult {
   String TextContent() const;
   bool IsLiveLink() const;
   bool IsContentEditable() const;
-
-  const String& CanvasRegionId() const { return canvas_region_id_; }
-  void SetCanvasRegionId(const String& id) { canvas_region_id_ = id; }
 
   bool IsOverLink() const;
 
@@ -238,9 +238,16 @@ class CORE_EXPORT HitTestResult {
   // Returns true if we are over a EmbeddedContentView (and not in the
   // border/padding area of a LayoutEmbeddedContent for example).
   bool is_over_embedded_content_view_;
+  // This is true if the location is over the bottom right of a resizable
+  // object, where resize controls are located. See
+  // PaintLayerScrollableArea::IsAbsolutePointInResizeControl for how that is
+  // tested.
+  bool is_over_resizer_ = false;
+
+  // Returns true if we are over custom scroll corner
+  bool is_over_scroll_corner_ = false;
 
   mutable Member<NodeSet> list_based_test_result_;
-  String canvas_region_id_;
 };
 
 }  // namespace blink

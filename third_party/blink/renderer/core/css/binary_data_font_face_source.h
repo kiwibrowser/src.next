@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,15 +16,14 @@ class FontCustomPlatformData;
 class BinaryDataFontFaceSource final : public CSSFontFaceSource {
  public:
   BinaryDataFontFaceSource(CSSFontFace*, SharedBuffer*, String&);
-  ~BinaryDataFontFaceSource() override;
+  void Trace(Visitor*) const override;
   bool IsValid() const override;
 
  private:
-  scoped_refptr<SimpleFontData> CreateFontData(
-      const FontDescription&,
-      const FontSelectionCapabilities&) override;
+  SimpleFontData* CreateFontData(const FontDescription&,
+                                 const FontSelectionCapabilities&) override;
 
-  scoped_refptr<FontCustomPlatformData> custom_platform_data_;
+  Member<const FontCustomPlatformData> custom_platform_data_;
 };
 
 }  // namespace blink

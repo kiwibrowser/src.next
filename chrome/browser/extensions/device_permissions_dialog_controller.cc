@@ -4,6 +4,7 @@
 
 #include "chrome/browser/extensions/device_permissions_dialog_controller.h"
 
+#include "base/not_fatal_until.h"
 #include "chrome/browser/chooser_controller/title_util.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/strings/grit/components_strings.h"
@@ -13,10 +14,8 @@
 DevicePermissionsDialogController::DevicePermissionsDialogController(
     content::RenderFrameHost* owner,
     scoped_refptr<extensions::DevicePermissionsPrompt::Prompt> prompt)
-    : ChooserController(CreateExtensionAwareChooserTitle(
+    : ChooserController(CreateChooserTitle(
           owner,
-          prompt->multiple() ? IDS_DEVICE_PERMISSIONS_PROMPT_MULTIPLE_SELECTION
-                             : IDS_DEVICE_PERMISSIONS_PROMPT_SINGLE_SELECTION,
           prompt->multiple() ? IDS_DEVICE_PERMISSIONS_PROMPT_MULTIPLE_SELECTION
                              : IDS_DEVICE_PERMISSIONS_PROMPT_SINGLE_SELECTION)),
       prompt_(prompt) {
@@ -59,7 +58,7 @@ std::u16string DevicePermissionsDialogController::GetOption(
     size_t index) const {
   std::u16string device_name = prompt_->GetDeviceName(index);
   const auto& it = device_name_map_.find(device_name);
-  DCHECK(it != device_name_map_.end());
+  CHECK(it != device_name_map_.end(), base::NotFatalUntil::M130);
   return it->second == 1
              ? device_name
              : l10n_util::GetStringFUTF16(

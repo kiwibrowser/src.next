@@ -1,15 +1,16 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
 
 #include <memory>
+
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/core/css/properties/longhands.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
@@ -19,6 +20,7 @@
 #include "third_party/blink/renderer/core/testing/color_scheme_helper.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
+#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 
 namespace blink {
 
@@ -44,7 +46,7 @@ inline EBorderStyle OutlineStyle(Element* element) {
 TEST_F(LayoutThemeTest, ChangeFocusRingColor) {
   SetHtmlInnerHTML("<span id=span tabIndex=0>Span</span>");
 
-  Element* span = GetDocument().getElementById(AtomicString("span"));
+  Element* span = GetElementById("span");
   EXPECT_NE(nullptr, span);
   EXPECT_NE(nullptr, span->GetLayoutObject());
 
@@ -66,7 +68,6 @@ TEST_F(LayoutThemeTest, ChangeFocusRingColor) {
 
   // Change focus ring color.
   LayoutTheme::GetTheme().SetCustomFocusRingColor(custom_color);
-  Page::PlatformColorsChanged();
   UpdateAllLifecyclePhasesForTest();
 
   // Check that the focus ring color is updated.
@@ -88,7 +89,7 @@ TEST_F(LayoutThemeTest, SystemColorWithColorScheme) {
     <div id="dark"></div>
   )HTML");
 
-  Element* dark_element = GetDocument().getElementById("dark");
+  Element* dark_element = GetElementById("dark");
   ASSERT_TRUE(dark_element);
 
   const ComputedStyle* style = dark_element->GetComputedStyle();
@@ -153,5 +154,16 @@ TEST_F(LayoutThemeTest, SetSelectionColorsNoInvalidation) {
             StyleChangeType::kNoStyleChange);
 }
 #endif  // !BUILDFLAG(IS_MAC)
+
+#if BUILDFLAG(IS_ANDROID)
+TEST_F(LayoutThemeTest, AndroidSelectionColor) {
+  EXPECT_EQ(Color::FromRGBA32(0xFF000000),
+            LayoutTheme::GetTheme().ActiveSelectionForegroundColor(
+                mojom::blink::ColorScheme::kLight));
+  EXPECT_EQ(Color::FromRGBA32(0x6633b5e5),
+            LayoutTheme::GetTheme().ActiveSelectionBackgroundColor(
+                mojom::blink::ColorScheme::kLight));
+}
+#endif  // BUILDFLAG(IS_ANDROID)
 
 }  // namespace blink

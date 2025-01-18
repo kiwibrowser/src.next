@@ -4,7 +4,7 @@
 
 #include "extensions/browser/test_image_loader.h"
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "extensions/browser/image_loader.h"
 #include "extensions/common/extension.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -27,8 +27,9 @@ SkBitmap TestImageLoader::LoadAndGetExtensionBitmap(
 void TestImageLoader::OnImageLoaded(const gfx::Image& image) {
   image_ = image;
   image_loaded_ = true;
-  if (waiting_)
+  if (waiting_) {
     std::move(loader_message_loop_quit_).Run();
+  }
 }
 
 SkBitmap TestImageLoader::LoadAndGetBitmap(const Extension* extension,

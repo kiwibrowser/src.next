@@ -31,6 +31,7 @@
 #include "third_party/blink/renderer/platform/graphics/picture_snapshot.h"
 
 #include <memory>
+
 #include "base/time/time.h"
 #include "third_party/blink/renderer/platform/graphics/logging_canvas.h"
 #include "third_party/blink/renderer/platform/graphics/profiling_canvas.h"
@@ -42,6 +43,7 @@
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkPictureRecorder.h"
+#include "third_party/skia/include/encode/SkPngEncoder.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/geometry/skia_conversions.h"
@@ -53,9 +55,9 @@ PictureSnapshot::PictureSnapshot(sk_sp<const SkPicture> picture)
 
 scoped_refptr<PictureSnapshot> PictureSnapshot::Load(
     const Vector<scoped_refptr<TilePictureStream>>& tiles) {
-  DCHECK(!tiles.IsEmpty());
+  DCHECK(!tiles.empty());
   Vector<sk_sp<SkPicture>> pictures;
-  pictures.ReserveCapacity(tiles.size());
+  pictures.reserve(tiles.size());
   gfx::RectF union_rect;
   for (const auto& tile_stream : tiles) {
     sk_sp<SkPicture> picture = std::move(tile_stream->picture);
@@ -142,7 +144,7 @@ Vector<Vector<base::TimeDelta>> PictureSnapshot::Profile(
   base::TimeTicks stop_time = now + min_duration;
   for (unsigned step = 0; step < min_repeat_count || now < stop_time; ++step) {
     Vector<base::TimeDelta> current_timings;
-    if (!timings.IsEmpty())
+    if (!timings.empty())
       current_timings.ReserveInitialCapacity(timings.front().size());
     ProfilingCanvas canvas(bitmap);
     if (clip_rect) {

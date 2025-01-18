@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,10 +55,11 @@ class CORE_EXPORT EmbeddedContentView : public GarbageCollectedMixin {
   // called directly to push frame rect information without changing it.
   virtual void PropagateFrameRects() = 0;
 
+  // See WebFrameWidgetImpl::SetZoomLevel() for how this value is used.
+  virtual void ZoomFactorChanged(float zoom_factor) {}
+
   gfx::Rect FrameRect() const { return gfx::Rect(Location(), Size()); }
   gfx::Point Location() const;
-  int X() const { return Location().x(); }
-  int Y() const { return Location().y(); }
   int Width() const { return Size().width(); }
   int Height() const { return Size().height(); }
   gfx::Size Size() const { return frame_rect_.size(); }

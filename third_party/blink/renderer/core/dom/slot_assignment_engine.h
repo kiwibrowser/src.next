@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,7 @@ class CORE_EXPORT SlotAssignmentEngine final
   void Disconnected(ShadowRoot&);
 
   bool HasPendingSlotAssignmentRecalc() const {
-    return !shadow_roots_needing_recalc_.IsEmpty();
+    return !shadow_roots_needing_recalc_.empty();
   }
 
   void RecalcSlotAssignments();

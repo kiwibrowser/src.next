@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "base/memory/singleton.h"
+#include "base/no_destructor.h"
 #include "chrome/browser/profiles/profile_keyed_service_factory.h"
 
 class AutocompleteClassifier;
@@ -30,14 +30,14 @@ class AutocompleteClassifierFactory : public ProfileKeyedServiceFactory {
       content::BrowserContext* context);
 
  private:
-  friend struct base::DefaultSingletonTraits<AutocompleteClassifierFactory>;
+  friend base::NoDestructor<AutocompleteClassifierFactory>;
 
   AutocompleteClassifierFactory();
   ~AutocompleteClassifierFactory() override;
 
   // BrowserContextKeyedServiceFactory:
   bool ServiceIsNULLWhileTesting() const override;
-  KeyedService* BuildServiceInstanceFor(
+  std::unique_ptr<KeyedService> BuildServiceInstanceForBrowserContext(
       content::BrowserContext* profile) const override;
 };
 

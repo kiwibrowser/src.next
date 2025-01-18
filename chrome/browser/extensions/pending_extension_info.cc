@@ -35,7 +35,7 @@ PendingExtensionInfo::PendingExtensionInfo(PendingExtensionInfo&& other) =
 PendingExtensionInfo& PendingExtensionInfo::operator=(
     PendingExtensionInfo&& other) = default;
 
-PendingExtensionInfo::~PendingExtensionInfo() {}
+PendingExtensionInfo::~PendingExtensionInfo() = default;
 
 bool PendingExtensionInfo::operator==(const PendingExtensionInfo& rhs) const {
   return id_ == rhs.id_;
@@ -47,8 +47,9 @@ int PendingExtensionInfo::CompareTo(const PendingExtensionInfo& other) const {
     int comparison = version_.CompareTo(other.version_);
 
     // If the versions differ then return the version comparison result.
-    if (comparison != 0)
+    if (comparison != 0) {
       return comparison;
+    }
   }
 
   // The versions aren't specified, or they are the same version. Check

@@ -9,7 +9,6 @@ import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.ResolveInfo;
 import android.os.BadParcelableException;
 import android.os.Binder;
 import android.os.Build;
@@ -20,63 +19,31 @@ import android.os.Parcelable;
 import android.os.TransactionTooLargeException;
 import android.text.TextUtils;
 
-import androidx.annotation.Nullable;
-import androidx.annotation.VisibleForTesting;
-import androidx.core.app.BundleCompat;
-
-import org.chromium.base.compat.ApiHelperForM;
-import org.chromium.base.compat.ApiHelperForS;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 
 import java.io.Serializable;
 import java.util.ArrayList;
 
-/**
- * Utilities dealing with extracting information from intents and creating common intents.
- */
+/** Utilities dealing with extracting information from intents and creating common intents. */
+@NullMarked
 public class IntentUtils {
     private static final String TAG = "IntentUtils";
 
-    /**
-     * The scheme for referrer coming from an application.
-     */
+    /** The scheme for referrer coming from an application. */
     public static final String ANDROID_APP_REFERRER_SCHEME = "android-app";
 
-    // Instant Apps system resolver activity on N-MR1+.
-    @VisibleForTesting
-    public static final String EPHEMERAL_INSTALLER_CLASS =
-            "com.google.android.gms.instantapps.routing.EphemeralInstallerActivity";
-
-    /**
-     * Intent extra used to identify the sending application.
-     */
+    /** Intent extra used to identify the sending application. */
     public static final String TRUSTED_APPLICATION_CODE_EXTRA = "trusted_application_code_extra";
 
-    /**
-     * Fake ComponentName used in constructing TRUSTED_APPLICATION_CODE_EXTRA.
-     */
-    private static ComponentName sFakeComponentName;
+    /** Fake ComponentName used in constructing TRUSTED_APPLICATION_CODE_EXTRA. */
+    private static @Nullable ComponentName sFakeComponentName;
+
     private static final Object COMPONENT_NAME_LOCK = new Object();
 
     private static boolean sForceTrustedIntentForTesting;
 
-    /**
-     * Whether the given ResolveInfo object refers to Instant Apps as a launcher.
-     * @param info The resolve info.
-     */
-    public static boolean isInstantAppResolveInfo(ResolveInfo info) {
-        if (info == null) return false;
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            return info.isInstantAppAvailable;
-        } else if (info.activityInfo != null) {
-            return EPHEMERAL_INSTALLER_CLASS.equals(info.activityInfo.name);
-        }
-
-        return false;
-    }
-    /**
-     * Just like {@link Intent#hasExtra(String)} but doesn't throw exceptions.
-     */
+    /** Just like {@link Intent#hasExtra(String)} but doesn't throw exceptions. */
     public static boolean safeHasExtra(Intent intent, String name) {
         try {
             return intent.hasExtra(name);
@@ -87,9 +54,7 @@ public class IntentUtils {
         }
     }
 
-    /**
-     * Just like {@link Intent#removeExtra(String)} but doesn't throw exceptions.
-     */
+    /** Just like {@link Intent#removeExtra(String)} but doesn't throw exceptions. */
     public static void safeRemoveExtra(Intent intent, String name) {
         try {
             intent.removeExtra(name);
@@ -99,9 +64,7 @@ public class IntentUtils {
         }
     }
 
-    /**
-     * Just like {@link Intent#getBooleanExtra(String, boolean)} but doesn't throw exceptions.
-     */
+    /** Just like {@link Intent#getBooleanExtra(String, boolean)} but doesn't throw exceptions. */
     public static boolean safeGetBooleanExtra(Intent intent, String name, boolean defaultValue) {
         try {
             return intent.getBooleanExtra(name, defaultValue);
@@ -112,9 +75,7 @@ public class IntentUtils {
         }
     }
 
-    /**
-     * Just like {@link Bundle#getBoolean(String, boolean)} but doesn't throw exceptions.
-     */
+    /** Just like {@link Bundle#getBoolean(String, boolean)} but doesn't throw exceptions. */
     public static boolean safeGetBoolean(Bundle bundle, String name, boolean defaultValue) {
         try {
             return bundle.getBoolean(name, defaultValue);
@@ -125,9 +86,7 @@ public class IntentUtils {
         }
     }
 
-    /**
-     * Just like {@link Intent#getIntExtra(String, int)} but doesn't throw exceptions.
-     */
+    /** Just like {@link Intent#getIntExtra(String, int)} but doesn't throw exceptions. */
     public static int safeGetIntExtra(Intent intent, String name, int defaultValue) {
         try {
             return intent.getIntExtra(name, defaultValue);
@@ -138,9 +97,7 @@ public class IntentUtils {
         }
     }
 
-    /**
-     * Just like {@link Bundle#getInt(String, int)} but doesn't throw exceptions.
-     */
+    /** Just like {@link Bundle#getInt(String, int)} but doesn't throw exceptions. */
     public static int safeGetInt(Bundle bundle, String name, int defaultValue) {
         try {
             return bundle.getInt(name, defaultValue);
@@ -151,10 +108,8 @@ public class IntentUtils {
         }
     }
 
-    /**
-     * Just like {@link Intent#getIntArrayExtra(String)} but doesn't throw exceptions.
-     */
-    public static int[] safeGetIntArrayExtra(Intent intent, String name) {
+    /** Just like {@link Intent#getIntArrayExtra(String)} but doesn't throw exceptions. */
+    public static int @Nullable [] safeGetIntArrayExtra(Intent intent, String name) {
         try {
             return intent.getIntArrayExtra(name);
         } catch (Throwable t) {
@@ -164,10 +119,8 @@ public class IntentUtils {
         }
     }
 
-    /**
-     * Just like {@link Bundle#getIntArray(String)} but doesn't throw exceptions.
-     */
-    public static int[] safeGetIntArray(Bundle bundle, String name) {
+    /** Just like {@link Bundle#getIntArray(String)} but doesn't throw exceptions. */
+    public static int @Nullable [] safeGetIntArray(Bundle bundle, String name) {
         try {
             return bundle.getIntArray(name);
         } catch (Throwable t) {
@@ -177,10 +130,8 @@ public class IntentUtils {
         }
     }
 
-    /**
-     * Just like {@link Bundle#getFloatArray(String)} but doesn't throw exceptions.
-     */
-    public static float[] safeGetFloatArray(Bundle bundle, String name) {
+    /** Just like {@link Bundle#getFloatArray(String)} but doesn't throw exceptions. */
+    public static float @Nullable [] safeGetFloatArray(Bundle bundle, String name) {
         try {
             return bundle.getFloatArray(name);
         } catch (Throwable t) {
@@ -190,9 +141,7 @@ public class IntentUtils {
         }
     }
 
-    /**
-     * Just like {@link Intent#getLongExtra(String, long)} but doesn't throw exceptions.
-     */
+    /** Just like {@link Intent#getLongExtra(String, long)} but doesn't throw exceptions. */
     public static long safeGetLongExtra(Intent intent, String name, long defaultValue) {
         try {
             return intent.getLongExtra(name, defaultValue);
@@ -203,10 +152,19 @@ public class IntentUtils {
         }
     }
 
-    /**
-     * Just like {@link Intent#getStringExtra(String)} but doesn't throw exceptions.
-     */
-    public static String safeGetStringExtra(Intent intent, String name) {
+    /** Just like {@link Bundle#getLong(String, long)} but doesn't throw exceptions. */
+    public static long safeGetLong(Bundle bundle, String name, long defaultValue) {
+        try {
+            return bundle.getLong(name, defaultValue);
+        } catch (Throwable t) {
+            // Catches un-parceling exceptions.
+            Log.e(TAG, "getLong failed on bundle " + bundle);
+            return defaultValue;
+        }
+    }
+
+    /** Just like {@link Intent#getStringExtra(String)} but doesn't throw exceptions. */
+    public static @Nullable String safeGetStringExtra(Intent intent, String name) {
         try {
             return intent.getStringExtra(name);
         } catch (Throwable t) {
@@ -216,10 +174,8 @@ public class IntentUtils {
         }
     }
 
-    /**
-     * Just like {@link Bundle#getString(String)} but doesn't throw exceptions.
-     */
-    public static String safeGetString(Bundle bundle, String name) {
+    /** Just like {@link Bundle#getString(String)} but doesn't throw exceptions. */
+    public static @Nullable String safeGetString(Bundle bundle, String name) {
         try {
             return bundle.getString(name);
         } catch (Throwable t) {
@@ -229,10 +185,8 @@ public class IntentUtils {
         }
     }
 
-    /**
-     * Just like {@link Intent#getBundleExtra(String)} but doesn't throw exceptions.
-     */
-    public static Bundle safeGetBundleExtra(Intent intent, String name) {
+    /** Just like {@link Intent#getBundleExtra(String)} but doesn't throw exceptions. */
+    public static @Nullable Bundle safeGetBundleExtra(Intent intent, String name) {
         try {
             return intent.getBundleExtra(name);
         } catch (Throwable t) {
@@ -242,10 +196,8 @@ public class IntentUtils {
         }
     }
 
-    /**
-     * Just like {@link Bundle#getBundle(String)} but doesn't throw exceptions.
-     */
-    public static Bundle safeGetBundle(Bundle bundle, String name) {
+    /** Just like {@link Bundle#getBundle(String)} but doesn't throw exceptions. */
+    public static @Nullable Bundle safeGetBundle(Bundle bundle, String name) {
         try {
             return bundle.getBundle(name);
         } catch (Throwable t) {
@@ -255,10 +207,8 @@ public class IntentUtils {
         }
     }
 
-    /**
-     * Just like {@link Bundle#getParcelable(String)} but doesn't throw exceptions.
-     */
-    public static <T extends Parcelable> T safeGetParcelable(Bundle bundle, String name) {
+    /** Just like {@link Bundle#getParcelable(String)} but doesn't throw exceptions. */
+    public static <T extends Parcelable> @Nullable T safeGetParcelable(Bundle bundle, String name) {
         try {
             return bundle.getParcelable(name);
         } catch (Throwable t) {
@@ -268,10 +218,9 @@ public class IntentUtils {
         }
     }
 
-    /**
-     * Just like {@link Intent#getParcelableExtra(String)} but doesn't throw exceptions.
-     */
-    public static <T extends Parcelable> T safeGetParcelableExtra(Intent intent, String name) {
+    /** Just like {@link Intent#getParcelableExtra(String)} but doesn't throw exceptions. */
+    public static <T extends Parcelable> @Nullable T safeGetParcelableExtra(
+            Intent intent, String name) {
         try {
             return intent.getParcelableExtra(name);
         } catch (Throwable t) {
@@ -284,7 +233,7 @@ public class IntentUtils {
     /**
      * Just link {@link Intent#getParcelableArrayListExtra(String)} but doesn't throw exceptions.
      */
-    public static <T extends Parcelable> ArrayList<T> getParcelableArrayListExtra(
+    public static <T extends Parcelable> @Nullable ArrayList<T> getParcelableArrayListExtra(
             Intent intent, String name) {
         try {
             return intent.getParcelableArrayListExtra(name);
@@ -295,10 +244,8 @@ public class IntentUtils {
         }
     }
 
-    /**
-     * Just link {@link Bundle#getParcelableArrayList(String)} but doesn't throw exceptions.
-     */
-    public static <T extends Parcelable> ArrayList<T> safeGetParcelableArrayList(
+    /** Just link {@link Bundle#getParcelableArrayList(String)} but doesn't throw exceptions. */
+    public static <T extends Parcelable> @Nullable ArrayList<T> safeGetParcelableArrayList(
             Bundle bundle, String name) {
         try {
             return bundle.getParcelableArrayList(name);
@@ -309,10 +256,8 @@ public class IntentUtils {
         }
     }
 
-    /**
-     * Just like {@link Intent#getParcelableArrayExtra(String)} but doesn't throw exceptions.
-     */
-    public static Parcelable[] safeGetParcelableArrayExtra(Intent intent, String name) {
+    /** Just like {@link Intent#getParcelableArrayExtra(String)} but doesn't throw exceptions. */
+    public static Parcelable @Nullable [] safeGetParcelableArrayExtra(Intent intent, String name) {
         try {
             return intent.getParcelableArrayExtra(name);
         } catch (Throwable t) {
@@ -321,10 +266,9 @@ public class IntentUtils {
         }
     }
 
-    /**
-     * Just like {@link Intent#getStringArrayListExtra(String)} but doesn't throw exceptions.
-     */
-    public static ArrayList<String> safeGetStringArrayListExtra(Intent intent, String name) {
+    /** Just like {@link Intent#getStringArrayListExtra(String)} but doesn't throw exceptions. */
+    public static @Nullable ArrayList<String> safeGetStringArrayListExtra(
+            Intent intent, String name) {
         try {
             return intent.getStringArrayListExtra(name);
         } catch (Throwable t) {
@@ -334,10 +278,8 @@ public class IntentUtils {
         }
     }
 
-    /**
-     * Just like {@link Intent#getByteArrayExtra(String)} but doesn't throw exceptions.
-     */
-    public static byte[] safeGetByteArrayExtra(Intent intent, String name) {
+    /** Just like {@link Intent#getByteArrayExtra(String)} but doesn't throw exceptions. */
+    public static byte @Nullable [] safeGetByteArrayExtra(Intent intent, String name) {
         try {
             return intent.getByteArrayExtra(name);
         } catch (Throwable t) {
@@ -347,11 +289,10 @@ public class IntentUtils {
         }
     }
 
-    /**
-     * Just like {@link Intent#getSerializableExtra(String)} but doesn't throw exceptions.
-     */
+    /** Just like {@link Intent#getSerializableExtra(String)} but doesn't throw exceptions. */
     @SuppressWarnings("unchecked")
-    public static <T extends Serializable> T safeGetSerializableExtra(Intent intent, String name) {
+    public static <T extends Serializable> @Nullable T safeGetSerializableExtra(
+            Intent intent, String name) {
         try {
             return (T) intent.getSerializableExtra(name);
         } catch (ClassCastException ex) {
@@ -365,12 +306,16 @@ public class IntentUtils {
     }
 
     /**
-     * Just like {@link BundleCompat#getBinder()}, but doesn't throw exceptions.
+     * Returns the value associated with the given name, or null if no mapping of the desired type
+     * exists for the given name or a null value is explicitly associated with the name.
+     *
+     * @param name a key string
+     * @return an IBinder value, or null
      */
-    public static IBinder safeGetBinder(Bundle bundle, String name) {
+    public static @Nullable IBinder safeGetBinder(@Nullable Bundle bundle, String name) {
         if (bundle == null) return null;
         try {
-            return BundleCompat.getBinder(bundle, name);
+            return bundle.getBinder(name);
         } catch (Throwable t) {
             // Catches un-parceling exceptions.
             Log.e(TAG, "getBinder failed on bundle " + bundle);
@@ -384,7 +329,7 @@ public class IntentUtils {
      * Creates a temporary copy of the extra Bundle, which is required as
      * Intent#getBinderExtra() doesn't exist, but Bundle.getBinder() does.
      */
-    public static IBinder safeGetBinderExtra(Intent intent, String name) {
+    public static @Nullable IBinder safeGetBinderExtra(Intent intent, String name) {
         if (!intent.hasExtra(name)) return null;
         Bundle extras = intent.getExtras();
         return safeGetBinder(extras, name);
@@ -392,8 +337,6 @@ public class IntentUtils {
 
     /**
      * Inserts a {@link Binder} value into an Intent as an extra.
-     *
-     * Uses {@link BundleCompat#putBinder()}, but doesn't throw exceptions.
      *
      * @param intent Intent to put the binder into.
      * @param name Key.
@@ -403,7 +346,7 @@ public class IntentUtils {
         if (intent == null) return;
         Bundle bundle = new Bundle();
         try {
-            BundleCompat.putBinder(bundle, name, binder);
+            bundle.putBinder(name, binder);
         } catch (Throwable t) {
             // Catches parceling exceptions.
             Log.e(TAG, "putBinder failed on bundle " + bundle);
@@ -478,7 +421,10 @@ public class IntentUtils {
      * make it safe to use.
      * @return A safe to use version of this intent.
      */
-    public static Intent sanitizeIntent(final Intent incomingIntent) {
+    public static @Nullable Intent sanitizeIntent(final Intent incomingIntent) {
+        // On Android T+, items are only deserialized when the items themselves are queried, so the
+        // code below is a no-op.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) return incomingIntent;
         if (incomingIntent == null) return null;
         try {
             incomingIntent.getBooleanExtra("TriggerUnparcel", false);
@@ -497,24 +443,24 @@ public class IntentUtils {
      * @return True if the intent is a MAIN intent a launcher would send.
      */
     public static boolean isMainIntentFromLauncher(Intent intent) {
-        return intent != null && TextUtils.equals(intent.getAction(), Intent.ACTION_MAIN)
+        return intent != null
+                && TextUtils.equals(intent.getAction(), Intent.ACTION_MAIN)
                 && intent.hasCategory(Intent.CATEGORY_LAUNCHER)
                 && 0 == (intent.getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY);
     }
 
     /**
-     * Gets the PendingIntent flag for the specified mutability.
-     * PendingIntent.FLAG_IMMUTABLE was added in API level 23 (M), and FLAG_MUTABLE was added in
-     * Android S.
+     * Gets the PendingIntent flag for the specified mutability. PendingIntent.FLAG_IMMUTABLE was
+     * added in API level 23 (M), and FLAG_MUTABLE was added in Android S.
      *
-     * Unless mutability is required, PendingIntents should always be marked as Immutable as this
+     * <p>Unless mutability is required, PendingIntents should always be marked as Immutable as this
      * is the more secure default.
      */
     public static int getPendingIntentMutabilityFlag(boolean mutable) {
         if (!mutable && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            return ApiHelperForM.getPendingIntentImmutableFlag();
+            return PendingIntent.FLAG_IMMUTABLE;
         } else if (mutable && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            return ApiHelperForS.getPendingIntentMutableFlag();
+            return PendingIntent.FLAG_MUTABLE;
         }
         return 0;
     }
@@ -522,16 +468,16 @@ public class IntentUtils {
     /**
      * Determines whether this app is the only possible handler for this Intent.
      *
-     * @param context Any context for this app.
      * @param intent The intent to check.
      * @return True if the intent targets this app.
      */
-    public static boolean intentTargetsSelf(Context context, Intent intent) {
+    public static boolean intentTargetsSelf(Intent intent) {
         boolean hasPackage = !TextUtils.isEmpty(intent.getPackage());
-        boolean matchesPackage = hasPackage && context.getPackageName().equals(intent.getPackage());
-        boolean hasComponent = intent.getComponent() != null;
-        boolean matchesComponent = hasComponent
-                && context.getPackageName().equals(intent.getComponent().getPackageName());
+        String appPackage = BuildInfo.getInstance().hostPackageName;
+        boolean matchesPackage = hasPackage && appPackage.equals(intent.getPackage());
+        ComponentName componentName = intent.getComponent();
+        boolean matchesComponent =
+                componentName != null && appPackage.equals(componentName.getPackageName());
 
         // Component takes precedence over PackageName when routing Intents if both are set, but to
         // be on the safe side, ensure that if we have both package and component set, that they
@@ -546,8 +492,8 @@ public class IntentUtils {
             return true;
         }
         if (matchesPackage) {
-            assert !hasComponent;
-            return !hasComponent;
+            assert componentName == null;
+            return true;
         }
         return false;
     }
@@ -580,8 +526,7 @@ public class IntentUtils {
     public static void addTrustedIntentExtras(Intent intent) {
         // It is crucial that we never leak the authentication token to other packages, because
         // then the other package could be used to impersonate us/do things as us.
-        boolean toSelf =
-                IntentUtils.intentTargetsSelf(ContextUtils.getApplicationContext(), intent);
+        boolean toSelf = IntentUtils.intentTargetsSelf(intent);
         assert toSelf;
         // For security reasons we have to check the asserted condition anyways.
         if (!toSelf) return;
@@ -615,5 +560,6 @@ public class IntentUtils {
 
     public static void setForceIsTrustedIntentForTesting(boolean isTrusted) {
         sForceTrustedIntentForTesting = isTrusted;
+        ResettersForTesting.register(() -> sForceTrustedIntentForTesting = false);
     }
 }

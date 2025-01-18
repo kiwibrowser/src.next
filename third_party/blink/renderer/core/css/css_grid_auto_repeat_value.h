@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,10 @@
 #include "third_party/blink/renderer/core/css/css_value_list.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
+
+namespace WTF {
+class String;
+}  // namespace WTF
 
 namespace blink {
 namespace cssvalue {
@@ -33,7 +37,7 @@ class CSSGridAutoRepeatValue : public CSSValueList {
     DCHECK(id == CSSValueID::kAutoFill || id == CSSValueID::kAutoFit);
   }
 
-  String CustomCSSText() const;
+  WTF::String CustomCSSText() const;
   bool Equals(const CSSGridAutoRepeatValue&) const;
 
   CSSValueID AutoRepeatID() const { return auto_repeat_id_; }

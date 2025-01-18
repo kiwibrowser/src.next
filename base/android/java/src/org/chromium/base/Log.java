@@ -4,24 +4,23 @@
 
 package org.chromium.base;
 
+import org.chromium.build.BuildConfig;
 import org.chromium.build.annotations.AlwaysInline;
-import org.chromium.build.annotations.CheckDiscard;
-import org.chromium.build.annotations.DoNotInline;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 
 import java.util.Locale;
 
 /**
  * Utility class for Logging.
  *
- * <p>
- * Defines logging access points for each feature. They format and forward the logs to
- * {@link android.util.Log}, allowing to standardize the output, to make it easy to identify
- * the origin of logs, and enable or disable logging in different parts of the code.
- * </p>
- * <p>
- * Usage documentation: {@code //docs/android_logging.md}.
- * </p>
+ * <p>Defines logging access points for each feature. They format and forward the logs to {@link
+ * android.util.Log}, allowing to standardize the output, to make it easy to identify the origin of
+ * logs, and enable or disable logging in different parts of the code.
+ *
+ * <p>Usage documentation: {@code //docs/android_logging.md}.
  */
+@NullMarked
 public class Log {
     /** Convenience property, same as {@link android.util.Log#ASSERT}. */
     public static final int ASSERT = android.util.Log.ASSERT;
@@ -45,8 +44,9 @@ public class Log {
         // Static only access
     }
 
-    /** Returns a formatted log message, using the supplied format and arguments.*/
-    private static String formatLog(String messageTemplate, Throwable tr, Object... params) {
+    /** Returns a formatted log message, using the supplied format and arguments. */
+    private static String formatLog(
+            String messageTemplate, @Nullable Throwable tr, @Nullable Object @Nullable [] params) {
         if ((params != null) && ((tr == null && params.length > 0) || params.length > 1)) {
             messageTemplate = String.format(Locale.US, messageTemplate, params);
         }
@@ -63,51 +63,36 @@ public class Log {
     public static String normalizeTag(String tag) {
         // @AlwaysInline makes sense because this method is almost always called with a string
         // literal as a parameter, so inlining causes the .concat() to happen at build-time.
-        return "cr_" + tag;
+        return BuildConfig.LOGTAG_PREFIX + tag;
     }
 
     /**
-     * Returns a formatted log message, using the supplied format and arguments.
-     * The message will be prepended with the filename and line number of the call.
+     * When BuildConfig.ENABLE_DEBUG_LOGS=true, returns true. Otherwise, forwards to {@link
+     * android.util.Log#isLoggable(String, int)} (which returns false for levels < INFO, unless
+     * configured otherwise by R8's -maximumremovedandroidloglevel).
+     *
+     * <p>https://stackoverflow.com/questions/7948204/does-log-isloggable-returns-wrong-values
      */
-    private static String formatLogWithStack(
-            String messageTemplate, Throwable tr, Object... params) {
-        return "[" + getCallOrigin() + "] " + formatLog(messageTemplate, tr, params);
-    }
-
-    private static boolean isDebug() {
-        // Proguard sets value to false in release builds.
-        return true;
-    }
-
-    /**
-     * In debug: Forwards to {@link android.util.Log#isLoggable(String, int)}, but always
-     * In release: Always returns false (via proguard rule).
-     */
+    @AlwaysInline
     public static boolean isLoggable(String tag, int level) {
-        // Early return helps optimizer eliminate calls to isLoggable().
-        if (!isDebug() && level <= INFO) {
-            return false;
-        }
-        return android.util.Log.isLoggable(tag, level);
+        return BuildConfig.ENABLE_DEBUG_LOGS || android.util.Log.isLoggable(tag, level);
     }
 
     /**
      * Sends a {@link android.util.Log#VERBOSE} log message.
      *
-     * @param tag Used to identify the source of a log message. Might be modified in the output
-     *            (see {@link #normalizeTag(String)})
+     * @param tag Used to identify the source of a log message. Might be modified in the output (see
+     *     {@link #normalizeTag(String)})
      * @param messageTemplate The message you would like logged. It is to be specified as a format
-     *                        string.
+     *     string.
      * @param args Arguments referenced by the format specifiers in the format string. If the last
-     *             one is a {@link Throwable}, its trace will be printed.
+     *     one is a {@link Throwable}, its trace will be printed.
      */
-    @CheckDiscard("crbug.com/1231625")
-    public static void v(String tag, String messageTemplate, Object... args) {
-        if (!isDebug()) return;
+    public static void v(String tag, String messageTemplate, @Nullable Object @Nullable ... args) {
+        if (!isLoggable(tag, VERBOSE)) return;
 
         Throwable tr = getThrowableToLog(args);
-        String message = formatLogWithStack(messageTemplate, tr, args);
+        String message = formatLog(messageTemplate, tr, args);
         tag = normalizeTag(tag);
         if (tr != null) {
             android.util.Log.v(tag, message, tr);
@@ -119,19 +104,18 @@ public class Log {
     /**
      * Sends a {@link android.util.Log#DEBUG} log message.
      *
-     * @param tag Used to identify the source of a log message. Might be modified in the output
-     *            (see {@link #normalizeTag(String)})
+     * @param tag Used to identify the source of a log message. Might be modified in the output (see
+     *     {@link #normalizeTag(String)})
      * @param messageTemplate The message you would like logged. It is to be specified as a format
-     *                        string.
+     *     string.
      * @param args Arguments referenced by the format specifiers in the format string. If the last
-     *             one is a {@link Throwable}, its trace will be printed.
+     *     one is a {@link Throwable}, its trace will be printed.
      */
-    @CheckDiscard("crbug.com/1231625")
-    public static void d(String tag, String messageTemplate, Object... args) {
-        if (!isDebug()) return;
+    public static void d(String tag, String messageTemplate, @Nullable Object @Nullable ... args) {
+        if (!isLoggable(tag, DEBUG)) return;
 
         Throwable tr = getThrowableToLog(args);
-        String message = formatLogWithStack(messageTemplate, tr, args);
+        String message = formatLog(messageTemplate, tr, args);
         tag = normalizeTag(tag);
         if (tr != null) {
             android.util.Log.d(tag, message, tr);
@@ -150,7 +134,7 @@ public class Log {
      * @param args Arguments referenced by the format specifiers in the format string. If the last
      *             one is a {@link Throwable}, its trace will be printed.
      */
-    public static void i(String tag, String messageTemplate, Object... args) {
+    public static void i(String tag, String messageTemplate, @Nullable Object... args) {
         Throwable tr = getThrowableToLog(args);
         String message = formatLog(messageTemplate, tr, args);
         tag = normalizeTag(tag);
@@ -161,7 +145,11 @@ public class Log {
         }
     }
 
-    // Overloads to avoid varargs overhead.
+    // Overloads that will optimize better:
+    // * No need to call getThrowableToLog()
+    // * normalizeTag() will be evaluated to const-string "cr_..."
+    // * String.format() will be converted into StringBuilder when possible
+    //   * Which also removes auto-boxing of primitives.
     @AlwaysInline
     public static void i(String tag, String message) {
         android.util.Log.i(normalizeTag(tag), message);
@@ -170,14 +158,163 @@ public class Log {
     public static void i(String tag, String message, Throwable t) {
         android.util.Log.i(normalizeTag(tag), message, t);
     }
-    @DoNotInline
-    public static void i(String tag, String messageTemplate, Object o) {
-        i(tag, messageTemplate, new Object[] {o});
+
+    @AlwaysInline
+    public static void i(String tag, String messageTemplate, @Nullable Object param1) {
+        tag = normalizeTag(tag);
+        android.util.Log.i(tag, String.format(Locale.US, messageTemplate, param1));
     }
-    @DoNotInline
-    public static void i(String tag, String messageTemplate, Object o1, Object o2) {
-        i(tag, messageTemplate, new Object[] {o1, o2});
+
+    @AlwaysInline
+    public static void i(String tag, String messageTemplate, @Nullable Object param1, Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.i(tag, String.format(Locale.US, messageTemplate, param1), t);
     }
+
+    @AlwaysInline
+    public static void i(
+            String tag, String messageTemplate, @Nullable Object param1, @Nullable Object param2) {
+        tag = normalizeTag(tag);
+        android.util.Log.i(tag, String.format(Locale.US, messageTemplate, param1, param2));
+    }
+
+    @AlwaysInline
+    public static void i(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.i(tag, String.format(Locale.US, messageTemplate, param1, param2), t);
+    }
+
+    @AlwaysInline
+    public static void i(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3) {
+        tag = normalizeTag(tag);
+        android.util.Log.i(tag, String.format(Locale.US, messageTemplate, param1, param2, param3));
+    }
+
+    @AlwaysInline
+    public static void i(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.i(
+                tag, String.format(Locale.US, messageTemplate, param1, param2, param3), t);
+    }
+
+    @AlwaysInline
+    public static void i(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4) {
+        tag = normalizeTag(tag);
+        android.util.Log.i(
+                tag, String.format(Locale.US, messageTemplate, param1, param2, param3, param4));
+    }
+
+    @AlwaysInline
+    public static void i(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4,
+            Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.i(
+                tag, String.format(Locale.US, messageTemplate, param1, param2, param3, param4), t);
+    }
+
+    @AlwaysInline
+    public static void i(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4,
+            @Nullable Object param5) {
+        tag = normalizeTag(tag);
+        android.util.Log.i(
+                tag,
+                String.format(Locale.US, messageTemplate, param1, param2, param3, param4, param5));
+    }
+
+    @AlwaysInline
+    public static void i(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4,
+            @Nullable Object param5,
+            Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.i(
+                tag,
+                String.format(Locale.US, messageTemplate, param1, param2, param3, param4, param5),
+                t);
+    }
+
+    @AlwaysInline
+    public static void i(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4,
+            @Nullable Object param5,
+            @Nullable Object param6) {
+        tag = normalizeTag(tag);
+        android.util.Log.i(
+                tag,
+                String.format(
+                        Locale.US,
+                        messageTemplate,
+                        param1,
+                        param2,
+                        param3,
+                        param4,
+                        param5,
+                        param6));
+    }
+
+    @AlwaysInline
+    public static void i(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4,
+            @Nullable Object param5,
+            @Nullable Object param6,
+            Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.i(
+                tag,
+                String.format(
+                        Locale.US, messageTemplate, param1, param2, param3, param4, param5, param6),
+                t);
+    }
+
 
     /**
      * Sends a {@link android.util.Log#WARN} log message.
@@ -200,7 +337,11 @@ public class Log {
         }
     }
 
-    // Overloads to avoid varargs overhead.
+    // Overloads that will optimize better:
+    // * No need to call getThrowableToLog()
+    // * normalizeTag() will be evaluated to const-string "cr_..."
+    // * String.format() will be converted into StringBuilder when possible
+    //   * Which also removes auto-boxing of primitives.
     @AlwaysInline
     public static void w(String tag, String message) {
         android.util.Log.w(normalizeTag(tag), message);
@@ -209,13 +350,161 @@ public class Log {
     public static void w(String tag, String message, Throwable t) {
         android.util.Log.w(normalizeTag(tag), message, t);
     }
-    @DoNotInline
-    public static void w(String tag, String messageTemplate, Object o) {
-        w(tag, messageTemplate, new Object[] {o});
+
+    @AlwaysInline
+    public static void w(String tag, String messageTemplate, @Nullable Object param1) {
+        tag = normalizeTag(tag);
+        android.util.Log.w(tag, String.format(Locale.US, messageTemplate, param1));
     }
-    @DoNotInline
-    public static void w(String tag, String messageTemplate, Object o1, Object o2) {
-        w(tag, messageTemplate, new Object[] {o1, o2});
+
+    @AlwaysInline
+    public static void w(String tag, String messageTemplate, @Nullable Object param1, Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.w(tag, String.format(Locale.US, messageTemplate, param1), t);
+    }
+
+    @AlwaysInline
+    public static void w(
+            String tag, String messageTemplate, @Nullable Object param1, @Nullable Object param2) {
+        tag = normalizeTag(tag);
+        android.util.Log.w(tag, String.format(Locale.US, messageTemplate, param1, param2));
+    }
+
+    @AlwaysInline
+    public static void w(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.w(tag, String.format(Locale.US, messageTemplate, param1, param2), t);
+    }
+
+    @AlwaysInline
+    public static void w(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3) {
+        tag = normalizeTag(tag);
+        android.util.Log.w(tag, String.format(Locale.US, messageTemplate, param1, param2, param3));
+    }
+
+    @AlwaysInline
+    public static void w(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.w(
+                tag, String.format(Locale.US, messageTemplate, param1, param2, param3), t);
+    }
+
+    @AlwaysInline
+    public static void w(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4) {
+        tag = normalizeTag(tag);
+        android.util.Log.w(
+                tag, String.format(Locale.US, messageTemplate, param1, param2, param3, param4));
+    }
+
+    @AlwaysInline
+    public static void w(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4,
+            Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.w(
+                tag, String.format(Locale.US, messageTemplate, param1, param2, param3, param4), t);
+    }
+
+    @AlwaysInline
+    public static void w(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4,
+            @Nullable Object param5) {
+        tag = normalizeTag(tag);
+        android.util.Log.w(
+                tag,
+                String.format(Locale.US, messageTemplate, param1, param2, param3, param4, param5));
+    }
+
+    @AlwaysInline
+    public static void w(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4,
+            @Nullable Object param5,
+            Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.w(
+                tag,
+                String.format(Locale.US, messageTemplate, param1, param2, param3, param4, param5),
+                t);
+    }
+
+    @AlwaysInline
+    public static void w(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4,
+            @Nullable Object param5,
+            @Nullable Object param6) {
+        tag = normalizeTag(tag);
+        android.util.Log.w(
+                tag,
+                String.format(
+                        Locale.US,
+                        messageTemplate,
+                        param1,
+                        param2,
+                        param3,
+                        param4,
+                        param5,
+                        param6));
+    }
+
+    @AlwaysInline
+    public static void w(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4,
+            @Nullable Object param5,
+            @Nullable Object param6,
+            Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.w(
+                tag,
+                String.format(
+                        Locale.US, messageTemplate, param1, param2, param3, param4, param5, param6),
+                t);
     }
 
     /**
@@ -239,7 +528,11 @@ public class Log {
         }
     }
 
-    // Overloads to avoid varargs overhead.
+    // Overloads that will optimize better:
+    // * No need to call getThrowableToLog()
+    // * normalizeTag() will be evaluated to const-string "cr_..."
+    // * String.format() will be converted into StringBuilder when possible
+    //   * Which also removes auto-boxing of primitives.
     @AlwaysInline
     public static void e(String tag, String message) {
         android.util.Log.e(normalizeTag(tag), message);
@@ -248,13 +541,161 @@ public class Log {
     public static void e(String tag, String message, Throwable t) {
         android.util.Log.e(normalizeTag(tag), message, t);
     }
-    @DoNotInline
-    public static void e(String tag, String messageTemplate, Object o) {
-        e(tag, messageTemplate, new Object[] {o});
+
+    @AlwaysInline
+    public static void e(String tag, String messageTemplate, @Nullable Object param1) {
+        tag = normalizeTag(tag);
+        android.util.Log.e(tag, String.format(Locale.US, messageTemplate, param1));
     }
-    @DoNotInline
-    public static void e(String tag, String messageTemplate, Object o1, Object o2) {
-        e(tag, messageTemplate, new Object[] {o1, o2});
+
+    @AlwaysInline
+    public static void e(String tag, String messageTemplate, @Nullable Object param1, Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.e(tag, String.format(Locale.US, messageTemplate, param1), t);
+    }
+
+    @AlwaysInline
+    public static void e(
+            String tag, String messageTemplate, @Nullable Object param1, @Nullable Object param2) {
+        tag = normalizeTag(tag);
+        android.util.Log.e(tag, String.format(Locale.US, messageTemplate, param1, param2));
+    }
+
+    @AlwaysInline
+    public static void e(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.e(tag, String.format(Locale.US, messageTemplate, param1, param2), t);
+    }
+
+    @AlwaysInline
+    public static void e(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3) {
+        tag = normalizeTag(tag);
+        android.util.Log.e(tag, String.format(Locale.US, messageTemplate, param1, param2, param3));
+    }
+
+    @AlwaysInline
+    public static void e(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.e(
+                tag, String.format(Locale.US, messageTemplate, param1, param2, param3), t);
+    }
+
+    @AlwaysInline
+    public static void e(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4) {
+        tag = normalizeTag(tag);
+        android.util.Log.e(
+                tag, String.format(Locale.US, messageTemplate, param1, param2, param3, param4));
+    }
+
+    @AlwaysInline
+    public static void e(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4,
+            Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.e(
+                tag, String.format(Locale.US, messageTemplate, param1, param2, param3, param4), t);
+    }
+
+    @AlwaysInline
+    public static void e(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4,
+            @Nullable Object param5) {
+        tag = normalizeTag(tag);
+        android.util.Log.e(
+                tag,
+                String.format(Locale.US, messageTemplate, param1, param2, param3, param4, param5));
+    }
+
+    @AlwaysInline
+    public static void e(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4,
+            @Nullable Object param5,
+            Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.e(
+                tag,
+                String.format(Locale.US, messageTemplate, param1, param2, param3, param4, param5),
+                t);
+    }
+
+    @AlwaysInline
+    public static void e(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4,
+            @Nullable Object param5,
+            @Nullable Object param6) {
+        tag = normalizeTag(tag);
+        android.util.Log.e(
+                tag,
+                String.format(
+                        Locale.US,
+                        messageTemplate,
+                        param1,
+                        param2,
+                        param3,
+                        param4,
+                        param5,
+                        param6));
+    }
+
+    @AlwaysInline
+    public static void e(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4,
+            @Nullable Object param5,
+            @Nullable Object param6,
+            Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.e(
+                tag,
+                String.format(
+                        Locale.US, messageTemplate, param1, param2, param3, param4, param5, param6),
+                t);
     }
 
     /**
@@ -282,41 +723,190 @@ public class Log {
         }
     }
 
+    // Overloads that will optimize better:
+    // * No need to call getThrowableToLog()
+    // * normalizeTag() will be evaluated to const-string "cr_..."
+    // * String.format() will be converted into StringBuilder when possible
+    //   * Which also removes auto-boxing of primitives.
+    @AlwaysInline
+    public static void wtf(String tag, String message) {
+        android.util.Log.wtf(normalizeTag(tag), message);
+    }
+
+    @AlwaysInline
+    public static void wtf(String tag, String message, Throwable t) {
+        android.util.Log.wtf(normalizeTag(tag), message, t);
+    }
+
+    @AlwaysInline
+    public static void wtf(String tag, String messageTemplate, @Nullable Object param1) {
+        tag = normalizeTag(tag);
+        android.util.Log.wtf(tag, String.format(Locale.US, messageTemplate, param1));
+    }
+
+    @AlwaysInline
+    public static void wtf(
+            String tag, String messageTemplate, @Nullable Object param1, Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.wtf(tag, String.format(Locale.US, messageTemplate, param1), t);
+    }
+
+    @AlwaysInline
+    public static void wtf(
+            String tag, String messageTemplate, @Nullable Object param1, @Nullable Object param2) {
+        tag = normalizeTag(tag);
+        android.util.Log.wtf(tag, String.format(Locale.US, messageTemplate, param1, param2));
+    }
+
+    @AlwaysInline
+    public static void wtf(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.wtf(tag, String.format(Locale.US, messageTemplate, param1, param2), t);
+    }
+
+    @AlwaysInline
+    public static void wtf(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3) {
+        tag = normalizeTag(tag);
+        android.util.Log.wtf(
+                tag, String.format(Locale.US, messageTemplate, param1, param2, param3));
+    }
+
+    @AlwaysInline
+    public static void wtf(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.wtf(
+                tag, String.format(Locale.US, messageTemplate, param1, param2, param3), t);
+    }
+
+    @AlwaysInline
+    public static void wtf(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4) {
+        tag = normalizeTag(tag);
+        android.util.Log.wtf(
+                tag, String.format(Locale.US, messageTemplate, param1, param2, param3, param4));
+    }
+
+    @AlwaysInline
+    public static void wtf(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4,
+            Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.wtf(
+                tag, String.format(Locale.US, messageTemplate, param1, param2, param3, param4), t);
+    }
+
+    @AlwaysInline
+    public static void wtf(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4,
+            @Nullable Object param5) {
+        tag = normalizeTag(tag);
+        android.util.Log.wtf(
+                tag,
+                String.format(Locale.US, messageTemplate, param1, param2, param3, param4, param5));
+    }
+
+    @AlwaysInline
+    public static void wtf(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4,
+            @Nullable Object param5,
+            Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.wtf(
+                tag,
+                String.format(Locale.US, messageTemplate, param1, param2, param3, param4, param5),
+                t);
+    }
+
+    @AlwaysInline
+    public static void wtf(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4,
+            @Nullable Object param5,
+            @Nullable Object param6) {
+        tag = normalizeTag(tag);
+        android.util.Log.wtf(
+                tag,
+                String.format(
+                        Locale.US,
+                        messageTemplate,
+                        param1,
+                        param2,
+                        param3,
+                        param4,
+                        param5,
+                        param6));
+    }
+
+    @AlwaysInline
+    public static void wtf(
+            String tag,
+            String messageTemplate,
+            @Nullable Object param1,
+            @Nullable Object param2,
+            @Nullable Object param3,
+            @Nullable Object param4,
+            @Nullable Object param5,
+            @Nullable Object param6,
+            Throwable t) {
+        tag = normalizeTag(tag);
+        android.util.Log.wtf(
+                tag,
+                String.format(
+                        Locale.US, messageTemplate, param1, param2, param3, param4, param5, param6),
+                t);
+    }
+
     /** Handy function to get a loggable stack trace from a Throwable. */
     public static String getStackTraceString(Throwable tr) {
         return android.util.Log.getStackTraceString(tr);
     }
 
-    private static Throwable getThrowableToLog(Object[] args) {
+    private static @Nullable Throwable getThrowableToLog(@Nullable Object @Nullable [] args) {
         if (args == null || args.length == 0) return null;
 
         Object lastArg = args[args.length - 1];
 
         if (!(lastArg instanceof Throwable)) return null;
         return (Throwable) lastArg;
-    }
-
-    /** Returns a string form of the origin of the log call, to be used as secondary tag.*/
-    @CheckDiscard("crbug.com/1231625")
-    private static String getCallOrigin() {
-        StackTraceElement[] st = Thread.currentThread().getStackTrace();
-
-        // The call stack should look like:
-        //   n [a variable number of calls depending on the vm used]
-        //  +0 getCallOrigin()
-        //  +1 formatLogWithStack()
-        //  +2 privateLogFunction: verbose or debug
-        //  +3 caller
-
-        int callerStackIndex;
-        String logClassName = Log.class.getName();
-        for (callerStackIndex = 0; callerStackIndex < st.length; callerStackIndex++) {
-            if (st[callerStackIndex].getClassName().equals(logClassName)) {
-                callerStackIndex += 3;
-                break;
-            }
-        }
-
-        return st[callerStackIndex].getFileName() + ":" + st[callerStackIndex].getLineNumber();
     }
 }

@@ -9,8 +9,8 @@
 #include <string>
 #include <vector>
 
-#include "base/callback_forward.h"
 #include "base/files/file_path.h"
+#include "base/functional/callback_forward.h"
 
 namespace base::win {
 struct ShortcutProperties;
@@ -22,33 +22,17 @@ namespace shell_integration::win {
 struct ShortcutProperties;
 enum class ShortcutOperation;
 
-// Initiates an OS shell flow which (if followed by the user) should set
-// Chrome as the default browser. Returns false if the flow cannot be
-// initialized, if it is not supported (introduced for Windows 8) or if the
-// user cancels the operation. This is a blocking call and requires a FILE
-// thread. If Chrome is already default browser, no interactive dialog will be
-// shown and this method returns true.
-bool SetAsDefaultBrowserUsingIntentPicker();
-
 // Initiates the interaction with the system settings for the default browser.
 // The function takes care of making sure |on_finished_callback| will get called
 // exactly once when the interaction is finished.
 void SetAsDefaultBrowserUsingSystemSettings(
     base::OnceClosure on_finished_callback);
 
-// Initiates an OS shell flow which (if followed by the user) should set
-// Chrome as the default handler for |protocol|. Returns false if the flow
-// cannot be initialized, if it is not supported (introduced for Windows 8)
-// or if the user cancels the operation. This is a blocking call and requires
-// a FILE thread. If Chrome is already default for |protocol|, no interactive
-// dialog will be shown and this method returns true.
-bool SetAsDefaultProtocolClientUsingIntentPicker(const std::string& protocol);
-
 // Initiates the interaction with the system settings for the default handler of
-// |protocol|. The function takes care of making sure |on_finished_callback|
+// |scheme|. The function takes care of making sure |on_finished_callback|
 // will get called exactly once when the interaction is finished.
-void SetAsDefaultProtocolClientUsingSystemSettings(
-    const std::string& protocol,
+void SetAsDefaultClientForSchemeUsingSystemSettings(
+    const std::string& scheme,
     base::OnceClosure on_finished_callback);
 
 // App windows on Windows have an App User Model Id (AUMI) property. This is set
@@ -89,8 +73,7 @@ std::wstring GetAppUserModelIdForBrowser(const base::FilePath& profile_path);
 // with the connection to the remote process.
 using ConnectionErrorCallback = base::OnceClosure;
 using IsPinnedToTaskbarCallback = base::OnceCallback<void(bool, bool)>;
-void GetIsPinnedToTaskbarState(ConnectionErrorCallback on_error_callback,
-                               IsPinnedToTaskbarCallback result_callback);
+void GetIsPinnedToTaskbarState(IsPinnedToTaskbarCallback result_callback);
 
 // Unpins `shortcuts` from the taskbar, and run `completion_callback` when done.
 void UnpinShortcuts(const std::vector<base::FilePath>& shortcuts,

@@ -85,7 +85,6 @@ float ViewportDescription::ResolveViewportLength(
     return initial_viewport_size.height();
 
   NOTREACHED();
-  return ViewportDescription::kValueAuto;
 }
 
 PageScaleConstraints ViewportDescription::Resolve(

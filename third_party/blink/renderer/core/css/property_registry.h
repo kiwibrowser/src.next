@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,6 +26,11 @@ class CORE_EXPORT PropertyRegistry : public GarbageCollected<PropertyRegistry> {
   // Removes all registrations originating from @property. Has no effect on
   // properties originating from CSS.registerProperty.
   void RemoveDeclaredProperties();
+
+  // Register property for devtools inspector.
+  void AddRegistrationForInspector(const AtomicString&, PropertyRegistration&);
+  // Removes property registration for devtools inspector.
+  void RemoveRegistrationForInspector(const AtomicString&);
 
   // Returns the registration originating from CSS.registerProperty if present,
   // otherwise returns the registration originating from @property (which may

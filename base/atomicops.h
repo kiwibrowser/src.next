@@ -2,6 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// IMPORTANT NOTE: deprecated. Use std::atomic instead.
+//
+// Rationale:
+// - Uniformity: most of the code uses std::atomic, and the underlying
+//   implementation is the same. Use the STL one.
+// - Clearer code: return values from some operations (e.g. CompareAndSwap)
+//   differ from the equivalent ones in std::atomic, leading to confusion.
+// - Richer semantics: can use actual types, rather than e.g. Atomic32 for a
+//   boolean flag, or AtomicWord for T*. Bitwise operations (e.g. fetch_or())
+//   are only in std::atomic.
+// - Harder to misuse: base::subtle::Atomic32 is just an int, making it possible
+//   to accidentally manipulate, not realizing that there are no atomic
+//   semantics attached to it. For instance, "Atomic32 a; a++;" is almost
+//   certainly incorrect.
+
 // For atomic operations on reference counts, see atomic_refcount.h.
 // For atomic operations on sequence numbers, see atomic_sequence_num.h.
 
@@ -36,6 +51,9 @@
 // - libstdc++: captures bits/c++config.h for __GLIBCXX__
 #include <cstddef>
 
+#include "base/base_export.h"
+#include "base/compiler_specific.h"
+#include "base/containers/span.h"
 #include "build/build_config.h"
 
 namespace base {
@@ -80,8 +98,7 @@ Atomic32 NoBarrier_AtomicExchange(volatile Atomic32* ptr, Atomic32 new_value);
 // *ptr with the increment applied.  This routine implies no memory barriers.
 Atomic32 NoBarrier_AtomicIncrement(volatile Atomic32* ptr, Atomic32 increment);
 
-Atomic32 Barrier_AtomicIncrement(volatile Atomic32* ptr,
-                                 Atomic32 increment);
+Atomic32 Barrier_AtomicIncrement(volatile Atomic32* ptr, Atomic32 increment);
 
 // These following lower-level operations are typically useful only to people
 // implementing higher-level synchronization operations like spinlocks,
@@ -119,11 +136,32 @@ Atomic64 Acquire_CompareAndSwap(volatile Atomic64* ptr,
 Atomic64 Release_CompareAndSwap(volatile Atomic64* ptr,
                                 Atomic64 old_value,
                                 Atomic64 new_value);
-void NoBarrier_Store(volatile Atomic64* ptr, Atomic64 value);
 void Release_Store(volatile Atomic64* ptr, Atomic64 value);
 Atomic64 NoBarrier_Load(volatile const Atomic64* ptr);
 Atomic64 Acquire_Load(volatile const Atomic64* ptr);
 #endif  // ARCH_CPU_64_BITS
+
+// Copies non-overlapping spans of the same size. Writes are done using C++
+// atomics with `std::memory_order_relaxed`.
+//
+// This is an analogue of `WTF::AtomicWriteMemcpy` and it should be used
+// for copying data into buffers that are accessible from another
+// thread while the copy is being done. The buffer will appear inconsistent,
+// but it won't trigger C++ UB and won't upset TSAN. The end of copy needs to
+// be signaled through a synchronization mechanism like fence, after
+// which the `dst` buffer will be observed as consistent.
+//
+// Notable example is a buffer owned by `SharedArrayBuffer`.
+// While the copy is being done, JS and WASM code can access the `dst` buffer
+// on a different thread. The data observed by JS may not be consistent
+// from application point of view (which is always the case with
+// `SharedArrayBuffer`).
+//
+// Reads from the `src` buffer are not atomic and `src` access
+// should be synchronized via other means.
+// More info: crbug.com/340606792
+BASE_EXPORT void RelaxedAtomicWriteMemcpy(base::span<uint8_t> dst,
+                                          base::span<const uint8_t> src);
 
 }  // namespace subtle
 }  // namespace base

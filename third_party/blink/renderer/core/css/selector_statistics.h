@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include "base/time/time.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/wtf/gc_plugin.h"
 
 namespace blink {
 
@@ -15,6 +16,9 @@ class RuleData;
 struct RulePerfDataPerRequest {
   RulePerfDataPerRequest(const RuleData* r, bool f, bool m, base::TimeDelta e)
       : rule(r), fast_reject(f), did_match(m), elapsed(e) {}
+  // RuleData is Traceable but not owned here, so there's no need to Trace it
+  // here. The RuleData is owned and traced by HeapVectors in RuleSet.
+  GC_PLUGIN_IGNORE("GC API violation: https://crbug.com/389707046")
   const RuleData* const rule;
   bool fast_reject;
   bool did_match;
@@ -50,12 +54,15 @@ class SelectorStatisticsCollector {
   void SetWasFastRejected() { fast_reject_ = true; }
   void SetDidMatch() { did_match_ = true; }
 
-  const HeapVector<RulePerfDataPerRequest>& PerRuleStatistics() const {
+  const Vector<RulePerfDataPerRequest>& PerRuleStatistics() const {
     return per_rule_statistics_;
   }
 
  private:
-  HeapVector<RulePerfDataPerRequest> per_rule_statistics_;
+  // `Vector` is more beneficial here since `RulePerfDataPerRequest` is
+  // non-traceable and `SelectorStatisticsCollector` is stack allocated.
+  // `HeapVector` could also be used but will be less performant in this case.
+  Vector<RulePerfDataPerRequest> per_rule_statistics_;
   // The below values are for the selector currently being matched. These values
   // are pushed into `per_rule_statistics_` when `EndCollectionForCurrentRule`
   // is called.

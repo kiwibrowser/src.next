@@ -8,14 +8,15 @@
 #include <string>
 
 #include "base/strings/string_util.h"
+#include "base/strings/to_string.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
-#include "chrome/browser/ui/exclusive_access/exclusive_access_test.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
@@ -112,23 +113,27 @@ void FullscreenKeyboardBrowserTestBase::FocusOnLastActiveBrowser() {
 }
 
 void FullscreenKeyboardBrowserTestBase::WaitForBrowserCount(size_t expected) {
-  while (GetBrowserCount() != expected)
+  while (GetBrowserCount() != expected) {
     base::RunLoop().RunUntilIdle();
+  }
 }
 
 void FullscreenKeyboardBrowserTestBase::WaitForTabCount(int expected) {
-  while (GetTabCount() != expected)
+  while (GetTabCount() != expected) {
     base::RunLoop().RunUntilIdle();
+  }
 }
 
 void FullscreenKeyboardBrowserTestBase::WaitForActiveTabIndex(int expected) {
-  while (GetActiveTabIndex() != expected)
+  while (GetActiveTabIndex() != expected) {
     base::RunLoop().RunUntilIdle();
+  }
 }
 
 void FullscreenKeyboardBrowserTestBase::WaitForInactiveTabIndex(int expected) {
-  while (GetActiveTabIndex() == expected)
+  while (GetActiveTabIndex() == expected) {
     base::RunLoop().RunUntilIdle();
+  }
 }
 
 void FullscreenKeyboardBrowserTestBase::StartFullscreenLockPage() {
@@ -142,8 +147,9 @@ void FullscreenKeyboardBrowserTestBase::StartFullscreenLockPage() {
   ASSERT_EQ(2, GetTabCount());
   ASSERT_EQ(1U, GetBrowserCount());
 
-  if (!GetEmbeddedTestServer()->Started())
+  if (!GetEmbeddedTestServer()->Started()) {
     ASSERT_TRUE(GetEmbeddedTestServer()->Start());
+  }
   ui_test_utils::NavigateToURLWithDisposition(
       GetActiveBrowser(),
       GetEmbeddedTestServer()->GetURL(kFullscreenKeyboardLockHTML),
@@ -167,12 +173,12 @@ void FullscreenKeyboardBrowserTestBase::SendShortcut(ui::KeyboardCode key,
   expected_result_ += ui::KeycodeConverter::DomCodeToCodeString(
       ui::UsLayoutKeyboardCodeToDomCode(key));
   expected_result_ += " ctrl:";
-  expected_result_ += control_modifier ? "true" : "false";
+  expected_result_ += base::ToString(control_modifier);
   expected_result_ += " shift:";
-  expected_result_ += shift ? "true" : "false";
+  expected_result_ += base::ToString(shift);
   expected_result_ += " alt:false";
   expected_result_ += " meta:";
-  expected_result_ += command_modifier ? "true" : "false";
+  expected_result_ += base::ToString(command_modifier);
   expected_result_ += '\n';
 }
 
@@ -184,7 +190,13 @@ void FullscreenKeyboardBrowserTestBase::SendShiftShortcut(
 void FullscreenKeyboardBrowserTestBase::SendFullscreenShortcutAndWait() {
   // On MacOSX, entering and exiting fullscreen are not synchronous. So we wait
   // for the observer to notice the change of fullscreen state.
-  FullscreenNotificationObserver observer(GetActiveBrowser());
+  bool current =
+      GetActiveBrowser()->exclusive_access_manager()->context()->IsFullscreen();
+  ui_test_utils::FullscreenWaiter waiter(
+      GetActiveBrowser(), current
+                              ? ui_test_utils::FullscreenWaiter::kNoFullscreen
+                              : ui_test_utils::FullscreenWaiter::Expectation{
+                                    .browser_fullscreen = true});
 // Enter fullscreen.
 #if BUILDFLAG(IS_MAC)
   // On MACOSX, Command + Control + F is used.
@@ -202,19 +214,20 @@ void FullscreenKeyboardBrowserTestBase::SendFullscreenShortcutAndWait() {
 // Mac fullscreen is simulated in tests and is performed synchronously with the
 // keyboard events. As a result, content doesn't actually know it has entered
 // fullscreen. For more details, see ScopedFakeNSWindowFullscreen.
-// TODO(crbug.com/837438): Remove this once ScopedFakeNSWindowFullscreen fires
+// TODO(crbug.com/41385780): Remove this once ScopedFakeNSWindowFullscreen fires
 // OnFullscreenStateChanged.
 #if !BUILDFLAG(IS_MAC)
-  observer.Wait();
+  waiter.Wait();
 #endif
 }
 
 void FullscreenKeyboardBrowserTestBase::SendJsFullscreenShortcutAndWait() {
-  FullscreenNotificationObserver observer(GetActiveBrowser());
+  ui_test_utils::FullscreenWaiter waiter(GetActiveBrowser(),
+                                         {.tab_fullscreen = true});
   ASSERT_TRUE(ui_test_utils::SendKeyPressSync(GetActiveBrowser(), ui::VKEY_S,
                                               false, false, false, false));
   expected_result_ += "KeyS ctrl:false shift:false alt:false meta:false\n";
-  observer.Wait();
+  waiter.Wait();
   ASSERT_TRUE(IsActiveTabFullscreen());
 }
 
@@ -226,10 +239,11 @@ void FullscreenKeyboardBrowserTestBase::SendEscape() {
 
 void FullscreenKeyboardBrowserTestBase::
     SendEscapeAndWaitForExitingFullscreen() {
-  FullscreenNotificationObserver observer(GetActiveBrowser());
+  ui_test_utils::FullscreenWaiter waiter(GetActiveBrowser(),
+                                         {.tab_fullscreen = false});
   ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
       GetActiveBrowser(), ui::VKEY_ESCAPE, false, false, false, false));
-  observer.Wait();
+  waiter.Wait();
   ASSERT_FALSE(IsActiveTabFullscreen());
 }
 
@@ -418,9 +432,9 @@ void FullscreenKeyboardBrowserTestBase::FinishTestAndVerifyResult() {
   EXPECT_TRUE(ui_test_utils::SendKeyPressSync(GetActiveBrowser(), ui::VKEY_X,
                                               false, false, false, false));
   expected_result_ += "KeyX ctrl:false shift:false alt:false meta:false";
-  std::string result;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
-      GetActiveWebContents(), "getKeyEventReport();", &result));
+  std::string result =
+      content::EvalJs(GetActiveWebContents(), "getKeyEventReport();")
+          .ExtractString();
   NormalizeMetaKeyForMacOS(&result);
   NormalizeMetaKeyForMacOS(&expected_result_);
   base::TrimWhitespaceASCII(result, base::TRIM_ALL, &result);

@@ -6,11 +6,11 @@
 
 #include <algorithm>
 #include <set>
+#include <vector>
 
-#include "base/bind.h"
 #include "base/containers/adapters.h"
-#include "base/containers/cxx20_erase.h"
 #include "base/file_version_info.h"
+#include "base/functional/bind.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -33,16 +33,18 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/content_constants.h"
+#include "content/public/common/zygote/zygote_buildflags.h"
 #include "extensions/buildflags/buildflags.h"
 #include "services/resource_coordinator/public/cpp/memory_instrumentation/global_memory_dump.h"
 #include "services/resource_coordinator/public/cpp/memory_instrumentation/memory_instrumentation.h"
 #include "ui/base/l10n/l10n_util.h"
 
-#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_ANDROID)
+#if BUILDFLAG(USE_ZYGOTE)
 #include "content/public/browser/zygote_host/zygote_host_linux.h"
 #endif
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
+#include "chrome/browser/extensions/chrome_content_browser_client_extensions_part.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/browser/process_map.h"
@@ -82,7 +84,8 @@ void UpdateProcessTypeAndTitles(
 
   // The rest of this block will happen only once per WebContents.
   GURL page_url = contents->GetLastCommittedURL();
-  bool is_webui = rfh->GetEnabledBindings() & content::BINDINGS_POLICY_WEB_UI;
+  bool is_webui =
+      rfh->GetEnabledBindings().Has(content::BindingsPolicyValue::kWebUi);
 
   if (is_webui) {
     process.renderer_type = ProcessMemoryInformation::RENDERER_CHROME;
@@ -133,7 +136,6 @@ std::string ProcessMemoryInformation::GetRendererTypeNameInEnglish(
     case RENDERER_UNKNOWN:
     default:
       NOTREACHED() << "Unknown renderer process type!";
-      return "Unknown";
   }
 }
 
@@ -158,14 +160,14 @@ ProcessMemoryInformation::ProcessMemoryInformation()
 ProcessMemoryInformation::ProcessMemoryInformation(
     const ProcessMemoryInformation& other) = default;
 
-ProcessMemoryInformation::~ProcessMemoryInformation() {}
+ProcessMemoryInformation::~ProcessMemoryInformation() = default;
 
 bool ProcessMemoryInformation::operator<(
     const ProcessMemoryInformation& rhs) const {
   return private_memory_footprint_kb < rhs.private_memory_footprint_kb;
 }
 
-ProcessData::ProcessData() {}
+ProcessData::ProcessData() = default;
 
 ProcessData::ProcessData(const ProcessData& rhs)
     : name(rhs.name),
@@ -173,7 +175,7 @@ ProcessData::ProcessData(const ProcessData& rhs)
       processes(rhs.processes) {
 }
 
-ProcessData::~ProcessData() {}
+ProcessData::~ProcessData() = default;
 
 ProcessData& ProcessData::operator=(const ProcessData& rhs) {
   name = rhs.name;
@@ -216,7 +218,7 @@ void MemoryDetails::StartFetch() {
       base::BindOnce(&MemoryDetails::CollectProcessData, this, child_info));
 }
 
-MemoryDetails::~MemoryDetails() {}
+MemoryDetails::~MemoryDetails() = default;
 
 std::string MemoryDetails::ToLogString(bool include_tab_title) {
   std::string log;
@@ -291,24 +293,28 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
     // Determine if this is an extension process.
     bool process_is_for_extensions = false;
     const extensions::ExtensionSet* extension_set = nullptr;
-    if (render_process_host) {
+    if (render_process_host &&
+        !extensions::ChromeContentBrowserClientExtensionsPart::
+            AreExtensionsDisabledForProfile(
+                render_process_host->GetBrowserContext())) {
       content::BrowserContext* context =
           render_process_host->GetBrowserContext();
       extensions::ExtensionRegistry* extension_registry =
           extensions::ExtensionRegistry::Get(context);
+      DCHECK(extension_registry);
       extension_set = &extension_registry->enabled_extensions();
       extensions::ProcessMap* process_map =
           extensions::ProcessMap::Get(context);
-      int rph_id = render_process_host->GetID();
+      DCHECK(process_map);
+      int rph_id = render_process_host->GetDeprecatedID();
       process_is_for_extensions = process_map->Contains(rph_id);
 
-      // For our purposes, don't count processes containing only hosted apps
-      // as extension processes. See also: crbug.com/102533.
-      for (auto& extension_id : process_map->GetExtensionsInProcess(rph_id)) {
-        const Extension* extension = extension_set->GetByID(extension_id);
-        if (extension && !extension->is_hosted_app()) {
+      // For our purposes, don't count processes running hosted apps as
+      // extension processes. See also: crbug.com/102533.
+      if (const Extension* extension =
+              process_map->GetEnabledExtensionByProcessID(rph_id)) {
+        if (!extension->is_hosted_app()) {
           process.renderer_type = ProcessMemoryInformation::RENDERER_EXTENSION;
-          break;
         }
       }
     }
@@ -319,14 +325,14 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
       // instances whose primary main RenderFrameHosts are in `process`. Refine
       // our determination of the `process.renderer_type`, and record the page
       // titles.
-      render_process_host->ForEachRenderFrameHost(base::BindRepeating(
-          &UpdateProcessTypeAndTitles,
+      render_process_host->ForEachRenderFrameHost(
+          [&](content::RenderFrameHost* frame) {
+            UpdateProcessTypeAndTitles(
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-          process_is_for_extensions ? extension_set : nullptr,
+                process_is_for_extensions ? extension_set : nullptr,
 #endif
-          // It is safe to use `std::ref` here, since `process` outlives this
-          // callback.
-          std::ref(process)));
+                process, frame);
+          });
     }
 
 #if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_ANDROID)
@@ -341,7 +347,7 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
     return process.process_type == content::PROCESS_TYPE_UNKNOWN;
   };
   auto& vector = chrome_browser->processes;
-  base::EraseIf(vector, is_unknown);
+  std::erase_if(vector, is_unknown);
 
   // Grab a memory dump for all processes.
   memory_instrumentation::MemoryInstrumentation::GetInstance()

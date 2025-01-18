@@ -6,19 +6,17 @@ package org.chromium.base;
 
 import android.os.StrictMode;
 
-import org.chromium.base.annotations.CalledByNative;
-import org.chromium.base.annotations.JNINamespace;
-import org.chromium.build.annotations.MainDex;
+import org.jni_zero.CalledByNative;
+import org.jni_zero.JNINamespace;
+
+import org.chromium.build.annotations.NullMarked;
 
 import java.util.TimeZone;
 
+@NullMarked
 @JNINamespace("base::android")
-@MainDex
 class TimezoneUtils {
-    /**
-     * Guards this class from being instantiated.
-     */
-
+    /** Guards this class from being instantiated. */
     private TimezoneUtils() {}
 
     /**

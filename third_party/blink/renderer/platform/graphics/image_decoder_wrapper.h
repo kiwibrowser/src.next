@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,14 +21,10 @@ class ImageDecoderWrapper {
  public:
   ImageDecoderWrapper(ImageFrameGenerator* generator,
                       SegmentReader* data,
-                      const SkISize& scaled_size,
-                      ImageDecoder::AlphaOption alpha_option,
+                      const SkPixmap& pixmap,
                       ColorBehavior decoder_color_behavior,
-                      ImageDecoder::HighBitDepthDecodingOption decoding_option,
+                      cc::AuxImage aux_image,
                       wtf_size_t index,
-                      const SkImageInfo& info,
-                      void* pixels,
-                      size_t row_bytes,
                       bool all_data_received,
                       cc::PaintImage::GeneratorClientId client_id);
   ~ImageDecoderWrapper();
@@ -54,14 +50,10 @@ class ImageDecoderWrapper {
 
   const ImageFrameGenerator* const generator_;
   SegmentReader* data_;
-  const SkISize scaled_size_;
-  const ImageDecoder::AlphaOption alpha_option_;
+  SkPixmap pixmap_;
   const ColorBehavior decoder_color_behavior_;
-  const ImageDecoder::HighBitDepthDecodingOption decoding_option_;
+  const cc::AuxImage aux_image_;
   const wtf_size_t frame_index_;
-  const SkImageInfo info_;
-  void* pixels_;
-  const size_t row_bytes_;
   const bool all_data_received_;
   const cc::PaintImage::GeneratorClientId client_id_;
 

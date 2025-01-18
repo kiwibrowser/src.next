@@ -30,7 +30,6 @@
 #include "third_party/blink/renderer/core/dom/attribute.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
-#include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -41,14 +40,20 @@ class ElementDataCache final : public GarbageCollected<ElementDataCache> {
  public:
   ElementDataCache();
 
+  // NOTE: Since the presentation attribute depends on the tag name,
+  // and that is part of ShareableElementData, we need to include
+  // tag_name in the cache key.
   ShareableElementData* CachedShareableElementDataWithAttributes(
+      const StringImpl* tag_name,
       const Vector<Attribute, kAttributePrealloc>&);
 
   void Trace(Visitor*) const;
 
  private:
-  typedef HeapHashMap<unsigned, Member<ShareableElementData>, AlreadyHashed>
-      ShareableElementDataCache;
+  using ShareableElementDataCache =
+      HeapHashMap<unsigned,
+                  std::pair<const StringImpl*, Member<ShareableElementData>>,
+                  AlreadyHashedTraits>;
   ShareableElementDataCache shareable_element_data_cache_;
 };
 

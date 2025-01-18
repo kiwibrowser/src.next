@@ -13,19 +13,18 @@
 #include <string>
 
 #include "base/atomicops.h"
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/location.h"
 #include "base/memory/memory_pressure_listener.h"
 #include "base/memory/weak_ptr.h"
-#include "base/sequence_checker.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/viz/host/gpu_host_impl.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/browser_child_process_host_delegate.h"
 #include "content/public/browser/gpu_data_manager.h"
-#include "gpu/command_buffer/common/activity_flags.h"
 #include "gpu/command_buffer/common/constants.h"
+#include "gpu/command_buffer/common/shm_count.h"
 #include "gpu/config/gpu_feature_info.h"
 #include "gpu/config/gpu_info.h"
 #include "gpu/config/gpu_mode.h"
@@ -51,6 +50,7 @@ namespace content {
 class BrowserChildProcessHostImpl;
 
 #if BUILDFLAG(IS_MAC)
+class BrowserChildProcessBackgroundedBridge;
 class CATransactionGPUCoordinator;
 #endif
 
@@ -75,11 +75,11 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
   // Returns whether there is an active GPU process or not.
   static void GetHasGpuProcess(base::OnceCallback<void(bool)> callback);
 
-  // Helper function to run a callback on the IO thread. The callback receives
+  // Helper function to run a callback on the UI thread. The callback receives
   // the appropriate GpuProcessHost instance. Note that the callback can be
   // called with a null host (e.g. when |force_create| is false, and no
   // GpuProcessHost instance exists).
-  CONTENT_EXPORT static void CallOnIO(
+  CONTENT_EXPORT static void CallOnUI(
       const base::Location& location,
       GpuProcessKind kind,
       bool force_create,
@@ -128,6 +128,13 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
 
   viz::GpuHostImpl* gpu_host() { return gpu_host_.get(); }
 
+#if BUILDFLAG(IS_MAC)
+  BrowserChildProcessBackgroundedBridge*
+  browser_child_process_backgrounded_bridge_for_testing() {
+    return browser_child_process_backgrounded_bridge_.get();
+  }
+#endif
+
  private:
   enum class GpuTerminationOrigin {
     kUnknownOrigin = 0,
@@ -159,8 +166,8 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
   void DidInitialize(
       const gpu::GPUInfo& gpu_info,
       const gpu::GpuFeatureInfo& gpu_feature_info,
-      const absl::optional<gpu::GPUInfo>& gpu_info_for_hardware_gpu,
-      const absl::optional<gpu::GpuFeatureInfo>&
+      const std::optional<gpu::GPUInfo>& gpu_info_for_hardware_gpu,
+      const std::optional<gpu::GpuFeatureInfo>&
           gpu_feature_info_for_hardware_gpu,
       const gfx::GpuExtraInfo& gpu_extra_info) override;
   void DidFailInitialize() override;
@@ -171,6 +178,9 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
   void DidUpdateOverlayInfo(const gpu::OverlayInfo& overlay_info) override;
   void DidUpdateDXGIInfo(gfx::mojom::DXGIInfoPtr dxgi_info) override;
 #endif
+  std::string GetIsolationKey(
+      int32_t process_id,
+      const blink::WebGPUExecutionContextToken& token) override;
   void BlockDomainsFrom3DAPIs(const std::set<GURL>& urls,
                               gpu::DomainGuilt guilt) override;
   void DisableGpuCompositing() override;
@@ -186,7 +196,7 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
   void BindInterface(const std::string& interface_name,
                      mojo::ScopedMessagePipeHandle interface_pipe) override;
   void BindHostReceiver(mojo::GenericPendingReceiver generic_receiver) override;
-#if defined(USE_OZONE)
+#if BUILDFLAG(IS_OZONE)
   void TerminateGpuProcess(const std::string& message) override;
 #endif
 
@@ -198,6 +208,7 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
 
   // Update GPU crash counters.  Disable GPU if crash limit is reached.
   void RecordProcessCrash();
+  int GetFallbackCrashLimit() const;
 
   void RunServiceImpl(mojo::GenericPendingReceiver receiver);
 
@@ -251,6 +262,11 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
 
 #if BUILDFLAG(IS_MAC)
   scoped_refptr<CATransactionGPUCoordinator> ca_transaction_gpu_coordinator_;
+
+  // Ensures the backgrounded state of the GPU process mirrors the backgrounded
+  // state of the browser process.
+  std::unique_ptr<BrowserChildProcessBackgroundedBridge>
+      browser_child_process_backgrounded_bridge_;
 #endif
 
   // Track the URLs of the pages which have live offscreen contexts,
@@ -267,8 +283,6 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
 #endif
 
   std::unique_ptr<viz::GpuHostImpl> gpu_host_;
-
-  SEQUENCE_CHECKER(sequence_checker_);
 
   base::WeakPtrFactory<GpuProcessHost> weak_ptr_factory_{this};
 };

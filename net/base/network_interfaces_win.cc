@@ -2,15 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "net/base/network_interfaces_win.h"
 
 #include <algorithm>
 #include <memory>
+#include <string_view>
 
+#include "base/containers/heap_array.h"
 #include "base/files/file_path.h"
 #include "base/lazy_instance.h"
 #include "base/strings/escape.h"
-#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -152,7 +158,7 @@ bool GetNetworkListImpl(NetworkInterfaceList* networks,
       continue;
     }
 
-    absl::optional<Eui48MacAddress> mac_address;
+    std::optional<Eui48MacAddress> mac_address;
     mac_address.emplace();
     if (adapter->PhysicalAddressLength == mac_address->size()) {
       std::copy_n(reinterpret_cast<const uint8_t*>(adapter->PhysicalAddress),
@@ -221,7 +227,7 @@ bool GetNetworkList(NetworkInterfaceList* networks, int policy) {
   // Initial buffer allocated on stack.
   char initial_buf[INITIAL_BUFFER_SIZE];
   // Dynamic buffer in case initial buffer isn't large enough.
-  std::unique_ptr<char[]> buf;
+  base::HeapArray<char> buf;
 
   IP_ADAPTER_ADDRESSES* adapters = nullptr;
   {
@@ -239,8 +245,8 @@ bool GetNetworkList(NetworkInterfaceList* networks, int policy) {
     for (int tries = 1; result == ERROR_BUFFER_OVERFLOW &&
                         tries < MAX_GETADAPTERSADDRESSES_TRIES;
          ++tries) {
-      buf = std::make_unique<char[]>(len);
-      adapters = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buf.get());
+      buf = base::HeapArray<char>::Uninit(len);
+      adapters = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buf.data());
       result = GetAdaptersAddresses(AF_UNSPEC, flags, nullptr, adapters, &len);
     }
 
@@ -254,38 +260,6 @@ bool GetNetworkList(NetworkInterfaceList* networks, int policy) {
   }
 
   return internal::GetNetworkListImpl(networks, policy, adapters);
-}
-
-WifiPHYLayerProtocol GetWifiPHYLayerProtocol() {
-  auto conn_info = GetConnectionAttributes();
-
-  if (!conn_info.get())
-    return WIFI_PHY_LAYER_PROTOCOL_NONE;
-
-  switch (conn_info->wlanAssociationAttributes.dot11PhyType) {
-    case dot11_phy_type_fhss:
-      return WIFI_PHY_LAYER_PROTOCOL_ANCIENT;
-    case dot11_phy_type_dsss:
-      return WIFI_PHY_LAYER_PROTOCOL_B;
-    case dot11_phy_type_irbaseband:
-      return WIFI_PHY_LAYER_PROTOCOL_ANCIENT;
-    case dot11_phy_type_ofdm:
-      return WIFI_PHY_LAYER_PROTOCOL_A;
-    case dot11_phy_type_hrdsss:
-      return WIFI_PHY_LAYER_PROTOCOL_B;
-    case dot11_phy_type_erp:
-      return WIFI_PHY_LAYER_PROTOCOL_G;
-    case dot11_phy_type_ht:
-      return WIFI_PHY_LAYER_PROTOCOL_N;
-    case dot11_phy_type_vht:
-      return WIFI_PHY_LAYER_PROTOCOL_AC;
-    case dot11_phy_type_dmg:
-      return WIFI_PHY_LAYER_PROTOCOL_AD;
-    case dot11_phy_type_he:
-      return WIFI_PHY_LAYER_PROTOCOL_AX;
-    default:
-      return WIFI_PHY_LAYER_PROTOCOL_UNKNOWN;
-  }
 }
 
 // Note: There is no need to explicitly set the options back

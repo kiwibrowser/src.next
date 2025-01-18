@@ -5,12 +5,9 @@
 #ifndef EXTENSIONS_BROWSER_EXTENSION_FILE_TASK_RUNNER_H_
 #define EXTENSIONS_BROWSER_EXTENSION_FILE_TASK_RUNNER_H_
 
-#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/task_traits.h"
-
-namespace base {
-class SequencedTaskRunner;
-}
 
 namespace extensions {
 

@@ -57,11 +57,15 @@ class ElementData : public GarbageCollected<ElementData> {
   void FinalizeGarbageCollectedObject();
 
   void ClearClass() const { class_names_.Clear(); }
-  void SetClass(const AtomicString& class_name, bool should_fold_case) const {
-    AtomicString lower_class_name;
-    if (should_fold_case && !class_name.IsLowerASCII())
-      lower_class_name = class_name.LowerASCII();
-    class_names_.Set(lower_class_name ? lower_class_name : class_name);
+  void SetClass(const AtomicString& class_names) const {
+    DCHECK(!class_names.empty());
+    class_names_.Set(class_names);
+  }
+  void SetClassFoldingCase(const AtomicString& class_names) const {
+    if (class_names.IsLowerASCII()) {
+      return SetClass(class_names);
+    }
+    return SetClass(class_names.LowerASCII());
   }
   const SpaceSplitString& ClassNames() const { return class_names_; }
 
@@ -74,7 +78,9 @@ class ElementData : public GarbageCollected<ElementData> {
 
   const CSSPropertyValueSet* InlineStyle() const { return inline_style_.Get(); }
 
-  const CSSPropertyValueSet* PresentationAttributeStyle() const;
+  const CSSPropertyValueSet* PresentationAttributeStyle() const {
+    return presentation_attribute_style_.Get();
+  }
 
   AttributeCollection Attributes() const;
 
@@ -132,6 +138,7 @@ class ElementData : public GarbageCollected<ElementData> {
   BitField bit_field_;
 
   mutable Member<CSSPropertyValueSet> inline_style_;
+  mutable Member<CSSPropertyValueSet> presentation_attribute_style_;
   mutable SpaceSplitString class_names_;
   mutable AtomicString id_for_style_resolution_;
 
@@ -205,11 +212,6 @@ class UniqueElementData final : public ElementData {
 
   void TraceAfterDispatch(blink::Visitor*) const;
 
-  // FIXME: We might want to support sharing element data for elements with
-  // presentation attribute style. Lots of table cells likely have the same
-  // attributes. Most modern pages don't use presentation attributes though
-  // so this might not make sense.
-  mutable Member<CSSPropertyValueSet> presentation_attribute_style_;
   AttributeVector attribute_vector_;
 };
 
@@ -219,13 +221,6 @@ struct DowncastTraits<UniqueElementData> {
     return data.bit_field_.get<ElementData::IsUniqueFlag>();
   }
 };
-
-inline const CSSPropertyValueSet* ElementData::PresentationAttributeStyle()
-    const {
-  if (!bit_field_.get<IsUniqueFlag>())
-    return nullptr;
-  return To<UniqueElementData>(this)->presentation_attribute_style_.Get();
-}
 
 inline AttributeCollection ElementData::Attributes() const {
   if (auto* unique_element_data = DynamicTo<UniqueElementData>(this))

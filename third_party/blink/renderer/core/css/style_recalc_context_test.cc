@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,17 +10,10 @@
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
-#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 
 namespace blink {
 
-class StyleRecalcContextTest : public PageTestBase,
-                               private ScopedCSSContainerQueriesForTest,
-                               private ScopedLayoutNGForTest {
- public:
-  StyleRecalcContextTest()
-      : ScopedCSSContainerQueriesForTest(true), ScopedLayoutNGForTest(true) {}
-};
+class StyleRecalcContextTest : public PageTestBase {};
 
 TEST_F(StyleRecalcContextTest, FromAncestors) {
   SetBodyInnerHTML(R"HTML(
@@ -50,18 +43,26 @@ TEST_F(StyleRecalcContextTest, FromAncestors) {
     </div>
   )HTML");
 
-  auto* outer = GetDocument().getElementById("outer");
-  auto* inner = GetDocument().getElementById("inner");
-  auto* display_contents = GetDocument().getElementById("display_contents");
+  auto* outer = GetDocument().getElementById(AtomicString("outer"));
+  auto* inner = GetDocument().getElementById(AtomicString("inner"));
+  auto* display_contents =
+      GetDocument().getElementById(AtomicString("display_contents"));
   auto* in_display_contents =
-      GetDocument().getElementById("in_display_contents");
-  auto* display_none = GetDocument().getElementById("display_none");
-  auto* in_display_none = GetDocument().getElementById("in_display_none");
-  auto* inline_container = GetDocument().getElementById("inline_container");
+      GetDocument().getElementById(AtomicString("in_display_contents"));
+  auto* display_none =
+      GetDocument().getElementById(AtomicString("display_none"));
+  auto* in_display_none =
+      GetDocument().getElementById(AtomicString("in_display_none"));
+  auto* inline_container =
+      GetDocument().getElementById(AtomicString("inline_container"));
   auto* in_inline_container =
-      GetDocument().getElementById("in_inline_container");
-  auto* before = GetDocument().getElementById("before");
+      GetDocument().getElementById(AtomicString("in_inline_container"));
+  auto* before = GetDocument().getElementById(AtomicString("before"));
   auto* before_pseudo = before->GetPseudoElement(kPseudoIdBefore);
+
+  // It is not valid to call ::FromInclusiveAncestors on an element
+  // without a ComputedStyle.
+  EXPECT_TRUE(in_display_none->EnsureComputedStyle());
 
   EXPECT_FALSE(StyleRecalcContext::FromAncestors(*outer).container);
   EXPECT_EQ(StyleRecalcContext::FromInclusiveAncestors(*outer).container,
@@ -85,13 +86,13 @@ TEST_F(StyleRecalcContextTest, FromAncestors) {
 
   EXPECT_EQ(StyleRecalcContext::FromAncestors(*display_none).container, outer);
   EXPECT_EQ(StyleRecalcContext::FromInclusiveAncestors(*display_none).container,
-            outer);
+            display_none);
 
   EXPECT_EQ(StyleRecalcContext::FromAncestors(*in_display_none).container,
-            outer);
+            display_none);
   EXPECT_EQ(
       StyleRecalcContext::FromInclusiveAncestors(*in_display_none).container,
-      outer);
+      in_display_none);
 
   EXPECT_EQ(StyleRecalcContext::FromAncestors(*inline_container).container,
             outer);
@@ -116,12 +117,12 @@ TEST_F(StyleRecalcContextTest, FromAncestors) {
       before);
 }
 
-TEST_F(StyleRecalcContextTest, FromAncestors_ShadowIncluding) {
-  GetDocument().body()->setInnerHTMLWithDeclarativeShadowDOMForTesting(R"HTML(
+TEST_F(StyleRecalcContextTest, FromAncestors_FlatTree) {
+  GetDocument().body()->setHTMLUnsafe(R"HTML(
     <div id="outer_host" style="container-type:size">
-      <template shadowroot="open">
+      <template shadowrootmode="open">
         <div id="inner_host" style="container-type:size">
-          <template shadowroot="open">
+          <template shadowrootmode="open">
             <slot id="inner_slot" style="container-type:size"></slot>
           </template>
           <div id="inner_child" style="container-type:size"></div>
@@ -134,21 +135,21 @@ TEST_F(StyleRecalcContextTest, FromAncestors_ShadowIncluding) {
 
   UpdateAllLifecyclePhasesForTest();
 
-  auto* outer_host = GetDocument().getElementById("outer_host");
-  auto* outer_child = GetDocument().getElementById("outer_child");
+  auto* outer_host = GetDocument().getElementById(AtomicString("outer_host"));
+  auto* outer_child = GetDocument().getElementById(AtomicString("outer_child"));
   auto* outer_root = outer_host->GetShadowRoot();
-  auto* outer_slot = outer_root->getElementById("outer_slot");
-  auto* inner_host = outer_root->getElementById("inner_host");
-  auto* inner_child = outer_root->getElementById("inner_child");
+  auto* outer_slot = outer_root->getElementById(AtomicString("outer_slot"));
+  auto* inner_host = outer_root->getElementById(AtomicString("inner_host"));
+  auto* inner_child = outer_root->getElementById(AtomicString("inner_child"));
   auto* inner_root = inner_host->GetShadowRoot();
-  auto* inner_slot = inner_root->getElementById("inner_slot");
+  auto* inner_slot = inner_root->getElementById(AtomicString("inner_slot"));
 
   EXPECT_FALSE(StyleRecalcContext::FromAncestors(*outer_host).container);
   EXPECT_EQ(StyleRecalcContext::FromInclusiveAncestors(*outer_host).container,
             outer_host);
 
   EXPECT_EQ(StyleRecalcContext::FromAncestors(*outer_child).container,
-            outer_host);
+            outer_slot);
   EXPECT_EQ(StyleRecalcContext::FromInclusiveAncestors(*outer_child).container,
             outer_child);
 
@@ -163,7 +164,7 @@ TEST_F(StyleRecalcContextTest, FromAncestors_ShadowIncluding) {
             inner_host);
 
   EXPECT_EQ(StyleRecalcContext::FromAncestors(*inner_child).container,
-            inner_host);
+            inner_slot);
   EXPECT_EQ(StyleRecalcContext::FromInclusiveAncestors(*inner_child).container,
             inner_child);
 

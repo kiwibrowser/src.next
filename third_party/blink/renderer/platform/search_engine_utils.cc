@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@ bool IsKnownSearchEngine(const String& url) {
     return false;
   }
 
-  return SearchEngineUtils::GetEngineType(gurl) > 0;
+  return search_engine_utils::GetEngineType(gurl) > 0;
 }
 
 }  // namespace blink

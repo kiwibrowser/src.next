@@ -34,16 +34,11 @@ class BrowserContextKeyedAPI : public KeyedService {
   static const bool kServiceRedirectedInIncognito = false;
   static const bool kServiceHasOwnInstanceInIncognito = false;
 
-  // The next two flags allows to force the selection for the System and Guest
-  // Profiles despite the experiments being activated. Setting the value to true
-  // in subclasses to force the selection.
-  //
-  // Part of experiment to remove System Profile selection by default with
-  // `kSystemProfileSelectionDefaultNone`.
-  static const bool kForceSelectionForSystemProfile = false;
-  // Part of experiment to remove Guest Profile selection by default with
-  // `kGuestProfileSelectionDefaultNone`.
-  static const bool kForceSelectionForGuestProfile = false;
+  // This value forces the Guest profile to set its `ProfileSelection` with the
+  // same value set for the Regular Profile.
+  // If the value is false, then `ProfileSelection::kNone` will be used, and the
+  // service will not be created for Guest profiles.
+  static const bool kServiceIsCreatedInGuestMode = true;
 
   // If set to false, don't start the service at BrowserContext creation time.
   // (The default differs from the BrowserContextKeyedServiceFactory default,
@@ -100,8 +95,10 @@ template <typename T>
 struct BrowserContextFactoryDependencies {
   static void DeclareFactoryDependencies(
       BrowserContextKeyedAPIFactory<T>* factory) {
-    factory->DependsOn(
-        ExtensionsBrowserClient::Get()->GetExtensionSystemFactory());
+    if (ExtensionsBrowserClient::Get()) {
+      factory->DependsOn(
+          ExtensionsBrowserClient::Get()->GetExtensionSystemFactory());
+    }
   }
 };
 
@@ -111,6 +108,7 @@ struct BrowserContextFactoryDependencies {
 template <typename T>
 class BrowserContextKeyedAPIFactory : public BrowserContextKeyedServiceFactory {
  public:
+  using PassKey = base::PassKey<BrowserContextKeyedAPIFactory<T>>;
   static T* Get(content::BrowserContext* context) {
     return static_cast<T*>(
         T::GetFactoryInstance()->GetServiceForBrowserContext(context, true));
@@ -145,31 +143,31 @@ class BrowserContextKeyedAPIFactory : public BrowserContextKeyedServiceFactory {
  private:
   friend struct BrowserContextFactoryDependencies<T>;
 
-  // BrowserContextKeyedServiceFactory implementation.
-  KeyedService* BuildServiceInstanceFor(
+  std::unique_ptr<KeyedService> BuildServiceInstanceForBrowserContext(
       content::BrowserContext* context) const override {
-    return new T(context);
+    return std::make_unique<T>(context);
   }
 
   // BrowserContextKeyedServiceFactory implementation.
   // These can be effectively overridden with template specializations.
   content::BrowserContext* GetBrowserContextToUse(
       content::BrowserContext* context) const override {
-    if (T::kServiceRedirectedInIncognito) {
-      return ExtensionsBrowserClient::Get()->GetRedirectedContextInIncognito(
-          context, T::kForceSelectionForGuestProfile,
-          T::kForceSelectionForSystemProfile);
+    // The GetContext...() implementations below treat guest sessions like
+    // normal ones, so explicitly exclude guest sessions here if necessary.
+    auto* const client = ExtensionsBrowserClient::Get();
+    if constexpr (!T::kServiceIsCreatedInGuestMode) {
+      if (client->IsGuestSession(context)) {
+        return nullptr;
+      }
     }
 
-    if (T::kServiceHasOwnInstanceInIncognito) {
-      return ExtensionsBrowserClient::Get()->GetContextForRegularAndIncognito(
-          context, T::kForceSelectionForGuestProfile,
-          T::kForceSelectionForSystemProfile);
+    if constexpr (T::kServiceRedirectedInIncognito) {
+      return client->GetContextRedirectedToOriginal(context);
+    } else if constexpr (T::kServiceHasOwnInstanceInIncognito) {
+      return client->GetContextOwnInstance(context);
+    } else {
+      return client->GetContextForOriginalOnly(context);
     }
-
-    return ExtensionsBrowserClient::Get()->GetRegularProfile(
-        context, T::kForceSelectionForGuestProfile,
-        T::kForceSelectionForSystemProfile);
   }
 
   bool ServiceIsCreatedWithBrowserContext() const override {

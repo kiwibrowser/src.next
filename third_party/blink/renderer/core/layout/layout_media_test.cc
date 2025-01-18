@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,6 +52,31 @@ TEST_F(LayoutMediaTest, DisallowFloatingChild) {
   )HTML");
 
   EXPECT_FALSE(GetLayoutObjectByElementId("video")->SlowFirstChild());
+}
+
+// crbug.com/1379779
+TEST_F(LayoutMediaTest, BlockifyInlineFlex) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      ::-webkit-media-controls { display: inline-flex; }
+    </style>
+    <video id='video'></video>
+  )HTML");
+
+  LayoutObject* child_box =
+      GetLayoutObjectByElementId("video")->SlowFirstChild();
+  EXPECT_FALSE(child_box->IsInline());
+}
+
+TEST_F(LayoutMediaTest, DisallowContainerBeyondMedia) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      ::-webkit-media-controls { contain: none; }
+      ::-webkit-media-controls-overlay-enclosure { position: fixed; }
+    </style>
+    <video controls></video>
+  )HTML");
+  // Pass if LayoutObject::AssertLaidOut() didn't fail.
 }
 
 }  // namespace blink

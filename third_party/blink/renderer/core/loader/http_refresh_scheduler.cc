@@ -60,7 +60,6 @@ static ClientNavigationReason ToReason(
       break;
   }
   NOTREACHED();
-  return ClientNavigationReason::kMetaTagRefresh;
 }
 
 HttpRefreshScheduler::HttpRefreshScheduler(Document* document)
@@ -105,7 +104,7 @@ void HttpRefreshScheduler::NavigateTask() {
   FrameLoadRequest request(document_->domWindow(),
                            ResourceRequest(refresh->url));
   request.SetInputStartTime(refresh->input_timestamp);
-  request.SetClientRedirectReason(refresh->reason);
+  request.SetClientNavigationReason(refresh->reason);
 
   WebFrameLoadType load_type = WebFrameLoadType::kStandard;
   // If the urls match, process the refresh as a reload. However, if an initial
@@ -138,7 +137,8 @@ void HttpRefreshScheduler::MaybeStartTimer() {
   // task handle is destroyed on the dtor of this HttpRefreshScheduler.
   navigate_task_handle_ = PostDelayedCancellableTask(
       *document_->GetTaskRunner(TaskType::kInternalLoading), FROM_HERE,
-      WTF::Bind(&HttpRefreshScheduler::NavigateTask, WrapWeakPersistent(this)),
+      WTF::BindOnce(&HttpRefreshScheduler::NavigateTask,
+                    WrapWeakPersistent(this)),
       refresh_->delay);
 
   probe::FrameScheduledNavigation(document_->GetFrame(), refresh_->url,

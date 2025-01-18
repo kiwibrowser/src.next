@@ -34,7 +34,7 @@
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
-#include "third_party/blink/renderer/core/paint/paint_timing.h"
+#include "third_party/blink/renderer/core/paint/timing/paint_timing.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
@@ -101,9 +101,9 @@ void ProgressTracker::ProgressCompleted() {
   frame_->SetIsLoading(false);
   SendFinalProgress();
   Reset();
+  probe::FrameStoppedLoading(frame_);
   GetLocalFrameClient()->DidStopLoading();
   frame_->UpdateFaviconURL();
-  probe::FrameStoppedLoading(frame_);
 }
 
 void ProgressTracker::FinishedParsing() {
@@ -207,7 +207,7 @@ void ProgressTracker::MaybeSendProgress() {
   if (progress_value_ < last_notified_progress_value_)
     return;
 
-  double now = base::Time::Now().ToDoubleT();
+  double now = base::Time::Now().InSecondsFSinceUnixEpoch();
   double notified_progress_time_delta = now - last_notified_progress_time_;
 
   double notification_progress_delta =

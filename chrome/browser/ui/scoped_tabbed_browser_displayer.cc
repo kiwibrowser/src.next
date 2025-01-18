@@ -10,26 +10,25 @@
 
 namespace chrome {
 
-ScopedTabbedBrowserDisplayer::ScopedTabbedBrowserDisplayer(
-    Profile* profile,
-    bool should_trigger_session_restore) {
+ScopedTabbedBrowserDisplayer::ScopedTabbedBrowserDisplayer(Profile* profile) {
   browser_ = FindTabbedBrowser(profile, false);
   if (!browser_ && Browser::GetCreationStatusForProfile(profile) ==
                        Browser::CreationStatus::kOk) {
     Browser::CreateParams params(profile, /*user_gesture=*/true);
-    params.should_trigger_session_restore = should_trigger_session_restore;
     browser_ = Browser::Create(params);
   }
 }
 
 ScopedTabbedBrowserDisplayer::~ScopedTabbedBrowserDisplayer() {
-  if (!browser_)
+  if (!browser_) {
     return;
+  }
 
   // Make sure to restore the window, since window()->Show() will not unminimize
   // it.
-  if (browser_->window()->IsMinimized())
+  if (browser_->window()->IsMinimized()) {
     browser_->window()->Restore();
+  }
 
   browser_->window()->Show();
 }

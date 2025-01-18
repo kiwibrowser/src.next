@@ -2,16 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "net/http/http_auth_handler_mock.h"
 
 #include <utility>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/task/single_thread_task_runner.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "net/base/net_errors.h"
 #include "net/dns/host_resolver.h"
 #include "net/http/http_auth_challenge_tokenizer.h"
@@ -65,7 +69,7 @@ bool HttpAuthHandlerMock::AllowsExplicitCredentials() {
 bool HttpAuthHandlerMock::Init(
     HttpAuthChallengeTokenizer* challenge,
     const SSLInfo& ssl_info,
-    const NetworkIsolationKey& network_isolation_key) {
+    const NetworkAnonymizationKey& network_anonymization_key) {
   EXPECT_EQ(State::WAIT_FOR_INIT, state_);
   state_ = State::WAIT_FOR_GENERATE_AUTH_TOKEN;
   auth_scheme_ = HttpAuth::AUTH_SCHEME_MOCK;
@@ -87,7 +91,7 @@ int HttpAuthHandlerMock::GenerateAuthTokenImpl(
     EXPECT_TRUE(auth_token_ == nullptr);
     callback_ = std::move(callback);
     auth_token_ = auth_token;
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE, base::BindOnce(&HttpAuthHandlerMock::OnGenerateAuthToken,
                                   weak_factory_.GetWeakPtr()));
     state_ = State::TOKEN_PENDING;
@@ -155,7 +159,7 @@ int HttpAuthHandlerMock::Factory::CreateAuthHandler(
     HttpAuthChallengeTokenizer* challenge,
     HttpAuth::Target target,
     const SSLInfo& ssl_info,
-    const NetworkIsolationKey& network_isolation_key,
+    const NetworkAnonymizationKey& network_anonymization_key,
     const url::SchemeHostPort& scheme_host_port,
     CreateReason reason,
     int nonce_count,
@@ -170,8 +174,8 @@ int HttpAuthHandlerMock::Factory::CreateAuthHandler(
   handlers.erase(handlers.begin());
   if (do_init_from_challenge_ &&
       !tmp_handler->InitFromChallenge(challenge, target, ssl_info,
-                                      network_isolation_key, scheme_host_port,
-                                      net_log)) {
+                                      network_anonymization_key,
+                                      scheme_host_port, net_log)) {
     return ERR_INVALID_RESPONSE;
   }
   handler->swap(tmp_handler);

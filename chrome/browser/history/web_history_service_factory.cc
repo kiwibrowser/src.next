@@ -7,7 +7,7 @@
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/sync/sync_service_factory.h"
 #include "components/history/core/browser/web_history_service.h"
-#include "components/sync/driver/sync_service.h"
+#include "components/sync/service/sync_service.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/storage_partition.h"
 
@@ -16,7 +16,7 @@ namespace {
 // and false otherwise.
 bool IsHistorySyncEnabled(Profile* profile) {
   syncer::SyncService* sync = SyncServiceFactory::GetForProfile(profile);
-  return sync && sync->IsSyncFeatureActive() && !sync->IsLocalSyncEnabled() &&
+  return sync && !sync->IsLocalSyncEnabled() &&
          sync->GetActiveDataTypes().Has(syncer::HISTORY_DELETE_DIRECTIVES);
 }
 
@@ -24,7 +24,8 @@ bool IsHistorySyncEnabled(Profile* profile) {
 
 // static
 WebHistoryServiceFactory* WebHistoryServiceFactory::GetInstance() {
-  return base::Singleton<WebHistoryServiceFactory>::get();
+  static base::NoDestructor<WebHistoryServiceFactory> instance;
+  return instance.get();
 }
 
 // static
@@ -37,24 +38,35 @@ history::WebHistoryService* WebHistoryServiceFactory::GetForProfile(
       GetInstance()->GetServiceForBrowserContext(profile, true));
 }
 
-KeyedService* WebHistoryServiceFactory::BuildServiceInstanceFor(
+std::unique_ptr<KeyedService>
+WebHistoryServiceFactory::BuildServiceInstanceForBrowserContext(
     content::BrowserContext* context) const {
   Profile* profile = static_cast<Profile*>(context);
   // Ensure that the service is not instantiated or used if the user is not
-  // signed into sync, or if web history is not enabled.
+  // signed in and has enabled history sync.
   if (!IsHistorySyncEnabled(profile))
     return nullptr;
 
-  return new history::WebHistoryService(
+  return std::make_unique<history::WebHistoryService>(
       IdentityManagerFactory::GetForProfile(profile),
       profile->GetDefaultStoragePartition()
           ->GetURLLoaderFactoryForBrowserProcess());
 }
 
 WebHistoryServiceFactory::WebHistoryServiceFactory()
-    : ProfileKeyedServiceFactory("WebHistoryServiceFactory") {
+    : ProfileKeyedServiceFactory(
+          "WebHistoryServiceFactory",
+          ProfileSelections::Builder()
+              .WithRegular(ProfileSelection::kOriginalOnly)
+              // TODO(crbug.com/40257657): Check if this service is needed in
+              // Guest mode.
+              .WithGuest(ProfileSelection::kOriginalOnly)
+              // TODO(crbug.com/41488885): Check if this service is needed for
+              // Ash Internals.
+              .WithAshInternals(ProfileSelection::kOriginalOnly)
+              .Build()) {
   DependsOn(IdentityManagerFactory::GetInstance());
+  DependsOn(SyncServiceFactory::GetInstance());
 }
 
-WebHistoryServiceFactory::~WebHistoryServiceFactory() {
-}
+WebHistoryServiceFactory::~WebHistoryServiceFactory() = default;

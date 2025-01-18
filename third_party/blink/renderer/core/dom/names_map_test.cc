@@ -1,10 +1,12 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/dom/names_map.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 
 namespace blink {
@@ -15,17 +17,17 @@ void ExpectEqMap(const ExpectedMap& exp, NamesMap& map) {
   EXPECT_EQ(exp.size(), map.size());
 
   for (auto kv : exp) {
-    absl::optional<SpaceSplitString> value = map.Get(AtomicString(kv.key));
+    SpaceSplitString* value = map.Get(AtomicString(kv.key));
     if (!value) {
       ADD_FAILURE() << "key: " << kv.key << " was nullptr";
       return;
     }
-    EXPECT_EQ(kv.value, value.value().SerializeToString())
-        << "for key: " << kv.key;
+    EXPECT_EQ(kv.value, value->SerializeToString()) << "for key: " << kv.key;
   }
 }
 
 TEST(NamesMapTest, Set) {
+  test::TaskEnvironment task_environment;
   // This is vector of pairs where first is an expected output and second is a
   // vector of inputs, all of which should produce that output.
   Vector<std::pair<ExpectedMap, Vector<String>>> test_cases({
@@ -116,20 +118,21 @@ TEST(NamesMapTest, Set) {
       {{{"foo", "foo"}, {"buz", "bar"}}, {"foo,buz:bar", "buz:bar,foo"}},
   });
 
-  NamesMap map;
+  NamesMap* map = MakeGarbageCollected<NamesMap>();
   for (auto test_case : test_cases) {
     for (String input : test_case.second) {
       SCOPED_TRACE(input);
-      map.Set(AtomicString(input));
-      ExpectEqMap(test_case.first, map);
+      map->Set(AtomicString(input));
+      ExpectEqMap(test_case.first, *map);
     }
   }
 }
 
 TEST(NamesMapTest, SetNull) {
-  NamesMap map;
-  map.Set(AtomicString("foo bar"));
-  map.Set(g_null_atom);
-  ExpectEqMap({}, map);
+  test::TaskEnvironment task_environment;
+  NamesMap* map = MakeGarbageCollected<NamesMap>();
+  map->Set(AtomicString("foo bar"));
+  map->Set(g_null_atom);
+  ExpectEqMap({}, *map);
 }
 }  // namespace blink

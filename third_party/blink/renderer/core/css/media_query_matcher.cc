@@ -19,6 +19,8 @@
 
 #include "third_party/blink/renderer/core/css/media_query_matcher.h"
 
+#include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/common/metrics/document_update_reason.h"
 #include "third_party/blink/renderer/core/css/media_list.h"
 #include "third_party/blink/renderer/core/css/media_query_evaluator.h"
 #include "third_party/blink/renderer/core/css/media_query_list.h"
@@ -45,8 +47,9 @@ void MediaQueryMatcher::DocumentDetached() {
 }
 
 MediaQueryEvaluator* MediaQueryMatcher::CreateEvaluator() const {
-  if (!document_ || !document_->GetFrame())
+  if (!document_ || !document_->GetFrame()) {
     return nullptr;
+  }
 
   return MakeGarbageCollected<MediaQueryEvaluator>(document_->GetFrame());
 }
@@ -54,22 +57,43 @@ MediaQueryEvaluator* MediaQueryMatcher::CreateEvaluator() const {
 bool MediaQueryMatcher::Evaluate(const MediaQuerySet* media) {
   DCHECK(!document_ || document_->GetFrame() || !evaluator_);
 
-  if (!media)
+  if (!media) {
     return false;
+  }
 
   // Cache the evaluator to avoid allocating one per evaluation.
-  if (!evaluator_)
+  if (!evaluator_) {
     evaluator_ = CreateEvaluator();
+  }
 
-  if (evaluator_)
+  if (evaluator_) {
     return evaluator_->Eval(*media, &media_query_result_flags_);
+  }
 
   return false;
 }
 
 MediaQueryList* MediaQueryMatcher::MatchMedia(const String& query) {
-  if (!document_)
+  if (!document_) {
     return nullptr;
+  }
+
+  // TODO(crbug.com/326992301) Check if there are other cases where we might
+  // need to force layout to make the initial media-query values in sync.
+  // This condition could probably be much simpler, but we are trying to
+  // preserve existing (possibly buggy) behavior until the implications are
+  // entirely clear.
+  if (document_->IsActive() && document_->IsLoadCompleted() &&
+      document_->HaveRenderBlockingStylesheetsLoaded() &&
+      !document_->View()->DidFirstLayout() && !document_->LoadEventStarted() &&
+      !document_->IsInMainFrame()) {
+    // With the feature enabled, we skip the synchronous forced layout update
+    // in Document::ImplicitClose(), so we have to force layout here to
+    // compute starting values for media queries.
+    DCHECK(base::FeatureList::IsEnabled(
+        blink::features::kAvoidForcedLayoutOnInitialEmptyDocumentInSubframe));
+    document_->UpdateStyleAndLayout(DocumentUpdateReason::kUnknown);
+  }
 
   MediaQuerySet* media =
       MediaQuerySet::Create(query, document_->GetExecutionContext());
@@ -78,33 +102,38 @@ MediaQueryList* MediaQueryMatcher::MatchMedia(const String& query) {
 }
 
 void MediaQueryMatcher::AddMediaQueryList(MediaQueryList* query) {
-  if (!document_)
+  if (!document_) {
     return;
+  }
   media_lists_.insert(query);
 }
 
 void MediaQueryMatcher::RemoveMediaQueryList(MediaQueryList* query) {
-  if (!document_)
+  if (!document_) {
     return;
+  }
   media_lists_.erase(query);
 }
 
 void MediaQueryMatcher::AddViewportListener(MediaQueryListListener* listener) {
-  if (!document_)
+  if (!document_) {
     return;
+  }
   viewport_listeners_.insert(listener);
 }
 
 void MediaQueryMatcher::RemoveViewportListener(
     MediaQueryListListener* listener) {
-  if (!document_)
+  if (!document_) {
     return;
+  }
   viewport_listeners_.erase(listener);
 }
 
 void MediaQueryMatcher::MediaFeaturesChanged() {
-  if (!document_)
+  if (!document_) {
     return;
+  }
 
   // Update favicon and theme color when a media query value has changed.
   if (document_->GetFrame()) {
@@ -125,12 +154,14 @@ void MediaQueryMatcher::MediaFeaturesChanged() {
 }
 
 void MediaQueryMatcher::ViewportChanged() {
-  if (!document_)
+  if (!document_) {
     return;
+  }
 
   HeapVector<Member<MediaQueryListListener>> listeners_to_notify;
-  for (const auto& listener : viewport_listeners_)
+  for (const auto& listener : viewport_listeners_) {
     listeners_to_notify.push_back(listener);
+  }
 
   document_->EnqueueMediaQueryChangeListeners(listeners_to_notify);
 }

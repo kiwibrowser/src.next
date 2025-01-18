@@ -4,6 +4,8 @@
 
 #include "net/http/http_auth_ntlm_mechanism.h"
 
+#include <string_view>
+
 #include "base/base64.h"
 #include "base/containers/span.h"
 #include "base/logging.h"
@@ -24,8 +26,8 @@ uint64_t GetMSTime() {
   return base::Time::Now().since_origin().InMicroseconds() * 10;
 }
 
-void GenerateRandom(uint8_t* output, size_t n) {
-  base::RandBytes(output, n);
+void GenerateRandom(base::span<uint8_t> output) {
+  base::RandBytes(output);
 }
 
 // static
@@ -50,11 +52,8 @@ int SetAuthTokenFromBinaryToken(std::string* auth_token,
   if (next_token.empty())
     return ERR_UNEXPECTED;
 
-  std::string encode_output;
-  base::Base64Encode(
-      base::StringPiece(reinterpret_cast<const char*>(next_token.data()),
-                        next_token.size()),
-      &encode_output);
+  std::string encode_output = base::Base64Encode(std::string_view(
+      reinterpret_cast<const char*>(next_token.data()), next_token.size()));
 
   *auth_token = std::string("NTLM ") + encode_output;
   return OK;
@@ -150,12 +149,12 @@ int HttpAuthNtlmMechanism::GenerateAuthToken(
     return ERR_UNEXPECTED;
 
   uint8_t client_challenge[8];
-  g_generate_random_proc(client_challenge, 8);
+  g_generate_random_proc(base::span<uint8_t>(client_challenge));
 
   auto next_token = ntlm_client_.GenerateAuthenticateMessage(
       domain, user, credentials->password(), hostname, channel_bindings, spn,
       g_get_ms_time_proc(), client_challenge,
-      base::as_bytes(base::make_span(challenge_token_)));
+      base::as_byte_span(challenge_token_));
 
   return SetAuthTokenFromBinaryToken(auth_token, next_token);
 }

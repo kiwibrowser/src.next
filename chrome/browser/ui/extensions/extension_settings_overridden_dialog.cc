@@ -11,6 +11,7 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/supports_user_data.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/extensions/extensions_overrides/simple_overrides.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "extensions/browser/disable_reason.h"
@@ -86,14 +87,17 @@ ExtensionSettingsOverriddenDialog::~ExtensionSettingsOverriddenDialog() =
     default;
 
 bool ExtensionSettingsOverriddenDialog::ShouldShow() {
-  if (params_.controlling_extension_id.empty())
+  if (params_.controlling_extension_id.empty()) {
     return false;
+  }
 
-  if (HasShownFor(profile_, params_.controlling_extension_id))
+  if (HasShownFor(profile_, params_.controlling_extension_id)) {
     return false;
+  }
 
-  if (HasAcknowledgedExtension(params_.controlling_extension_id))
+  if (HasAcknowledgedExtension(params_.controlling_extension_id)) {
     return false;
+  }
 
   const extensions::Extension* extension =
       extensions::ExtensionRegistry::Get(profile_)
@@ -179,8 +183,7 @@ void ExtensionSettingsOverriddenDialog::DisableControllingExtension() {
 void ExtensionSettingsOverriddenDialog::AcknowledgeControllingExtension() {
   extensions::ExtensionPrefs::Get(profile_)->UpdateExtensionPref(
       params_.controlling_extension_id,
-      params_.extension_acknowledged_preference_name,
-      std::make_unique<base::Value>(true));
+      params_.extension_acknowledged_preference_name, base::Value(true));
 }
 
 bool ExtensionSettingsOverriddenDialog::HasAcknowledgedExtension(

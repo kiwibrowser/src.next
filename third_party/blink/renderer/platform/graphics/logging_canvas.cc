@@ -28,12 +28,16 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "third_party/blink/renderer/platform/graphics/logging_canvas.h"
 
 #include <unicode/unistr.h>
 
 #include "base/logging.h"
-#include "base/sys_byteorder.h"
 #include "build/build_config.h"
 #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
 #include "third_party/blink/renderer/platform/image-encoders/image_encoder.h"
@@ -82,7 +86,6 @@ String PointModeName(SkCanvas::PointMode mode) {
       return "Polygon";
     default:
       NOTREACHED();
-      return "?";
   };
 }
 
@@ -126,7 +129,6 @@ String RrectTypeName(SkRRect::Type type) {
       return "Complex";
     default:
       NOTREACHED();
-      return "?";
   };
 }
 
@@ -142,7 +144,6 @@ String RadiusName(SkRRect::Corner corner) {
       return "lowerLeftRadius";
     default:
       NOTREACHED();
-      return "?";
   }
 }
 
@@ -171,7 +172,6 @@ String FillTypeName(SkPathFillType type) {
       return "InverseEvenOdd";
     default:
       NOTREACHED();
-      return "?";
   };
 }
 
@@ -193,7 +193,6 @@ VerbParams SegmentParams(SkPath::Verb verb) {
       return VerbParams("Done", 0, 0);
     default:
       NOTREACHED();
-      return VerbParams("?", 0, 0);
   };
 }
 
@@ -279,7 +278,6 @@ String StrokeCapName(SkPaint::Cap cap) {
       return "Square";
     default:
       NOTREACHED();
-      return "?";
   };
 }
 
@@ -293,7 +291,6 @@ String StrokeJoinName(SkPaint::Join join) {
       return "Bevel";
     default:
       NOTREACHED();
-      return "?";
   };
 }
 
@@ -305,7 +302,6 @@ String StyleName(SkPaint::Style style) {
       return "Stroke";
     default:
       NOTREACHED();
-      return "?";
   };
 }
 

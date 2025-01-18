@@ -147,8 +147,8 @@ TEST_F(ChromeAppSortingPageOrdinal, ChromeAppSortingPageOrdinal) {}
 // of old page and app launch indices and properly convert them.
 class ChromeAppSortingInitialize : public PrefsPrepopulatedTestBase {
  public:
-  ChromeAppSortingInitialize() {}
-  ~ChromeAppSortingInitialize() override {}
+  ChromeAppSortingInitialize() = default;
+  ~ChromeAppSortingInitialize() override = default;
 
   void Initialize() override {
     // A preference determining the order of which the apps appear on the NTP.
@@ -158,22 +158,19 @@ class ChromeAppSortingInitialize : public PrefsPrepopulatedTestBase {
 
     // Setup the deprecated preferences.
     prefs()->UpdateExtensionPref(extension1()->id(),
-                                 kPrefAppLaunchIndexDeprecated,
-                                 std::make_unique<base::Value>(0));
+                                 kPrefAppLaunchIndexDeprecated, base::Value(0));
     prefs()->UpdateExtensionPref(extension1()->id(), kPrefPageIndexDeprecated,
-                                 std::make_unique<base::Value>(0));
+                                 base::Value(0));
 
     prefs()->UpdateExtensionPref(extension2()->id(),
-                                 kPrefAppLaunchIndexDeprecated,
-                                 std::make_unique<base::Value>(1));
+                                 kPrefAppLaunchIndexDeprecated, base::Value(1));
     prefs()->UpdateExtensionPref(extension2()->id(), kPrefPageIndexDeprecated,
-                                 std::make_unique<base::Value>(0));
+                                 base::Value(0));
 
     prefs()->UpdateExtensionPref(extension3()->id(),
-                                 kPrefAppLaunchIndexDeprecated,
-                                 std::make_unique<base::Value>(0));
+                                 kPrefAppLaunchIndexDeprecated, base::Value(0));
     prefs()->UpdateExtensionPref(extension3()->id(), kPrefPageIndexDeprecated,
-                                 std::make_unique<base::Value>(1));
+                                 base::Value(1));
 
     // We insert the ids in reverse order so that we have to deal with the
     // element on the 2nd page before the 1st page is seen.
@@ -209,28 +206,25 @@ TEST_F(ChromeAppSortingInitialize, ChromeAppSortingInitialize) {}
 // (i.e. make sure that the web store icon is still loaded into the map).
 class ChromeAppSortingInitializeWithNoApps : public PrefsPrepopulatedTestBase {
  public:
-  ChromeAppSortingInitializeWithNoApps() {}
-  ~ChromeAppSortingInitializeWithNoApps() override {}
+  ChromeAppSortingInitializeWithNoApps() = default;
+  ~ChromeAppSortingInitializeWithNoApps() override = default;
 
   void Initialize() override {
     // Make sure that the web store has valid ordinals.
     syncer::StringOrdinal initial_ordinal =
         syncer::StringOrdinal::CreateInitialOrdinal();
-    app_sorting()->SetPageOrdinal(extensions::kWebStoreAppId,
-                                  initial_ordinal);
-    app_sorting()->SetAppLaunchOrdinal(extensions::kWebStoreAppId,
-                                       initial_ordinal);
+    app_sorting()->SetPageOrdinal(kWebStoreAppId, initial_ordinal);
+    app_sorting()->SetAppLaunchOrdinal(kWebStoreAppId, initial_ordinal);
   }
   void Verify() override {
-    syncer::StringOrdinal page =
-        app_sorting()->GetPageOrdinal(extensions::kWebStoreAppId);
+    syncer::StringOrdinal page = app_sorting()->GetPageOrdinal(kWebStoreAppId);
     EXPECT_TRUE(page.IsValid());
 
     auto page_it = app_sorting()->ntp_ordinal_map_.find(page);
     EXPECT_TRUE(page_it != app_sorting()->ntp_ordinal_map_.end());
 
     syncer::StringOrdinal app_launch =
-        app_sorting()->GetPageOrdinal(extensions::kWebStoreAppId);
+        app_sorting()->GetPageOrdinal(kWebStoreAppId);
     EXPECT_TRUE(app_launch.IsValid());
 
     auto app_launch_it = page_it->second.find(app_launch);
@@ -247,8 +241,8 @@ TEST_F(ChromeAppSortingInitializeWithNoApps,
 class ChromeAppSortingMigrateAppIndexInvalid
     : public PrefsPrepopulatedTestBase {
  public:
-  ChromeAppSortingMigrateAppIndexInvalid() {}
-  ~ChromeAppSortingMigrateAppIndexInvalid() override {}
+  ChromeAppSortingMigrateAppIndexInvalid() = default;
+  ~ChromeAppSortingMigrateAppIndexInvalid() override = default;
 
   void Initialize() override {
     // A preference determining the order of which the apps appear on the NTP.
@@ -258,10 +252,9 @@ class ChromeAppSortingMigrateAppIndexInvalid
 
     // Setup the deprecated preference.
     prefs()->UpdateExtensionPref(extension1()->id(),
-                                 kPrefAppLaunchIndexDeprecated,
-                                 std::make_unique<base::Value>(0));
+                                 kPrefAppLaunchIndexDeprecated, base::Value(0));
     prefs()->UpdateExtensionPref(extension1()->id(), kPrefPageIndexDeprecated,
-                                 std::make_unique<base::Value>(-1));
+                                 base::Value(-1));
   }
   void Verify() override {
     // Make sure that the invalid page_index wasn't converted over.
@@ -275,8 +268,8 @@ TEST_F(ChromeAppSortingMigrateAppIndexInvalid,
 class ChromeAppSortingFixNTPCollisionsAllCollide
     : public PrefsPrepopulatedTestBase {
  public:
-  ChromeAppSortingFixNTPCollisionsAllCollide() {}
-  ~ChromeAppSortingFixNTPCollisionsAllCollide() override {}
+  ChromeAppSortingFixNTPCollisionsAllCollide() = default;
+  ~ChromeAppSortingFixNTPCollisionsAllCollide() override = default;
 
   void Initialize() override {
     repeated_ordinal_ = syncer::StringOrdinal::CreateInitialOrdinal();
@@ -328,8 +321,8 @@ TEST_F(ChromeAppSortingFixNTPCollisionsAllCollide,
 class ChromeAppSortingFixNTPCollisionsSomeCollideAtStart
     : public PrefsPrepopulatedTestBase {
  public:
-  ChromeAppSortingFixNTPCollisionsSomeCollideAtStart() {}
-  ~ChromeAppSortingFixNTPCollisionsSomeCollideAtStart() override {}
+  ChromeAppSortingFixNTPCollisionsSomeCollideAtStart() = default;
+  ~ChromeAppSortingFixNTPCollisionsSomeCollideAtStart() override = default;
 
   void Initialize() override {
     first_ordinal_ = syncer::StringOrdinal::CreateInitialOrdinal();
@@ -383,8 +376,8 @@ TEST_F(ChromeAppSortingFixNTPCollisionsSomeCollideAtStart,
 class ChromeAppSortingFixNTPCollisionsSomeCollideAtEnd
     : public PrefsPrepopulatedTestBase {
  public:
-  ChromeAppSortingFixNTPCollisionsSomeCollideAtEnd() {}
-  ~ChromeAppSortingFixNTPCollisionsSomeCollideAtEnd() override {}
+  ChromeAppSortingFixNTPCollisionsSomeCollideAtEnd() = default;
+  ~ChromeAppSortingFixNTPCollisionsSomeCollideAtEnd() override = default;
 
   void Initialize() override {
     first_ordinal_ = syncer::StringOrdinal::CreateInitialOrdinal();
@@ -438,8 +431,8 @@ TEST_F(ChromeAppSortingFixNTPCollisionsSomeCollideAtEnd,
 class ChromeAppSortingFixNTPCollisionsTwoCollisions
     : public PrefsPrepopulatedTestBase {
  public:
-  ChromeAppSortingFixNTPCollisionsTwoCollisions() {}
-  ~ChromeAppSortingFixNTPCollisionsTwoCollisions() override {}
+  ChromeAppSortingFixNTPCollisionsTwoCollisions() = default;
+  ~ChromeAppSortingFixNTPCollisionsTwoCollisions() override = default;
 
   void Initialize() override {
     first_ordinal_ = syncer::StringOrdinal::CreateInitialOrdinal();
@@ -503,8 +496,8 @@ TEST_F(ChromeAppSortingFixNTPCollisionsTwoCollisions,
 class ChromeAppSortingEnsureValidOrdinals
     : public PrefsPrepopulatedTestBase {
  public :
-  ChromeAppSortingEnsureValidOrdinals() {}
-  ~ChromeAppSortingEnsureValidOrdinals() override {}
+  ChromeAppSortingEnsureValidOrdinals() = default;
+  ~ChromeAppSortingEnsureValidOrdinals() override = default;
 
   void Initialize() override {}
   void Verify() override {
@@ -527,8 +520,8 @@ TEST_F(ChromeAppSortingEnsureValidOrdinals,
 
 class ChromeAppSortingPageOrdinalMapping : public PrefsPrepopulatedTestBase {
  public:
-  ChromeAppSortingPageOrdinalMapping() {}
-  ~ChromeAppSortingPageOrdinalMapping() override {}
+  ChromeAppSortingPageOrdinalMapping() = default;
+  ~ChromeAppSortingPageOrdinalMapping() override = default;
 
   void Initialize() override {}
   void Verify() override {
@@ -582,10 +575,10 @@ TEST_F(ChromeAppSortingPageOrdinalMapping,
 class ChromeAppSortingPreinstalledAppsBase : public PrefsPrepopulatedTestBase {
  public:
   ChromeAppSortingPreinstalledAppsBase() {
-    base::DictionaryValue simple_dict;
-    simple_dict.SetStringPath(keys::kVersion, "1.0.0.0");
-    simple_dict.SetStringPath(keys::kName, "unused");
-    simple_dict.SetStringPath(keys::kLaunchLocalPath, "fake.html");
+    base::Value::Dict simple_dict;
+    simple_dict.Set(keys::kVersion, "1.0.0.0");
+    simple_dict.Set(keys::kName, "unused");
+    simple_dict.SetByDottedPath(keys::kLaunchLocalPath, "fake.html");
 
     std::string error;
     app1_scoped_ = Extension::Create(prefs_.temp_dir().AppendASCII("app1_"),
@@ -607,12 +600,12 @@ class ChromeAppSortingPreinstalledAppsBase : public PrefsPrepopulatedTestBase {
     app1_ = app1_scoped_.get();
     app2_ = app2_scoped_.get();
   }
-  ~ChromeAppSortingPreinstalledAppsBase() override {}
+  ~ChromeAppSortingPreinstalledAppsBase() override = default;
 
  protected:
   // Weak references, for convenience.
-  raw_ptr<Extension> app1_;
-  raw_ptr<Extension> app2_;
+  raw_ptr<Extension, DanglingUntriaged> app1_;
+  raw_ptr<Extension, DanglingUntriaged> app2_;
 
  private:
   scoped_refptr<Extension> app1_scoped_;
@@ -622,8 +615,8 @@ class ChromeAppSortingPreinstalledAppsBase : public PrefsPrepopulatedTestBase {
 class ChromeAppSortingGetMinOrMaxAppLaunchOrdinalsOnPage
     : public ChromeAppSortingPreinstalledAppsBase {
  public:
-  ChromeAppSortingGetMinOrMaxAppLaunchOrdinalsOnPage() {}
-  ~ChromeAppSortingGetMinOrMaxAppLaunchOrdinalsOnPage() override {}
+  ChromeAppSortingGetMinOrMaxAppLaunchOrdinalsOnPage() = default;
+  ~ChromeAppSortingGetMinOrMaxAppLaunchOrdinalsOnPage() override = default;
 
   void Initialize() override {}
   void Verify() override {
@@ -665,8 +658,8 @@ TEST_F(ChromeAppSortingGetMinOrMaxAppLaunchOrdinalsOnPage,
 class ChromeAppSortingKeepEmptyStringOrdinalPages
     : public ChromeAppSortingPreinstalledAppsBase {
  public:
-  ChromeAppSortingKeepEmptyStringOrdinalPages() {}
-  ~ChromeAppSortingKeepEmptyStringOrdinalPages() override {}
+  ChromeAppSortingKeepEmptyStringOrdinalPages() = default;
+  ~ChromeAppSortingKeepEmptyStringOrdinalPages() override = default;
 
   void Initialize() override {
     syncer::StringOrdinal first_page =
@@ -701,8 +694,8 @@ TEST_F(ChromeAppSortingKeepEmptyStringOrdinalPages,
 class ChromeAppSortingMakesFillerOrdinals
     : public ChromeAppSortingPreinstalledAppsBase {
  public:
-  ChromeAppSortingMakesFillerOrdinals() {}
-  ~ChromeAppSortingMakesFillerOrdinals() override {}
+  ChromeAppSortingMakesFillerOrdinals() = default;
+  ~ChromeAppSortingMakesFillerOrdinals() override = default;
 
   void Initialize() override {
     syncer::StringOrdinal first_page =
@@ -731,8 +724,8 @@ TEST_F(ChromeAppSortingMakesFillerOrdinals,
 
 class ChromeAppSortingDefaultOrdinalsBase : public ExtensionPrefsTest {
  public:
-  ChromeAppSortingDefaultOrdinalsBase() {}
-  ~ChromeAppSortingDefaultOrdinalsBase() override {}
+  ChromeAppSortingDefaultOrdinalsBase() = default;
+  ~ChromeAppSortingDefaultOrdinalsBase() override = default;
 
   void Initialize() override {
     app_ = CreateApp("app");
@@ -750,10 +743,10 @@ class ChromeAppSortingDefaultOrdinalsBase : public ExtensionPrefsTest {
 
  protected:
   scoped_refptr<Extension> CreateApp(const std::string& name) {
-    base::DictionaryValue simple_dict;
-    simple_dict.SetStringPath(keys::kVersion, "1.0.0.0");
-    simple_dict.SetStringPath(keys::kName, name);
-    simple_dict.SetStringPath(keys::kLaunchLocalPath, "fake.html");
+    base::Value::Dict simple_dict;
+    simple_dict.Set(keys::kVersion, "1.0.0.0");
+    simple_dict.Set(keys::kName, name);
+    simple_dict.SetByDottedPath(keys::kLaunchLocalPath, "fake.html");
 
     std::string errors;
     scoped_refptr<Extension> app = Extension::Create(
@@ -789,8 +782,8 @@ class ChromeAppSortingDefaultOrdinalsBase : public ExtensionPrefsTest {
 class ChromeAppSortingDefaultOrdinals
     : public ChromeAppSortingDefaultOrdinalsBase {
  public:
-  ChromeAppSortingDefaultOrdinals() {}
-  ~ChromeAppSortingDefaultOrdinals() override {}
+  ChromeAppSortingDefaultOrdinals() = default;
+  ~ChromeAppSortingDefaultOrdinals() override = default;
 
   void Verify() override {
     EXPECT_TRUE(app_sorting()->GetPageOrdinal(app_->id()).Equals(
@@ -806,8 +799,8 @@ TEST_F(ChromeAppSortingDefaultOrdinals,
 class ChromeAppSortingDefaultOrdinalOverriddenByInstallPage
     : public ChromeAppSortingDefaultOrdinalsBase {
  public:
-  ChromeAppSortingDefaultOrdinalOverriddenByInstallPage() {}
-  ~ChromeAppSortingDefaultOrdinalOverriddenByInstallPage() override {}
+  ChromeAppSortingDefaultOrdinalOverriddenByInstallPage() = default;
+  ~ChromeAppSortingDefaultOrdinalOverriddenByInstallPage() override = default;
 
   void Verify() override {
     EXPECT_FALSE(app_sorting()->GetPageOrdinal(app_->id()).Equals(
@@ -835,8 +828,8 @@ TEST_F(ChromeAppSortingDefaultOrdinalOverriddenByInstallPage,
 class ChromeAppSortingDefaultOrdinalOverriddenByUserValue
     : public ChromeAppSortingDefaultOrdinalsBase {
  public:
-  ChromeAppSortingDefaultOrdinalOverriddenByUserValue() {}
-  ~ChromeAppSortingDefaultOrdinalOverriddenByUserValue() override {}
+  ChromeAppSortingDefaultOrdinalOverriddenByUserValue() = default;
+  ~ChromeAppSortingDefaultOrdinalOverriddenByUserValue() override = default;
 
   void Verify() override {
     EXPECT_TRUE(app_sorting()->GetPageOrdinal(app_->id()).Equals(
@@ -865,8 +858,8 @@ TEST_F(ChromeAppSortingDefaultOrdinalOverriddenByUserValue,
 class ChromeAppSortingDefaultOrdinalNoCollision
     : public ChromeAppSortingDefaultOrdinalsBase {
  public:
-  ChromeAppSortingDefaultOrdinalNoCollision() {}
-  ~ChromeAppSortingDefaultOrdinalNoCollision() override {}
+  ChromeAppSortingDefaultOrdinalNoCollision() = default;
+  ~ChromeAppSortingDefaultOrdinalNoCollision() override = default;
 
   void Verify() override {
     // Use the default page.
@@ -902,8 +895,8 @@ TEST_F(ChromeAppSortingDefaultOrdinalNoCollision,
 // Tests that SetExtensionVisible() correctly hides and unhides extensions.
 class ChromeAppSortingSetExtensionVisible : public ExtensionPrefsTest {
  public:
-  ChromeAppSortingSetExtensionVisible() {}
-  ~ChromeAppSortingSetExtensionVisible() override {}
+  ChromeAppSortingSetExtensionVisible() = default;
+  ~ChromeAppSortingSetExtensionVisible() override = default;
 
   void Initialize() override {
     first_app_ = prefs_.AddApp("first_app");

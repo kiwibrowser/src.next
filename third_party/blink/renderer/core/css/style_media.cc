@@ -38,24 +38,28 @@ StyleMedia::StyleMedia(LocalDOMWindow* window)
     : ExecutionContextClient(window) {}
 
 AtomicString StyleMedia::type() const {
-  if (!DomWindow())
+  if (!DomWindow()) {
     return g_null_atom;
+  }
   return DomWindow()->GetFrame()->View()->MediaType();
 }
 
 bool StyleMedia::matchMedium(const String& query) const {
-  if (!DomWindow())
+  if (!DomWindow()) {
     return false;
+  }
 
   Element* document_element = DomWindow()->document()->documentElement();
-  if (!document_element)
+  if (!document_element) {
     return false;
+  }
 
   const MediaQuerySet* media = MediaQuerySet::Create(query, DomWindow());
   DCHECK(media);
 
-  MediaQueryEvaluator screen_eval(DomWindow()->GetFrame());
-  return screen_eval.Eval(*media);
+  MediaQueryEvaluator* screen_eval =
+      MakeGarbageCollected<MediaQueryEvaluator>(DomWindow()->GetFrame());
+  return screen_eval->Eval(*media);
 }
 
 void StyleMedia::Trace(Visitor* visitor) const {

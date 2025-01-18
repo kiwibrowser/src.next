@@ -1,11 +1,12 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be found
-// in the LICENSE file.
+// Copyright 2015 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/frame/remote_frame_owner.h"
 
 #include "third_party/blink/public/mojom/frame/frame.mojom-blink.h"
 #include "third_party/blink/public/mojom/frame/intrinsic_sizing_info.mojom-blink.h"
+#include "third_party/blink/public/mojom/timing/resource_timing.mojom-blink-forward.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -13,9 +14,8 @@
 #include "third_party/blink/renderer/core/frame/web_frame_widget_impl.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/frame/web_remote_frame_impl.h"
-#include "third_party/blink/renderer/core/layout/intrinsic_sizing_info.h"
+#include "third_party/blink/renderer/core/layout/natural_sizing_info.h"
 #include "third_party/blink/renderer/core/timing/performance.h"
-#include "third_party/blink/renderer/platform/loader/fetch/resource_timing_info.h"
 
 namespace blink {
 
@@ -32,6 +32,7 @@ RemoteFrameOwner::RemoteFrameOwner(
       allow_payment_request_(frame_owner_properties.allow_payment_request),
       is_display_none_(frame_owner_properties.is_display_none),
       color_scheme_(frame_owner_properties.color_scheme),
+      preferred_color_scheme_(frame_owner_properties.preferred_color_scheme),
       needs_occlusion_tracking_(false) {}
 
 void RemoteFrameOwner::Trace(Visitor* visitor) const {
@@ -52,24 +53,25 @@ void RemoteFrameOwner::ClearContentFrame() {
   frame_ = nullptr;
 }
 
-void RemoteFrameOwner::AddResourceTiming(const ResourceTimingInfo& info) {
+void RemoteFrameOwner::AddResourceTiming(
+    mojom::blink::ResourceTimingInfoPtr info) {
+  DCHECK(info);
   LocalFrame* frame = To<LocalFrame>(frame_.Get());
-  mojom::blink::ResourceTimingInfoPtr resource_timing =
-      Performance::GenerateResourceTiming(
-          *frame->Tree().Parent()->GetSecurityContext()->GetSecurityOrigin(),
-          info, *frame->DomWindow());
+  CHECK(!frame->IsProvisional());
   frame->GetLocalFrameHostRemote().ForwardResourceTimingToParent(
-      std::move(resource_timing));
+      std::move(info));
 }
 
 void RemoteFrameOwner::DispatchLoad() {
+  LocalFrame* frame = To<LocalFrame>(frame_.Get());
+  CHECK(!frame->IsProvisional());
   auto& local_frame_host = To<LocalFrame>(*frame_).GetLocalFrameHostRemote();
   local_frame_host.DispatchLoad();
 }
 
 void RemoteFrameOwner::IntrinsicSizingInfoChanged() {
   LocalFrame& local_frame = To<LocalFrame>(*frame_);
-  IntrinsicSizingInfo intrinsic_sizing_info;
+  NaturalSizingInfo intrinsic_sizing_info;
   bool result =
       local_frame.View()->GetIntrinsicSizingInfo(intrinsic_sizing_info);
   // By virtue of having been invoked, GetIntrinsicSizingInfo() should always

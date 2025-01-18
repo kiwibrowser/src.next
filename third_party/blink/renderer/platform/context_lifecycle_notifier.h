@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include "base/dcheck_is_on.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
-#include "third_party/blink/renderer/platform/heap_observer_set.h"
+#include "third_party/blink/renderer/platform/heap_observer_list.h"
 
 namespace blink {
 
@@ -18,26 +18,26 @@ class PLATFORM_EXPORT ContextLifecycleNotifier : public GarbageCollectedMixin {
  public:
   virtual ~ContextLifecycleNotifier();
 
-  virtual void AddContextLifecycleObserver(ContextLifecycleObserver*);
-  virtual void RemoveContextLifecycleObserver(ContextLifecycleObserver*);
+  void AddContextLifecycleObserver(ContextLifecycleObserver*);
+  void RemoveContextLifecycleObserver(ContextLifecycleObserver*);
 
   void Trace(Visitor* visitor) const override;
+
+  bool IsContextDestroyed() const;
 
  protected:
   // Should be called by implementers to notify observers when the context is
   // destroyed.
   void NotifyContextDestroyed();
 
-  const HeapObserverSet<ContextLifecycleObserver>& observers() const {
+  const HeapObserverList<ContextLifecycleObserver>& observers() const {
     return observers_;
   }
-  HeapObserverSet<ContextLifecycleObserver>& observers() { return observers_; }
+  HeapObserverList<ContextLifecycleObserver>& observers() { return observers_; }
 
  private:
-  HeapObserverSet<ContextLifecycleObserver> observers_;
-#if DCHECK_IS_ON()
-  bool did_notify_observers_ = false;
-#endif
+  HeapObserverList<ContextLifecycleObserver> observers_;
+  bool context_destroyed_ = false;
 };
 
 }  // namespace blink

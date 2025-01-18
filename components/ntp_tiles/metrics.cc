@@ -28,7 +28,6 @@ const char kHistogramBakedInName[] = "popular_baked_in";
 const char kHistogramAllowlistName[] = "allowlist";
 const char kHistogramHomepageName[] = "homepage";
 const char kHistogramCustomLinksName[] = "custom_links";
-const char kHistogramExploreName[] = "explore";
 
 // Suffixes for the various icon types.
 const char kTileTypeSuffixIconColor[] = "IconsColor";
@@ -49,11 +48,8 @@ std::string GetSourceHistogramName(TileSource source) {
       return kHistogramHomepageName;
     case TileSource::CUSTOM_LINKS:
       return kHistogramCustomLinksName;
-    case TileSource::EXPLORE:
-      return kHistogramExploreName;
   }
   NOTREACHED();
-  return std::string();
 }
 
 const char* GetTileTypeSuffix(TileVisualType type) {
@@ -64,7 +60,7 @@ const char* GetTileTypeSuffix(TileVisualType type) {
       return kTileTypeSuffixIconGray;
     case TileVisualType::ICON_REAL:
       return kTileTypeSuffixIconReal;
-    case TileVisualType::NONE:                     // Fall through.
+    case TileVisualType::NONE:  // Fall through.
     case TileVisualType::UNKNOWN_TILE_TYPE:
       break;
   }
@@ -113,18 +109,6 @@ void RecordTileImpression(const NTPTileImpression& impression) {
         base::StringPrintf("NewTabPage.SuggestionsImpression.%s",
                            tile_type_suffix),
         impression.index, kMaxNumTiles);
-
-    if (impression.icon_type != favicon_base::IconType::kInvalid) {
-      base::UmaHistogramEnumeration(
-          base::StringPrintf("NewTabPage.TileFaviconType.%s", tile_type_suffix),
-          impression.icon_type, favicon_base::IconType::kCount);
-    }
-  }
-
-  if (impression.icon_type != favicon_base::IconType::kInvalid) {
-    base::UmaHistogramEnumeration("NewTabPage.TileFaviconType",
-                                  impression.icon_type,
-                                  favicon_base::IconType::kCount);
   }
 }
 
@@ -143,19 +127,6 @@ void RecordTileClick(const NTPTileImpression& impression) {
     base::UmaHistogramExactLinear(
         base::StringPrintf("NewTabPage.MostVisited.%s", tile_type_suffix),
         impression.index, kMaxNumTiles);
-
-    if (impression.icon_type != favicon_base::IconType::kInvalid) {
-      base::UmaHistogramEnumeration(
-          base::StringPrintf("NewTabPage.TileFaviconTypeClicked.%s",
-                             tile_type_suffix),
-          impression.icon_type, favicon_base::IconType::kCount);
-    }
-  }
-
-  if (impression.icon_type != favicon_base::IconType::kInvalid) {
-    base::UmaHistogramEnumeration("NewTabPage.TileFaviconTypeClicked",
-                                  impression.icon_type,
-                                  favicon_base::IconType::kCount);
   }
 
   UMA_HISTOGRAM_ENUMERATION("NewTabPage.TileTitleClicked",

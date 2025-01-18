@@ -5,8 +5,7 @@
 #ifndef COMPONENTS_HISTORY_CORE_BROWSER_KEYWORD_SEARCH_TERM_UTIL_H_
 #define COMPONENTS_HISTORY_CORE_BROWSER_KEYWORD_SEARCH_TERM_UTIL_H_
 
-#include <memory>
-#include <vector>
+#include "components/history/core/browser/history_types.h"
 
 namespace base {
 class Time;
@@ -16,7 +15,6 @@ class TimeDelta;
 namespace history {
 
 class KeywordSearchTermVisitEnumerator;
-struct KeywordSearchTermVisit;
 
 enum class SearchTermRankingPolicy {
   kRecency,  // From the most recent to the least recent.
@@ -36,30 +34,28 @@ extern const base::TimeDelta kAutocompleteDuplicateVisitIntervalThreshold;
 // that are more frequent and more recent (see go/local-zps-frecency-ranking).
 double GetFrecencyScore(int visit_count, base::Time visit_time, base::Time now);
 
-// Returns keyword search terms ordered by descending recency or frecency scores
-// for use as prefix or zero-prefix suggestions in the omnibox respectively.
-// |enumerator| enumerates keyword search term visits from the URLDatabase. It
-// must return visits ordered first by |normalized_term| and then by
-// |last_visit_time| in ascending order, i.e., from the oldest to the newest.
-// |ignore_duplicate_visits| specifies whether duplicative visits to a search
-// term should be ignored. A duplicative visit is defined as a visit to the
-// same search term in an interval smaller than
-// kAutocompleteDuplicateVisitIntervalThreshold. |ranking_policy| specifies
-// how the returned keyword search terms should be ordered.
+// Returns up to `count` unique keyword search terms ordered by descending
+// recency or frecency scores for use in the omnibox.
+// - `enumerator` must enumerate keyword search term visits from the URLDatabase
+//   ordered first by `normalized_term` and then by `last_visit_time` in
+//   ascending order, i.e., from the oldest to the newest.
+// - `ranking_policy` specifies how the returned keyword search terms should be
+//   ordered.
 void GetAutocompleteSearchTermsFromEnumerator(
     KeywordSearchTermVisitEnumerator& enumerator,
-    bool ignore_duplicate_visits,
+    const size_t count,
     SearchTermRankingPolicy ranking_policy,
-    std::vector<std::unique_ptr<KeywordSearchTermVisit>>* search_terms);
+    KeywordSearchTermVisitList* search_terms);
 
-// Returns keyword search terms ordered by descending frecency scores
-// accumulated across days for use in the Most Visited tiles. |enumerator|
-// enumerates keyword search term visits from the URLDatabase. It must return
-// visits ordered first by |normalized_term| and then by |last_visit_time| in
-// ascending order, i.e., from the oldest to the newest.
+// Returns up to `count` unique keyword search terms ordered by descending
+// frecency scores for use in the Most Visited tiles.
+// - `enumerator` must enumerate keyword search term visits from the URLDatabase
+//   ordered first by `normalized_term` and then by `last_visit_time` in
+//   ascending order, i.e., from the oldest to the newest.
 void GetMostRepeatedSearchTermsFromEnumerator(
     KeywordSearchTermVisitEnumerator& enumerator,
-    std::vector<std::unique_ptr<KeywordSearchTermVisit>>* search_terms);
+    const size_t count,
+    KeywordSearchTermVisitList* search_terms);
 
 }  // namespace history
 

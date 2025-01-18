@@ -6,9 +6,9 @@
 
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback.h"
 #include "base/feature_list.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
@@ -29,85 +29,6 @@ namespace {
 
 AppModalDialogManager* GetAppModalDialogManager() {
   return AppModalDialogManager::GetInstance();
-}
-
-// The relationship between origins in displayed dialogs.
-//
-// This is used for a UMA histogram. Please never alter existing values, only
-// append new ones.
-//
-// Note that "HTTP" in these enum names refers to a scheme that is either HTTP
-// or HTTPS.
-enum class DialogOriginRelationship {
-  // The dialog was shown by a main frame with a non-HTTP(S) scheme, or by a
-  // frame within a non-HTTP(S) main frame.
-  NON_HTTP_MAIN_FRAME = 1,
-
-  // The dialog was shown by a main frame with an HTTP(S) scheme.
-  HTTP_MAIN_FRAME = 2,
-
-  // The dialog was displayed by an HTTP(S) frame which shared the same origin
-  // as the main frame.
-  HTTP_MAIN_FRAME_HTTP_SAME_ORIGIN_ALERTING_FRAME = 3,
-
-  // The dialog was displayed by an HTTP(S) frame which had a different origin
-  // from the main frame.
-  HTTP_MAIN_FRAME_HTTP_DIFFERENT_ORIGIN_ALERTING_FRAME = 4,
-
-  // The dialog was displayed by a non-HTTP(S) frame whose nearest HTTP(S)
-  // ancestor shared the same origin as the main frame.
-  HTTP_MAIN_FRAME_NON_HTTP_ALERTING_FRAME_SAME_ORIGIN_ANCESTOR = 5,
-
-  // The dialog was displayed by a non-HTTP(S) frame whose nearest HTTP(S)
-  // ancestor was a different origin than the main frame.
-  HTTP_MAIN_FRAME_NON_HTTP_ALERTING_FRAME_DIFFERENT_ORIGIN_ANCESTOR = 6,
-
-  COUNT,
-};
-
-DialogOriginRelationship GetDialogOriginRelationship(
-    content::WebContents* web_contents,
-    content::RenderFrameHost* alerting_frame) {
-  url::Origin main_frame_origin =
-      web_contents->GetPrimaryMainFrame()->GetLastCommittedOrigin();
-
-  if (!main_frame_origin.GetURL().SchemeIsHTTPOrHTTPS())
-    return DialogOriginRelationship::NON_HTTP_MAIN_FRAME;
-
-  if (alerting_frame == web_contents->GetPrimaryMainFrame())
-    return DialogOriginRelationship::HTTP_MAIN_FRAME;
-
-  url::Origin alerting_frame_origin = alerting_frame->GetLastCommittedOrigin();
-
-  if (alerting_frame_origin.GetURL().SchemeIsHTTPOrHTTPS()) {
-    if (main_frame_origin == alerting_frame_origin) {
-      return DialogOriginRelationship::
-          HTTP_MAIN_FRAME_HTTP_SAME_ORIGIN_ALERTING_FRAME;
-    }
-    return DialogOriginRelationship::
-        HTTP_MAIN_FRAME_HTTP_DIFFERENT_ORIGIN_ALERTING_FRAME;
-  }
-
-  // Walk up the tree to find the nearest ancestor frame of the alerting frame
-  // that has an HTTP(S) scheme. Note that this is guaranteed to terminate
-  // because the main frame has an HTTP(S) scheme.
-  content::RenderFrameHost* nearest_http_ancestor_frame =
-      alerting_frame->GetParent();
-  while (!nearest_http_ancestor_frame->GetLastCommittedOrigin()
-              .GetURL()
-              .SchemeIsHTTPOrHTTPS()) {
-    nearest_http_ancestor_frame = nearest_http_ancestor_frame->GetParent();
-  }
-
-  url::Origin nearest_http_ancestor_frame_origin =
-      nearest_http_ancestor_frame->GetLastCommittedOrigin();
-
-  if (main_frame_origin == nearest_http_ancestor_frame_origin) {
-    return DialogOriginRelationship::
-        HTTP_MAIN_FRAME_NON_HTTP_ALERTING_FRAME_SAME_ORIGIN_ANCESTOR;
-  }
-  return DialogOriginRelationship::
-      HTTP_MAIN_FRAME_NON_HTTP_ALERTING_FRAME_DIFFERENT_ORIGIN_ANCESTOR;
 }
 
 }  // namespace
@@ -160,36 +81,38 @@ void TabModalDialogManager::RunJavaScriptDialog(
             content::WebContents::FromRenderFrameHost(render_frame_host));
 
   content::WebContents* web_contents = WebContentsObserver::web_contents();
-  DialogOriginRelationship origin_relationship =
-      GetDialogOriginRelationship(alerting_web_contents, render_frame_host);
-  navigation_metrics::Scheme scheme =
-      navigation_metrics::GetScheme(render_frame_host->GetLastCommittedURL());
-  switch (dialog_type) {
-    case content::JAVASCRIPT_DIALOG_TYPE_ALERT:
-      UMA_HISTOGRAM_ENUMERATION("JSDialogs.OriginRelationship.Alert",
-                                origin_relationship,
-                                DialogOriginRelationship::COUNT);
-      UMA_HISTOGRAM_ENUMERATION("JSDialogs.Scheme.Alert", scheme,
-                                navigation_metrics::Scheme::COUNT);
-      break;
-    case content::JAVASCRIPT_DIALOG_TYPE_CONFIRM:
-      UMA_HISTOGRAM_ENUMERATION("JSDialogs.OriginRelationship.Confirm",
-                                origin_relationship,
-                                DialogOriginRelationship::COUNT);
-      UMA_HISTOGRAM_ENUMERATION("JSDialogs.Scheme.Confirm", scheme,
-                                navigation_metrics::Scheme::COUNT);
-      break;
-    case content::JAVASCRIPT_DIALOG_TYPE_PROMPT:
-      UMA_HISTOGRAM_ENUMERATION("JSDialogs.OriginRelationship.Prompt",
-                                origin_relationship,
-                                DialogOriginRelationship::COUNT);
-      UMA_HISTOGRAM_ENUMERATION("JSDialogs.Scheme.Prompt", scheme,
-                                navigation_metrics::Scheme::COUNT);
-      break;
-  }
 
   // Close any dialog already showing.
   CloseDialog(DismissalCause::kSubsequentDialogShown, false, std::u16string());
+
+  // Only show the dialog if there is no other modal dialog showing.
+  if (!delegate_->CanShowModalUI()) {
+    static const char kDialogSuppressedByOtherDialogConsoleMessageFormat[] =
+        "A window.%s() dialog generated by this page was suppressed because "
+        "another browser modal dialog was already showing to the user.";
+    std::string dialog_type_string;
+    switch (dialog_type) {
+      case content::JAVASCRIPT_DIALOG_TYPE_ALERT: {
+        dialog_type_string = "alert";
+        break;
+      }
+      case content::JAVASCRIPT_DIALOG_TYPE_CONFIRM: {
+        dialog_type_string = "confirm";
+        break;
+      }
+      case content::JAVASCRIPT_DIALOG_TYPE_PROMPT: {
+        dialog_type_string = "prompt";
+        break;
+      }
+    }
+    render_frame_host->AddMessageToConsole(
+        blink::mojom::ConsoleMessageLevel::kWarning,
+        base::StringPrintf(kDialogSuppressedByOtherDialogConsoleMessageFormat,
+                           dialog_type_string.c_str()));
+
+    *did_suppress_message = true;
+    return;
+  }
 
   bool make_pending = false;
   if (!delegate_->IsWebContentsForemost() &&
@@ -295,16 +218,6 @@ void TabModalDialogManager::RunBeforeUnloadDialog(
   DCHECK_EQ(web_contents,
             content::WebContents::FromRenderFrameHost(render_frame_host));
 
-  DialogOriginRelationship origin_relationship =
-      GetDialogOriginRelationship(web_contents, render_frame_host);
-  navigation_metrics::Scheme scheme =
-      navigation_metrics::GetScheme(render_frame_host->GetLastCommittedURL());
-  UMA_HISTOGRAM_ENUMERATION("JSDialogs.OriginRelationship.BeforeUnload",
-                            origin_relationship,
-                            DialogOriginRelationship::COUNT);
-  UMA_HISTOGRAM_ENUMERATION("JSDialogs.Scheme.BeforeUnload", scheme,
-                            navigation_metrics::Scheme::COUNT);
-
   // onbeforeunload dialogs are always handled with an app-modal dialog, because
   // - they are critical to the user not losing data
   // - they can be requested for tabs that are not foremost
@@ -344,6 +257,15 @@ void TabModalDialogManager::OnVisibilityChanged(
   if (visibility == content::Visibility::HIDDEN) {
     HandleTabSwitchAway(DismissalCause::kTabHidden);
   } else if (pending_dialog_) {
+    // Another dialog has started showing between when the pending dialog was
+    // created and now. We cannot show the pending dialog over the currently
+    // showing dialog, so we must close the pending dialog.
+    if (!delegate_->CanShowModalUI()) {
+      CloseDialog(DismissalCause::kSuppressedByOtherDialog, false,
+                  std::u16string());
+      return;
+    }
+
     dialog_ = std::move(pending_dialog_).Run();
     pending_dialog_.Reset();
     delegate_->SetTabNeedsAttention(false);

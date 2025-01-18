@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "ui/base/mojom/window_show_state.mojom-blink.h"
 
 namespace blink {
 
@@ -47,29 +48,37 @@ MediaValuesCached::MediaValuesCachedData::MediaValuesCachedData(
     available_pointer_types =
         MediaValues::CalculateAvailablePointerTypes(frame);
     primary_hover_type = MediaValues::CalculatePrimaryHoverType(frame);
+    output_device_update_ability_type =
+        MediaValues::CalculateOutputDeviceUpdateAbilityType(frame);
     available_hover_types = MediaValues::CalculateAvailableHoverTypes(frame);
     em_size = MediaValues::CalculateEmSize(frame);
-    // Use 0.5em as the fallback for ex and ch units. CalculateEx/ChSize() would
-    // trigger unconditional font metrics retrieval for MediaValuesCached
-    // regardless of whether they are being used in a media query. In addition
-    // to unnecessary load font data, it also causes these two tests to fail for
-    // some reason:
+    // Use 0.5em as the fallback for ex, ch, ic, and lh units. CalculateEx()
+    // etc would trigger unconditional font metrics retrieval for
+    // MediaValuesCached regardless of whether they are being used in a media
+    // query.
+    //
+    // If this is changed, beware that tests like this may start failing because
+    // font loading may be triggered before the call to
+    // testRunner.setTextSubpixelPositioning(true):
     //
     // virtual/text-antialias/sub-pixel/text-scaling-pixel.html
-    // virtual/highdpi-threaded/external/wpt/css/css-paint-api/hidpi/device-pixel-ratio.https.html
     ex_size = em_size / 2.0;
     ch_size = em_size / 2.0;
     ic_size = em_size;
+    line_height = em_size;
     three_d_enabled = MediaValues::CalculateThreeDEnabled(frame);
-    immersive_mode = MediaValues::CalculateInImmersiveMode(frame);
     strict_mode = MediaValues::CalculateStrictMode(frame);
     display_mode = MediaValues::CalculateDisplayMode(frame);
+    window_show_state = MediaValues::CalculateWindowShowState(frame);
+    resizable = MediaValues::CalculateResizable(frame);
     media_type = MediaValues::CalculateMediaType(frame);
     color_gamut = MediaValues::CalculateColorGamut(frame);
     preferred_color_scheme = MediaValues::CalculatePreferredColorScheme(frame);
     preferred_contrast = MediaValues::CalculatePreferredContrast(frame);
     prefers_reduced_motion = MediaValues::CalculatePrefersReducedMotion(frame);
     prefers_reduced_data = MediaValues::CalculatePrefersReducedData(frame);
+    prefers_reduced_transparency =
+        MediaValues::CalculatePrefersReducedTransparency(frame);
     forced_colors = MediaValues::CalculateForcedColors(frame);
     navigation_controls = MediaValues::CalculateNavigationControls(frame);
     horizontal_viewport_segments =
@@ -77,6 +86,8 @@ MediaValuesCached::MediaValuesCachedData::MediaValuesCachedData(
     vertical_viewport_segments =
         MediaValues::CalculateVerticalViewportSegments(frame);
     device_posture = MediaValues::CalculateDevicePosture(frame);
+    inverted_colors = MediaValues::CalculateInvertedColors(frame);
+    scripting = MediaValues::CalculateScripting(frame);
   }
 }
 
@@ -91,25 +102,71 @@ MediaValues* MediaValuesCached::Copy() const {
   return MakeGarbageCollected<MediaValuesCached>(data_);
 }
 
-float MediaValuesCached::EmFontSize() const {
+float MediaValuesCached::EmFontSize(float zoom) const {
+  DCHECK_EQ(1.0f, zoom);
   return data_.em_size;
 }
 
-float MediaValuesCached::RemFontSize() const {
+float MediaValuesCached::RemFontSize(float zoom) const {
+  DCHECK_EQ(1.0f, zoom);
   // For media queries rem and em units are both based on the initial font.
   return data_.em_size;
 }
 
-float MediaValuesCached::ExFontSize() const {
+float MediaValuesCached::ExFontSize(float zoom) const {
+  DCHECK_EQ(1.0f, zoom);
   return data_.ex_size;
 }
 
-float MediaValuesCached::ChFontSize() const {
+float MediaValuesCached::RexFontSize(float zoom) const {
+  DCHECK_EQ(1.0f, zoom);
+  // For media queries rex and ex units are both based on the initial font.
+  return data_.ex_size;
+}
+
+float MediaValuesCached::ChFontSize(float zoom) const {
+  DCHECK_EQ(1.0f, zoom);
   return data_.ch_size;
 }
 
-float MediaValuesCached::IcFontSize() const {
+float MediaValuesCached::RchFontSize(float zoom) const {
+  DCHECK_EQ(1.0f, zoom);
+  // For media queries rch and ch units are both based on the initial font.
+  return data_.ch_size;
+}
+
+float MediaValuesCached::IcFontSize(float zoom) const {
+  DCHECK_EQ(1.0f, zoom);
   return data_.ic_size;
+}
+
+float MediaValuesCached::RicFontSize(float zoom) const {
+  DCHECK_EQ(1.0f, zoom);
+  // For media queries ric and ic units are both based on the initial font.
+  return data_.ic_size;
+}
+
+float MediaValuesCached::LineHeight(float zoom) const {
+  DCHECK_EQ(1.0f, zoom);
+  return data_.line_height;
+}
+
+float MediaValuesCached::RootLineHeight(float zoom) const {
+  DCHECK_EQ(1.0f, zoom);
+  // For media queries rlh and lh units are both based on the initial font.
+  return data_.line_height;
+}
+
+float MediaValuesCached::CapFontSize(float zoom) const {
+  DCHECK_EQ(1.0f, zoom);
+  // For media queries cap units are based on the initial font.
+  return data_.cap_size;
+}
+
+float MediaValuesCached::RcapFontSize(float zoom) const {
+  DCHECK_EQ(1.0f, zoom);
+  // For media queries rcap units are based on the initial font.
+  return data_.cap_size;
 }
 
 double MediaValuesCached::ViewportWidth() const {
@@ -152,6 +209,14 @@ double MediaValuesCached::ContainerHeight() const {
   return SmallViewportHeight();
 }
 
+double MediaValuesCached::ContainerWidth(const ScopedCSSName&) const {
+  return SmallViewportWidth();
+}
+
+double MediaValuesCached::ContainerHeight(const ScopedCSSName&) const {
+  return SmallViewportHeight();
+}
+
 int MediaValuesCached::DeviceWidth() const {
   return data_.device_width;
 }
@@ -176,6 +241,10 @@ int MediaValuesCached::MonochromeBitsPerComponent() const {
   return data_.monochrome_bits_per_component;
 }
 
+bool MediaValuesCached::InvertedColors() const {
+  return data_.inverted_colors;
+}
+
 mojom::blink::PointerType MediaValuesCached::PrimaryPointerType() const {
   return data_.primary_pointer_type;
 }
@@ -188,16 +257,17 @@ mojom::blink::HoverType MediaValuesCached::PrimaryHoverType() const {
   return data_.primary_hover_type;
 }
 
+mojom::blink::OutputDeviceUpdateAbilityType
+MediaValuesCached::OutputDeviceUpdateAbilityType() const {
+  return data_.output_device_update_ability_type;
+}
+
 int MediaValuesCached::AvailableHoverTypes() const {
   return data_.available_hover_types;
 }
 
 bool MediaValuesCached::ThreeDEnabled() const {
   return data_.three_d_enabled;
-}
-
-bool MediaValuesCached::InImmersiveMode() const {
-  return data_.immersive_mode;
 }
 
 bool MediaValuesCached::StrictMode() const {
@@ -210,6 +280,14 @@ const String MediaValuesCached::MediaType() const {
 
 blink::mojom::DisplayMode MediaValuesCached::DisplayMode() const {
   return data_.display_mode;
+}
+
+ui::mojom::blink::WindowShowState MediaValuesCached::WindowShowState() const {
+  return data_.window_show_state;
+}
+
+bool MediaValuesCached::Resizable() const {
+  return data_.resizable;
 }
 
 Document* MediaValuesCached::GetDocument() const {
@@ -248,6 +326,10 @@ bool MediaValuesCached::PrefersReducedData() const {
   return data_.prefers_reduced_data;
 }
 
+bool MediaValuesCached::PrefersReducedTransparency() const {
+  return data_.prefers_reduced_transparency;
+}
+
 ForcedColors MediaValuesCached::GetForcedColors() const {
   return data_.forced_colors;
 }
@@ -264,9 +346,12 @@ int MediaValuesCached::GetVerticalViewportSegments() const {
   return data_.vertical_viewport_segments;
 }
 
-device::mojom::blink::DevicePostureType MediaValuesCached::GetDevicePosture()
-    const {
+mojom::blink::DevicePostureType MediaValuesCached::GetDevicePosture() const {
   return data_.device_posture;
+}
+
+Scripting MediaValuesCached::GetScripting() const {
+  return data_.scripting;
 }
 
 }  // namespace blink

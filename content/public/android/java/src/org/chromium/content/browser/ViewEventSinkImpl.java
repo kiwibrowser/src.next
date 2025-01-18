@@ -4,25 +4,29 @@
 
 package org.chromium.content.browser;
 
+import static org.chromium.build.NullUtil.assumeNonNull;
+
 import android.content.res.Configuration;
 
 import org.chromium.base.TraceEvent;
 import org.chromium.base.UserData;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.content.browser.webcontents.WebContentsImpl;
 import org.chromium.content.browser.webcontents.WebContentsImpl.UserDataFactory;
 import org.chromium.content_public.browser.ViewEventSink;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.ViewAndroidDelegate;
+import org.chromium.ui.base.ViewUtils;
 import org.chromium.ui.base.WindowAndroid.ActivityStateObserver;
 
-/**
- * Implementation of the interface {@link ViewEventSink}.
- */
+/** Implementation of the interface {@link ViewEventSink}. */
+@NullMarked
 public final class ViewEventSinkImpl implements ViewEventSink, ActivityStateObserver, UserData {
     private final WebContentsImpl mWebContents;
 
     // Whether the container view has view-level focus.
-    private Boolean mHasViewFocus;
+    private @Nullable Boolean mHasViewFocus;
 
     // This is used in place of window focus on the container view, as we can't actually use window
     // focus due to issues where content expects to be focused while a popup steals window focus.
@@ -32,7 +36,7 @@ public final class ViewEventSinkImpl implements ViewEventSink, ActivityStateObse
     // Whether we consider this WebContents to have input focus. This is computed through
     // mHasViewFocus and mPaused. See the comments on mPaused for how this doesn't exactly match
     // Android's notion of input focus and why we need to do this.
-    private Boolean mHasInputFocus;
+    private @Nullable Boolean mHasInputFocus;
     private boolean mHideKeyboardOnBlur;
 
     private static final class UserDataFactoryLazyHolder {
@@ -40,8 +44,12 @@ public final class ViewEventSinkImpl implements ViewEventSink, ActivityStateObse
     }
 
     public static ViewEventSinkImpl from(WebContents webContents) {
-        return ((WebContentsImpl) webContents)
-                .getOrSetUserData(ViewEventSinkImpl.class, UserDataFactoryLazyHolder.INSTANCE);
+        ViewEventSinkImpl ret =
+                ((WebContentsImpl) webContents)
+                        .getOrSetUserData(
+                                ViewEventSinkImpl.class, UserDataFactoryLazyHolder.INSTANCE);
+        assert ret != null;
+        return ret;
     }
 
     public ViewEventSinkImpl(WebContents webContents) {
@@ -50,7 +58,10 @@ public final class ViewEventSinkImpl implements ViewEventSink, ActivityStateObse
 
     @Override
     public void setAccessDelegate(ViewEventSink.InternalAccessDelegate accessDelegate) {
-        GestureListenerManagerImpl.fromWebContents(mWebContents).setScrollDelegate(accessDelegate);
+        GestureListenerManagerImpl gestureManager =
+                GestureListenerManagerImpl.fromWebContents(mWebContents);
+        assumeNonNull(gestureManager);
+        gestureManager.setScrollDelegate(accessDelegate);
         ContentUiEventHandler.fromWebContents(mWebContents).setEventDelegate(accessDelegate);
     }
 
@@ -66,8 +77,9 @@ public final class ViewEventSinkImpl implements ViewEventSink, ActivityStateObse
         if (mWebContents.getStylusWritingHandler() != null) {
             ViewAndroidDelegate viewAndroidDelegate = mWebContents.getViewAndroidDelegate();
             if (viewAndroidDelegate != null) {
-                mWebContents.getStylusWritingHandler().onDetachedFromWindow(
-                        viewAndroidDelegate.getContainerView().getContext());
+                mWebContents
+                        .getStylusWritingHandler()
+                        .onDetachedFromWindow(viewAndroidDelegate.getContainerView().getContext());
             }
         }
     }
@@ -103,7 +115,10 @@ public final class ViewEventSinkImpl implements ViewEventSink, ActivityStateObse
             // To request layout has side effect, but it seems OK as it only happen in
             // onConfigurationChange and layout has to be changed in most case.
             ViewAndroidDelegate delegate = mWebContents.getViewAndroidDelegate();
-            if (delegate != null) delegate.getContainerView().requestLayout();
+            if (delegate != null) {
+                ViewUtils.requestLayout(
+                        delegate.getContainerView(), "ViewEventSinkImpl.onConfigurationChanged");
+            }
         } finally {
             TraceEvent.end("ViewEventSink.onConfigurationChanged");
         }

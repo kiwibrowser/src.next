@@ -5,16 +5,18 @@
 #include "extensions/common/manifest_handlers/file_handler_info.h"
 
 #include <stddef.h>
-
 #include <memory>
 
+#include "base/feature_list.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "extensions/common/error_utils.h"
+#include "extensions/common/extension_features.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_constants.h"
+#include "extensions/common/manifest_handlers/web_file_handlers_info.h"
 
 namespace extensions {
 
@@ -33,30 +35,8 @@ bool IsSupportedVerb(const std::string& verb) {
          verb == apps::file_handler_verbs::kShareWith;
 }
 
-}  // namespace
-
-FileHandlerMatch::FileHandlerMatch() = default;
-FileHandlerMatch::~FileHandlerMatch() = default;
-
-FileHandlers::FileHandlers() {}
-FileHandlers::~FileHandlers() {}
-
-// static
-const FileHandlersInfo* FileHandlers::GetFileHandlers(
-    const Extension* extension) {
-  FileHandlers* info = static_cast<FileHandlers*>(
-      extension->GetManifestData(keys::kFileHandlers));
-  return info ? &info->file_handlers : nullptr;
-}
-
-FileHandlersParser::FileHandlersParser() {
-}
-
-FileHandlersParser::~FileHandlersParser() {
-}
-
 bool LoadFileHandler(const std::string& handler_id,
-                     const base::Value& handler_info,
+                     const base::Value::Dict& handler_info,
                      FileHandlersInfo* file_handlers,
                      std::u16string* error,
                      std::vector<InstallWarning>* install_warnings) {
@@ -65,7 +45,7 @@ bool LoadFileHandler(const std::string& handler_id,
 
   handler.id = handler_id;
 
-  const base::Value* mime_types = handler_info.FindKey(keys::kFileHandlerTypes);
+  const base::Value* mime_types = handler_info.Find(keys::kFileHandlerTypes);
   if (mime_types != nullptr && !mime_types->is_list()) {
     *error = ErrorUtils::FormatErrorMessageUTF16(
         errors::kInvalidFileHandlerType, handler_id);
@@ -73,7 +53,7 @@ bool LoadFileHandler(const std::string& handler_id,
   }
 
   const base::Value* file_extensions =
-      handler_info.FindKey(keys::kFileHandlerExtensions);
+      handler_info.Find(keys::kFileHandlerExtensions);
   if (file_extensions != nullptr && !file_extensions->is_list()) {
     *error = ErrorUtils::FormatErrorMessageUTF16(
         errors::kInvalidFileHandlerExtension, handler_id);
@@ -82,19 +62,18 @@ bool LoadFileHandler(const std::string& handler_id,
 
   handler.include_directories = false;
   const base::Value* include_directories =
-      handler_info.FindKey(keys::kFileHandlerIncludeDirectories);
+      handler_info.Find(keys::kFileHandlerIncludeDirectories);
   if (include_directories != nullptr) {
     if (include_directories->is_bool()) {
       handler.include_directories = include_directories->GetBool();
     } else {
-      *error = base::UTF8ToUTF16(errors::kInvalidFileHandlerIncludeDirectories);
+      *error = errors::kInvalidFileHandlerIncludeDirectories;
       return false;
     }
   }
 
   handler.verb = apps::file_handler_verbs::kOpenWith;
-  const base::Value* file_handler =
-      handler_info.FindKey(keys::kFileHandlerVerb);
+  const base::Value* file_handler = handler_info.Find(keys::kFileHandlerVerb);
   if (file_handler != nullptr) {
     if (file_handler->is_string() &&
         IsSupportedVerb(file_handler->GetString())) {
@@ -144,48 +123,86 @@ bool LoadFileHandler(const std::string& handler_id,
   file_handlers->push_back(handler);
 
   // Check for unknown keys.
-  for (auto entry : handler_info.DictItems()) {
+  for (auto entry : handler_info) {
     if (entry.first != keys::kFileHandlerExtensions &&
         entry.first != keys::kFileHandlerTypes &&
         entry.first != keys::kFileHandlerIncludeDirectories &&
         entry.first != keys::kFileHandlerVerb) {
-      install_warnings->push_back(InstallWarning(
+      install_warnings->emplace_back(
           base::StringPrintf(kNotRecognized, entry.first.c_str()),
-          keys::kFileHandlers, entry.first));
+          keys::kFileHandlers, entry.first);
     }
   }
 
   return true;
 }
 
+}  // namespace
+
+FileHandlerMatch::FileHandlerMatch() = default;
+FileHandlerMatch::~FileHandlerMatch() = default;
+
+FileHandlers::FileHandlers() = default;
+FileHandlers::~FileHandlers() = default;
+
+// static
+const FileHandlersInfo* FileHandlers::GetFileHandlers(
+    const Extension* extension) {
+  CHECK(extension);
+  if (WebFileHandlers::SupportsWebFileHandlers(*extension)) {
+    return nullptr;
+  }
+  FileHandlers* info = static_cast<FileHandlers*>(
+      extension->GetManifestData(keys::kFileHandlers));
+  return info ? &info->file_handlers : nullptr;
+}
+
+FileHandlersParser::FileHandlersParser() = default;
+
+FileHandlersParser::~FileHandlersParser() = default;
+
+bool FileHandlersParser::Validate(const Extension* extension,
+                                  std::string* error,
+                                  std::vector<InstallWarning>* warnings) const {
+  DCHECK(extension);
+
+  // Web File Handlers.
+  if (extension->manifest_version() >= 3) {
+    return WebFileHandlersParser().Validate(extension, error, warnings);
+  }
+
+  return true;
+}
+
 bool FileHandlersParser::Parse(Extension* extension, std::u16string* error) {
+  // If this is an MV3 extension, use the generated `file_handlers` object.
+  if (extension->manifest_version() >= 3) {
+    return WebFileHandlersParser().Parse(extension, error);
+  }
+
   std::unique_ptr<FileHandlers> info(new FileHandlers);
-  const base::Value* all_handlers = nullptr;
-  if (!extension->manifest()->GetDictionary(keys::kFileHandlers,
-                                            &all_handlers)) {
+  const base::Value::Dict* all_handlers =
+      extension->manifest()->available_values().FindDict(keys::kFileHandlers);
+  if (!all_handlers) {
     *error = errors::kInvalidFileHandlers;
     return false;
   }
 
   std::vector<InstallWarning> install_warnings;
-  for (auto entry : all_handlers->DictItems()) {
+  for (auto entry : *all_handlers) {
     if (!entry.second.is_dict()) {
       *error = errors::kInvalidFileHandlers;
       return false;
     }
-    if (!LoadFileHandler(entry.first, entry.second, &info->file_handlers, error,
-                         &install_warnings)) {
+    if (!LoadFileHandler(entry.first, entry.second.GetDict(),
+                         &info->file_handlers, error, &install_warnings)) {
       return false;
     }
   }
 
   int filter_count = 0;
-  for (FileHandlersInfo::const_iterator iter = info->file_handlers.begin();
-       iter != info->file_handlers.end();
-       iter++) {
-    filter_count += iter->types.size();
-    filter_count += iter->extensions.size();
-  }
+  for (const auto& iter : info->file_handlers)
+    filter_count += iter.types.size() + iter.extensions.size();
 
   if (filter_count > kMaxTypeAndExtensionHandlers) {
     *error = errors::kInvalidFileHandlersTooManyTypesAndExtensions;

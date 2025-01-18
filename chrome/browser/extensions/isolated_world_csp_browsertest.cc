@@ -4,6 +4,7 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_apitest.h"
+#include "chrome/browser/ui/browser.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/dns/mock_host_resolver.h"
@@ -64,14 +65,13 @@ IN_PROC_BROWSER_TEST_F(IsolatedWorldCspBrowserTest, JavascriptUrl_ManifestV3) {
   content::WebContentsConsoleObserver console_observer(web_contents);
   console_observer.SetPattern(
       "Refused to run the JavaScript URL because it violates the following "
-      "Content Security Policy directive: \"script-src 'self' "
-      "'wasm-unsafe-eval'\".*");
+      "Content Security Policy directive: *");
 
   GURL url = embedded_test_server()->GetURL("js-url.com",
                                             "/page_with_script_src_csp.html");
   ASSERT_TRUE(RunExtensionTest("mv3", {.page_url = url.spec().c_str()}))
       << message_;
-  console_observer.Wait();
+  ASSERT_TRUE(console_observer.Wait());
 
   // Also ensure the page title wasn't changed.
   EXPECT_EQ(u"Page With CSP", web_contents->GetTitle());

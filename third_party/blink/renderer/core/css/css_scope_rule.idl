@@ -1,10 +1,10 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 [
-    Exposed=Window,
-    RuntimeEnabled=CSSScope
-] interface CSSScopeRule : CSSConditionRule {
-    // TODO(crbug.com/1315532): Spec.
+    Exposed=Window
+] interface CSSScopeRule : CSSGroupingRule {
+    readonly attribute CSSOMString? start;
+    readonly attribute CSSOMString? end;
 };

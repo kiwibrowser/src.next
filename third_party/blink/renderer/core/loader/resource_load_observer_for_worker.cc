@@ -1,10 +1,11 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/loader/resource_load_observer_for_worker.h"
 
 #include "services/network/public/cpp/ip_address_space_util.h"
+#include "third_party/blink/renderer/core/core_probe_sink.h"
 #include "third_party/blink/renderer/core/core_probes_inl.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/loader/mixed_content_checker.h"
@@ -39,7 +40,7 @@ void ResourceLoadObserverForWorker::WillSendRequest(
     RenderBlockingBehavior render_blocking_behavior,
     const Resource* resource) {
   probe::WillSendRequest(
-      probe_, nullptr,
+      worker_fetch_context_->GetExecutionContext(), nullptr,
       fetcher_properties_->GetFetchClientSettingsObject().GlobalObjectUrl(),
       request, redirect_response, options, resource_type,
       render_blocking_behavior, base::TimeTicks::Now());
@@ -92,9 +93,8 @@ void ResourceLoadObserverForWorker::DidReceiveResponse(
 
 void ResourceLoadObserverForWorker::DidReceiveData(
     uint64_t identifier,
-    base::span<const char> chunk) {
-  probe::DidReceiveData(probe_, identifier, nullptr, chunk.data(),
-                        chunk.size());
+    base::SpanOrSize<const char> chunk) {
+  probe::DidReceiveData(probe_, identifier, nullptr, chunk);
 }
 
 void ResourceLoadObserverForWorker::DidReceiveTransferSizeUpdate(
@@ -112,11 +112,9 @@ void ResourceLoadObserverForWorker::DidFinishLoading(
     uint64_t identifier,
     base::TimeTicks finish_time,
     int64_t encoded_data_length,
-    int64_t decoded_body_length,
-    bool should_report_corb_blocking) {
+    int64_t decoded_body_length) {
   probe::DidFinishLoading(probe_, identifier, nullptr, finish_time,
-                          encoded_data_length, decoded_body_length,
-                          should_report_corb_blocking);
+                          encoded_data_length, decoded_body_length);
 }
 
 void ResourceLoadObserverForWorker::DidFailLoading(const KURL&,
@@ -126,6 +124,13 @@ void ResourceLoadObserverForWorker::DidFailLoading(const KURL&,
                                                    IsInternalRequest) {
   probe::DidFailLoading(probe_, identifier, nullptr, error,
                         devtools_worker_token_);
+}
+
+bool ResourceLoadObserverForWorker::InterestedInAllRequests() {
+  if (probe_) {
+    return probe_->HasInspectorNetworkAgents();
+  }
+  return false;
 }
 
 void ResourceLoadObserverForWorker::Trace(Visitor* visitor) const {

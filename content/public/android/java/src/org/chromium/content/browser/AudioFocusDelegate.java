@@ -5,14 +5,20 @@
 package org.chromium.content.browser;
 
 import android.content.Context;
+import android.media.AudioAttributes;
+import android.media.AudioFocusRequest;
 import android.media.AudioManager;
+import android.os.Handler;
+
+import org.jni_zero.CalledByNative;
+import org.jni_zero.JNINamespace;
+import org.jni_zero.NativeMethods;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.annotations.CalledByNative;
-import org.chromium.base.annotations.JNINamespace;
-import org.chromium.base.annotations.NativeMethods;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 
 /**
  * AudioFocusDelegate is the Java counterpart of content::AudioFocusDelegateAndroid.
@@ -26,18 +32,24 @@ import org.chromium.base.annotations.NativeMethods;
  * like a notification.
  */
 @JNINamespace("content")
+@NullMarked
 public class AudioFocusDelegate implements AudioManager.OnAudioFocusChangeListener {
     private static final String TAG = "MediaSession";
 
     private int mFocusType;
     private boolean mIsDucking;
+    private @Nullable AudioFocusRequest mFocusRequest;
 
     // Native pointer to C++ content::AudioFocusDelegateAndroid.
     // It will be set to 0 when the native AudioFocusDelegateAndroid object is destroyed.
     private long mNativeAudioFocusDelegateAndroid;
 
+    // Handle to the UI thread to ensure callbacks are on the correct thread.
+    private final Handler mHandler;
+
     private AudioFocusDelegate(long nativeAudioFocusDelegateAndroid) {
         mNativeAudioFocusDelegateAndroid = nativeAudioFocusDelegateAndroid;
+        mHandler = new Handler(ThreadUtils.getUiThreadLooper());
     }
 
     @CalledByNative
@@ -55,17 +67,24 @@ public class AudioFocusDelegate implements AudioManager.OnAudioFocusChangeListen
     @CalledByNative
     private boolean requestAudioFocus(boolean transientFocus) {
         assert ThreadUtils.runningOnUiThread();
-        mFocusType = transientFocus ? AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
-                                    : AudioManager.AUDIOFOCUS_GAIN;
+        mFocusType =
+                transientFocus
+                        ? AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+                        : AudioManager.AUDIOFOCUS_GAIN;
         return requestAudioFocusInternal();
     }
 
     @CalledByNative
     private void abandonAudioFocus() {
         assert ThreadUtils.runningOnUiThread();
-        AudioManager am = (AudioManager) ContextUtils.getApplicationContext().getSystemService(
-                Context.AUDIO_SERVICE);
-        am.abandonAudioFocus(this);
+        AudioManager am =
+                (AudioManager)
+                        ContextUtils.getApplicationContext()
+                                .getSystemService(Context.AUDIO_SERVICE);
+        if (mFocusRequest != null) {
+            am.abandonAudioFocusRequest(mFocusRequest);
+            mFocusRequest = null;
+        }
     }
 
     @CalledByNative
@@ -74,10 +93,34 @@ public class AudioFocusDelegate implements AudioManager.OnAudioFocusChangeListen
     }
 
     private boolean requestAudioFocusInternal() {
-        AudioManager am = (AudioManager) ContextUtils.getApplicationContext().getSystemService(
-                Context.AUDIO_SERVICE);
+        AudioManager am =
+                (AudioManager)
+                        ContextUtils.getApplicationContext()
+                                .getSystemService(Context.AUDIO_SERVICE);
 
-        int result = am.requestAudioFocus(this, AudioManager.STREAM_MUSIC, mFocusType);
+        int result;
+        AudioAttributes playbackAttributes =
+                new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_UNKNOWN)
+                        .build();
+        mFocusRequest =
+                new AudioFocusRequest.Builder(mFocusType)
+                        .setAudioAttributes(playbackAttributes)
+                        .setAcceptsDelayedFocusGain(false)
+                        .setWillPauseWhenDucked(false)
+                        .setOnAudioFocusChangeListener(this, mHandler)
+                        .build();
+        try {
+            result = am.requestAudioFocus(mFocusRequest);
+        } catch (SecurityException e) {
+            // If we get a SecurityException, the platform has a bug and requestAudioFocus is broken
+            // (at least under our current running conditions). Pretend that everything worked,
+            // because the alternative is that media such as videos may refuse to ever play.
+            Log.w(TAG, "audio focus coordination is broken", e);
+            return true;
+        }
+
         return result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
     }
 
@@ -89,29 +132,28 @@ public class AudioFocusDelegate implements AudioManager.OnAudioFocusChangeListen
         switch (focusChange) {
             case AudioManager.AUDIOFOCUS_GAIN:
                 if (mIsDucking) {
-                    AudioFocusDelegateJni.get().onStopDucking(
-                            mNativeAudioFocusDelegateAndroid, AudioFocusDelegate.this);
+                    AudioFocusDelegateJni.get()
+                            .onStopDucking(
+                                    mNativeAudioFocusDelegateAndroid, AudioFocusDelegate.this);
                     mIsDucking = false;
                 } else {
-                    AudioFocusDelegateJni.get().onResume(
-                            mNativeAudioFocusDelegateAndroid, AudioFocusDelegate.this);
+                    AudioFocusDelegateJni.get()
+                            .onResume(mNativeAudioFocusDelegateAndroid, AudioFocusDelegate.this);
                 }
                 break;
             case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
-                AudioFocusDelegateJni.get().onSuspend(
-                        mNativeAudioFocusDelegateAndroid, AudioFocusDelegate.this);
+                AudioFocusDelegateJni.get()
+                        .onSuspend(mNativeAudioFocusDelegateAndroid, AudioFocusDelegate.this);
                 break;
             case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
                 mIsDucking = true;
-                AudioFocusDelegateJni.get().recordSessionDuck(
-                        mNativeAudioFocusDelegateAndroid, AudioFocusDelegate.this);
-                AudioFocusDelegateJni.get().onStartDucking(
-                        mNativeAudioFocusDelegateAndroid, AudioFocusDelegate.this);
+                AudioFocusDelegateJni.get()
+                        .onStartDucking(mNativeAudioFocusDelegateAndroid, AudioFocusDelegate.this);
                 break;
             case AudioManager.AUDIOFOCUS_LOSS:
                 abandonAudioFocus();
-                AudioFocusDelegateJni.get().onSuspend(
-                        mNativeAudioFocusDelegateAndroid, AudioFocusDelegate.this);
+                AudioFocusDelegateJni.get()
+                        .onSuspend(mNativeAudioFocusDelegateAndroid, AudioFocusDelegate.this);
                 break;
             default:
                 Log.w(TAG, "onAudioFocusChange called with unexpected value %d", focusChange);
@@ -122,9 +164,11 @@ public class AudioFocusDelegate implements AudioManager.OnAudioFocusChangeListen
     @NativeMethods
     interface Natives {
         void onSuspend(long nativeAudioFocusDelegateAndroid, AudioFocusDelegate caller);
+
         void onResume(long nativeAudioFocusDelegateAndroid, AudioFocusDelegate caller);
+
         void onStartDucking(long nativeAudioFocusDelegateAndroid, AudioFocusDelegate caller);
+
         void onStopDucking(long nativeAudioFocusDelegateAndroid, AudioFocusDelegate caller);
-        void recordSessionDuck(long nativeAudioFocusDelegateAndroid, AudioFocusDelegate caller);
     }
 }

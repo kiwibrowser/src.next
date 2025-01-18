@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,20 +16,33 @@ bool CascadeResolver::IsLocked(const CSSProperty& property) const {
   return Find(property) != kNotFound;
 }
 
+bool CascadeResolver::IsLocked(const String& attribute) const {
+  return Find(attribute) != kNotFound;
+}
+
 bool CascadeResolver::AllowSubstitution(CSSVariableData* data) const {
   if (data && data->IsAnimationTainted() && stack_.size()) {
     const CSSProperty* property = CurrentProperty();
-    if (IsA<CustomProperty>(*property))
+    if (IsA<CustomProperty>(*property)) {
       return true;
+    }
     return !CSSAnimations::IsAnimationAffectingProperty(*property);
   }
   return true;
 }
 
 bool CascadeResolver::DetectCycle(const CSSProperty& property) {
-  wtf_size_t index = Find(property);
-  if (index == kNotFound)
+  return DetectCycle(Find(property));
+}
+
+bool CascadeResolver::DetectCycle(const String& attribute) {
+  return DetectCycle(Find(attribute));
+}
+
+bool CascadeResolver::DetectCycle(wtf_size_t index) {
+  if (index == kNotFound) {
     return false;
+  }
   cycle_start_ = std::min(cycle_start_, index);
   cycle_end_ = stack_.size();
   DCHECK(InCycle());
@@ -42,9 +55,24 @@ bool CascadeResolver::InCycle() const {
 
 wtf_size_t CascadeResolver::Find(const CSSProperty& property) const {
   wtf_size_t index = 0;
-  for (const CSSProperty* p : stack_) {
-    if (p->HasEqualCSSPropertyName(property))
+  for (CycleElem elem : stack_) {
+    if (absl::holds_alternative<const CSSProperty*>(elem) &&
+        absl::get<const CSSProperty*>(elem)->HasEqualCSSPropertyName(
+            property)) {
       return index;
+    }
+    ++index;
+  }
+  return kNotFound;
+}
+
+wtf_size_t CascadeResolver::Find(const String& attribute) const {
+  wtf_size_t index = 0;
+  for (CycleElem elem : stack_) {
+    if (absl::holds_alternative<const String*>(elem) &&
+        *(absl::get<const String*>(elem)) == attribute) {
+      return index;
+    }
     ++index;
   }
   return kNotFound;
@@ -55,6 +83,13 @@ CascadeResolver::AutoLock::AutoLock(const CSSProperty& property,
     : resolver_(resolver) {
   DCHECK(!resolver.IsLocked(property));
   resolver_.stack_.push_back(&property);
+}
+
+CascadeResolver::AutoLock::AutoLock(const String& attribute,
+                                    CascadeResolver& resolver)
+    : resolver_(resolver) {
+  DCHECK(!resolver.IsLocked(attribute));
+  resolver_.stack_.push_back(&attribute);
 }
 
 CascadeResolver::AutoLock::~AutoLock() {

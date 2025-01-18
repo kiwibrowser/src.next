@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,17 +6,16 @@
 
 #include "third_party/blink/renderer/core/layout/layout_replaced.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
+#include "third_party/blink/renderer/core/layout/physical_fragment.h"
 #include "third_party/blink/renderer/core/paint/box_model_object_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_painter.h"
 
 namespace blink {
 
-ScopedPaintState::ScopedPaintState(
-    const LayoutObject& object,
-    const PaintInfo& paint_info,
-    const FragmentData* fragment_data,
-    bool painting_legacy_table_part_in_ancestor_layer)
+ScopedPaintState::ScopedPaintState(const LayoutObject& object,
+                                   const PaintInfo& paint_info,
+                                   const FragmentData* fragment_data)
     : fragment_to_paint_(fragment_data), input_paint_info_(paint_info) {
   if (!fragment_to_paint_) {
     // The object has nothing to paint in the current fragment.
@@ -28,12 +27,9 @@ ScopedPaintState::ScopedPaintState(
   }
 
   paint_offset_ = fragment_to_paint_->PaintOffset();
-  if (painting_legacy_table_part_in_ancestor_layer) {
-    DCHECK(object.IsTableCellLegacy() || object.IsLegacyTableRow() ||
-           object.IsLegacyTableSection());
-  } else if (paint_info.phase == PaintPhase::kOverlayOverflowControls ||
-             (object.HasLayer() &&
-              To<LayoutBoxModelObject>(object).HasSelfPaintingLayer())) {
+  if (paint_info.phase == PaintPhase::kOverlayOverflowControls ||
+      (object.HasLayer() &&
+       To<LayoutBoxModelObject>(object).HasSelfPaintingLayer())) {
     // PaintLayerPainter already adjusted for PaintOffsetTranslation for
     // PaintContainer.
     return;
@@ -50,6 +46,26 @@ void ScopedPaintState::AdjustForPaintProperties(const LayoutObject& object) {
   const auto* properties = fragment_to_paint_->PaintProperties();
   if (!properties)
     return;
+
+  if (!object.Parent() && !object.HasLayer()) {
+#if DCHECK_IS_ON()
+    DCHECK(object.IsInDetachedNonDomTree());
+    DCHECK(object.IsBox());
+    DCHECK_EQ(To<LayoutBox>(object).GetPhysicalFragment(0)->GetBoxType(),
+              PhysicalFragment::kPageBorderBox);
+#endif
+
+    // The page border box fragment paints @page borders and other decorations,
+    // in addition to the document background (the one typically defined on the
+    // BODY or HTML element). Therefore, this is in the coordinate system of the
+    // document, which may have a different scale factor than the page
+    // container, which is fitted to the paper size, if any.
+    chunk_properties_.emplace(
+        input_paint_info_.context.GetPaintController(),
+        fragment_to_paint_->LocalBorderBoxProperties(), object,
+        DisplayItem::PaintPhaseToDrawingType(input_paint_info_.phase));
+    return;
+  }
 
   auto new_chunk_properties = input_paint_info_.context.GetPaintController()
                                   .CurrentPaintChunkProperties();
@@ -68,7 +84,7 @@ void ScopedPaintState::AdjustForPaintProperties(const LayoutObject& object) {
       // are painting table row background behind a cell having paint offset
       // translation.
       input_paint_info_.context.Save();
-      gfx::Vector2dF translation = paint_offset_translation->Translation2D();
+      gfx::Vector2dF translation = paint_offset_translation->Get2dTranslation();
       input_paint_info_.context.Translate(translation.x(), translation.y());
       paint_offset_translation_as_drawing_ = true;
     }

@@ -17,8 +17,7 @@ ChromeTemplateURLServiceClient::ChromeTemplateURLServiceClient(
     history_service_observation_.Observe(history_service_.get());
 }
 
-ChromeTemplateURLServiceClient::~ChromeTemplateURLServiceClient() {
-}
+ChromeTemplateURLServiceClient::~ChromeTemplateURLServiceClient() = default;
 
 void ChromeTemplateURLServiceClient::Shutdown() {
   // ChromeTemplateURLServiceClient is owned by TemplateURLService which is a
@@ -53,7 +52,7 @@ void ChromeTemplateURLServiceClient::SetKeywordSearchTermsForURL(
 void ChromeTemplateURLServiceClient::AddKeywordGeneratedVisit(const GURL& url) {
   if (history_service_)
     history_service_->AddPage(
-        url, base::Time::Now(), /*context_id=*/nullptr, /*nav_entry_id=*/0,
+        url, base::Time::Now(), /*context_id=*/0, /*nav_entry_id=*/0,
         /*referrer=*/GURL(), history::RedirectList(),
         ui::PAGE_TRANSITION_KEYWORD_GENERATED, history::SOURCE_BROWSED,
         /*did_replace_entry=*/false);

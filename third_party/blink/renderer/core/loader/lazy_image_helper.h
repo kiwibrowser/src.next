@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,28 +9,23 @@
 
 namespace blink {
 
+class Document;
 class Element;
 class HTMLImageElement;
 class LocalFrame;
-class KURL;
 
 // Contains helper functions to deal with the lazy loading logic of images.
 class LazyImageHelper final {
   STATIC_ONLY(LazyImageHelper);
 
  public:
-  enum class Eligibility {
-    kDisabled,
-    kEnabledFullyDeferred,
-  };
-
   static void StartMonitoring(Element* element);
   static void StopMonitoring(Element* element);
 
-  static Eligibility DetermineEligibilityAndTrackVisibilityMetrics(
-      LocalFrame& frame,
-      HTMLImageElement* html_image,
-      const KURL& url);
+  static bool LoadAllImagesAndBlockLoadEvent(Document&);
+
+  static bool ShouldDeferImageLoad(LocalFrame& frame,
+                                   HTMLImageElement* html_image);
 
   static void RecordMetricsOnLoadFinished(HTMLImageElement* image_element);
 };

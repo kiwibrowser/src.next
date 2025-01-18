@@ -21,7 +21,7 @@ class Profile;
 
 class ChromeBrowserMainExtraParts {
  public:
-  virtual ~ChromeBrowserMainExtraParts() {}
+  virtual ~ChromeBrowserMainExtraParts() = default;
 
   // EarlyInitialization methods.
   virtual void PreEarlyInitialization() {}
@@ -43,6 +43,7 @@ class ChromeBrowserMainExtraParts {
   virtual void PostBrowserStart() {}
   virtual void PreMainMessageLoopRun() {}
   virtual void PostMainMessageLoopRun() {}
+  virtual void PostDestroyThreads() {}
 };
 
 #endif  // CHROME_BROWSER_CHROME_BROWSER_MAIN_EXTRA_PARTS_H_

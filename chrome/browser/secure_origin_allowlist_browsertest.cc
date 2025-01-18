@@ -5,7 +5,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
-#include "chrome/browser/ssl/security_state_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
@@ -14,6 +13,7 @@
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/policy/policy_constants.h"
+#include "components/security_state/content/security_state_tab_helper.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/dns/mock_host_resolver.h"
@@ -78,7 +78,7 @@ class SecureOriginAllowlistBrowsertest
         /*is_first_policy_load_complete_return=*/true);
     policy::BrowserPolicyConnector::SetPolicyProviderForTesting(&provider_);
 
-    base::Value urls(base::Value::Type::LIST);
+    base::Value::List urls;
     if (variant == TestVariant::kPolicy || variant == TestVariant::kPolicyOld ||
         variant == TestVariant::kPolicyOldAndNew) {
       urls.Append(BaseURL());
@@ -97,18 +97,21 @@ class SecureOriginAllowlistBrowsertest
                    ? policy::key::kUnsafelyTreatInsecureOriginAsSecure
                    : policy::key::kOverrideSecurityRestrictionsOnInsecureOrigin,
                policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
-               policy::POLICY_SOURCE_CLOUD, std::move(urls), nullptr);
+               policy::POLICY_SOURCE_CLOUD, base::Value(std::move(urls)),
+               nullptr);
     if (variant == TestVariant::kPolicyOldAndNew) {
-      base::Value other_urls(base::Value::Type::LIST);
-      other_urls.Append(base::Value(OtherURL()));
+      base::Value::List other_urls;
+      other_urls.Append(OtherURL());
       values.Set(policy::key::kOverrideSecurityRestrictionsOnInsecureOrigin,
                  policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
-                 policy::POLICY_SOURCE_CLOUD, std::move(other_urls), nullptr);
+                 policy::POLICY_SOURCE_CLOUD,
+                 base::Value(std::move(other_urls)), nullptr);
     }
 #else
     values.Set(policy::key::kOverrideSecurityRestrictionsOnInsecureOrigin,
                policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
-               policy::POLICY_SOURCE_CLOUD, std::move(urls), nullptr);
+               policy::POLICY_SOURCE_CLOUD, base::Value(std::move(urls)),
+               nullptr);
 #endif  // !BUILDFLAG(IS_CHROMEOS) && !BUILDFLAG(IS_ANDROID)
 
     provider_.UpdateChromePolicy(values);

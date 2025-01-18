@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,6 +35,7 @@ class CORE_EXPORT IdlenessDetector
   void Shutdown();
   void WillCommitLoad();
   void DomContentLoadedEventFired();
+  void DidDropNavigation();
   // TODO(lpy) Don't need to pass in fetcher once the command line of disabling
   // PlzNavigate is removed.
   void OnWillSendRequest(ResourceFetcher*);
@@ -42,7 +43,6 @@ class CORE_EXPORT IdlenessDetector
 
   base::TimeTicks GetNetworkAlmostIdleTime();
   base::TimeTicks GetNetworkIdleTime();
-  bool NetworkIsAlmostIdle();
 
   void Trace(Visitor*) const;
 
@@ -61,7 +61,11 @@ class CORE_EXPORT IdlenessDetector
   void DidProcessTask(base::TimeTicks start_time,
                       base::TimeTicks end_time) override;
 
+  void Start();
   void Stop();
+  bool HasCompleted() const {
+    return !in_network_0_quiet_period_ && !in_network_2_quiet_period_;
+  }
 
   // This method and the associated timer appear to have no effect, but they
   // have the side effect of triggering a task, which will send WillProcessTask

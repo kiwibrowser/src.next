@@ -27,7 +27,8 @@
 
 #include <memory>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
+#include "base/not_fatal_until.h"
 #include "base/synchronization/lock.h"
 #include "third_party/blink/renderer/platform/graphics/image_frame_generator.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
@@ -279,7 +280,7 @@ void ImageDecodingStore::RemoveFromCacheInternal(
 
   // Remove entry from identifier map.
   typename V::iterator iter = identifier_map->find(cache_entry->Generator());
-  DCHECK(iter != identifier_map->end());
+  CHECK(iter != identifier_map->end(), base::NotFatalUntil::M130);
   iter->value.erase(cache_entry->CacheKey());
   if (!iter->value.size())
     identifier_map->erase(iter);
@@ -318,8 +319,7 @@ void ImageDecodingStore::RemoveCacheIndexedByGeneratorInternal(
     return;
 
   // Get all cache identifiers associated with generator.
-  Vector<typename U::KeyType> cache_identifier_list;
-  CopyToVector(iter->value, cache_identifier_list);
+  Vector<typename U::KeyType> cache_identifier_list(iter->value);
 
   // For each cache identifier find the corresponding CacheEntry and remove it.
   for (wtf_size_t i = 0; i < cache_identifier_list.size(); ++i) {

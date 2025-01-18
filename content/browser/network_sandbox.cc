@@ -11,12 +11,13 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
 #include "base/task/thread_pool.h"
+#include "base/trace_event/base_tracing.h"
 #include "build/build_config.h"
 #include "content/browser/network_sandbox_grant_result.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/network_service_util.h"
 #include "content/public/common/content_client.h"
-#include "content/public/common/network_service_util.h"
 #include "sql/database.h"
 
 #if BUILDFLAG(IS_WIN)
@@ -24,7 +25,7 @@
 
 #include "base/win/security_util.h"
 #include "base/win/sid.h"
-#include "sandbox/features.h"
+#include "sandbox/policy/features.h"
 #endif  // BUILDFLAG(IS_WIN)
 
 namespace content {
@@ -57,7 +58,7 @@ struct SandboxParameters {
 // not be deleted.
 SandboxGrantResult MaybeDeleteOldData(
     const base::FilePath& old_path,
-    const absl::optional<base::FilePath>& filename,
+    const std::optional<base::FilePath>& filename,
     bool is_sql) {
   // The path to the specific data file might not have been specified in the
   // network context params. In that case, nothing to delete.
@@ -107,7 +108,7 @@ SandboxGrantResult MaybeDeleteOldData(
 // Returns SandboxGrantResult::kFailedToCopyData if a file could not be copied.
 SandboxGrantResult MaybeCopyData(const base::FilePath& old_path,
                                  const base::FilePath& new_path,
-                                 const absl::optional<base::FilePath>& filename,
+                                 const std::optional<base::FilePath>& filename,
                                  bool is_sql) {
   // The path to the specific data file might not have been specified in the
   // network context params. In that case, no files need to be moved.
@@ -220,20 +221,17 @@ bool MaybeGrantAccessToDataPath(const SandboxParameters& sandbox_params,
 
 #if BUILDFLAG(IS_WIN)
   // On platforms that don't support the LPAC sandbox, do nothing.
-  if (!sandbox::features::IsAppContainerSandboxSupported())
+  if (!sandbox::policy::features::IsNetworkSandboxSupported()) {
     return true;
+  }
   DCHECK(!sandbox_params.lpac_capability_name.empty());
   auto ac_sids = base::win::Sid::FromNamedCapabilityVector(
-      {sandbox_params.lpac_capability_name.c_str()});
-  if (!ac_sids.has_value()) {
-    NOTREACHED();
-    return false;
-  }
+      {sandbox_params.lpac_capability_name});
 
   // Grant recursive access to directory. This also means new files in the
   // directory will inherit the ACE.
   return base::win::GrantAccessToPath(
-      directory->path(), *ac_sids,
+      directory->path(), ac_sids,
       GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | DELETE,
       CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE, /*recursive=*/true);
 #else
@@ -252,7 +250,7 @@ bool MaybeGrantAccessToDataPath(const SandboxParameters& sandbox_params,
 // 1. Create and grant the sandbox access to the cache dir.
 // 2. If `data_directory` is not specified then the caller is using in-memory
 // storage and so there's nothing to do. END.
-// 2. If `unsandboxed_data_path` is not specified then the caller is not aware
+// 3. If `unsandboxed_data_path` is not specified then the caller is not aware
 // of the sandbox or migration, and the steps terminate here with
 // `data_directory` used by the network context and END.
 // 4. If migration has already taken place, regardless of whether it's requested
@@ -282,40 +280,54 @@ SandboxGrantResult MaybeGrantSandboxAccessToNetworkContextData(
 #endif
 #endif  // BUILDFLAG(IS_WIN)
 
-  // HTTP cache path is special, and not under `data_directory` so must also be
-  // granted access. Continue attempting to grant access to the other files if
-  // this part fails.
-  if (params->http_cache_directory && params->http_cache_enabled) {
-    SandboxGrantResult cache_result = SandboxGrantResult::kSuccess;
-    // The path must exist for the cache ACL to be set. Create if needed.
-    if (!base::CreateDirectory(params->http_cache_directory->path()))
-      cache_result = SandboxGrantResult::kFailedToCreateCacheDirectory;
-    if (cache_result == SandboxGrantResult::kSuccess) {
-      // Note, this code always grants access to the cache directory even when
-      // the sandbox is not enabled. This is a optimization (on Windows) because
-      // by setting the ACL on the directory earlier rather than later, it
-      // ensures that any new files created by the cache subsystem get the
-      // inherited ACE rather than having to set them manually later.
-      SCOPED_UMA_HISTOGRAM_TIMER("NetworkService.TimeToGrantCacheAccess");
-      if (!MaybeGrantAccessToDataPath(sandbox_params,
-                                      &*params->http_cache_directory)) {
-        PLOG(ERROR) << "Failed to grant sandbox access to cache directory "
-                    << params->http_cache_directory->path();
-        cache_result = SandboxGrantResult::kFailedToGrantSandboxAccessToCache;
-      }
-    }
-
-    // Log a separate histogram entry for failures related to the disk cache
-    // here.
-    base::UmaHistogramEnumeration("NetworkService.GrantSandboxToCacheResult",
-                                  cache_result);
+  // No file paths (e.g. in-memory context) so nothing to do.
+  if (!params->file_paths) {
+    return SandboxGrantResult::kDidNotAttemptToGrantSandboxAccess;
   }
 
-  // No file paths (e.g. in-memory context) so nothing to do.
-  if (!params->file_paths)
-    return SandboxGrantResult::kDidNotAttemptToGrantSandboxAccess;
+  // HTTP cache path is special, and not under `data_directory` so must also
+  // be granted access. Continue attempting to grant access to the other files
+  // if this part fails.
+  if (params->file_paths->http_cache_directory && params->http_cache_enabled) {
+    // The path must exist for the cache ACL to be set. Create if needed.
+    if (base::CreateDirectory(
+            params->file_paths->http_cache_directory->path())) {
+      // Note, this code always grants access to the cache directory even when
+      // the sandbox is not enabled. This is a optimization (on Windows)
+      // because by setting the ACL on the directory earlier rather than
+      // later, it ensures that any new files created by the cache subsystem
+      // get the inherited ACE rather than having to set them manually later.
+      SCOPED_UMA_HISTOGRAM_TIMER("NetworkService.TimeToGrantCacheAccess");
+      TRACE_EVENT("startup", "NetworkSandbox.MaybeGrantAccessToDataPath");
+      if (!MaybeGrantAccessToDataPath(
+              sandbox_params, &*params->file_paths->http_cache_directory)) {
+        PLOG(ERROR) << "Failed to grant sandbox access to cache directory "
+                    << params->file_paths->http_cache_directory->path();
+      }
+    }
+  }
+  if (params->file_paths->shared_dictionary_directory &&
+      params->shared_dictionary_enabled) {
+    SCOPED_UMA_HISTOGRAM_TIMER(
+        "NetworkService.TimeToGrantSharedDictionaryAccess");
+    // The path must exist for the cache ACL to be set. Create if needed.
+    if (base::CreateDirectory(
+            params->file_paths->shared_dictionary_directory->path())) {
+      if (!MaybeGrantAccessToDataPath(
+              sandbox_params,
+              &*params->file_paths->shared_dictionary_directory)) {
+        PLOG(ERROR) << "Failed to grant sandbox access to shared dictionary "
+                       "directory "
+                    << params->file_paths->shared_dictionary_directory->path();
+      }
+    }
+  }
 
-  DCHECK(!params->file_paths->data_directory.path().empty());
+  // No data directory, so rest of the files and databases are in memory.
+  // Nothing to do.
+  if (params->file_paths->data_directory.path().empty()) {
+    return SandboxGrantResult::kDidNotAttemptToGrantSandboxAccess;
+  }
 
   if (!params->file_paths->unsandboxed_data_path.has_value()) {
 #if BUILDFLAG(IS_WIN) && DCHECK_IS_ON()

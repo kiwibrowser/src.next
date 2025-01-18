@@ -9,36 +9,30 @@ import android.graphics.Rect;
 import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextUtils;
-import android.text.TextWatcher;
 import android.util.AttributeSet;
 import android.view.KeyEvent;
-import android.view.View.OnKeyListener;
 import android.view.accessibility.AccessibilityEvent;
-import android.view.accessibility.AccessibilityManager;
-import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.widget.EditText;
 
 import androidx.annotation.CallSuper;
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.Log;
-import org.chromium.base.StrictModeContext;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.components.browser_ui.widget.text.VerticallyFixedEditText;
+import org.chromium.ui.text.EmptyTextWatcher;
 
-/**
- * An {@link EditText} that shows autocomplete text at the end.
- */
-public class AutocompleteEditText
-        extends VerticallyFixedEditText implements AutocompleteEditTextModelBase.Delegate {
+import java.util.Optional;
+
+/** An {@link EditText} that shows autocomplete text at the end. */
+public class AutocompleteEditText extends VerticallyFixedEditText
+        implements AutocompleteEditTextModelBase.Delegate {
     private static final String TAG = "AutocompleteEdit";
 
     private static final boolean DEBUG = false;
-
-    private final AccessibilityManager mAccessibilityManager;
 
     private AutocompleteEditTextModelBase mModel;
     private boolean mIgnoreTextChangesForAutocomplete = true;
@@ -52,16 +46,11 @@ public class AutocompleteEditText
      */
     private boolean mDisableTextScrollingFromAutocomplete;
 
-    private boolean mIgnoreImeForTest;
-
     /** Local copy of the OnKeyListener. */
     private @Nullable OnKeyListener mOnKeyListener;
 
     public AutocompleteEditText(Context context, AttributeSet attrs) {
         super(context, attrs);
-        mAccessibilityManager =
-                (AccessibilityManager) context.getSystemService(Context.ACCESSIBILITY_SERVICE);
-
         addTextWatcherForPaste();
     }
 
@@ -71,27 +60,26 @@ public class AutocompleteEditText
      * user's typing, so we need to handle this case as well.
      */
     private void addTextWatcherForPaste() {
-        addTextChangedListener(new TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-
-            @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {}
-
-            @Override
-            public void afterTextChanged(Editable editable) {
-                if (wasLastEditPaste() && !mIgnoreTextChangesForAutocomplete) {
-                    mOnSanitizing = true;
-                    String text = editable.toString();
-                    String sanitizedText = sanitizeTextForPaste(text);
-                    if (!text.equals(sanitizedText)) {
-                        editable.replace(
-                                0, editable.length(), sanitizedText, 0, sanitizedText.length());
+        addTextChangedListener(
+                new EmptyTextWatcher() {
+                    @Override
+                    public void afterTextChanged(Editable editable) {
+                        if (wasLastEditPaste() && !mIgnoreTextChangesForAutocomplete) {
+                            mOnSanitizing = true;
+                            String text = editable.toString();
+                            String sanitizedText = sanitizeTextForPaste(text);
+                            if (!text.equals(sanitizedText)) {
+                                editable.replace(
+                                        0,
+                                        editable.length(),
+                                        sanitizedText,
+                                        0,
+                                        sanitizedText.length());
+                            }
+                            mOnSanitizing = false;
+                        }
                     }
-                    mOnSanitizing = false;
-                }
-            }
-        });
+                });
     }
 
     @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
@@ -99,30 +87,15 @@ public class AutocompleteEditText
         return mNativeInitialized ? OmniboxViewUtil.sanitizeTextForPaste(s) : s;
     }
 
-    /**
-     *  Signals that's it safe to call code that requires native to be loaded.
-     */
+    /** Signals that's it safe to call code that requires native to be loaded. */
     public void onFinishNativeInitialization() {
         mNativeInitialized = true;
-    }
-
-    @VisibleForTesting
-    public AccessibilityManager getAccessibilityManagerForTesting() {
-        return mAccessibilityManager;
     }
 
     private void ensureModel() {
         if (mModel != null) return;
 
-        if (!ChromeFeatureList.isInitialized()
-                || ChromeFeatureList.isEnabled(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)) {
-            Log.w(TAG, "Using spannable model...");
-            mModel = new SpannableAutocompleteEditTextModel(this);
-        } else {
-            Log.w(TAG, "Using non-spannable model...");
-            mModel = new AutocompleteEditTextModel(this);
-        }
-        // Feed initial values.
+        mModel = new SpannableAutocompleteEditTextModel(this, getContext());
         mModel.setIgnoreTextChangeFromAutocomplete(true);
         mModel.onFocusChanged(hasFocus());
         mModel.onSetText(getText());
@@ -137,7 +110,7 @@ public class AutocompleteEditText
      * Sets whether text changes should trigger autocomplete.
      *
      * @param ignoreAutocomplete Whether text changes should be ignored and no auto complete
-     *                           triggered.
+     *     triggered.
      */
     public void setIgnoreTextChangesForAutocomplete(boolean ignoreAutocomplete) {
         mIgnoreTextChangesForAutocomplete = ignoreAutocomplete;
@@ -152,13 +125,27 @@ public class AutocompleteEditText
         return mModel.getTextWithoutAutocomplete();
     }
 
-    /** @return Text that includes autocomplete. */
+    /**
+     * @return Text that includes autocomplete.
+     */
     public String getTextWithAutocomplete() {
         if (mModel == null) return "";
         return mModel.getTextWithAutocomplete();
     }
 
-    /** @return Whether any autocomplete information is specified on the current text. */
+    /**
+     * @return Additional text presented in the omnibox, indicating the destination of the default
+     *     match.
+     */
+    @VisibleForTesting
+    public Optional<String> getAdditionalText() {
+        if (mModel == null) return Optional.empty();
+        return mModel.getAdditionalText();
+    }
+
+    /**
+     * @return Whether any autocomplete information is specified on the current text.
+     */
     @VisibleForTesting
     public boolean hasAutocomplete() {
         if (mModel == null) return false;
@@ -167,8 +154,9 @@ public class AutocompleteEditText
 
     /**
      * Whether we want to be showing inline autocomplete results. We don't want to show them as the
-     * user deletes input. Also if there is a composition (e.g. while using the Japanese IME),
-     * we must not autocomplete or we'll destroy the composition.
+     * user deletes input. Also if there is a composition (e.g. while using the Japanese IME), we
+     * must not autocomplete or we'll destroy the composition.
+     *
      * @return Whether we want to be showing inline autocomplete results.
      */
     public boolean shouldAutocomplete() {
@@ -219,22 +207,29 @@ public class AutocompleteEditText
     /**
      * Autocompletes the text and selects the text that was not entered by the user. Using append()
      * instead of setText() to preserve the soft-keyboard layout.
+     *
      * @param userText user The text entered by the user.
      * @param inlineAutocompleteText The suggested autocompletion for the user's text.
+     * @param additionalText This string is displayed adjacent to the omnibox if this match is the
+     *     default. Will usually be URL when autocompleting a title, and empty otherwise.
      */
-    public void setAutocompleteText(CharSequence userText, CharSequence inlineAutocompleteText) {
+    public void setAutocompleteText(
+            @NonNull CharSequence userText,
+            @Nullable CharSequence inlineAutocompleteText,
+            Optional<String> additionalText) {
         boolean emptyAutocomplete = TextUtils.isEmpty(inlineAutocompleteText);
         if (!emptyAutocomplete) mDisableTextScrollingFromAutocomplete = true;
-        if (mModel != null) mModel.setAutocompleteText(userText, inlineAutocompleteText);
+        if (mModel != null) {
+            mModel.setAutocompleteText(userText, inlineAutocompleteText, additionalText);
+        }
     }
 
     /**
-     * Returns the length of the autocomplete text currently displayed, zero if none is
-     * currently displayed.
+     * Returns the length of the autocomplete text currently displayed, zero if none is currently
+     * displayed.
      */
     public int getAutocompleteLength() {
-        if (mModel == null) return 0;
-        return mModel.getAutocompleteText().length();
+        return mModel == null ? 0 : mModel.getAutocompleteTextLength();
     }
 
     @Override
@@ -243,8 +238,11 @@ public class AutocompleteEditText
         // If AutocompleteEditText receives a series of keystrokes(more than 1) from the beginning,
         // the input will be considered as paste. We do this because some IME may paste the text as
         // a series of keystrokes, not from the system copy/paste method.
-        mLastEditWasPaste = (start == 0 && (lengthAfter - lengthBefore) > 1 && !mOnSanitizing
-                && !mIgnoreTextChangesForAutocomplete);
+        mLastEditWasPaste =
+                (start == 0
+                        && (lengthAfter - lengthBefore) > 1
+                        && !mOnSanitizing
+                        && !mIgnoreTextChangesForAutocomplete);
 
         if (mModel != null) mModel.onTextChanged(text, start, lengthBefore, lengthAfter);
     }
@@ -254,10 +252,7 @@ public class AutocompleteEditText
         if (DEBUG) Log.i(TAG, "setText -- text: %s", text);
         mDisableTextScrollingFromAutocomplete = false;
 
-        // Certain OEM implementations of setText trigger disk reads. https://crbug.com/633298
-        try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
-            super.setText(text, type);
-        }
+        super.setText(text, type);
         if (mModel != null) mModel.onSetText(text);
     }
 
@@ -278,29 +273,15 @@ public class AutocompleteEditText
 
     private boolean shouldIgnoreAccessibilityEvent(AccessibilityEvent event) {
         return (mIgnoreTextChangesForAutocomplete
-                       || (mModel != null && mModel.shouldIgnoreAccessibilityEvent()))
+                        || (mModel != null && mModel.shouldIgnoreAccessibilityEvent()))
                 && (event.getEventType() == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED
-                           || event.getEventType() == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED);
-    }
-
-    @Override
-    public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
-        // Certain OEM implementations of onInitializeAccessibilityNodeInfo trigger disk reads
-        // to access the clipboard.  crbug.com/640993
-        try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
-            super.onInitializeAccessibilityNodeInfo(info);
-        }
+                        || event.getEventType() == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED);
     }
 
     @VisibleForTesting
     public InputConnection getInputConnection() {
         if (mModel == null) return null;
         return mModel.getInputConnection();
-    }
-
-    @VisibleForTesting
-    public void setIgnoreImeForTest(boolean ignore) {
-        mIgnoreImeForTest = ignore;
     }
 
     @Override
@@ -314,7 +295,6 @@ public class AutocompleteEditText
         if (DEBUG) Log.i(TAG, "onCreateInputConnection: " + target);
         ensureModel();
         InputConnection retVal = mModel.onCreateInputConnection(target);
-        if (mIgnoreImeForTest) return null;
         return retVal;
     }
 
@@ -327,7 +307,6 @@ public class AutocompleteEditText
                 return true;
             }
 
-            if (mIgnoreImeForTest) return true;
             if (mModel == null) return super.dispatchKeyEvent(event);
             return mModel.dispatchKeyEvent(event);
         } finally {
@@ -368,17 +347,13 @@ public class AutocompleteEditText
     }
 
     @Override
-    public boolean isAccessibilityEnabled() {
-        return mAccessibilityManager != null && mAccessibilityManager.isEnabled();
-    }
-
-    @Override
     public void onUpdateSelectionForTesting(int selStart, int selEnd) {}
 
     @Override
     public String getKeyboardPackageName() {
-        String defaultIme = Settings.Secure.getString(
-                getContext().getContentResolver(), Settings.Secure.DEFAULT_INPUT_METHOD);
+        String defaultIme =
+                Settings.Secure.getString(
+                        getContext().getContentResolver(), Settings.Secure.DEFAULT_INPUT_METHOD);
         return defaultIme == null ? "" : defaultIme;
     }
 }

@@ -6,6 +6,7 @@
 #include <string>
 #include <utility>
 
+#include "base/feature_list.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
@@ -17,6 +18,7 @@
 #include "content/browser/renderer_host/navigation_request.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
+#include "content/common/content_navigation_policy.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -198,7 +200,7 @@ IN_PROC_BROWSER_TEST_F(NavigationMhtmlBrowserTest, IframeNotFound) {
   // have enough information to make that determination. On the renderer side,
   // there's no existing way to turn `CommitNavigation()` into
   // `CommitFailedNavigation()`.
-  // TODO(https://crbug.com/1112965): Fix this by implementing a MHTML
+  // TODO(crbug.com/40143262): Fix this by implementing a MHTML
   // URLLoaderFactory; then failure to find the resource can use the standard
   // error handling path.
   EXPECT_TRUE(iframe_navigation_observer.has_committed());
@@ -209,7 +211,7 @@ IN_PROC_BROWSER_TEST_F(NavigationMhtmlBrowserTest, IframeNotFound) {
 
 // An MHTML document with an iframe using a data-URL. The data-URL is not
 // defined in the MHTML archive.
-// TODO(https://crbug.com/967307): Enable this test. It currently reaches a
+// TODO(crbug.com/40629273): Enable this test. It currently reaches a
 // DCHECK or timeout in release mode.
 IN_PROC_BROWSER_TEST_F(NavigationMhtmlBrowserTest, IframeDataUrlNotFound) {
   MhtmlArchive mhtml_archive;
@@ -395,6 +397,10 @@ IN_PROC_BROWSER_TEST_F(NavigationMhtmlBrowserTest, IframeAboutBlankFound) {
 // An MHTML document with an iframe trying to load a javascript URL.
 IN_PROC_BROWSER_TEST_F(NavigationMhtmlBrowserTest,
                        IframeJavascriptUrlNotFound) {
+  // JS is allowed to execute when this feature is enabled.
+  if (base::FeatureList::IsEnabled(blink::features::kMHTML_Improvements)) {
+    return;
+  }
   MhtmlArchive mhtml_archive;
   mhtml_archive.AddHtmlDocument(
       GURL("http://example.com"),
@@ -408,7 +414,7 @@ IN_PROC_BROWSER_TEST_F(NavigationMhtmlBrowserTest,
       mhtml_url.spec().c_str()));
 
   EXPECT_TRUE(NavigateToURL(shell(), mhtml_url));
-  console_observer.Wait();
+  ASSERT_TRUE(console_observer.Wait());
 
   RenderFrameHostImpl* main_document = main_frame_host();
   ASSERT_EQ(1u, main_document->child_count());
@@ -424,6 +430,10 @@ IN_PROC_BROWSER_TEST_F(NavigationMhtmlBrowserTest,
 
 // An MHTML document with an iframe trying to load a javascript URL. The
 IN_PROC_BROWSER_TEST_F(NavigationMhtmlBrowserTest, IframeJavascriptUrlFound) {
+  // JS is allowed to execute when this feature is enabled.
+  if (base::FeatureList::IsEnabled(blink::features::kMHTML_Improvements)) {
+    return;
+  }
   MhtmlArchive mhtml_archive;
   mhtml_archive.AddHtmlDocument(
       GURL("http://example.com"),
@@ -439,7 +449,7 @@ IN_PROC_BROWSER_TEST_F(NavigationMhtmlBrowserTest, IframeJavascriptUrlFound) {
       mhtml_url.spec().c_str()));
 
   EXPECT_TRUE(NavigateToURL(shell(), mhtml_url));
-  console_observer.Wait();
+  ASSERT_TRUE(console_observer.Wait());
 
   RenderFrameHostImpl* main_document = main_frame_host();
   ASSERT_EQ(1u, main_document->child_count());
@@ -511,7 +521,7 @@ IN_PROC_BROWSER_TEST_F(NavigationMhtmlBrowserTest, IframeContentIdNotFound) {
   // have enough information to make that determination. On the renderer side,
   // there's no existing way to turn `CommitNavigation()` into
   // `CommitFailedNavigation()`.
-  // TODO(https://crbug.com/1112965): Fix this by implementing a MHTML
+  // TODO(crbug.com/40143262): Fix this by implementing a MHTML
   // URLLoaderFactory; then failure to find the resource can use the standard
   // error handling path.
   EXPECT_EQ(GURL("cid:iframe"), sub_document->GetLastCommittedURL());
@@ -576,7 +586,7 @@ IN_PROC_BROWSER_TEST_F(NavigationMhtmlBrowserTest, CSPEmbeddedEnforcement) {
   EXPECT_FALSE(rfh_1->IsErrorDocument());
 
   // Cross-origin without Allow-CSP-From:* => response blocked;
-  // TODO(https://crbug.com/1112965) Add support for CSPEE in MHTML documents.
+  // TODO(crbug.com/40143262) Add support for CSPEE in MHTML documents.
   // An error page should be displayed here.
   EXPECT_FALSE(rfh_2->IsErrorDocument());
 
@@ -586,6 +596,13 @@ IN_PROC_BROWSER_TEST_F(NavigationMhtmlBrowserTest, CSPEmbeddedEnforcement) {
 
 IN_PROC_BROWSER_TEST_F(NavigationMhtmlBrowserTest,
                        SameDocumentNavigationWhileLoading) {
+  if (ShouldCreateNewHostForAllFrames() &&
+      ShouldQueueNavigationsWhenPendingCommitRFHExists()) {
+    GTEST_SKIP() << "When RenderDocument + navigation queueing is enabled, the "
+                    "same-document navigation won't cancel the cross-document "
+                    "navigation";
+  }
+
   // Load a MHTML archive normally so there's a renderer process for file://.
   MhtmlArchive mhtml_archive;
   mhtml_archive.AddHtmlDocument(GURL("http://example.com/main"),
@@ -726,6 +743,9 @@ IN_PROC_BROWSER_TEST_F(NavigationMhtmlBrowserTest, SandboxedIframe) {
       ~network::mojom::WebSandboxFlags::kPopups &
       ~network::mojom::WebSandboxFlags::kPropagatesToAuxiliaryBrowsingContexts;
 
+  if (base::FeatureList::IsEnabled(blink::features::kMHTML_Improvements)) {
+    default_mhtml_sandbox &= ~network::mojom::WebSandboxFlags::kScripts;
+  }
   EXPECT_EQ(default_mhtml_sandbox, rfh_main->active_sandbox_flags());
   EXPECT_EQ(default_mhtml_sandbox, rfh_unsandboxed->active_sandbox_flags());
   EXPECT_EQ(strict_sandbox, rfh_sandboxed->active_sandbox_flags());
@@ -812,45 +832,18 @@ IN_PROC_BROWSER_TEST_F(NavigationMhtmlBrowserTest, ErrorBaseURL) {
 }
 
 class NavigationMhtmlFencedFrameBrowserTest
-    : public NavigationMhtmlBrowserTest,
-      public ::testing::WithParamInterface<
-          blink::features::FencedFramesImplementationType> {
+    : public NavigationMhtmlBrowserTest {
  public:
-  // Provides meaningful param names instead of /0 and /1.
-  static std::string DescribeParams(
-      const ::testing::TestParamInfo<ParamType>& info) {
-    switch (info.param) {
-      case blink::features::FencedFramesImplementationType::kShadowDOM:
-        return "ShadowDOM";
-      case blink::features::FencedFramesImplementationType::kMPArch:
-        return "MPArch";
-    }
-  }
-
   NavigationMhtmlFencedFrameBrowserTest() {
     scoped_feature_list_.InitWithFeaturesAndParameters(
-        {{blink::features::kFencedFrames,
-          {{"implementation_type",
-            GetParam() ==
-                    blink::features::FencedFramesImplementationType::kShadowDOM
-                ? "shadow_dom"
-                : "mparch"}}}},
-        /*disabled_features=*/{});
+        {{blink::features::kFencedFrames, {}}}, /*disabled_features=*/{});
   }
 
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
 };
 
-INSTANTIATE_TEST_SUITE_P(
-    All,
-    NavigationMhtmlFencedFrameBrowserTest,
-    ::testing::Values(
-        blink::features::FencedFramesImplementationType::kShadowDOM,
-        blink::features::FencedFramesImplementationType::kMPArch),
-    &NavigationMhtmlFencedFrameBrowserTest::DescribeParams);
-
-IN_PROC_BROWSER_TEST_P(NavigationMhtmlFencedFrameBrowserTest,
+IN_PROC_BROWSER_TEST_F(NavigationMhtmlFencedFrameBrowserTest,
                        MhtmlCannotCreateFencedFrame) {
   MhtmlArchive mhtml_archive;
   mhtml_archive.AddHtmlDocument(
@@ -867,7 +860,7 @@ IN_PROC_BROWSER_TEST_P(NavigationMhtmlFencedFrameBrowserTest,
   // Ensure nothing was created for the fencedframe element. Only a single
   // RenderFrameHost, the `main_document`, should exist.
   int num_documents = 0;
-  main_document->ForEachRenderFrameHost(
+  main_document->ForEachRenderFrameHostImpl(
       [&](RenderFrameHostImpl* rfh) { num_documents++; });
   EXPECT_EQ(1, num_documents);
 }

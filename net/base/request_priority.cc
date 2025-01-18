@@ -24,7 +24,6 @@ const char* RequestPriorityToString(RequestPriority priority) {
       return "HIGHEST";
   }
   NOTREACHED();
-  return "UNKNOWN_PRIORITY";
 }
 
 }  // namespace net

@@ -1,14 +1,16 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/loader/url_matcher.h"
 
+#include <string_view>
+
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 namespace blink {
 
-UrlMatcher::UrlMatcher(const base::StringPiece& encoded_url_list_string) {
+UrlMatcher::UrlMatcher(const std::string_view& encoded_url_list_string) {
   ParseFieldTrialParam(encoded_url_list_string);
 }
 
@@ -31,9 +33,10 @@ bool UrlMatcher::Match(const KURL& url) const {
       if (!it.second.has_value())
         return true;
       // Otherwise check if the path or query contains the string.
-      if (url.GetPath().Contains(it.second.value()) ||
-          url.Query().Contains(it.second.value()))
+      if (url.GetPath().ToString().Contains(it.second.value()) ||
+          url.Query().ToString().Contains(it.second.value())) {
         return true;
+      }
     }
   }
 
@@ -41,7 +44,7 @@ bool UrlMatcher::Match(const KURL& url) const {
 }
 
 void UrlMatcher::ParseFieldTrialParam(
-    const base::StringPiece& encoded_url_list_string) {
+    const std::string_view& encoded_url_list_string) {
   Vector<String> parsed_strings;
   String::FromUTF8(encoded_url_list_string)
       .Split(",", /*allow_empty_entries=*/false, parsed_strings);
@@ -50,7 +53,7 @@ void UrlMatcher::ParseFieldTrialParam(
     it.Split("|", /*allow_empty_entries=*/false, site_info);
     DCHECK_LE(site_info.size(), 2u)
         << "Got unexpected format that UrlMatcher cannot handle: " << it;
-    absl::optional<String> match_string;
+    std::optional<String> match_string;
     if (site_info.size() == 2u)
       match_string = site_info[1];
     url_list_.push_back(std::make_pair(

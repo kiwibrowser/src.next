@@ -11,6 +11,15 @@
 
 #include "chrome/browser/chrome_browser_main.h"
 #include "chrome/common/conflicts/module_watcher_win.h"
+#include "chrome/install_static/buildflags.h"
+
+#if BUILDFLAG(USE_GOOGLE_UPDATE_INTEGRATION)
+#include <optional>
+
+#include "chrome/browser/google/did_run_updater_win.h"
+#endif
+
+class PlatformAuthPolicyObserver;
 
 namespace base {
 class CommandLine;
@@ -34,19 +43,15 @@ class ChromeBrowserMainPartsWin : public ChromeBrowserMainParts {
   void ToolkitInitialized() override;
   void PreCreateMainMessageLoop() override;
   int PreCreateThreads() override;
+  void PostCreateThreads() override;
   void PostMainMessageLoopRun() override;
 
   // ChromeBrowserMainParts overrides.
+  void PostEarlyInitialization() override;
   void ShowMissingLocaleMessageBox() override;
+  void PreProfileInit() override;
   void PostProfileInit(Profile* profile, bool is_initial_profile) override;
   void PostBrowserStart() override;
-
-  // Prepares the localized strings that are going to be displayed to
-  // the user if the browser process dies. These strings are stored in the
-  // environment block so they are accessible in the early stages of the
-  // chrome executable's lifetime.
-  static void PrepareRestartOnCrashEnviroment(
-      const base::CommandLine& parsed_command_line);
 
   // Registers Chrome with the Windows Restart Manager, which will restore the
   // Chrome session when the computer is restarted after a system update.
@@ -79,8 +84,16 @@ class ChromeBrowserMainPartsWin : public ChromeBrowserMainParts {
   void OnModuleEvent(const ModuleWatcher::ModuleEvent& event);
   void SetupModuleDatabase(std::unique_ptr<ModuleWatcher>* module_watcher);
 
+#if BUILDFLAG(USE_GOOGLE_UPDATE_INTEGRATION)
+  // Updates Chrome's "did run" state periodically when the process is in use.
+  std::optional<DidRunUpdater> did_run_updater_;
+#endif
+
   // Watches module load events and forwards them to the ModuleDatabase.
   std::unique_ptr<ModuleWatcher> module_watcher_;
+
+  // Applies enterprise policies for platform auth SSO.
+  std::unique_ptr<PlatformAuthPolicyObserver> platform_auth_policy_observer_;
 };
 
 #endif  // CHROME_BROWSER_CHROME_BROWSER_MAIN_WIN_H_

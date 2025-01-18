@@ -9,6 +9,7 @@
 
 #include <string>
 
+#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -23,7 +24,11 @@ class WebContents;
 // for the |BrowserGuestModeNavigation| which tests navigation while in guest
 // mode.
 class BrowserNavigatorTest : public InProcessBrowserTest {
+ public:
+  BrowserNavigatorTest();
+
  protected:
+  void SetUpOnMainThread() override;
   NavigateParams MakeNavigateParams() const;
   NavigateParams MakeNavigateParams(Browser* browser) const;
 
@@ -60,6 +65,9 @@ class BrowserNavigatorTest : public InProcessBrowserTest {
       content::WebContents* expected_web_contents = nullptr);
 
   size_t created_tab_contents_count_;
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 #endif  // CHROME_BROWSER_UI_BROWSER_NAVIGATOR_BROWSERTEST_H_

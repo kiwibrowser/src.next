@@ -9,7 +9,6 @@ import android.content.res.TypedArray;
 import android.view.View;
 
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.incognito.IncognitoUtils;
 import org.chromium.chrome.browser.ui.appmenu.AppMenuItemProperties;
 import org.chromium.chrome.browser.ui.appmenu.AppMenuUtil;
 import org.chromium.chrome.browser.ui.appmenu.CustomViewBinder;
@@ -21,9 +20,7 @@ import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.widget.ChromeImageView;
 
-/**
- * A custom binder used to bind the incognito menu item.
- */
+/** A custom binder used to bind the incognito menu item. */
 class IncognitoMenuItemViewBinder implements CustomViewBinder {
     private static final int INCOGNITO_ITEM_VIEW_TYPE = 0;
 
@@ -34,8 +31,9 @@ class IncognitoMenuItemViewBinder implements CustomViewBinder {
 
     @Override
     public int getItemViewType(int id) {
-        return id == R.id.new_incognito_tab_menu_id ? INCOGNITO_ITEM_VIEW_TYPE
-                                                    : CustomViewBinder.NOT_HANDLED;
+        return id == R.id.new_incognito_tab_menu_id
+                ? INCOGNITO_ITEM_VIEW_TYPE
+                : CustomViewBinder.NOT_HANDLED;
     }
 
     @Override
@@ -54,11 +52,13 @@ class IncognitoMenuItemViewBinder implements CustomViewBinder {
             int id = model.get(AppMenuItemProperties.MENU_ITEM_ID);
             assert id == R.id.new_incognito_tab_menu_id;
             view.setId(id);
-
-            if (IncognitoUtils.isIncognitoModeManaged()) {
-                ChromeImageView image = view.findViewById(R.id.trailing_icon);
+        } else if (key == AppMenuItemProperties.MANAGED) {
+            ChromeImageView image = view.findViewById(R.id.trailing_icon);
+            if (model.get(AppMenuItemProperties.MANAGED)) {
                 image.setImageResource(R.drawable.ic_business);
                 image.setVisibility(View.VISIBLE);
+            } else {
+                image.setVisibility(View.GONE);
             }
         } else if (key == AppMenuItemProperties.TITLE) {
             ((TextViewWithCompoundDrawables) view.findViewById(R.id.title))
@@ -98,8 +98,9 @@ class IncognitoMenuItemViewBinder implements CustomViewBinder {
 
     @Override
     public int getPixelHeight(Context context) {
-        TypedArray a = context.obtainStyledAttributes(
-                new int[] {android.R.attr.listPreferredItemHeightSmall});
+        TypedArray a =
+                context.obtainStyledAttributes(
+                        new int[] {android.R.attr.listPreferredItemHeightSmall});
         return a.getDimensionPixelSize(0, 0);
     }
 }

@@ -9,6 +9,7 @@
 
 #include "base/android/jni_android.h"
 #include "base/android/scoped_java_ref.h"
+#include "base/memory/raw_ptr.h"
 #include "components/download/public/common/download_item.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -28,12 +29,10 @@ class DangerousDownloadDialogBridge : public download::DownloadItem::Observer {
             ui::WindowAndroid* window_android);
 
   // Called from Java via JNI.
-  void Accepted(JNIEnv* env,
-                const base::android::JavaParamRef<jstring>& jdownload_guid);
+  void Accepted(JNIEnv* env, std::string& download_guid);
 
   // Called from Java via JNI.
-  void Cancelled(JNIEnv* env,
-                 const base::android::JavaParamRef<jstring>& jdownload_guid);
+  void Cancelled(JNIEnv* env, std::string& download_guid);
 
   // download::DownloadItem::Observer:
   void OnDownloadDestroyed(download::DownloadItem* download_item) override;
@@ -41,7 +40,8 @@ class DangerousDownloadDialogBridge : public download::DownloadItem::Observer {
  private:
   // Download items that are requesting the dialog. Could get deleted while
   // the dialog is showing.
-  std::vector<download::DownloadItem*> download_items_;
+  std::vector<raw_ptr<download::DownloadItem, VectorExperimental>>
+      download_items_;
 
   // The corresponding java object.
   base::android::ScopedJavaGlobalRef<jobject> java_object_;

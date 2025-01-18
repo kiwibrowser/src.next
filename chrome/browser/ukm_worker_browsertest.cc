@@ -4,11 +4,13 @@
 
 #include <algorithm>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
+#include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/privacy_budget/scoped_privacy_budget_config.h"
 #include "chrome/test/base/chrome_test_utils.h"
+#include "chrome/test/base/platform_browser_test.h"
 #include "components/ukm/test_ukm_recorder.h"
 #include "content/public/browser/worker_type.h"
 #include "content/public/test/browser_test.h"
@@ -17,12 +19,6 @@
 #include "net/test/embedded_test_server/http_response.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-#if BUILDFLAG(IS_ANDROID)
-#include "chrome/test/base/android/android_browser_test.h"
-#else
-#include "chrome/test/base/in_process_browser_test.h"
-#endif
 
 namespace {
 
@@ -81,14 +77,16 @@ IN_PROC_BROWSER_TEST_F(UkmWorkerBrowserTest,
                         browser()->tab_strip_model()->GetActiveWebContents(),
                         "waitForMessage();"));
 
-  std::vector<const ukm::mojom::UkmEntry*> doc_created_entries =
-      test_ukm_recorder().GetEntriesByName(DocumentCreatedEntry::kEntryName);
+  std::vector<raw_ptr<const ukm::mojom::UkmEntry, VectorExperimental>>
+      doc_created_entries = test_ukm_recorder().GetEntriesByName(
+          DocumentCreatedEntry::kEntryName);
   EXPECT_EQ(1u, doc_created_entries.size());
   const ukm::SourceId document_source_id = doc_created_entries[0]->source_id;
 
   // Check that we got the WorkerClientConnected event.
-  std::vector<const ukm::mojom::UkmEntry*> connected_entries =
-      test_ukm_recorder().GetEntriesByName(AddedEntry::kEntryName);
+  std::vector<raw_ptr<const ukm::mojom::UkmEntry, VectorExperimental>>
+      connected_entries =
+          test_ukm_recorder().GetEntriesByName(AddedEntry::kEntryName);
   EXPECT_EQ(1u, connected_entries.size());
   const ukm::SourceId client_source_id = *test_ukm_recorder().GetEntryMetric(
       connected_entries[0], AddedEntry::kClientSourceIdName);
@@ -119,14 +117,16 @@ IN_PROC_BROWSER_TEST_F(UkmWorkerBrowserTest,
   EXPECT_EQ("DONE", EvalJs(web_contents(),
                            "register('fetch_event_respond_with_fetch.js');"));
 
-  std::vector<const ukm::mojom::UkmEntry*> doc_created_entries =
-      test_ukm_recorder().GetEntriesByName(DocumentCreatedEntry::kEntryName);
+  std::vector<raw_ptr<const ukm::mojom::UkmEntry, VectorExperimental>>
+      doc_created_entries = test_ukm_recorder().GetEntriesByName(
+          DocumentCreatedEntry::kEntryName);
   ASSERT_EQ(1u, doc_created_entries.size());
   const ukm::SourceId document_source_id = doc_created_entries[0]->source_id;
 
   // Check that we got the Worker.ClientAdded event.
-  std::vector<const ukm::mojom::UkmEntry*> connected_entries =
-      test_ukm_recorder().GetEntriesByName(AddedEntry::kEntryName);
+  std::vector<raw_ptr<const ukm::mojom::UkmEntry, VectorExperimental>>
+      connected_entries =
+          test_ukm_recorder().GetEntriesByName(AddedEntry::kEntryName);
   ASSERT_EQ(1u, connected_entries.size());
   const ukm::SourceId client_source_id = *test_ukm_recorder().GetEntryMetric(
       connected_entries[0], AddedEntry::kClientSourceIdName);
@@ -165,8 +165,8 @@ IN_PROC_BROWSER_TEST_F(UkmWorkerBrowserTest,
 
   // Check that we only have the single Worker.ClientAdded event (for the
   // document).
-  std::vector<const ukm::mojom::UkmEntry*> connected_entries =
-      test_ukm_recorder().GetEntriesByName(
+  std::vector<raw_ptr<const ukm::mojom::UkmEntry, VectorExperimental>>
+      connected_entries = test_ukm_recorder().GetEntriesByName(
           ukm::builders::Worker_ClientAdded::kEntryName);
   EXPECT_EQ(1u, connected_entries.size());
 }
@@ -210,8 +210,9 @@ IN_PROC_BROWSER_TEST_F(UkmWorkerBrowserTest,
   // Check that we have a Worker.ClientAdded event for all three pairs:
   // document-shared worker, document-service worker, and shared worker-service
   // worker.
-  std::vector<const ukm::mojom::UkmEntry*> connected_entries =
-      test_ukm_recorder().GetEntriesByName(AddedEntry::kEntryName);
+  std::vector<raw_ptr<const ukm::mojom::UkmEntry, VectorExperimental>>
+      connected_entries =
+          test_ukm_recorder().GetEntriesByName(AddedEntry::kEntryName);
   ASSERT_EQ(3u, connected_entries.size());
 
   // Get the document and shared worker ids from the shared worker event.

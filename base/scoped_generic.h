@@ -7,9 +7,12 @@
 
 #include <stdlib.h>
 
+#include <concepts>
 #include <type_traits>
+#include <utility>
 
 #include "base/check.h"
+#include "base/compiler_specific.h"
 #include "base/memory/raw_ptr.h"
 
 namespace base {
@@ -79,7 +82,7 @@ namespace base {
 //   using ScopedBar = ScopedGeneric<int, BarScopedTraits>;
 struct ScopedGenericOwnershipTracking {};
 
-template<typename T, typename Traits>
+template <typename T, typename Traits>
 class ScopedGeneric {
  private:
   // This must be first since it's used inline below.
@@ -135,8 +138,10 @@ class ScopedGeneric {
   // object, if given. Self-resets are not allowd as on unique_ptr. See
   // http://crbug.com/162971
   void reset(const element_type& value = traits_type::InvalidValue()) {
-    if (data_.generic != traits_type::InvalidValue() && data_.generic == value)
+    if (data_.generic != traits_type::InvalidValue() &&
+        data_.generic == value) {
       abort();
+    }
     FreeIfNecessary();
     data_.generic = value;
     TrackAcquire(value);
@@ -146,8 +151,8 @@ class ScopedGeneric {
   // object. After this operation, this object will hold a null value, and
   // will not own the object any more.
   [[nodiscard]] element_type release() {
-    element_type old_generic = data_.generic;
-    data_.generic = traits_type::InvalidValue();
+    element_type old_generic =
+        std::exchange(data_.generic, traits_type::InvalidValue());
     TrackRelease(old_generic);
     return old_generic;
   }
@@ -248,8 +253,8 @@ class ScopedGeneric {
     return data_.generic != value;
   }
 
-  Traits& get_traits() { return data_; }
-  const Traits& get_traits() const { return data_; }
+  Traits& get_traits() LIFETIME_BOUND { return data_; }
+  const Traits& get_traits() const LIFETIME_BOUND { return data_; }
 
  private:
   void FreeIfNecessary() {
@@ -260,62 +265,46 @@ class ScopedGeneric {
     }
   }
 
-  template <typename Void = void>
-  typename std::enable_if_t<
-      std::is_base_of<ScopedGenericOwnershipTracking, Traits>::value,
-      Void>
-  TrackAcquire(const T& value) {
-    if (value != traits_type::InvalidValue()) {
-      data_.Acquire(static_cast<const ScopedGeneric&>(*this), value);
+  void TrackAcquire(const T& value) {
+    if constexpr (std::derived_from<Traits, ScopedGenericOwnershipTracking>) {
+      if (value != traits_type::InvalidValue()) {
+        data_.Acquire(static_cast<const ScopedGeneric&>(*this), value);
+      }
     }
   }
 
-  template <typename Void = void>
-  typename std::enable_if_t<
-      !std::is_base_of<ScopedGenericOwnershipTracking, Traits>::value,
-      Void>
-  TrackAcquire(const T& value) {}
-
-  template <typename Void = void>
-  typename std::enable_if_t<
-      std::is_base_of<ScopedGenericOwnershipTracking, Traits>::value,
-      Void>
-  TrackRelease(const T& value) {
-    if (value != traits_type::InvalidValue()) {
-      data_.Release(static_cast<const ScopedGeneric&>(*this), value);
+  void TrackRelease(const T& value) {
+    if constexpr (std::derived_from<Traits, ScopedGenericOwnershipTracking>) {
+      if (value != traits_type::InvalidValue()) {
+        data_.Release(static_cast<const ScopedGeneric&>(*this), value);
+      }
     }
   }
-
-  template <typename Void = void>
-  typename std::enable_if_t<
-      !std::is_base_of<ScopedGenericOwnershipTracking, Traits>::value,
-      Void>
-  TrackRelease(const T& value) {}
 
   // Forbid comparison. If U != T, it totally doesn't make sense, and if U ==
   // T, it still doesn't make sense because you should never have the same
   // object owned by two different ScopedGenerics.
-  template <typename T2, typename Traits2> bool operator==(
-      const ScopedGeneric<T2, Traits2>& p2) const;
-  template <typename T2, typename Traits2> bool operator!=(
-      const ScopedGeneric<T2, Traits2>& p2) const;
+  template <typename T2, typename Traits2>
+  bool operator==(const ScopedGeneric<T2, Traits2>& p2) const;
+  template <typename T2, typename Traits2>
+  bool operator!=(const ScopedGeneric<T2, Traits2>& p2) const;
 
   Data data_;
   bool receiving_ = false;
 };
 
-template<class T, class Traits>
+template <class T, class Traits>
 void swap(const ScopedGeneric<T, Traits>& a,
           const ScopedGeneric<T, Traits>& b) {
   a.swap(b);
 }
 
-template<class T, class Traits>
+template <class T, class Traits>
 bool operator==(const T& value, const ScopedGeneric<T, Traits>& scoped) {
   return value == scoped.get();
 }
 
-template<class T, class Traits>
+template <class T, class Traits>
 bool operator!=(const T& value, const ScopedGeneric<T, Traits>& scoped) {
   return value != scoped.get();
 }

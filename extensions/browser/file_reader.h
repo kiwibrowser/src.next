@@ -5,14 +5,14 @@
 #ifndef EXTENSIONS_BROWSER_FILE_READER_H_
 #define EXTENSIONS_BROWSER_FILE_READER_H_
 
+#include <optional>
 #include <string>
 #include <vector>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/task/single_thread_task_runner.h"
 #include "extensions/common/extension_resource.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 // This file defines an interface for reading files asynchronously on a
 // background sequence.
@@ -24,7 +24,7 @@ class FileReader : public base::RefCountedThreadSafe<FileReader> {
   // encountered error in `error`. If there was an error, `data` will be empty.
   using DoneCallback =
       base::OnceCallback<void(std::vector<std::unique_ptr<std::string>> data,
-                              absl::optional<std::string> error)>;
+                              std::optional<std::string> error)>;
 
   // Lets the caller accomplish tasks on the file data, after the file content
   // has been read. This is called once per file successfully read (it is not
@@ -32,6 +32,7 @@ class FileReader : public base::RefCountedThreadSafe<FileReader> {
   using OptionalFileSequenceTask = base::RepeatingCallback<void(std::string*)>;
 
   FileReader(std::vector<extensions::ExtensionResource> resources,
+             size_t max_resources_length,
              OptionalFileSequenceTask file_sequence_task,
              DoneCallback done_callback);
 
@@ -50,6 +51,7 @@ class FileReader : public base::RefCountedThreadSafe<FileReader> {
   void ReadFilesOnFileSequence();
 
   std::vector<extensions::ExtensionResource> resources_;
+  const size_t max_resources_length_;
   OptionalFileSequenceTask optional_file_sequence_task_;
   DoneCallback done_callback_;
   const scoped_refptr<base::SingleThreadTaskRunner> origin_task_runner_;

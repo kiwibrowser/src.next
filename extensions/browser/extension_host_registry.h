@@ -8,6 +8,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "base/observer_list.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "extensions/common/extension_id.h"
@@ -75,6 +76,10 @@ class ExtensionHostRegistry : public KeyedService {
     virtual void OnExtensionHostRenderProcessGone(
         content::BrowserContext* browser_context,
         ExtensionHost* extension_host) {}
+
+    // Called when `registry` is starting to shut down.
+    virtual void OnExtensionHostRegistryShutdown(
+        ExtensionHostRegistry* registry) {}
   };
 
   ExtensionHostRegistry();
@@ -127,12 +132,20 @@ class ExtensionHostRegistry : public KeyedService {
   ExtensionHost* GetExtensionHostForPrimaryMainFrame(
       content::RenderFrameHost* render_frame_host);
 
+  const std::unordered_set<raw_ptr<ExtensionHost, CtnExperimental>>&
+  extension_hosts() {
+    return extension_hosts_;
+  }
+
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
+  // KeyedService:
+  void Shutdown() override;
+
  private:
   // The active set of ExtensionHosts.
-  std::unordered_set<ExtensionHost*> extension_hosts_;
+  std::unordered_set<raw_ptr<ExtensionHost, CtnExperimental>> extension_hosts_;
 
   base::ObserverList<Observer> observers_;
 };

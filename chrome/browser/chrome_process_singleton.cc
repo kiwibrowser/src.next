@@ -7,56 +7,18 @@
 #include <utility>
 
 #include "build/build_config.h"
-#include "chrome/browser/headless/headless_mode_util.h"
-#include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
-#include "chrome/common/chrome_switches.h"
 
 #if BUILDFLAG(IS_WIN)
-#include "base/hash/hash.h"
-#include "base/strings/utf_string_conversions.h"
-#include "base/win/registry.h"
-#include "chrome/common/channel_info.h"
-#include "components/version_info/channel.h"
+#include <windows.h>
+
+#include "base/metrics/histogram_functions.h"
+#include "chrome/common/chrome_features.h"
+#include "components/app_launch_prefetch/app_launch_prefetch.h"
 #endif
 
 namespace {
-bool g_is_early_singleton_feature_ = false;
+
 ChromeProcessSingleton* g_chrome_process_singleton_ = nullptr;
-
-#if BUILDFLAG(IS_WIN)
-
-std::string GetMachineGUID() {
-  base::win::RegKey key;
-  std::wstring value;
-  if (key.Open(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Cryptography",
-               KEY_QUERY_VALUE | KEY_WOW64_64KEY) != ERROR_SUCCESS ||
-      key.ReadValue(L"MachineGuid", &value) != ERROR_SUCCESS || value.empty()) {
-    return std::string();
-  }
-
-  std::string machine_guid;
-  if (!base::WideToUTF8(value.c_str(), value.length(), &machine_guid))
-    return std::string();
-  return machine_guid;
-}
-
-bool EnrollMachineInEarlySingletonFeature() {
-  // Run experiment on early channels only.
-  const version_info::Channel channel = chrome::GetChannel();
-  if (channel != version_info::Channel::CANARY &&
-      channel != version_info::Channel::DEV &&
-      channel != version_info::Channel::UNKNOWN) {
-    return false;
-  }
-
-  const std::string machine_guid = GetMachineGUID();
-  if (machine_guid.empty())
-    return false;
-
-  // Enroll 50% of the population.
-  return base::Hash(machine_guid) % 2 == 0;
-}
-#endif  // BUILDFLAG(IS_WIN)
 
 }  // namespace
 
@@ -65,22 +27,20 @@ ChromeProcessSingleton::ChromeProcessSingleton(
     : startup_lock_(
           base::BindRepeating(&ChromeProcessSingleton::NotificationCallback,
                               base::Unretained(this))),
-      modal_dialog_lock_(startup_lock_.AsNotificationCallback()),
       process_singleton_(user_data_dir,
-                         modal_dialog_lock_.AsNotificationCallback()) {}
+                         startup_lock_.AsNotificationCallback()) {}
 
 ChromeProcessSingleton::~ChromeProcessSingleton() = default;
 
 ProcessSingleton::NotifyResult
     ChromeProcessSingleton::NotifyOtherProcessOrCreate() {
-  // In headless mode we don't want to hand off pages to an existing processes,
-  // so short circuit process singleton creation and bail out if we're not
-  // the only process using this user data dir.
-  if (headless::IsChromeNativeHeadless()) {
-    return process_singleton_.Create() ? ProcessSingleton::PROCESS_NONE
-                                       : ProcessSingleton::PROFILE_IN_USE;
+  CHECK(!is_singleton_instance_);
+  ProcessSingleton::NotifyResult result =
+      process_singleton_.NotifyOtherProcessOrCreate();
+  if (result == ProcessSingleton::PROCESS_NONE) {
+    is_singleton_instance_ = true;
   }
-  return process_singleton_.NotifyOtherProcessOrCreate();
+  return result;
 }
 
 void ChromeProcessSingleton::StartWatching() {
@@ -88,13 +48,9 @@ void ChromeProcessSingleton::StartWatching() {
 }
 
 void ChromeProcessSingleton::Cleanup() {
-  process_singleton_.Cleanup();
-}
-
-void ChromeProcessSingleton::SetModalDialogNotificationHandler(
-    base::RepeatingClosure notification_handler) {
-  modal_dialog_lock_.SetModalDialogNotificationHandler(
-      std::move(notification_handler));
+  if (is_singleton_instance_) {
+    process_singleton_.Cleanup();
+  }
 }
 
 void ChromeProcessSingleton::Unlock(
@@ -102,6 +58,50 @@ void ChromeProcessSingleton::Unlock(
   notification_callback_ = notification_callback;
   startup_lock_.Unlock();
 }
+
+#if BUILDFLAG(IS_WIN)
+void ChromeProcessSingleton::InitializeFeatures() {
+  // On Windows, App Launch Prefetch (ALPF) will monitor the disk accesses done
+  // by processes launched, and load the resources used into memory before the
+  // process needs them, if possible. Different Chrome process types use
+  // different resources, and this is signaled to ALPF via the command line:
+  // passing "/prefetch:N" on the command line with different numbers causes
+  // ALPF to treat two launches placed in different buckets as separarate
+  // applications for its purposes.
+  //
+  // Short lived browser processes occur on notification and rendezvous, both
+  // cases where nearly nothing will be used from disk, and which are not
+  // launched with `/prefetch`, and are thus considered "browser" processes
+  // according to ALPF. This may be polluting the ALPF cache.
+  //
+  // The `::ProcessOverrideSubsequentPrefetchParameter` process information
+  // attribute will change the behavior of ALPF to explicitly consider
+  // subsequent launches while this singleton process is running (rendezvous,
+  // toast) of Chrome which do not specify a prefetch bucket as if they had
+  // specified the `kCatchAll` bucket.
+  //
+  // It is expected that this will overall improve the behavior of ALPF on
+  // Windows, which should decrease startup time for ordinary browser processes.
+  if (is_singleton_instance_ &&
+      (wcsstr(::GetCommandLineW(), L"/prefetch:") == nullptr) &&
+      base::FeatureList::IsEnabled(features::kOverridePrefetchOnSingleton)) {
+    OVERRIDE_PREFETCH_PARAMETER prefetch_parameter = {};
+    prefetch_parameter.Value = app_launch_prefetch::GetPrefetchBucket(
+        app_launch_prefetch::SubprocessType::kCatchAll);
+    // This is not fatal because it is an optimization and has no bearing on the
+    // functionality of the browser. See crbug.com/380088804 for details. It has
+    // been seen that occasionally (in CQ), this call fails with
+    // ERROR_INTERNAL_ERROR.
+    base::UmaHistogramSparse(
+        "Startup.PrefetchOverrideErrorCode",
+        ::SetProcessInformation(::GetCurrentProcess(),
+                                ::ProcessOverrideSubsequentPrefetchParameter,
+                                &prefetch_parameter, sizeof(prefetch_parameter))
+            ? ERROR_SUCCESS
+            : ::GetLastError());
+  }
+}
+#endif
 
 // static
 void ChromeProcessSingleton::CreateInstance(
@@ -126,34 +126,14 @@ ChromeProcessSingleton* ChromeProcessSingleton::GetInstance() {
 }
 
 // static
-void ChromeProcessSingleton::SetupEarlySingletonFeature(
-    const base::CommandLine& command_line) {
-  if (command_line.HasSwitch(switches::kEnableEarlyProcessSingleton))
-    g_is_early_singleton_feature_ = true;
-
-#if BUILDFLAG(IS_WIN)
-  if (!g_is_early_singleton_feature_)
-    g_is_early_singleton_feature_ = EnrollMachineInEarlySingletonFeature();
-#endif
-}
-
-void ChromeProcessSingleton::RegisterEarlySingletonFeature() {
-  // The synthetic trial needs to use kCurrentLog to ensure that UMA report will
-  // be generated from the metrics log that is open at the time of registration.
-  ChromeMetricsServiceAccessor::RegisterSyntheticFieldTrial(
-      "EarlyProcessSingleton",
-      g_is_early_singleton_feature_ ? "Enabled" : "Disabled",
-      variations::SyntheticTrialAnnotationMode::kCurrentLog);
-}
-
-// static
-bool ChromeProcessSingleton::IsEarlySingletonFeatureEnabled() {
-  return g_is_early_singleton_feature_;
+bool ChromeProcessSingleton::IsSingletonInstance() {
+  return g_chrome_process_singleton_ &&
+         g_chrome_process_singleton_->is_singleton_instance_;
 }
 
 bool ChromeProcessSingleton::NotificationCallback(
-    const base::CommandLine& command_line,
+    base::CommandLine command_line,
     const base::FilePath& current_directory) {
   DCHECK(notification_callback_);
-  return notification_callback_.Run(command_line, current_directory);
+  return notification_callback_.Run(std::move(command_line), current_directory);
 }

@@ -14,6 +14,8 @@
 #include <zircon/status.h>
 #include <zircon/syscalls.h>
 
+#include <string_view>
+
 #include "base/base_paths.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
@@ -22,7 +24,6 @@
 #include "base/path_service.h"
 #include "base/posix/safe_strerror.h"
 #include "base/strings/strcat.h"
-#include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
@@ -57,16 +58,16 @@ NativeLibrary LoadNativeLibraryWithOptions(const FilePath& library_path,
     computed_path = library_root_path.Append(library_path);
   }
 
-  // Use fdio_open_fd (a Fuchsia-specific API) here so we can pass the
+  // Use fdio_open3_fd (a Fuchsia-specific API) here so we can pass the
   // appropriate FS rights flags to request executability.
-  // TODO(crbug.com/1018538): Teach base::File about FLAG_WIN_EXECUTE on
-  // Fuchsia, and then use it here instead of using fdio_open_fd() directly.
+  // TODO(crbug.com/40655456): Teach base::File about FLAG_WIN_EXECUTE on
+  // Fuchsia, and then use it here instead of using fdio_open3_fd() directly.
   base::ScopedFD fd;
-  zx_status_t status = fdio_open_fd(
-      computed_path.value().c_str(),
-      static_cast<uint32_t>(fuchsia::io::OpenFlags::RIGHT_READABLE |
-                            fuchsia::io::OpenFlags::RIGHT_EXECUTABLE),
-      base::ScopedFD::Receiver(fd).get());
+  zx_status_t status =
+      fdio_open3_fd(computed_path.value().c_str(),
+                    static_cast<uint64_t>(fuchsia::io::PERM_READABLE |
+                                          fuchsia::io::PERM_EXECUTABLE),
+                    base::ScopedFD::Receiver(fd).get());
   if (status != ZX_OK) {
     if (error) {
       error->message =
@@ -94,15 +95,15 @@ void UnloadNativeLibrary(NativeLibrary library) {
 }
 
 void* GetFunctionPointerFromNativeLibrary(NativeLibrary library,
-                                          StringPiece name) {
-  return dlsym(library, name.data());
+                                          const char* name) {
+  return dlsym(library, name);
 }
 
-std::string GetNativeLibraryName(StringPiece name) {
+std::string GetNativeLibraryName(std::string_view name) {
   return StrCat({"lib", name, ".so"});
 }
 
-std::string GetLoadableModuleName(StringPiece name) {
+std::string GetLoadableModuleName(std::string_view name) {
   return GetNativeLibraryName(name);
 }
 

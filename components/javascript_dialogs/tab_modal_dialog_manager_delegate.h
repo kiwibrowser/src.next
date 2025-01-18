@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "base/callback_forward.h"
+#include "base/functional/callback_forward.h"
 #include "base/memory/weak_ptr.h"
 #include "content/public/browser/javascript_dialog_manager.h"
 
@@ -47,6 +47,9 @@ class TabModalDialogManagerDelegate {
 
   // Should return true if this web contents is an app window, such as a PWA.
   virtual bool IsApp() = 0;
+
+  // Returns true if the dialog can be shown as a modal UI.
+  virtual bool CanShowModalUI() = 0;
 };
 
 }  // namespace javascript_dialogs

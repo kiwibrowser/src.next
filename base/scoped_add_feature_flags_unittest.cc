@@ -6,6 +6,7 @@
 
 #include <cstring>
 #include <string>
+#include <string_view>
 
 #include "base/base_switches.h"
 #include "base/command_line.h"
@@ -19,7 +20,7 @@ namespace {
 
 // Converts a string to CommandLine::StringType, which is std::wstring on
 // Windows and std::string on other platforms.
-CommandLine::StringType ToCommandLineStringType(StringPiece s) {
+CommandLine::StringType ToCommandLineStringType(std::string_view s) {
   return CommandLine::StringType(s.begin(), s.end());
 }
 
@@ -32,12 +33,12 @@ TEST(ScopedAddFeatureFlags, ConflictWithExistingFlags) {
   command_line.AppendSwitchASCII(switches::kDisableFeatures,
                                  "ExistingDisabledFoo,ExistingDisabledBar");
 
-  const Feature kExistingEnabledFoo{"ExistingEnabledFoo",
-                                    FEATURE_DISABLED_BY_DEFAULT};
-  const Feature kExistingDisabledFoo{"ExistingDisabledFoo",
-                                     FEATURE_DISABLED_BY_DEFAULT};
-  const Feature kEnabledBaz{"EnabledBaz", FEATURE_DISABLED_BY_DEFAULT};
-  const Feature kDisabledBaz{"DisabledBaz", FEATURE_DISABLED_BY_DEFAULT};
+  static BASE_FEATURE(kExistingEnabledFoo, "ExistingEnabledFoo",
+                      FEATURE_DISABLED_BY_DEFAULT);
+  static BASE_FEATURE(kExistingDisabledFoo, "ExistingDisabledFoo",
+                      FEATURE_DISABLED_BY_DEFAULT);
+  static BASE_FEATURE(kEnabledBaz, "EnabledBaz", FEATURE_DISABLED_BY_DEFAULT);
+  static BASE_FEATURE(kDisabledBaz, "DisabledBaz", FEATURE_DISABLED_BY_DEFAULT);
   {
     ScopedAddFeatureFlags scoped_add(&command_line);
     scoped_add.EnableIfNotSet(kExistingEnabledFoo);
@@ -66,10 +67,10 @@ TEST(ScopedAddFeatureFlags, FlagWithParameter) {
   CommandLine command_line(CommandLine::NO_PROGRAM);
   command_line.AppendSwitchASCII(switches::kEnableFeatures,
                                  "ExistingEnabledFoo");
-  const Feature kExistingEnabledFoo{"ExistingEnabledFoo",
-                                    FEATURE_DISABLED_BY_DEFAULT};
-  const Feature kFeatureWithParameter{"FeatureWithParam",
-                                      FEATURE_DISABLED_BY_DEFAULT};
+  static BASE_FEATURE(kExistingEnabledFoo, "ExistingEnabledFoo",
+                      FEATURE_DISABLED_BY_DEFAULT);
+  static BASE_FEATURE(kFeatureWithParameter, "FeatureWithParam",
+                      FEATURE_DISABLED_BY_DEFAULT);
 
   {
     ScopedAddFeatureFlags scoped_add(&command_line);

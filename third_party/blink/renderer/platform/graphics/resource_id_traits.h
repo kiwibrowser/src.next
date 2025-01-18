@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,36 +20,18 @@ struct CrossThreadCopier<viz::ResourceId>
 
 template <>
 struct HashTraits<viz::ResourceId> : GenericHashTraits<viz::ResourceId> {
+  static uint32_t GetHash(const viz::ResourceId& id) {
+    return WTF::GetHash(id.GetUnsafeValue());
+  }
   static const bool kEmptyValueIsZero = false;
   static viz::ResourceId EmptyValue() {
     return viz::ResourceId(std::numeric_limits<uint32_t>::max());
   }
-  static void ConstructDeletedValue(viz::ResourceId& slot, bool) {
-    slot = viz::ResourceId(std::numeric_limits<uint32_t>::max() - 1);
-  }
-  static bool IsDeletedValue(const viz::ResourceId& value) {
-    return value.GetUnsafeValue() == std::numeric_limits<uint32_t>::max() - 1;
+  static viz::ResourceId DeletedValue() {
+    return viz::ResourceId(std::numeric_limits<uint32_t>::max() - 1);
   }
 };
 
 }  // namespace WTF
-
-namespace blink {
-
-struct ResourceIdHash {
-  STATIC_ONLY(ResourceIdHash);
-
-  static bool Equal(const viz::ResourceId& a, const viz::ResourceId& b) {
-    return a == b;
-  }
-
-  static uint32_t GetHash(const viz::ResourceId& id) {
-    return WTF::HashInt(id.GetUnsafeValue());
-  }
-
-  static const bool safe_to_compare_to_empty_or_deleted = true;
-};
-
-}  // namespace blink
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_RESOURCE_ID_TRAITS_H_

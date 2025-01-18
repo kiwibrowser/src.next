@@ -8,14 +8,31 @@
 #include "base/files/file_path.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/values.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "content/public/test/browser_test.h"
 #include "extensions/common/extension_features.h"
-#include "extensions/common/value_builder.h"
 #include "extensions/test/test_extension_dir.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace extensions {
+
+#if BUILDFLAG(IS_ANDROID)
+
+constexpr char kBackgroundJS_SabDisallowed[] = R"(
+  chrome.test.runTests([
+    function sendSharedArrayBufferToWorker() {
+      try {
+        let sab = new SharedArrayBuffer(16);
+        chrome.test.fail('SAB construction succeeded unexpectedly')
+      } catch (e) {
+        chrome.test.succeed();
+      }
+    }
+  ]);
+)";
+
+#else
 
 constexpr char kWorkerJS[] = R"(
   function verifyData(data) {
@@ -40,19 +57,6 @@ constexpr char kWorkerJS[] = R"(
       postMessage(e.message);
     }
   });
-)";
-
-constexpr char kBackgroundJS_SabDisallowed[] = R"(
-  chrome.test.runTests([
-    function sendSharedArrayBufferToWorker() {
-      try {
-        let sab = new SharedArrayBuffer(16);
-        chrome.test.fail('SAB construction succeeded unexpectedly')
-      } catch (e) {
-        chrome.test.succeed();
-      }
-    }
-  ]);
 )";
 
 constexpr char kBackgroundJS_SabAllowed[] = R"(
@@ -80,78 +84,61 @@ constexpr char kBackgroundJS_SabAllowed[] = R"(
   ]);
 )";
 
+#endif
+
 // Parameterized on tuple of
 // <is_sab_allowed_unconditionally, is_cross_origin_isolated, is_platform_app>.
 class SharedArrayBufferTest
     : public ExtensionApiTest,
-      public ::testing::WithParamInterface<std::tuple<bool, bool, bool>> {
+      public ::testing::WithParamInterface<std::tuple<bool, bool>> {
  public:
-  SharedArrayBufferTest() {
-    std::vector<base::Feature> enabled_features, disabled_features;
-    const bool is_sab_allowed_unconditionally = std::get<0>(GetParam());
-    if (is_sab_allowed_unconditionally) {
-      enabled_features.push_back(
-          extensions_features::kAllowSharedArrayBuffersUnconditionally);
-    } else {
-      disabled_features.push_back(
-          extensions_features::kAllowSharedArrayBuffersUnconditionally);
-    }
-    feature_list_.InitWithFeatures(enabled_features, disabled_features);
-  }
 
   TestExtensionDir& test_dir() { return test_dir_; }
 
  private:
-  base::test::ScopedFeatureList feature_list_;
   TestExtensionDir test_dir_;
 };
 
 IN_PROC_BROWSER_TEST_P(SharedArrayBufferTest, TransferToWorker) {
   ASSERT_TRUE(StartEmbeddedTestServer());
 
-  bool is_sab_allowed_unconditionally;
   bool is_cross_origin_isolated;
   bool is_platform_app;
-  std::tie(is_sab_allowed_unconditionally, is_cross_origin_isolated,
-           is_platform_app) = GetParam();
+  std::tie(is_cross_origin_isolated, is_platform_app) = GetParam();
 
-  DictionaryBuilder builder;
-  builder.Set("manifest_version", 2)
-      .Set("name", "SharedArrayBuffer")
-      .Set("version", "1.1");
+  auto builder = base::Value::Dict()
+                     .Set("manifest_version", 2)
+                     .Set("name", "SharedArrayBuffer")
+                     .Set("version", "1.1");
 
   if (is_cross_origin_isolated) {
-    builder
-        .Set("cross_origin_opener_policy",
-             DictionaryBuilder().Set("value", "same-origin").Build())
-        .Set("cross_origin_embedder_policy",
-             DictionaryBuilder().Set("value", "require-corp").Build());
+    builder.Set("cross_origin_opener_policy",
+                base::Value::Dict().Set("value", "same-origin"));
+    builder.Set("cross_origin_embedder_policy",
+                base::Value::Dict().Set("value", "require-corp"));
   }
 
-  DictionaryBuilder background_builder;
+  base::Value::Dict background_builder;
   background_builder.Set("scripts",
-                         ListBuilder().Append("background.js").Build());
+                         base::Value::List().Append("background.js"));
 
   if (is_platform_app) {
-    builder.Set("app", DictionaryBuilder()
-                           .Set("background", background_builder.Build())
-                           .Build());
+    builder.Set("app", base::Value::Dict().Set("background",
+                                               std::move(background_builder)));
   } else {
-    builder.Set("background", background_builder.Build());
+    builder.Set("background", std::move(background_builder));
   }
 
-  test_dir().WriteManifest(builder.ToJSON());
+  test_dir().WriteManifest(builder);
 
-  const bool expect_sab_allowed =
-      is_cross_origin_isolated || is_sab_allowed_unconditionally;
-  if (expect_sab_allowed) {
-    test_dir().WriteFile(FILE_PATH_LITERAL("background.js"),
-                         kBackgroundJS_SabAllowed);
-    test_dir().WriteFile(FILE_PATH_LITERAL("worker.js"), kWorkerJS);
-  } else {
-    test_dir().WriteFile(FILE_PATH_LITERAL("background.js"),
-                         kBackgroundJS_SabDisallowed);
-  }
+#if BUILDFLAG(IS_ANDROID)
+  test_dir().WriteFile(FILE_PATH_LITERAL("background.js"),
+                       kBackgroundJS_SabDisallowed);
+#else
+  test_dir().WriteFile(FILE_PATH_LITERAL("background.js"),
+                       kBackgroundJS_SabAllowed);
+  test_dir().WriteFile(FILE_PATH_LITERAL("worker.js"), kWorkerJS);
+#endif
 
   ASSERT_TRUE(RunExtensionTest(test_dir().Pack(),
                                {.launch_as_platform_app = is_platform_app},
@@ -162,17 +149,12 @@ IN_PROC_BROWSER_TEST_P(SharedArrayBufferTest, TransferToWorker) {
 INSTANTIATE_TEST_SUITE_P(
     ,
     SharedArrayBufferTest,
-    ::testing::Combine(::testing::Bool(), ::testing::Bool(), ::testing::Bool()),
-    [](const testing::TestParamInfo<std::tuple<bool, bool, bool>>& info) {
-      bool is_sab_allowed_unconditionally;
+    ::testing::Combine(::testing::Bool(), ::testing::Bool()),
+    [](const testing::TestParamInfo<std::tuple<bool, bool>>& info) {
       bool is_cross_origin_isolated;
       bool is_platform_app;
-      std::tie(is_sab_allowed_unconditionally, is_cross_origin_isolated,
-               is_platform_app) = info.param;
-      return base::StringPrintf("%s_%s_%s",
-                                is_sab_allowed_unconditionally
-                                    ? "SabAllowedEnabled"
-                                    : "SabAllowedDisabled",
+      std::tie(is_cross_origin_isolated, is_platform_app) = info.param;
+      return base::StringPrintf("%s_%s",
                                 is_cross_origin_isolated ? "COI" : "NonCOI",
                                 is_platform_app ? "App" : "Extension");
     });

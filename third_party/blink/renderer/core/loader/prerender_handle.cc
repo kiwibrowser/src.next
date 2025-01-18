@@ -31,7 +31,7 @@
 #include "third_party/blink/renderer/core/loader/prerender_handle.h"
 
 #include "services/network/public/mojom/referrer_policy.mojom-blink.h"
-#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
+#include "third_party/blink/public/platform/browser_interface_broker_proxy.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -55,6 +55,21 @@ PrerenderHandle* PrerenderHandle::Create(
   ExecutionContext* context = document.GetExecutionContext();
   Referrer referrer = SecurityPolicy::GenerateReferrer(
       context->GetReferrerPolicy(), url, context->OutgoingReferrer());
+
+  // Record an origin type of the target URL.
+  if (trigger_type == mojom::blink::PrerenderTriggerType::kLinkRelPrerender) {
+    const SecurityOrigin* initiator_origin = context->GetSecurityOrigin();
+    scoped_refptr<SecurityOrigin> prerendering_origin =
+        SecurityOrigin::Create(url);
+    if (prerendering_origin->IsSameOriginWith(initiator_origin)) {
+      UseCounter::Count(context, WebFeature::kLinkRelPrerenderSameOrigin);
+    } else if (prerendering_origin->IsSameSiteWith(initiator_origin)) {
+      UseCounter::Count(context,
+                        WebFeature::kLinkRelPrerenderSameSiteCrossOrigin);
+    } else {
+      UseCounter::Count(context, WebFeature::kLinkRelPrerenderCrossSite);
+    }
+  }
 
   auto attributes = mojom::blink::PrerenderAttributes::New();
   attributes->url = url;

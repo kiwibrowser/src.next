@@ -8,12 +8,12 @@ import android.app.Activity;
 
 import androidx.annotation.Nullable;
 
-import org.chromium.chrome.browser.app.ChromeActivity;
+import org.chromium.chrome.browser.tabmodel.TabClosureParams;
 import org.chromium.components.external_intents.ExternalNavigationHandler;
-import org.chromium.components.external_intents.ExternalNavigationHandler.OverrideUrlLoadingResult;
 import org.chromium.components.external_intents.InterceptNavigationDelegateClient;
 import org.chromium.components.external_intents.InterceptNavigationDelegateImpl;
 import org.chromium.components.external_intents.RedirectHandler;
+import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.NavigationHandle;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.WindowAndroid;
@@ -27,32 +27,40 @@ public class InterceptNavigationDelegateClientImpl implements InterceptNavigatio
     private final TabObserver mTabObserver;
     private InterceptNavigationDelegateImpl mInterceptNavigationDelegate;
 
+    public static InterceptNavigationDelegateClientImpl createForTesting(Tab tab) {
+        return new InterceptNavigationDelegateClientImpl(tab);
+    }
+
     InterceptNavigationDelegateClientImpl(Tab tab) {
         mTab = (TabImpl) tab;
-        mTabObserver = new EmptyTabObserver() {
-            @Override
-            public void onContentChanged(Tab tab) {
-                mInterceptNavigationDelegate.associateWithWebContents(tab.getWebContents());
-            }
+        mTabObserver =
+                new EmptyTabObserver() {
+                    @Override
+                    public void onContentChanged(Tab tab) {
+                        mInterceptNavigationDelegate.associateWithWebContents(tab.getWebContents());
+                    }
 
-            @Override
-            public void onActivityAttachmentChanged(Tab tab, @Nullable WindowAndroid window) {
-                if (window != null) {
-                    mInterceptNavigationDelegate.setExternalNavigationHandler(
-                            createExternalNavigationHandler());
-                }
-            }
+                    @Override
+                    public void onActivityAttachmentChanged(
+                            Tab tab, @Nullable WindowAndroid window) {
+                        if (window != null) {
+                            mInterceptNavigationDelegate.setExternalNavigationHandler(
+                                    createExternalNavigationHandler());
+                        }
+                    }
 
-            @Override
-            public void onDidFinishNavigation(Tab tab, NavigationHandle navigation) {
-                mInterceptNavigationDelegate.onNavigationFinished(navigation);
-            }
+                    @Override
+                    public void onDidFinishNavigationInPrimaryMainFrame(
+                            Tab tab, NavigationHandle navigation) {
+                        mInterceptNavigationDelegate.onNavigationFinishedInPrimaryMainFrame(
+                                navigation);
+                    }
 
-            @Override
-            public void onDestroyed(Tab tab) {
-                mInterceptNavigationDelegate.associateWithWebContents(null);
-            }
-        };
+                    @Override
+                    public void onDestroyed(Tab tab) {
+                        mInterceptNavigationDelegate.associateWithWebContents(null);
+                    }
+                };
     }
 
     @Override
@@ -66,29 +74,13 @@ public class InterceptNavigationDelegateClientImpl implements InterceptNavigatio
     }
 
     @Override
-    public long getLastUserInteractionTime() {
-        ChromeActivity associatedActivity = mTab.getActivity();
-        return (associatedActivity == null) ? -1 : associatedActivity.getLastUserInteractionTime();
-    }
-
-    @Override
     public RedirectHandler getOrCreateRedirectHandler() {
         return RedirectHandlerTabHelper.getOrCreateHandlerFor(mTab);
     }
 
     @Override
     public boolean isIncognito() {
-        return mTab.isIncognito();
-    }
-
-    @Override
-    public boolean isHidden() {
-        return mTab.isHidden();
-    }
-
-    @Override
-    public boolean areIntentLaunchesAllowedInHiddenTabsForNavigation(NavigationHandle handle) {
-        return false;
+        return mTab.isIncognitoBranded();
     }
 
     @Override
@@ -108,15 +100,13 @@ public class InterceptNavigationDelegateClientImpl implements InterceptNavigatio
 
     @Override
     public void closeTab() {
-        mTab.getActivity().getTabModelSelector().closeTab(mTab);
+        if (mTab.isClosing()) return;
+        mTab.getActivity()
+                .getTabModelSelector()
+                .tryCloseTab(
+                        TabClosureParams.closeTab(mTab).allowUndo(false).build(),
+                        /* allowDialog= */ false);
     }
-
-    @Override
-    public void onNavigationStarted(NavigationHandle handle) {}
-
-    @Override
-    public void onDecisionReachedForNavigation(
-            NavigationHandle handle, OverrideUrlLoadingResult overrideUrlLoadingResult) {}
 
     public void initializeWithDelegate(InterceptNavigationDelegateImpl delegate) {
         mInterceptNavigationDelegate = delegate;
@@ -127,5 +117,11 @@ public class InterceptNavigationDelegateClientImpl implements InterceptNavigatio
         assert mInterceptNavigationDelegate != null;
         mTab.removeObserver(mTabObserver);
         mInterceptNavigationDelegate = null;
+    }
+
+    @Override
+    public void loadUrlIfPossible(LoadUrlParams loadUrlParams) {
+        if (mTab.isDestroyed() || mTab.isClosing()) return;
+        mTab.loadUrl(loadUrlParams);
     }
 }

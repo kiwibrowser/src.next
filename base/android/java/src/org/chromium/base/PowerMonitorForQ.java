@@ -9,21 +9,25 @@ import android.os.PowerManager;
 
 import androidx.annotation.RequiresApi;
 
+import org.chromium.build.annotations.NullMarked;
+
 /**
  * Utility class to use new APIs that were added in Q (API level 29). These need to exist in a
  * separate class so that Android framework can successfully verify the PowerMonitor class without
  * encountering the new APIs.
  */
+@NullMarked
 @RequiresApi(Build.VERSION_CODES.Q)
 public final class PowerMonitorForQ {
     private PowerMonitorForQ() {}
 
     public static void addThermalStatusListener(PowerManager powerManager) {
-        powerManager.addThermalStatusListener(new PowerManager.OnThermalStatusChangedListener() {
-            @Override
-            public void onThermalStatusChanged(int status) {
-                PowerMonitorJni.get().onThermalStatusChanged(status);
-            }
-        });
+        powerManager.addThermalStatusListener(
+                new PowerManager.OnThermalStatusChangedListener() {
+                    @Override
+                    public void onThermalStatusChanged(int status) {
+                        PowerMonitorJni.get().onThermalStatusChanged(status);
+                    }
+                });
     }
 }

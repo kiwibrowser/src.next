@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include <array>
 #include <memory>
 #include <utility>
 
@@ -14,6 +15,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "build/android_buildflags.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -43,15 +45,15 @@ void CheckParse(const ConstCommandsTestData& data,
                "| index: " + base::NumberToString(i));
 
   extensions::Command command;
-  std::unique_ptr<base::DictionaryValue> input(new base::DictionaryValue);
+  base::Value::Dict input;
   std::u16string error;
 
   // First, test the parse of a string suggested_key value.
-  input->SetString("suggested_key", data.key);
-  input->SetString("description", data.description);
+  input.Set("suggested_key", data.key);
+  input.Set("description", data.description);
 
   if (!platform_specific_only) {
-    bool result = command.Parse(input.get(), data.command_name, i, &error);
+    bool result = command.Parse(input, data.command_name, i, &error);
     EXPECT_EQ(data.expected_result, result);
     if (result) {
       EXPECT_STREQ(data.description,
@@ -72,16 +74,16 @@ void CheckParse(const ConstCommandsTestData& data,
       return;
     }
 
-    input = std::make_unique<base::DictionaryValue>();
-    base::Value key_dict(base::Value::Type::DICTIONARY);
+    base::Value::Dict key_dict;
+    for (const auto& platform : platforms) {
+      key_dict.Set(platform, data.key);
+    }
 
-    for (size_t j = 0; j < platforms.size(); ++j)
-      key_dict.SetStringKey(platforms[j], data.key);
+    input.clear();
+    input.Set("suggested_key", std::move(key_dict));
+    input.Set("description", data.description);
 
-    input->SetKey("suggested_key", std::move(key_dict));
-    input->SetStringKey("description", data.description);
-
-    bool result = command.Parse(input.get(), data.command_name, i, &error);
+    bool result = command.Parse(input, data.command_name, i, &error);
     EXPECT_EQ(data.expected_result, result);
 
     if (result) {
@@ -131,7 +133,7 @@ TEST(CommandTest, ExtensionCommandParsing) {
   const ui::Accelerator stop =
       ui::Accelerator(ui::VKEY_MEDIA_STOP, ui::EF_NONE);
 
-  ConstCommandsTestData kTests[] = {
+  static const auto kTests = std::to_array<ConstCommandsTestData>({
       // Negative test (one or more missing required fields). We don't need to
       // test |command_name| being blank as it is used as a key in the manifest,
       // so it can't be blank (and we CHECK() when it is). A blank shortcut is
@@ -189,37 +191,46 @@ TEST(CommandTest, ExtensionCommandParsing) {
       {false, none, "_execute_browser_action", "MediaNextTrack", ""},
       {false, none, "_execute_page_action", "MediaPrevTrack", ""},
       {false, none, "command", "Ctrl+Shift+MediaPrevTrack", "description"},
-  };
+  });
   std::vector<std::string> all_platforms;
   all_platforms.push_back("default");
   all_platforms.push_back("chromeos");
   all_platforms.push_back("linux");
   all_platforms.push_back("mac");
   all_platforms.push_back("windows");
-
-  for (size_t i = 0; i < std::size(kTests); ++i)
+  for (size_t i = 0; i < std::size(kTests); ++i) {
     CheckParse(kTests[i], i, false, all_platforms);
+  }
 }
 
-TEST(CommandTest, ExtensionCommandParsingFallback) {
+// TODO(https://crbug.com/356905053): Add/adjust command key support on
+// desktop-android platform.
+#if BUILDFLAG(IS_DESKTOP_ANDROID)
+#define MAYBE_ExtensionCommandParsingFallback \
+  DISABLED_ExtensionCommandParsingFallback
+#else
+#define MAYBE_ExtensionCommandParsingFallback ExtensionCommandParsingFallback
+#endif
+TEST(CommandTest, MAYBE_ExtensionCommandParsingFallback) {
   std::string description = "desc";
   std::string command_name = "foo";
 
   // Test that platform specific keys are honored on each platform, despite
   // fallback being given.
-  std::unique_ptr<base::DictionaryValue> input(new base::DictionaryValue);
-  input->SetString("description", description);
-  base::Value* key_dict = input->SetKey(
-      "suggested_key", base::Value(base::Value::Type::DICTIONARY));
-  key_dict->SetStringKey("default", "Ctrl+Shift+D");
-  key_dict->SetStringKey("windows", "Ctrl+Shift+W");
-  key_dict->SetStringKey("mac", "Ctrl+Shift+M");
-  key_dict->SetStringKey("linux", "Ctrl+Shift+L");
-  key_dict->SetStringKey("chromeos", "Ctrl+Shift+C");
+  base::Value::Dict input;
+  input.Set("description", description);
+
+  base::Value::Dict& key_dict =
+      input.Set("suggested_key", base::Value::Dict())->GetDict();
+  key_dict.Set("default", "Ctrl+Shift+D");
+  key_dict.Set("windows", "Ctrl+Shift+W");
+  key_dict.Set("mac", "Ctrl+Shift+M");
+  key_dict.Set("linux", "Ctrl+Shift+L");
+  key_dict.Set("chromeos", "Ctrl+Shift+C");
 
   extensions::Command command;
   std::u16string error;
-  EXPECT_TRUE(command.Parse(input.get(), command_name, 0, &error));
+  EXPECT_TRUE(command.Parse(input, command_name, 0, &error));
   EXPECT_STREQ(description.c_str(),
                base::UTF16ToASCII(command.description()).c_str());
   EXPECT_STREQ(command_name.c_str(), command.command_name().c_str());
@@ -237,7 +248,7 @@ TEST(CommandTest, ExtensionCommandParsingFallback) {
   ui::Accelerator accelerator(ui::VKEY_L,
                               ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN);
 #elif BUILDFLAG(IS_FUCHSIA)
-  // TODO(crbug.com/1312215): Change this once we decide on a unique platform
+  // TODO(crbug.com/40220501): Change this once we decide on a unique platform
   // key for Fuchsia.
   ui::Accelerator accelerator(ui::VKEY_L,
                               ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN);
@@ -250,45 +261,45 @@ TEST(CommandTest, ExtensionCommandParsingFallback) {
       << Command::AcceleratorToString(accelerator);
 
   // Misspell a platform.
-  key_dict->SetStringKey("windosw", "Ctrl+M");
-  EXPECT_FALSE(command.Parse(input.get(), command_name, 0, &error));
-  EXPECT_TRUE(key_dict->RemoveKey("windosw"));
+  key_dict.Set("windosw", "Ctrl+M");
+  EXPECT_FALSE(command.Parse(input, command_name, 0, &error));
+  EXPECT_TRUE(key_dict.Remove("windosw"));
 
   // Now remove platform specific keys (leaving just "default") and make sure
   // every platform falls back to the default.
-  EXPECT_TRUE(key_dict->RemoveKey("windows"));
-  EXPECT_TRUE(key_dict->RemoveKey("mac"));
-  EXPECT_TRUE(key_dict->RemoveKey("linux"));
-  EXPECT_TRUE(key_dict->RemoveKey("chromeos"));
-  EXPECT_TRUE(command.Parse(input.get(), command_name, 0, &error));
+  EXPECT_TRUE(key_dict.Remove("windows"));
+  EXPECT_TRUE(key_dict.Remove("mac"));
+  EXPECT_TRUE(key_dict.Remove("linux"));
+  EXPECT_TRUE(key_dict.Remove("chromeos"));
+  EXPECT_TRUE(command.Parse(input, command_name, 0, &error));
   EXPECT_EQ(ui::VKEY_D, command.accelerator().key_code());
 
   // Now remove "default", leaving no option but failure. Or, in the words of
   // the immortal Adam Savage: "Failure is always an option".
-  EXPECT_TRUE(key_dict->RemoveKey("default"));
-  EXPECT_FALSE(command.Parse(input.get(), command_name, 0, &error));
+  EXPECT_TRUE(key_dict.Remove("default"));
+  EXPECT_FALSE(command.Parse(input, command_name, 0, &error));
 
   // Make sure Command is not supported for non-Mac platforms.
-  key_dict->SetStringKey("default", "Command+M");
-  EXPECT_FALSE(command.Parse(input.get(), command_name, 0, &error));
-  EXPECT_TRUE(key_dict->RemoveKey("default"));
-  key_dict->SetStringKey("windows", "Command+M");
-  EXPECT_FALSE(command.Parse(input.get(), command_name, 0, &error));
-  EXPECT_TRUE(key_dict->RemoveKey("windows"));
+  key_dict.Set("default", "Command+M");
+  EXPECT_FALSE(command.Parse(input, command_name, 0, &error));
+  EXPECT_TRUE(key_dict.Remove("default"));
+  key_dict.Set("windows", "Command+M");
+  EXPECT_FALSE(command.Parse(input, command_name, 0, &error));
+  EXPECT_TRUE(key_dict.Remove("windows"));
 
   // Now add only a valid platform that we are not running on to make sure devs
   // are notified of errors on other platforms.
 #if BUILDFLAG(IS_WIN)
-  key_dict->SetStringKey("mac", "Ctrl+Shift+M");
+  key_dict.Set("mac", "Ctrl+Shift+M");
 #else
-  key_dict->SetStringKey("windows", "Ctrl+Shift+W");
+  key_dict.Set("windows", "Ctrl+Shift+W");
 #endif
-  EXPECT_FALSE(command.Parse(input.get(), command_name, 0, &error));
+  EXPECT_FALSE(command.Parse(input, command_name, 0, &error));
 
   // Make sure Mac specific keys are not processed on other platforms.
 #if !BUILDFLAG(IS_MAC)
-  key_dict->SetStringKey("windows", "Command+Shift+M");
-  EXPECT_FALSE(command.Parse(input.get(), command_name, 0, &error));
+  key_dict.Set("windows", "Command+Shift+M");
+  EXPECT_FALSE(command.Parse(input, command_name, 0, &error));
 #endif
 }
 
@@ -297,29 +308,31 @@ TEST(CommandTest, ExtensionCommandParsingPlatformSpecific) {
   ui::Accelerator search_shift_z(ui::VKEY_Z,
                                  ui::EF_COMMAND_DOWN | ui::EF_SHIFT_DOWN);
 
-  ConstCommandsTestData kChromeOsTests[] = {
+  const auto kChromeOsTests = std::to_array<ConstCommandsTestData>({
       {true, search_shift_z, "command", "Search+Shift+Z", "description"},
       {true, search_a, "command", "Search+A", "description"},
       // Command is not valid on Chrome OS.
       {false, search_shift_z, "command", "Command+Shift+Z", "description"},
-  };
+  });
 
   std::vector<std::string> chromeos;
   chromeos.push_back("chromeos");
-  for (size_t i = 0; i < std::size(kChromeOsTests); ++i)
+  for (size_t i = 0; i < std::size(kChromeOsTests); ++i) {
     CheckParse(kChromeOsTests[i], i, true, chromeos);
+  }
 
-  ConstCommandsTestData kNonChromeOsSearchTests[] = {
+  const auto kNonChromeOsSearchTests = std::to_array<ConstCommandsTestData>({
       {false, search_shift_z, "command", "Search+Shift+Z", "description"},
-  };
+  });
   std::vector<std::string> non_chromeos;
   non_chromeos.push_back("default");
   non_chromeos.push_back("windows");
   non_chromeos.push_back("mac");
   non_chromeos.push_back("linux");
 
-  for (size_t i = 0; i < std::size(kNonChromeOsSearchTests); ++i)
+  for (size_t i = 0; i < kNonChromeOsSearchTests.size(); ++i) {
     CheckParse(kNonChromeOsSearchTests[i], i, true, non_chromeos);
+  }
 }
 
 }  // namespace extensions

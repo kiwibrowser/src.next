@@ -30,9 +30,9 @@ const ReplacementAppsInfo* GetReplacementAppsInfo(const Extension* extension) {
 
 }  // namespace
 
-ReplacementAppsInfo::ReplacementAppsInfo() {}
+ReplacementAppsInfo::ReplacementAppsInfo() = default;
 
-ReplacementAppsInfo::~ReplacementAppsInfo() {}
+ReplacementAppsInfo::~ReplacementAppsInfo() = default;
 
 // static
 bool ReplacementAppsInfo::HasReplacementWebApp(const Extension* extension) {
@@ -49,24 +49,6 @@ GURL ReplacementAppsInfo::GetReplacementWebApp(const Extension* extension) {
   }
 
   return GURL();
-}
-
-// static
-bool ReplacementAppsInfo::HasReplacementAndroidApp(const Extension* extension) {
-  const ReplacementAppsInfo* info = GetReplacementAppsInfo(extension);
-  return info && !info->replacement_android_app.empty();
-}
-
-// static
-const std::string& ReplacementAppsInfo::GetReplacementAndroidApp(
-    const Extension* extension) {
-  const ReplacementAppsInfo* info = GetReplacementAppsInfo(extension);
-
-  if (info && !info->replacement_android_app.empty()) {
-    return info->replacement_android_app;
-  }
-
-  return base::EmptyString();
 }
 
 bool ReplacementAppsInfo::LoadWebApp(const Extension* extension,
@@ -93,35 +75,17 @@ bool ReplacementAppsInfo::LoadWebApp(const Extension* extension,
   return true;
 }
 
-bool ReplacementAppsInfo::LoadAndroidApp(const Extension* extension,
-                                         std::u16string* error) {
-  const base::Value* app_value =
-      extension->manifest()->FindPath(keys::kReplacementAndroidApp);
-  if (app_value == nullptr) {
-    return true;
-  }
-
-  DCHECK(app_value);
-  if (!app_value->is_string()) {
-    *error = errors::kInvalidReplacementAndroidApp;
-    return false;
-  }
-
-  replacement_android_app = std::move(app_value->GetString());
-  return true;
-}
-
 bool ReplacementAppsInfo::Parse(const Extension* extension,
                                 std::u16string* error) {
-  if (!LoadWebApp(extension, error) || !LoadAndroidApp(extension, error)) {
+  if (!LoadWebApp(extension, error)) {
     return false;
   }
   return true;
 }
 
-ReplacementAppsHandler::ReplacementAppsHandler() {}
+ReplacementAppsHandler::ReplacementAppsHandler() = default;
 
-ReplacementAppsHandler::~ReplacementAppsHandler() {}
+ReplacementAppsHandler::~ReplacementAppsHandler() = default;
 
 bool ReplacementAppsHandler::Parse(Extension* extension,
                                    std::u16string* error) {
@@ -136,8 +100,9 @@ bool ReplacementAppsHandler::Parse(Extension* extension,
 }
 
 base::span<const char* const> ReplacementAppsHandler::Keys() const {
-  static constexpr const char* kKeys[] = {keys::kReplacementWebApp,
-                                          keys::kReplacementAndroidApp};
+  static constexpr const char* kKeys[] = {
+      keys::kReplacementWebApp,
+  };
   return kKeys;
 }
 

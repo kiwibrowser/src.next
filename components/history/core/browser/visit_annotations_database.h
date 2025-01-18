@@ -83,6 +83,27 @@ class VisitAnnotationsDatabase {
   // entries for any `Cluster` that it failed to add.
   void AddClusters(const std::vector<Cluster>& clusters);
 
+  // Adds a cluster with no visits with `originator_cache_guid` and
+  // `originator_cluster_id` and returns the new cluster's ID.
+  // `originator_cache_guid` and `originator_cluster_id` can be the respective
+  // empty states if the cluster is a local cluster or the originator device
+  // does not support those fields yet.
+  int64_t ReserveNextClusterId(const std::string& originator_cache_guid,
+                               int64_t originator_cluster_id);
+
+  // Adds visits to the cluster with id `cluster_id`.
+  void AddVisitsToCluster(int64_t cluster_id,
+                          const std::vector<ClusterVisit>& visits);
+
+  // Updates the triggerability attributes for each cluster in `clusters`.
+  void UpdateClusterTriggerability(
+      const std::vector<history::Cluster>& clusters);
+
+  // Updates the cluster visit with the same visit ID as `cluster_visit` that
+  // belongs to `cluster_id`.
+  void UpdateClusterVisit(int64_t cluster_id,
+                          const history::ClusterVisit& cluster_visit);
+
   // Get a `Cluster`. Does not include the cluster's `visits` or
   // `keyword_to_data_map`.
   Cluster GetCluster(int64_t cluster_id);
@@ -107,12 +128,50 @@ class VisitAnnotationsDatabase {
   // is not in a cluster.`
   int64_t GetClusterIdContainingVisit(VisitID visit_id);
 
+  // Return the ID of the cluster that has `originator_cache_guid` and
+  // `originator_cluster_id`. Returns 0 if a cluster does not have those
+  // details.
+  int64_t GetClusterIdForSyncedDetails(const std::string& originator_cache_guid,
+                                       int64_t originator_cluster_id);
+
   // Return the keyword data associated with `cluster_id`.
   base::flat_map<std::u16string, ClusterKeywordData> GetClusterKeywords(
       int64_t cluster_id);
 
+  // Sets scores of cluster visits to 0 to hide them from the webUI.
+  void HideVisits(const std::vector<VisitID>& visit_ids);
+
   // Delete `Cluster`s from the table.
   void DeleteClusters(const std::vector<int64_t>& cluster_ids);
+
+  // Update the interaction state of cluster visits.
+  void UpdateVisitsInteractionState(
+      const std::vector<VisitID>& visit_ids,
+      ClusterVisit::InteractionState interaction_state);
+
+  // Converts categories to something that can be stored in the database eg:
+  // "mid1:score1,mid2:score2". As the serialized format is already being
+  // synced, the implementation of these functions should not be changed.
+  static std::string ConvertCategoriesToStringColumn(
+      const std::vector<VisitContentModelAnnotations::Category>& categories);
+
+  // Converts serialized categories into a vector of (`id`, `weight`) pairs. As
+  // the serialized format is already being synced, the implementation of these
+  // functions should not be changed.
+  static std::vector<VisitContentModelAnnotations::Category>
+  GetCategoriesFromStringColumn(const std::string& column_value);
+
+  // Serializes a vector of strings into a string separated by null character
+  // that can be stored in the db. As the serialized format is already being
+  // synced, the implementation of these functions should not be changed.
+  static std::string SerializeToStringColumn(
+      const std::vector<std::string>& related_searches);
+
+  // Converts a serialized db string separated by null character into a vector
+  // of strings. As the serialized format is already being synced, the
+  // implementation of these functions should not be changed.
+  static std::vector<std::string> DeserializeFromStringColumn(
+      const std::string& column_value);
 
  protected:
   // Returns the database for the functions in this interface.
@@ -177,7 +236,29 @@ class VisitAnnotationsDatabase {
   // * password_state
   bool MigrateAnnotationsAddColumnsForSync();
 
+  // Called by the derived classes to migrate the older clusters table by adding
+  // a triggerability calculated column.
+  bool MigrateClustersAddTriggerabilityCalculated();
+
+  // Called by the derived classes to migrate the older clusters table which
+  // aren't ready to accommodate Sync. It sets `id` to AUTOINCREMENT, and
+  // ensures the existence of the `originator_cache_guid` and
+  // `originator_cluster_id` columns.
+  bool MigrateClustersAutoincrementIdAndAddOriginatorColumns();
+
+  // Called by the derived classes to migrate the older content_annotations
+  // table by adding the has_url_keyed_image column.
+  bool MigrateContentAnnotationsAddHasUrlKeyedImage();
+
+  // Called by the derived class to migrate the older clusters_and_visits table
+  // by adding the interaction_state column.
+  bool MigrateClustersAndVisitsAddInteractionState();
+
  private:
+  // Return true if the clusters table's schema contains "AUTOINCREMENT".
+  // false if table do not contain AUTOINCREMENT, or the table is not created.
+  bool ClustersTableContainsAutoincrement();
+
   // Helper to create the 'clusters' table and avoid duplicating the code.
   bool CreateClustersTable();
 

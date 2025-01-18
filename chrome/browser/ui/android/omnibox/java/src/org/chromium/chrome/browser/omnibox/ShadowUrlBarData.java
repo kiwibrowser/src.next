@@ -7,15 +7,15 @@ package org.chromium.chrome.browser.omnibox;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 
-/**
- * Shadow of the UrlBarData, that permits stubbing/mocking static methods for testing.
- */
+import org.chromium.url.GURL;
+
+/** Shadow of the UrlBarData, that permits stubbing/mocking static methods for testing. */
 @Implements(UrlBarData.class)
 public class ShadowUrlBarData {
     public static boolean sShouldShowNextUrl = true;
 
     @Implementation
-    public static boolean shouldShowUrl(String url, boolean isIncognito) {
+    public static boolean shouldShowUrl(GURL gurl, boolean isIncognito) {
         boolean res = sShouldShowNextUrl;
         sShouldShowNextUrl = true;
         return res;

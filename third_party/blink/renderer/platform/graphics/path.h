@@ -29,19 +29,20 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_PATH_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_PATH_H_
 
+#include "base/memory/raw_span.h"
 #include "third_party/blink/renderer/platform/geometry/float_rounded_rect.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_types.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/transforms/transformation_matrix.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 #include "third_party/skia/include/core/SkPath.h"
-#include "third_party/skia/include/core/SkPathBuilder.h"
 #include "third_party/skia/include/core/SkPathMeasure.h"
+#include "ui/gfx/geometry/transform.h"
 
 namespace gfx {
 class PointF;
+class QuadF;
 class RectF;
 class Vector2dF;
 }
@@ -64,7 +65,7 @@ enum PathElementType {
 // returns two tangent points and the endpoint.
 struct PathElement {
   PathElementType type;
-  gfx::PointF* points;
+  base::raw_span<gfx::PointF> points;
 };
 
 // Result structure from Path::PointAndNormalAtLength() (and similar).
@@ -73,7 +74,7 @@ struct PointAndTangent {
   float tangent_in_degrees = 0;
 };
 
-typedef void (*PathApplierFunction)(void* info, const PathElement*);
+typedef void (*PathApplierFunction)(void* info, const PathElement&);
 
 class PLATFORM_EXPORT Path {
   USING_FAST_MALLOC(Path);
@@ -91,6 +92,9 @@ class PLATFORM_EXPORT Path {
 
   bool Contains(const gfx::PointF&) const;
   bool Contains(const gfx::PointF&, WindRule) const;
+
+  bool Intersects(const gfx::QuadF&) const;
+  bool Intersects(const gfx::QuadF&, WindRule) const;
 
   // Determine if the path's stroke contains the point.  The transform is used
   // only to determine the precision factor when analyzing the stroke, so that
@@ -135,6 +139,7 @@ class PLATFORM_EXPORT Path {
   void Clear();
   bool IsEmpty() const;
   bool IsClosed() const;
+  bool IsLine() const;
 
   // Specify whether this path is volatile. Temporary paths that are discarded
   // or modified after use should be marked as volatile. This is a hint to the
@@ -193,7 +198,7 @@ class PLATFORM_EXPORT Path {
 
   void Apply(void* info, PathApplierFunction) const;
   Path& Transform(const AffineTransform&);
-  Path& Transform(const TransformationMatrix&);
+  Path& Transform(const gfx::Transform&);
 
   bool SubtractPath(const Path&);
 

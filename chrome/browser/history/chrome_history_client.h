@@ -8,12 +8,11 @@
 #include <memory>
 #include <set>
 
-#include "base/callback_forward.h"
 #include "base/callback_list.h"
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "components/bookmarks/browser/base_bookmark_model_observer.h"
 #include "components/history/core/browser/history_client.h"
-#include "components/history/core/browser/history_service.h"
 
 class GURL;
 
@@ -38,7 +37,7 @@ class ChromeHistoryClient : public history::HistoryClient,
   void OnHistoryServiceCreated(
       history::HistoryService* history_service) override;
   void Shutdown() override;
-  bool CanAddURL(const GURL& url) override;
+  history::CanAddURLCallback GetThreadSafeCanAddURLCallback() const override;
   void NotifyProfileError(sql::InitStatus init_status,
                           const std::string& diagnostics) override;
   std::unique_ptr<history::HistoryBackendClient> CreateBackendClient() override;
@@ -50,14 +49,14 @@ class ChromeHistoryClient : public history::HistoryClient,
 
   // bookmarks::BaseBookmarkModelObserver implementation.
   void BookmarkModelChanged() override;
-  void BookmarkModelBeingDeleted(bookmarks::BookmarkModel* model) override;
-  void BookmarkNodeRemoved(bookmarks::BookmarkModel* bookmark_model,
-                           const bookmarks::BookmarkNode* parent,
+  void BookmarkModelBeingDeleted() override;
+  void BookmarkNodeRemoved(const bookmarks::BookmarkNode* parent,
                            size_t old_index,
                            const bookmarks::BookmarkNode* node,
-                           const std::set<GURL>& removed_url) override;
-  void BookmarkAllUserNodesRemoved(bookmarks::BookmarkModel* bookmark_model,
-                                   const std::set<GURL>& removed_urls) override;
+                           const std::set<GURL>& removed_url,
+                           const base::Location& location) override;
+  void BookmarkAllUserNodesRemoved(const std::set<GURL>& removed_urls,
+                                   const base::Location& location) override;
 
   // BookmarkModel instance providing access to bookmarks. May be null during
   // testing, and is null while shutting down.

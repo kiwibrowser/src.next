@@ -37,7 +37,6 @@ ui::ResourceBundle::FontStyle GetFontStyleForIconSize(
       return ui::ResourceBundle::LargeFont;
   }
   NOTREACHED();
-  return ui::ResourceBundle::MediumFont;
 }
 
 // Returns the background image to use for the given icon |size|.

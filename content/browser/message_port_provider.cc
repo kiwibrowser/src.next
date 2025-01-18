@@ -4,6 +4,7 @@
 
 #include "content/public/browser/message_port_provider.h"
 
+#include <optional>
 #include <utility>
 
 #include "base/unguessable_token.h"
@@ -14,14 +15,13 @@
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/public/browser/browser_thread.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/messaging/string_message_codec.h"
 
 #if BUILDFLAG(IS_ANDROID)
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
 #include "content/browser/android/app_web_message_port.h"
-#include "content/browser/android/message_payload.h"
+#include "content/public/browser/android/message_payload.h"
 #endif
 
 using blink::MessagePortChannel;
@@ -45,10 +45,14 @@ void PostMessageToFrameInternal(
 
   blink::TransferableMessage message = blink::EncodeWebMessagePayload(data);
   message.ports = std::move(channels);
+  // As the message is posted from the embedder and not from another renderer,
+  // set the agent cluster ID to the embedder's.
+  message.sender_agent_cluster_id =
+      blink::WebMessagePort::GetEmbedderAgentClusterID();
 
   RenderFrameHostImpl* rfh =
       static_cast<RenderFrameHostImpl*>(&page.GetMainDocument());
-  rfh->PostMessageEvent(absl::nullopt, source_origin, target_origin,
+  rfh->PostMessageEvent(std::nullopt, source_origin, target_origin,
                         std::move(message));
 }
 
@@ -96,7 +100,7 @@ void MessagePortProvider::PostMessageToFrame(
 void MessagePortProvider::PostMessageToFrame(
     Page& page,
     const std::u16string& source_origin,
-    const absl::optional<std::u16string>& target_origin,
+    const std::optional<std::u16string>& target_origin,
     const std::u16string& data,
     std::vector<blink::WebMessagePort> ports) {
   // Extract the underlying descriptors.
@@ -105,8 +109,8 @@ void MessagePortProvider::PostMessageToFrame(
   for (size_t i = 0; i < ports.size(); ++i)
     descriptors.push_back(ports[i].PassPort());
   PostMessageToFrameInternal(page, source_origin,
-                             target_origin.value_or(base::EmptyString16()),
-                             data, std::move(descriptors));
+                             target_origin.value_or(std::u16string()), data,
+                             std::move(descriptors));
 }
 #endif
 

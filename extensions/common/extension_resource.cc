@@ -90,13 +90,22 @@ base::FilePath ExtensionResource::GetFilePath(
   // unfortunately.
   // TODO(mad): Fix this once MakeAbsoluteFilePath is unified.
   full_path = base::MakeAbsoluteFilePath(full_path);
-  if (base::PathExists(full_path) &&
-      (symlink_policy == FOLLOW_SYMLINKS_ANYWHERE ||
-       clean_extension_root.IsParent(full_path))) {
-    return full_path;
+  if (!base::PathExists(full_path) ||
+      (symlink_policy != FOLLOW_SYMLINKS_ANYWHERE &&
+       !clean_extension_root.IsParent(full_path))) {
+    return base::FilePath();
   }
 
-  return base::FilePath();
+#if BUILDFLAG(IS_MAC)
+  // Reject file paths ending with a separator. Unlike other platforms, macOS
+  // strips the trailing separator when `realpath` is used, which causes
+  // inconsistencies. See https://crbug.com/356878412.
+  if (relative_path.EndsWithSeparator() && !base::DirectoryExists(full_path)) {
+    return base::FilePath();
+  }
+#endif
+
+  return full_path;
 }
 
 }  // namespace extensions

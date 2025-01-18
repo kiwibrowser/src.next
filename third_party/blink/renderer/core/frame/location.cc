@@ -35,11 +35,13 @@
 #include "third_party/blink/renderer/core/frame/dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/remote_dom_window.h"
 #include "third_party/blink/renderer/core/loader/frame_load_request.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
 #include "third_party/blink/renderer/core/url/dom_url_utils_read_only.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/v8_dom_activity_logger.h"
+#include "third_party/blink/renderer/platform/bindings/v8_dom_wrapper.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
@@ -47,16 +49,36 @@ namespace blink {
 
 Location::Location(DOMWindow* dom_window) : dom_window_(dom_window) {}
 
+v8::Local<v8::Value> Location::Wrap(ScriptState* script_state) {
+  // Note that this check is gated on whether or not |dom_window_| is remote,
+  // not whether or not |dom_window_| is cross-origin. If |dom_window_| is
+  // local, the |location| property must always return the same wrapper, even if
+  // the cross-origin status changes by changing properties like
+  // |document.domain|.
+  if (IsA<RemoteDOMWindow>(dom_window_.Get())) {
+    DCHECK(!DOMDataStore::ContainsWrapper(script_state->GetIsolate(), this));
+
+    DOMWrapperWorld& world = script_state->World();
+    v8::Isolate* isolate = script_state->GetIsolate();
+    const auto* location_wrapper_type = GetWrapperTypeInfo();
+    v8::Local<v8::Object> new_wrapper =
+        location_wrapper_type->GetV8ClassTemplate(isolate, world)
+            .As<v8::FunctionTemplate>()
+            ->NewRemoteInstance()
+            .ToLocalChecked();
+    return V8DOMWrapper::AssociateObjectWithWrapper(
+        isolate, this, location_wrapper_type, new_wrapper);
+  }
+
+  return ScriptWrappable::Wrap(script_state);
+}
+
 void Location::Trace(Visitor* visitor) const {
   visitor->Trace(dom_window_);
   ScriptWrappable::Trace(visitor);
 }
 
 inline const KURL& Location::Url() const {
-  const KURL& web_bundle_claimed_url = GetDocument()->WebBundleClaimedUrl();
-  if (web_bundle_claimed_url.IsValid()) {
-    return web_bundle_claimed_url;
-  }
   const KURL& url = GetDocument()->Url();
   if (!url.IsValid()) {
     // Use "about:blank" while the page is still loading (before we have a
@@ -103,9 +125,8 @@ DOMStringList* Location::ancestorOrigins() const {
   auto* origins = MakeGarbageCollected<DOMStringList>();
   if (!IsAttached())
     return origins;
-  for (Frame* frame =
-           dom_window_->GetFrame()->Tree().Parent(FrameTreeBoundary::kFenced);
-       frame; frame = frame->Tree().Parent(FrameTreeBoundary::kFenced)) {
+  for (Frame* frame = dom_window_->GetFrame()->Tree().Parent(); frame;
+       frame = frame->Tree().Parent()) {
     origins->Append(
         frame->GetSecurityContext()->GetSecurityOrigin()->ToString());
   }
@@ -192,7 +213,7 @@ void Location::setHash(v8::Isolate* isolate,
                        const String& hash,
                        ExceptionState& exception_state) {
   KURL url = GetDocument()->Url();
-  String old_fragment_identifier = url.FragmentIdentifier();
+  String old_fragment_identifier = url.FragmentIdentifier().ToString();
   String new_fragment_identifier = hash;
   if (hash[0] == '#')
     new_fragment_identifier = hash.Substring(1);
@@ -200,8 +221,10 @@ void Location::setHash(v8::Isolate* isolate,
   // Note that by parsing the URL and *then* comparing fragments, we are
   // comparing fragments post-canonicalization, and so this handles the
   // cases where fragment identifiers are ignored or invalid.
-  if (EqualIgnoringNullity(old_fragment_identifier, url.FragmentIdentifier()))
+  if (EqualIgnoringNullity(old_fragment_identifier,
+                           url.FragmentIdentifier().ToString())) {
     return;
+  }
   SetLocation(url.GetString(), IncumbentDOMWindow(isolate),
               EnteredDOMWindow(isolate), &exception_state);
 }
@@ -270,41 +293,30 @@ void Location::SetLocation(const String& url,
     return;
   }
 
-  // Check the source browsing context's CSP to fulfill the CSP check
-  // requirement of https://html.spec.whatwg.org/C/#navigate for javascript
-  // URLs. Although the spec states we should perform this check on task
-  // execution, there are concerns about the correctness of that statement,
-  // see http://github.com/whatwg/html/issues/2591.
-  if (completed_url.ProtocolIsJavaScript()) {
-    String script_source = DecodeURLEscapeSequences(
-        completed_url.GetString(), DecodeURLMode::kUTF8OrIsomorphic);
-    if (!incumbent_window->GetContentSecurityPolicyForCurrentWorld()
-             ->AllowInline(ContentSecurityPolicy::InlineType::kNavigation,
-                           nullptr /* element */, script_source,
-                           String() /* nonce */, incumbent_window->Url(),
-                           OrdinalNumber::First())) {
-      return;
-    }
-  }
-
   V8DOMActivityLogger* activity_logger =
-      V8DOMActivityLogger::CurrentActivityLoggerIfIsolatedWorld();
+      V8DOMActivityLogger::CurrentActivityLoggerIfIsolatedWorld(
+          incumbent_window->GetIsolate());
   if (activity_logger) {
     Vector<String> argv;
     argv.push_back("LocalDOMWindow");
     argv.push_back("url");
     argv.push_back(entered_document->Url());
     argv.push_back(completed_url);
-    activity_logger->LogEvent("blinkSetAttribute", argv.size(), argv.data());
+    // We use the CurrentDOMWindow here. `dom_window` might be remote here.
+    activity_logger->LogEvent(CurrentDOMWindow(incumbent_window->GetIsolate()),
+                              "blinkSetAttribute", argv);
   }
 
-  FrameLoadRequest request(incumbent_window, ResourceRequest(completed_url));
-  request.SetClientRedirectReason(ClientNavigationReason::kFrameNavigation);
+  ResourceRequestHead resource_request(completed_url);
+  resource_request.SetHasUserGesture(
+      LocalFrame::HasTransientUserActivation(incumbent_window->GetFrame()));
+
+  FrameLoadRequest request(incumbent_window, resource_request);
+  request.SetClientNavigationReason(ClientNavigationReason::kFrameNavigation);
   WebFrameLoadType frame_load_type = WebFrameLoadType::kStandard;
   if (set_location_policy == SetLocationPolicy::kReplaceThisFrame)
     frame_load_type = WebFrameLoadType::kReplaceCurrentItem;
 
-  incumbent_window->GetFrame()->MaybeLogAdClickNavigation();
   dom_window_->GetFrame()->Navigate(request, frame_load_type);
 }
 

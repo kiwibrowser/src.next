@@ -4,8 +4,8 @@
 
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 
-#include "base/bind.h"
-#include "base/callback.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/logging.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/infobars/simple_alert_infobar_creator.h"
@@ -20,7 +20,7 @@ ChromeSelectFilePolicy::ChromeSelectFilePolicy(
     content::WebContents* source_contents)
     : source_contents_(source_contents) {}
 
-ChromeSelectFilePolicy::~ChromeSelectFilePolicy() {}
+ChromeSelectFilePolicy::~ChromeSelectFilePolicy() = default;
 
 bool ChromeSelectFilePolicy::CanOpenSelectFileDialog() {
   return FileSelectDialogsAllowed();
@@ -47,8 +47,9 @@ bool ChromeSelectFilePolicy::FileSelectDialogsAllowed() {
   DCHECK(g_browser_process);
 
   // local_state() can return NULL for tests.
-  if (!g_browser_process->local_state())
+  if (!g_browser_process->local_state()) {
     return false;
+  }
 
   return !g_browser_process->local_state()->FindPreference(
              prefs::kAllowFileSelectionDialogs) ||

@@ -1,11 +1,16 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "third_party/blink/renderer/platform/graphics/color_correction_test_utils.h"
 
+#include "base/containers/heap_array.h"
 #include "base/notreached.h"
-#include "base/sys_byteorder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/modules/skcms/skcms.h"
 
@@ -127,17 +132,17 @@ void ColorCorrectionTestUtils::CompareColorCorrectedPixels(
     }
 
     case kPixelFormat_hhhh: {
-      float actual_pixels_f32[num_pixels * 4];
-      float expected_pixels_f32[num_pixels * 4];
+      auto actual_pixels_f32 = base::HeapArray<float>::Uninit(num_pixels * 4);
+      auto expected_pixels_f32 = base::HeapArray<float>::Uninit(num_pixels * 4);
       EXPECT_TRUE(
           skcms_Transform(actual_pixels, skcms_PixelFormat_RGBA_hhhh,
                           skcms_AlphaFormat_Unpremul, nullptr,
-                          actual_pixels_f32, skcms_PixelFormat_BGRA_ffff,
+                          actual_pixels_f32.data(), skcms_PixelFormat_BGRA_ffff,
                           skcms_AlphaFormat_Unpremul, nullptr, num_pixels));
       EXPECT_TRUE(
           skcms_Transform(expected_pixels, skcms_PixelFormat_RGBA_hhhh,
                           skcms_AlphaFormat_Unpremul, nullptr,
-                          expected_pixels_f32, skcms_PixelFormat_BGRA_ffff,
+                          expected_pixels_f32.data(), skcms_PixelFormat_BGRA_ffff,
                           skcms_AlphaFormat_Unpremul, nullptr, num_pixels));
 
       for (size_t i = 0; test_passed && i < num_pixels * 4; i++) {
@@ -173,7 +178,7 @@ bool ColorCorrectionTestUtils::ConvertPixelsToColorSpaceAndPixelFormatForTest(
     ImageDataStorageFormat src_storage_format,
     PredefinedColorSpace dst_color_space,
     CanvasPixelFormat dst_canvas_pixel_format,
-    std::unique_ptr<uint8_t[]>& converted_pixels,
+    base::span<uint8_t> converted_pixels,
     PixelFormat pixel_format_for_f16_canvas) {
   skcms_PixelFormat src_pixel_format = skcms_PixelFormat_RGBA_8888;
   if (src_storage_format == ImageDataStorageFormat::kUint16) {
@@ -189,20 +194,13 @@ bool ColorCorrectionTestUtils::ConvertPixelsToColorSpaceAndPixelFormatForTest(
                            : skcms_PixelFormat_RGBA_ffff;
   }
 
-  sk_sp<SkColorSpace> src_sk_color_space = nullptr;
-  src_sk_color_space =
-      CanvasColorParams(src_color_space,
-                        (src_storage_format == ImageDataStorageFormat::kUint8)
-                            ? CanvasPixelFormat::kUint8
-                            : CanvasPixelFormat::kF16,
-                        kNonOpaque)
-          .GetSkColorSpace();
+  sk_sp<SkColorSpace> src_sk_color_space =
+      PredefinedColorSpaceToSkColorSpace(src_color_space);
   if (!src_sk_color_space.get())
     src_sk_color_space = SkColorSpace::MakeSRGB();
 
   sk_sp<SkColorSpace> dst_sk_color_space =
-      CanvasColorParams(dst_color_space, dst_canvas_pixel_format, kNonOpaque)
-          .GetSkColorSpace();
+      PredefinedColorSpaceToSkColorSpace(dst_color_space);
   if (!dst_sk_color_space.get())
     dst_sk_color_space = SkColorSpace::MakeSRGB();
 
@@ -222,7 +220,7 @@ bool ColorCorrectionTestUtils::ConvertPixelsToColorSpaceAndPixelFormatForTest(
   skcms_AlphaFormat alpha_format = skcms_AlphaFormat_Unpremul;
   bool conversion_result =
       skcms_Transform(src_data, src_pixel_format, alpha_format, src_profile_ptr,
-                      converted_pixels.get(), dst_pixel_format, alpha_format,
+                      converted_pixels.data(), dst_pixel_format, alpha_format,
                       dst_profile_ptr, num_elements / 4);
 
   return conversion_result;
@@ -281,15 +279,15 @@ bool ColorCorrectionTestUtils::MatchSkImages(sk_sp<SkImage> src_image,
       src_image->alphaType(), dst_image->refColorSpace());
 
   if (src_image->colorType() != kRGBA_F16_SkColorType) {
-    std::unique_ptr<uint8_t[]> src_pixels(new uint8_t[num_pixels * 4]());
-    std::unique_ptr<uint8_t[]> dst_pixels(new uint8_t[num_pixels * 4]());
+    auto src_pixels = base::HeapArray<uint8_t>::Uninit(num_pixels * 4);
+    auto dst_pixels = base::HeapArray<uint8_t>::Uninit(num_pixels * 4);
 
-    src_image->readPixels(src_info, src_pixels.get(), src_info.minRowBytes(), 0,
-                          0);
-    dst_image->readPixels(dst_info, dst_pixels.get(), dst_info.minRowBytes(), 0,
-                          0);
+    src_image->readPixels(src_info, src_pixels.data(), src_info.minRowBytes(),
+                          0, 0);
+    dst_image->readPixels(dst_info, dst_pixels.data(), dst_info.minRowBytes(),
+                          0, 0);
 
-    for (int i = 0; test_passed && i < num_pixels; i++) {
+    for (size_t i = 0; test_passed && i < src_pixels.size(); i++) {
       for (int j = 0; j < num_components; j++) {
         test_passed &= IsNearlyTheSame(src_pixels[i * 4 + j],
                                        dst_pixels[i * 4 + j], uint8_tolerance);
@@ -298,18 +296,18 @@ bool ColorCorrectionTestUtils::MatchSkImages(sk_sp<SkImage> src_image,
     return test_passed;
   }
 
-  std::unique_ptr<float[]> src_pixels(new float[num_pixels * 4]());
-  std::unique_ptr<float[]> dst_pixels(new float[num_pixels * 4]());
+  auto src_pixels = base::HeapArray<float>::Uninit(num_pixels * 4);
+  auto dst_pixels = base::HeapArray<float>::Uninit(num_pixels * 4);
 
   src_info = src_info.makeColorType(kRGBA_F32_SkColorType);
   dst_info = dst_info.makeColorType(kRGBA_F32_SkColorType);
 
-  src_image->readPixels(src_info, src_pixels.get(), src_info.minRowBytes(), 0,
+  src_image->readPixels(src_info, src_pixels.data(), src_info.minRowBytes(), 0,
                         0);
-  dst_image->readPixels(dst_info, dst_pixels.get(), dst_info.minRowBytes(), 0,
+  dst_image->readPixels(dst_info, dst_pixels.data(), dst_info.minRowBytes(), 0,
                         0);
 
-  for (int i = 0; test_passed && i < num_pixels; i++) {
+  for (size_t i = 0; test_passed && i < src_pixels.size(); i++) {
     for (int j = 0; j < num_components; j++) {
       test_passed &= IsNearlyTheSame(src_pixels[i * 4 + j],
                                      dst_pixels[i * 4 + j], f16_tolerance);

@@ -33,7 +33,6 @@
 #include "third_party/blink/renderer/core/css/media_query_exp.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/media_type_names.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -65,8 +64,9 @@ String MediaQuery::Serialize() const {
     result.Append(" and ");
   }
 
-  if (exp_node)
+  if (exp_node) {
     result.Append(exp_node->Serialize());
+  }
 
   return result.ReleaseString();
 }
@@ -79,16 +79,16 @@ MediaQuery* MediaQuery::CreateNotAll() {
 MediaQuery::MediaQuery(RestrictorType restrictor,
                        String media_type,
                        const MediaQueryExpNode* exp_node)
-    : restrictor_(restrictor),
-      media_type_(AttemptStaticStringCreation(media_type.LowerASCII())),
+    : media_type_(AttemptStaticStringCreation(media_type.LowerASCII())),
       exp_node_(exp_node),
+      restrictor_(restrictor),
       has_unknown_(exp_node_ ? exp_node_->HasUnknown() : false) {}
 
 MediaQuery::MediaQuery(const MediaQuery& o)
-    : restrictor_(o.restrictor_),
-      media_type_(o.media_type_),
-      exp_node_(o.exp_node_),
+    : media_type_(o.media_type_),
       serialization_cache_(o.serialization_cache_),
+      exp_node_(o.exp_node_),
+      restrictor_(o.restrictor_),
       has_unknown_(o.has_unknown_) {}
 
 MediaQuery::~MediaQuery() = default;
@@ -98,22 +98,14 @@ void MediaQuery::Trace(Visitor* visitor) const {
 }
 
 MediaQuery::RestrictorType MediaQuery::Restrictor() const {
-  if (BehaveAsNotAll())
-    return RestrictorType::kNot;
   return restrictor_;
 }
 
 const MediaQueryExpNode* MediaQuery::ExpNode() const {
-  if (BehaveAsNotAll())
-    return nullptr;
   return exp_node_.Get();
 }
 
 const String& MediaQuery::MediaType() const {
-  if (BehaveAsNotAll()) {
-    DEFINE_STATIC_LOCAL(const AtomicString, all, ("all"));
-    return all;
-  }
   return media_type_;
 }
 
@@ -122,16 +114,11 @@ bool MediaQuery::operator==(const MediaQuery& other) const {
   return CssText() == other.CssText();
 }
 
-bool MediaQuery::BehaveAsNotAll() const {
-  if (RuntimeEnabledFeatures::CSSMediaQueries4Enabled())
-    return false;
-  return has_unknown_;
-}
-
 // https://drafts.csswg.org/cssom/#serialize-a-list-of-media-queries
 String MediaQuery::CssText() const {
-  if (serialization_cache_.IsNull())
+  if (serialization_cache_.IsNull()) {
     const_cast<MediaQuery*>(this)->serialization_cache_ = Serialize();
+  }
 
   return serialization_cache_;
 }

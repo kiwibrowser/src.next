@@ -82,7 +82,7 @@ are treated in different ways during painting:
     *   [grid items](http://www.w3.org/TR/css-grid-1/#z-order)
     *   custom scrollbar parts
 
-    They are painted by `ObjectPainter::paintAllPhasesAtomically()` which
+    They are painted by `ObjectPainter::PaintAllPhasesAtomically()` which
     executes all of the steps of the painting algorithm explained in the
     documentation, except ignores any descendants which are positioned or have
     non-auto z-index (which is achieved by skipping descendants with
@@ -92,22 +92,18 @@ are treated in different ways during painting:
 
 ### Other glossaries
 
-*   Paint container: the parent of an object for painting, as defined by
-    [CSS2.1 spec for painting]((http://www.w3.org/TR/CSS21/zindex.html)). For
-    regular objects, this is the parent in the DOM. For stacked objects, it's
-    the containing stacking context-inducing object.
+*   [`PaintLayer`](paint_layer.h): an old implementation detail of Blink.
+    It represents some layout objects to handle a lot of operations about
+    painting and hit-testing. We would like to remove this class in the future.
+    See the documentation of the class for more details.
 
-*   Paint container chain: the chain of paint ancestors between an element and
-    the root of the page.
+*   Painting container: the parent of a `PaintLayer` in paint order.
+    For a stacked `PaintLayer`, it's the containing stacking-context-inducing
+    ancestor, otherwise it's the parent.
 
-*   Compositing container: an implementation detail of Blink, which uses
-    `PaintLayer`s to represent some layout objects. It is the ancestor along the
-    paint ancestor chain which has a PaintLayer. Implemented in
-    `PaintLayer::compositingContainer()`. Think of it as skipping intermediate
-    normal objects and going directly to the containing stacked object.
-
-*   Compositing container chain: same as paint chain, but for compositing
-    container.
+*   Painting container chain: the chain of painting containers between a
+    `PaintLayer` and the root of the frame or the page, depending on whether
+    we want to cross the frame boundaries.
 
 *   Visual rect: the bounding box of all pixels that will be painted by a
     for a [display item](../../platform/graphics/paint/README.md#display-items)
@@ -243,32 +239,22 @@ is created for the root `LayoutView`. During the tree walk, one
 `PaintInvalidatorContext` passed from the parent object. It tracks the painting
 layer which will initiate painting of the current object.
 
-[`PaintInvalidator`](PaintInvalidator.h) initializes `PaintInvalidatorContext`
+[`PaintInvalidator`](paint_invalidator.h) initializes `PaintInvalidatorContext`
 for the current object, then calls `LayoutObject::InvalidatePaint()` which
 calls the object's paint invalidator (e.g. `BoxPaintInvalidator`) to complete
 paint invalidation of the object.
 
 #### Paint invalidation of text
 
-Text is painted by `InlineTextBoxPainter` using `InlineTextBox` as display
-item client. Text backgrounds and masks are painted by `InlineTextFlowPainter`
-using `InlineFlowBox` as display item client. We should invalidate these display
-item clients when their painting will change.
-
-`LayoutInline`s and `LayoutText`s are marked for full paint invalidation if
-needed when new style is set on them. During paint invalidation, we invalidate
-the `InlineFlowBox`s directly contained by the `LayoutInline` in
-`LayoutInline::InvalidateDisplayItemClients()` and `InlineTextBox`s contained by
-the `LayoutText` in `LayoutText::InvalidateDisplayItemClients()`. We don't need
-to traverse into the subtree of `InlineFlowBox`s in
-`LayoutInline::InvalidateDisplayItemClients()` because the descendant
-`InlineFlowBox`s and `InlineTextBox`s will be handled by their owning
-`LayoutInline`s and `LayoutText`s, respectively, when changed style is
-propagated.
+Text is painted by `TextFragmentPainter` using
+`FragmentItem::GetDisplayItemClient()` (which is the containing `LayoutText` or
+`LayoutInline`) as the display item client. We should invalidate these display
+item clients when their painting will change, which is the same as paint
+invalidation of other `LayoutObject`s.
 
 #### Specialty of `::first-line`
 
-`::first-line` pseudo style dynamically applies to all `InlineBox`'s in the
+`::first-line` pseudo style dynamically applies to all `FragmentItem`'s in the
 first line in the block having `::first-line` style. The actual applied style is
 computed from the `::first-line` style and other applicable styles.
 
@@ -287,8 +273,8 @@ The normal paint invalidation of texts doesn't work for first line because:
 
 We have a special path for first line style change: the style system informs the
 layout system when the computed first-line style changes through
-`LayoutObject::FirstLineStyleDidChange()`. When this happens, we invalidate all
-`InlineBox`es in the first line.
+`LayoutObject::ApplyFirstLineChanges()`. When this happens, we invalidate all
+`LayoutObject`s contributing to the first line.
 
 ### Building paint property trees
 [`PaintPropertyTreeBuilder`](paint_property_tree_builder.h)
@@ -400,18 +386,15 @@ Each `FragmentData` receives its own `ClipPaintPropertyNode`. They
 also store a unique `PaintOffset, `PaginationOffset and
 `LocalBorderBoxProperties` object.
 
-See
-[`LayoutMultiColumnFlowThread.h`](../layout/layout_multi_column_flow_thread.h)
-for a much more detail about multicolumn/pagination.
-
 ## Paint
 
-Paint walks the LayoutObject tree in paint-order and produces a list of
-display items. This is implemented using static painter classes
-(e.g., [`BlockPainter`](block_painter.cc)) and appends display items to a
-[`PaintController`](../../platform/graphics/paint/paint_controller.h). There
-is only one `PaintController` for the entire `LocalFrameView`. During
-this treewalk, the current property tree state is maintained (see:
+Within a PaintLayer, paint walks the PhysicalFragment tree in paint-order and
+produces a list of display items. This is implemented using static painter
+classes (such as [`BoxFragmentPainter`](box_fragment_painter.cc)) and
+appends display items to a
+[`PaintController`](../../platform/graphics/paint/paint_controller.h). There is
+only one `PaintController` for the entire `LocalFrameView`. During this
+treewalk, the current property tree state is maintained (see:
 `PaintController::UpdateCurrentPaintChunkProperties`). The `PaintController`
 segments the display item list into
 [`PaintChunk`](../../platform/graphics/paint/paint_chunk.h)s which are
@@ -462,6 +445,29 @@ if an object changes style and creates a self-painting-layer, we copy the flags
 from its containing self-painting layer to this layer, assuming that this layer
 needs all paint phases that its container self-painting layer needs.
 
+### Property tree update optimization
+
+In some specific cases of style updates, we can directly update the property
+tree without needing to run the property tree builder (Which requires a layout
+tree walk). During `PaintLayer::StyleDidChange` we check if this update meets
+the requirements for a quick update, and if so we add it to a list of pending
+updates (Those updates can't be executed on the fly because then paint offset
+changes can't be detected correctly).
+
+The updates are executed later in `PrePaintTreeWalk::WalkTree`.
+If at some point during pre-paint we reach a node that has a pending update,
+we mark that node as needs full update, and remove the pending update from the
+list
+
+When setting the display-locked property of an object (or ending a forced
+scope, effectively locking it), we remove all the pending opacity updates of
+that document. We actually need to remove only the updates for objects that are
+in that display, but the check is too expensive, so we remove all of the
+pending updates.
+
+Current updates that are checked for an optimized update are transform updates
+and opacity updates.
+
 ### Hit test information recording
 
 Hit testing is done in paint-order, and to preserve this information the paint
@@ -494,14 +500,23 @@ structures:
    and
    [`HitTestData::scroll_hit_test_rect`](../../platform/graphics/paint/hit_test_data.h)
 
-   Used to create
-   [non-fast scrollable regions](https://docs.google.com/document/d/1IyYJ6bVF7KZq96b_s5NrAzGtVoBXn_LQnya9y4yT3iw/view)
-   to prevent compositor scrolling of non-composited scrollers, plugins with
-   blocking scroll event handlers, and resize handles.
+   Used to create main-thread scroll hit-test regions (renamed from
+   [non-fast scrollable regions](https://docs.google.com/document/d/1IyYJ6bVF7KZq96b_s5NrAzGtVoBXn_LQnya9y4yT3iw/view))
+   to force main-thread hit test for non-composited scrollers with mixed
+   hit-test opaqueness, non-composited scrollbars, and resize handles.
 
    If `scroll_translation` is not null, this is also used to force a special
    cc::Layer that is marked as being scrollable when composited scrolling is
    needed for the scroller.
+
+5. [Hit-test opaqueness](../../../cc/input/hit_test_opaqueness.h)
+
+   Iindicates if a hit test can be reliably sent to a paint chunk directly or
+   ignored. During layerization, the [paint artifact compositor](../../platform/graphics/paint/README.md#paint-artifact-compositor)
+   will accumulate the hit-test opaqueness on paint chunks to cc::Layers, and
+   cc will use the information (as well as main-thread scroll hit-test regions)
+   to determine if a hit-test can be done directly on the compositor or must be
+   done on the main thread.
 
 ### Scrollbar painting
 
@@ -516,27 +531,3 @@ of type cc::SolidColorScrollbarLayer, cc::PaintedScrollbarLayer or
 cc::PaintedOverlayScrollbarLayer depending on the type of the scrollbar.
 
 Custom scrollbars are still painted into drawing display items directly.
-
-### PaintNG
-
-[LayoutNG](../layout/ng/README.md) is a project that will change how Layout
-generates geometry/style information for painting. Instead of modifying
-LayoutObjects, LayoutNG will generate an NGFragment tree.
-
-NGPaintFragments are:
-
-*    immutable
-*    all coordinates are physical. See
-[layout_box_model_object.h](../layout/layout_box_model_object.h).
-*    instead of Location(), NGFragment has Offset(), a physical offset from parent
-fragment.
-
-The goal is for PaintNG to eventually paint from NGFragment tree,
-and not see LayoutObjects at all. Until this goal is reached,
-LegacyPaint, and NGPaint will coexist.
-
-When a particular LayoutObject subclass fully migrates to NG, its LayoutObject
-geometry information might no longer be updated\(\*\), and its
-painter needs to be rewritten to paint NGFragments.
-For example, see how BlockPainter is being rewritten as NGBoxFragmentPainter.
-

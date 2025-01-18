@@ -13,8 +13,6 @@
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "components/pref_registry/pref_registry_syncable.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "services/network/public/cpp/network_connection_tracker.h"
 #include "services/network/public/mojom/host_resolver.mojom.h"
@@ -27,7 +25,7 @@ class SimpleURLLoader;
 class PrefRegistrySimple;
 
 #if !(BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || \
-      BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA))
+      BUILDFLAG(IS_CHROMEOS))
 #error "IntranetRedirectDetector should only be built on Desktop platforms."
 #endif
 

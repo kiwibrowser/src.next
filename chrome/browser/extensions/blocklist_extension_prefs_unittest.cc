@@ -7,6 +7,7 @@
 #include "base/memory/raw_ptr.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
+#include "chrome/browser/profiles/profile.h"
 #include "extensions/browser/blocklist_state.h"
 #include "extensions/browser/extension_prefs.h"
 
@@ -255,6 +256,38 @@ TEST_F(BlocklistExtensionPrefsUnitTest, IsExtensionBlocklisted) {
       blocklist_prefs::IsExtensionBlocklisted(kExtensionId, extension_prefs()));
 
   blocklist_prefs::SetSafeBrowsingExtensionBlocklistState(
+      kExtensionId, BitMapBlocklistState::NOT_BLOCKLISTED, extension_prefs());
+  EXPECT_FALSE(
+      blocklist_prefs::IsExtensionBlocklisted(kExtensionId, extension_prefs()));
+}
+
+TEST_F(BlocklistExtensionPrefsUnitTest,
+       ExtensionTelemetryServiceBlocklistState) {
+  blocklist_prefs::SetExtensionTelemetryServiceBlocklistState(
+      kExtensionId, BitMapBlocklistState::BLOCKLISTED_MALWARE,
+      extension_prefs());
+
+  EXPECT_EQ(BitMapBlocklistState::BLOCKLISTED_MALWARE,
+            blocklist_prefs::GetExtensionTelemetryServiceBlocklistState(
+                kExtensionId, extension_prefs()));
+
+  blocklist_prefs::SetExtensionTelemetryServiceBlocklistState(
+      kExtensionId, BitMapBlocklistState::NOT_BLOCKLISTED, extension_prefs());
+
+  EXPECT_EQ(BitMapBlocklistState::NOT_BLOCKLISTED,
+            blocklist_prefs::GetExtensionTelemetryServiceBlocklistState(
+                kExtensionId, extension_prefs()));
+}
+
+TEST_F(BlocklistExtensionPrefsUnitTest,
+       IsExtensionBlocklisted_ExtensionTelemetryService) {
+  blocklist_prefs::SetExtensionTelemetryServiceBlocklistState(
+      kExtensionId, BitMapBlocklistState::BLOCKLISTED_MALWARE,
+      extension_prefs());
+  EXPECT_TRUE(
+      blocklist_prefs::IsExtensionBlocklisted(kExtensionId, extension_prefs()));
+
+  blocklist_prefs::SetExtensionTelemetryServiceBlocklistState(
       kExtensionId, BitMapBlocklistState::NOT_BLOCKLISTED, extension_prefs());
   EXPECT_FALSE(
       blocklist_prefs::IsExtensionBlocklisted(kExtensionId, extension_prefs()));

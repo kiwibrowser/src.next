@@ -9,7 +9,7 @@
 #include <memory>
 #include <set>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
@@ -18,7 +18,7 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/ui/ash/shelf/shelf_extension_app_updater.h"
 #endif
 
@@ -42,7 +42,7 @@ class ChromeAppIconDelegate;
 // is bound to content::BrowserContext.
 // Usage: ChromeAppIconService::Get(context)->CreateIcon().
 class ChromeAppIconService : public KeyedService,
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
                              public ShelfAppUpdater::Delegate,
 #endif
                              public ExtensionRegistryObserver {
@@ -84,7 +84,8 @@ class ChromeAppIconService : public KeyedService,
 
   // System may have multiple icons for the same app id with different
   // dimensions. For example icon in shelf and app launcher.
-  using IconMap = std::map<std::string, std::set<ChromeAppIcon*>>;
+  using IconMap =
+      std::map<std::string, std::set<raw_ptr<ChromeAppIcon, SetExperimental>>>;
 
   // Called from ChromeAppIcon DTOR.
   void OnIconDestroyed(ChromeAppIcon* icon);
@@ -99,7 +100,7 @@ class ChromeAppIconService : public KeyedService,
                            const Extension* extension,
                            UnloadedExtensionReason reason) override;
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   // ShelfAppUpdater::Delegate:
   void OnAppUpdated(content::BrowserContext* browser_context,
                     const std::string& app_id,
@@ -109,7 +110,7 @@ class ChromeAppIconService : public KeyedService,
   // Unowned pointer.
   raw_ptr<content::BrowserContext> context_;
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   // On Chrome OS this handles Chrome app life-cycle events that may change how
   // extension based app icon looks like.
   std::unique_ptr<ShelfExtensionAppUpdater> app_updater_;

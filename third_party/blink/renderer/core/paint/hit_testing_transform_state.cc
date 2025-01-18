@@ -25,7 +25,6 @@
 
 #include "third_party/blink/renderer/core/paint/hit_testing_transform_state.h"
 
-#include "third_party/blink/renderer/platform/geometry/layout_rect.h"
 #include "third_party/blink/renderer/platform/graphics/paint/transform_paint_property_node.h"
 
 namespace blink {
@@ -36,49 +35,46 @@ void HitTestingTransformState::Translate(const gfx::Vector2dF& offset) {
 
 void HitTestingTransformState::ApplyTransform(
     const TransformPaintPropertyNode& transform) {
-  if (transform.IsIdentityOr2DTranslation()) {
-    Translate(transform.Translation2D());
-  } else {
-    accumulated_transform_.Multiply(transform.MatrixWithOriginApplied());
-  }
+  accumulated_transform_.PreConcat(transform.MatrixWithOriginApplied());
 }
 
-void HitTestingTransformState::ApplyTransform(
-    const GeometryMapper::Translation2DOrMatrix& transform) {
-  if (transform.IsIdentityOr2DTranslation()) {
-    Translate(transform.Translation2D());
-  } else {
-    accumulated_transform_.Multiply(transform.Matrix());
-  }
+void HitTestingTransformState::ApplyTransform(const gfx::Transform& transform) {
+  accumulated_transform_.PreConcat(transform);
 }
 
 void HitTestingTransformState::Flatten() {
-  TransformationMatrix inverse_transform = accumulated_transform_.Inverse();
-  last_planar_point_ = inverse_transform.ProjectPoint(last_planar_point_);
-  last_planar_quad_ = inverse_transform.ProjectQuad(last_planar_quad_);
-  last_planar_area_ = inverse_transform.ProjectQuad(last_planar_area_);
+  gfx::Transform inverse_transform;
+  if (accumulated_transform_.GetInverse(&inverse_transform)) {
+    last_planar_point_ = inverse_transform.ProjectPoint(last_planar_point_);
+    last_planar_quad_ = inverse_transform.ProjectQuad(last_planar_quad_);
+    last_planar_area_ = inverse_transform.ProjectQuad(last_planar_area_);
+  }
 
   accumulated_transform_.MakeIdentity();
 }
 
 gfx::PointF HitTestingTransformState::MappedPoint() const {
-  return accumulated_transform_.Inverse().ProjectPoint(last_planar_point_);
+  return accumulated_transform_.InverseOrIdentity().ProjectPoint(
+      last_planar_point_);
 }
 
 gfx::QuadF HitTestingTransformState::MappedQuad() const {
-  return accumulated_transform_.Inverse().ProjectQuad(last_planar_quad_);
+  return accumulated_transform_.InverseOrIdentity().ProjectQuad(
+      last_planar_quad_);
 }
 
 PhysicalRect HitTestingTransformState::BoundsOfMappedQuad() const {
-  return PhysicalRectToBeNoop(
-      accumulated_transform_.Inverse().ClampedBoundsOfProjectedQuad(
-          last_planar_quad_));
+  return BoundsOfMappedQuadInternal(last_planar_quad_);
 }
 
 PhysicalRect HitTestingTransformState::BoundsOfMappedArea() const {
-  return PhysicalRectToBeNoop(
-      accumulated_transform_.Inverse().ClampedBoundsOfProjectedQuad(
-          last_planar_area_));
+  return BoundsOfMappedQuadInternal(last_planar_area_);
+}
+
+PhysicalRect HitTestingTransformState::BoundsOfMappedQuadInternal(
+    const gfx::QuadF& q) const {
+  return PhysicalRect::EnclosingRect(
+      accumulated_transform_.InverseOrIdentity().ProjectQuad(q).BoundingBox());
 }
 
 }  // namespace blink

@@ -24,7 +24,7 @@ using MimeTypesHandlerNotAllowedTest = ManifestTest;
 
 class MimeTypesHandlerTest : public ManifestTest {
  protected:
-  std::string GetTestExtensionID() const override {
+  ExtensionId GetTestExtensionID() const override {
     // Extension ID must correspond to a hashed extension ID in the allowlist
     // for "mime_types" and "mime_types_handler" in _manifest_features.json.
     return extension_misc::kMimeHandlerPrivateTestExtensionId;
@@ -41,7 +41,8 @@ TEST_F(MimeTypesHandlerNotAllowedTest, Load) {
         "version": "0.1",
         "mime_types": ["text/plain", "application/octet-stream"],
         "mime_types_handler": "index.html"
-      })")));
+      })")
+                                            .TakeDict()));
   ASSERT_TRUE(extension);
 
   EXPECT_FALSE(MimeTypesHandler::GetHandler(extension.get()));
@@ -55,7 +56,8 @@ TEST_F(MimeTypesHandlerTest, Load) {
         "version": "0.1",
         "mime_types": ["text/plain", "application/octet-stream"],
         "mime_types_handler": "index.html"
-      })")));
+      })")
+                                            .TakeDict()));
   ASSERT_TRUE(extension);
 
   MimeTypesHandler* handler = MimeTypesHandler::GetHandler(extension.get());

@@ -4,12 +4,12 @@
 
 #include "extensions/browser/media_capture_util.h"
 
-#include <algorithm>
 #include <string>
 #include <utility>
 
-#include "base/callback.h"
 #include "base/check.h"
+#include "base/functional/callback.h"
+#include "base/ranges/algorithm.h"
 #include "content/public/browser/media_capture_devices.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/permissions/permissions_data.h"
@@ -26,20 +26,26 @@ namespace extensions {
 
 namespace {
 
+// Return the first device from `requested_device_ids` that's found in the id
+// list. If none of the ids are found then return the first device.
 const MediaStreamDevice* GetRequestedDeviceOrDefault(
     const MediaStreamDevices& devices,
-    const std::string& requested_device_id) {
-  if (!requested_device_id.empty()) {
-    auto it =
-        std::find_if(devices.begin(), devices.end(),
-                     [requested_device_id](const MediaStreamDevice& device) {
-                       return device.id == requested_device_id;
-                     });
-    return it != devices.end() ? &(*it) : nullptr;
+    const std::vector<std::string>& requested_device_ids) {
+  for (const auto& requested_device_id : requested_device_ids) {
+    if (requested_device_id.empty()) {
+      continue;
+    }
+
+    auto it = base::ranges::find(devices, requested_device_id,
+                                 &MediaStreamDevice::id);
+    if (it != devices.end()) {
+      return &(*it);
+    }
   }
 
-  if (!devices.empty())
+  if (!devices.empty()) {
     return &devices[0];
+  }
 
   return nullptr;
 }
@@ -70,9 +76,10 @@ void GrantMediaStreamRequest(content::WebContents* web_contents,
     VerifyMediaAccessPermission(request.audio_type, extension);
     const MediaStreamDevice* device = GetRequestedDeviceOrDefault(
         MediaCaptureDevices::GetInstance()->GetAudioCaptureDevices(),
-        request.requested_audio_device_id);
-    if (device)
+        request.requested_audio_device_ids);
+    if (device) {
       devices.audio_device = *device;
+    }
   }
 
   if (request.video_type ==
@@ -80,9 +87,10 @@ void GrantMediaStreamRequest(content::WebContents* web_contents,
     VerifyMediaAccessPermission(request.video_type, extension);
     const MediaStreamDevice* device = GetRequestedDeviceOrDefault(
         MediaCaptureDevices::GetInstance()->GetVideoCaptureDevices(),
-        request.requested_video_device_id);
-    if (device)
+        request.requested_video_device_ids);
+    if (device) {
       devices.video_device = *device;
+    }
   }
 
   // TODO(jamescook): Should we show a recording icon somewhere? If so, where?
@@ -108,16 +116,6 @@ void VerifyMediaAccessPermission(blink::mojom::MediaStreamType type,
     CHECK(permissions_data->HasAPIPermission(APIPermissionID::kVideoCapture))
         << "Video capture request but no videoCapture permission in manifest.";
   }
-}
-
-bool CheckMediaAccessPermission(blink::mojom::MediaStreamType type,
-                                const Extension* extension) {
-  const PermissionsData* permissions_data = extension->permissions_data();
-  if (type == blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE) {
-    return permissions_data->HasAPIPermission(APIPermissionID::kAudioCapture);
-  }
-  DCHECK(type == blink::mojom::MediaStreamType::DEVICE_VIDEO_CAPTURE);
-  return permissions_data->HasAPIPermission(APIPermissionID::kVideoCapture);
 }
 
 }  // namespace media_capture_util

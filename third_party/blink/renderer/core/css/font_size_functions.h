@@ -23,13 +23,18 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_FONT_SIZE_FUNCTIONS_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_FONT_SIZE_FUNCTIONS_H_
 
+#include <optional>
+
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
+#include "third_party/blink/renderer/platform/fonts/font_size_adjust.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
 class Document;
+class FontDescription;
+class SimpleFontData;
 
 enum ApplyMinimumFontSize {
   kDoNotApplyMinimumForFontSize,
@@ -52,8 +57,9 @@ class CORE_EXPORT FontSizeFunctions {
   static unsigned KeywordSize(CSSValueID value_id) {
     DCHECK(IsValidValueID(value_id));
 
-    if (value_id == CSSValueID::kWebkitXxxLarge)
+    if (value_id == CSSValueID::kWebkitXxxLarge) {
       value_id = CSSValueID::kXxxLarge;
+    }
 
     return static_cast<int>(value_id) - static_cast<int>(CSSValueID::kXxSmall) +
            1;
@@ -79,6 +85,21 @@ class CORE_EXPORT FontSizeFunctions {
   static int LegacyFontSize(const Document*,
                             int pixel_font_size,
                             bool is_monospace);
+
+  // Given font data, this function returns a normalized aspect value for the
+  // specified font metric, which is calculated using the size of the font
+  // metric divided by the font size.
+  // https://www.w3.org/TR/css-fonts-5/#font-size-adjust-aspect-value
+  static std::optional<float> FontAspectValue(const SimpleFontData*,
+                                              FontSizeAdjust::Metric,
+                                              float computed_size);
+
+  // Given font data, this function returns a font size adjusted by
+  // font-size-adjust, scaling the font size to achieve the desired aspect
+  // value of font size to metric.
+  static std::optional<float> MetricsMultiplierAdjustedFontSize(
+      const SimpleFontData*,
+      const FontDescription&);
 };
 
 }  // namespace blink

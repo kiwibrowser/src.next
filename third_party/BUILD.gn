@@ -1,12 +1,16 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/buildflag_header.gni")
+import("//build/config/features.gni")
 import("//build/config/freetype/freetype.gni")
 import("//third_party/harfbuzz-ng/harfbuzz.gni")
 import("//third_party/libjpeg.gni")
 
-assert(!is_ios, "This is not used on iOS, don't drag it in unintentionally")
+assert(
+    use_blink,
+    "This is not used on if blink is not enabled, don't drag it in unintentionally")
 
 config("system_libjpeg_config") {
   libs = [ "jpeg" ]
@@ -51,14 +55,24 @@ group("jpeg_includes") {
 component("freetype_harfbuzz") {
   public_configs = []
   public_deps = []
-  if (use_system_freetype) {
-    public_configs += [ "//build/linux:freetype_from_pkgconfig" ]
-  } else {
-    public_deps += [ "//third_party/freetype:freetype_source" ]
+  if (enable_freetype) {
+    if (use_system_freetype) {
+      public_configs += [ "//build/linux:freetype_from_pkgconfig" ]
+    } else {
+      public_deps += [ "//third_party/freetype:freetype_source" ]
+    }
   }
   if (use_system_harfbuzz) {
     public_configs += [ "//third_party/harfbuzz-ng:harfbuzz_from_pkgconfig" ]
   } else {
     public_deps += [ "//third_party/harfbuzz-ng:harfbuzz_source" ]
   }
+}
+
+buildflag_header("freetype_buildflags") {
+  header = "freetype_buildflags.h"
+  flags = [
+    "USE_SYSTEM_FREETYPE=$use_system_freetype",
+    "ENABLE_FREETYPE=$enable_freetype",
+  ]
 }

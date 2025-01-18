@@ -12,9 +12,7 @@ import org.chromium.base.metrics.RecordUserAction;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 
-/**
- * Metrics util class.
- */
+/** Metrics util class. */
 class GestureNavMetrics {
     // Used to record the UMA histogram GestureNavigation. This definition should be
     // in sync with the enum "GestureNavigationDirection" in tools/metrics/histograms/enums.xml.
@@ -43,11 +41,13 @@ class GestureNavMetrics {
 
     /**
      * Records UMA histogram for various gesture navigation events.
+     *
      * @param name Event name.
      * @param forward {@code true} if navigating forward; otherwise {@code false}.
      */
     static void recordHistogram(String name, boolean forward) {
-        RecordHistogram.recordEnumeratedHistogram(name,
+        RecordHistogram.recordEnumeratedHistogram(
+                name,
                 forward ? GestureNavigationDirection.FORWARD : GestureNavigationDirection.BACK,
                 GestureNavigationDirection.NUM_ENTRIES);
     }
@@ -68,6 +68,6 @@ class GestureNavMetrics {
         // true  -> GestureNavigationType.CHROME
         // false -> GestureNavigationType.SYSTEM
         // This histogram is logged at Chrome startup.
-        RecordHistogram.recordBooleanHistogram("GestureNavigation.Type", isChromeGesture);
+        RecordHistogram.recordBooleanHistogram("GestureNavigation.Type2", isChromeGesture);
     }
 }

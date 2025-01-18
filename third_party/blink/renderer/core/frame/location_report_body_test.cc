@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/scheme_registry.h"
 
 namespace blink {
 namespace {
@@ -16,8 +17,8 @@ class TestLocationReportBody : public LocationReportBody {
  public:
   explicit TestLocationReportBody(
       const String& source_file = g_empty_string,
-      absl::optional<uint32_t> line_number = absl::nullopt,
-      absl::optional<uint32_t> column_number = absl::nullopt)
+      std::optional<uint32_t> line_number = std::nullopt,
+      std::optional<uint32_t> column_number = std::nullopt)
       : LocationReportBody(source_file, line_number, column_number) {}
 };
 
@@ -25,13 +26,13 @@ class TestLocationReportBody : public LocationReportBody {
 // input will give same return value.
 TEST(LocationReportBodyMatchIdTest, SameInputGeneratesSameMatchId) {
   String url = "";
-  absl::optional<uint32_t> line = absl::nullopt, column = absl::nullopt;
+  std::optional<uint32_t> line = std::nullopt, column = std::nullopt;
   EXPECT_EQ(TestLocationReportBody(url, line, column).MatchId(),
             TestLocationReportBody(url, line, column).MatchId());
 
   url = "https://example.com";
-  line = absl::make_optional<uint32_t>(0);
-  column = absl::make_optional<uint32_t>(0);
+  line = std::make_optional<uint32_t>(0);
+  column = std::make_optional<uint32_t>(0);
   EXPECT_EQ(TestLocationReportBody(url, line, column).MatchId(),
             TestLocationReportBody(url, line, column).MatchId());
 }
@@ -43,15 +44,15 @@ bool AllDistinct(const std::vector<unsigned>& match_ids) {
 
 const struct {
   const char* url;
-  const absl::optional<uint32_t> line_number;
-  const absl::optional<uint32_t> column_number;
+  const std::optional<uint32_t> line_number;
+  const std::optional<uint32_t> column_number;
 } kLocationReportBodyInputs[] = {
-    {"url", absl::nullopt, absl::nullopt},
-    {"url", 0, absl::nullopt},
-    {"url", absl::nullopt, 0},
+    {"url", std::nullopt, std::nullopt},
+    {"url", 0, std::nullopt},
+    {"url", std::nullopt, 0},
     {"url", 0, 0},
-    {"url", 1, absl::nullopt},
-    {"url", absl::nullopt, 1},
+    {"url", 1, std::nullopt},
+    {"url", std::nullopt, 1},
     {"url", 1, 1},
 };
 
@@ -81,12 +82,31 @@ TEST(LocationReportBodyMatchIdTest, MatchIdGeneratedShouldNotBeZero) {
 TEST(LocationReportBodyMatchIdTest,
      EmptyURLGenerateSameMatchIdRegardlessOfOtherParams) {
   const unsigned empty_hash =
-      TestLocationReportBody("", absl::nullopt, absl::nullopt).MatchId();
+      TestLocationReportBody("", std::nullopt, std::nullopt).MatchId();
   for (const auto& input : kLocationReportBodyInputs) {
     EXPECT_EQ(TestLocationReportBody("", input.line_number, input.column_number)
                   .MatchId(),
               empty_hash);
   }
+}
+
+TEST(LocationReportBodyTest, ExtensionURLsAreIdentified) {
+  const char* kExtensionUrl =
+      "chrome-extension://abcdefghijklmnopabcdefghijklmnop/scripts/"
+      "script.js";
+  const char* kAboutBlankUrl = "about:blank";
+  const char* kHttpsUrl = "https://example.com/";
+
+  EXPECT_FALSE(TestLocationReportBody(kExtensionUrl, 1, 1).IsExtensionSource());
+  EXPECT_FALSE(
+      TestLocationReportBody(kAboutBlankUrl, 1, 1).IsExtensionSource());
+  EXPECT_FALSE(TestLocationReportBody(kHttpsUrl, 1, 1).IsExtensionSource());
+
+  CommonSchemeRegistry::RegisterURLSchemeAsExtension("chrome-extension");
+  EXPECT_TRUE(TestLocationReportBody(kExtensionUrl, 1, 1).IsExtensionSource());
+  EXPECT_FALSE(
+      TestLocationReportBody(kAboutBlankUrl, 1, 1).IsExtensionSource());
+  EXPECT_FALSE(TestLocationReportBody(kHttpsUrl, 1, 1).IsExtensionSource());
 }
 
 }  // namespace

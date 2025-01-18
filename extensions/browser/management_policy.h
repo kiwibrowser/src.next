@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "extensions/browser/disable_reason.h"
 #include "extensions/common/extension.h"
 
@@ -58,9 +59,9 @@ class ManagementPolicy {
 
     // Providers should return false if a user may not install the |extension|,
     // or load or run it if it has already been installed.
-    // TODO(crbug.com/461747): The method name is misleading, since this applies
-    // to all extension installations, not just user-initiated ones. Fix either
-    // the name or the semantics.
+    // TODO(crbug.com/41159442): The method name is misleading, since this
+    // applies to all extension installations, not just user-initiated ones. Fix
+    // either the name or the semantics.
     virtual bool UserMayLoad(const Extension* extension,
                              std::u16string* error) const;
 
@@ -73,9 +74,9 @@ class ManagementPolicy {
     // Providers should return false if a user may not enable, disable, or
     // uninstall the |extension|, or change its usage options (incognito
     // permission, file access, etc.).
-    // TODO(crbug.com/461747): The method name is misleading, since this applies
-    // to all setting modifications, not just user-initiated ones. Fix either
-    // the name or the semantics.
+    // TODO(crbug.com/41159442): The method name is misleading, since this
+    // applies to all setting modifications, not just user-initiated ones. Fix
+    // either the name or the semantics.
     virtual bool UserMayModifySettings(const Extension* extension,
                                        std::u16string* error) const;
 
@@ -94,10 +95,10 @@ class ManagementPolicy {
                                    std::u16string* error) const;
 
     // Similar to MustRemainEnabled, but for whether an extension must remain
-    // disabled, and returns an error and/or reason if the caller needs it.
-    virtual bool MustRemainDisabled(const Extension* extension,
-                                    disable_reason::DisableReason* reason,
-                                    std::u16string* error) const;
+    // disabled, and populates the reason, if any.
+    virtual bool MustRemainDisabled(
+        const Extension* extension,
+        disable_reason::DisableReason* reason) const;
 
     // Similar to MustRemainEnabled, but for whether an extension must remain
     // installed, and returns an error and/or reason if the caller needs it.
@@ -128,11 +129,11 @@ class ManagementPolicy {
       const std::vector<std::unique_ptr<Provider>>& providers);
 
   // Returns true if the user is permitted to install, load, and run the given
-  // extension. If not, |error| may be set to an appropriate message.
+  // extension.
   // Installed extensions failing this check are disabled with the reason
   // DISABLE_BLOCKED_BY_POLICY.
-  // TODO(crbug.com/461747): Misleading name; see comment in Provider.
-  bool UserMayLoad(const Extension* extension, std::u16string* error) const;
+  // TODO(crbug.com/41159442): Misleading name; see comment in Provider.
+  bool UserMayLoad(const Extension* extension) const;
 
   // Returns false if the user should not be allowed to install the given
   // |extension|. By default, this forwards to UserMayLoad() (since a user
@@ -142,7 +143,7 @@ class ManagementPolicy {
   // Returns true if the user is permitted to enable, disable, or uninstall the
   // given extension, or change the extension's usage options (incognito mode,
   // file access, etc.). If not, |error| may be set to an appropriate message.
-  // TODO(crbug.com/461747): Misleading name; see comment in Provider.
+  // TODO(crbug.com/41159442): Misleading name; see comment in Provider.
   bool UserMayModifySettings(const Extension* extension,
                              std::u16string* error) const;
 
@@ -161,8 +162,7 @@ class ManagementPolicy {
   // Returns true immediately if any registered provider's UserMayLoad() returns
   // false or MustRemainDisabled() returns true.
   bool MustRemainDisabled(const Extension* extension,
-                          disable_reason::DisableReason* reason,
-                          std::u16string* error) const;
+                          disable_reason::DisableReason* reason) const;
 
   // Returns true immediately if any registered provider's MustRemainInstalled
   // function returns true.
@@ -188,7 +188,7 @@ class ManagementPolicy {
   typedef bool (Provider::*ProviderFunction)(const Extension*,
                                              std::u16string*) const;
 
-  typedef std::set<Provider*> ProviderList;
+  typedef std::set<raw_ptr<Provider, SetExperimental>> ProviderList;
 
   // This is a helper to apply a method in the Provider interface to each of
   // the Provider objects in |providers_|. The return value of this function

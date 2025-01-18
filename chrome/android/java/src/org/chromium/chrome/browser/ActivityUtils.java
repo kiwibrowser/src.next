@@ -32,8 +32,7 @@ public final class ActivityUtils {
      * @return Activity currently related to webContents. Could be <c>null</c> and could change,
      *         therefore do not cache.
      */
-    @Nullable
-    public static Activity getActivityFromWebContents(@Nullable WebContents webContents) {
+    public static @Nullable Activity getActivityFromWebContents(@Nullable WebContents webContents) {
         if (webContents == null || webContents.isDestroyed()) return null;
 
         WindowAndroid window = webContents.getTopLevelNativeWindow();
@@ -46,8 +45,9 @@ public final class ActivityUtils {
     /** @return the theme ID to use. */
     public static int getThemeId() {
         boolean useLowEndTheme = SysUtils.isLowEndDevice();
-        return (useLowEndTheme ? R.style.Theme_Chromium_WithWindowAnimation_LowEnd
-                               : R.style.Theme_Chromium_WithWindowAnimation);
+        return (useLowEndTheme
+                ? R.style.Theme_Chromium_WithWindowAnimation_LowEnd
+                : R.style.Theme_Chromium_WithWindowAnimation);
     }
 
     /**
@@ -75,7 +75,8 @@ public final class ActivityUtils {
             return;
         }
         if (component.getClassName() != null
-                && TextUtils.equals(component.getClassName(),
+                && TextUtils.equals(
+                        component.getClassName(),
                         ChromeTabbedActivity.MAIN_LAUNCHER_ACTIVITY_NAME)) {
             // Keep in sync with the activities that the .Main alias points to in
             // AndroidManifest.xml.

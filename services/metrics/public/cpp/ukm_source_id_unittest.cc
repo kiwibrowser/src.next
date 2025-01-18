@@ -4,13 +4,15 @@
 
 #include "services/metrics/public/cpp/ukm_source_id.h"
 
+#include <array>
+
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace ukm {
 
 TEST(UkmSourceIdTest, AssignSourceIds) {
   const size_t numIds = 5;
-  SourceId ids[numIds] = {};
+  std::array<SourceId, numIds> ids = {};
 
   for (size_t i = 0; i < numIds; i++) {
     ids[i] = AssignNewSourceId();
@@ -24,7 +26,7 @@ TEST(UkmSourceIdTest, AssignSourceIds) {
 
 TEST(UkmSourceIdTest, ConvertToNavigationType) {
   const size_t numIds = 5;
-  SourceId ids[numIds] = {};
+  std::array<SourceId, numIds> ids = {};
 
   for (size_t i = 0; i < numIds; i++) {
     ids[i] = ConvertToSourceId(i, SourceIdType::NAVIGATION_ID);

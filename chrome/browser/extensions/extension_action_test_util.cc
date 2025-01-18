@@ -6,7 +6,7 @@
 
 #include <memory>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/run_loop.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/extensions/test_extension_system.h"
@@ -44,7 +44,7 @@ size_t GetPageActionCount(content::WebContents* web_contents,
     ExtensionAction* extension_action =
         action_manager->GetExtensionAction(*extension);
     if (extension_action &&
-        extension_action->action_type() == ActionInfo::TYPE_PAGE &&
+        extension_action->action_type() == ActionInfo::Type::kPage &&
         (!only_count_visible || extension_action->GetIsVisible(tab_id.id()))) {
       ++count;
     }
@@ -65,8 +65,9 @@ std::unique_ptr<KeyedService> BuildToolbarModel(
 ToolbarActionsModel* CreateToolbarModelImpl(Profile* profile,
                                             bool wait_for_ready) {
   ToolbarActionsModel* model = ToolbarActionsModel::Get(profile);
-  if (model)
+  if (model) {
     return model;
+  }
 
   // No existing model means it's a new profile (since we, by default, don't
   // create the ToolbarModel in testing).

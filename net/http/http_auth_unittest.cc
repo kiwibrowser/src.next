@@ -7,6 +7,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <string_view>
 
 #include "base/memory/ref_counted.h"
 #include "base/strings/string_util.h"
@@ -38,14 +39,12 @@ std::unique_ptr<HttpAuthHandlerMock> CreateMockHandler(bool connection_based) {
   std::unique_ptr<HttpAuthHandlerMock> auth_handler =
       std::make_unique<HttpAuthHandlerMock>();
   auth_handler->set_connection_based(connection_based);
-  std::string challenge_text = "Basic";
-  HttpAuthChallengeTokenizer challenge(challenge_text.begin(),
-                                         challenge_text.end());
+  HttpAuthChallengeTokenizer challenge("Basic");
   url::SchemeHostPort scheme_host_port(GURL("https://www.example.com"));
   SSLInfo null_ssl_info;
   EXPECT_TRUE(auth_handler->InitFromChallenge(
-      &challenge, HttpAuth::AUTH_SERVER, null_ssl_info, NetworkIsolationKey(),
-      scheme_host_port, NetLogWithSource()));
+      &challenge, HttpAuth::AUTH_SERVER, null_ssl_info,
+      NetworkAnonymizationKey(), scheme_host_port, NetLogWithSource()));
   return auth_handler;
 }
 
@@ -149,7 +148,7 @@ TEST(HttpAuthTest, ChooseBestChallenge) {
     std::unique_ptr<HttpAuthHandler> handler;
     HttpAuth::ChooseBestChallenge(
         http_auth_handler_factory.get(), *headers, null_ssl_info,
-        NetworkIsolationKey(), HttpAuth::AUTH_SERVER, scheme_host_port,
+        NetworkAnonymizationKey(), HttpAuth::AUTH_SERVER, scheme_host_port,
         disabled_schemes, NetLogWithSource(), host_resolver.get(), &handler);
 
     if (handler.get()) {

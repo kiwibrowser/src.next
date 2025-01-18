@@ -12,8 +12,8 @@
 #include <memory>
 #include <set>
 
-#include "base/bind.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
 #include "base/process/process_iterator.h"
 #include "base/process/process_metrics.h"
 #include "base/strings/string_number_conversions.h"
@@ -23,7 +23,7 @@
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/branded_strings.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/process_type.h"
@@ -103,8 +103,7 @@ std::vector<pid_t> GetAllChildren(const ProcessMap& processes, pid_t root) {
 
 }  // namespace
 
-MemoryDetails::MemoryDetails() {
-}
+MemoryDetails::MemoryDetails() = default;
 
 ProcessData* MemoryDetails::ChromeBrowser() {
   return &process_data_[0];

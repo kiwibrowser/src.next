@@ -9,14 +9,13 @@
 
 #include <array>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "net/base/ip_address.h"
 #include "net/base/net_export.h"
 #include "net/base/network_change_notifier.h"
-
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace net {
 
@@ -63,9 +62,12 @@ struct NET_EXPORT NetworkInterface {
                    const IPAddress& address,
                    uint32_t prefix_length,
                    int ip_address_attributes,
-                   absl::optional<Eui48MacAddress> mac_address = absl::nullopt);
+                   std::optional<Eui48MacAddress> mac_address = std::nullopt);
   NetworkInterface(const NetworkInterface& other);
   ~NetworkInterface();
+
+  bool operator==(const NetworkInterface& that) const = default;
+  bool operator!=(const NetworkInterface& that) const = default;
 
   std::string name;
   std::string friendly_name;  // Same as |name| on non-Windows.
@@ -74,7 +76,7 @@ struct NET_EXPORT NetworkInterface {
   IPAddress address;
   uint32_t prefix_length;
   int ip_address_attributes;  // Combination of |IPAddressAttributes|.
-  absl::optional<Eui48MacAddress> mac_address;
+  std::optional<Eui48MacAddress> mac_address;
 };
 
 typedef std::vector<NetworkInterface> NetworkInterfaceList;
@@ -99,34 +101,6 @@ NET_EXPORT bool GetNetworkList(NetworkInterfaceList* networks,
 // point or its SSID is unavailable, an empty string is returned.
 // Currently only implemented on Linux, ChromeOS, Android and Windows.
 NET_EXPORT std::string GetWifiSSID();
-
-// General category of the IEEE 802.11 (wifi) physical layer operating mode.
-enum WifiPHYLayerProtocol {
-  // No wifi support or no associated AP.
-  WIFI_PHY_LAYER_PROTOCOL_NONE,
-  // An obsolete modes introduced by the original 802.11, e.g. IR, FHSS.
-  WIFI_PHY_LAYER_PROTOCOL_ANCIENT,
-  // 802.11a, OFDM-based rates.
-  WIFI_PHY_LAYER_PROTOCOL_A,
-  // 802.11b, DSSS or HR DSSS.
-  WIFI_PHY_LAYER_PROTOCOL_B,
-  // 802.11g, same rates as 802.11a but compatible with 802.11b.
-  WIFI_PHY_LAYER_PROTOCOL_G,
-  // 802.11n, HT rates.
-  WIFI_PHY_LAYER_PROTOCOL_N,
-  // Unclassified mode or failure to identify.
-  WIFI_PHY_LAYER_PROTOCOL_UNKNOWN,
-  // 802.11ac
-  WIFI_PHY_LAYER_PROTOCOL_AC,
-  // 802.11ad
-  WIFI_PHY_LAYER_PROTOCOL_AD,
-  // 802.11ax
-  WIFI_PHY_LAYER_PROTOCOL_AX
-};
-
-// Characterize the PHY mode of the currently associated access point.
-// Currently only available on Windows.
-NET_EXPORT WifiPHYLayerProtocol GetWifiPHYLayerProtocol();
 
 enum WifiOptions {
   // Disables background SSID scans.

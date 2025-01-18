@@ -2,10 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "net/base/network_interfaces_win.h"
 
-#include <iphlpapi.h>
 #include <objbase.h>
+
+#include <iphlpapi.h>
 
 #include <ostream>
 #include <string>
@@ -252,7 +258,6 @@ bool read_int_or_bool(DWORD data_size, PVOID data) {
       return !!*reinterpret_cast<uint32_t*>(data);
     default:
       LOG(FATAL) << "That is not a type I know!";
-      return false;
   }
 }
 
@@ -319,8 +324,14 @@ void TryChangeWifiOptions(int options) {
   EXPECT_EQ(previous_options, GetWifiOptions());
 }
 
+// Test fails on Win Arm64 bots. TODO(crbug.com/40260910): Fix on bot.
+#if BUILDFLAG(IS_WIN) && defined(ARCH_CPU_ARM64)
+#define MAYBE_SetWifiOptions DISABLED_SetWifiOptions
+#else
+#define MAYBE_SetWifiOptions SetWifiOptions
+#endif
 // Test SetWifiOptions().
-TEST(NetworkInterfacesTest, SetWifiOptions) {
+TEST(NetworkInterfacesTest, MAYBE_SetWifiOptions) {
   TryChangeWifiOptions(0);
   TryChangeWifiOptions(WIFI_OPTIONS_DISABLE_SCAN);
   TryChangeWifiOptions(WIFI_OPTIONS_MEDIA_STREAMING_MODE);

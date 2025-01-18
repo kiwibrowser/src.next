@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,9 +19,10 @@ namespace blink {
 namespace {
 
 sk_sp<SkImage> CreateFrameAtIndex(DeferredImageDecoder* decoder, size_t index) {
-  return SkImage::MakeFromGenerator(std::make_unique<SkiaPaintImageGenerator>(
-      decoder->CreateGenerator(), index,
-      cc::PaintImage::kDefaultGeneratorClientId));
+  return SkImages::DeferredFromGenerator(
+      std::make_unique<SkiaPaintImageGenerator>(
+          decoder->CreateGenerator(), index,
+          cc::PaintImage::kDefaultGeneratorClientId));
 }
 
 }  // namespace
@@ -47,25 +48,25 @@ static void MixImages(const char* file_name,
                       size_t bytes_for_first_frame,
                       size_t later_frame) {
   base::test::SingleThreadTaskEnvironment task_environment;
-  const Vector<char> file = ReadFile(file_name)->CopyAs<Vector<char>>();
+  const Vector<char> file = ReadFile(file_name);
 
   scoped_refptr<SharedBuffer> partial_file =
-      SharedBuffer::Create(file.data(), bytes_for_first_frame);
+      SharedBuffer::Create(base::span(file).first(bytes_for_first_frame));
   std::unique_ptr<DeferredImageDecoder> decoder = DeferredImageDecoder::Create(
       partial_file, false, ImageDecoder::kAlphaPremultiplied,
-      ColorBehavior::Ignore());
+      ColorBehavior::kIgnore);
   ASSERT_NE(decoder, nullptr);
   sk_sp<SkImage> partial_image = CreateFrameAtIndex(decoder.get(), 0);
 
   scoped_refptr<SharedBuffer> almost_complete_file =
-      SharedBuffer::Create(file.data(), file.size() - 1);
+      SharedBuffer::Create(base::span(file).first(file.size() - 1));
   decoder->SetData(almost_complete_file, false);
   sk_sp<SkImage> image_with_more_data =
       CreateFrameAtIndex(decoder.get(), later_frame);
 
   // we now want to ensure we don't crash if we access these in this order
   SkImageInfo info = SkImageInfo::MakeN32Premul(10, 10);
-  sk_sp<SkSurface> surf = SkSurface::MakeRaster(info);
+  sk_sp<SkSurface> surf = SkSurfaces::Raster(info);
   surf->getCanvas()->drawImage(image_with_more_data, 0, 0);
   surf->getCanvas()->drawImage(partial_image, 0, 0);
 }
@@ -96,40 +97,36 @@ TEST(DeferredImageDecoderTestWoPlatform, mixImagesIco) {
 
 TEST(DeferredImageDecoderTestWoPlatform, fragmentedSignature) {
   base::test::SingleThreadTaskEnvironment task_environment;
-  const char* test_files[] = {
+  constexpr auto test_files = std::to_array<const char*>({
       "/images/resources/animated.gif",
       "/images/resources/mu.png",
       "/images/resources/2-dht.jpg",
       "/images/resources/webp-animated.webp",
       "/images/resources/gracehopper.bmp",
       "/images/resources/wrong-frame-dimensions.ico",
-  };
+  });
 
-  for (size_t i = 0; i < SK_ARRAY_COUNT(test_files); ++i) {
-    scoped_refptr<SharedBuffer> file_buffer = ReadFile(test_files[i]);
-    ASSERT_NE(file_buffer, nullptr);
-    // We need contiguous data, which SharedBuffer doesn't guarantee.
-    Vector<char> contiguous = file_buffer->CopyAs<Vector<char>>();
-    EXPECT_EQ(contiguous.size(), file_buffer->size());
-    const char* data = contiguous.data();
+  for (const auto* test_file : test_files) {
+    Vector<char> file_data = ReadFile(test_file);
+    auto [first_byte, rest_of_data] = base::span(file_data).split_at(1u);
 
     // Truncated signature (only 1 byte).  Decoder instantiation should fail.
-    scoped_refptr<SharedBuffer> buffer = SharedBuffer::Create<size_t>(data, 1u);
+    scoped_refptr<SharedBuffer> buffer = SharedBuffer::Create(first_byte);
     EXPECT_FALSE(ImageDecoder::HasSufficientDataToSniffMimeType(*buffer));
     EXPECT_EQ(nullptr, DeferredImageDecoder::Create(
                            buffer, false, ImageDecoder::kAlphaPremultiplied,
-                           ColorBehavior::Ignore()));
+                           ColorBehavior::kIgnore));
 
     // Append the rest of the data.  We should be able to sniff the signature
     // now, even if segmented.
-    buffer->Append<size_t>(data + 1, contiguous.size() - 1);
+    buffer->Append(rest_of_data);
     EXPECT_TRUE(ImageDecoder::HasSufficientDataToSniffMimeType(*buffer));
     std::unique_ptr<DeferredImageDecoder> decoder =
         DeferredImageDecoder::Create(buffer, false,
                                      ImageDecoder::kAlphaPremultiplied,
-                                     ColorBehavior::Ignore());
+                                     ColorBehavior::kIgnore);
     ASSERT_NE(decoder, nullptr);
-    EXPECT_TRUE(String(test_files[i]).EndsWith(decoder->FilenameExtension()));
+    EXPECT_TRUE(String(test_file).EndsWith(decoder->FilenameExtension()));
   }
 }
 

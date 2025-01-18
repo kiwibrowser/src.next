@@ -8,7 +8,6 @@
 
 #include <memory>
 
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_management.h"
@@ -20,8 +19,8 @@
 #include "components/download/public/common/download_item.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_item_utils.h"
-#include "content/public/browser/notification_service.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/common/extension_urls.h"
 #include "extensions/common/user_script.h"
 
 using content::BrowserThread;
@@ -66,13 +65,13 @@ std::unique_ptr<ExtensionInstallPrompt> CreateExtensionInstallPrompt(
   }
 }
 
+}  // namespace
+
 bool OffStoreInstallAllowedByPrefs(Profile* profile, const DownloadItem& item) {
   return g_allow_offstore_install_for_testing ||
          extensions::ExtensionManagementFactory::GetForBrowserContext(profile)
              ->IsOffstoreInstallAllowed(item.GetURL(), item.GetReferrerUrl());
 }
-
-}  // namespace
 
 // Tests can call this method to inject a mock ExtensionInstallPrompt
 // to be used to confirm permissions on a downloaded CRX.
@@ -103,31 +102,6 @@ scoped_refptr<extensions::CrxInstaller> CreateCrxInstaller(
   return installer;
 }
 
-scoped_refptr<extensions::CrxInstaller> OpenChromeExtension(
-    Profile* profile,
-    const DownloadItem& download_item) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  scoped_refptr<extensions::CrxInstaller> installer(
-      CreateCrxInstaller(profile, download_item));
-
-  if (OffStoreInstallAllowedByPrefs(profile, download_item)) {
-    installer->set_off_store_install_allow_reason(
-        extensions::CrxInstaller::OffStoreInstallAllowedBecausePref);
-  }
-
-  if (extensions::UserScript::IsURLUserScript(download_item.GetURL(),
-                                              download_item.GetMimeType())) {
-    installer->InstallUserScript(download_item.GetFullPath(),
-                                 download_item.GetURL());
-  } else {
-    DCHECK(!WebstoreInstaller::GetAssociatedApproval(download_item));
-    installer->InstallCrx(download_item.GetFullPath());
-  }
-
-  return installer;
-}
-
 bool IsExtensionDownload(const DownloadItem& download_item) {
   if (download_item.GetTargetDisposition() ==
       DownloadItem::TARGET_DISPOSITION_PROMPT)
@@ -144,7 +118,9 @@ bool IsExtensionDownload(const DownloadItem& download_item) {
 
 bool IsTrustedExtensionDownload(Profile* profile, const DownloadItem& item) {
   return IsExtensionDownload(item) &&
-         OffStoreInstallAllowedByPrefs(profile, item);
+         (OffStoreInstallAllowedByPrefs(profile, item) ||
+          extension_urls::IsWebstoreUpdateUrl(item.GetURL()) ||
+          extension_urls::IsWebstoreDomain(item.GetURL()));
 }
 
 std::unique_ptr<base::AutoReset<bool>> OverrideOffstoreInstallAllowedForTesting(

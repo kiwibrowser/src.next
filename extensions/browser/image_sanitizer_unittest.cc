@@ -6,16 +6,17 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 
 #include "base/base64.h"
-#include "base/bind.h"
 #include "base/containers/contains.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/functional/bind.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "content/public/test/browser_task_environment.h"
 #include "extensions/browser/extension_file_task_runner.h"
@@ -70,8 +71,9 @@ class TestClient : public ImageSanitizer::Client {
     done_callback_called_ = true;
     last_status_ = status;
     last_reported_path_ = path;
-    if (done_callback_)
+    if (done_callback_) {
       std::move(done_callback_).Run();
+    }
   }
 
   void OnImageDecoded(const base::FilePath& path, SkBitmap image) override {
@@ -133,11 +135,12 @@ class ImageSanitizerTest : public testing::Test {
   bool WriteBase64DataToFile(const std::string& base64_data,
                              const base::FilePath::StringPieceType& file_name) {
     std::string binary;
-    if (!base::Base64Decode(base64_data, &binary))
+    if (!base::Base64Decode(base64_data, &binary)) {
       return false;
+    }
 
     base::FilePath path = temp_dir_.GetPath().Append(file_name);
-    return base::WriteFile(path, binary.data(), binary.size());
+    return base::WriteFile(path, binary);
   }
 
   void SetUp() override { ASSERT_TRUE(temp_dir_.CreateUniqueTempDir()); }
@@ -209,10 +212,10 @@ TEST_F(ImageSanitizerTest, ValidCase) {
   // Make sure the image files are there and non empty, and that the
   // ImageSanitizerDecodedImage callback was invoked for every image.
   for (const auto& path : paths) {
-    int64_t file_size = 0;
     base::FilePath full_path = GetImagePath().Append(path);
-    EXPECT_TRUE(base::GetFileSize(full_path, &file_size));
-    EXPECT_GT(file_size, 0);
+    std::optional<int64_t> file_size = base::GetFileSize(full_path);
+    EXPECT_TRUE(file_size.has_value());
+    EXPECT_GT(file_size.value(), 0);
 
     ASSERT_TRUE(base::Contains(*client()->decoded_images(), path));
     EXPECT_FALSE((*client()->decoded_images())[path].drawsNothing());
@@ -262,7 +265,7 @@ TEST_F(ImageSanitizerTest, NoCallbackAfterDelete) {
   ClearSanitizer();
   // Wait a bit and ensure no callback has been called.
   base::RunLoop run_loop;
-  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
       FROM_HERE, run_loop.QuitClosure(), base::Milliseconds(200));
   run_loop.Run();
   EXPECT_FALSE(client()->done_callback_called());
@@ -301,7 +304,7 @@ TEST_F(ImageSanitizerTest, DontHoldOnToCallbacksOnSuccess) {
 TEST_F(ImageSanitizerTest, DataDecoderServiceCrashes) {
   constexpr base::FilePath::CharType kGoodPngName[] =
       FILE_PATH_LITERAL("good.png");
-  in_process_data_decoder().service().SimulateImageDecoderCrashForTesting(true);
+  in_process_data_decoder().SimulateImageDecoderCrash(true);
   CreateValidImage(kGoodPngName);
   base::FilePath good_png(kGoodPngName);
   CreateAndStartSanitizer({good_png});

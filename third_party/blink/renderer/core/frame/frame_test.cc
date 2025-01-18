@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,15 @@
 #include "mojo/public/cpp/bindings/remote.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink.h"
+#include "third_party/blink/renderer/core/animation/scroll_timeline.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/frame/frame.h"
+#include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/remote_frame.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
-#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
 namespace blink {
@@ -32,8 +36,7 @@ class FrameTest : public PageTestBase {
   void Navigate(const String& destinationUrl, bool user_activated) {
     const KURL& url = KURL(NullURL(), destinationUrl);
     auto navigation_params =
-        WebNavigationParams::CreateWithHTMLBufferForTesting(
-            SharedBuffer::Create(), url);
+        WebNavigationParams::CreateWithEmptyHTMLForTesting(url);
     if (user_activated)
       navigation_params->is_user_activated = true;
     GetDocument().GetFrame()->Loader().CommitNavigation(
@@ -262,6 +265,63 @@ TEST_F(FrameTest, UserActivationTriggerHistograms) {
   histograms.ExpectTotalCount("Event.UserActivation.TriggerForConsuming", 2);
   histograms.ExpectTotalCount("Event.UserActivation.TriggerForSticky", 4);
   histograms.ExpectTotalCount("Event.UserActivation.TriggerForTransient", 4);
+}
+
+TEST_F(FrameTest, NavigateClearsScrollSnapshotClients) {
+  ScrollTimeline::Create(&GetDocument(),
+                         GetDocument().ScrollingElementNoLayout(),
+                         ScrollTimeline::ScrollAxis::kBlock);
+
+  EXPECT_EQ(
+      GetDocument().GetFrame()->GetScrollSnapshotClientsForTesting().size(),
+      1U);
+  NavigateSameDomain("page1");
+  EXPECT_EQ(
+      GetDocument().GetFrame()->GetScrollSnapshotClientsForTesting().size(),
+      0U);
+}
+
+class FrameDetachTest : public ::testing::Test {
+ public:
+  Frame* MainFrame() {
+    return web_view_helper_.GetWebView()->GetPage()->MainFrame();
+  }
+
+  frame_test_helpers::WebViewHelper& WebViewHelper() {
+    return web_view_helper_;
+  }
+
+ private:
+  test::TaskEnvironment task_environment_;
+  frame_test_helpers::WebViewHelper web_view_helper_;
+};
+
+// Verify that a local frame cannot be looked up by token after detach.
+TEST_F(FrameDetachTest, Local) {
+  WebViewHelper().Initialize();
+
+  // Keep a reference to the main frame on the stack to keep the GC from
+  // collecting it.
+  auto* frame = DynamicTo<LocalFrame>(MainFrame());
+  ASSERT_TRUE(frame);
+
+  WebViewHelper().Reset();
+  EXPECT_EQ(nullptr, Frame::ResolveFrame(frame->GetFrameToken()));
+  EXPECT_EQ(nullptr, LocalFrame::FromFrameToken(frame->GetLocalFrameToken()));
+}
+
+// Verify that a remote frame cannot be looked up by token after detach.
+TEST_F(FrameDetachTest, Remote) {
+  WebViewHelper().InitializeRemote();
+
+  // Keep a reference to the main frame on the stack to keep the GC from
+  // collecting it.
+  auto* frame = DynamicTo<RemoteFrame>(MainFrame());
+  ASSERT_TRUE(frame);
+
+  WebViewHelper().Reset();
+  EXPECT_EQ(nullptr, Frame::ResolveFrame(frame->GetFrameToken()));
+  EXPECT_EQ(nullptr, RemoteFrame::FromFrameToken(frame->GetRemoteFrameToken()));
 }
 
 }  // namespace blink

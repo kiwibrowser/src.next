@@ -4,10 +4,10 @@
 
 #include "chrome/browser/platform_util.h"
 
-#include "base/bind.h"
 #include "base/check_op.h"
 #include "base/files/file.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
 #include "base/task/thread_pool.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/platform_util_internal.h"
@@ -70,7 +70,7 @@ bool AreShellOperationsAllowed() {
 
 }  // namespace internal
 
-void OpenItem(Profile* profile,
+void OpenItem(Profile*,
               const base::FilePath& full_path,
               OpenItemType item_type,
               OpenOperationCallback callback) {

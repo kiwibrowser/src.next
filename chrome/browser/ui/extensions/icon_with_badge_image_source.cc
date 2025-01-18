@@ -12,11 +12,8 @@
 #include "build/build_config.h"
 #include "cc/paint/paint_flags.h"
 #include "chrome/browser/ui/color/chrome_color_id.h"
-#include "chrome/grit/theme_resources.h"
 #include "extensions/browser/extension_action.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "ui/base/resource/resource_bundle.h"
-#include "ui/base/ui_base_features.h"
 #include "ui/color/color_provider.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_palette.h"
@@ -29,6 +26,8 @@
 #include "ui/gfx/render_text.h"
 #include "ui/gfx/shadow_value.h"
 #include "ui/gfx/skia_paint_util.h"
+#include "ui/views/style/typography.h"
+#include "ui/views/style/typography_provider.h"
 
 namespace {
 
@@ -65,7 +64,7 @@ IconWithBadgeImageSource::Badge::Badge(const std::string& text,
                                        SkColor background_color)
     : text(text), text_color(text_color), background_color(background_color) {}
 
-IconWithBadgeImageSource::Badge::~Badge() {}
+IconWithBadgeImageSource::Badge::~Badge() = default;
 
 IconWithBadgeImageSource::IconWithBadgeImageSource(
     const gfx::Size& size,
@@ -84,36 +83,23 @@ void IconWithBadgeImageSource::SetIcon(const gfx::Image& icon) {
 void IconWithBadgeImageSource::SetBadge(std::unique_ptr<Badge> badge) {
   badge_ = std::move(badge);
 
-  if (!badge_ || badge_->text.empty())
+  if (!badge_ || badge_->text.empty()) {
     return;
+  }
 
   // Generate the badge's render text. Make sure it contrasts with the badge
-  // background.
+  // background if it is transparent (also occurs when text color has not yet
+  // been set).
   SkColor text_color =
       SkColorGetA(badge_->text_color) == SK_AlphaTRANSPARENT
           ? color_utils::GetColorWithMaxContrast(GetBadgeBackgroundColor(
                 badge_.get(), get_color_provider_callback_.Run()))
           : badge_->text_color;
 
-  constexpr int kBadgeHeight = 12;
-  ui::ResourceBundle* rb = &ui::ResourceBundle::GetSharedInstance();
-  gfx::FontList base_font = rb->GetFontList(ui::ResourceBundle::BaseFont)
-                                .DeriveWithHeightUpperBound(kBadgeHeight);
+  constexpr int badge_height = 14;
+  gfx::FontList base_font = views::TypographyProvider::Get().GetFont(
+      views::style::CONTEXT_BADGE, views::style::STYLE_SECONDARY);
   std::u16string utf16_text = base::UTF8ToUTF16(badge_->text);
-
-  // See if we can squeeze a slightly larger font into the badge given the
-  // actual string that is to be displayed.
-  constexpr int kMaxIncrementAttempts = 5;
-  for (size_t i = 0; i < kMaxIncrementAttempts; ++i) {
-    int w = 0;
-    int h = 0;
-    gfx::FontList bigger_font = base_font.Derive(1, 0, gfx::Font::Weight::BOLD);
-    gfx::Canvas::SizeStringInt(utf16_text, bigger_font, &w, &h, 0,
-                               gfx::Canvas::NO_ELLIPSIS);
-    if (h > kBadgeHeight)
-      break;
-    base_font = bigger_font;
-  }
 
   constexpr int kMaxTextWidth = 23;
   const int text_width = std::min(
@@ -127,9 +113,10 @@ void IconWithBadgeImageSource::SetBadge(std::unique_ptr<Badge> badge) {
 
   // Force the pixel width of badge to be either odd (if the icon width is odd)
   // or even otherwise. If there is a mismatch you get http://crbug.com/26400.
-  if (icon_area.width() != 0 && (badge_width % 2 != icon_area.width() % 2))
+  if (icon_area.width() != 0 && (badge_width % 2 != icon_area.width() % 2)) {
     badge_width += 1;
-  badge_width = std::max(kBadgeHeight, badge_width);
+  }
+  badge_width = std::max(badge_height, badge_width);
 
   // The minimum width for center-aligning the badge.
   constexpr int kCenterAlignThreshold = 20;
@@ -138,32 +125,39 @@ void IconWithBadgeImageSource::SetBadge(std::unique_ptr<Badge> badge) {
   const int badge_offset_x = badge_width >= kCenterAlignThreshold
                                  ? (icon_area.width() - badge_width) / 2
                                  : icon_area.width() - badge_width;
-  const int badge_offset_y = icon_area.height() - kBadgeHeight;
+  const int badge_offset_y = icon_area.height() - badge_height;
   badge_background_rect_ =
       gfx::Rect(icon_area.x() + badge_offset_x, icon_area.y() + badge_offset_y,
-                badge_width, kBadgeHeight);
+                badge_width, badge_height);
   gfx::Rect badge_rect = badge_background_rect_;
-  badge_rect.Inset(gfx::Insets::TLBR(
-      kBadgeHeight - base_font.GetHeight(),
-      std::max(kPadding, (badge_rect.width() - text_width) / 2), 0, kPadding));
+
+  const int top_inset = (badge_height - base_font.GetHeight()) / 2;
+  const int bottom_inset = (badge_height - base_font.GetHeight()) - top_inset;
+  const int left_inset = (badge_rect.width() - text_width) / 2;
+  const int right_inset = (badge_rect.width() - text_width) - left_inset;
+  badge_rect.Inset(
+      gfx::Insets::TLBR(top_inset, left_inset, bottom_inset, right_inset));
+
   badge_text_ = gfx::RenderText::CreateRenderText();
-  badge_text_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  badge_text_->SetHorizontalAlignment(gfx::ALIGN_CENTER);
   badge_text_->SetCursorEnabled(false);
   badge_text_->SetFontList(base_font);
   badge_text_->SetColor(text_color);
-  badge_text_->SetText(utf16_text);
+  badge_text_->SetText(std::move(utf16_text));
   badge_text_->SetDisplayRect(badge_rect);
 }
 
 void IconWithBadgeImageSource::Draw(gfx::Canvas* canvas) {
-  // TODO(https://crbug.com/842856): There should be a cleaner delineation
+  // TODO(crbug.com/40576276): There should be a cleaner delineation
   // between what is drawn here and what is handled by the button itself.
 
-  if (icon_.IsEmpty())
+  if (icon_.IsEmpty()) {
     return;
+  }
 
-  if (paint_blocked_actions_decoration_)
+  if (paint_blocked_actions_decoration_) {
     PaintBlockedActionDecoration(canvas);
+  }
 
   gfx::ImageSkia skia = icon_.AsImageSkia();
   gfx::ImageSkiaRep rep = skia.GetRepresentation(canvas->image_scale());
@@ -172,8 +166,9 @@ void IconWithBadgeImageSource::Draw(gfx::Canvas* canvas) {
         ScaleImageSkiaRep(rep, extensions::ExtensionAction::ActionIconSize(),
                           canvas->image_scale()));
   }
-  if (grayscale_)
+  if (grayscale_) {
     skia = gfx::ImageSkiaOperations::CreateHSLShiftedImage(skia, {-1, 0, 0.6});
+  }
 
   int x_offset = std::floor(
       (size().width() - extensions::ExtensionAction::ActionIconSize()) / 2.0);
@@ -187,8 +182,9 @@ void IconWithBadgeImageSource::Draw(gfx::Canvas* canvas) {
 
 // Paints badge with specified parameters to |canvas|.
 void IconWithBadgeImageSource::PaintBadge(gfx::Canvas* canvas) {
-  if (!badge_text_)
+  if (!badge_text_) {
     return;
+  }
 
   SkColor background_color =
       GetBadgeBackgroundColor(badge_.get(), get_color_provider_callback_.Run());
@@ -203,11 +199,12 @@ void IconWithBadgeImageSource::PaintBadge(gfx::Canvas* canvas) {
   cc::PaintFlags cutout_flags = rect_flags;
   cutout_flags.setBlendMode(SkBlendMode::kClear);
   constexpr int kOuterCornerRadius = 3;
+  const int corner_radius_for_badge_background_rect = kOuterCornerRadius + 1;
   canvas->DrawRoundRect(cutout_rect, kOuterCornerRadius, cutout_flags);
 
   // Paint the backdrop.
-  canvas->DrawRoundRect(badge_background_rect_, kOuterCornerRadius - 1,
-                        rect_flags);
+  canvas->DrawRoundRect(badge_background_rect_,
+                        corner_radius_for_badge_background_rect, rect_flags);
 
   // Paint the text.
   badge_text_->Draw(canvas);

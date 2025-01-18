@@ -4,14 +4,13 @@
 
 #include "chrome/renderer/loadtimes_extension_bindings.h"
 
-#include <math.h>
-
 #include "base/time/time.h"
 #include "extensions/renderer/v8_helpers.h"
-#include "net/http/http_response_info.h"
+#include "net/http/http_connection_info.h"
 #include "third_party/blink/public/platform/web_url_response.h"
 #include "third_party/blink/public/web/web_local_frame.h"
-#include "third_party/blink/public/web/web_performance.h"
+#include "third_party/blink/public/web/web_navigation_type.h"
+#include "third_party/blink/public/web/web_performance_metrics_for_reporting.h"
 #include "v8/include/v8-extension.h"
 #include "v8/include/v8-isolate.h"
 #include "v8/include/v8-object.h"
@@ -21,7 +20,6 @@
 using blink::WebDocumentLoader;
 using blink::WebLocalFrame;
 using blink::WebNavigationType;
-using blink::WebPerformance;
 
 // Values for CSI "tran" property
 const int kTransitionLink = 0;
@@ -81,17 +79,20 @@ class LoadTimesExtensionWrapper : public v8::Extension {
     return v8::Local<v8::FunctionTemplate>();
   }
 
-  static const char* GetNavigationType(WebNavigationType nav_type) {
+  static constexpr std::string_view GetNavigationType(
+      WebNavigationType nav_type) {
     switch (nav_type) {
       case blink::kWebNavigationTypeLinkClicked:
         return "LinkClicked";
       case blink::kWebNavigationTypeFormSubmitted:
         return "FormSubmitted";
       case blink::kWebNavigationTypeBackForward:
+      case blink::kWebNavigationTypeRestore:
         return "BackForward";
       case blink::kWebNavigationTypeReload:
         return "Reload";
-      case blink::kWebNavigationTypeFormResubmitted:
+      case blink::kWebNavigationTypeFormResubmittedBackForward:
+      case blink::kWebNavigationTypeFormResubmittedReload:
         return "Resubmitted";
       case blink::kWebNavigationTypeOther:
         return "Other";
@@ -103,9 +104,11 @@ class LoadTimesExtensionWrapper : public v8::Extension {
     switch (nav_type) {
       case blink::kWebNavigationTypeLinkClicked:
       case blink::kWebNavigationTypeFormSubmitted:
-      case blink::kWebNavigationTypeFormResubmitted:
+      case blink::kWebNavigationTypeFormResubmittedBackForward:
+      case blink::kWebNavigationTypeFormResubmittedReload:
         return kTransitionLink;
       case blink::kWebNavigationTypeBackForward:
+      case blink::kWebNavigationTypeRestore:
         return kTransitionForwardBack;
       case blink::kWebNavigationTypeReload:
         return kTransitionReload;
@@ -113,6 +116,13 @@ class LoadTimesExtensionWrapper : public v8::Extension {
         return kTransitionOther;
     }
     return kTransitionOther;
+  }
+
+  static void EmptySetter(v8::Local<v8::Name> name,
+                          v8::Local<v8::Value> value,
+                          const v8::PropertyCallbackInfo<void>& info) {
+    // Empty setter is required to keep the native data property in "accessor"
+    // state even in case the value is updated by user code.
   }
 
   static void LoadtimesGetter(
@@ -136,7 +146,8 @@ class LoadTimesExtensionWrapper : public v8::Extension {
       return;
     }
     const blink::WebURLResponse& response = document_loader->GetWebResponse();
-    WebPerformance web_performance = frame->Performance();
+    blink::WebPerformanceMetricsForReporting web_performance =
+        frame->PerformanceMetricsForReporting();
     // Though request time now tends to be used to describe the time that the
     // request for the main resource was issued, when chrome.loadTimes() was
     // added, it was used to describe 'The time the request to load the page was
@@ -171,7 +182,7 @@ class LoadTimesExtensionWrapper : public v8::Extension {
     // long before the load event fires. We report a time of zero for the
     // time being.
     double first_paint_after_load_time = 0.0;
-    std::string navigation_type =
+    std::string_view navigation_type =
         GetNavigationType(document_loader->GetNavigationType());
     bool was_fetched_via_spdy = response.WasFetchedViaSPDY();
     bool was_alpn_negotiated = response.WasAlpnNegotiated();
@@ -179,8 +190,8 @@ class LoadTimesExtensionWrapper : public v8::Extension {
         response.AlpnNegotiatedProtocol().Utf8();
     bool was_alternate_protocol_available =
         response.WasAlternateProtocolAvailable();
-    std::string connection_info = net::HttpResponseInfo::ConnectionInfoToString(
-        response.ConnectionInfo());
+    std::string_view connection_info =
+        net::HttpConnectionInfoToString(response.ConnectionInfo());
 
     // Important: |frame| and |document_loader| should not be
     // referred to below this line, as JS setters below can invalidate these
@@ -189,146 +200,84 @@ class LoadTimesExtensionWrapper : public v8::Extension {
     v8::Local<v8::Context> ctx = isolate->GetCurrentContext();
     v8::Local<v8::Object> load_times = v8::Object::New(isolate);
 
-    if (!load_times
-             ->SetAccessor(
-                 ctx,
-                 v8::String::NewFromUtf8Literal(
-                     isolate, "requestTime", v8::NewStringType::kInternalized),
-                 LoadtimesGetter, nullptr,
-                 v8::Number::New(isolate, request_time))
-             .FromMaybe(false)) {
+    // Helper lambdas for creating v8::Number, v8::Boolean and v8::String.
+    auto v8_num = [=](double value) { return v8::Number::New(isolate, value); };
+    auto v8_bool = [=](bool value) { return v8::Boolean::New(isolate, value); };
+    auto v8_str = [=](std::string_view str) {
+      return v8::String::NewFromUtf8(isolate, str.data(),
+                                     v8::NewStringType::kNormal, str.length())
+          .ToLocalChecked();
+    };
+
+    // Defines a property on |load_times| object with given name and value,
+    // returns true on success, false otherwise.
+    auto define_prop = [=](std::string_view name, v8::Local<v8::Value> value) {
+      v8::Local<v8::String> name_str =
+          v8::String::NewFromUtf8(isolate, name.data(),
+                                  v8::NewStringType::kInternalized,
+                                  name.length())
+              .ToLocalChecked();
+
+      return load_times
+          ->SetNativeDataProperty(ctx, name_str, LoadtimesGetter, EmptySetter,
+                                  value)
+          .FromMaybe(false);
+    };
+
+    if (!define_prop("requestTime", v8_num(request_time))) {
       return;
     }
-    if (!load_times
-             ->SetAccessor(ctx,
-                           v8::String::NewFromUtf8Literal(
-                               isolate, "startLoadTime",
-                               v8::NewStringType::kInternalized),
-                           LoadtimesGetter, nullptr,
-                           v8::Number::New(isolate, start_load_time))
-             .FromMaybe(false)) {
+    if (!define_prop("startLoadTime", v8_num(start_load_time))) {
       return;
     }
-    if (!load_times
-             ->SetAccessor(ctx,
-                           v8::String::NewFromUtf8Literal(
-                               isolate, "commitLoadTime",
-                               v8::NewStringType::kInternalized),
-                           LoadtimesGetter, nullptr,
-                           v8::Number::New(isolate, commit_load_time))
-             .FromMaybe(false)) {
+    if (!define_prop("commitLoadTime", v8_num(commit_load_time))) {
       return;
     }
-    if (!load_times
-             ->SetAccessor(ctx,
-                           v8::String::NewFromUtf8Literal(
-                               isolate, "finishDocumentLoadTime",
-                               v8::NewStringType::kInternalized),
-                           LoadtimesGetter, nullptr,
-                           v8::Number::New(isolate, finish_document_load_time))
-             .FromMaybe(false)) {
+    if (!define_prop("finishDocumentLoadTime",
+                     v8_num(finish_document_load_time))) {
       return;
     }
-    if (!load_times
-             ->SetAccessor(ctx,
-                           v8::String::NewFromUtf8Literal(
-                               isolate, "finishLoadTime",
-                               v8::NewStringType::kInternalized),
-                           LoadtimesGetter, nullptr,
-                           v8::Number::New(isolate, finish_load_time))
-             .FromMaybe(false)) {
+    if (!define_prop("finishLoadTime", v8_num(finish_load_time))) {
       return;
     }
-    if (!load_times
-             ->SetAccessor(ctx,
-                           v8::String::NewFromUtf8Literal(
-                               isolate, "firstPaintTime",
-                               v8::NewStringType::kInternalized),
-                           LoadtimesGetter, nullptr,
-                           v8::Number::New(isolate, first_paint_time))
-             .FromMaybe(false)) {
+    if (!define_prop("firstPaintTime", v8_num(first_paint_time))) {
       return;
     }
-    if (!load_times
-             ->SetAccessor(
-                 ctx,
-                 v8::String::NewFromUtf8Literal(
-                     isolate, "firstPaintAfterLoadTime",
-                     v8::NewStringType::kInternalized),
-                 LoadtimesGetter, nullptr,
-                 v8::Number::New(isolate, first_paint_after_load_time))
-             .FromMaybe(false)) {
+    if (!define_prop("firstPaintAfterLoadTime",
+                     v8_num(first_paint_after_load_time))) {
       return;
     }
-    if (!load_times
-             ->SetAccessor(
-                 ctx,
-                 v8::String::NewFromUtf8Literal(
-                     isolate, "navigationType",
-                     v8::NewStringType::kInternalized),
-                 LoadtimesGetter, nullptr,
-                 v8::String::NewFromUtf8(isolate, navigation_type.c_str())
-                     .ToLocalChecked())
-             .FromMaybe(false)) {
+    if (!define_prop("navigationType", v8_str(navigation_type))) {
       return;
     }
-    if (!load_times
-             ->SetAccessor(ctx,
-                           v8::String::NewFromUtf8Literal(
-                               isolate, "wasFetchedViaSpdy",
-                               v8::NewStringType::kInternalized),
-                           LoadtimesGetter, nullptr,
-                           v8::Boolean::New(isolate, was_fetched_via_spdy))
-             .FromMaybe(false)) {
+    if (!define_prop("wasFetchedViaSpdy", v8_bool(was_fetched_via_spdy))) {
       return;
     }
-    if (!load_times
-             ->SetAccessor(ctx,
-                           v8::String::NewFromUtf8Literal(
-                               isolate, "wasNpnNegotiated",
-                               v8::NewStringType::kInternalized),
-                           LoadtimesGetter, nullptr,
-                           v8::Boolean::New(isolate, was_alpn_negotiated))
-             .FromMaybe(false)) {
+    if (!define_prop("wasNpnNegotiated", v8_bool(was_alpn_negotiated))) {
       return;
     }
-    if (!load_times
-             ->SetAccessor(ctx,
-                           v8::String::NewFromUtf8Literal(
-                               isolate, "npnNegotiatedProtocol",
-                               v8::NewStringType::kInternalized),
-                           LoadtimesGetter, nullptr,
-                           v8::String::NewFromUtf8(
-                               isolate, alpn_negotiated_protocol.c_str())
-                               .ToLocalChecked())
-             .FromMaybe(false)) {
+    if (!define_prop("npnNegotiatedProtocol",
+                     v8_str(alpn_negotiated_protocol))) {
       return;
     }
-    if (!load_times
-             ->SetAccessor(
-                 ctx,
-                 v8::String::NewFromUtf8Literal(
-                     isolate, "wasAlternateProtocolAvailable",
-                     v8::NewStringType::kInternalized),
-                 LoadtimesGetter, nullptr,
-                 v8::Boolean::New(isolate, was_alternate_protocol_available))
-             .FromMaybe(false)) {
+    if (!define_prop("wasAlternateProtocolAvailable",
+                     v8_bool(was_alternate_protocol_available))) {
       return;
     }
-    if (!load_times
-             ->SetAccessor(
-                 ctx,
-                 v8::String::NewFromUtf8Literal(
-                     isolate, "connectionInfo",
-                     v8::NewStringType::kInternalized),
-                 LoadtimesGetter, nullptr,
-                 v8::String::NewFromUtf8(isolate, connection_info.c_str())
-                     .ToLocalChecked())
-             .FromMaybe(false)) {
+    if (!define_prop("connectionInfo", v8_str(connection_info))) {
       return;
     }
 
     args.GetReturnValue().Set(load_times);
+  }
+
+  static void CSIGetter(v8::Local<v8::Name> name,
+                        const v8::PropertyCallbackInfo<v8::Value>& info) {
+    if (WebLocalFrame* frame = WebLocalFrame::FrameForCurrentContext()) {
+      frame->UsageCountChromeCSI(blink::WebString::FromUTF8(
+          *v8::String::Utf8Value(info.GetIsolate(), name)));
+    }
+    info.GetReturnValue().Set(info.Data());
   }
 
   static void GetCSI(const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -341,13 +290,14 @@ class LoadTimesExtensionWrapper : public v8::Extension {
     if (!document_loader) {
       return;
     }
-    WebPerformance web_performance = frame->Performance();
+    blink::WebPerformanceMetricsForReporting web_performance =
+        frame->PerformanceMetricsForReporting();
     base::Time now = base::Time::Now();
-    base::Time start =
-        base::Time::FromDoubleT(web_performance.NavigationStart());
+    base::Time start = base::Time::FromSecondsSinceUnixEpoch(
+        web_performance.NavigationStart());
 
-    base::Time dom_content_loaded_end =
-        base::Time::FromDoubleT(web_performance.DomContentLoadedEventEnd());
+    base::Time dom_content_loaded_end = base::Time::FromSecondsSinceUnixEpoch(
+        web_performance.DomContentLoadedEventEnd());
     base::TimeDelta page = now - start;
     int navigation_type =
         GetCSITransitionType(document_loader->GetNavigationType());
@@ -356,37 +306,39 @@ class LoadTimesExtensionWrapper : public v8::Extension {
     v8::Isolate* isolate = args.GetIsolate();
     v8::Local<v8::Context> ctx = isolate->GetCurrentContext();
     v8::Local<v8::Object> csi = v8::Object::New(isolate);
-    if (!csi->Set(ctx,
-                  v8::String::NewFromUtf8Literal(
-                      isolate, "startE", v8::NewStringType::kInternalized),
-                  v8::Number::New(isolate, floor(start.ToDoubleT() * 1000)))
-             .FromMaybe(false)) {
+
+    // Helper lambda for creating v8::Number.
+    auto v8_num = [=](double value) { return v8::Number::New(isolate, value); };
+
+    // Defines a property on |csi| object with given name and value,
+    // returns true on success, false otherwise.
+    auto define_prop = [=](std::string_view name, v8::Local<v8::Value> value) {
+      v8::Local<v8::String> name_str =
+          v8::String::NewFromUtf8(isolate, name.data(),
+                                  v8::NewStringType::kInternalized,
+                                  name.length())
+              .ToLocalChecked();
+
+      return csi
+          ->SetNativeDataProperty(ctx, name_str, CSIGetter, EmptySetter, value)
+          .FromMaybe(false);
+    };
+
+    if (!define_prop("startE", v8_num(start.InMillisecondsSinceUnixEpoch()))) {
       return;
     }
     // NOTE: historically, the CSI onload field has reported the time the
     // document finishes parsing, which is DOMContentLoaded. Thus, we continue
     // to report that here, despite the fact that the field is named onloadT.
-    if (!csi->Set(
-                ctx,
-                v8::String::NewFromUtf8Literal(
-                    isolate, "onloadT", v8::NewStringType::kInternalized),
-                v8::Number::New(
-                    isolate, floor(dom_content_loaded_end.ToDoubleT() * 1000)))
-             .FromMaybe(false)) {
+    if (!define_prop(
+            "onloadT",
+            v8_num(dom_content_loaded_end.InMillisecondsSinceUnixEpoch()))) {
       return;
     }
-    if (!csi->Set(ctx,
-                  v8::String::NewFromUtf8Literal(
-                      isolate, "pageT", v8::NewStringType::kInternalized),
-                  v8::Number::New(isolate, page.InMillisecondsF()))
-             .FromMaybe(false)) {
+    if (!define_prop("pageT", v8_num(page.InMillisecondsF()))) {
       return;
     }
-    if (!csi->Set(ctx,
-                  v8::String::NewFromUtf8Literal(
-                      isolate, "tran", v8::NewStringType::kInternalized),
-                  v8::Number::New(isolate, navigation_type))
-             .FromMaybe(false)) {
+    if (!define_prop("tran", v8_num(navigation_type))) {
       return;
     }
     args.GetReturnValue().Set(csi);

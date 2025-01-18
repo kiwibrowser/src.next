@@ -11,13 +11,12 @@
 #include "chrome/browser/extensions/extension_sync_data.h"
 #include "chrome/browser/extensions/extension_sync_service.h"
 #include "chrome/browser/extensions/extension_util.h"
-#include "chrome/browser/profiles/profile.h"
 #include "extensions/common/extension.h"
 
 namespace extensions {
 
-SyncBundle::SyncBundle() {}
-SyncBundle::~SyncBundle() {}
+SyncBundle::SyncBundle() = default;
+SyncBundle::~SyncBundle() = default;
 
 void SyncBundle::StartSyncing(
     std::unique_ptr<syncer::SyncChangeProcessor> sync_processor) {

@@ -23,7 +23,7 @@ namespace {
 // The general list of blocked ports. Will be blocked unless a specific
 // protocol overrides it. (Ex: ftp can use port 21)
 // When adding a port to the list, consider also adding it to kAllowablePorts,
-// below.
+// below. See <https://fetch.spec.whatwg.org/#port-blocking>.
 const int kRestrictedPorts[] = {
     1,      // tcpmux
     7,      // echo
@@ -130,7 +130,7 @@ bool IsWellKnownPort(int port) {
   return port >= 0 && port < 1024;
 }
 
-bool IsPortAllowedForScheme(int port, base::StringPiece url_scheme) {
+bool IsPortAllowedForScheme(int port, std::string_view url_scheme) {
   // Reject invalid ports.
   if (!IsPortValid(port))
     return false;
@@ -166,10 +166,11 @@ ScopedPortException::ScopedPortException(int port) : port_(port) {
 
 ScopedPortException::~ScopedPortException() {
   auto it = g_explicitly_allowed_ports.Get().find(port_);
-  if (it != g_explicitly_allowed_ports.Get().end())
+  if (it != g_explicitly_allowed_ports.Get().end()) {
     g_explicitly_allowed_ports.Get().erase(it);
-  else
+  } else {
     NOTREACHED();
+  }
 }
 
 NET_EXPORT bool IsAllowablePort(int port) {

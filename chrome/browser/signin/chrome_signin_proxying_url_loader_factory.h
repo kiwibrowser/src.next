@@ -5,18 +5,20 @@
 #ifndef CHROME_BROWSER_SIGNIN_CHROME_SIGNIN_PROXYING_URL_LOADER_FACTORY_H_
 #define CHROME_BROWSER_SIGNIN_CHROME_SIGNIN_PROXYING_URL_LOADER_FACTORY_H_
 
-#include "base/callback.h"
+#include <memory>
+#include <set>
+
 #include "base/containers/unique_ptr_adapters.h"
+#include "base/functional/callback.h"
 #include "base/memory/ref_counted_delete_on_sequence.h"
 #include "content/public/browser/web_contents.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
 #include "mojo/public/cpp/bindings/remote.h"
+#include "net/base/isolation_info.h"
+#include "services/network/public/cpp/url_loader_factory_builder.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
-
-#include <memory>
-#include <set>
 
 namespace content {
 class RenderFrameHost;
@@ -37,12 +39,11 @@ class ProxyingURLLoaderFactory : public network::mojom::URLLoaderFactory {
 
   // Constructor public for testing purposes. New instances should be created
   // by calling MaybeProxyRequest().
-  ProxyingURLLoaderFactory(
-      std::unique_ptr<HeaderModificationDelegate> delegate,
-      content::WebContents::Getter web_contents_getter,
-      mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver,
-      mojo::PendingRemote<network::mojom::URLLoaderFactory> target_factory,
-      DisconnectCallback on_disconnect);
+  ProxyingURLLoaderFactory(std::unique_ptr<HeaderModificationDelegate> delegate,
+                           const net::IsolationInfo& factory_isolation_info,
+                           content::WebContents::Getter web_contents_getter,
+                           network::URLLoaderFactoryBuilder& factory_builder,
+                           DisconnectCallback on_disconnect);
 
   ProxyingURLLoaderFactory(const ProxyingURLLoaderFactory&) = delete;
   ProxyingURLLoaderFactory& operator=(const ProxyingURLLoaderFactory&) = delete;
@@ -51,14 +52,13 @@ class ProxyingURLLoaderFactory : public network::mojom::URLLoaderFactory {
 
   // Called when a renderer needs a URLLoaderFactory to give this module the
   // opportunity to install a proxy. This is only done when
-  // https://accounts.google.com is loaded in non-incognito mode. Returns true
-  // when |factory_request| has been proxied.
-  static bool MaybeProxyRequest(
+  // https://accounts.google.com is loaded in non-incognito mode.
+  static void MaybeProxyRequest(
       content::RenderFrameHost* render_frame_host,
       bool is_navigation,
       const url::Origin& request_initiator,
-      mojo::PendingReceiver<network::mojom::URLLoaderFactory>*
-          factory_receiver);
+      const net::IsolationInfo& factory_isolation_info,
+      network::URLLoaderFactoryBuilder& factory_builder);
 
   // network::mojom::URLLoaderFactory:
   void CreateLoaderAndStart(
@@ -87,6 +87,10 @@ class ProxyingURLLoaderFactory : public network::mojom::URLLoaderFactory {
 
   std::unique_ptr<HeaderModificationDelegate> delegate_;
   content::WebContents::Getter web_contents_getter_;
+  // Top frame origin associated with this factory, if any. If set, takes
+  // precedence over origin provided in
+  // ResourceRequest::TrustedParams::IsolationInfo field of individual requests.
+  std::optional<url::Origin> top_frame_origin_;
 
   mojo::ReceiverSet<network::mojom::URLLoaderFactory> proxy_receivers_;
   std::set<std::unique_ptr<InProgressRequest>, base::UniquePtrComparator>

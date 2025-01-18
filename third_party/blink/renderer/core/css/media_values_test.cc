@@ -1,5 +1,5 @@
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
-// Copyright 2014 The Chromium Authors. All rights reserved.
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/css/media_values.h"
@@ -33,9 +33,16 @@ TEST_F(MediaValuesTest, Basic) {
       {40.0, CSSPrimitiveValue::UnitType::kPixels, 16, 300, 300, true, 40},
       {40.0, CSSPrimitiveValue::UnitType::kEms, 16, 300, 300, true, 640},
       {40.0, CSSPrimitiveValue::UnitType::kRems, 16, 300, 300, true, 640},
+      {40.0, CSSPrimitiveValue::UnitType::kCaps, 16, 300, 300, true, 640},
+      {40.0, CSSPrimitiveValue::UnitType::kRcaps, 16, 300, 300, true, 640},
       {40.0, CSSPrimitiveValue::UnitType::kExs, 16, 300, 300, true, 320},
+      {40.0, CSSPrimitiveValue::UnitType::kRexs, 16, 300, 300, true, 320},
       {40.0, CSSPrimitiveValue::UnitType::kChs, 16, 300, 300, true, 320},
+      {40.0, CSSPrimitiveValue::UnitType::kRchs, 16, 300, 300, true, 320},
       {40.0, CSSPrimitiveValue::UnitType::kIcs, 16, 300, 300, true, 640},
+      {40.0, CSSPrimitiveValue::UnitType::kRics, 16, 300, 300, true, 640},
+      {40.0, CSSPrimitiveValue::UnitType::kLhs, 16, 300, 300, true, 800},
+      {40.0, CSSPrimitiveValue::UnitType::kRlhs, 16, 300, 300, true, 800},
       {43.0, CSSPrimitiveValue::UnitType::kViewportWidth, 16, 848, 976, true,
        364.64},
       {100.0, CSSPrimitiveValue::UnitType::kViewportWidth, 16, 821, 976, true,
@@ -57,34 +64,35 @@ TEST_F(MediaValuesTest, Basic) {
       {1.3, CSSPrimitiveValue::UnitType::kPicas, 16, 300, 300, true, 20.8},
       {40.0, CSSPrimitiveValue::UnitType::kUserUnits, 16, 300, 300, true, 40},
       {1.3, CSSPrimitiveValue::UnitType::kUnknown, 16, 300, 300, false, 20},
-      {0.0, CSSPrimitiveValue::UnitType::kUnknown, 0, 0, 0, false,
-       0.0}  // Do not remove the terminating line.
   };
 
-  for (unsigned i = 0; test_cases[i].viewport_width; ++i) {
+  for (MediaValuesTestCase test_case : test_cases) {
     MediaValuesCached::MediaValuesCachedData data;
-    data.em_size = test_cases[i].font_size;
-    data.viewport_width = test_cases[i].viewport_width;
-    data.viewport_height = test_cases[i].viewport_height;
-    MediaValuesCached media_values(data);
+    data.em_size = test_case.font_size;
+    data.viewport_width = test_case.viewport_width;
+    data.viewport_height = test_case.viewport_height;
+    data.line_height = 20;
+    MediaValuesCached* media_values =
+        MakeGarbageCollected<MediaValuesCached>(data);
 
     double output = 0;
-    bool success = media_values.ComputeLength(test_cases[i].value,
-                                              test_cases[i].type, output);
-    EXPECT_EQ(test_cases[i].success, success);
-    if (success)
-      EXPECT_FLOAT_EQ(test_cases[i].output, output);
+    bool success =
+        media_values->ComputeLength(test_case.value, test_case.type, output);
+    EXPECT_EQ(test_case.success, success);
+    if (success) {
+      EXPECT_FLOAT_EQ(test_case.output, output);
+    }
   }
 }
 
 TEST_F(MediaValuesTest, ZoomedFontUnits) {
   LoadAhem();
-  GetFrame().SetPageZoomFactor(2.0f);
+  GetFrame().SetLayoutZoomFactor(2.0f);
 
   // Set 'font:Ahem 10px' as the default font.
   Settings* settings = GetDocument().GetSettings();
   ASSERT_TRUE(settings);
-  settings->GetGenericFontFamilySettings().UpdateStandard("Ahem");
+  settings->GetGenericFontFamilySettings().UpdateStandard(AtomicString("Ahem"));
   settings->SetDefaultFontSize(10.0f);
 
   UpdateAllLifecyclePhasesForTest();
@@ -94,22 +102,43 @@ TEST_F(MediaValuesTest, ZoomedFontUnits) {
   double em = 0;
   double rem = 0;
   double ex = 0;
+  double rex = 0;
   double ch = 0;
+  double rch = 0;
   double ic = 0;
+  double ric = 0;
+  double lh = 0;
+  double rlh = 0;
+  double cap = 0;
+  double rcap = 0;
 
   using UnitType = CSSPrimitiveValue::UnitType;
 
   EXPECT_TRUE(media_values->ComputeLength(1.0, UnitType::kEms, em));
   EXPECT_TRUE(media_values->ComputeLength(1.0, UnitType::kRems, rem));
   EXPECT_TRUE(media_values->ComputeLength(1.0, UnitType::kExs, ex));
+  EXPECT_TRUE(media_values->ComputeLength(1.0, UnitType::kRexs, rex));
   EXPECT_TRUE(media_values->ComputeLength(1.0, UnitType::kChs, ch));
+  EXPECT_TRUE(media_values->ComputeLength(1.0, UnitType::kRchs, rch));
   EXPECT_TRUE(media_values->ComputeLength(1.0, UnitType::kIcs, ic));
+  EXPECT_TRUE(media_values->ComputeLength(1.0, UnitType::kRics, ric));
+  EXPECT_TRUE(media_values->ComputeLength(1.0, UnitType::kLhs, lh));
+  EXPECT_TRUE(media_values->ComputeLength(1.0, UnitType::kRlhs, rlh));
+  EXPECT_TRUE(media_values->ComputeLength(1.0, UnitType::kCaps, cap));
+  EXPECT_TRUE(media_values->ComputeLength(1.0, UnitType::kRcaps, rcap));
 
   EXPECT_DOUBLE_EQ(10.0, em);
   EXPECT_DOUBLE_EQ(10.0, rem);
   EXPECT_DOUBLE_EQ(8.0, ex);
+  EXPECT_DOUBLE_EQ(8.0, rex);
   EXPECT_DOUBLE_EQ(10.0, ch);
+  EXPECT_DOUBLE_EQ(10.0, rch);
   EXPECT_DOUBLE_EQ(10.0, ic);
+  EXPECT_DOUBLE_EQ(10.0, ric);
+  EXPECT_DOUBLE_EQ(10.0, lh);
+  EXPECT_DOUBLE_EQ(10.0, rlh);
+  EXPECT_DOUBLE_EQ(8.0, cap);
+  EXPECT_DOUBLE_EQ(8.0, rcap);
 }
 
 }  // namespace blink

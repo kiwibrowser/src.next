@@ -32,7 +32,7 @@ namespace blink {
 
 class MutableCSSPropertyValueSet;
 
-class PropertySetCSSStyleDeclaration
+class CORE_EXPORT PropertySetCSSStyleDeclaration
     : public AbstractPropertySetCSSStyleDeclaration {
  public:
   PropertySetCSSStyleDeclaration(ExecutionContext* execution_context,
@@ -40,6 +40,7 @@ class PropertySetCSSStyleDeclaration
       : AbstractPropertySetCSSStyleDeclaration(execution_context),
         property_set_(&property_set) {}
 
+  bool IsPropertyValid(CSSPropertyID) const override { return true; }
   void Trace(Visitor*) const override;
 
  protected:

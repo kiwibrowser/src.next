@@ -5,12 +5,11 @@
 #ifndef NET_HTTP_STRUCTURED_HEADERS_H_
 #define NET_HTTP_STRUCTURED_HEADERS_H_
 
+#include <optional>
 #include <string>
+#include <string_view>
 
-#include "base/strings/abseil_string_conversions.h"
-#include "base/strings/string_piece.h"
 #include "net/third_party/quiche/src/quiche/common/structured_headers.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace net::structured_headers {
 
@@ -26,46 +25,43 @@ using ListOfLists = quiche::structured_headers::ListOfLists;
 using List = quiche::structured_headers::List;
 using Parameters = quiche::structured_headers::Parameters;
 
-inline absl::optional<ParameterizedItem> ParseItem(base::StringPiece str) {
-  return quiche::structured_headers::ParseItem(
-      base::StringPieceToStringView(str));
+inline std::optional<ParameterizedItem> ParseItem(std::string_view str) {
+  return quiche::structured_headers::ParseItem(str);
 }
-inline absl::optional<Item> ParseBareItem(base::StringPiece str) {
-  return quiche::structured_headers::ParseBareItem(
-      base::StringPieceToStringView(str));
+inline std::optional<Item> ParseBareItem(std::string_view str) {
+  return quiche::structured_headers::ParseBareItem(str);
 }
-inline absl::optional<ParameterisedList> ParseParameterisedList(
-    base::StringPiece str) {
-  return quiche::structured_headers::ParseParameterisedList(
-      base::StringPieceToStringView(str));
+inline std::optional<ParameterisedList> ParseParameterisedList(
+    std::string_view str) {
+  return quiche::structured_headers::ParseParameterisedList(str);
 }
-inline absl::optional<ListOfLists> ParseListOfLists(base::StringPiece str) {
-  return quiche::structured_headers::ParseListOfLists(
-      base::StringPieceToStringView(str));
+inline std::optional<ListOfLists> ParseListOfLists(std::string_view str) {
+  return quiche::structured_headers::ParseListOfLists(str);
 }
-inline absl::optional<List> ParseList(base::StringPiece str) {
-  return quiche::structured_headers::ParseList(
-      base::StringPieceToStringView(str));
+inline std::optional<List> ParseList(std::string_view str) {
+  return quiche::structured_headers::ParseList(str);
 }
-inline absl::optional<Dictionary> ParseDictionary(
-    const base::StringPiece& str) {
-  return quiche::structured_headers::ParseDictionary(
-      base::StringPieceToStringView(str));
+inline std::optional<Dictionary> ParseDictionary(std::string_view str) {
+  return quiche::structured_headers::ParseDictionary(str);
 }
 
-inline absl::optional<std::string> SerializeItem(const Item& value) {
+inline std::optional<std::string> SerializeItem(const Item& value) {
   return quiche::structured_headers::SerializeItem(value);
 }
-inline absl::optional<std::string> SerializeItem(
+inline std::optional<std::string> SerializeItem(
     const ParameterizedItem& value) {
   return quiche::structured_headers::SerializeItem(value);
 }
-inline absl::optional<std::string> SerializeList(const List& value) {
+inline std::optional<std::string> SerializeList(const List& value) {
   return quiche::structured_headers::SerializeList(value);
 }
-inline absl::optional<std::string> SerializeDictionary(
-    const Dictionary& value) {
+inline std::optional<std::string> SerializeDictionary(const Dictionary& value) {
   return quiche::structured_headers::SerializeDictionary(value);
+}
+
+inline std::string_view ItemTypeToString(
+    structured_headers::Item::ItemType type) {
+  return quiche::structured_headers::ItemTypeToString(type);
 }
 
 }  // namespace net::structured_headers

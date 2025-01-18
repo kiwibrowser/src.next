@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,12 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/graphics/paint/cull_rect.h"
 #include "third_party/blink/renderer/platform/graphics/paint/property_tree_state.h"
+#include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
+class ViewTransitionSupplement;
 class FragmentData;
 class LayoutObject;
 class PaintLayer;
@@ -29,12 +31,19 @@ class CORE_EXPORT CullRectUpdater {
   STACK_ALLOCATED();
 
  public:
-  explicit CullRectUpdater(PaintLayer& starting_layer);
+  explicit CullRectUpdater(PaintLayer& starting_layer,
+                           bool disable_expansion = false);
 
   void Update();
 
+  // For testing painting behavior with cull rect with a custom top-level cull
+  // rect.
+  void UpdateForTesting(const CullRect& input_cull_rect);
+
   static void PaintPropertiesChanged(const LayoutObject&,
                                      const PaintPropertiesChangeInfo&);
+
+  static bool IsOverridingCullRects();
 
  private:
   friend class OverriddenCullRectScope;
@@ -74,25 +83,32 @@ class CORE_EXPORT CullRectUpdater {
   bool ShouldProactivelyUpdate(const Context&, const PaintLayer&) const;
 
   PaintLayer& starting_layer_;
-  PropertyTreeState root_state_ = PropertyTreeState::Uninitialized();
+  PropertyTreeState root_state_{PropertyTreeState::kUninitialized};
+  ViewTransitionSupplement* view_transition_supplement_;
+  float expansion_ratio_;
 };
 
 // Used when painting with a custom top-level cull rect, e.g. when printing a
-// page. It temporarily overrides the cull rect on the PaintLayer (which must be
-// a stacking context) and marks the PaintLayer as needing to recalculate the
-// cull rect when leaving this scope.
-// TODO(crbug.com/1215251): Avoid repaint after the scope if the scope is used
-// to paint into a separate PaintController.
-class OverriddenCullRectScope {
+// page. It temporarily overrides the cull rects on the starting layer and
+// descendant PaintLayers if needed, and restores the original cull rects when
+// leaving this scope.
+class CORE_EXPORT OverriddenCullRectScope {
   STACK_ALLOCATED();
 
  public:
-  OverriddenCullRectScope(PaintLayer&, const CullRect&);
+  OverriddenCullRectScope(PaintLayer&, const CullRect&, bool disable_expansion);
   ~OverriddenCullRectScope();
 
+  struct FragmentCullRects {
+    explicit FragmentCullRects(FragmentData&);
+    Persistent<FragmentData> fragment;
+    CullRect cull_rect;
+    CullRect contents_cull_rect;
+  };
+
  private:
-  PaintLayer& starting_layer_;
-  bool updated_ = false;
+  Vector<FragmentCullRects> original_cull_rects_;
+  Vector<FragmentCullRects>* outer_original_cull_rects_ = nullptr;
 };
 
 }  // namespace blink

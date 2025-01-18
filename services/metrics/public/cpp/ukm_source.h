@@ -6,6 +6,7 @@
 #define SERVICES_METRICS_PUBLIC_CPP_UKM_SOURCE_H_
 
 #include <map>
+#include <optional>
 #include <vector>
 
 #include "base/strings/string_util.h"
@@ -13,7 +14,6 @@
 #include "build/build_config.h"
 #include "services/metrics/public/cpp/metrics_export.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
 namespace ukm {
@@ -23,12 +23,6 @@ class Source;
 // Contains UKM URL data for a single source id.
 class METRICS_EXPORT UkmSource {
  public:
-  enum CustomTabState {
-    kCustomTabUnset,
-    kCustomTabTrue,
-    kCustomTabFalse,
-  };
-
   // Extra navigation data associated with a particular Source. Currently, all
   // of these members except |url| are only set for navigation id sources.
   //
@@ -55,8 +49,8 @@ class METRICS_EXPORT UkmSource {
     // - For navigation sources, this will only contain at most two elements,
     //   one for the first URL in the redirect chain and one for the final URL
     //   that committed.
-    //   TODO(crbug.com/869123): This may end up containing all the URLs in the
-    //   redirect chain for navigation sources.
+    // TODO(crbug.com/40587196): This may end up containing all the URLs in the
+    // redirect chain for navigation sources.
     std::vector<GURL> urls;
 
     // The previous source id for this tab.
@@ -83,10 +77,10 @@ class METRICS_EXPORT UkmSource {
 
     // Represents the same origin status of the navigation compared to the
     // previous document.
-    enum SameOriginStatus {
-      UNSET = 0,
-      SAME_ORIGIN,
-      CROSS_ORIGIN,
+    enum SourceSameOriginStatus {
+      SOURCE_SAME_ORIGIN_STATUS_UNSET = 0,
+      SOURCE_SAME_ORIGIN,
+      SOURCE_CROSS_ORIGIN,
     };
 
     // Whether this is the same origin as the previous document.
@@ -94,7 +88,8 @@ class METRICS_EXPORT UkmSource {
     // This is set to the NavigationHandle's same origin state when the
     // navigation is committed, is not a same document navigation and is not
     // committed as an error page. Otherwise, this remains unset.
-    SameOriginStatus same_origin_status = SameOriginStatus::UNSET;
+    SourceSameOriginStatus same_origin_status =
+        SourceSameOriginStatus::SOURCE_SAME_ORIGIN_STATUS_UNSET;
 
     // Whether this navigation is initiated by the renderer.
     bool is_renderer_initiated = false;
@@ -104,7 +99,7 @@ class METRICS_EXPORT UkmSource {
 
     // The navigation start time relative to session start. The navigation
     // time within session should be monotonically increasing.
-    absl::optional<base::TimeTicks> navigation_time;
+    std::optional<base::TimeTicks> navigation_time;
   };
 
   UkmSource(SourceId id, const GURL& url);
@@ -133,10 +128,7 @@ class METRICS_EXPORT UkmSource {
   // Serializes the members of the class into the supplied proto.
   void PopulateProto(Source* proto_source) const;
 
-  // Sets the current "custom tab" state. This can be called from any thread.
-  static void SetCustomTabVisible(bool visible);
-  // Sets the current "android_activity_type" state, this will replace the
-  // "custom tab" state.
+  // Sets the current "android_activity_type" state.
   static void SetAndroidActivityTypeState(int32_t android_activity_type);
 
  private:
@@ -145,11 +137,9 @@ class METRICS_EXPORT UkmSource {
 
   NavigationData navigation_data_;
 
-  // A flag indicating if metric was collected in a custom tab. This is set
-  // automatically when the object is created and so represents the state when
-  // the metric was created.
-  // TODO(crbug/1228735): To be replaced by |android_activity_type_state_|.
-  const CustomTabState custom_tab_state_;
+  // The type of the visible activity when the metric was collected. This is
+  // set automatically when the object is created and so represents the state
+  // when the metric was created.
   const int32_t android_activity_type_state_ = -1;
 
   // When this object was created.

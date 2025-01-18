@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/config/chrome_build.gni")
+import("//build/config/coverage/coverage.gni")
 
 declare_args() {
   # Optimize parts of Chrome's UI written with web technologies (HTML/CSS/JS)
@@ -13,7 +14,20 @@ declare_args() {
   # Enable the WebUI version of the browser's tab strip.
   enable_webui_tab_strip = is_chromeos || is_linux || is_win
 
-  # Whether to inline source maps during build. This is an experimental feature
-  # currently only being used for New Tab Page being tracked at crbug/1337530.
-  enable_webui_inline_sourcemaps = false
+  # Whether to inline source maps during build. Cannot be enabled when
+  # `optimize_webui=true`.
+  enable_webui_inline_sourcemaps = use_javascript_coverage
+
+  # Flag used for loading WebUI files directly from disk instead of .pak files.
+  # It causes additional file path info for each file to be added into Grit
+  # generated '*_resource_map.cc' files during the build, which is then used at
+  # runtime to read such files.
+  # Meant to be used during local development only (requires a local checkout
+  # and build) with the runtime --load-webui-from-disk command line switch.
+  load_webui_from_disk = false
+}
+
+if (load_webui_from_disk) {
+  assert(is_linux || is_mac || is_win || is_chromeos,
+         "load_webui_from_disk not available")
 }

@@ -6,7 +6,7 @@
 
 #include <utility>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 
 namespace base {
 
@@ -32,8 +32,9 @@ CallbackListSubscription::~CallbackListSubscription() {
 }
 
 void CallbackListSubscription::Run() {
-  if (closure_)
+  if (closure_) {
     std::move(closure_).Run();
+  }
 }
 
 }  // namespace base

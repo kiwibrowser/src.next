@@ -19,7 +19,7 @@ class MockTabModalConfirmDialogDelegate : public TabModalConfirmDialogDelegate {
     virtual void OnClosed() = 0;
 
    protected:
-    virtual ~Delegate() {}
+    virtual ~Delegate() = default;
   };
 
   MockTabModalConfirmDialogDelegate(content::WebContents* web_contents,
@@ -63,10 +63,11 @@ class TabModalConfirmDialogTest
 
  protected:
   // Owned by |dialog_|.
-  raw_ptr<MockTabModalConfirmDialogDelegate> delegate_;
+  raw_ptr<MockTabModalConfirmDialogDelegate, AcrossTasksDanglingUntriaged>
+      delegate_;
 
   // Deletes itself.
-  raw_ptr<TabModalConfirmDialog> dialog_;
+  raw_ptr<TabModalConfirmDialog, AcrossTasksDanglingUntriaged> dialog_;
 
   int accepted_count_;
   int canceled_count_;

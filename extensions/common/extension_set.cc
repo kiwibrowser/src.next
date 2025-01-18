@@ -4,6 +4,8 @@
 
 #include "extensions/common/extension_set.h"
 
+#include "base/containers/contains.h"
+#include "base/containers/map_util.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/url_pattern_set.h"
 #include "url/gurl.h"
@@ -28,7 +30,7 @@ ExtensionId ExtensionSet::GetExtensionIdByURL(const GURL& url) {
   return ExtensionId();
 }
 
-ExtensionSet::const_iterator::const_iterator() {}
+ExtensionSet::const_iterator::const_iterator() = default;
 
 ExtensionSet::const_iterator::const_iterator(const const_iterator& other)
     : it_(other.it_) {
@@ -38,24 +40,18 @@ ExtensionSet::const_iterator::const_iterator(ExtensionMap::const_iterator it)
     : it_(it) {
 }
 
-ExtensionSet::const_iterator::~const_iterator() {}
+ExtensionSet::const_iterator::~const_iterator() = default;
 
-ExtensionSet::ExtensionSet() {
-}
+ExtensionSet::ExtensionSet() = default;
 
-ExtensionSet::~ExtensionSet() {
-}
+ExtensionSet::~ExtensionSet() = default;
 
-size_t ExtensionSet::size() const {
-  return extensions_.size();
-}
+ExtensionSet::ExtensionSet(ExtensionSet&&) = default;
 
-bool ExtensionSet::is_empty() const {
-  return extensions_.empty();
-}
+ExtensionSet& ExtensionSet::operator=(ExtensionSet&&) noexcept = default;
 
 bool ExtensionSet::Contains(const ExtensionId& extension_id) const {
-  return extensions_.find(extension_id) != extensions_.end();
+  return base::Contains(extensions_, extension_id);
 }
 
 bool ExtensionSet::Insert(const scoped_refptr<const Extension>& extension) {
@@ -70,9 +66,8 @@ bool ExtensionSet::Insert(const scoped_refptr<const Extension>& extension) {
 
 bool ExtensionSet::InsertAll(const ExtensionSet& extensions) {
   size_t before = size();
-  for (ExtensionSet::const_iterator iter = extensions.begin();
-       iter != extensions.end(); ++iter) {
-    Insert(*iter);
+  for (const auto& extension : extensions) {
+    Insert(extension);
   }
   return size() != before;
 }
@@ -91,7 +86,7 @@ ExtensionId ExtensionSet::GetExtensionOrAppIDByURL(const GURL& url) const {
     return extension_id;
 
   // GetHostedAppByURL already supports filesystem: URLs (via MatchesURL).
-  // TODO(crbug/852162): Add support for blob: URLs in MatchesURL.
+  // TODO(crbug.com/41394231): Add support for blob: URLs in MatchesURL.
   const Extension* extension = GetHostedAppByURL(url);
   if (!extension)
     return ExtensionId();
@@ -106,7 +101,7 @@ const Extension* ExtensionSet::GetExtensionOrAppByURL(const GURL& url,
     return include_guid ? GetByIDorGUID(extension_id) : GetByID(extension_id);
 
   // GetHostedAppByURL already supports filesystem: URLs (via MatchesURL).
-  // TODO(crbug/852162): Add support for blob: URLs in MatchesURL.
+  // TODO(crbug.com/41394231): Add support for blob: URLs in MatchesURL.
   return GetHostedAppByURL(url);
 }
 
@@ -116,22 +111,22 @@ const Extension* ExtensionSet::GetAppByURL(const GURL& url) const {
 }
 
 const Extension* ExtensionSet::GetHostedAppByURL(const GURL& url) const {
-  for (auto iter = extensions_.cbegin(); iter != extensions_.cend(); ++iter) {
-    if (iter->second->web_extent().MatchesURL(url))
-      return iter->second.get();
-  }
-
-  return nullptr;
+  auto hosted_app_itr =
+      base::ranges::find_if(extensions_, [&](const auto& extension_info) {
+        return extension_info.second->web_extent().MatchesURL(url);
+      });
+  return hosted_app_itr != extensions_.end() ? hosted_app_itr->second.get()
+                                             : nullptr;
 }
 
 const Extension* ExtensionSet::GetHostedAppByOverlappingWebExtent(
     const URLPatternSet& extent) const {
-  for (auto iter = extensions_.cbegin(); iter != extensions_.cend(); ++iter) {
-    if (iter->second->web_extent().OverlapsWith(extent))
-      return iter->second.get();
-  }
-
-  return nullptr;
+  auto hosted_app_itr =
+      base::ranges::find_if(extensions_, [&](const auto& extension_info) {
+        return extension_info.second->web_extent().OverlapsWith(extent);
+      });
+  return hosted_app_itr != extensions_.end() ? hosted_app_itr->second.get()
+                                             : nullptr;
 }
 
 bool ExtensionSet::InSameExtent(const GURL& old_url,
@@ -141,18 +136,15 @@ bool ExtensionSet::InSameExtent(const GURL& old_url,
 }
 
 const Extension* ExtensionSet::GetByID(const ExtensionId& id) const {
-  auto i = extensions_.find(id);
-  if (i != extensions_.end())
-    return i->second.get();
-  return nullptr;
+  return base::FindPtrOrNull(extensions_, id);
 }
 
 const Extension* ExtensionSet::GetByGUID(const std::string& guid) const {
-  for (const auto& extension : extensions_) {
-    if (extension.second.get()->guid() == guid)
-      return extension.second.get();
-  }
-  return nullptr;
+  auto extension_itr = base::ranges::find(
+      extensions_, guid,
+      [](const auto& extension_info) { return extension_info.second->guid(); });
+  return extension_itr != extensions_.end() ? extension_itr->second.get()
+                                            : nullptr;
 }
 
 const Extension* ExtensionSet::GetByIDorGUID(
@@ -164,8 +156,8 @@ const Extension* ExtensionSet::GetByIDorGUID(
 
 ExtensionIdSet ExtensionSet::GetIDs() const {
   ExtensionIdSet ids;
-  for (auto it = extensions_.cbegin(); it != extensions_.cend(); ++it) {
-    ids.insert(it->first);
+  for (const auto& [extension_id, extension] : extensions_) {
+    ids.insert(extension_id);
   }
   return ids;
 }
@@ -174,13 +166,11 @@ bool ExtensionSet::ExtensionBindingsAllowed(const GURL& url) const {
   if (url.SchemeIs(kExtensionScheme))
     return true;
 
-  for (auto it = extensions_.cbegin(); it != extensions_.cend(); ++it) {
-    if (it->second->location() == mojom::ManifestLocation::kComponent &&
-        it->second->web_extent().MatchesURL(url))
-      return true;
-  }
-
-  return false;
+  return base::ranges::any_of(extensions_, [&url](const auto& extension_info) {
+    const Extension* extension = extension_info.second.get();
+    return extension->location() == mojom::ManifestLocation::kComponent &&
+           extension->web_extent().MatchesURL(url);
+  });
 }
 
 }  // namespace extensions

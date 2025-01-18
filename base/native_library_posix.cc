@@ -6,11 +6,12 @@
 
 #include <dlfcn.h>
 
+#include <string_view>
+
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/notreached.h"
 #include "base/strings/strcat.h"
-#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/scoped_blocking_call.h"
@@ -39,12 +40,14 @@ NativeLibrary LoadNativeLibraryWithOptions(const FilePath& library_path,
   // warn developers that they're trying to rely on uncertain behavior.
   CHECK(!options.prefer_own_symbols);
 #else
-  if (options.prefer_own_symbols)
+  if (options.prefer_own_symbols) {
     flags |= RTLD_DEEPBIND;
+  }
 #endif
   void* dl = dlopen(library_path.value().c_str(), flags);
-  if (!dl && error)
+  if (!dl && error) {
     error->message = dlerror();
+  }
 
   return dl;
 }
@@ -58,16 +61,16 @@ void UnloadNativeLibrary(NativeLibrary library) {
 }
 
 void* GetFunctionPointerFromNativeLibrary(NativeLibrary library,
-                                          StringPiece name) {
-  return dlsym(library, name.data());
+                                          const char* name) {
+  return dlsym(library, name);
 }
 
-std::string GetNativeLibraryName(StringPiece name) {
+std::string GetNativeLibraryName(std::string_view name) {
   DCHECK(IsStringASCII(name));
   return StrCat({"lib", name, ".so"});
 }
 
-std::string GetLoadableModuleName(StringPiece name) {
+std::string GetLoadableModuleName(std::string_view name) {
   return GetNativeLibraryName(name);
 }
 

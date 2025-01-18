@@ -29,18 +29,18 @@ scoped_refptr<Extension> CreateTestExtension(const std::string& name,
 #endif
   path = path.AppendASCII(name);
 
-  base::DictionaryValue manifest;
-  manifest.SetStringKey("name", name);
-  manifest.SetStringKey("version", "1");
-  manifest.SetIntKey("manifest_version", 2);
+  auto manifest = base::Value::Dict()
+                      .Set("name", name)
+                      .Set("version", "1")
+                      .Set("manifest_version", 2);
 
   if (!launch_url.empty())
-    manifest.SetStringPath("app.launch.web_url", launch_url);
+    manifest.SetByDottedPath("app.launch.web_url", launch_url);
 
   if (!extent.empty()) {
-    base::Value urls(base::Value::Type::LIST);
+    base::Value::List urls;
     urls.Append(extent);
-    manifest.SetPath("app.urls", std::move(urls));
+    manifest.SetByDottedPath("app.urls", std::move(urls));
   }
 
   std::string error;
@@ -124,7 +124,7 @@ TEST(ExtensionSetTest, ExtensionSet) {
                             GURL("filesystem:http://dev.chromium.org/foo")));
   EXPECT_EQ(nullptr, extensions.GetExtensionOrAppByURL(
                          GURL("filesystem:http://code.google.com/foo")));
-  // TODO(crbug/852162): Support blob URLs. This should return ext3.
+  // TODO(crbug.com/41394231): Support blob URLs. This should return ext3.
   EXPECT_EQ(nullptr, extensions.GetExtensionOrAppByURL(
                          GURL("blob:http://dev.chromium.org/abcd")));
 

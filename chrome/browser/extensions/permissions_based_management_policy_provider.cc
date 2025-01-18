@@ -18,18 +18,15 @@ namespace extensions {
 
 PermissionsBasedManagementPolicyProvider::
     PermissionsBasedManagementPolicyProvider(ExtensionManagement* settings)
-    : settings_(settings) {
-}
+    : settings_(settings) {}
 
 PermissionsBasedManagementPolicyProvider::
-    ~PermissionsBasedManagementPolicyProvider() {
-}
+    ~PermissionsBasedManagementPolicyProvider() = default;
 
 std::string
 PermissionsBasedManagementPolicyProvider::GetDebugPolicyProviderName() const {
 #ifdef NDEBUG
   NOTREACHED();
-  return std::string();
 #else
   return "Controlled by enterprise policy, restricting extension permissions.";
 #endif
@@ -39,8 +36,9 @@ bool PermissionsBasedManagementPolicyProvider::UserMayLoad(
     const Extension* extension,
     std::u16string* error) const {
   // Component extensions are always allowed.
-  if (Manifest::IsComponentLocation(extension->location()))
+  if (Manifest::IsComponentLocation(extension->location())) {
     return true;
+  }
 
   if (!settings_->IsPermissionSetAllowed(
           extension, PermissionsParser::GetRequiredPermissions(extension))) {

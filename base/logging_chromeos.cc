@@ -15,9 +15,9 @@
 #include <errno.h>
 
 #include <iomanip>
+#include <string_view>
 
 #include "base/process/process_handle.h"
-#include "base/strings/string_piece.h"
 #include "base/threading/platform_thread.h"
 
 namespace logging {
@@ -38,7 +38,7 @@ const char* GetProgramName() {
 // 2020-06-27T23:55:25.094701Z 1234 VERBOSE1 chrome[3816:3877]:
 // [drm_device_handle.cc(90)] Succeeded authenticating /dev/dri/card0 in 0 ms
 // with 1 attempt(s)
-void LogMessage::InitWithSyslogPrefix(base::StringPiece filename,
+void LogMessage::InitWithSyslogPrefix(std::string_view filename,
                                       int line,
                                       uint64_t tick_count,
                                       const char* log_severity_name_c_str,
@@ -47,8 +47,9 @@ void LogMessage::InitWithSyslogPrefix(base::StringPiece filename,
                                       bool enable_thread_id,
                                       bool enable_timestamp,
                                       bool enable_tickcount) {
-  if (log_prefix)
+  if (log_prefix) {
     stream_ << log_prefix << ':';
+  }
   if (enable_timestamp) {
     timeval tv{};
     gettimeofday(&tv, nullptr);
@@ -65,8 +66,9 @@ void LogMessage::InitWithSyslogPrefix(base::StringPiece filename,
             << std::setw(6) << tv.tv_usec                      // millisecond
             << "Z ";                                           // timezone UTC
   }
-  if (enable_tickcount)
+  if (enable_tickcount) {
     stream_ << tick_count << ' ';
+  }
   if (severity_ >= 0) {
     stream_ << log_severity_name_c_str;
   } else {

@@ -5,7 +5,9 @@
 #ifndef NET_BASE_SOCKADDR_STORAGE_H_
 #define NET_BASE_SOCKADDR_STORAGE_H_
 
+#include "base/memory/raw_ptr_exclusion.h"
 #include "build/build_config.h"
+#include "net/base/net_export.h"
 
 #if BUILDFLAG(IS_WIN)
 #include <winsock2.h>
@@ -15,19 +17,21 @@
 #include <sys/types.h>
 #endif
 
-#include "net/base/net_export.h"
-
 namespace net {
 
 // Convenience struct for when you need a |struct sockaddr|.
 struct NET_EXPORT SockaddrStorage {
   SockaddrStorage();
   SockaddrStorage(const SockaddrStorage& other);
-  void operator=(const SockaddrStorage& other);
+  SockaddrStorage& operator=(const SockaddrStorage& other);
 
-  struct sockaddr_storage addr_storage;
-  socklen_t addr_len;
-  struct sockaddr* const addr;
+  const sockaddr* addr() const {
+    return reinterpret_cast<const sockaddr*>(&addr_storage);
+  }
+  sockaddr* addr() { return reinterpret_cast<sockaddr*>(&addr_storage); }
+
+  sockaddr_storage addr_storage;
+  socklen_t addr_len = sizeof(addr_storage);
 };
 
 }  // namespace net

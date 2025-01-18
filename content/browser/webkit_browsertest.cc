@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
@@ -36,16 +36,15 @@ bool AbortOnEndInterceptor(URLLoaderInterceptor::RequestParams* params) {
   response->headers->GetMimeType(&response->mime_type);
 
   std::string body = "some data\r\n";
-  uint32_t bytes_written = body.size();
   mojo::ScopedDataPipeProducerHandle producer_handle;
   mojo::ScopedDataPipeConsumerHandle consumer_handle;
   CHECK_EQ(mojo::CreateDataPipe(body.size(), producer_handle, consumer_handle),
            MOJO_RESULT_OK);
   CHECK_EQ(MOJO_RESULT_OK,
-           producer_handle->WriteData(body.data(), &bytes_written,
-                                      MOJO_WRITE_DATA_FLAG_ALL_OR_NONE));
+           producer_handle->WriteAllData(base::as_byte_span(body)));
+  // Ok to ignore `actually_written_bytes` because of `...ALL_OR_NONE`.
   params->client->OnReceiveResponse(std::move(response),
-                                    std::move(consumer_handle), absl::nullopt);
+                                    std::move(consumer_handle), std::nullopt);
 
   params->client->OnComplete(
       network::URLLoaderCompletionStatus(net::ERR_CONNECTION_ABORTED));

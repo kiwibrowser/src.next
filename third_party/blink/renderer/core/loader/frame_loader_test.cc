@@ -1,13 +1,18 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/run_loop.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
+#include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/web/web_view.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_mouse_event_init.h"
+#include "third_party/blink/renderer/core/events/mouse_event.h"
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -17,22 +22,11 @@
 #include "third_party/blink/renderer/core/testing/mock_policy_container_host.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 
 namespace blink {
-
-namespace {
-
-class UserAgentOverrideWebFrameClient
-    : public frame_test_helpers::TestWebFrameClient {
- public:
-  UserAgentOverrideWebFrameClient() = default;
-
-  WebString UserAgentOverride() override { return WebString("foo"); }
-};
-
-}  // namespace
 
 class FrameLoaderSimTest : public SimTest {
  public:
@@ -128,6 +122,115 @@ TEST_F(FrameLoaderSimTest, LoadEventProgressBeforeUnloadCanceled) {
   }
 }
 
+class FrameLoaderJavaScriptUrlWebFrameClient
+    : public frame_test_helpers::TestWebFrameClient {
+ public:
+  void BeginNavigation(std::unique_ptr<WebNavigationInfo> info) override {
+    // The initial page is not loaded via a call to `BeginNavigation()`, and
+    // javascript: URLs should always be handled internally in Blink, so this
+    // should never be reached in tests.
+    ASSERT_TRUE(false);
+  }
+};
+
+class FrameLoaderJavaScriptUrlTest : public SimTest {
+  std::unique_ptr<frame_test_helpers::TestWebFrameClient>
+  CreateWebFrameClientForMainFrame() override {
+    return std::make_unique<FrameLoaderJavaScriptUrlWebFrameClient>();
+  }
+};
+
+// This is mostly a differential test, to verify that JavaScriptUrlTargetBlank
+// and CtrlClickJavaScriptUrlTargetBlank don't unexpectedly pass. That is, if
+// this test starts failing, any pass results for the aforementioned tests
+// should be considered highly suspicious.
+TEST_F(FrameLoaderJavaScriptUrlTest, Click) {
+  SimRequest request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  request.Complete(R"HTML(
+      <!DOCTYPE html>
+      <html><body>
+      <a href="javascript:'moo'"></a>
+      </body></html>
+  )HTML");
+
+  // Generate and dispatch a click event.
+  MouseEventInit* mouse_initializer = MouseEventInit::Create();
+  mouse_initializer->setView(&Window());
+  mouse_initializer->setButton(1);
+
+  Event* event =
+      MouseEvent::Create(nullptr, event_type_names::kClick, mouse_initializer);
+  Element* anchor = GetDocument().QuerySelector(AtomicString("a"));
+  anchor->DispatchSimulatedClick(event);
+
+  // Navigations to JavaScript URLs should queue a task:
+  // https://whatwg.org/c/browsing-the-web.html#beginning-navigation:navigate-to-a-javascript:-url
+  EXPECT_TRUE(GetDocument().HasPendingJavaScriptUrlsForTest());
+
+  base::RunLoop run_loop;
+  GetDocument()
+      .GetFrame()
+      ->GetTaskRunner(TaskType::kNetworking)
+      ->PostTask(FROM_HERE, run_loop.QuitClosure());
+  run_loop.Run();
+
+  EXPECT_EQ("moo", GetDocument().documentElement()->innerText());
+}
+
+// Clicking an anchor with href="javascript:..." and target="_blank" should not
+// run the JavaScript URL.
+TEST_F(FrameLoaderJavaScriptUrlTest, JavaScriptUrlTargetBlank) {
+  SimRequest request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  request.Complete(R"HTML(
+      <!DOCTYPE html>
+      <html><body>
+      <a href="javascript:'moo'" target="_blank"></a>
+      </body></html>
+  )HTML");
+
+  // Generate and dispatch a click event.
+  MouseEventInit* mouse_initializer = MouseEventInit::Create();
+  mouse_initializer->setView(&Window());
+  mouse_initializer->setButton(1);
+
+  Event* event =
+      MouseEvent::Create(nullptr, event_type_names::kClick, mouse_initializer);
+  Element* anchor = GetDocument().QuerySelector(AtomicString("a"));
+  anchor->DispatchSimulatedClick(event);
+
+  // No task should be queued, since this navigation attempt should be ignored.
+  EXPECT_FALSE(GetDocument().HasPendingJavaScriptUrlsForTest());
+}
+
+// Ctrl+clicking an anchor with href="javascript:..." and target="_blank" should
+// not run the JavaScript URL. Regression test for crbug.com/41490237.
+TEST_F(FrameLoaderJavaScriptUrlTest, CtrlClickJavaScriptUrlTargetBlank) {
+  SimRequest request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  request.Complete(R"HTML(
+      <!DOCTYPE html>
+      <html><body>
+      <a href="javascript:'moo'" target="_blank"></a>
+      </body></html>
+  )HTML");
+
+  // Generate and dispatch a ctrl+click event.
+  MouseEventInit* mouse_initializer = MouseEventInit::Create();
+  mouse_initializer->setView(&Window());
+  mouse_initializer->setButton(1);
+  mouse_initializer->setCtrlKey(true);
+
+  Event* event =
+      MouseEvent::Create(nullptr, event_type_names::kClick, mouse_initializer);
+  Element* anchor = GetDocument().QuerySelector(AtomicString("a"));
+  anchor->DispatchSimulatedClick(event);
+
+  // No task should be queued, since this navigation attempt should be ignored.
+  EXPECT_FALSE(GetDocument().HasPendingJavaScriptUrlsForTest());
+}
+
 class FrameLoaderTest : public testing::Test {
  protected:
   void SetUp() override {
@@ -141,6 +244,7 @@ class FrameLoaderTest : public testing::Test {
     url_test_helpers::UnregisterAllURLsAndClearMemoryCache();
   }
 
+  test::TaskEnvironment task_environment_;
   frame_test_helpers::WebViewHelper web_view_helper_;
 };
 
@@ -149,8 +253,7 @@ TEST_F(FrameLoaderTest, PolicyContainerIsStoredOnCommitNavigation) {
 
   const KURL& url = KURL(NullURL(), "https://www.example.com/bar.html");
   std::unique_ptr<WebNavigationParams> params =
-      WebNavigationParams::CreateWithHTMLBufferForTesting(
-          SharedBuffer::Create(), url);
+      WebNavigationParams::CreateWithEmptyHTMLForTesting(url);
   MockPolicyContainerHost mock_policy_container_host;
   params->policy_container = std::make_unique<WebPolicyContainer>(
       WebPolicyContainerPolicies{
@@ -164,41 +267,16 @@ TEST_F(FrameLoaderTest, PolicyContainerIsStoredOnCommitNavigation) {
   local_frame->Loader().CommitNavigation(std::move(params), nullptr);
 
   EXPECT_EQ(*mojom::blink::PolicyContainerPolicies::New(
-                network::mojom::CrossOriginEmbedderPolicyValue::kNone,
+                network::CrossOriginEmbedderPolicy(
+                    network::mojom::CrossOriginEmbedderPolicyValue::kNone),
                 network::mojom::ReferrerPolicy::kAlways,
                 Vector<network::mojom::blink::ContentSecurityPolicyPtr>(),
-                /*anonymous=*/false, network::mojom::WebSandboxFlags::kNone),
+                /*anonymous=*/false, network::mojom::WebSandboxFlags::kNone,
+                network::mojom::blink::IPAddressSpace::kUnknown,
+                /*can_navigate_top_without_user_gesture=*/true,
+                /*allow_cross_origin_isolation_under_initial_empty_document=*/
+                false),
             local_frame->DomWindow()->GetPolicyContainer()->GetPolicies());
-}
-
-class UserAgentOverrideFrameLoaderTest : public FrameLoaderTest {
- public:
-  void SetUp() override {
-    FrameLoaderTest::SetUp();
-    scoped_feature_list_.InitAndEnableFeature(
-        blink::features::kUserAgentOverrideExperiment);
-  }
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-};
-
-TEST_F(UserAgentOverrideFrameLoaderTest, UserAgentOverrideIframeNavigation) {
-  frame_test_helpers::WebViewHelper web_view_helper;
-  UserAgentOverrideWebFrameClient client;
-  WebViewImpl* web_view = web_view_helper.Initialize(&client);
-
-  frame_test_helpers::LoadHTMLString(
-      web_view->MainFrameImpl(),
-      R"HTML(
-      <!DOCTYPE html>
-      <iframe src="foo.html"></iframe>
-  )HTML",
-      url_test_helpers::ToKURL("https://example.com/"));
-
-  // Manually reset ro avoid UAF
-  web_view_helper.Reset();
-  // Test passes if there's no crash.
 }
 
 }  // namespace blink

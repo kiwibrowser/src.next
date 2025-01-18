@@ -91,20 +91,6 @@ TEST_F(WebExposedIsolationInfoTest, Comparisons) {
   EXPECT_FALSE(appB < appA);
 }
 
-TEST_F(WebExposedIsolationInfoTest, ComparisonsWithOptionals) {
-  WebExposedIsolationInfo value = WebExposedIsolationInfo::CreateNonIsolated();
-  absl::optional<WebExposedIsolationInfo> optional_value =
-      WebExposedIsolationInfo::CreateNonIsolated();
-
-  ASSERT_DCHECK_DEATH(operator==(value, optional_value));
-  ASSERT_DCHECK_DEATH(operator==(optional_value, value));
-  ASSERT_DCHECK_DEATH(operator==(optional_value, optional_value));
-
-  ASSERT_DCHECK_DEATH(operator!=(value, optional_value));
-  ASSERT_DCHECK_DEATH(operator!=(optional_value, value));
-  ASSERT_DCHECK_DEATH(operator!=(optional_value, optional_value));
-}
-
 TEST_F(WebExposedIsolationInfoTest, AreCompatibleFunctions) {
   url::Origin originA =
       url::Origin::CreateFromNormalizedTuple("https", "aaa.example", 443);
@@ -122,7 +108,7 @@ TEST_F(WebExposedIsolationInfoTest, AreCompatibleFunctions) {
       WebExposedIsolationInfo::CreateIsolatedApplication(originB);
 
   // Compare nullopt with a range of different values.
-  absl::optional<WebExposedIsolationInfo> optionalEmpty = absl::nullopt;
+  std::optional<WebExposedIsolationInfo> optionalEmpty = std::nullopt;
   EXPECT_TRUE(
       WebExposedIsolationInfo::AreCompatible(optionalEmpty, nonIsolated));
   EXPECT_TRUE(WebExposedIsolationInfo::AreCompatible(optionalEmpty, isolatedA));
@@ -133,7 +119,7 @@ TEST_F(WebExposedIsolationInfoTest, AreCompatibleFunctions) {
   EXPECT_TRUE(WebExposedIsolationInfo::AreCompatible(appA, optionalEmpty));
 
   // Compare a non isolated optional with a range of different values.
-  absl::optional<WebExposedIsolationInfo> optionalNonIsolated =
+  std::optional<WebExposedIsolationInfo> optionalNonIsolated =
       WebExposedIsolationInfo::CreateNonIsolated();
   EXPECT_TRUE(
       WebExposedIsolationInfo::AreCompatible(optionalNonIsolated, nonIsolated));
@@ -149,7 +135,7 @@ TEST_F(WebExposedIsolationInfoTest, AreCompatibleFunctions) {
       WebExposedIsolationInfo::AreCompatible(appA, optionalNonIsolated));
 
   // Compare an isolated optional with a range of different values.
-  absl::optional<WebExposedIsolationInfo> optionalIsolatedA =
+  std::optional<WebExposedIsolationInfo> optionalIsolatedA =
       WebExposedIsolationInfo::CreateIsolated(originA);
   EXPECT_FALSE(
       WebExposedIsolationInfo::AreCompatible(optionalIsolatedA, nonIsolated));
@@ -167,7 +153,7 @@ TEST_F(WebExposedIsolationInfoTest, AreCompatibleFunctions) {
   EXPECT_FALSE(WebExposedIsolationInfo::AreCompatible(appA, optionalIsolatedA));
 
   // Compare an isolated application optional with a range of different values.
-  absl::optional<WebExposedIsolationInfo> optionalAppA =
+  std::optional<WebExposedIsolationInfo> optionalAppA =
       WebExposedIsolationInfo::CreateIsolatedApplication(originA);
   EXPECT_FALSE(
       WebExposedIsolationInfo::AreCompatible(optionalAppA, nonIsolated));
@@ -199,7 +185,7 @@ TEST_F(WebExposedIsolationInfoTest, AreCompatibleFunctions) {
   EXPECT_FALSE(WebExposedIsolationInfo::AreCompatible(optionalNonIsolated,
                                                       optionalAppA));
 
-  absl::optional<WebExposedIsolationInfo> optionalIsolatedB =
+  std::optional<WebExposedIsolationInfo> optionalIsolatedB =
       WebExposedIsolationInfo::CreateIsolated(originB);
   EXPECT_TRUE(
       WebExposedIsolationInfo::AreCompatible(optionalIsolatedA, optionalEmpty));
@@ -214,7 +200,7 @@ TEST_F(WebExposedIsolationInfoTest, AreCompatibleFunctions) {
   EXPECT_FALSE(
       WebExposedIsolationInfo::AreCompatible(optionalIsolatedA, optionalAppA));
 
-  absl::optional<WebExposedIsolationInfo> optionalAppB =
+  std::optional<WebExposedIsolationInfo> optionalAppB =
       WebExposedIsolationInfo::CreateIsolatedApplication(originB);
   EXPECT_TRUE(
       WebExposedIsolationInfo::AreCompatible(optionalAppA, optionalEmpty));

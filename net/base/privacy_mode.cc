@@ -20,7 +20,6 @@ const char* PrivacyModeToDebugString(PrivacyMode privacy_mode) {
       return "enabled partitioned state allowed";
   }
   NOTREACHED();
-  return "";
 }
 
 }  // namespace net
