@@ -23,8 +23,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_STYLE_REQUEST_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_STYLE_REQUEST_H_
 
-#include "third_party/blink/renderer/core/css/style_color.h"
-#include "third_party/blink/renderer/core/layout/custom_scrollbar.h"
 #include "third_party/blink/renderer/core/scroll/scroll_types.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
@@ -32,6 +30,8 @@
 namespace blink {
 
 class ComputedStyle;
+class CustomScrollbar;
+class Element;
 
 enum RuleMatchingBehavior { kMatchAllRules, kMatchAllRulesExcludingSMIL };
 
@@ -41,6 +41,7 @@ class StyleRequest {
  public:
   enum RequestType { kForRenderer, kForComputedStyle };
   enum RulesToInclude { kUAOnly, kAll };
+  enum SearchTextRequest { kNone, kCurrent, kNotCurrent };
 
   StyleRequest() = default;
 
@@ -49,14 +50,26 @@ class StyleRequest {
   const ComputedStyle* parent_override{nullptr};
   const ComputedStyle* layout_parent_override{nullptr};
   const ComputedStyle* originating_element_style{nullptr};
+  // The styled element may be different from the matched element for SVG <use>
+  // instantiations. In those cases we pass in the element that gets the style
+  // as styled_element while the element matching the rules are the one passed
+  // in the ElementResolveContext.
+  Element* styled_element{nullptr};
   RuleMatchingBehavior matching_behavior{kMatchAllRules};
 
+  // pseudo_id is used only for pseudo elements that are not PseudoElement,
+  // since for real PseudoElement style requests, PseudoElement would be
+  // ElementResolveContext::element_ for matching with pseudo_id set to none
+  // here.
   PseudoId pseudo_id{kPseudoIdNone};
   RequestType type{kForRenderer};
   ScrollbarPart scrollbar_part{kNoPart};
   CustomScrollbar* scrollbar{nullptr};
   AtomicString pseudo_argument{g_null_atom};
+  Vector<AtomicString> pseudo_ident_list;
   RulesToInclude rules_to_include{kAll};
+  bool can_trigger_animations{true};
+  SearchTextRequest search_text_request{kNone};
 
   explicit StyleRequest(const ComputedStyle* parent_override)
       : parent_override(parent_override),
@@ -64,13 +77,15 @@ class StyleRequest {
 
   StyleRequest(PseudoId pseudo_id,
                const ComputedStyle* parent_override,
+               const ComputedStyle* originating_element_style = nullptr,
                const AtomicString& pseudo_argument = g_null_atom)
       : parent_override(parent_override),
         layout_parent_override(parent_override),
+        originating_element_style(originating_element_style),
         pseudo_id(pseudo_id),
         pseudo_argument(pseudo_argument) {
     DCHECK(!IsTransitionPseudoElement(pseudo_id) ||
-           pseudo_id == kPseudoIdPageTransition || pseudo_argument);
+           pseudo_id == kPseudoIdViewTransition || pseudo_argument);
   }
 
   StyleRequest(PseudoId pseudo_id,

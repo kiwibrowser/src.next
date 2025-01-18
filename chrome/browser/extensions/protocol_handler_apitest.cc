@@ -8,12 +8,15 @@
 #include "build/build_config.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/extensions/extension_apitest.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/custom_handlers/protocol_handler_registry.h"
 #include "components/permissions/permission_request.h"
 #include "components/permissions/permission_request_manager.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/test/browser_test.h"
+#include "content/public/test/browser_test_utils.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
 #include "third_party/blink/public/common/security/protocol_handler_security_level.h"
@@ -61,7 +64,13 @@ class ProtocolHandlerChangeWaiter
 // This test verifies correct registration of protocol handlers using HTML5's
 // registerProtocolHandler in extension context and its validation with relaxed
 // security checks.
-IN_PROC_BROWSER_TEST_F(ProtocolHandlerApiTest, Registration) {
+// TODO(crbug.com/40168716): Flaky on win/mac.
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
+#define MAYBE_Registration DISABLED_Registration
+#else
+#define MAYBE_Registration Registration
+#endif
+IN_PROC_BROWSER_TEST_F(ProtocolHandlerApiTest, MAYBE_Registration) {
   ASSERT_TRUE(StartEmbeddedTestServer());
 
   // Initialize listener and result catcher before the test page is loaded to
@@ -99,7 +108,7 @@ IN_PROC_BROWSER_TEST_F(ProtocolHandlerApiTest, Registration) {
   // 4. The JS side waits for a "change_observed" message and performs a call to
   //    navigator.registerProtocolHandler that is expected to trigger a protocol
   //    handler change. Note that this is performed with a user gesture since
-  //    this event is triggered by a content::ExecuteScript call.
+  //    this event is triggered by a content::ExecJs call.
   // 5. The C++ side sends a "change_observed" message and waits for the next
   //    message to the listener.
   // 6. The JS side resolves the promise and moves to the next checks.
@@ -112,11 +121,11 @@ IN_PROC_BROWSER_TEST_F(ProtocolHandlerApiTest, Registration) {
       if (listener.message() == "request_register_protocol") {
         listener.Reset();
         ProtocolHandlerChangeWaiter waiter(registry);
-        ASSERT_TRUE(content::ExecuteScript(
-            web_contents, "self.postMessage('observing_change');"));
+        ASSERT_TRUE(content::ExecJs(web_contents,
+                                    "self.postMessage('observing_change');"));
         waiter.Wait();
-        ASSERT_TRUE(content::ExecuteScript(
-            web_contents, "self.postMessage('change_observed');"));
+        ASSERT_TRUE(content::ExecJs(web_contents,
+                                    "self.postMessage('change_observed');"));
       } else {
         wait_for_requests = false;
       }
@@ -131,8 +140,7 @@ IN_PROC_BROWSER_TEST_F(ProtocolHandlerApiTest, Registration) {
   // 3. The JS side completes the finalizeTests() and sends the final
   //    notification for chrome.test.runTests.
   // 4. The C++ side catches the final result of the test.
-  ASSERT_TRUE(
-      content::ExecuteScript(web_contents, "self.postMessage('complete');"));
+  ASSERT_TRUE(content::ExecJs(web_contents, "self.postMessage('complete');"));
 
   // Wait for the result of chrome.test.runTests
   ASSERT_TRUE(result_catcher.GetNextResult()) << result_catcher.message();
@@ -147,7 +155,7 @@ IN_PROC_BROWSER_TEST_F(ProtocolHandlerApiTest, BrowserProcessSecurityLevel) {
   // Run the extension subtest and wait for the initialization.
   ASSERT_TRUE(RunExtensionTest(
       "protocol_handler",
-      {.page_url = "test_browser_process_security_level.html"}))
+      {.extension_url = "test_browser_process_security_level.html"}))
       << message_;
 
   content::WebContentsDelegate* web_contents_delegate =

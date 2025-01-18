@@ -9,7 +9,6 @@
 #include "base/run_loop.h"
 #include "base/values.h"
 #include "content/public/test/browser_task_environment.h"
-#include "extensions/common/value_builder.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -21,7 +20,7 @@ const char kDummyRegistryKey[] = "dummyId";
 
 class TestExternalRegistryLoader : public ExternalRegistryLoader {
  public:
-  TestExternalRegistryLoader() {}
+  TestExternalRegistryLoader() = default;
 
   TestExternalRegistryLoader(const TestExternalRegistryLoader&) = delete;
   TestExternalRegistryLoader& operator=(const TestExternalRegistryLoader&) =
@@ -37,24 +36,24 @@ class TestExternalRegistryLoader : public ExternalRegistryLoader {
   std::vector<int> GetPrefsTestIds() { return prefs_test_ids_; }
 
  private:
-  ~TestExternalRegistryLoader() override {}
+  ~TestExternalRegistryLoader() override = default;
 
-  std::unique_ptr<base::DictionaryValue> LoadPrefsOnBlockingThread() override {
-    return DictionaryBuilder().Set(kDummyRegistryKey, id_++).Build();
+  base::Value::Dict LoadPrefsOnBlockingThread() override {
+    return base::Value::Dict().Set(kDummyRegistryKey, id_++);
   }
-  void LoadFinished(std::unique_ptr<base::DictionaryValue> prefs) override {
+  void LoadFinished(base::Value::Dict prefs) override {
     ++load_finished_count_;
     ASSERT_LE(load_finished_count_, 2);
 
-    ASSERT_TRUE(prefs);
-    int prefs_test_id = -1;
-    EXPECT_TRUE(prefs->GetInteger(kDummyRegistryKey, &prefs_test_id));
-    prefs_test_ids_.push_back(prefs_test_id);
+    auto prefs_test_id = prefs.FindInt(kDummyRegistryKey);
+    ASSERT_TRUE(prefs_test_id.has_value());
+    prefs_test_ids_.push_back(*prefs_test_id);
 
     ExternalRegistryLoader::LoadFinished(std::move(prefs));
 
-    if (load_finished_count_ == 2)
+    if (load_finished_count_ == 2) {
       run_loop_.Quit();
+    }
   }
 
   base::RunLoop run_loop_;
@@ -67,14 +66,14 @@ class TestExternalRegistryLoader : public ExternalRegistryLoader {
 
 class ExternalRegistryLoaderUnittest : public testing::Test {
  public:
-  ExternalRegistryLoaderUnittest() {}
+  ExternalRegistryLoaderUnittest() = default;
 
   ExternalRegistryLoaderUnittest(const ExternalRegistryLoaderUnittest&) =
       delete;
   ExternalRegistryLoaderUnittest& operator=(
       const ExternalRegistryLoaderUnittest&) = delete;
 
-  ~ExternalRegistryLoaderUnittest() override {}
+  ~ExternalRegistryLoaderUnittest() override = default;
 
  protected:
   void RunUntilIdle() { task_environment_.RunUntilIdle(); }

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_SCROLL_ANCHOR_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/geometry/layout_point.h"
+#include "third_party/blink/renderer/core/layout/geometry/logical_offset.h"
+#include "third_party/blink/renderer/core/scroll/scroll_types.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -20,22 +21,25 @@ namespace blink {
 class LayoutObject;
 class Node;
 class ScrollableArea;
+struct ScrollAnchorData;
 
 static const int kMaxSerializedSelectorLength = 500;
 
 struct SerializedAnchor {
   SerializedAnchor() : simhash(0) {}
-  SerializedAnchor(const String& s, const LayoutPoint& p)
+  SerializedAnchor(const String& s, const LogicalOffset& p)
       : selector(s), relative_offset(p), simhash(0) {}
-  SerializedAnchor(const String& s, const LayoutPoint& p, uint64_t hash)
-      : selector(s), relative_offset(p), simhash(hash) {}
+  SerializedAnchor(const ScrollAnchorData& data,
+                   const ScrollableArea& scroller);
 
-  bool IsValid() const { return !selector.IsEmpty(); }
+  bool IsValid() const { return !selector.empty(); }
+
+  ScrollOffset GetScrollOffset(const ScrollableArea& scroller) const;
 
   // Used to locate an element previously used as a scroll anchor.
   const String selector;
   // Used to restore the previous offset of the element within its scroller.
-  const LayoutPoint relative_offset;
+  const LogicalOffset relative_offset;
   // Used to compare the similarity of a prospective anchor's contents to the
   // contents at the time the previous anchor was saved.
   const uint64_t simhash;
@@ -56,11 +60,11 @@ class CORE_EXPORT ScrollAnchor final {
   void SetScroller(ScrollableArea*);
 
   // Returns true if the underlying scroller is set.
-  bool HasScroller() const { return scroller_; }
+  bool HasScroller() const { return scroller_ != nullptr; }
 
   // The LayoutObject we are currently anchored to. Lazily computed during
   // notifyBeforeLayout() and cached until the next call to clear().
-  LayoutObject* AnchorObject() const { return anchor_object_; }
+  LayoutObject* AnchorObject() const { return anchor_object_.Get(); }
 
   // Called when the scroller attached to this anchor is being destroyed.
   void Dispose();
@@ -83,6 +87,7 @@ class CORE_EXPORT ScrollAnchor final {
 
   enum class Corner {
     kTopLeft = 0,
+    kBottomLeft,
     kTopRight,
   };
   // Which corner of the anchor object we are currently anchored to.
@@ -104,6 +109,9 @@ class CORE_EXPORT ScrollAnchor final {
 
   // Notifies us that an object will be removed from the layout tree.
   void NotifyRemoved(LayoutObject*);
+
+  // This anchor is not active because we are applying scroll-start.
+  void CancelAdjustment() { queued_ = false; }
 
  private:
   enum WalkStatus { kSkip = 0, kConstrain, kContinue, kReturn };
@@ -154,6 +162,10 @@ class CORE_EXPORT ScrollAnchor final {
 
   gfx::Vector2d ComputeAdjustment() const;
 
+  // Previously calculated css selector that uniquely locates the current
+  // anchor_object_. Cleared when the anchor_object_ is cleared.
+  String saved_selector_;
+
   // The scroller to be adjusted by this ScrollAnchor. This is also the scroller
   // that owns us, unless it is the RootFrameViewport in which case we are owned
   // by the layout viewport.
@@ -166,14 +178,8 @@ class CORE_EXPORT ScrollAnchor final {
   Corner corner_;
 
   // Location of anchor_object_ relative to scroller block-start at the time of
-  // NotifyBeforeLayout(). Note that the block-offset is a logical coordinate,
-  // which makes a difference if we're in a block-flipped writing-mode
-  // (vertical-rl).
-  LayoutPoint saved_relative_offset_;
-
-  // Previously calculated css selector that uniquely locates the current
-  // anchor_object_. Cleared when the anchor_object_ is cleared.
-  String saved_selector_;
+  // NotifyBeforeLayout().
+  LogicalOffset saved_relative_offset_;
 
   // We suppress scroll anchoring after a style change on the anchor node or
   // one of its ancestors, if that change might have caused the node to move.

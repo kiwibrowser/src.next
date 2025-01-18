@@ -8,8 +8,8 @@
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
-#include "base/bind.h"
-#include "base/callback_helpers.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "chrome/browser/profiles/profile_key_android.h"
@@ -31,7 +31,7 @@ class DownloadManagerServiceTest : public testing::Test {
  public:
   DownloadManagerServiceTest()
       : service_(new DownloadManagerService()),
-        coordinator_(base::NullCallback(), false),
+        coordinator_(base::NullCallback()),
         success_(false) {
     ON_CALL(manager_, GetDownloadByGuid(_))
         .WillByDefault(::testing::Invoke(
@@ -49,20 +49,16 @@ class DownloadManagerServiceTest : public testing::Test {
     run_loop_.Quit();
   }
 
-  void StartDownload(const std::string& download_guid) {
+  void StartDownload(std::string download_guid) {
     JNIEnv* env = base::android::AttachCurrentThread();
     service_->set_resume_callback_for_testing(base::BindOnce(
         &DownloadManagerServiceTest::OnResumptionDone, base::Unretained(this)));
     ProfileKeyAndroid profile_key_android(profile_.GetProfileKey());
 
     service_->ResumeDownload(
-        env, nullptr,
-        JavaParamRef<jstring>(
-            env,
-            base::android::ConvertUTF8ToJavaString(env, download_guid).obj()),
+        env, nullptr, download_guid,
         JavaParamRef<jobject>(env,
-                              profile_key_android.GetJavaObject().Release()),
-        false);
+                              profile_key_android.GetJavaObject().Release()));
     EXPECT_FALSE(success_);
     service_->OnDownloadsInitialized(&coordinator_, false);
     run_loop_.Run();

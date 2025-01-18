@@ -34,6 +34,7 @@
 #include "third_party/blink/renderer/core/layout/layout_block_flow.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/linked_hash_set.h"
+#include "third_party/blink/renderer/platform/wtf/pod_interval_tree.h"
 
 namespace blink {
 
@@ -42,25 +43,6 @@ class LayoutMultiColumnSet;
 typedef HeapLinkedHashSet<Member<LayoutMultiColumnSet>>
     LayoutMultiColumnSetList;
 
-// Layout state for multicol. To be stored when laying out a block child, so
-// that we can roll back to the initial state if we need to re-lay out said
-// block child.
-class MultiColumnLayoutState {
-  DISALLOW_NEW();
-  friend class LayoutMultiColumnFlowThread;
-
- public:
-  MultiColumnLayoutState() = default;
-  void Trace(Visitor*) const;
-
- private:
-  explicit MultiColumnLayoutState(LayoutMultiColumnSet* column_set)
-      : column_set_(column_set) {}
-  LayoutMultiColumnSet* ColumnSet() const { return column_set_; }
-
-  Member<LayoutMultiColumnSet> column_set_;
-};
-
 // LayoutFlowThread is used to collect all the layout objects that participate
 // in a flow thread. It will also help in doing the layout. However, it will not
 // layout directly to screen. Instead, LayoutMultiColumnSet objects will
@@ -68,10 +50,11 @@ class MultiColumnLayoutState {
 // LayoutMultiColumnSet will actually be a viewPort of the LayoutFlowThread.
 class CORE_EXPORT LayoutFlowThread : public LayoutBlockFlow {
  public:
-  explicit LayoutFlowThread(bool needs_paint_layer);
+  explicit LayoutFlowThread();
   ~LayoutFlowThread() override = default;
   void Trace(Visitor*) const override;
 
+  bool IsLayoutNGObject() const final;
   bool IsLayoutFlowThread() const final {
     NOT_DESTROYED();
     return true;
@@ -110,14 +93,7 @@ class CORE_EXPORT LayoutFlowThread : public LayoutBlockFlow {
       const LayoutObject&,
       AncestorSearchConstraint);
 
-  void UpdateLayout() override;
-
   PaintLayerType LayerTypeRequired() const final;
-
-  bool NeedsPreferredWidthsRecalculation() const final {
-    NOT_DESTROYED();
-    return true;
-  }
 
   virtual void FlowThreadDescendantWasInserted(LayoutObject*) {
     NOT_DESTROYED();
@@ -126,26 +102,29 @@ class CORE_EXPORT LayoutFlowThread : public LayoutBlockFlow {
     NOT_DESTROYED();
   }
   virtual void FlowThreadDescendantStyleWillChange(
-      LayoutBox*,
+      LayoutBoxModelObject*,
       StyleDifference,
       const ComputedStyle& new_style) {
     NOT_DESTROYED();
   }
   virtual void FlowThreadDescendantStyleDidChange(
-      LayoutBox*,
+      LayoutBoxModelObject*,
       StyleDifference,
       const ComputedStyle& old_style) {
     NOT_DESTROYED();
   }
 
-  void AbsoluteQuadsForDescendant(const LayoutBox& descendant,
-                                  Vector<gfx::QuadF>&,
-                                  MapCoordinatesFlags mode = 0);
+  void QuadsInAncestorForDescendant(const LayoutBox& descendant,
+                                    Vector<gfx::QuadF>&,
+                                    const LayoutBoxModelObject* ancestor,
+                                    MapCoordinatesFlags);
 
-  void AddOutlineRects(Vector<PhysicalRect>&,
+  void AddOutlineRects(OutlineRectCollector&,
                        OutlineInfo*,
                        const PhysicalOffset& additional_offset,
-                       NGOutlineType) const override;
+                       OutlineType) const override;
+
+  void Paint(const PaintInfo& paint_info) const final;
 
   bool NodeAtPoint(HitTestResult&,
                    const HitTestLocation&,
@@ -154,10 +133,6 @@ class CORE_EXPORT LayoutFlowThread : public LayoutBlockFlow {
 
   virtual void AddColumnSetToThread(LayoutMultiColumnSet*) = 0;
   virtual void RemoveColumnSetFromThread(LayoutMultiColumnSet*);
-
-  void ComputeLogicalHeight(LayoutUnit logical_height,
-                            LayoutUnit logical_top,
-                            LogicalExtentComputedValues&) const override;
 
   bool HasColumnSets() const {
     NOT_DESTROYED();
@@ -171,7 +146,7 @@ class CORE_EXPORT LayoutFlowThread : public LayoutBlockFlow {
   }
   bool HasValidColumnSetInfo() const {
     NOT_DESTROYED();
-    return !column_sets_invalidated_ && !multi_column_set_list_.IsEmpty();
+    return !column_sets_invalidated_ && !multi_column_set_list_.empty();
   }
 
   bool MapToVisualRectInAncestorSpaceInternal(
@@ -179,57 +154,25 @@ class CORE_EXPORT LayoutFlowThread : public LayoutBlockFlow {
       TransformState&,
       VisualRectFlags = kDefaultVisualRectFlags) const override;
 
-  LayoutUnit PageLogicalHeightForOffset(LayoutUnit) const;
-  LayoutUnit PageRemainingLogicalHeightForOffset(LayoutUnit,
-                                                 PageBoundaryRule) const;
-
-  virtual void ContentWasLaidOut(
-      LayoutUnit logical_bottom_in_flow_thread_after_pagination) = 0;
-  virtual bool CanSkipLayout(const LayoutBox&) const = 0;
-
-  virtual MultiColumnLayoutState GetMultiColumnLayoutState() const = 0;
-  virtual void RestoreMultiColumnLayoutState(const MultiColumnLayoutState&) = 0;
-
-  // Find and return the next logical top after |flowThreadOffset| that can fit
-  // unbreakable content as tall as |contentLogicalHeight|. |flowThreadOffset|
-  // is expected to be at the exact top of a column that's known to not have
-  // enough space for |contentLogicalHeight|. This method is called when the
-  // current column is too short to fit the content, in the hope that there
-  // exists one that's tall enough further ahead. If no such column can be
-  // found, |flowThreadOffset| will be returned.
-  LayoutUnit NextLogicalTopForUnbreakableContent(
-      LayoutUnit flow_thread_offset,
-      LayoutUnit content_logical_height) const;
-
   virtual bool IsPageLogicalHeightKnown() const {
     NOT_DESTROYED();
     return true;
   }
-  virtual bool MayHaveNonUniformPageLogicalHeight() const = 0;
-  bool PageLogicalSizeChanged() const {
-    NOT_DESTROYED();
-    return page_logical_size_changed_;
-  }
-
   // Return the visual bounding box based on the supplied flow-thread bounding
   // box. Both rectangles are completely physical in terms of writing mode.
-  LayoutRect FragmentsBoundingBox(const LayoutRect& layer_bounding_box) const;
+  PhysicalRect FragmentsBoundingBox(
+      const PhysicalRect& layer_bounding_box) const;
 
-  // Convert a logical position in the flow thread coordinate space to a logical
-  // position in the containing coordinate space.
-  void FlowThreadToContainingCoordinateSpace(LayoutUnit& block_position,
-                                             LayoutUnit& inline_position) const;
-
-  virtual LayoutPoint FlowThreadPointToVisualPoint(
-      const LayoutPoint& flow_thread_point) const = 0;
-  virtual LayoutPoint VisualPointToFlowThreadPoint(
-      const LayoutPoint& visual_point) const = 0;
+  virtual PhysicalOffset VisualPointToFlowThreadPoint(
+      const PhysicalOffset& visual_point) const = 0;
 
   virtual LayoutMultiColumnSet* ColumnSetAtBlockOffset(
       LayoutUnit,
       PageBoundaryRule) const = 0;
 
   const char* GetName() const override = 0;
+
+  RecalcScrollableOverflowResult RecalcScrollableOverflow() final;
 
  protected:
   void GenerateColumnSetIntervalTree();
@@ -262,8 +205,6 @@ class CORE_EXPORT LayoutFlowThread : public LayoutBlockFlow {
   MultiColumnSetIntervalTree multi_column_set_interval_tree_;
 
   bool column_sets_invalidated_ : 1;
-  bool page_logical_size_changed_ : 1;
-  bool needs_paint_layer_ : 1;
 };
 
 template <>
@@ -282,6 +223,12 @@ template <>
 struct ValueToString<blink::LayoutMultiColumnSet*> {
   static String ToString(const blink::LayoutMultiColumnSet* value) {
     return String::Format("%p", value);
+  }
+};
+template <>
+struct ValueToString<blink::LayoutUnit> {
+  static String ToString(const blink::LayoutUnit value) {
+    return String::Number(value.ToFloat());
   }
 };
 #endif

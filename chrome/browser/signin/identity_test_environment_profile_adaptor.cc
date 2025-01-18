@@ -4,10 +4,11 @@
 
 #include "chrome/browser/signin/identity_test_environment_profile_adaptor.h"
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
+#include "third_party/abseil-cpp/absl/types/variant.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/browser_process.h"
@@ -26,64 +27,54 @@ std::unique_ptr<TestingProfile> IdentityTestEnvironmentProfileAdaptor::
 // static
 std::unique_ptr<TestingProfile>
 IdentityTestEnvironmentProfileAdaptor::CreateProfileForIdentityTestEnvironment(
-    const TestingProfile::TestingFactories& input_factories) {
+    TestingProfile::TestingFactories input_factories) {
   TestingProfile::Builder builder;
-
-  for (auto& input_factory : input_factories) {
-    builder.AddTestingFactory(input_factory.first, input_factory.second);
-  }
-
+  builder.AddTestingFactories(std::move(input_factories));
   return CreateProfileForIdentityTestEnvironment(builder);
 }
 
 // static
 std::unique_ptr<TestingProfile>
 IdentityTestEnvironmentProfileAdaptor::CreateProfileForIdentityTestEnvironment(
-    TestingProfile::Builder& builder,
-    signin::AccountConsistencyMethod account_consistency) {
-  for (auto& identity_factory :
-       GetIdentityTestEnvironmentFactories(account_consistency)) {
-    builder.AddTestingFactory(identity_factory.first, identity_factory.second);
-  }
-
+    TestingProfile::Builder& builder) {
+  builder.AddTestingFactories(GetIdentityTestEnvironmentFactories());
   return builder.Build();
 }
 
 // static
 void IdentityTestEnvironmentProfileAdaptor::
     SetIdentityTestEnvironmentFactoriesOnBrowserContext(
-        content::BrowserContext* context,
-        signin::AccountConsistencyMethod account_consistency) {
-  for (const auto& factory_pair :
-       GetIdentityTestEnvironmentFactories(account_consistency)) {
-    factory_pair.first->SetTestingFactory(context, factory_pair.second);
+        content::BrowserContext* context) {
+  for (auto& f : GetIdentityTestEnvironmentFactories()) {
+    absl::visit(
+        [context](auto& p) {
+          p.first->SetTestingFactory(context, std::move(p.second));
+        },
+        f.service_factory_and_testing_factory);
   }
 }
 
 // static
-void IdentityTestEnvironmentProfileAdaptor::
-    AppendIdentityTestEnvironmentFactories(
-        TestingProfile::TestingFactories* factories_to_append_to) {
-  TestingProfile::TestingFactories identity_factories =
-      GetIdentityTestEnvironmentFactories();
-  factories_to_append_to->insert(factories_to_append_to->end(),
-                                 identity_factories.begin(),
-                                 identity_factories.end());
+TestingProfile::TestingFactories IdentityTestEnvironmentProfileAdaptor::
+    GetIdentityTestEnvironmentFactoriesWithAppendedFactories(
+        TestingProfile::TestingFactories testing_factories) {
+  for (auto& factory : GetIdentityTestEnvironmentFactories()) {
+    testing_factories.push_back(std::move(factory));
+  }
+  return testing_factories;
 }
 
 // static
 TestingProfile::TestingFactories
-IdentityTestEnvironmentProfileAdaptor::GetIdentityTestEnvironmentFactories(
-    signin::AccountConsistencyMethod account_consistency) {
-  return {{IdentityManagerFactory::GetInstance(),
-           base::BindRepeating(&BuildIdentityManagerForTests,
-                               account_consistency)}};
+IdentityTestEnvironmentProfileAdaptor::GetIdentityTestEnvironmentFactories() {
+  return {TestingProfile::TestingFactory{
+      IdentityManagerFactory::GetInstance(),
+      base::BindRepeating(&BuildIdentityManagerForTests)}};
 }
 
 // static
 std::unique_ptr<KeyedService>
 IdentityTestEnvironmentProfileAdaptor::BuildIdentityManagerForTests(
-    signin::AccountConsistencyMethod account_consistency,
     content::BrowserContext* context) {
   Profile* profile = Profile::FromBrowserContext(context);
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -95,7 +86,7 @@ IdentityTestEnvironmentProfileAdaptor::BuildIdentityManagerForTests(
 #else
   return signin::IdentityTestEnvironment::BuildIdentityManagerForTests(
       ChromeSigninClientFactory::GetForProfile(profile), profile->GetPrefs(),
-      profile->GetPath(), account_consistency);
+      profile->GetPath());
 #endif
 }
 

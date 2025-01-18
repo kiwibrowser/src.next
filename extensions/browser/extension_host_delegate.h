@@ -8,19 +8,19 @@
 #include <string>
 
 #include "content/public/browser/media_stream_request.h"
+#include "extensions/common/extension_id.h"
 #include "third_party/blink/public/common/mediastream/media_stream_request.h"
 #include "ui/base/window_open_disposition.h"
 
 namespace content {
 enum class PictureInPictureResult;
-class JavaScriptDialogManager;
 class RenderFrameHost;
 class WebContents;
 }
 
-namespace gfx {
-class Rect;
-}  // namespace gfx
+namespace blink::mojom {
+class WindowFeatures;
+}
 
 namespace extensions {
 class Extension;
@@ -40,16 +40,12 @@ class ExtensionHostDelegate {
   // Called after |host| creates the renderer main frame for an extension.
   virtual void OnMainFrameCreatedForBackgroundPage(ExtensionHost* host) = 0;
 
-  // Returns the embedder's JavaScriptDialogManager or NULL if the embedder
-  // does not support JavaScript dialogs.
-  virtual content::JavaScriptDialogManager* GetJavaScriptDialogManager() = 0;
-
   // Creates a new tab or popup window with |web_contents|. The embedder may
   // choose to do nothing if tabs and popups are not supported.
   virtual void CreateTab(std::unique_ptr<content::WebContents> web_contents,
-                         const std::string& extension_id,
+                         const ExtensionId& extension_id,
                          WindowOpenDisposition disposition,
-                         const gfx::Rect& initial_rect,
+                         const blink::mojom::WindowFeatures& window_features,
                          bool user_gesture) = 0;
 
   // Requests access to an audio or video media stream. Invokes |callback|
@@ -65,7 +61,7 @@ class ExtensionHostDelegate {
   // or MEDIA_DEVICE_VIDEO_CAPTURE.
   virtual bool CheckMediaAccessPermission(
       content::RenderFrameHost* render_frame_host,
-      const GURL& security_origin,
+      const url::Origin& security_origin,
       blink::mojom::MediaStreamType type,
       const Extension* extension) = 0;
 

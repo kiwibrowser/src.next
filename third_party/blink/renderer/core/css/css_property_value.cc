@@ -20,8 +20,8 @@
 
 #include "third_party/blink/renderer/core/css/css_property_value.h"
 
-#include "third_party/blink/renderer/core/css/css_custom_property_declaration.h"
 #include "third_party/blink/renderer/core/css/css_property_name.h"
+#include "third_party/blink/renderer/core/css/css_unparsed_declaration_value.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/core/style_property_shorthand.h"
 #include "third_party/blink/renderer/platform/wtf/size_assertions.h"
@@ -29,31 +29,17 @@
 namespace blink {
 
 struct SameSizeAsCSSPropertyValue {
-  uint32_t bitfields;
   void* property;
+  uint32_t bitfields;
   Member<void*> value;
 };
 
 ASSERT_SIZE(CSSPropertyValue, SameSizeAsCSSPropertyValue);
 
-CSSPropertyValueMetadata::CSSPropertyValueMetadata(
-    const CSSPropertyName& name,
-    bool is_set_from_shorthand,
-    int index_in_shorthands_vector,
-    bool important,
-    bool implicit)
-    : property_id_(static_cast<unsigned>(name.Id())),
-      is_set_from_shorthand_(is_set_from_shorthand),
-      index_in_shorthands_vector_(index_in_shorthands_vector),
-      important_(important),
-      implicit_(implicit) {
-  if (name.IsCustomProperty())
-    custom_name_ = name.ToAtomicString();
-}
-
-CSSPropertyID CSSPropertyValueMetadata::ShorthandID() const {
-  if (!is_set_from_shorthand_)
+CSSPropertyID CSSPropertyValue::ShorthandID() const {
+  if (!is_set_from_shorthand_) {
     return CSSPropertyID::kInvalid;
+  }
 
   Vector<StylePropertyShorthand, 4> shorthands;
   getMatchingShorthandsForLonghand(PropertyID(), &shorthands);
@@ -63,9 +49,10 @@ CSSPropertyID CSSPropertyValueMetadata::ShorthandID() const {
   return shorthands.at(index_in_shorthands_vector_).id();
 }
 
-CSSPropertyName CSSPropertyValueMetadata::Name() const {
-  if (PropertyID() != CSSPropertyID::kVariable)
+CSSPropertyName CSSPropertyValue::Name() const {
+  if (PropertyID() != CSSPropertyID::kVariable) {
     return CSSPropertyName(PropertyID());
+  }
   return CSSPropertyName(custom_name_);
 }
 

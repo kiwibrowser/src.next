@@ -52,7 +52,7 @@ class TextTrackLoader final : public GarbageCollected<TextTrackLoader>,
   ~TextTrackLoader() override;
 
   bool Load(const KURL&, CrossOriginAttributeValue);
-  void CancelLoad();
+  void Detach();
 
   enum State { kLoading, kFinished, kFailed };
   State LoadState() { return state_; }
@@ -64,7 +64,7 @@ class TextTrackLoader final : public GarbageCollected<TextTrackLoader>,
 
  private:
   // RawResourceClient
-  void DataReceived(Resource*, const char* data, size_t length) override;
+  void DataReceived(Resource*, base::span<const char> data) override;
   void NotifyFinished(Resource*) override;
   String DebugName() const override { return "TextTrackLoader"; }
 
@@ -72,6 +72,7 @@ class TextTrackLoader final : public GarbageCollected<TextTrackLoader>,
   void NewCuesParsed() override;
   void FileFailedToParse() override;
 
+  void CancelLoad();
   void CueLoadTimerFired(TimerBase*);
   void CorsPolicyPreventedLoad(const SecurityOrigin*, const KURL&);
 

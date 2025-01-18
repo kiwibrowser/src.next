@@ -41,10 +41,12 @@ std::string DecodeBase64Url(const std::string& encoded) {
 
 bool GetPublicKey(const base::FilePath& path, std::string* public_key) {
   std::string public_key_pem;
-  if (!base::ReadFileToString(path, &public_key_pem))
+  if (!base::ReadFileToString(path, &public_key_pem)) {
     return false;
-  if (!Extension::ParsePEMKeyBytes(public_key_pem, public_key))
+  }
+  if (!Extension::ParsePEMKeyBytes(public_key_pem, public_key)) {
     return false;
+  }
   return true;
 }
 
@@ -64,13 +66,14 @@ std::unique_ptr<VerifiedContents> CreateTestVerifiedContents(
 
   // Initialize the VerifiedContents object.
   std::string public_key;
-  if (!GetPublicKey(path.AppendASCII(kPublicKeyPem), &public_key))
+  if (!GetPublicKey(path.AppendASCII(kPublicKeyPem), &public_key)) {
     return nullptr;
+  }
 
   base::FilePath verified_contents_path =
       path.AppendASCII(verified_contents_filename);
-  return VerifiedContents::CreateFromFile(
-      base::as_bytes(base::make_span(public_key)), verified_contents_path);
+  return VerifiedContents::CreateFromFile(base::as_byte_span(public_key),
+                                          verified_contents_path);
 }
 
 }  // namespace

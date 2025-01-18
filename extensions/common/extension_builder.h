@@ -7,16 +7,17 @@
 
 #include <initializer_list>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "base/files/file_path.h"
-#include "base/memory/ref_counted.h"
-#include "base/strings/string_piece.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/values.h"
 #include "extensions/common/api/extension_action/action_info.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/mojom/manifest.mojom-shared.h"
-#include "extensions/common/value_builder.h"
 
 namespace extensions {
 class Extension;
@@ -62,7 +63,8 @@ class ExtensionBuilder {
   // Initializes an ExtensionBuilder that can be used with various utility
   // methods to automatically construct a manifest. |name| will be the name of
   // the extension and used to generate a stable ID.
-  ExtensionBuilder(const std::string& name, Type type = Type::EXTENSION);
+  explicit ExtensionBuilder(const std::string& name,
+                            Type type = Type::EXTENSION);
 
   ExtensionBuilder(const ExtensionBuilder&) = delete;
   ExtensionBuilder& operator=(const ExtensionBuilder&) = delete;
@@ -85,9 +87,25 @@ class ExtensionBuilder {
   //////////////////////////////////////////////////////////////////////////////
   // Utility methods for use with aided manifest construction.
 
-  // Add one or more permissions to the extension.
-  ExtensionBuilder& AddPermission(const std::string& permission);
-  ExtensionBuilder& AddPermissions(const std::vector<std::string>& permissions);
+  // Adds one or more API permissions to the extension.
+  ExtensionBuilder& AddAPIPermission(const std::string& permission);
+  ExtensionBuilder& AddAPIPermissions(
+      const std::vector<std::string>& permissions);
+
+  // Adds one or more optional API permissions to the extension.
+  ExtensionBuilder& AddOptionalAPIPermission(const std::string& permission);
+  ExtensionBuilder& AddOptionalAPIPermissions(
+      const std::vector<std::string>& permissions);
+
+  // Adds one or more host permissions to the extension.
+  ExtensionBuilder& AddHostPermission(const std::string& permission);
+  ExtensionBuilder& AddHostPermissions(
+      const std::vector<std::string>& permissions);
+
+  // Adds one or more optional host permissions to the extension.
+  ExtensionBuilder& AddOptionalHostPermission(const std::string& permission);
+  ExtensionBuilder& AddOptionalHostPermissions(
+      const std::vector<std::string>& permissions);
 
   // Sets an action type for the extension to have. By default, no action will
   // be set (though note that we synthesize a page action for most extensions).
@@ -111,33 +129,16 @@ class ExtensionBuilder {
   // Shortcuts to setting values on the manifest dictionary without needing to
   // go all the way through MergeManifest(). Sample usage:
   // ExtensionBuilder("name").SetManifestKey("version", "0.2").Build();
-  // Can be used in conjuction with ListBuilder and DictionaryBuilder for more
-  // complex types.
+  // Can be used in conjuction with chained base::Value::List and
+  // base::Value::Dict to create complex values.
   template <typename T>
-  ExtensionBuilder& SetManifestKey(base::StringPiece key, T&& value) {
+  ExtensionBuilder& SetManifestKey(std::string_view key, T&& value) {
     SetManifestKeyImpl(key, base::Value(std::forward<T>(value)));
     return *this;
   }
   template <typename T>
-  ExtensionBuilder& SetManifestPath(
-      std::initializer_list<base::StringPiece> path,
-      T&& value) {
+  ExtensionBuilder& SetManifestPath(std::string_view path, T&& value) {
     SetManifestPathImpl(path, base::Value(std::forward<T>(value)));
-    return *this;
-  }
-  // Specializations for unique_ptr<> to allow passing unique_ptr<base::Value>.
-  // All other types will fail to compile.
-  template <typename T>
-  ExtensionBuilder& SetManifestKey(base::StringPiece key,
-                                   std::unique_ptr<T> value) {
-    SetManifestKeyImpl(key, std::move(*value));
-    return *this;
-  }
-  template <typename T>
-  ExtensionBuilder& SetManifestPath(
-      std::initializer_list<base::StringPiece> path,
-      std::unique_ptr<T> value) {
-    SetManifestPathImpl(path, std::move(*value));
     return *this;
   }
 
@@ -148,14 +149,13 @@ class ExtensionBuilder {
   // for instance:
   // builder.AddJSON(R"("content_scripts": [...], "action": {})");
   // Keys specified in `json` take precedence over previously-set values.
-  ExtensionBuilder& AddJSON(base::StringPiece json);
+  ExtensionBuilder& AddJSON(std::string_view json);
 
   //////////////////////////////////////////////////////////////////////////////
   // Utility methods for use with custom manifest construction.
 
   // Assigns the extension's manifest to |manifest|.
-  ExtensionBuilder& SetManifest(
-      std::unique_ptr<base::DictionaryValue> manifest);
+  ExtensionBuilder& SetManifest(base::Value::Dict manifest);
 
   //////////////////////////////////////////////////////////////////////////////
   // Common utility methods (usable with both aided and custom manifest
@@ -169,9 +169,7 @@ class ExtensionBuilder {
 
   // Merge another manifest into the current manifest, with new keys taking
   // precedence.
-  ExtensionBuilder& MergeManifest(const base::Value& manifest);
-  ExtensionBuilder& MergeManifest(
-      std::unique_ptr<base::DictionaryValue> manifest);
+  ExtensionBuilder& MergeManifest(base::Value::Dict manifest);
 
   // Add flags to the extension. Default is no flags.
   ExtensionBuilder& AddFlags(int init_from_value_flags);
@@ -184,15 +182,14 @@ class ExtensionBuilder {
  private:
   struct ManifestData;
 
-  void SetManifestKeyImpl(base::StringPiece key, base::Value value);
-  void SetManifestPathImpl(std::initializer_list<base::StringPiece> path,
-                           base::Value value);
+  void SetManifestKeyImpl(std::string_view key, base::Value value);
+  void SetManifestPathImpl(std::string_view path, base::Value value);
 
   // Information for constructing the manifest; either metadata about the
   // manifest which will be used to construct it, or the dictionary itself. Only
   // one will be present.
   std::unique_ptr<ManifestData> manifest_data_;
-  std::unique_ptr<base::DictionaryValue> manifest_value_;
+  std::optional<base::Value::Dict> manifest_value_;
 
   base::FilePath path_;
   mojom::ManifestLocation location_;

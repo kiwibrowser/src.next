@@ -6,11 +6,11 @@
 #define EXTENSIONS_BROWSER_LOAD_AND_LOCALIZE_FILE_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
-#include "base/callback.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "base/functional/callback.h"
 
 namespace extensions {
 class Extension;
@@ -21,7 +21,7 @@ class ExtensionResource;
 // files. `error` indicates the error, if any.
 using LoadAndLocalizeResourcesCallback =
     base::OnceCallback<void(std::vector<std::unique_ptr<std::string>> data,
-                            absl::optional<std::string> error)>;
+                            std::optional<std::string> error)>;
 
 // Loads |resources| from |extension|, optionally localizing the content, and
 // invokes |callback| with the result. Handles both component and non-component
@@ -30,6 +30,7 @@ using LoadAndLocalizeResourcesCallback =
 void LoadAndLocalizeResources(const Extension& extension,
                               std::vector<ExtensionResource> resources,
                               bool localize_files,
+                              size_t max_script_length,
                               LoadAndLocalizeResourcesCallback callback);
 
 }  // namespace extensions

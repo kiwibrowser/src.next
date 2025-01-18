@@ -7,10 +7,11 @@
 #include <stdint.h>
 
 #include "base/base64.h"
-#include "base/bind.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "build/build_config.h"
@@ -18,7 +19,6 @@
 #include "chrome/browser/download/download_crx_util.h"
 #include "chrome/browser/download/download_ui_model.h"
 #include "chrome/browser/image_decoder/image_decoder.h"
-#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/url_constants.h"
 #include "components/google/core/common/google_util.h"
 #include "content/public/browser/browser_thread.h"
@@ -26,7 +26,7 @@
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || \
-    BUILDFLAG(IS_MAC) || BUILDFLAG(IS_FUCHSIA)
+    BUILDFLAG(IS_MAC)
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
@@ -34,7 +34,6 @@
 
 #if BUILDFLAG(IS_WIN)
 #include "chrome/browser/download/download_target_determiner.h"
-#include "chrome/browser/ui/pdf/adobe_reader_info_win.h"
 #endif
 
 namespace {
@@ -72,9 +71,8 @@ class ImageClipboardCopyManager : public ImageDecoder::ImageRequest {
         FROM_HERE, base::BlockingType::WILL_BLOCK);
 
     // Re-check the filesize since the file may be modified after downloaded.
-    int64_t filesize;
-    if (!GetFileSize(file_path_, &filesize) ||
-        filesize > kMaxImageClipboardSize) {
+    std::optional<int64_t> filesize = base::GetFileSize(file_path_);
+    if (!filesize.has_value() || filesize.value() > kMaxImageClipboardSize) {
       OnFailedBeforeDecoding();
       return;
     }
@@ -167,7 +165,7 @@ void DownloadCommands::ExecuteCommand(Command command) {
 }
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
-    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
+    BUILDFLAG(IS_CHROMEOS)
 
 Browser* DownloadCommands::GetBrowser() const {
   if (!model_)
@@ -187,22 +185,11 @@ bool DownloadCommands::IsDownloadPdf() const {
 }
 
 bool DownloadCommands::CanOpenPdfInSystemViewer() const {
-#if BUILDFLAG(IS_WIN)
-  bool is_adobe_pdf_reader_up_to_date = false;
-  if (IsDownloadPdf() && IsAdobeReaderDefaultPDFViewer()) {
-    is_adobe_pdf_reader_up_to_date =
-        DownloadTargetDeterminer::IsAdobeReaderUpToDate();
-  }
-  return IsDownloadPdf() &&
-         (IsAdobeReaderDefaultPDFViewer() ? is_adobe_pdf_reader_up_to_date
-                                          : true);
-#else  // BUILDFLAG(IS_WIN)
   return IsDownloadPdf();
-#endif
 }
 
 #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) ||
-        // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
+        // BUILDFLAG(IS_CHROMEOS)
 
 void DownloadCommands::CopyFileAsImageToClipboard() {
   if (!model_)

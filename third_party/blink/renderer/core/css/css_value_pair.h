@@ -53,8 +53,9 @@ class CORE_EXPORT CSSValuePair : public CSSValue {
   String CustomCSSText() const {
     String first = first_->CssText();
     String second = second_->CssText();
-    if (identical_values_policy_ == kDropIdenticalValues && first == second)
+    if (identical_values_policy_ == kDropIdenticalValues && first == second) {
       return first;
+    }
     return first + ' ' + second;
   }
 
@@ -62,6 +63,10 @@ class CORE_EXPORT CSSValuePair : public CSSValue {
     return base::ValuesEquivalent(first_, other.first_) &&
            base::ValuesEquivalent(second_, other.second_) &&
            identical_values_policy_ == other.identical_values_policy_;
+  }
+  unsigned CustomHash() const {
+    return WTF::HashInts(identical_values_policy_,
+                         WTF::HashInts(first_->Hash(), second_->Hash()));
   }
 
   void TraceAfterDispatch(blink::Visitor*) const;

@@ -4,15 +4,16 @@
 
 #include "chrome/browser/ui/network_profile_bubble.h"
 
-#include <stdint.h>
 #include <windows.h>
+
+#include <stdint.h>
 #include <wtsapi32.h>
 
-#include "base/bind.h"
 #include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
@@ -49,7 +50,7 @@ class NetworkProfileBubbleBrowserListObserver : public BrowserListObserver {
 };
 
 NetworkProfileBubbleBrowserListObserver::
-    ~NetworkProfileBubbleBrowserListObserver() {}
+    ~NetworkProfileBubbleBrowserListObserver() = default;
 
 void NetworkProfileBubbleBrowserListObserver::OnBrowserAdded(Browser* browser) {
 }
@@ -76,8 +77,9 @@ bool NetworkProfileBubble::notification_shown_ = false;
 // static
 bool NetworkProfileBubble::ShouldCheckNetworkProfile(Profile* profile) {
   PrefService* prefs = profile->GetPrefs();
-  if (prefs->GetInteger(prefs::kNetworkProfileWarningsLeft))
+  if (prefs->GetInteger(prefs::kNetworkProfileWarningsLeft)) {
     return !notification_shown_;
+  }
   int64_t last_check = prefs->GetInt64(prefs::kNetworkProfileLastWarningTime);
   base::TimeDelta time_since_last_check =
       base::Time::Now() - base::Time::FromTimeT(last_check);
@@ -127,10 +129,11 @@ void NetworkProfileBubble::CheckNetworkProfile(
       // Try to create some non-empty temp file in the profile dir and use
       // it to check if there is a reparse-point free path to it.
       if (base::CreateTemporaryFileInDir(profile_folder, &temp_file) &&
-          (base::WriteFile(temp_file, ".", 1) == 1)) {
+          base::WriteFile(temp_file, ".")) {
         base::FilePath normalized_temp_file;
-        if (!base::NormalizeFilePath(temp_file, &normalized_temp_file))
+        if (!base::NormalizeFilePath(temp_file, &normalized_temp_file)) {
           profile_on_network = true;
+        }
       } else {
         RecordUmaEvent(METRIC_CHECK_IO_FAILED);
       }
@@ -173,8 +176,9 @@ void NetworkProfileBubble::RecordUmaEvent(MetricNetworkedProfileCheck event) {
 void NetworkProfileBubble::NotifyNetworkProfileDetected() {
   Browser* browser = chrome::FindLastActive();
 
-  if (browser)
+  if (browser) {
     ShowNotification(browser);
-  else
+  } else {
     BrowserList::AddObserver(new NetworkProfileBubbleBrowserListObserver());
+  }
 }

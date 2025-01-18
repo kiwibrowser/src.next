@@ -4,11 +4,13 @@
 
 #include "net/http/http_auth_handler.h"
 
+#include <string_view>
+
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/task_environment.h"
 #include "net/base/net_errors.h"
-#include "net/base/network_isolation_key.h"
+#include "net/base/network_anonymization_key.h"
 #include "net/base/test_completion_callback.h"
 #include "net/http/http_auth_challenge_tokenizer.h"
 #include "net/http/http_auth_handler_mock.h"
@@ -36,7 +38,7 @@ TEST(HttpAuthHandlerTest, NetLog) {
   for (auto async : {true, false}) {
     for (auto target : {HttpAuth::AUTH_PROXY, HttpAuth::AUTH_SERVER}) {
       TestCompletionCallback test_callback;
-      HttpAuthChallengeTokenizer tokenizer(challenge.begin(), challenge.end());
+      HttpAuthChallengeTokenizer tokenizer(challenge);
       HttpAuthHandlerMock mock_handler;
       RecordingNetLogObserver net_log_observer;
 
@@ -45,7 +47,7 @@ TEST(HttpAuthHandlerTest, NetLog) {
       // AUTHORIZATION_RESULT_REJECT.
       mock_handler.set_connection_based(true);
       mock_handler.InitFromChallenge(
-          &tokenizer, target, SSLInfo(), NetworkIsolationKey(),
+          &tokenizer, target, SSLInfo(), NetworkAnonymizationKey(),
           scheme_host_port, NetLogWithSource::Make(NetLogSourceType::NONE));
       mock_handler.SetGenerateExpectation(async, OK);
       mock_handler.GenerateAuthToken(&credentials, &request,

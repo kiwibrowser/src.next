@@ -9,6 +9,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/omnibox/omnibox_input_watcher_factory.h"
+#include "chrome/browser/omnibox/omnibox_suggestions_watcher_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_util.h"
@@ -28,17 +30,17 @@ KeywordExtensionsDelegateImpl::KeywordExtensionsDelegateImpl(
   current_input_id_ = 0;
 
   omnibox_input_observation_.Observe(
-      OmniboxInputWatcher::GetForBrowserContext(profile_));
+      OmniboxInputWatcherFactory::GetForBrowserContext(profile_));
 
-  // TODO(crbug.com/1278436): The comment below is historic and maybe misleading
-  // because extensions don't always "run" in the original profile. Review and
-  // update as needed.
+  // TODO(crbug.com/40810217): The comment below is historic and maybe
+  // misleading because extensions don't always "run" in the original profile.
+  // Review and update as needed.
   //
   // Extension suggestions always come from the original profile, since that's
   // where extensions run. We use the input ID to distinguish whether the
   // suggestions are meant for us.
   omnibox_suggestions_observation_.Observe(
-      OmniboxSuggestionsWatcher::GetForBrowserContext(
+      OmniboxSuggestionsWatcherFactory::GetForBrowserContext(
           profile_->GetOriginalProfile()));
 }
 
@@ -136,7 +138,8 @@ void KeywordExtensionsDelegateImpl::OnOmniboxInputEntered() {
 }
 
 void KeywordExtensionsDelegateImpl::OnOmniboxSuggestionsReady(
-    omnibox_api::SendSuggestions::Params* suggestions) {
+    omnibox_api::SendSuggestions::Params* suggestions,
+    const std::string& extension_id) {
   DCHECK(suggestions);
 
   if (suggestions->request_id != current_input_id_)
@@ -147,15 +150,17 @@ void KeywordExtensionsDelegateImpl::OnOmniboxSuggestionsReady(
 
   const AutocompleteInput& input = extension_suggest_last_input_;
 
-  // ExtractKeywordFromInput() can fail if e.g. this code is triggered by
-  // direct calls from the development console, outside the normal flow of
-  // user input.
+  // AutocompleteInput::ExtractKeywordFromInput() can fail if e.g. this code is
+  // triggered by direct calls from the development console, outside the normal
+  // flow of user input.
   std::u16string keyword, remaining_input;
-  if (!KeywordProvider::ExtractKeywordFromInput(input, model, &keyword,
-                                                &remaining_input))
+  if (!AutocompleteInput::ExtractKeywordFromInput(input, model, &keyword,
+                                                  &remaining_input)) {
     return;
+  }
 
   const TemplateURL* template_url = model->GetTemplateURLForKeyword(keyword);
+  DCHECK_EQ(extension_id, template_url->GetExtensionId());
 
   for (size_t i = 0; i < suggestions->suggest_results.size(); ++i) {
     const omnibox_api::SuggestResult& suggestion =
@@ -167,13 +172,13 @@ void KeywordExtensionsDelegateImpl::OnOmniboxSuggestionsReady(
     // is true, because we wouldn't get results from the extension unless
     // the full keyword had been typed.
     int first_relevance = KeywordProvider::CalculateRelevance(
-        input.type(), true, true, true, input.prefer_keyword(),
+        input.type(), true, true, input.prefer_keyword(),
         input.allow_exact_keyword_match());
     // Because these matches are async, we should never let them become the
     // default match, lest we introduce race conditions in the omnibox user
     // interaction.
     extension_suggest_matches_.push_back(provider_->CreateAutocompleteMatch(
-        template_url, keyword.length(), input, keyword.length(),
+        template_url, input, keyword.length(),
         base::UTF8ToUTF16(suggestion.content), false, first_relevance - (i + 1),
         suggestion.deletable && *suggestion.deletable));
 
@@ -199,9 +204,10 @@ void KeywordExtensionsDelegateImpl::OnOmniboxDefaultSuggestionChanged() {
   // session.
   std::u16string keyword, remaining_input;
   if (matches()->empty() || current_keyword_extension_id_.empty() ||
-      !KeywordProvider::ExtractKeywordFromInput(input, model, &keyword,
-                                                &remaining_input))
+      !AutocompleteInput::ExtractKeywordFromInput(input, model, &keyword,
+                                                  &remaining_input)) {
     return;
+  }
 
   const TemplateURL* template_url(model->GetTemplateURLForKeyword(keyword));
   extensions::ApplyDefaultSuggestionForExtensionKeyword(

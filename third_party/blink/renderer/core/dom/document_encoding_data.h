@@ -31,18 +31,21 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_DOCUMENT_ENCODING_DATA_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_DOCUMENT_ENCODING_DATA_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
 
 namespace blink {
 class TextResourceDecoder;
+struct WebEncodingData;
 
-class DocumentEncodingData {
+class CORE_EXPORT DocumentEncodingData {
   DISALLOW_NEW();
 
  public:
   DocumentEncodingData();
   explicit DocumentEncodingData(const TextResourceDecoder&);
+  explicit DocumentEncodingData(const WebEncodingData&);
 
   const WTF::TextEncoding& Encoding() const { return encoding_; }
   void SetEncoding(const WTF::TextEncoding&);

@@ -5,6 +5,8 @@
 #ifndef CONTENT_PUBLIC_COMMON_SANDBOXED_PROCESS_LAUNCHER_DELEGATE_H_
 #define CONTENT_PUBLIC_COMMON_SANDBOXED_PROCESS_LAUNCHER_DELEGATE_H_
 
+#include <optional>
+
 #include "base/environment.h"
 #include "base/files/scoped_file.h"
 #include "base/process/process.h"
@@ -13,9 +15,13 @@
 #include "content/public/common/zygote/zygote_buildflags.h"
 #include "sandbox/policy/sandbox_delegate.h"
 
-#if BUILDFLAG(USE_ZYGOTE_HANDLE)
+#if BUILDFLAG(USE_ZYGOTE)
 #include "content/public/common/zygote/zygote_handle.h"  // nogncheck
-#endif  // BUILDFLAG(USE_ZYGOTE_HANDLE)
+#endif  // BUILDFLAG(USE_ZYGOTE)
+
+#if BUILDFLAG(IS_MAC)
+#include "base/mac/process_requirement.h"
+#endif  // BUILDFLAG(IS_MAC)
 
 namespace content {
 
@@ -29,24 +35,32 @@ class CONTENT_EXPORT SandboxedProcessLauncherDelegate
   ~SandboxedProcessLauncherDelegate() override {}
 
 #if BUILDFLAG(IS_WIN)
-  // SandboxDelegate:
+  // sandbox::policy::SandboxDelegate:
   std::string GetSandboxTag() override;
   bool DisableDefaultPolicy() override;
   bool GetAppContainerId(std::string* appcontainer_id) override;
+  bool InitializeConfig(sandbox::TargetConfig* config) override;
   bool PreSpawnTarget(sandbox::TargetPolicy* policy) override;
   void PostSpawnTarget(base::ProcessHandle process) override;
   bool ShouldUnsandboxedRunInJob() override;
   bool CetCompatible() override;
+#endif  // BUILDFLAG(IS_WIN)
 
+#if BUILDFLAG(IS_WIN)
   // Override to return true if the process should be launched as an elevated
   // process (which implies no sandbox).
   virtual bool ShouldLaunchElevated();
+
+  // Whether or not to use the MOJO_SEND_INVITATION_FLAG_UNTRUSTED_PROCESS flag
+  // on the outgoing invitation used to create the mojo connection to this
+  // process.
+  virtual bool ShouldUseUntrustedMojoInvitation();
 #endif  // BUILDFLAG(IS_WIN)
 
-#if BUILDFLAG(USE_ZYGOTE_HANDLE)
+#if BUILDFLAG(USE_ZYGOTE)
   // Returns the zygote used to launch the process.
-  virtual ZygoteHandle GetZygote();
-#endif  // BUILDFLAG(USE_ZYGOTE_HANDLE)
+  virtual ZygoteCommunication* GetZygote();
+#endif  // BUILDFLAG(USE_ZYGOTE)
 
 #if BUILDFLAG(IS_POSIX)
   // Override this if the process needs a non-empty environment map.
@@ -61,6 +75,10 @@ class CONTENT_EXPORT SandboxedProcessLauncherDelegate
   // Whether or not to enable CPU security mitigations against side-channel
   // attacks. See base::LaunchOptions::enable_cpu_security_mitigations.
   virtual bool EnableCpuSecurityMitigations();
+
+  // A `ProcessRequirement` that the launched process will be validated against
+  // before it can retrieve any Mach ports and bootstrap Mojo IPC.
+  virtual std::optional<base::mac::ProcessRequirement> GetProcessRequirement();
 #endif  // BUILDFLAG(IS_MAC)
 };
 

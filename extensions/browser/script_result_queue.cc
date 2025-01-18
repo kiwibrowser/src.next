@@ -16,14 +16,15 @@ ScriptResultQueue::ScriptResultQueue() {
 ScriptResultQueue::~ScriptResultQueue() = default;
 
 void ScriptResultQueue::OnScriptResult(const base::Value& script_result) {
-  results_.push_back(script_result.Clone());
-  if (quit_closure_)
+  results_.Append(script_result.Clone());
+  if (quit_closure_) {
     std::move(quit_closure_).Run();
+  }
 }
 
 base::Value ScriptResultQueue::GetNextResult() {
   if (next_result_index_ >= results_.size()) {
-    base::RunLoop run_loop;
+    base::RunLoop run_loop{base::RunLoop::Type::kNestableTasksAllowed};
     quit_closure_ = run_loop.QuitClosure();
     run_loop.Run();
   }

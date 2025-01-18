@@ -11,7 +11,7 @@
 
 #include "base/memory/raw_ptr.h"
 #include "base/scoped_observation.h"
-#include "chrome/browser/extensions/extension_service_test_base.h"
+#include "chrome/browser/extensions/extension_service_user_test_base.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/common/extension.h"
@@ -28,9 +28,9 @@ class BrowserTaskEnvironment;
 
 namespace extensions {
 
-// An enhancement of ExtensionServiceTestBase that provides helpers to install,
-// update, and uninstall extensions.
-class ExtensionServiceTestWithInstall : public ExtensionServiceTestBase,
+// An enhancement of ExtensionServiceUserTestBase that provides helpers to
+// install, update, and uninstall extensions.
+class ExtensionServiceTestWithInstall : public ExtensionServiceUserTestBase,
                                         public ExtensionRegistryObserver {
  public:
   ExtensionServiceTestWithInstall();
@@ -45,8 +45,7 @@ class ExtensionServiceTestWithInstall : public ExtensionServiceTestBase,
   ~ExtensionServiceTestWithInstall() override;
 
  protected:
-  void InitializeExtensionService(
-      const ExtensionServiceInitParams& params) override;
+  void InitializeExtensionService(ExtensionServiceInitParams params) override;
 
   static std::vector<std::u16string> GetErrors();
 
@@ -124,7 +123,18 @@ class ExtensionServiceTestWithInstall : public ExtensionServiceTestBase,
                        const base::FilePath& in_path,
                        UpdateState expected_state);
 
-  void UninstallExtension(const std::string& id);
+  enum UninstallExtensionFileDeleteType {
+    kDeletePath,         // Delete the exact path of the extension install.
+    kDeleteAllVersions,  // Delete all version of the extension (e.g. delete the
+                         // root of the install folder).
+    kDoNotDelete,        // Do not delete any of the extension's files.
+  };
+
+  // Uninstalls extension with `id` and expects deletion of the extension's
+  // files according to `delete_type`.
+  void UninstallExtension(
+      const std::string& id,
+      UninstallExtensionFileDeleteType delete_type = kDeleteAllVersions);
 
   void TerminateExtension(const std::string& id);
 
@@ -155,7 +165,7 @@ class ExtensionServiceTestWithInstall : public ExtensionServiceTestBase,
                           int creation_flags);
 
   extensions::ExtensionList loaded_extensions_;
-  raw_ptr<const Extension> installed_extension_;
+  raw_ptr<const Extension, DanglingUntriaged> installed_extension_;
   bool was_update_;
   std::string old_name_;
   std::string unloaded_id_;

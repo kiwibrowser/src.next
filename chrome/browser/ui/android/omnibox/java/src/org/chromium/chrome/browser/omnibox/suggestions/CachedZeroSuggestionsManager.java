@@ -8,9 +8,6 @@ import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.KEY_Z
 import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.KEY_ZERO_SUGGEST_DESCRIPTION_PREFIX;
 import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.KEY_ZERO_SUGGEST_DISPLAY_TEXT_PREFIX;
 import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.KEY_ZERO_SUGGEST_GROUP_ID_PREFIX;
-import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.KEY_ZERO_SUGGEST_HEADER_GROUP_COLLAPSED_BY_DEFAULT_PREFIX;
-import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.KEY_ZERO_SUGGEST_HEADER_GROUP_ID_PREFIX;
-import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.KEY_ZERO_SUGGEST_HEADER_GROUP_TITLE_PREFIX;
 import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.KEY_ZERO_SUGGEST_IS_DELETABLE_PREFIX;
 import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.KEY_ZERO_SUGGEST_IS_SEARCH_TYPE_PREFIX;
 import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.KEY_ZERO_SUGGEST_NATIVE_SUBTYPES_PREFIX;
@@ -19,284 +16,215 @@ import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.KEY_Z
 import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.KEY_ZERO_SUGGEST_POST_CONTENT_TYPE_PREFIX;
 import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.KEY_ZERO_SUGGEST_URL_PREFIX;
 
+import android.content.SharedPreferences;
 import android.text.TextUtils;
 import android.util.Base64;
-import android.util.SparseArray;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
-import androidx.collection.ArraySet;
 
-import org.chromium.base.Function;
-import org.chromium.chrome.browser.omnibox.MatchClassificationStyle;
-import org.chromium.chrome.browser.omnibox.OmniboxSuggestionType;
+import com.google.protobuf.InvalidProtocolBufferException;
+
+import org.chromium.base.ContextUtils;
 import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
-import org.chromium.chrome.browser.preferences.SharedPreferencesManager;
-import org.chromium.components.omnibox.AutocompleteMatch;
+import org.chromium.components.embedder_support.util.UrlConstants;
+import org.chromium.components.metrics.OmniboxEventProtos.OmniboxEventProto.PageClassification;
+import org.chromium.components.omnibox.AutocompleteProto.AutocompleteResultProto;
 import org.chromium.components.omnibox.AutocompleteResult;
-import org.chromium.components.omnibox.AutocompleteResult.GroupDetails;
 import org.chromium.url.GURL;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
-/**
- * CachedZeroSuggestionsManager manages caching and restoring zero suggestions.
- */
+/** CachedZeroSuggestionsManager manages caching and restoring zero suggestions. */
 public class CachedZeroSuggestionsManager {
-    /**
-     * Save the content of the CachedZeroSuggestionsManager to SharedPreferences cache.
-     */
-    public static void saveToCache(AutocompleteResult resultToCache) {
-        final SharedPreferencesManager manager = SharedPreferencesManager.getInstance();
-        cacheSuggestionList(manager, resultToCache.getSuggestionsList());
-        cacheGroupsDetails(manager, resultToCache.getGroupsDetails());
+    /** Jump-Start Omnibox: the context of the most recently visited page. */
+    public static class JumpStartContext {
+        /** The GURL representing the most recently visited page. */
+        public final GURL url;
+
+        /** {@link PageClassification} value associated with the most recently visited page. */
+        public final int pageClass;
+
+        public JumpStartContext(GURL url, int pageClass) {
+            this.url = url;
+            this.pageClass = pageClass;
+        }
+    }
+
+    /** Persisted Search Engine metadata. */
+    public static class SearchEngineMetadata {
+        /** The keyword associated with the search engine. */
+        public final String keyword;
+
+        public SearchEngineMetadata(String keyword) {
+            this.keyword = keyword;
+        }
+    }
+
+    @VisibleForTesting
+    /* package */ static final String KEY_JUMP_START_URL = "omnibox:jump_start:url";
+
+    @VisibleForTesting
+    /* package */ static final String KEY_JUMP_START_PAGE_CLASS = "omnibox:jump_start:page_class";
+
+    @VisibleForTesting /* package */ static final String KEY_DSE_KEYWORD = "omnibox:dse:keyword";
+
+    @VisibleForTesting
+    /* package */ static final Set<String> ADDITIONAL_KEYS_TO_ERASE =
+            Set.of(KEY_JUMP_START_URL, KEY_JUMP_START_PAGE_CLASS);
+
+    /** Save the content of the CachedZeroSuggestionsManager to SharedPreferences cache. */
+    @SuppressWarnings("ApplySharedPref")
+    public static void saveToCache(int pageClass, @NonNull AutocompleteResult resultToCache) {
+        SharedPreferences prefs = ContextUtils.getAppSharedPreferences();
+
+        var serializedBytes = resultToCache.serialize().toByteArray();
+
+        // Note: this code has very little time to run. Be sure data is persisted. Don't use
+        // asynchronous `apply()` method, because the asynchronously persisted details may never
+        // make it to the data file.
+        prefs.edit()
+                .putString(
+                        getCacheKey(pageClass),
+                        Base64.encodeToString(serializedBytes, Base64.DEFAULT))
+                .commit();
+
+        eraseOldCachedData();
+    }
+
+    /** Save the details related to currently selected Search Engine. */
+    public static void saveSearchEngineMetadata(SearchEngineMetadata metadata) {
+        SharedPreferences.Editor editor = ContextUtils.getAppSharedPreferences().edit();
+        editor.putString(KEY_DSE_KEYWORD, metadata.keyword).apply();
+    }
+
+    /** Returns the details of the currently persisted Search Engine. */
+    public static @Nullable SearchEngineMetadata readSearchEngineMetadata() {
+        SharedPreferences prefs = ContextUtils.getAppSharedPreferences();
+        var keyword = prefs.getString(KEY_DSE_KEYWORD, null);
+        if (TextUtils.isEmpty(keyword)) return null;
+
+        return new SearchEngineMetadata(keyword);
     }
 
     /**
      * Read previously stored AutocompleteResult from cache.
+     *
      * @return AutocompleteResult populated with the content of the SharedPreferences cache.
      */
-    static AutocompleteResult readFromCache() {
-        final SharedPreferencesManager manager = SharedPreferencesManager.getInstance();
-        List<AutocompleteMatch> suggestions =
-                CachedZeroSuggestionsManager.readCachedSuggestionList(manager);
-        SparseArray<GroupDetails> groupsDetails =
-                CachedZeroSuggestionsManager.readCachedGroupsDetails(manager);
-        removeInvalidSuggestionsAndGroupsDetails(suggestions, groupsDetails);
-        return AutocompleteResult.fromCache(suggestions, groupsDetails);
-    }
+    static @NonNull AutocompleteResult readFromCache(int pageClass) {
+        SharedPreferences prefs = ContextUtils.getAppSharedPreferences();
+        String key = getCacheKey(pageClass);
 
-    /**
-     * Cache suggestion list in shared preferences.
-     *
-     * @param prefs Shared preferences manager.
-     */
-    private static void cacheSuggestionList(
-            SharedPreferencesManager prefs, List<AutocompleteMatch> suggestions) {
-        int numCachableSuggestions = 0;
-
-        // Write 0 here to avoid something wrong in the for loop, and the real size will be updated
-        // after the for loop.
-        prefs.writeInt(ChromePreferenceKeys.KEY_ZERO_SUGGEST_LIST_SIZE, 0);
-        for (int i = 0; i < suggestions.size(); i++) {
-            AutocompleteMatch suggestion = suggestions.get(i);
-            if (!shouldCacheSuggestion(suggestion)) continue;
-
-            prefs.writeString(KEY_ZERO_SUGGEST_URL_PREFIX.createKey(numCachableSuggestions),
-                    suggestion.getUrl().serialize());
-            prefs.writeString(
-                    KEY_ZERO_SUGGEST_DISPLAY_TEXT_PREFIX.createKey(numCachableSuggestions),
-                    suggestion.getDisplayText());
-            prefs.writeString(KEY_ZERO_SUGGEST_DESCRIPTION_PREFIX.createKey(numCachableSuggestions),
-                    suggestion.getDescription());
-            prefs.writeInt(KEY_ZERO_SUGGEST_NATIVE_TYPE_PREFIX.createKey(numCachableSuggestions),
-                    suggestion.getType());
-            prefs.writeStringSet(
-                    KEY_ZERO_SUGGEST_NATIVE_SUBTYPES_PREFIX.createKey(numCachableSuggestions),
-                    convertSet(suggestion.getSubtypes(), v -> v.toString()));
-            prefs.writeBoolean(
-                    KEY_ZERO_SUGGEST_IS_SEARCH_TYPE_PREFIX.createKey(numCachableSuggestions),
-                    suggestion.isSearchSuggestion());
-            prefs.writeBoolean(
-                    KEY_ZERO_SUGGEST_IS_DELETABLE_PREFIX.createKey(numCachableSuggestions),
-                    suggestion.isDeletable());
-            prefs.writeString(
-                    KEY_ZERO_SUGGEST_POST_CONTENT_TYPE_PREFIX.createKey(numCachableSuggestions),
-                    suggestion.getPostContentType());
-            prefs.writeString(
-                    KEY_ZERO_SUGGEST_POST_CONTENT_DATA_PREFIX.createKey(numCachableSuggestions),
-                    suggestion.getPostData() == null
-                            ? null
-                            : Base64.encodeToString(suggestion.getPostData(), Base64.DEFAULT));
-            prefs.writeInt(KEY_ZERO_SUGGEST_GROUP_ID_PREFIX.createKey(numCachableSuggestions),
-                    suggestion.getGroupId());
-            numCachableSuggestions++;
-        }
-        prefs.writeInt(ChromePreferenceKeys.KEY_ZERO_SUGGEST_LIST_SIZE, numCachableSuggestions);
-    }
-
-    /**
-     * Restore suggestion list from shared preferences.
-     *
-     * @param prefs Shared preferences manager.
-     * @return List of Omnibox suggestions previously cached in shared preferences.
-     */
-    @NonNull
-    @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
-    static List<AutocompleteMatch> readCachedSuggestionList(SharedPreferencesManager prefs) {
-        int size = prefs.readInt(ChromePreferenceKeys.KEY_ZERO_SUGGEST_LIST_SIZE, -1);
-        if (size <= 1) {
-            // Ignore case where we only have a single item on the list - it's likely
-            // 'what-you-typed' suggestion.
-            size = 0;
-        }
-
-        List<AutocompleteMatch> suggestions = new ArrayList<>(size);
-        List<AutocompleteMatch.MatchClassification> classifications = new ArrayList<>();
-        classifications.add(
-                new AutocompleteMatch.MatchClassification(0, MatchClassificationStyle.NONE));
-        for (int i = 0; i < size; i++) {
-            // TODO(tedchoc): Answers in suggest were previously cached, but that could lead to
-            //                stale or misleading answers for cases like weather.  Ignore any
-            //                previously cached answers for several releases while any previous
-            //                results are cycled through.
-            String answerText =
-                    prefs.readString(KEY_ZERO_SUGGEST_ANSWER_TEXT_PREFIX.createKey(i), null);
-            if (!TextUtils.isEmpty(answerText)) continue;
-
-            GURL url = GURL.deserialize(
-                    prefs.readString(KEY_ZERO_SUGGEST_URL_PREFIX.createKey(i), null));
-            String displayText =
-                    prefs.readString(KEY_ZERO_SUGGEST_DISPLAY_TEXT_PREFIX.createKey(i), null);
-            String description =
-                    prefs.readString(KEY_ZERO_SUGGEST_DESCRIPTION_PREFIX.createKey(i), null);
-            int nativeType = prefs.readInt(KEY_ZERO_SUGGEST_NATIVE_TYPE_PREFIX.createKey(i),
-                    AutocompleteMatch.INVALID_TYPE);
-            boolean isSearchType =
-                    prefs.readBoolean(KEY_ZERO_SUGGEST_IS_SEARCH_TYPE_PREFIX.createKey(i), false);
-            boolean isDeletable =
-                    prefs.readBoolean(KEY_ZERO_SUGGEST_IS_DELETABLE_PREFIX.createKey(i), false);
-            String postContentType =
-                    prefs.readString(KEY_ZERO_SUGGEST_POST_CONTENT_TYPE_PREFIX.createKey(i), null);
-            String postDataStr =
-                    prefs.readString(KEY_ZERO_SUGGEST_POST_CONTENT_DATA_PREFIX.createKey(i), null);
-            byte[] postData =
-                    postDataStr == null ? null : Base64.decode(postDataStr, Base64.DEFAULT);
-            int groupId = prefs.readInt(
-                    KEY_ZERO_SUGGEST_GROUP_ID_PREFIX.createKey(i), AutocompleteMatch.INVALID_GROUP);
-
-            Set<Integer> subtypes = null;
+        var encoded = prefs.getString(key, null);
+        if (encoded != null) {
             try {
-                Set<String> subtypeStrings = prefs.readStringSet(
-                        KEY_ZERO_SUGGEST_NATIVE_SUBTYPES_PREFIX.createKey(i), null);
-                subtypes = convertSet(subtypeStrings, v -> Integer.parseInt(v));
-            } catch (NumberFormatException e) {
-                // Subtype information contains malformed elements, suggesting that the
-                // entire cache may be damaged.
-                return Collections.emptyList();
+                var deserialized =
+                        AutocompleteResultProto.parseFrom(Base64.decode(encoded, Base64.DEFAULT));
+                AutocompleteResult result = AutocompleteResult.deserialize(deserialized);
+                return result;
+            } catch (IllegalArgumentException e) {
+                // Bad Base64 encoding.
+            } catch (InvalidProtocolBufferException e) {
+                // Bad protobuf.
             }
-
-            AutocompleteMatch suggestion = new AutocompleteMatch(nativeType, subtypes, isSearchType,
-                    0, 0, displayText, classifications, description, classifications, null, null,
-                    url, GURL.emptyGURL(), null, isDeletable, postContentType, postData, groupId,
-                    null, null, false, null, null);
-            suggestions.add(suggestion);
+            eraseCachedSuggestionsByPageClass(pageClass);
         }
-
-        return suggestions;
+        return AutocompleteResult.fromCache(null, null);
     }
 
     /**
-     * Cache suggestion group details in shared preferences.
+     * Erase previously stored AutocompleteResult for a given page class from cache.
      *
-     * @param prefs Shared preferences manager.
-     * @param groupsDetails Map of Group ID to GroupDetails.
+     * @param pageClass the PageClassification to clear cache for
      */
-    private static void cacheGroupsDetails(
-            SharedPreferencesManager prefs, SparseArray<GroupDetails> groupsDetails) {
-        final int size = groupsDetails.size();
-        prefs.writeInt(ChromePreferenceKeys.KEY_ZERO_SUGGEST_HEADER_LIST_SIZE, size);
-        for (int i = 0; i < size; i++) {
-            final GroupDetails details = groupsDetails.valueAt(i);
-            String title = details.title;
-            boolean collapsedByDefault = details.collapsedByDefault;
+    static void eraseCachedSuggestionsByPageClass(int pageClass) {
+        SharedPreferences prefs = ContextUtils.getAppSharedPreferences();
+        String key = getCacheKey(pageClass);
+        prefs.edit().remove(key).apply();
+    }
 
-            prefs.writeInt(
-                    KEY_ZERO_SUGGEST_HEADER_GROUP_ID_PREFIX.createKey(i), groupsDetails.keyAt(i));
-            prefs.writeString(KEY_ZERO_SUGGEST_HEADER_GROUP_TITLE_PREFIX.createKey(i), title);
-            prefs.writeBoolean(
-                    KEY_ZERO_SUGGEST_HEADER_GROUP_COLLAPSED_BY_DEFAULT_PREFIX.createKey(i),
-                    collapsedByDefault);
+    /** Save the context of the most recently visited page. */
+    @SuppressWarnings("ApplySharedPref")
+    public static void saveJumpStartContext(@Nullable JumpStartContext jsContext) {
+        SharedPreferences.Editor editor = ContextUtils.getAppSharedPreferences().edit();
+        if (jsContext == null || GURL.isEmptyOrInvalid(jsContext.url)) {
+            editor.remove(KEY_JUMP_START_URL);
+            editor.remove(KEY_JUMP_START_PAGE_CLASS);
+        } else {
+            editor.putString(KEY_JUMP_START_URL, jsContext.url.getSpec());
+            editor.putInt(KEY_JUMP_START_PAGE_CLASS, jsContext.pageClass);
         }
+        // Note: this code has very little time to run. Be sure data is persisted. Don't use
+        // asynchronous `apply()` method, because the asynchronously persisted details may never
+        // make it to the data file.
+        editor.commit();
     }
 
     /**
-     * Restore group details from shared preferences.
+     * Read previously stored context of the most recently visited page.
      *
-     * @param prefs Shared preferences manager.
-     * @return Map of group ID to GroupDetails previously cached in shared preferences.
+     * <p>This function always returns a valid object, even if there's no data to read, falling back
+     * to the context of a NTP.
      */
-    @NonNull
-    @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
-    static SparseArray<GroupDetails> readCachedGroupsDetails(SharedPreferencesManager prefs) {
-        final int size = prefs.readInt(ChromePreferenceKeys.KEY_ZERO_SUGGEST_HEADER_LIST_SIZE, 0);
-        final SparseArray<GroupDetails> groupsDetails = new SparseArray<>(size);
-
-        for (int i = 0; i < size; i++) {
-            int groupId = prefs.readInt(KEY_ZERO_SUGGEST_HEADER_GROUP_ID_PREFIX.createKey(i),
-                    AutocompleteMatch.INVALID_GROUP);
-            String groupTitle =
-                    prefs.readString(KEY_ZERO_SUGGEST_HEADER_GROUP_TITLE_PREFIX.createKey(i), null);
-            boolean collapsedByDefault = prefs.readBoolean(
-                    KEY_ZERO_SUGGEST_HEADER_GROUP_COLLAPSED_BY_DEFAULT_PREFIX.createKey(i), false);
-
-            groupsDetails.put(groupId, new GroupDetails(groupTitle, collapsedByDefault));
-        }
-        return groupsDetails;
+    public static @NonNull JumpStartContext readJumpStartContext() {
+        SharedPreferences prefs = ContextUtils.getAppSharedPreferences();
+        String url = prefs.getString(KEY_JUMP_START_URL, UrlConstants.NTP_URL);
+        int pageClass =
+                prefs.getInt(
+                        KEY_JUMP_START_PAGE_CLASS,
+                        PageClassification.INSTANT_NTP_WITH_OMNIBOX_AS_STARTING_FOCUS_VALUE);
+        return new JumpStartContext(new GURL(url), pageClass);
     }
 
-    /**
-     * Remove all invalid entries for group details map and omnibox suggestions list.
-     *
-     * @param suggestions List of suggestions to scan for invalid entries.
-     * @param groupsDetails Map of GroupDetails to scan for invalid entries.
-     */
-    @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
-    static void removeInvalidSuggestionsAndGroupsDetails(
-            List<AutocompleteMatch> suggestions, SparseArray<GroupDetails> groupsDetails) {
-        // Remove all group details that have invalid index or title.
-        for (int index = groupsDetails.size() - 1; index >= 0; index--) {
-            if (groupsDetails.keyAt(index) == AutocompleteMatch.INVALID_GROUP
-                    || TextUtils.isEmpty(groupsDetails.valueAt(index).title)) {
-                groupsDetails.removeAt(index);
-            }
-        }
+    /** Clean up data persisted by current Chrome versions. */
+    public static void eraseCachedData() {
+        SharedPreferences.Editor editor = ContextUtils.getAppSharedPreferences().edit();
 
-        // Remove all suggestions with no valid URL or pointing to nonexistent groups.
-        for (int index = suggestions.size() - 1; index >= 0; index--) {
-            final AutocompleteMatch suggestion = suggestions.get(index);
-            final int groupId = suggestion.getGroupId();
-            if (!suggestion.getUrl().isValid() || suggestion.getUrl().isEmpty()
-                    || (groupId != AutocompleteMatch.INVALID_GROUP
-                            && groupsDetails.indexOfKey(groupId) < 0)) {
-                suggestions.remove(index);
-            }
+        for (var pageClass : PageClassification.values()) {
+            editor.remove(getCacheKey(pageClass.getNumber()));
         }
+        for (String key : ADDITIONAL_KEYS_TO_ERASE) {
+            editor.remove(key);
+        }
+        // This is a best-effort cleanup which is okay if it doesn't complete before Chrome dies.
+        editor.apply();
+
+        eraseOldCachedData();
     }
 
-    /**
-     * Check if the suggestion is needed to be cached.
-     *
-     * @param suggestion The AutocompleteMatch to check.
-     * @return Whether or not the suggestion can be cached.
-     */
-    private static boolean shouldCacheSuggestion(AutocompleteMatch suggestion) {
-        return !suggestion.hasAnswer()
-                && suggestion.getType() != OmniboxSuggestionType.CLIPBOARD_URL
-                && suggestion.getType() != OmniboxSuggestionType.CLIPBOARD_TEXT
-                && suggestion.getType() != OmniboxSuggestionType.CLIPBOARD_IMAGE
-                && suggestion.getType() != OmniboxSuggestionType.TILE_NAVSUGGEST;
+    /** Clean up data persisted by older Chrome versions. */
+    static void eraseOldCachedData() {
+        SharedPreferences prefs = ContextUtils.getAppSharedPreferences();
+
+        if (!prefs.contains(ChromePreferenceKeys.KEY_ZERO_SUGGEST_LIST_SIZE)) {
+            return;
+        }
+
+        var editor = prefs.edit();
+        editor.remove(ChromePreferenceKeys.KEY_ZERO_SUGGEST_LIST_SIZE);
+        // In previously preserved context we cached up to 15 suggestions. Remove all old keys.
+        for (int index = 0; index < 15; index++) {
+            editor.remove(KEY_ZERO_SUGGEST_URL_PREFIX.createKey(index));
+            editor.remove(KEY_ZERO_SUGGEST_DISPLAY_TEXT_PREFIX.createKey(index));
+            editor.remove(KEY_ZERO_SUGGEST_DESCRIPTION_PREFIX.createKey(index));
+            editor.remove(KEY_ZERO_SUGGEST_NATIVE_TYPE_PREFIX.createKey(index));
+            editor.remove(KEY_ZERO_SUGGEST_NATIVE_SUBTYPES_PREFIX.createKey(index));
+            editor.remove(KEY_ZERO_SUGGEST_ANSWER_TEXT_PREFIX.createKey(index));
+            editor.remove(KEY_ZERO_SUGGEST_IS_SEARCH_TYPE_PREFIX.createKey(index));
+            editor.remove(KEY_ZERO_SUGGEST_IS_DELETABLE_PREFIX.createKey(index));
+            editor.remove(KEY_ZERO_SUGGEST_POST_CONTENT_TYPE_PREFIX.createKey(index));
+            editor.remove(KEY_ZERO_SUGGEST_POST_CONTENT_DATA_PREFIX.createKey(index));
+            editor.remove(KEY_ZERO_SUGGEST_GROUP_ID_PREFIX.createKey(index));
+        }
+        // This is a best-effort cleanup which is okay if it doesn't complete before Chrome dies.
+        editor.apply();
     }
 
-    /**
-     * Convert the set of type T to set of type U objects.
-     *
-     * @param <T> Type of data held in the input set (inferred).
-     * @param <U> Type of data held in the output set (inferred).
-     * @param input Input set.
-     * @param converter Function object that converts type T into type U.
-     * @return A set of input objects converted to string.
-     */
-    private static <T, U> Set<U> convertSet(Set<T> input, Function<T, U> converter) {
-        if (input == null) return null;
-
-        Set<U> result = new ArraySet<>(input.size());
-        for (T item : input) {
-            result.add(converter.apply(item));
-        }
-        return result;
+    @VisibleForTesting
+    static String getCacheKey(int pageClass) {
+        return String.format(Locale.getDefault(), "omnibox:cached_suggestions:%d", pageClass);
     }
 }

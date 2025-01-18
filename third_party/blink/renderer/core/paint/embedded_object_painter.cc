@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/layout/layout_embedded_object.h"
-#include "third_party/blink/renderer/core/layout/layout_theme.h"
+#include "third_party/blink/renderer/core/layout/layout_theme_font_provider.h"
 #include "third_party/blink/renderer/core/paint/box_painter.h"
 #include "third_party/blink/renderer/core/paint/embedded_content_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_auto_dark_mode.h"
@@ -27,11 +27,17 @@ static const float kReplacementTextRoundedRectRadius = 5;
 static const float kReplacementTextTextOpacity = 0.55f;
 
 static Font ReplacementTextFont(const Document* document) {
+  const AtomicString& family = LayoutThemeFontProvider::SystemFontFamily(
+      CSSValueID::kWebkitSmallControl);
+  const float size = LayoutThemeFontProvider::SystemFontSize(
+      CSSValueID::kWebkitSmallControl, document);
+
   FontDescription font_description;
-  LayoutTheme::GetTheme().SystemFont(CSSValueID::kWebkitSmallControl,
-                                     font_description, document);
-  font_description.SetWeight(BoldWeightValue());
-  font_description.SetComputedSize(font_description.SpecifiedSize());
+  font_description.SetFamily(
+      FontFamily(family, FontFamily::InferredTypeFor(family)));
+  font_description.SetWeight(kBoldWeightValue);
+  font_description.SetSpecifiedSize(size);
+  font_description.SetComputedSize(size);
   Font font(font_description);
   return font;
 }

@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,14 +50,6 @@ class CORE_EXPORT PolicyContainer {
       Vector<network::mojom::blink::ContentSecurityPolicyPtr> policies);
 
   const mojom::blink::PolicyContainerPolicies& GetPolicies() const;
-
-  // Return a keep alive handle for the browser process' PolicyContainerHost. If
-  // that PolicyContainerHost is owned by a RenderFrameHost, holding a keep
-  // alive handle ensures that the PolicyContainerHost will still be retrievable
-  // via RenderFrameHostImpl::GetPolicyContainerHost, even if the
-  // RenderFrameHost has been deleted in between.
-  mojo::PendingRemote<mojom::blink::PolicyContainerHostKeepAliveHandle>
-  IssueKeepAliveHandle();
 
  private:
   mojom::blink::PolicyContainerPoliciesPtr policies_;

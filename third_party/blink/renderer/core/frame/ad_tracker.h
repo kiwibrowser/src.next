@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,9 @@
 
 #include <stdint.h>
 
+#include <optional>
+
 #include "base/feature_list.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/frame/ad_script_identifier.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
@@ -16,6 +17,7 @@
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_info.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "v8/include/v8.h"
 
@@ -31,10 +33,6 @@ class AsyncTaskContext;
 class CallFunction;
 class ExecuteScript;
 }  // namespace probe
-
-namespace features {
-CORE_EXPORT extern const base::Feature kAsyncStackAdTagging;
-}  // namespace features
 
 // Tracker for tagging resources as ads based on the call stack scripts.
 // The tracker is maintained per local root.
@@ -92,7 +90,7 @@ class CORE_EXPORT AdTracker : public GarbageCollected<AdTracker> {
   // bottom-most known ad script on the stack will be copied to the address.
   bool IsAdScriptInStack(
       StackType stack_type,
-      absl::optional<AdScriptIdentifier>* out_ad_script = nullptr);
+      std::optional<AdScriptIdentifier>* out_ad_script = nullptr);
 
   virtual void Trace(Visitor*) const;
 
@@ -132,13 +130,13 @@ class CORE_EXPORT AdTracker : public GarbageCollected<AdTracker> {
 
   int num_ads_in_stack_ = 0;
 
-  // Indicates the bottom-most ad script on the stack or `absl::nullopt` if
+  // Indicates the bottom-most ad script on the stack or `std::nullopt` if
   // there isn't one. A non-null value implies `num_ads_in_stack > 0`.
-  absl::optional<AdScriptIdentifier> bottom_most_ad_script_;
+  std::optional<AdScriptIdentifier> bottom_most_ad_script_;
 
-  // Indicates the bottom-most ad script on the async stack or `absl::nullopt`
+  // Indicates the bottom-most ad script on the async stack or `std::nullopt`
   // if there isn't one.
-  absl::optional<AdScriptIdentifier> bottom_most_async_ad_script_;
+  std::optional<AdScriptIdentifier> bottom_most_async_ad_script_;
 
   // The set of ad scripts detected outside of ad-frame contexts. Scripts are
   // identified by name (i.e. resource URL). Scripts with no name (i.e. inline
@@ -147,11 +145,6 @@ class CORE_EXPORT AdTracker : public GarbageCollected<AdTracker> {
 
   // The number of ad-related async tasks currently running in the stack.
   int running_ad_async_tasks_ = 0;
-
-  // True if the AdTracker looks not only at the current V8 stack for ad script
-  // but also at the previous asynchronous stacks that caused this current
-  // callstack to run (e.g., registered callbacks).
-  const bool async_stack_enabled_;
 };
 
 }  // namespace blink

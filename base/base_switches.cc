@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/base_switches.h"
+
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 
@@ -12,7 +13,7 @@ namespace switches {
 const char kDisableBestEffortTasks[] = "disable-best-effort-tasks";
 
 // Disables the crash reporting.
-const char kDisableBreakpad[]               = "disable-breakpad";
+const char kDisableBreakpad[] = "disable-breakpad";
 
 // Comma-separated list of feature names to disable. See also kEnableFeatures.
 const char kDisableFeatures[] = "disable-features";
@@ -23,13 +24,13 @@ const char kDisableLowEndDeviceMode[] = "disable-low-end-device-mode";
 // Indicates that crash reporting should be enabled. On platforms where helper
 // processes cannot access to files needed to make this decision, this flag is
 // generated internally.
-const char kEnableCrashReporter[]           = "enable-crash-reporter";
+const char kEnableCrashReporter[] = "enable-crash-reporter";
 
 // Comma-separated list of feature names to enable. See also kDisableFeatures.
 const char kEnableFeatures[] = "enable-features";
 
 // Force low-end device mode when set.
-const char kEnableLowEndDeviceMode[]        = "enable-low-end-device-mode";
+const char kEnableLowEndDeviceMode[] = "enable-low-end-device-mode";
 
 // Enable the use of background thread priorities for background tasks in the
 // ThreadPool even on systems where it is disabled by default, e.g. due to
@@ -37,12 +38,13 @@ const char kEnableLowEndDeviceMode[]        = "enable-low-end-device-mode";
 const char kEnableBackgroundThreadPool[] = "enable-background-thread-pool";
 
 // Handle to the shared memory segment containing field trial state that is to
-// be shared between processes. The argument to this switch is made of 4
-// segments, separated by commas:
-// 1. The platform-specific handle id for the shared memory as a string.
-// 2. The high 64 bits of the shared memory block GUID.
-// 3. The low 64 bits of the shared memory block GUID.
-// 4. The size of the shared memory segment as a string.
+// be shared between processes. The argument to this switch is made of segments
+// separated by commas:
+// - The platform-specific handle id for the shared memory as a string.
+// - (Windows only) i=inherited by duplication or p=child must open parent.
+// - The high 64 bits of the shared memory block GUID.
+// - The low 64 bits of the shared memory block GUID.
+// - The size of the shared memory segment as a string.
 const char kFieldTrialHandle[] = "field-trial-handle";
 
 // This option can be used to force field trials when testing changes locally.
@@ -53,7 +55,7 @@ const char kFieldTrialHandle[] = "field-trial-handle";
 // also be used by the browser process to send the list of trials to a
 // non-browser process, using the same format. See
 // FieldTrialList::CreateTrialsFromString() in field_trial.h for details.
-const char kForceFieldTrials[]              = "force-fieldtrials";
+const char kForceFieldTrials[] = "force-fieldtrials";
 
 // Generates full memory crash dump.
 const char kFullMemoryCrashReport[] = "full-memory-crash-report";
@@ -65,8 +67,12 @@ const char kFullMemoryCrashReport[] = "full-memory-crash-report";
 // to BEST_EFFORT are not logged.
 const char kLogBestEffortTasks[] = "log-best-effort-tasks";
 
+// Handle to the shared memory segment a child process should use to transmit
+// histograms back to the browser process.
+const char kMetricsSharedMemoryHandle[] = "metrics-shmem-handle";
+
 // Suppresses all error dialogs when present.
-const char kNoErrorDialogs[]                = "noerrdialogs";
+const char kNoErrorDialogs[] = "noerrdialogs";
 
 // Starts the sampling based profiler for the browser process at startup. This
 // will only work if chrome has been built with the gn arg enable_profiling =
@@ -92,11 +98,6 @@ const char kProfilingFlush[] = "profiling-flush";
 // When running certain tests that spawn child processes, this switch indicates
 // to the test framework that the current process is a child process.
 const char kTestChildProcess[] = "test-child-process";
-
-// When running certain tests that spawn child processes, this switch indicates
-// to the test framework that the current process should not initialize ICU to
-// avoid creating any scoped handles too early in startup.
-const char kTestDoNotInitializeIcu[] = "test-do-not-initialize-icu";
 
 // Sends trace events from these categories to a file.
 // --trace-to-file on its own sends to default categories.
@@ -128,14 +129,11 @@ const char kWaitForDebugger[] = "wait-for-debugger";
 // Disable high-resolution timer on Windows.
 const char kDisableHighResTimer[] = "disable-highres-timer";
 
-// Disables the USB keyboard detection for blocking the OSK on Win8+.
-const char kDisableUsbKeyboardDetect[]      = "disable-usb-keyboard-detect";
+// Disables the USB keyboard detection for blocking the OSK on Windows.
+const char kDisableUsbKeyboardDetect[] = "disable-usb-keyboard-detect";
 #endif
 
-// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
-// of lacros-chrome is complete.
-#if BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMEOS_ASH) && \
-    !BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_LINUX)
 // The /dev/shm partition is too small in certain VM environments, causing
 // Chrome to fail or crash (see http://crbug.com/715363). Use this flag to
 // work-around this issue (a temporary directory will always be used to create
@@ -151,13 +149,10 @@ const char kEnableCrashReporterForTesting[] =
 #endif
 
 #if BUILDFLAG(IS_ANDROID)
-// Enables the reached code profiler that samples all threads in all processes
-// to determine which functions are almost never executed.
-const char kEnableReachedCodeProfiler[] = "enable-reached-code-profiler";
-
-// Specifies the profiling interval in microseconds for reached code profiler.
-const char kReachedCodeSamplingIntervalUs[] =
-    "reached-code-sampling-interval-us";
+// For testing, do not initialize child service process but also do not exit
+// (until requested by browser).
+const char kAndroidSkipChildServiceInitForTesting[] =
+    "android-skip-child-service-init-for-testing";
 
 // Default country code to be used for search engine localization.
 const char kDefaultCountryCodeAtInstall[] = "default-country-code";
@@ -165,16 +160,23 @@ const char kDefaultCountryCodeAtInstall[] = "default-country-code";
 // Adds additional thread idle time information into the trace event output.
 const char kEnableIdleTracing[] = "enable-idle-tracing";
 
-// The field trial parameters and their values when testing changes locally.
-const char kForceFieldTrialParams[] = "force-fieldtrial-params";
-
-#endif
-
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
-// TODO(crbug.com/1176772): Remove kEnableCrashpad and IsCrashpadEnabled() when
-// Crashpad is fully enabled on Linux. Indicates that Crashpad should be
-// enabled.
-extern const char kEnableCrashpad[] = "enable-crashpad";
+// When we retrieve the package name within the SDK Runtime, we need to use
+// a bit of a hack to do this by taking advantage of the fact that the pid
+// is the same pid as the application's pid + 10000.
+// see:
+// https://cs.android.com/android/platform/superproject/main/+/main:frameworks/base/core/java/android/os/Process.java;l=292;drc=47fffdd53115a9af1820e3f89d8108745be4b55d
+// When the render process is created however, it is just a regular isolated
+// process with no particular association so we can't perform the same hack.
+// When creating minidumps, the package name is retrieved from the process
+// meaning the render process minidumps would end up reporting a generic
+// process name not associated with the app.
+// We work around this by feeding through the host package information to the
+// render process when launching it.
+const char kHostPackageName[] = "host-package-name";
+const char kHostPackageLabel[] = "host-package-label";
+const char kHostVersionCode[] = "host-version-code";
+const char kPackageName[] = "package-name";
+const char kPackageVersionName[] = "package-version-name";
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS)

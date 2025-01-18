@@ -32,14 +32,15 @@
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
+#include "third_party/blink/renderer/core/layout/hit_test_location.h"
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/page/frame_tree.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/scoped_page_pauser.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
+#include "third_party/blink/renderer/core/timing/dom_window_performance.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "ui/display/screen_info.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -94,6 +95,7 @@ template <typename Delegate>
 static bool OpenJavaScriptDialog(LocalFrame* frame,
                                  const String& message,
                                  const Delegate& delegate) {
+  DOMWindowPerformance::performance(*frame->DomWindow())->WillShowModalDialog();
   // Suspend pages in case the client method runs a new event loop that would
   // otherwise cause the load to continue while we're in the middle of
   // executing JavaScript.
@@ -161,7 +163,7 @@ void ChromeClient::MouseDidMoveOverElement(LocalFrame& frame,
     WebPrescientNetworking* web_prescient_networking =
         frame.PrescientNetworking();
     if (web_prescient_networking) {
-      web_prescient_networking->PrefetchDNS(result.AbsoluteLinkURL().Host());
+      web_prescient_networking->PrefetchDNS(result.AbsoluteLinkURL());
     }
   }
 
@@ -206,7 +208,7 @@ void ChromeClient::UpdateTooltipUnderCursor(LocalFrame& frame,
   // The ::UpdateTooltipUnderCursor overload, which is be called down the road,
   // ensures a new tooltip to be displayed with the new context.
   if (result.InnerNodeOrImageMapImage() != last_mouse_over_node_ &&
-      !last_tool_tip_text_.IsEmpty() && tool_tip == last_tool_tip_text_)
+      !last_tool_tip_text_.empty() && tool_tip == last_tool_tip_text_)
     ClearToolTip(frame);
 
   last_tool_tip_point_ = location.Point();
@@ -268,6 +270,8 @@ bool ChromeClient::Print(LocalFrame* frame) {
         "Ignored call to 'print()' during prerendering."));
     return false;
   }
+
+  DOMWindowPerformance::performance(*frame->DomWindow())->WillShowModalDialog();
 
   // Suspend pages in case the client method runs a new event loop that would
   // otherwise cause the load to continue while we're in the middle of

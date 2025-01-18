@@ -20,7 +20,6 @@
 class ChromeDownloadManagerDelegate;
 class DownloadHistory;
 class DownloadUIController;
-class ExtensionDownloadsEventRouter;
 class Profile;
 
 namespace content {
@@ -48,12 +47,12 @@ class DownloadCoreServiceImpl : public DownloadCoreService {
   extensions::ExtensionDownloadsEventRouter* GetExtensionEventRouter() override;
 #endif
   bool HasCreatedDownloadManager() override;
-  int NonMaliciousDownloadCount() const override;
-  void CancelDownloads() override;
+  int BlockingShutdownCount() const override;
+  void CancelDownloads(
+      DownloadCoreService::CancelDownloadsTrigger trigger) override;
   void SetDownloadManagerDelegateForTesting(
       std::unique_ptr<ChromeDownloadManagerDelegate> delegate) override;
   bool IsDownloadUiEnabled() override;
-  bool IsDownloadObservedByExtension() override;
   DownloadUIController* GetDownloadUIController() override;
   void SetDownloadHistoryForTesting(
       std::unique_ptr<DownloadHistory> download_history) override;

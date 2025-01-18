@@ -6,8 +6,8 @@
 
 #include <memory>
 
-#include "base/bind.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/task/task_runner.h"
 #include "net/base/file_stream.h"
@@ -154,7 +154,6 @@ int UploadFileElementReader::DoLoop(int result) {
     switch (state) {
       case State::IDLE:
         NOTREACHED();
-        break;
       case State::OPEN:
         // Ignore previous result here. It's typically OK, but if Init()
         // interrupted the previous operation, it may be an error.

@@ -4,90 +4,68 @@
 
 package org.chromium.chrome.browser.toolbar.adaptive;
 
-import android.text.TextUtils;
+import android.content.Context;
 
-import androidx.annotation.IntDef;
 import androidx.annotation.VisibleForTesting;
 
+import org.chromium.base.FeatureList;
+import org.chromium.base.ResettersForTesting;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.readaloud.ReadAloudFeatures;
+import org.chromium.ui.base.DeviceFormFactor;
 
-import java.lang.annotation.Retention;
-import java.lang.annotation.RetentionPolicy;
+import java.util.HashMap;
+import java.util.List;
 
-/**
- * A utility class for handling feature flags used by {@link AdaptiveToolbarButtonController}.
- */
+/** A utility class for handling feature flags used by {@link AdaptiveToolbarButtonController}. */
 public class AdaptiveToolbarFeatures {
     /** Finch default group for new tab variation. */
     static final String NEW_TAB = "new-tab";
+
     /** Finch default group for share variation. */
     static final String SHARE = "share";
+
     /** Finch default group for voice search variation. */
     static final String VOICE = "voice";
 
-    /** Field trial params. */
-    private static final String VARIATION_PARAM_DEFAULT_SEGMENT = "default_segment";
-    private static final String VARIATION_PARAM_DISABLE_UI = "disable_ui";
-    private static final String VARIATION_PARAM_IGNORE_SEGMENTATION_RESULTS =
-            "ignore_segmentation_results";
-    private static final String VARIATION_PARAM_SHOW_UI_ONLY_AFTER_READY =
-            "show_ui_only_after_ready";
-    @VisibleForTesting
-    static final String VARIATION_PARAM_MIN_VERSION = "min_version_adaptive";
-    /**
-     * Version number in the scope of this feature. If {@link
-     * AdaptiveToolbarFeatures#VARIATION_PARAM_MIN_VERSION} is set to a int value larger than this,
-     * feature config must be ignored (disabled).
-     */
-    @VisibleForTesting
-    static final int VERSION = 4;
-
-    /** Default value to use in case finch param isn't available for default segment. */
-    private static final String DEFAULT_PARAM_VALUE_DEFAULT_SEGMENT = NEW_TAB;
-
-    /**
-     * Default minimum width to show the optional button.
-     */
+    /** Default minimum width to show the optional button. */
     public static final int DEFAULT_MIN_WIDTH_DP = 360;
 
-    /**
-     * Default delay between action chip expansion and collapse.
-     */
+    /** Default delay between action chip expansion and collapse. */
     public static final int DEFAULT_CONTEXTUAL_PAGE_ACTION_CHIP_DELAY_MS = 3000;
 
-    @AdaptiveToolbarButtonVariant
-    private static Integer sButtonVariant;
+    /** Default action chip delay for price tracking. */
+    public static final int DEFAULT_PRICE_TRACKING_ACTION_CHIP_DELAY_MS = 6000;
+
+    /** Default action chip delay for reader mode. */
+    public static final int DEFAULT_READER_MODE_ACTION_CHIP_DELAY_MS = 3000;
+
+    @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
+    public static final String CONTEXTUAL_PAGE_ACTION_TEST_FEATURE_NAME =
+            "CONTEXTUAL_PAGE_ACTION_TEST_FEATURE_NAME";
+
+    private static final String CONTEXTUAL_PAGE_ACTION_CHIP_ALTERNATE_COLOR =
+            "action_chip_with_different_color";
+
+    @AdaptiveToolbarButtonVariant private static Integer sButtonVariant;
 
     /** For testing only. */
     private static String sDefaultSegmentForTesting;
-    private static Boolean sIgnoreSegmentationResultsForTesting;
-    private static Boolean sDisableUiForTesting;
-    private static Boolean sShowUiOnlyAfterReadyForTesting;
+
+    private static HashMap<Integer, Boolean> sActionChipOverridesForTesting;
+    private static HashMap<Integer, Boolean> sAlternativeColorOverridesForTesting;
+    private static HashMap<Integer, Boolean> sIsDynamicActionOverridesForTesting;
 
     /**
-     * Unique identifiers for each of the possible button variants.
-     *
-     * <p>These values are persisted to logs. Entries should not be renumbered and numeric values
-     * should never be reused.
+     * @return Whether the button variant is a dynamic action.
      */
-    @IntDef({AdaptiveToolbarButtonVariant.UNKNOWN, AdaptiveToolbarButtonVariant.NONE,
-            AdaptiveToolbarButtonVariant.NEW_TAB, AdaptiveToolbarButtonVariant.SHARE,
-            AdaptiveToolbarButtonVariant.VOICE, AdaptiveToolbarButtonVariant.AUTO,
-            AdaptiveToolbarButtonVariant.PRICE_TRACKING})
-    @Retention(RetentionPolicy.SOURCE)
-    public @interface AdaptiveToolbarButtonVariant {
-        int UNKNOWN = 0;
-        int NONE = 1;
-        int NEW_TAB = 2;
-        int SHARE = 3;
-        int VOICE = 4;
-        int AUTO = 5;
-        int PRICE_TRACKING = 6;
-        int NUM_ENTRIES = 7;
-    }
-
-    /** @return Whether the button variant is a dynamic action. */
     public static boolean isDynamicAction(@AdaptiveToolbarButtonVariant int variant) {
+        if (sIsDynamicActionOverridesForTesting != null
+                && sIsDynamicActionOverridesForTesting.containsKey(variant)) {
+            return Boolean.TRUE.equals(sIsDynamicActionOverridesForTesting.get(variant));
+        }
+
         switch (variant) {
             case AdaptiveToolbarButtonVariant.UNKNOWN:
             case AdaptiveToolbarButtonVariant.NONE:
@@ -97,6 +75,9 @@ public class AdaptiveToolbarFeatures {
             case AdaptiveToolbarButtonVariant.AUTO:
                 return false;
             case AdaptiveToolbarButtonVariant.PRICE_TRACKING:
+            case AdaptiveToolbarButtonVariant.READER_MODE:
+            case AdaptiveToolbarButtonVariant.PRICE_INSIGHTS:
+            case AdaptiveToolbarButtonVariant.DISCOUNTS:
                 return true;
         }
         return false;
@@ -108,71 +89,141 @@ public class AdaptiveToolbarFeatures {
      * <p>Must be called with the {@link FeatureList} initialized.
      */
     public static boolean isCustomizationEnabled() {
-        if (!ChromeFeatureList.isEnabled(
-                    ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_V2)) {
-            return false;
-        }
-        final int minVersion = ChromeFeatureList.getFieldTrialParamByFeatureAsInt(
-                ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_V2,
-                VARIATION_PARAM_MIN_VERSION, 0);
-        return minVersion <= VERSION;
+        return ChromeFeatureList.sAdaptiveButtonInTopToolbarCustomizationV2.isEnabled();
     }
 
-    /** @return Whether the contextual page actions should show the action chip version. */
-    public static boolean shouldShowActionChip() {
-        return ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
-                ChromeFeatureList.CONTEXTUAL_PAGE_ACTION_PRICE_TRACKING, "action_chip", false);
+    /**
+     * @return Whether the contextual page action should show an action chip when appearing.
+     *     <li>If true, it will use the action chip animation using rate limiting from the
+     *         "IPH_ContextualPageActions_ActionChip" feature.
+     *     <li>If false, we'll show the button's IPH bubble specified on its ButtonData.
+     */
+    public static boolean shouldShowActionChip(@AdaptiveToolbarButtonVariant int buttonVariant) {
+        if (!isDynamicAction(buttonVariant)) return false;
+        if (sActionChipOverridesForTesting != null
+                && sActionChipOverridesForTesting.containsKey(buttonVariant)) {
+            return Boolean.TRUE.equals(sActionChipOverridesForTesting.get(buttonVariant));
+        }
+
+        // Price tracking, price insights and reader mode launched with the action chip variant.
+        switch (buttonVariant) {
+            case AdaptiveToolbarButtonVariant.PRICE_TRACKING:
+            case AdaptiveToolbarButtonVariant.READER_MODE:
+            case AdaptiveToolbarButtonVariant.PRICE_INSIGHTS:
+            case AdaptiveToolbarButtonVariant.DISCOUNTS:
+            case AdaptiveToolbarButtonVariant.TEST_BUTTON:
+                return true;
+            default:
+                assert false : "Unknown button variant " + buttonVariant;
+                return false;
+        }
     }
 
     /**
      * @return The amount of time the action chip should remain expanded in milliseconds. Default is
-     *         3 seconds.
+     *     3 seconds.
      */
-    public static int getContextualPageActionDelayMs() {
-        return ChromeFeatureList.getFieldTrialParamByFeatureAsInt(
-                ChromeFeatureList.CONTEXTUAL_PAGE_ACTION_PRICE_TRACKING, "action_chip_time_ms",
-                DEFAULT_CONTEXTUAL_PAGE_ACTION_CHIP_DELAY_MS);
+    public static int getContextualPageActionDelayMs(
+            @AdaptiveToolbarButtonVariant int buttonVariant) {
+        switch (buttonVariant) {
+            case AdaptiveToolbarButtonVariant.PRICE_TRACKING:
+            case AdaptiveToolbarButtonVariant.PRICE_INSIGHTS:
+            case AdaptiveToolbarButtonVariant.DISCOUNTS:
+            case AdaptiveToolbarButtonVariant.TEST_BUTTON:
+                return DEFAULT_PRICE_TRACKING_ACTION_CHIP_DELAY_MS;
+            case AdaptiveToolbarButtonVariant.READER_MODE:
+                return DEFAULT_READER_MODE_ACTION_CHIP_DELAY_MS;
+            default:
+                assert false : "Unknown button variant " + buttonVariant;
+                return DEFAULT_CONTEXTUAL_PAGE_ACTION_CHIP_DELAY_MS;
+        }
     }
 
     /**
      * @return Whether the CPA action chip should use a different background color when expanded.
      */
-    public static boolean shouldUseAlternativeActionChipColor() {
-        return ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
-                ChromeFeatureList.CONTEXTUAL_PAGE_ACTION_PRICE_TRACKING,
-                "action_chip_with_different_color", false);
+    public static boolean shouldUseAlternativeActionChipColor(
+            @AdaptiveToolbarButtonVariant int buttonVariant) {
+        if (sAlternativeColorOverridesForTesting != null
+                && sAlternativeColorOverridesForTesting.containsKey(buttonVariant)) {
+            return Boolean.TRUE.equals(sAlternativeColorOverridesForTesting.get(buttonVariant));
+        }
+        // Price tracking, price insights and reader mode launched without using alternative color.
+        switch (buttonVariant) {
+            case AdaptiveToolbarButtonVariant.PRICE_TRACKING:
+            case AdaptiveToolbarButtonVariant.READER_MODE:
+            case AdaptiveToolbarButtonVariant.PRICE_INSIGHTS:
+                return false;
+            case AdaptiveToolbarButtonVariant.DISCOUNTS:
+                return ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
+                        ChromeFeatureList.ENABLE_DISCOUNT_INFO_API,
+                        CONTEXTUAL_PAGE_ACTION_CHIP_ALTERNATE_COLOR,
+                        false);
+            default:
+                assert false : "Unknown button variant " + buttonVariant;
+                return false;
+        }
     }
 
     /**
+     * We guard contextual page actions behind a feature flag, since all segmentation platform
+     * powered functionalities require a feature flag.
+     *
      * @return Whether contextual page actions are enabled.
      */
     public static boolean isContextualPageActionsEnabled() {
-        // TODO(shaktisahu): These checks must match the ones when creating config. Maybe introduce
-        // a something common for android clients.
-        return ChromeFeatureList.isEnabled(ChromeFeatureList.CONTEXTUAL_PAGE_ACTIONS)
-                && ChromeFeatureList.isEnabled(
-                        ChromeFeatureList.CONTEXTUAL_PAGE_ACTION_PRICE_TRACKING)
-                && ChromeFeatureList.isEnabled(ChromeFeatureList.SHOPPING_LIST);
+        return ChromeFeatureList.isEnabled(ChromeFeatureList.CONTEXTUAL_PAGE_ACTIONS);
+    }
+
+    public static boolean isAdaptiveToolbarPageSummaryEnabled() {
+        return ChromeFeatureList.isEnabled(
+                ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_PAGE_SUMMARY);
+    }
+
+    public static boolean isPriceInsightsPageActionEnabled() {
+        return ChromeFeatureList.isEnabled(ChromeFeatureList.PRICE_INSIGHTS);
+    }
+
+    public static boolean isAdaptiveToolbarReadAloudEnabled(Profile profile) {
+        return ReadAloudFeatures.isAllowed(profile);
+    }
+
+    public static boolean isDiscountsPageActionEnabled() {
+        return ChromeFeatureList.sEnableDiscountInfoApi.isEnabled();
     }
 
     /**
-     * @return Whether contextual page actions UI is enabled.
+     * Returns top choice from segmentation results based on device form-factor.
+     *
+     * @param context Context to determine form factor.
+     * @param segmentationResults List of rank-ordered results obtained from segmentation.
+     * @return Top result to use for UI flows.
      */
-    public static boolean isContextualPageActionUiEnabled() {
-        return ChromeFeatureList.isEnabled(ChromeFeatureList.CONTEXTUAL_PAGE_ACTIONS)
-                && ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
-                        ChromeFeatureList.CONTEXTUAL_PAGE_ACTIONS, "enable_ui", true);
+    public static @AdaptiveToolbarButtonVariant int getTopSegmentationResult(
+            Context context, List<Integer> segmentationResults) {
+        if (DeviceFormFactor.isNonMultiDisplayContextOnTablet(context)) {
+            // Exclude NTB and Bookmarks from segmentation results on tablets since these buttons
+            // are available on top chrome (on tab strip and omnibox).
+            for (int result : segmentationResults) {
+                if (AdaptiveToolbarButtonVariant.NEW_TAB == result
+                        || AdaptiveToolbarButtonVariant.ADD_TO_BOOKMARKS == result) continue;
+                return result;
+            }
+            return AdaptiveToolbarButtonVariant.UNKNOWN;
+        }
+        return segmentationResults.get(0);
     }
 
     /**
      * Returns the default variant to be shown in segmentation experiment when the backend results
      * are unavailable or not configured.
+     *
+     * @param context Context to determine form-factor.
      */
-    @AdaptiveToolbarButtonVariant
-    static int getSegmentationDefault() {
+    static @AdaptiveToolbarButtonVariant int getSegmentationDefault(Context context) {
         assert isCustomizationEnabled();
         if (sButtonVariant != null) return sButtonVariant;
-        String defaultSegment = getDefaultSegment();
+        String defaultSegment = getDefaultSegment(context);
         switch (defaultSegment) {
             case NEW_TAB:
                 sButtonVariant = AdaptiveToolbarButtonVariant.NEW_TAB;
@@ -190,79 +241,51 @@ public class AdaptiveToolbarFeatures {
         return sButtonVariant;
     }
 
-    /** Returns the default segment set by the finch experiment. */
-    static String getDefaultSegment() {
+    /**
+     * Returns the default segment to be selected in absence of a valid segmentation result.
+     *
+     * @param context Context to determine form-factor. Defaults defer by form-factor.
+     */
+    static String getDefaultSegment(Context context) {
         if (sDefaultSegmentForTesting != null) return sDefaultSegmentForTesting;
-
-        String defaultSegment = ChromeFeatureList.getFieldTrialParamByFeature(
-                ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_V2,
-                VARIATION_PARAM_DEFAULT_SEGMENT);
-        if (TextUtils.isEmpty(defaultSegment)) return DEFAULT_PARAM_VALUE_DEFAULT_SEGMENT;
-        return defaultSegment;
+        return DeviceFormFactor.isNonMultiDisplayContextOnTablet(context) ? SHARE : NEW_TAB;
     }
 
-    /** Returns whether we should ignore the segmentation backend results. */
-    static boolean ignoreSegmentationResults() {
-        if (sIgnoreSegmentationResultsForTesting != null) {
-            return sIgnoreSegmentationResultsForTesting;
-        }
-
-        return ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
-                ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_V2,
-                VARIATION_PARAM_IGNORE_SEGMENTATION_RESULTS, false);
-    }
-
-    /**
-     * Returns whether the UI should be disabled. If disabled, the UI will ignore the backend
-     * results.
-     */
-    static boolean disableUi() {
-        if (sDisableUiForTesting != null) return sDisableUiForTesting;
-
-        return ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
-                ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_V2,
-                VARIATION_PARAM_DISABLE_UI, false);
-    }
-
-    /**
-     * Returns whether the UI can be shown only after the backend is ready and has sufficient
-     * information for result computation.
-     */
-    static boolean showUiOnlyAfterReady() {
-        if (sShowUiOnlyAfterReadyForTesting != null) return sShowUiOnlyAfterReadyForTesting;
-
-        return ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
-                ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_V2,
-                VARIATION_PARAM_SHOW_UI_ONLY_AFTER_READY, true);
-    }
-
-    @VisibleForTesting
     static void setDefaultSegmentForTesting(String defaultSegment) {
         sDefaultSegmentForTesting = defaultSegment;
+        ResettersForTesting.register(() -> sDefaultSegmentForTesting = null);
     }
 
-    @VisibleForTesting
-    static void setIgnoreSegmentationResultsForTesting(boolean ignoreSegmentationResults) {
-        sIgnoreSegmentationResultsForTesting = ignoreSegmentationResults;
+    public static void setActionChipOverrideForTesting(
+            @AdaptiveToolbarButtonVariant int buttonVariant, Boolean useActionChip) {
+        if (sActionChipOverridesForTesting == null) {
+            sActionChipOverridesForTesting = new HashMap<>();
+        }
+        sActionChipOverridesForTesting.put(buttonVariant, useActionChip);
+        ResettersForTesting.register(() -> sActionChipOverridesForTesting = null);
     }
 
-    @VisibleForTesting
-    static void setDisableUiForTesting(boolean disableUi) {
-        sDisableUiForTesting = disableUi;
+    public static void setAlternativeColorOverrideForTesting(
+            @AdaptiveToolbarButtonVariant int buttonVariant, Boolean useAlternativeColor) {
+        if (sAlternativeColorOverridesForTesting == null) {
+            sAlternativeColorOverridesForTesting = new HashMap<>();
+        }
+        sAlternativeColorOverridesForTesting.put(buttonVariant, useAlternativeColor);
+        ResettersForTesting.register(() -> sAlternativeColorOverridesForTesting = null);
     }
 
-    @VisibleForTesting
-    static void setShowUiOnlyAfterReadyForTesting(boolean showUiOnlyAfterReady) {
-        sShowUiOnlyAfterReadyForTesting = showUiOnlyAfterReady;
+    public static void setIsDynamicActionForTesting(
+            @AdaptiveToolbarButtonVariant int buttonVariant, Boolean isDynamicAction) {
+        if (sIsDynamicActionOverridesForTesting == null) {
+            sIsDynamicActionOverridesForTesting = new HashMap<>();
+        }
+        sIsDynamicActionOverridesForTesting.put(buttonVariant, isDynamicAction);
+        ResettersForTesting.register(() -> sIsDynamicActionOverridesForTesting = null);
     }
 
-    @VisibleForTesting
     public static void clearParsedParamsForTesting() {
         sButtonVariant = null;
         sDefaultSegmentForTesting = null;
-        sIgnoreSegmentationResultsForTesting = null;
-        sDisableUiForTesting = null;
-        sShowUiOnlyAfterReadyForTesting = null;
     }
 
     private AdaptiveToolbarFeatures() {}
@@ -271,6 +294,7 @@ public class AdaptiveToolbarFeatures {
     public static int getDeviceMinimumWidthForShowingButton() {
         return ChromeFeatureList.getFieldTrialParamByFeatureAsInt(
                 ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_V2,
-                "minimum_width_dp", DEFAULT_MIN_WIDTH_DP);
+                "minimum_width_dp",
+                DEFAULT_MIN_WIDTH_DP);
     }
 }

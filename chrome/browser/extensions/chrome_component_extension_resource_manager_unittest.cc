@@ -2,9 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <optional>
+
 #include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/common/chrome_paths.h"
@@ -15,14 +18,14 @@
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
-#include "extensions/common/extension_icon_set.h"
 #include "extensions/common/extension_resource.h"
 #include "extensions/common/file_util.h"
+#include "extensions/common/icons/extension_icon_set.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_handlers/icons_handler.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
 #include "ui/file_manager/grit/file_manager_resources.h"
 #endif
 
@@ -47,9 +50,9 @@ TEST_F(ChromeComponentExtensionResourceManagerTest,
 
   // Load the manifest data.
   std::string error;
-  std::unique_ptr<base::DictionaryValue> manifest(file_util::LoadManifest(
+  std::optional<base::Value::Dict> manifest(file_util::LoadManifest(
       test_path, FILE_PATH_LITERAL("app.json"), &error));
-  ASSERT_TRUE(manifest.get()) << error;
+  ASSERT_TRUE(manifest) << error;
 
   // Build a path inside Chrome's resources directory where a component
   // extension might be installed.
@@ -64,12 +67,11 @@ TEST_F(ChromeComponentExtensionResourceManagerTest,
   ASSERT_TRUE(extension.get());
 
   // Load one of the icons.
-  ExtensionResource resource =
-      IconsInfo::GetIconResource(extension.get(),
-                                 extension_misc::EXTENSION_ICON_BITTY,
-                                 ExtensionIconSet::MATCH_EXACTLY);
+  ExtensionResource resource = IconsInfo::GetIconResource(
+      extension.get(), extension_misc::EXTENSION_ICON_BITTY,
+      ExtensionIconSet::Match::kExactly);
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   // The resource is a component resource.
   int resource_id = 0;
   ASSERT_TRUE(resource_manager->IsComponentExtensionResource(

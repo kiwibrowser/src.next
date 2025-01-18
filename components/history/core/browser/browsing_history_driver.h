@@ -7,7 +7,7 @@
 
 #include <vector>
 
-#include "base/callback_forward.h"
+#include "base/functional/callback_forward.h"
 #include "components/history/core/browser/browsing_history_service.h"
 #include "components/history/core/browser/history_types.h"
 
@@ -57,6 +57,9 @@ class BrowsingHistoryDriver {
   virtual void HasOtherFormsOfBrowsingHistory(bool has_other_forms,
                                               bool has_synced_results) {}
 
+  // Fetch all the app IDs used in the database.
+  virtual void OnGetAllAppIds(const std::vector<std::string>& app_ids) {}
+
   // If history deletions are currently allowed.
   virtual bool AllowHistoryDeletions() = 0;
 
@@ -76,8 +79,8 @@ class BrowsingHistoryDriver {
       base::OnceCallback<void(bool)> callback) = 0;
 
  protected:
-  BrowsingHistoryDriver() {}
-  virtual ~BrowsingHistoryDriver() {}
+  BrowsingHistoryDriver() = default;
+  virtual ~BrowsingHistoryDriver() = default;
 };
 
 }  // namespace history

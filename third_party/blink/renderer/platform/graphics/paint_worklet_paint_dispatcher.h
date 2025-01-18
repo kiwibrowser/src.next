@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,8 @@
 #include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/renderer/platform/graphics/paint_worklet_painter.h"
 #include "third_party/blink/renderer/platform/graphics/platform_paint_worklet_layer_painter.h"
-#include "third_party/blink/renderer/platform/heap/persistent.h"
+#include "third_party/blink/renderer/platform/heap/cross_thread_persistent.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
-#include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
 
 namespace blink {
 
@@ -42,6 +41,7 @@ class PLATFORM_EXPORT PaintWorkletPaintDispatcher {
   PaintWorkletPaintDispatcher(const PaintWorkletPaintDispatcher&) = delete;
   PaintWorkletPaintDispatcher& operator=(const PaintWorkletPaintDispatcher&) =
       delete;
+  virtual ~PaintWorkletPaintDispatcher() = default;
 
   // Dispatches a set of paint class instances - each represented by a
   // PaintWorkletInput - to the appropriate PaintWorklet threads, asynchronously
@@ -83,6 +83,9 @@ class PLATFORM_EXPORT PaintWorkletPaintDispatcher {
   const PaintWorkletPainterToTaskRunnerMap& PainterMapForTesting() const {
     return painter_map_;
   }
+
+ protected:
+  virtual scoped_refptr<base::SingleThreadTaskRunner> GetCompositorTaskRunner();
 
  private:
   // Called when results are available for the previous call to

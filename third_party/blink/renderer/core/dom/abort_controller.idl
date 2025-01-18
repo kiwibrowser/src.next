@@ -1,13 +1,13 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // https://dom.spec.whatwg.org/#interface-abortcontroller
 
 [
-    Exposed=(Window,Worker)
+    Exposed=(Window,Worker,ShadowRealm) // TODO(crbug.com/41480387): This should be Exposed=*
 ] interface AbortController {
-    [CallWith=ExecutionContext, Measure] constructor();
+    [CallWith=ScriptState, Measure] constructor();
     [SameObject] readonly attribute AbortSignal signal;
 
     [CallWith=ScriptState] void abort(optional any reason);

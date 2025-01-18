@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -57,7 +57,7 @@ class CORE_EXPORT WebAssociatedURLLoaderImpl final
   WebAssociatedURLLoaderClient* client_;
   WebAssociatedURLLoaderOptions options_;
 
-  // Converts ThreadableLoaderClient method calls into WebURLLoaderClient method
+  // Converts ThreadableLoaderClient method calls into URLLoaderClient method
   // calls.
   Persistent<ClientAdapter> client_adapter_;
   Persistent<ThreadableLoader> loader_;

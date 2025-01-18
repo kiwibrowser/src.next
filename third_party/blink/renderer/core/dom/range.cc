@@ -54,14 +54,16 @@
 #include "third_party/blink/renderer/core/highlight/highlight_registry.h"
 #include "third_party/blink/renderer/core/html/html_body_element.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
-#include "third_party/blink/renderer/core/layout/deferred_shaping_controller.h"
+#include "third_party/blink/renderer/core/html/html_html_element.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_text.h"
 #include "third_party/blink/renderer/core/layout/layout_text_fragment.h"
+#include "third_party/blink/renderer/core/page/scrolling/sync_scroll_attempt_heuristic.h"
 #include "third_party/blink/renderer/core/svg/svg_svg_element.h"
 #include "third_party/blink/renderer/core/trustedtypes/trusted_types_util.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "ui/gfx/geometry/quad_f.h"
 
@@ -218,10 +220,7 @@ void Range::setStart(Node* ref_node,
 
   start_.Set(*ref_node, offset, child_node);
 
-  if (did_move_document ||
-      HasDifferentRootContainer(&start_.Container(), &end_.Container()) ||
-      compareBoundaryPoints(start_, end_, ASSERT_NO_EXCEPTION) > 0)
-    collapse(true);
+  CollapseIfNeeded(did_move_document, /*collapse_to_start=*/true);
 }
 
 void Range::setEnd(Node* ref_node,
@@ -247,10 +246,7 @@ void Range::setEnd(Node* ref_node,
 
   end_.Set(*ref_node, offset, child_node);
 
-  if (did_move_document ||
-      HasDifferentRootContainer(&start_.Container(), &end_.Container()) ||
-      compareBoundaryPoints(start_, end_, ASSERT_NO_EXCEPTION) > 0)
-    collapse(false);
+  CollapseIfNeeded(did_move_document, /*collapse_to_start=*/false);
 }
 
 void Range::setStart(const Position& start, ExceptionState& exception_state) {
@@ -267,10 +263,22 @@ void Range::setEnd(const Position& end, ExceptionState& exception_state) {
 
 void Range::collapse(bool to_start) {
   RangeUpdateScope scope(this);
-  if (to_start)
+  if (to_start) {
     end_ = start_;
-  else
+  } else {
     start_ = end_;
+  }
+}
+
+void Range::CollapseIfNeeded(bool did_move_document, bool collapse_to_start) {
+  bool different_tree_scopes =
+      HasDifferentRootContainer(&start_.Container(), &end_.Container());
+  // If document moved, we are in different tree scopes, or start boundary point
+  // is after end boundary point, we should collapse the range.
+  if (did_move_document || different_tree_scopes ||
+      compareBoundaryPoints(start_, end_, ASSERT_NO_EXCEPTION) > 0) {
+    collapse(collapse_to_start);
+  }
 }
 
 bool Range::HasSameRoot(const Node& node) const {
@@ -336,10 +344,12 @@ int16_t Range::comparePoint(Node* ref_node,
     return 0;
 
   // compare to end, and point comes after
-  if (compareBoundaryPoints(ref_node, offset, &end_.Container(), end_.Offset(),
-                            exception_state) > 0 &&
-      !exception_state.HadException())
+  bool start_after_end =
+      compareBoundaryPoints(ref_node, offset, &end_.Container(), end_.Offset(),
+                            exception_state) > 0;
+  if (start_after_end && !exception_state.HadException()) {
     return 1;
+  }
 
   // point is in the middle of this range, or on the boundary points
   return 0;
@@ -393,7 +403,6 @@ int16_t Range::compareBoundaryPoints(unsigned how,
   }
 
   NOTREACHED();
-  return 0;
 }
 
 int16_t Range::compareBoundaryPoints(Node* container_a,
@@ -407,7 +416,7 @@ int16_t Range::compareBoundaryPoints(Node* container_a,
   if (disconnected) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kWrongDocumentError,
-        "The two ranges are in separate documents.");
+        "The two ranges are in separate tree scopes.");
     return 0;
   }
   return result;
@@ -423,8 +432,9 @@ int16_t Range::compareBoundaryPoints(const RangeBoundaryPoint& boundary_a,
 
 bool Range::BoundaryPointsValid() const {
   DummyExceptionStateForTesting exception_state;
-  return compareBoundaryPoints(start_, end_, exception_state) <= 0 &&
-         !exception_state.HadException();
+  bool start_after_end =
+      compareBoundaryPoints(start_, end_, exception_state) > 0;
+  return !start_after_end && !exception_state.HadException();
 }
 
 void Range::deleteContents(ExceptionState& exception_state) {
@@ -566,6 +576,10 @@ DocumentFragment* Range::ProcessContents(ActionType action,
         right_contents, common_root, exception_state);
   }
 
+  if (exception_state.HadException()) {
+    return nullptr;
+  }
+
   // delete all children of commonRoot between the start and end container
   Node* process_start = ChildOfCommonRootBeforeOffset(
       &original_start.Container(), original_start.Offset(), common_root);
@@ -579,13 +593,9 @@ DocumentFragment* Range::ProcessContents(ActionType action,
   // was partially selected.
   if (action == kExtractContents || action == kDeleteContents) {
     if (partial_start && common_root->contains(partial_start)) {
-      // FIXME: We should not continue if we have an earlier error.
-      exception_state.ClearException();
       setStart(partial_start->parentNode(), partial_start->NodeIndex() + 1,
                exception_state);
     } else if (partial_end && common_root->contains(partial_end)) {
-      // FIXME: We should not continue if we have an earlier error.
-      exception_state.ClearException();
       setStart(partial_end->parentNode(), partial_end->NodeIndex(),
                exception_state);
     }
@@ -719,14 +729,25 @@ Node* Range::ProcessAncestorsAndTheirSiblings(
       break;
     ancestors.push_back(runner);
   }
+  // Both https://dom.spec.whatwg.org/#concept-range-clone and
+  // https://dom.spec.whatwg.org/#concept-range-extract specify (in various
+  // ways) that nodes are to be processed in tree order. But the algorithm below
+  // processes in depth first order instead. So clone the nodes first here,
+  // in reverse order, so upgrades happen in the proper order.
+  HeapVector<Member<Node>> cloned_ancestors(ancestors.size(), nullptr);
+  auto clone_ptr = cloned_ancestors.rbegin();
+  for (auto it = ancestors.rbegin(); it != ancestors.rend(); ++it) {
+    *(clone_ptr++) = (*it)->cloneNode(false);
+  }
 
   Node* first_child_in_ancestor_to_process =
       direction == kProcessContentsForward ? container->nextSibling()
                                            : container->previousSibling();
-  for (const auto& ancestor : ancestors) {
+  for (wtf_size_t i = 0; i < ancestors.size(); ++i) {
+    const auto& ancestor = ancestors[i];
     if (action == kExtractContents || action == kCloneContents) {
       // Might have been removed already during mutation event.
-      if (Node* cloned_ancestor = ancestor->cloneNode(false)) {
+      if (auto cloned_ancestor = cloned_ancestors[i]) {
         cloned_ancestor->appendChild(cloned_container, exception_state);
         cloned_container = cloned_ancestor;
       }
@@ -868,9 +889,11 @@ void Range::insertNode(Node* new_node, ExceptionState& exception_state) {
                                          : To<ContainerNode>(start_node);
 
   // 6. Ensure pre-insertion validity of node into parent before referenceNode.
-  if (!parent.EnsurePreInsertionValidity(*new_node, reference_node, nullptr,
-                                         exception_state))
+  if (!parent.EnsurePreInsertionValidity(new_node, /*new_children*/ nullptr,
+                                         reference_node, nullptr,
+                                         exception_state)) {
     return;
+  }
 
   EventQueueScope scope;
   // 7. If range's start node is a Text node, set referenceNode to the result of
@@ -1054,7 +1077,6 @@ Node* Range::CheckNodeWOffset(Node* n,
     }
   }
   NOTREACHED();
-  return nullptr;
 }
 
 void Range::CheckNodeBA(Node* n, ExceptionState& exception_state) const {
@@ -1262,13 +1284,15 @@ void Range::surroundContents(Node* new_parent,
 
   // 1. If a non-Text node is partially contained in the context object, then
   // throw an InvalidStateError.
-  Node* start_non_text_container = &start_.Container();
-  if (start_non_text_container->getNodeType() == Node::kTextNode)
-    start_non_text_container = start_non_text_container->parentNode();
-  Node* end_non_text_container = &end_.Container();
-  if (end_non_text_container->getNodeType() == Node::kTextNode)
-    end_non_text_container = end_non_text_container->parentNode();
-  if (start_non_text_container != end_non_text_container) {
+  Node* start_node = &start_.Container();
+  Node* end_node = &end_.Container();
+  if (start_node->IsTextNode()) {
+    start_node = start_node->parentNode();
+  }
+  if (end_node->IsTextNode()) {
+    end_node = end_node->parentNode();
+  }
+  if (start_node != end_node) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidStateError,
         "The Range has partially selected a non-Text node.");
@@ -1371,34 +1395,16 @@ bool AreRangesEqual(const Range* a, const Range* b) {
 static inline void BoundaryNodeChildrenWillBeRemoved(
     RangeBoundaryPoint& boundary,
     ContainerNode& container) {
-  for (Node* node_to_be_removed = container.firstChild(); node_to_be_removed;
-       node_to_be_removed = node_to_be_removed->nextSibling()) {
-    if (boundary.ChildBefore() == node_to_be_removed) {
-      boundary.SetToStartOfNode(container);
-      return;
-    }
-
-    for (Node* n = &boundary.Container(); n; n = n->parentNode()) {
-      if (n == node_to_be_removed) {
-        boundary.SetToStartOfNode(container);
-        return;
-      }
-    }
+  if (container.contains(&boundary.Container())) {
+    boundary.SetToStartOfNode(container);
   }
 }
 
 static void BoundaryShadowNodeChildrenWillBeRemoved(
     RangeBoundaryPoint& boundary,
     ContainerNode& container) {
-  for (Node* node_to_be_removed = container.firstChild(); node_to_be_removed;
-       node_to_be_removed = node_to_be_removed->nextSibling()) {
-    for (Node* n = &boundary.Container(); n;
-         n = n->ParentOrShadowHostElement()) {
-      if (n == node_to_be_removed) {
-        boundary.SetToStartOfNode(container);
-        return;
-      }
-    }
+  if (boundary.Container().IsDescendantOrShadowDescendantOf(&container)) {
+    boundary.SetToStartOfNode(container);
   }
 }
 
@@ -1414,19 +1420,21 @@ void Range::FixupRemovedChildrenAcrossShadowBoundary(ContainerNode& container) {
   BoundaryShadowNodeChildrenWillBeRemoved(end_, container);
 }
 
-static inline void BoundaryNodeWillBeRemoved(RangeBoundaryPoint& boundary,
+// Returns true if `boundary` was modified.
+static inline bool BoundaryNodeWillBeRemoved(RangeBoundaryPoint& boundary,
                                              Node& node_to_be_removed) {
   if (boundary.ChildBefore() == node_to_be_removed) {
     boundary.ChildBeforeWillBeRemoved();
-    return;
+    return true;
   }
 
   for (Node* n = &boundary.Container(); n; n = n->parentNode()) {
     if (n == node_to_be_removed) {
       boundary.SetToBeforeChild(node_to_be_removed);
-      return;
+      return true;
     }
   }
+  return false;
 }
 
 static inline void BoundaryShadowNodeWillBeRemoved(RangeBoundaryPoint& boundary,
@@ -1450,8 +1458,14 @@ void Range::NodeWillBeRemoved(Node& node) {
   // should change following if-statement to DCHECK(!node->parentNode).
   if (!node.parentNode())
     return;
-  BoundaryNodeWillBeRemoved(start_, node);
-  BoundaryNodeWillBeRemoved(end_, node);
+  const bool is_collapsed = collapsed();
+  const bool start_updated = BoundaryNodeWillBeRemoved(start_, node);
+  if (is_collapsed) {
+    if (start_updated)
+      end_ = start_;
+  } else {
+    BoundaryNodeWillBeRemoved(end_, node);
+  }
 }
 
 void Range::FixupRemovedNodeAcrossShadowBoundary(Node& node) {
@@ -1593,10 +1607,9 @@ void Range::expand(const String& unit, ExceptionState& exception_state) {
 }
 
 DOMRectList* Range::getClientRects() const {
-  if (owner_document_->View()) {
-    DeferredShapingController::From(*owner_document_)
-        ->ReshapeAllDeferred(ReshapeReason::kGeometryApi);
-  }
+  // TODO(crbug.com/1499981): This should be removed once synchronized scrolling
+  // impact is understood.
+  SyncScrollAttemptHeuristic::DidAccessScrollOffset();
   DisplayLockUtilities::ScopedForcedUpdate force_locks(
       this, DisplayLockContext::ForcedPhase::kLayout);
   owner_document_->UpdateStyleAndLayout(DocumentUpdateReason::kJavaScript);
@@ -1608,6 +1621,9 @@ DOMRectList* Range::getClientRects() const {
 }
 
 DOMRect* Range::getBoundingClientRect() const {
+  // TODO(crbug.com/1499981): This should be removed once synchronized scrolling
+  // impact is understood.
+  SyncScrollAttemptHeuristic::DidAccessScrollOffset();
   return DOMRect::FromRectF(BoundingRect());
 }
 
@@ -1720,11 +1736,7 @@ void Range::GetBorderAndTextQuads(Vector<gfx::QuadF>& quads) const {
 }
 
 gfx::RectF Range::BoundingRect() const {
-  if (owner_document_->View()) {
-    DeferredShapingController::From(*owner_document_)
-        ->ReshapeAllDeferred(ReshapeReason::kGeometryApi);
-  }
-  absl::optional<DisplayLockUtilities::ScopedForcedUpdate> force_locks;
+  std::optional<DisplayLockUtilities::ScopedForcedUpdate> force_locks;
   if (!collapsed()) {
     force_locks = DisplayLockUtilities::ScopedForcedUpdate(
         this, DisplayLockContext::ForcedPhase::kLayout);
@@ -1742,7 +1754,7 @@ gfx::RectF Range::BoundingRect() const {
     result.Union(quad.BoundingBox());  // Skips empty rects.
 
   // If all rects are empty, return the first rect.
-  if (result.IsEmpty() && !quads.IsEmpty())
+  if (result.IsEmpty() && !quads.empty())
     return quads.front().BoundingBox();
 
   return result;

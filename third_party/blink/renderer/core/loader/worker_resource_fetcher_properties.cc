@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,10 +40,6 @@ bool WorkerResourceFetcherProperties::IsPaused() const {
 
 LoaderFreezeMode WorkerResourceFetcherProperties::FreezeMode() const {
   return global_scope_->GetLoaderFreezeMode();
-}
-
-const KURL& WorkerResourceFetcherProperties::WebBundlePhysicalUrl() const {
-  return NullURL();
 }
 
 int WorkerResourceFetcherProperties::GetOutstandingThrottledLimit() const {

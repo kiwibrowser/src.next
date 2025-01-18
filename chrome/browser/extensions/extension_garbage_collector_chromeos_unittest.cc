@@ -32,7 +32,6 @@
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/install_flag.h"
 #include "extensions/common/extension_builder.h"
-#include "extensions/common/value_builder.h"
 #include "ppapi/buildflags/buildflags.h"
 
 #if BUILDFLAG(ENABLE_PLUGINS)
@@ -93,29 +92,25 @@ class ExtensionGarbageCollectorChromeOSUnitTest
                                   const std::string& version,
                                   const std::string& users_string,
                                   const base::FilePath& path) {
-    DictionaryPrefUpdate shared_extensions(
+    ScopedDictPrefUpdate shared_extensions(
         testing_local_state_.Get(),
         ExtensionAssetsManagerChromeOS::kSharedExtensions);
 
-    base::Value* extension_info_weak = shared_extensions->FindDictKey(id);
-    if (!extension_info_weak) {
-      extension_info_weak = shared_extensions->SetKey(
-          id, base::Value(base::Value::Type::DICTIONARY));
-    }
+    base::Value::Dict* extension_info_weak = shared_extensions->EnsureDict(id);
 
-    base::Value version_info(base::Value::Type::DICTIONARY);
-    version_info.SetStringKey(
-        ExtensionAssetsManagerChromeOS::kSharedExtensionPath, path.value());
+    base::Value::Dict version_info;
+    version_info.Set(ExtensionAssetsManagerChromeOS::kSharedExtensionPath,
+                     path.value());
 
-    base::Value users(base::Value::Type::LIST);
+    base::Value::List users;
     for (const std::string& user :
          base::SplitString(users_string, ",", base::KEEP_WHITESPACE,
                            base::SPLIT_WANT_NONEMPTY)) {
       users.Append(user);
     }
-    version_info.SetKey(ExtensionAssetsManagerChromeOS::kSharedExtensionUsers,
-                        std::move(users));
-    extension_info_weak->SetKey(version, std::move(version_info));
+    version_info.Set(ExtensionAssetsManagerChromeOS::kSharedExtensionUsers,
+                     std::move(users));
+    extension_info_weak->Set(version, std::move(version_info));
   }
 
   scoped_refptr<const Extension> CreateExtension(const std::string& id,
@@ -168,11 +163,8 @@ TEST_F(ExtensionGarbageCollectorChromeOSUnitTest, SharedExtensions) {
   scoped_refptr<const Extension> extension2 =
       CreateExtension(kExtensionId2, "1.0", path_id2_1);
   GetExtensionPrefs()->SetDelayedInstallInfo(
-      extension2.get(),
-      Extension::ENABLED,
-      kInstallFlagNone,
-      ExtensionPrefs::DELAY_REASON_WAIT_FOR_IDLE,
-      syncer::StringOrdinal(),
+      extension2.get(), Extension::ENABLED, kInstallFlagNone,
+      ExtensionPrefs::DelayReason::kWaitForIdle, syncer::StringOrdinal(),
       std::string());
   EXPECT_TRUE(base::PathExists(path_id2_1));
 

@@ -16,9 +16,7 @@ import androidx.annotation.ColorInt;
 
 import org.junit.Assert;
 import org.junit.Before;
-import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
@@ -27,16 +25,12 @@ import org.robolectric.annotation.Config;
 import org.chromium.base.ObserverList.RewindableIterator;
 import org.chromium.base.UserDataHost;
 import org.chromium.base.test.BaseRobolectricTestRunner;
-import org.chromium.base.test.util.JniMocker;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
-import org.chromium.chrome.test.util.browser.Features;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.url.JUnitTestGURLs;
 
 /** Unit tests for {@link TabFavicon}. */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
-@Features.EnableFeatures(ChromeFeatureList.ANDROID_SCROLL_OPTIMIZATIONS)
 public class TabFaviconTest {
     private static final int IDEAL_SIZE = 4;
 
@@ -45,29 +39,21 @@ public class TabFaviconTest {
         public boolean hasNext() {
             return false;
         }
+
         @Override
         public TabObserver next() {
             return null;
         }
+
         @Override
         public void rewind() {}
     }
 
-    @Rule
-    public JniMocker mJniMocker = new JniMocker();
-    @Rule
-    public TestRule mProcessor = new Features.JUnitProcessor();
-
-    @Mock
-    private TabFavicon.Natives mTabFaviconJni;
-    @Mock
-    private TabImpl mTab;
-    @Mock
-    private Context mContext;
-    @Mock
-    private Resources mResources;
-    @Mock
-    private WebContents mWebContents;
+    @Mock private TabFavicon.Natives mTabFaviconJni;
+    @Mock private TabImpl mTab;
+    @Mock private Context mContext;
+    @Mock private Resources mResources;
+    @Mock private WebContents mWebContents;
 
     private UserDataHost mUserDataHost;
     private TabFavicon mTabFavicon;
@@ -75,7 +61,7 @@ public class TabFaviconTest {
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
-        mJniMocker.mock(TabFaviconJni.TEST_HOOKS, mTabFaviconJni);
+        TabFaviconJni.setInstanceForTesting(mTabFaviconJni);
 
         mUserDataHost = new UserDataHost();
         doReturn(mUserDataHost).when(mTab).getUserDataHost();
@@ -85,7 +71,7 @@ public class TabFaviconTest {
         doReturn(false).when(mTab).isNativePage();
         doReturn(true).when(mTab).isInitialized();
         doReturn(mWebContents).when(mTab).getWebContents();
-        doReturn(JUnitTestGURLs.getGURL(JUnitTestGURLs.EXAMPLE_URL)).when(mTab).getUrl();
+        doReturn(JUnitTestGURLs.EXAMPLE_URL).when(mTab).getUrl();
         doReturn(new EmptyIterator()).when(mTab).getTabObservers();
 
         mTabFavicon = TabFavicon.from(mTab);
@@ -102,7 +88,11 @@ public class TabFaviconTest {
     }
 
     private void onFaviconAvailable(Bitmap bitmap) {
-        mTabFavicon.onFaviconAvailable(bitmap, JUnitTestGURLs.getGURL(JUnitTestGURLs.EXAMPLE_URL));
+        // Mimic the behavior of the native call, where `TabFavicon#shouldUpdateFaviconForBrowserUi`
+        // is checked first before sending the bitmap into Java layer.
+        if (mTabFavicon.shouldUpdateFaviconForBrowserUi(bitmap.getWidth(), bitmap.getHeight())) {
+            mTabFavicon.onFaviconAvailable(bitmap, JUnitTestGURLs.EXAMPLE_URL);
+        }
     }
 
     @Test

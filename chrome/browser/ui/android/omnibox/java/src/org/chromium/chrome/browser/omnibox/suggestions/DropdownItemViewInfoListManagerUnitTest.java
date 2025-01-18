@@ -4,19 +4,13 @@
 
 package org.chromium.chrome.browser.omnibox.suggestions;
 
-import static org.mockito.Mockito.any;
-import static org.mockito.Mockito.eq;
-import static org.mockito.Mockito.reset;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
-import android.content.Context;
-import android.util.SparseArray;
-import android.view.View;
+import static org.chromium.components.omnibox.GroupConfigTestSupport.SECTION_1_NO_HEADER;
+import static org.chromium.components.omnibox.GroupConfigTestSupport.SECTION_2_WITH_HEADER;
 
-import androidx.test.filters.SmallTest;
+import android.content.Context;
+import android.view.View;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -24,6 +18,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.annotation.Config;
@@ -31,30 +26,24 @@ import org.robolectric.annotation.Config;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
-import org.chromium.components.omnibox.AutocompleteResult.GroupDetails;
+import org.chromium.components.omnibox.suggestions.OmniboxSuggestionUiType;
 import org.chromium.ui.modelutil.ListObservable.ListObserver;
 import org.chromium.ui.modelutil.MVCListAdapter.ModelList;
 import org.chromium.ui.modelutil.PropertyModel;
-import org.chromium.url.ShadowGURL;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-/**
- * Tests for {@link DropdownItemViewInfoListManager}.
- */
+/** Tests for {@link DropdownItemViewInfoListManager}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(manifest = Config.NONE, shadows = {ShadowGURL.class})
+@Config(manifest = Config.NONE)
 public class DropdownItemViewInfoListManagerUnitTest {
-    private static final int MINIMUM_NUMBER_OF_SUGGESTIONS_TO_SHOW = 5;
-    private static final int SUGGESTION_MIN_HEIGHT = 20;
-    private static final int HEADER_MIN_HEIGHT = 15;
-
     public @Rule MockitoRule mockitoRule = MockitoJUnit.rule();
 
-    private @Mock DropdownItemProcessor mBasicSuggestionProcessor;
-    private @Mock DropdownItemProcessor mHeaderProcessor;
+    private @Spy SuggestionProcessor mBasicSuggestionProcessor;
+    private @Spy SuggestionProcessor mEditUrlSuggestionProcessor;
+    private @Spy DropdownItemProcessor mHeaderProcessor;
     private @Mock PropertyModel mModel;
     private @Mock ListObserver<Void> mListObserver;
 
@@ -65,6 +54,8 @@ public class DropdownItemViewInfoListManagerUnitTest {
     @Before
     public void setUp() {
         when(mBasicSuggestionProcessor.getViewTypeId()).thenReturn(OmniboxSuggestionUiType.DEFAULT);
+        when(mEditUrlSuggestionProcessor.getViewTypeId())
+                .thenReturn(OmniboxSuggestionUiType.EDIT_URL_SUGGESTION);
         when(mHeaderProcessor.getViewTypeId()).thenReturn(OmniboxSuggestionUiType.HEADER);
 
         mSuggestionModels = new ModelList();
@@ -72,18 +63,21 @@ public class DropdownItemViewInfoListManagerUnitTest {
 
         mContext = ContextUtils.getApplicationContext();
         mManager = new DropdownItemViewInfoListManager(mSuggestionModels, mContext);
+        mManager.onNativeInitialized();
     }
 
     /**
-     * Verify that the content of the resulting Suggestions list matches the supplied list.
-     * Asserts if the two lists differ.
+     * Verify that the content of the resulting Suggestions list matches the supplied list. Asserts
+     * if the two lists differ.
      */
     private void verifyModelEquals(List<DropdownItemViewInfo> expected) {
         Assert.assertEquals(expected.size(), mSuggestionModels.size());
 
         for (int index = 0; index < expected.size(); index++) {
-            Assert.assertEquals("Element at position " + index + " does not match",
-                    expected.get(index), mSuggestionModels.get(index));
+            Assert.assertEquals(
+                    "Element at position " + index + " does not match",
+                    expected.get(index),
+                    mSuggestionModels.get(index));
         }
     }
 
@@ -93,223 +87,24 @@ public class DropdownItemViewInfoListManagerUnitTest {
     private void verifyPropertyValues(
             int layoutDirection, @BrandedColorScheme int brandedColorScheme) {
         for (int index = 0; index < mSuggestionModels.size(); index++) {
-            Assert.assertEquals("Unexpected layout direction for suggestion at position " + index,
+            Assert.assertEquals(
+                    "Unexpected layout direction for suggestion at position " + index,
                     layoutDirection,
-                    mSuggestionModels.get(index).model.get(
-                            SuggestionCommonProperties.LAYOUT_DIRECTION));
-            Assert.assertEquals("Unexpected visual theme for suggestion at position " + index,
+                    mSuggestionModels
+                            .get(index)
+                            .model
+                            .get(SuggestionCommonProperties.LAYOUT_DIRECTION));
+            Assert.assertEquals(
+                    "Unexpected visual theme for suggestion at position " + index,
                     brandedColorScheme,
-                    mSuggestionModels.get(index).model.get(
-                            SuggestionCommonProperties.COLOR_SCHEME));
+                    mSuggestionModels
+                            .get(index)
+                            .model
+                            .get(SuggestionCommonProperties.COLOR_SCHEME));
         }
     }
 
     @Test
-    @SmallTest
-    public void modelUpdates_visibilityChangesOnlyUpdateTheModel() {
-        // This change confirms that we do not re-create entire model, but instead insert/remove
-        // items that have been added/removed from the list.
-        final List<DropdownItemViewInfo> list = Arrays.asList(
-                // Group 1: header + 2 suggestions
-                new DropdownItemViewInfo(mHeaderProcessor, mModel, 1),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 1),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 1),
-                // Group 2: header + 2 suggestions
-                new DropdownItemViewInfo(mHeaderProcessor, mModel, 2),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 2),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 2));
-
-        mManager.setSourceViewInfoList(list, new SparseArray<GroupDetails>());
-        verifyModelEquals(list);
-
-        // Monitor updates moving forward.
-        reset(mListObserver);
-
-        // Collapse group 1.
-        mManager.setGroupCollapsedState(1, true);
-        verify(mListObserver, times(1)).onItemRangeRemoved(any(), eq(1), eq(2));
-        // Collapse group 2.
-        mManager.setGroupCollapsedState(2, true);
-        verify(mListObserver, times(1)).onItemRangeRemoved(any(), eq(2), eq(2));
-
-        // Expand group 1.
-        mManager.setGroupCollapsedState(1, false);
-        verify(mListObserver, times(1)).onItemRangeInserted(any(), eq(1), eq(2));
-
-        // Expand group 2.
-        mManager.setGroupCollapsedState(2, false);
-        verify(mListObserver, times(1)).onItemRangeInserted(any(), eq(4), eq(2));
-
-        verifyNoMoreInteractions(mListObserver);
-    }
-
-    @Test
-    @SmallTest
-    public void groupHandling_toggleGroupExpandedState() {
-        final List<DropdownItemViewInfo> listWithBothGroupsExpanded = Arrays.asList(
-                // Group 1: header + 2 suggestions
-                new DropdownItemViewInfo(mHeaderProcessor, mModel, 1),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 1),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 1),
-                // Group 2: header + 2 suggestions
-                new DropdownItemViewInfo(mHeaderProcessor, mModel, 2),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 2),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 2));
-
-        mManager.setSourceViewInfoList(listWithBothGroupsExpanded, new SparseArray<GroupDetails>());
-        verifyModelEquals(listWithBothGroupsExpanded);
-
-        // Toggle group 1.
-        final List<DropdownItemViewInfo> listWithGroup1Collapsed = new ArrayList<>();
-        listWithGroup1Collapsed.add(listWithBothGroupsExpanded.get(0));
-        listWithGroup1Collapsed.addAll(listWithBothGroupsExpanded.subList(3, 6));
-        mManager.setGroupCollapsedState(1, true);
-        verifyModelEquals(listWithGroup1Collapsed);
-        mManager.setGroupCollapsedState(1, false);
-        verifyModelEquals(listWithBothGroupsExpanded);
-
-        // Toggle group 2.
-        final List<DropdownItemViewInfo> listWithGroup2Collapsed =
-                listWithBothGroupsExpanded.subList(0, 4);
-        mManager.setGroupCollapsedState(2, true);
-        verifyModelEquals(listWithGroup2Collapsed);
-        mManager.setGroupCollapsedState(2, false);
-        verifyModelEquals(listWithBothGroupsExpanded);
-
-        // Toggle both groups.
-        final List<DropdownItemViewInfo> listWithBothGroupsCollapsed =
-                listWithGroup1Collapsed.subList(0, 2);
-        mManager.setGroupCollapsedState(2, true);
-        verifyModelEquals(listWithGroup2Collapsed);
-        mManager.setGroupCollapsedState(1, true);
-        verifyModelEquals(listWithBothGroupsCollapsed);
-        mManager.setGroupCollapsedState(2, false);
-        verifyModelEquals(listWithGroup1Collapsed);
-        mManager.setGroupCollapsedState(1, false);
-        verifyModelEquals(listWithBothGroupsExpanded);
-    }
-
-    @Test
-    @SmallTest
-    public void groupHandling_defaultGroupExpandedState() {
-        final List<DropdownItemViewInfo> listWithBothGroupsExpanded = Arrays.asList(
-                // Group 1: header + 2 suggestions
-                new DropdownItemViewInfo(mHeaderProcessor, mModel, 1),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 1),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 1),
-                // Group 2: header + 2 suggestions
-                new DropdownItemViewInfo(mHeaderProcessor, mModel, 2),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 2),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 2));
-
-        // Receive suggestions list with group 1 default-collapsed.
-        mManager.setSourceViewInfoList(listWithBothGroupsExpanded, new SparseArray<GroupDetails>() {
-            {
-                put(1, new GroupDetails("Collapsed", true));
-                put(2, new GroupDetails("Expanded", false));
-            }
-        });
-
-        final List<DropdownItemViewInfo> listWithGroup1Collapsed = new ArrayList<>();
-        listWithGroup1Collapsed.add(listWithBothGroupsExpanded.get(0));
-        listWithGroup1Collapsed.addAll(listWithBothGroupsExpanded.subList(3, 6));
-        verifyModelEquals(listWithGroup1Collapsed);
-
-        // Expand suggestions for group 1.
-        mManager.setGroupCollapsedState(1, false);
-        verifyModelEquals(listWithBothGroupsExpanded);
-
-        // Receive suggestions list with group 2 default-collapsed.
-        mManager.setSourceViewInfoList(listWithBothGroupsExpanded, new SparseArray<GroupDetails>() {
-            {
-                put(1, new GroupDetails("Expanded", false));
-                put(2, new GroupDetails("Collapsed", true));
-            }
-        });
-        final List<DropdownItemViewInfo> listWithGroup2Collapsed =
-                listWithBothGroupsExpanded.subList(0, 4);
-        verifyModelEquals(listWithGroup2Collapsed);
-        // Expand suggestions for group 2.
-        mManager.setGroupCollapsedState(2, false);
-        verifyModelEquals(listWithBothGroupsExpanded);
-
-        // Receive suggestions list with both groups default-collapsed.
-        mManager.setSourceViewInfoList(listWithBothGroupsExpanded, new SparseArray<GroupDetails>() {
-            {
-                put(1, new GroupDetails("Collapsed", true));
-                put(2, new GroupDetails("Collapsed", true));
-            }
-        });
-        final List<DropdownItemViewInfo> listWithBothGroupsCollapsed =
-                listWithGroup1Collapsed.subList(0, 2);
-        verifyModelEquals(listWithBothGroupsCollapsed);
-        mManager.setGroupCollapsedState(2, false);
-        verifyModelEquals(listWithGroup1Collapsed);
-        mManager.setGroupCollapsedState(1, false);
-        verifyModelEquals(listWithBothGroupsExpanded);
-    }
-
-    @Test
-    @SmallTest
-    public void groupHandling_expandingAlreadyExpandedGroupAddsNoNewElementns() {
-        final List<DropdownItemViewInfo> list = Arrays.asList(
-                // Group 1: header + 2 suggestions
-                new DropdownItemViewInfo(mHeaderProcessor, mModel, 1),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 1),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 1),
-                // Group 2: header + 2 suggestions
-                new DropdownItemViewInfo(mHeaderProcessor, mModel, 2),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 2),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 2));
-
-        mManager.setSourceViewInfoList(list, new SparseArray<GroupDetails>());
-        verifyModelEquals(list);
-
-        // Expand group 1.
-        mManager.setGroupCollapsedState(1, false);
-        verifyModelEquals(list);
-
-        // Expand group 2.
-        mManager.setGroupCollapsedState(2, false);
-        verifyModelEquals(list);
-    }
-
-    @Test
-    @SmallTest
-    public void groupHandling_collapseAlreadyCollapsedListIsNoOp() {
-        final List<DropdownItemViewInfo> list = Arrays.asList(
-                // Group 1: header + 2 suggestions
-                new DropdownItemViewInfo(mHeaderProcessor, mModel, 1),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 1),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 1),
-                // Group 2: header + 2 suggestions
-                new DropdownItemViewInfo(mHeaderProcessor, mModel, 2),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 2),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 2));
-
-        mManager.setSourceViewInfoList(list, new SparseArray<GroupDetails>());
-        verifyModelEquals(list);
-
-        // Collapse group 1.
-        final List<DropdownItemViewInfo> listWithGroup1Collapsed = new ArrayList<>();
-        listWithGroup1Collapsed.add(list.get(0));
-        listWithGroup1Collapsed.addAll(list.subList(3, 6));
-        mManager.setGroupCollapsedState(1, true);
-        verifyModelEquals(listWithGroup1Collapsed);
-        mManager.setGroupCollapsedState(1, true);
-        verifyModelEquals(listWithGroup1Collapsed);
-
-        // Collapse group 2.
-        final List<DropdownItemViewInfo> listWithBothGroupsCollapsed =
-                listWithGroup1Collapsed.subList(0, 2);
-        mManager.setGroupCollapsedState(2, true);
-        verifyModelEquals(listWithBothGroupsCollapsed);
-        mManager.setGroupCollapsedState(2, true);
-        verifyModelEquals(listWithBothGroupsCollapsed);
-    }
-
-    @Test
-    @SmallTest
     public void updateSuggestionsList_suggestionsAreRebuiltOnSubsequentInteractions() {
         // This test validates scenario:
         // 1. user focuses omnibox
@@ -319,36 +114,45 @@ public class DropdownItemViewInfoListManagerUnitTest {
         // 5. AutocompleteMediator receives same suggestions as in (2)
         // 6. user sees suggestions again.
         final List<DropdownItemViewInfo> list1 = new ArrayList<>();
-        list1.add(new DropdownItemViewInfo(mHeaderProcessor, mModel, 1));
-        list1.add(new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 1));
-        list1.add(new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 1));
+        list1.add(new DropdownItemViewInfo(mHeaderProcessor, mModel, SECTION_1_NO_HEADER));
+        list1.add(new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, SECTION_1_NO_HEADER));
+        list1.add(new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, SECTION_1_NO_HEADER));
 
         final List<DropdownItemViewInfo> list2 =
-                Arrays.asList(new DropdownItemViewInfo(mHeaderProcessor, mModel, 1),
-                        new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 1),
-                        new DropdownItemViewInfo(mBasicSuggestionProcessor, mModel, 1));
+                Arrays.asList(
+                        new DropdownItemViewInfo(mHeaderProcessor, mModel, SECTION_1_NO_HEADER),
+                        new DropdownItemViewInfo(
+                                mBasicSuggestionProcessor, mModel, SECTION_1_NO_HEADER),
+                        new DropdownItemViewInfo(
+                                mBasicSuggestionProcessor, mModel, SECTION_1_NO_HEADER));
 
-        mManager.setSourceViewInfoList(list1, new SparseArray<GroupDetails>());
+        mManager.setSourceViewInfoList(list1);
         verifyModelEquals(list1);
 
         mManager.clear();
 
-        mManager.setSourceViewInfoList(list2, new SparseArray<GroupDetails>());
+        mManager.setSourceViewInfoList(list2);
         verifyModelEquals(list2);
     }
 
     @Test
-    @SmallTest
     public void updateSuggestionsList_uiChangesArePropagatedToSuggestions() {
         List<DropdownItemViewInfo> list =
-                Arrays.asList(new DropdownItemViewInfo(mHeaderProcessor,
-                                      new PropertyModel(SuggestionCommonProperties.ALL_KEYS), 1),
-                        new DropdownItemViewInfo(mBasicSuggestionProcessor,
-                                new PropertyModel(SuggestionCommonProperties.ALL_KEYS), 1),
-                        new DropdownItemViewInfo(mBasicSuggestionProcessor,
-                                new PropertyModel(SuggestionCommonProperties.ALL_KEYS), 1));
+                Arrays.asList(
+                        new DropdownItemViewInfo(
+                                mHeaderProcessor,
+                                new PropertyModel(SuggestionCommonProperties.ALL_KEYS),
+                                SECTION_1_NO_HEADER),
+                        new DropdownItemViewInfo(
+                                mBasicSuggestionProcessor,
+                                new PropertyModel(SuggestionCommonProperties.ALL_KEYS),
+                                SECTION_1_NO_HEADER),
+                        new DropdownItemViewInfo(
+                                mBasicSuggestionProcessor,
+                                new PropertyModel(SuggestionCommonProperties.ALL_KEYS),
+                                SECTION_1_NO_HEADER));
 
-        mManager.setSourceViewInfoList(list, new SparseArray<GroupDetails>());
+        mManager.setSourceViewInfoList(list);
         verifyModelEquals(list);
         verifyPropertyValues(View.LAYOUT_DIRECTION_INHERIT, BrandedColorScheme.LIGHT_BRANDED_THEME);
 
@@ -362,68 +166,26 @@ public class DropdownItemViewInfoListManagerUnitTest {
         verifyPropertyValues(View.LAYOUT_DIRECTION_RTL, BrandedColorScheme.INCOGNITO);
 
         // Finally, set the new list and confirm that the values are still applied.
-        list = Arrays.asList(new DropdownItemViewInfo(mHeaderProcessor,
-                                     new PropertyModel(SuggestionCommonProperties.ALL_KEYS), 2),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor,
-                        new PropertyModel(SuggestionCommonProperties.ALL_KEYS), 2),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor,
-                        new PropertyModel(SuggestionCommonProperties.ALL_KEYS), 2),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor,
-                        new PropertyModel(SuggestionCommonProperties.ALL_KEYS), 2));
-        mManager.setSourceViewInfoList(list, new SparseArray<GroupDetails>());
+        list =
+                Arrays.asList(
+                        new DropdownItemViewInfo(
+                                mHeaderProcessor,
+                                new PropertyModel(SuggestionCommonProperties.ALL_KEYS),
+                                SECTION_2_WITH_HEADER),
+                        new DropdownItemViewInfo(
+                                mBasicSuggestionProcessor,
+                                new PropertyModel(SuggestionCommonProperties.ALL_KEYS),
+                                SECTION_2_WITH_HEADER),
+                        new DropdownItemViewInfo(
+                                mBasicSuggestionProcessor,
+                                new PropertyModel(SuggestionCommonProperties.ALL_KEYS),
+                                SECTION_2_WITH_HEADER),
+                        new DropdownItemViewInfo(
+                                mBasicSuggestionProcessor,
+                                new PropertyModel(SuggestionCommonProperties.ALL_KEYS),
+                                SECTION_2_WITH_HEADER));
+        mManager.setSourceViewInfoList(list);
         verifyModelEquals(list);
         verifyPropertyValues(View.LAYOUT_DIRECTION_RTL, BrandedColorScheme.INCOGNITO);
-    }
-
-    @Test
-    @SmallTest
-    public void suggestionsListRoundedCorners() {
-        final int groupId = 1;
-        when(mHeaderProcessor.allowBackgroundRounding()).thenReturn(false);
-        when(mBasicSuggestionProcessor.allowBackgroundRounding()).thenReturn(true);
-
-        List<DropdownItemViewInfo> list = Arrays.asList(
-                new DropdownItemViewInfo(mBasicSuggestionProcessor,
-                        new PropertyModel(SuggestionCommonProperties.ALL_KEYS), groupId),
-                new DropdownItemViewInfo(mHeaderProcessor,
-                        new PropertyModel(SuggestionCommonProperties.ALL_KEYS), groupId),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor,
-                        new PropertyModel(SuggestionCommonProperties.ALL_KEYS), groupId),
-                new DropdownItemViewInfo(mBasicSuggestionProcessor,
-                        new PropertyModel(SuggestionCommonProperties.ALL_KEYS), groupId));
-
-        mManager.setSourceViewInfoList(list, new SparseArray<GroupDetails>());
-        verifyModelEquals(list);
-
-        //
-        // ******************** <--- rounded corner
-        // * basic suggestion *
-        // ******************** <--- rounded corner
-        //                      <--- no corner
-        //  header suggestion
-        //                      <--- no corner
-        // ******************** <--- rounded corner
-        // * basic suggestion *
-        // ******************** <--- sharped corner
-        // ******************** <--- sharped corner
-        // * basic suggestion *
-        // ******************** <--- rounded corner
-        //
-        Assert.assertTrue(
-                mSuggestionModels.get(0).model.get(DropdownCommonProperties.BG_TOP_CORNER_ROUNDED));
-        Assert.assertTrue(mSuggestionModels.get(0).model.get(
-                DropdownCommonProperties.BG_BOTTOM_CORNER_ROUNDED));
-        Assert.assertFalse(
-                mSuggestionModels.get(1).model.get(DropdownCommonProperties.BG_TOP_CORNER_ROUNDED));
-        Assert.assertFalse(mSuggestionModels.get(1).model.get(
-                DropdownCommonProperties.BG_BOTTOM_CORNER_ROUNDED));
-        Assert.assertTrue(
-                mSuggestionModels.get(2).model.get(DropdownCommonProperties.BG_TOP_CORNER_ROUNDED));
-        Assert.assertFalse(mSuggestionModels.get(2).model.get(
-                DropdownCommonProperties.BG_BOTTOM_CORNER_ROUNDED));
-        Assert.assertFalse(
-                mSuggestionModels.get(3).model.get(DropdownCommonProperties.BG_TOP_CORNER_ROUNDED));
-        Assert.assertTrue(mSuggestionModels.get(3).model.get(
-                DropdownCommonProperties.BG_BOTTOM_CORNER_ROUNDED));
     }
 }

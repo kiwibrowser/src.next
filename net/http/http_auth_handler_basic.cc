@@ -45,11 +45,11 @@ bool ParseRealm(const HttpAuthChallengeTokenizer& tokenizer,
   realm->clear();
   HttpUtil::NameValuePairsIterator parameters = tokenizer.param_pairs();
   while (parameters.GetNext()) {
-    if (!base::EqualsCaseInsensitiveASCII(parameters.name_piece(), "realm"))
+    if (!base::EqualsCaseInsensitiveASCII(parameters.name(), "realm")) {
       continue;
+    }
 
-    if (!ConvertToUtf8AndNormalize(parameters.value_piece(), kCharsetLatin1,
-                                   realm)) {
+    if (!ConvertToUtf8AndNormalize(parameters.value(), kCharsetLatin1, realm)) {
       return false;
     }
   }
@@ -61,7 +61,7 @@ bool ParseRealm(const HttpAuthChallengeTokenizer& tokenizer,
 bool HttpAuthHandlerBasic::Init(
     HttpAuthChallengeTokenizer* challenge,
     const SSLInfo& ssl_info,
-    const NetworkIsolationKey& network_isolation_key) {
+    const NetworkAnonymizationKey& network_anonymization_key) {
   auth_scheme_ = HttpAuth::AUTH_SCHEME_BASIC;
   score_ = 1;
   properties_ = 0;
@@ -90,10 +90,9 @@ int HttpAuthHandlerBasic::GenerateAuthTokenImpl(
   // Firefox, Safari and Chromium all use UTF-8 encoding; IE uses iso-8859-1.
   // RFC7617 does not specify a default encoding, but UTF-8 is the only allowed
   // value for the optional charset parameter on the challenge.
-  std::string base64_username_password;
-  base::Base64Encode(base::UTF16ToUTF8(credentials->username()) + ":" +
-                         base::UTF16ToUTF8(credentials->password()),
-                     &base64_username_password);
+  std::string base64_username_password =
+      base::Base64Encode(base::UTF16ToUTF8(credentials->username()) + ":" +
+                         base::UTF16ToUTF8(credentials->password()));
   *auth_token = "Basic " + base64_username_password;
   return OK;
 }
@@ -118,7 +117,7 @@ int HttpAuthHandlerBasic::Factory::CreateAuthHandler(
     HttpAuthChallengeTokenizer* challenge,
     HttpAuth::Target target,
     const SSLInfo& ssl_info,
-    const NetworkIsolationKey& network_isolation_key,
+    const NetworkAnonymizationKey& network_anonymization_key,
     const url::SchemeHostPort& scheme_host_port,
     CreateReason reason,
     int digest_nonce_count,
@@ -134,8 +133,8 @@ int HttpAuthHandlerBasic::Factory::CreateAuthHandler(
   //                 method and only constructing when valid.
   auto tmp_handler = std::make_unique<HttpAuthHandlerBasic>();
   if (!tmp_handler->InitFromChallenge(challenge, target, ssl_info,
-                                      network_isolation_key, scheme_host_port,
-                                      net_log)) {
+                                      network_anonymization_key,
+                                      scheme_host_port, net_log)) {
     return ERR_INVALID_RESPONSE;
   }
   *handler = std::move(tmp_handler);

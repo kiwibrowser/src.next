@@ -8,8 +8,8 @@
 #include <set>
 #include <string>
 
-#include "base/callback.h"
-#include "base/memory/ref_counted.h"
+#include "base/functional/callback.h"
+#include "base/memory/scoped_refptr.h"
 
 namespace extensions {
 
@@ -26,7 +26,6 @@ class PreloadCheck {
     kBlocklistedUnknown,
     kDisallowedByPolicy,
     kWebglNotSupported,
-    kWindowShapeNotSupported,
   };
 
   using Errors = std::set<Error>;

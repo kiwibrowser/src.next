@@ -4,14 +4,17 @@
 
 #include "net/base/network_interfaces_fuchsia.h"
 
-#include <lib/sys/cpp/component_context.h>
+#include <fuchsia/net/interfaces/cpp/fidl.h>
+#include <zircon/types.h>
 
+#include <optional>
 #include <string>
 #include <utility>
 
-#include "base/format_macros.h"
-#include "base/fuchsia/fuchsia_logging.h"
-#include "base/fuchsia/process_context.h"
+#include "base/logging.h"
+#include "net/base/fuchsia/network_interface_cache.h"
+#include "net/base/network_change_notifier.h"
+#include "net/base/network_change_notifier_fuchsia.h"
 #include "net/base/network_interfaces.h"
 
 namespace net {
@@ -21,9 +24,9 @@ namespace {
 IPAddress FuchsiaIpAddressToIPAddress(const fuchsia::net::IpAddress& address) {
   switch (address.Which()) {
     case fuchsia::net::IpAddress::kIpv4:
-      return IPAddress(address.ipv4().addr.data(), address.ipv4().addr.size());
+      return IPAddress(address.ipv4().addr);
     case fuchsia::net::IpAddress::kIpv6:
-      return IPAddress(address.ipv6().addr.data(), address.ipv6().addr.size());
+      return IPAddress(address.ipv6().addr);
     default:
       return IPAddress();
   }
@@ -32,11 +35,11 @@ IPAddress FuchsiaIpAddressToIPAddress(const fuchsia::net::IpAddress& address) {
 }  // namespace
 
 // static
-absl::optional<InterfaceProperties> InterfaceProperties::VerifyAndCreate(
+std::optional<InterfaceProperties> InterfaceProperties::VerifyAndCreate(
     fuchsia::net::interfaces::Properties properties) {
   if (!internal::VerifyCompleteInterfaceProperties(properties))
-    return absl::nullopt;
-  return absl::make_optional(InterfaceProperties(std::move(properties)));
+    return std::nullopt;
+  return std::make_optional(InterfaceProperties(std::move(properties)));
 }
 
 InterfaceProperties::InterfaceProperties(
@@ -54,14 +57,14 @@ InterfaceProperties::~InterfaceProperties() = default;
 bool InterfaceProperties::Update(
     fuchsia::net::interfaces::Properties properties) {
   if (!properties.has_id() || properties_.id() != properties.id()) {
-    LOG(WARNING) << "Update failed: invalid properties.";
+    LOG(ERROR) << "Update failed: invalid properties.";
     return false;
   }
 
   if (properties.has_addresses()) {
     for (const auto& fidl_address : properties.addresses()) {
       if (!fidl_address.has_addr()) {
-        LOG(WARNING) << "Update failed: invalid properties.";
+        LOG(ERROR) << "Update failed: invalid properties.";
         return false;
       }
     }
@@ -88,12 +91,10 @@ void InterfaceProperties::AppendNetworkInterfaces(
       continue;
     }
 
-    // TODO(crbug.com/1131220): Set correct attributes once available in
-    // fuchsia::net::interfaces::Properties.
     const int kAttributes = 0;
     interfaces->emplace_back(
         properties_.name(), properties_.name(), properties_.id(),
-        internal::ConvertConnectionType(properties_.device_class()),
+        internal::ConvertConnectionType(properties_.port_class()),
         std::move(address), fidl_address.addr().prefix_len, kAttributes);
   }
 }
@@ -116,15 +117,15 @@ bool InterfaceProperties::IsPubliclyRoutable() const {
 }
 
 NetworkChangeNotifier::ConnectionType ConvertConnectionType(
-    const fuchsia::net::interfaces::DeviceClass& device_class) {
+    const fuchsia::net::interfaces::PortClass& device_class) {
   switch (device_class.Which()) {
-    case fuchsia::net::interfaces::DeviceClass::kLoopback:
+    case fuchsia::net::interfaces::PortClass::kLoopback:
       return NetworkChangeNotifier::CONNECTION_NONE;
-    case fuchsia::net::interfaces::DeviceClass::kDevice:
+    case fuchsia::net::interfaces::PortClass::kDevice:
       switch (device_class.device()) {
-        case fuchsia::hardware::network::DeviceClass::WLAN:
+        case fuchsia::hardware::network::PortClass::WLAN_CLIENT:
           return NetworkChangeNotifier::CONNECTION_WIFI;
-        case fuchsia::hardware::network::DeviceClass::ETHERNET:
+        case fuchsia::hardware::network::PortClass::ETHERNET:
           return NetworkChangeNotifier::CONNECTION_ETHERNET;
         default:
           return NetworkChangeNotifier::CONNECTION_UNKNOWN;
@@ -134,17 +135,6 @@ NetworkChangeNotifier::ConnectionType ConvertConnectionType(
                    << device_class.Which();
       return NetworkChangeNotifier::CONNECTION_UNKNOWN;
   }
-}
-
-fuchsia::net::interfaces::WatcherHandle ConnectInterfacesWatcher() {
-  fuchsia::net::interfaces::StateSyncPtr state;
-  zx_status_t status =
-      base::ComponentContextForProcess()->svc()->Connect(state.NewRequest());
-  ZX_CHECK(status == ZX_OK, status) << "Connect()";
-
-  fuchsia::net::interfaces::WatcherHandle watcher;
-  state->GetWatcher({} /*options*/, watcher.NewRequest());
-  return watcher;
 }
 
 bool VerifyCompleteInterfaceProperties(
@@ -159,76 +149,46 @@ bool VerifyCompleteInterfaceProperties(
   }
   if (!properties.has_online())
     return false;
-  if (!properties.has_device_class())
+  if (!properties.has_port_class())
     return false;
   if (!properties.has_has_default_ipv4_route())
     return false;
   if (!properties.has_has_default_ipv6_route())
     return false;
-  return true;
-}
-
-absl::optional<ExistingInterfaceProperties> GetExistingInterfaces(
-    const fuchsia::net::interfaces::WatcherSyncPtr& watcher) {
-  ExistingInterfaceProperties existing_interfaces;
-  for (;;) {
-    fuchsia::net::interfaces::Event event;
-    zx_status_t status = watcher->Watch(&event);
-    if (status != ZX_OK) {
-      ZX_LOG(ERROR, status) << "GetExistingInterfaces: Watch() failed";
-      return absl::nullopt;
-    }
-
-    switch (event.Which()) {
-      case fuchsia::net::interfaces::Event::Tag::kExisting: {
-        absl::optional<InterfaceProperties> interface =
-            InterfaceProperties::VerifyAndCreate(std::move(event.existing()));
-        if (!interface) {
-          LOG(ERROR) << "GetExistingInterfaces: Invalid kExisting event.";
-          return absl::nullopt;
-        }
-        uint64_t id = interface->id();
-        existing_interfaces.emplace_back(id, std::move(*interface));
-        break;
-      }
-      case fuchsia::net::interfaces::Event::Tag::kIdle:
-        // Idle means we've listed all the existing interfaces. We can stop
-        // fetching events.
-        return existing_interfaces;
-      default:
-        LOG(ERROR) << "GetExistingInterfaces: Unexpected event received.";
-        return absl::nullopt;
-    }
+  if (!properties.has_name()) {
+    return false;
   }
+  return true;
 }
 
 }  // namespace internal
 
 bool GetNetworkList(NetworkInterfaceList* networks, int policy) {
   DCHECK(networks);
-  fuchsia::net::interfaces::WatcherHandle handle =
-      internal::ConnectInterfacesWatcher();
-  fuchsia::net::interfaces::WatcherSyncPtr watcher = handle.BindSync();
 
-  // TODO(crbug.com/1131238): Use NetworkChangeNotifier's cached interface
-  // list.
-  absl::optional<internal::ExistingInterfaceProperties> existing_interfaces =
-      internal::GetExistingInterfaces(watcher);
-  if (!existing_interfaces)
-    return false;
-  handle = watcher.Unbind();
-  for (const auto& interface_entry : *existing_interfaces) {
-    if (!interface_entry.second.online()) {
-      // GetNetworkList() only returns online interfaces.
-      continue;
-    }
-    if (interface_entry.second.device_class().is_loopback()) {
-      // GetNetworkList() returns all interfaces except loopback.
-      continue;
-    }
-    interface_entry.second.AppendNetworkInterfaces(networks);
+  const internal::NetworkInterfaceCache* cache_ptr =
+      NetworkChangeNotifier::GetNetworkInterfaceCache();
+  if (cache_ptr) {
+    return cache_ptr->GetOnlineInterfaces(networks);
   }
-  return true;
+
+  fuchsia::net::interfaces::WatcherHandle watcher_handle =
+      internal::ConnectInterfacesWatcher();
+  std::vector<fuchsia::net::interfaces::Properties> interfaces;
+
+  auto handle_or_status = internal::ReadExistingNetworkInterfacesFromNewWatcher(
+      std::move(watcher_handle), interfaces);
+  if (!handle_or_status.has_value()) {
+    return false;
+  }
+
+  internal::NetworkInterfaceCache temp_cache(/*require_wlan=*/false);
+  auto change_bits = temp_cache.AddInterfaces(std::move(interfaces));
+  if (!change_bits.has_value()) {
+    return false;
+  }
+
+  return temp_cache.GetOnlineInterfaces(networks);
 }
 
 std::string GetWifiSSID() {

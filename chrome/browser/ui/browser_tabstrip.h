@@ -5,11 +5,12 @@
 #ifndef CHROME_BROWSER_UI_BROWSER_TABSTRIP_H_
 #define CHROME_BROWSER_UI_BROWSER_TABSTRIP_H_
 
+#include <optional>
+
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "components/tab_groups/tab_group_id.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 
@@ -31,11 +32,19 @@ namespace chrome {
 // Adds a tab to the tab strip of the specified browser and loads |url| into it.
 // If |url| is an empty URL, then the new tab-page is laoded. An |index| of -1
 // means to append it to the end of the tab strip.
+content::WebContents* AddAndReturnTabAt(
+    Browser* browser,
+    const GURL& url,
+    int index,
+    bool foreground,
+    std::optional<tab_groups::TabGroupId> group = std::nullopt);
+
+// Same as above, but eats the return value to make Bind*() easier.
 void AddTabAt(Browser* browser,
               const GURL& url,
               int index,
               bool foreground,
-              absl::optional<tab_groups::TabGroupId> group = absl::nullopt);
+              std::optional<tab_groups::TabGroupId> group = std::nullopt);
 
 // Adds a selected tab with the specified URL and transition, returns the
 // created WebContents.
@@ -49,7 +58,10 @@ content::WebContents* AddSelectedTabWithURL(Browser* browser,
 // the initial position and size and other features of the new window.
 // |window_action| may optionally specify whether the window should be shown or
 // activated.
-void AddWebContents(
+// Returns the WebContents instance where navigation completed.
+// Invariant: If `new_contents` is not nullptr, then the returned instance
+// should always match new_contents.get().
+content::WebContents* AddWebContents(
     Browser* browser,
     content::WebContents* source_contents,
     std::unique_ptr<content::WebContents> new_contents,

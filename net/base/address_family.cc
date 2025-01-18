@@ -30,7 +30,6 @@ int ConvertAddressFamily(AddressFamily address_family) {
       return AF_INET6;
   }
   NOTREACHED();
-  return AF_UNSPEC;
 }
 
 AddressFamily ToAddressFamily(int family) {
@@ -43,7 +42,6 @@ AddressFamily ToAddressFamily(int family) {
       return ADDRESS_FAMILY_UNSPECIFIED;
   }
   NOTREACHED();
-  return ADDRESS_FAMILY_UNSPECIFIED;
 }
 
 }  // namespace net

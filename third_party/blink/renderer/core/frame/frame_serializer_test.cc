@@ -31,10 +31,15 @@
 #include "third_party/blink/renderer/core/frame/frame_serializer.h"
 
 #include <string>
+
+#include "base/run_loop.h"
+#include "base/test/bind.h"
+#include "base/test/scoped_feature_list.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_url.h"
-#include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/platform/web_url_response.h"
 #include "third_party/blink/public/web/web_settings.h"
@@ -44,24 +49,35 @@
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
+#include "third_party/blink/renderer/platform/heap/thread_state.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_error.h"
 #include "third_party/blink/renderer/platform/mhtml/serialized_resource.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
+#include "third_party/blink/renderer/platform/testing/url_loader_mock_factory.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 #include "third_party/blink/renderer/platform/wtf/deque.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
+namespace {
+using testing::Eq;
+using testing::Pair;
 
-class FrameSerializerTest : public testing::Test,
-                            public FrameSerializer::Delegate {
+class FrameSerializerTest
+    : public testing::Test,
+      public WebFrameSerializer::MHTMLPartsGenerationDelegate {
  public:
   FrameSerializerTest()
       : folder_("frameserializer/"),
         base_url_(url_test_helpers::ToKURL("http://www.test.com")) {}
+
+  ~FrameSerializerTest() override {
+    ThreadState::Current()->CollectAllGarbageForTesting();
+  }
 
  protected:
   void SetUp() override {
@@ -70,13 +86,12 @@ class FrameSerializerTest : public testing::Test,
   }
 
   void TearDown() override {
-    WebURLLoaderMockFactory::GetSingletonInstance()
+    URLLoaderMockFactory::GetSingletonInstance()
         ->UnregisterAllURLsAndClearMemoryCache();
+    helper_.Reset();
   }
 
   void SetBaseFolder(const char* folder) { folder_ = folder; }
-
-  void SetRewriteURLFolder(const char* folder) { rewrite_folder_ = folder; }
 
   void RegisterURL(const KURL& url, const char* file, const char* mime_type) {
     url_test_helpers::RegisterMockedURLLoad(
@@ -99,16 +114,12 @@ class FrameSerializerTest : public testing::Test,
     response.SetMimeType("text/html");
     response.SetHttpStatusCode(status_code);
 
-    WebURLLoaderMockFactory::GetSingletonInstance()->RegisterErrorURL(
+    URLLoaderMockFactory::GetSingletonInstance()->RegisterErrorURL(
         KURL(base_url_, file), response, WebURLError(error));
   }
 
-  void RegisterRewriteURL(const char* from_url, const char* to_url) {
-    rewrite_urls_.insert(from_url, to_url);
-  }
-
   void RegisterSkipURL(const char* url) {
-    skip_urls_.push_back(KURL(base_url_, url));
+    skip_urls_.insert(KURL(base_url_, url));
   }
 
   void Serialize(const char* url) {
@@ -119,22 +130,40 @@ class FrameSerializerTest : public testing::Test,
     // load.
     frame_test_helpers::PumpPendingRequestsForFrameToLoad(
         helper_.GetWebView()->MainFrameImpl());
-    FrameSerializer serializer(resources_, *this);
     Frame* frame = helper_.LocalMainFrame()->GetFrame();
     for (; frame; frame = frame->Tree().TraverseNext()) {
       // This is safe, because tests do not do cross-site navigation
       // (and therefore don't have remote frames).
-      serializer.SerializeFrame(*To<LocalFrame>(frame));
+      base::RunLoop run_loop;
+      FrameSerializer::SerializeFrame(
+          *this, *To<LocalFrame>(frame),
+          base::BindLambdaForTesting([&](Deque<SerializedResource> resources) {
+            for (auto& res : resources) {
+              resources_.push_back(res);
+              // Don't serialize the same resource on subsequent frames. This
+              // mimics how FrameSerializer is actually used.
+              skip_urls_.insert(res.url);
+            }
+            run_loop.Quit();
+          }));
+      URLLoaderMockFactory::GetSingletonInstance()->ServeAsynchronousRequests();
+      run_loop.Run();
     }
   }
 
   Deque<SerializedResource>& GetResources() { return resources_; }
-
+  Vector<std::pair<KURL, String>> GetResourceUrlAndMimeTypes() const {
+    Vector<std::pair<KURL, String>> result;
+    for (const SerializedResource& r : resources_) {
+      result.emplace_back(r.url, r.mime_type);
+    }
+    return result;
+  }
   const SerializedResource* GetResource(const KURL& url,
                                         const char* mime_type) {
     String mime(mime_type);
     for (const SerializedResource& resource : resources_) {
-      if (resource.url == url && !resource.data->IsEmpty() &&
+      if (resource.url == url && !resource.data->empty() &&
           (mime.IsNull() || EqualIgnoringASCIICase(resource.mime_type, mime)))
         return &resource;
     }
@@ -143,8 +172,7 @@ class FrameSerializerTest : public testing::Test,
 
   const SerializedResource* GetResource(const char* url_string,
                                         const char* mime_type) {
-    const KURL url(base_url_, url_string);
-    return GetResource(url, mime_type);
+    return GetResource(ResourceURL(url_string), mime_type);
   }
 
   bool IsSerialized(const char* url, const char* mime_type = nullptr) {
@@ -155,9 +183,13 @@ class FrameSerializerTest : public testing::Test,
     const SerializedResource* resource = GetResource(url, mime_type);
     if (resource) {
       const Vector<char> data = resource->data->CopyAs<Vector<char>>();
-      return String(data.data(), data.size());
+      return String(data);
     }
     return String();
+  }
+
+  KURL ResourceURL(const String& resource_name) const {
+    return KURL(base_url_, resource_name);
   }
 
  private:
@@ -167,39 +199,21 @@ class FrameSerializerTest : public testing::Test,
     settings->SetJavaScriptEnabled(true);
   }
 
-  // FrameSerializer::Delegate implementation.
-  bool RewriteLink(const Element& element, String& rewritten_link) override {
-    String complete_url;
-    for (const auto& attribute : element.Attributes()) {
-      if (element.HasLegalLinkAttribute(attribute.GetName())) {
-        complete_url = element.GetDocument().CompleteURL(attribute.Value());
-        break;
-      }
-    }
-
-    if (complete_url.IsNull() || !rewrite_urls_.Contains(complete_url))
-      return false;
-
-    StringBuilder uri_builder;
-    uri_builder.Append(rewrite_folder_);
-    uri_builder.Append('/');
-    uri_builder.Append(rewrite_urls_.at(complete_url));
-    rewritten_link = uri_builder.ToString();
-    return true;
+  // WebFrameSerializer::MHTMLPartsGenerationDelegate impl.
+  bool ShouldSkipResource(const WebURL& url) override {
+    return skip_urls_.Contains(url.GetString());
   }
+  bool UseBinaryEncoding() override { return false; }
 
-  bool ShouldSkipResourceWithURL(const KURL& url) override {
-    return skip_urls_.Contains(url);
-  }
+  bool RemovePopupOverlay() override { return false; }
 
+  test::TaskEnvironment task_environment_;
   ScopedTestingPlatformSupport<TestingPlatformSupport> platform_;
   frame_test_helpers::WebViewHelper helper_;
   std::string folder_;
   KURL base_url_;
   Deque<SerializedResource> resources_;
-  HashMap<String, String> rewrite_urls_;
-  Vector<String> skip_urls_;
-  String rewrite_folder_;
+  HashSet<String> skip_urls_;
 };
 
 TEST_F(FrameSerializerTest, HTMLElements) {
@@ -207,6 +221,49 @@ TEST_F(FrameSerializerTest, HTMLElements) {
 
   RegisterURL("elements.html", "text/html");
   RegisterURL("style.css", "style.css", "text/css");
+  RegisterErrorURL("style_network_error.css", 404);
+  RegisterURL("copyright.html", "empty.txt", "text/html");
+  RegisterURL("script.js", "empty.txt", "text/javascript");
+
+  RegisterURL("bodyBackground.png", "image.png", "image/png");
+
+  RegisterURL("imageSrc.png", "image.png", "image/png");
+
+  RegisterURL("inputImage.png", "image.png", "image/png");
+
+  RegisterURL("tableBackground.png", "image.png", "image/png");
+  RegisterURL("trBackground.png", "image.png", "image/png");
+  RegisterURL("tdBackground.png", "image.png", "image/png");
+
+  RegisterURL("blockquoteCite.html", "empty.txt", "text/html");
+  RegisterURL("qCite.html", "empty.txt", "text/html");
+  RegisterURL("delCite.html", "empty.txt", "text/html");
+  RegisterURL("insCite.html", "empty.txt", "text/html");
+
+  RegisterErrorURL("nonExisting.png", 404);
+
+  Serialize("elements.html");
+  EXPECT_THAT(GetResourceUrlAndMimeTypes(),
+              testing::UnorderedElementsAre(
+                  Pair(ResourceURL("elements.html"), "text/html"),
+                  Pair(ResourceURL("style.css"), "text/css"),
+                  Pair(ResourceURL("bodyBackground.png"), "image/png"),
+                  Pair(ResourceURL("imageSrc.png"), "image/png"),
+                  Pair(ResourceURL("inputImage.png"), "image/png"),
+                  Pair(ResourceURL("tableBackground.png"), "image/png"),
+                  Pair(ResourceURL("trBackground.png"), "image/png"),
+                  Pair(ResourceURL("tdBackground.png"), "image/png"),
+                  Pair(ResourceURL("style_network_error.css"), "text/css")));
+}
+
+TEST_F(FrameSerializerTest, MHTMLImprovedHTMLElements) {
+  base::test::ScopedFeatureList features(
+      {blink::features::kMHTML_Improvements});
+  SetBaseFolder("frameserializer/elements/");
+
+  RegisterURL("elements.html", "text/html");
+  RegisterURL("style.css", "style.css", "text/css");
+  RegisterErrorURL("style_network_error.css", 404);
   RegisterURL("copyright.html", "empty.txt", "text/html");
   RegisterURL("script.js", "empty.txt", "text/javascript");
 
@@ -229,17 +286,18 @@ TEST_F(FrameSerializerTest, HTMLElements) {
 
   Serialize("elements.html");
 
-  EXPECT_EQ(8U, GetResources().size());
-
-  EXPECT_TRUE(IsSerialized("elements.html", "text/html"));
-  EXPECT_TRUE(IsSerialized("style.css", "text/css"));
-  EXPECT_TRUE(IsSerialized("bodyBackground.png", "image/png"));
-  EXPECT_TRUE(IsSerialized("imageSrc.png", "image/png"));
-  EXPECT_TRUE(IsSerialized("inputImage.png", "image/png"));
-  EXPECT_TRUE(IsSerialized("tableBackground.png", "image/png"));
-  EXPECT_TRUE(IsSerialized("trBackground.png", "image/png"));
-  EXPECT_TRUE(IsSerialized("tdBackground.png", "image/png"));
-  EXPECT_FALSE(IsSerialized("nonExisting.png", "image/png"));
+  EXPECT_THAT(GetResourceUrlAndMimeTypes(),
+              testing::UnorderedElementsAre(
+                  Pair(ResourceURL("elements.html"), "text/html"),
+                  Pair(ResourceURL("style.css"), "text/css"),
+                  Pair(ResourceURL("bodyBackground.png"), "image/png"),
+                  Pair(ResourceURL("imageSrc.png"), "image/png"),
+                  Pair(ResourceURL("inputImage.png"), "image/png"),
+                  Pair(ResourceURL("tableBackground.png"), "image/png"),
+                  Pair(ResourceURL("trBackground.png"), "image/png"),
+                  Pair(ResourceURL("tdBackground.png"), "image/png"),
+                  Pair(testing::Property(&KURL::IsValid, Eq(true)),
+                       "text/javascript")));
 }
 
 TEST_F(FrameSerializerTest, Frames) {
@@ -268,6 +326,12 @@ TEST_F(FrameSerializerTest, Frames) {
   EXPECT_TRUE(IsSerialized("frame_2.png", "image/png"));
   EXPECT_TRUE(IsSerialized("frame_3.png", "image/png"));
   EXPECT_TRUE(IsSerialized("frame_4.png", "image/png"));
+
+  // Verify all 3 frame src are rewritten to Content ID URLs.
+  Vector<String> split_string;
+  GetSerializedData("simple_frames.html", "text/html")
+      .Split("<frame src=\"cid:", split_string);
+  EXPECT_EQ(split_string.size(), 4u);
 }
 
 TEST_F(FrameSerializerTest, IFrames) {
@@ -481,27 +545,6 @@ TEST_F(FrameSerializerTest, DataURIMorphing) {
   EXPECT_TRUE(IsSerialized("page_with_morphing_data.html", "text/html"));
 }
 
-TEST_F(FrameSerializerTest, RewriteLinksSimple) {
-  SetBaseFolder("frameserializer/rewritelinks/");
-  SetRewriteURLFolder("folder");
-
-  RegisterURL("rewritelinks_simple.html", "text/html");
-  RegisterURL("absolute.png", "image.png", "image/png");
-  RegisterURL("relative.png", "image.png", "image/png");
-  RegisterRewriteURL("http://www.test.com/absolute.png", "a.png");
-  RegisterRewriteURL("http://www.test.com/relative.png", "b.png");
-
-  Serialize("rewritelinks_simple.html");
-
-  EXPECT_EQ(3U, GetResources().size());
-  EXPECT_NE(GetSerializedData("rewritelinks_simple.html", "text/html")
-                .Find("\"folder/a.png\""),
-            kNotFound);
-  EXPECT_NE(GetSerializedData("rewritelinks_simple.html", "text/html")
-                .Find("\"folder/b.png\""),
-            kNotFound);
-}
-
 // Test that we don't regress https://bugs.webkit.org/show_bug.cgi?id=99105
 TEST_F(FrameSerializerTest, SVGImageDontCrash) {
   SetBaseFolder("frameserializer/svg/");
@@ -565,4 +608,27 @@ TEST_F(FrameSerializerTest, markOfTheWebDeclaration) {
                 KURL("http://foo.com#bar--baz")));
 }
 
+TEST_F(FrameSerializerTest, ReplaceAllCaseInsensitive) {
+  auto transform = [](const String& from) { return String("</HI>"); };
+  EXPECT_EQ(
+      blink::internal::ReplaceAllCaseInsensitive("", "</style>", transform),
+      "");
+  EXPECT_EQ(
+      blink::internal::ReplaceAllCaseInsensitive("test", "</style>", transform),
+      "test");
+  EXPECT_EQ(blink::internal::ReplaceAllCaseInsensitive("</Style>", "</style>",
+                                                       transform),
+            "</HI>");
+  EXPECT_EQ(blink::internal::ReplaceAllCaseInsensitive("x</Style>", "</style>",
+                                                       transform),
+            "x</HI>");
+  EXPECT_EQ(blink::internal::ReplaceAllCaseInsensitive("</Style>x", "</style>",
+                                                       transform),
+            "</HI>x");
+  EXPECT_EQ(blink::internal::ReplaceAllCaseInsensitive(
+                "test</Style>test</Style>testagain", "</style>", transform),
+            "test</HI>test</HI>testagain");
+}
+
+}  // namespace
 }  // namespace blink

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 #include <inttypes.h>
 #include <memory>
 #include "third_party/blink/renderer/core/layout/layout_inline.h"
-#include "third_party/blink/renderer/core/layout/layout_table_cell.h"
 #include "third_party/blink/renderer/core/layout/layout_text.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
+#include "third_party/blink/renderer/core/layout/table/layout_table_cell.h"
 
 namespace blink {
 
@@ -57,22 +57,18 @@ void DumpToTracedValue(const LayoutObject& object,
 
   if (object.IsOutOfFlowPositioned())
     traced_value->SetBoolean("positioned", object.IsOutOfFlowPositioned());
-  if (object.SelfNeedsLayout())
-    traced_value->SetBoolean("selfNeeds", object.SelfNeedsLayout());
-  if (object.NeedsPositionedMovementLayout())
-    traced_value->SetBoolean("positionedMovement",
-                             object.NeedsPositionedMovementLayout());
-  if (object.NormalChildNeedsLayout())
-    traced_value->SetBoolean("childNeeds", object.NormalChildNeedsLayout());
-  if (object.PosChildNeedsLayout())
-    traced_value->SetBoolean("posChildNeeds", object.PosChildNeedsLayout());
+  if (object.SelfNeedsFullLayout()) {
+    traced_value->SetBoolean("selfNeeds", object.SelfNeedsFullLayout());
+  }
+  if (object.ChildNeedsFullLayout()) {
+    traced_value->SetBoolean("childNeeds", object.ChildNeedsFullLayout());
+  }
 
   if (object.IsTableCell()) {
     // Table layout might be dirty if traceGeometry is false.
     // See https://crbug.com/664271 .
     if (trace_geometry) {
-      const LayoutNGTableCellInterface& c =
-          ToInterface<LayoutNGTableCellInterface>(object);
+      const auto& c = To<LayoutTableCell>(object);
       traced_value->SetDouble("row", c.RowIndex());
       traced_value->SetDouble("col", c.AbsoluteColumnIndex());
       if (c.ResolvedRowSpan() != 1)

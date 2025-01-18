@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,10 +17,10 @@ class KeyboardEvent;
 
 enum class FocusgroupDirection {
   kNone,
-  kBackwardHorizontal,
-  kBackwardVertical,
-  kForwardHorizontal,
-  kForwardVertical,
+  kBackwardInline,
+  kBackwardBlock,
+  kForwardInline,
+  kForwardBlock,
 };
 
 enum class FocusgroupType {
@@ -35,8 +35,8 @@ class CORE_EXPORT FocusgroupControllerUtils {
   static FocusgroupDirection FocusgroupDirectionForEvent(KeyboardEvent* event);
   static bool IsDirectionBackward(FocusgroupDirection direction);
   static bool IsDirectionForward(FocusgroupDirection direction);
-  static bool IsDirectionHorizontal(FocusgroupDirection direction);
-  static bool IsDirectionVertical(FocusgroupDirection direction);
+  static bool IsDirectionInline(FocusgroupDirection direction);
+  static bool IsDirectionBlock(FocusgroupDirection direction);
   static bool IsAxisSupported(FocusgroupFlags flags,
                               FocusgroupDirection direction);
   static bool WrapsInDirection(FocusgroupFlags flags,

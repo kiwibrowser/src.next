@@ -17,10 +17,8 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/service_worker_context.h"
-#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/test/browser_test.h"
@@ -166,23 +164,20 @@ IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest, OriginPrivileges) {
   // A web host that has permission.
   ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(), web_resource.ReplaceComponents(make_host_a_com)));
-  std::string result;
-  ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-      browser()->tab_strip_model()->GetActiveWebContents(),
-      "window.domAutomationController.send(document.title)",
-      &result));
-  EXPECT_EQ(result, "Loaded");
+  EXPECT_EQ(
+      content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
+                      "document.title"),
+      "Loaded");
 
   // A web host that loads a non-existent extension.
   GURL non_existent_extension(embedded_test_server()->GetURL(
       "/extensions/api_test/extension_resource_request_policy/"
       "non_existent_extension.html"));
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), non_existent_extension));
-  ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-      browser()->tab_strip_model()->GetActiveWebContents(),
-      "window.domAutomationController.send(document.title)",
-      &result));
-  EXPECT_EQ(result, "Image failed to load");
+  EXPECT_EQ(
+      content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
+                      "document.title"),
+      "Image failed to load");
 
   // A data URL. Data URLs should always be able to load chrome-extension://
   // resources.
@@ -197,11 +192,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest, OriginPrivileges) {
   ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(),
       GURL(std::string("data:text/html;charset=utf-8,") + file_source)));
-  ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-      browser()->tab_strip_model()->GetActiveWebContents(),
-      "window.domAutomationController.send(document.title)",
-      &result));
-  EXPECT_EQ(result, "Loaded");
+  EXPECT_EQ(
+      content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
+                      "document.title"),
+      "Loaded");
 
   // A different extension. Legacy (manifest_version 1) extensions should always
   // be able to load each other's resources.
@@ -211,11 +205,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest, OriginPrivileges) {
   ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(),
       GURL("chrome-extension://pbkkcbgdkliohhfaeefcijaghglkahja/index.html")));
-  ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-      browser()->tab_strip_model()->GetActiveWebContents(),
-      "window.domAutomationController.send(document.title)",
-      &result));
-  EXPECT_EQ(result, "Loaded");
+  EXPECT_EQ(
+      content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
+                      "document.title"),
+      "Loaded");
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest,
@@ -224,27 +217,26 @@ IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest,
       test_data_dir_.AppendASCII("extension_resource_request_policy")
           .AppendASCII("hosted_app")));
 
-  ASSERT_TRUE(
-      RunExtensionTest("extension_resource_request_policy/extension2/",
-                       {.page_url = "can_load_icons_from_hosted_apps.html"}))
+  ASSERT_TRUE(RunExtensionTest(
+      "extension_resource_request_policy/extension2/",
+      {.extension_url = "can_load_icons_from_hosted_apps.html"}))
       << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest, Audio) {
   EXPECT_TRUE(RunExtensionTest("extension_resource_request_policy/extension2",
-                               {.page_url = "audio.html"}))
+                               {.extension_url = "audio.html"}))
       << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest, Video) {
   EXPECT_TRUE(RunExtensionTest("extension_resource_request_policy/extension2",
-                               {.page_url = "video.html"}))
+                               {.extension_url = "video.html"}))
       << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest,
                        WebAccessibleResources) {
-  std::string result;
   ASSERT_TRUE(LoadExtension(test_data_dir_
       .AppendASCII("extension_resource_request_policy")
       .AppendASCII("web_accessible")));
@@ -253,52 +245,46 @@ IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest,
       "/extensions/api_test/extension_resource_request_policy/"
       "web_accessible/accessible_resource.html"));
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), accessible_resource));
-  ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-      browser()->tab_strip_model()->GetActiveWebContents(),
-      "window.domAutomationController.send(document.title)",
-      &result));
-  EXPECT_EQ("Loaded", result);
+  EXPECT_EQ("Loaded", content::EvalJs(
+                          browser()->tab_strip_model()->GetActiveWebContents(),
+                          "document.title"));
 
   GURL xhr_accessible_resource(embedded_test_server()->GetURL(
       "/extensions/api_test/extension_resource_request_policy/"
       "web_accessible/xhr_accessible_resource.html"));
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), xhr_accessible_resource));
-  ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-      browser()->tab_strip_model()->GetActiveWebContents(),
-      "window.domAutomationController.send(document.title)",
-      &result));
-  EXPECT_EQ("XHR completed with status: 200", result);
+  EXPECT_EQ(
+      "XHR completed with status: 200",
+      content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
+                      "document.title"));
 
   GURL xhr_inaccessible_resource(embedded_test_server()->GetURL(
       "/extensions/api_test/extension_resource_request_policy/"
       "web_accessible/xhr_inaccessible_resource.html"));
   ASSERT_TRUE(
       ui_test_utils::NavigateToURL(browser(), xhr_inaccessible_resource));
-  ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-      browser()->tab_strip_model()->GetActiveWebContents(),
-      "window.domAutomationController.send(document.title)",
-      &result));
-  EXPECT_EQ("XHR failed to load resource", result);
+  EXPECT_EQ(
+      "XHR failed to load resource",
+      content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
+                      "document.title"));
 
   GURL nonaccessible_resource(embedded_test_server()->GetURL(
       "/extensions/api_test/extension_resource_request_policy/"
       "web_accessible/nonaccessible_resource.html"));
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), nonaccessible_resource));
-  ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-      browser()->tab_strip_model()->GetActiveWebContents(),
-      "window.domAutomationController.send(document.title)",
-      &result));
-  EXPECT_EQ("Image failed to load", result);
+  EXPECT_EQ(
+      "Image failed to load",
+      content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
+                      "document.title"));
 
   GURL nonexistent_resource(embedded_test_server()->GetURL(
       "/extensions/api_test/extension_resource_request_policy/"
       "web_accessible/nonexistent_resource.html"));
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), nonexistent_resource));
-  ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-      browser()->tab_strip_model()->GetActiveWebContents(),
-      "window.domAutomationController.send(document.title)",
-      &result));
-  EXPECT_EQ("Image failed to load", result);
+  EXPECT_EQ(
+      "Image failed to load",
+      content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
+                      "document.title"));
 
   GURL newtab_page("chrome://newtab");
   GURL accessible_newtab_override(embedded_test_server()->GetURL(
@@ -307,16 +293,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest,
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), newtab_page));
   ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
       browser(), accessible_newtab_override, 1);
-  ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-      browser()->tab_strip_model()->GetActiveWebContents(),
-      "window.domAutomationController.send(document.title)",
-      &result));
-  EXPECT_EQ("New Tab Page Loaded Successfully", result);
+  EXPECT_EQ(
+      "New Tab Page Loaded Successfully",
+      content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
+                      "document.title"));
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest,
                        LinkToWebAccessibleResources) {
-  std::string result;
   const Extension* extension = LoadExtension(
       test_data_dir_.AppendASCII("extension_resource_request_policy")
           .AppendASCII("web_accessible"));
@@ -330,13 +314,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest,
       "web_accessible/accessible_link_resource.html"));
   ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
       browser(), accessible_linked_resource, 1);
-  ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-      web_contents, "window.domAutomationController.send(document.URL)",
-      &result));
+  GURL accessible_url = extension->GetResourceURL("/test.png");
+  EXPECT_EQ(accessible_url, content::EvalJs(web_contents, "document.URL"));
   EXPECT_EQ(content::PAGE_TYPE_NORMAL,
             controller.GetLastCommittedEntry()->GetPageType());
-  GURL accessible_url = extension->GetResourceURL("/test.png");
-  EXPECT_EQ(accessible_url, result);
   EXPECT_EQ(accessible_url,
             web_contents->GetPrimaryMainFrame()->GetLastCommittedURL());
 
@@ -345,20 +326,17 @@ IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest,
       "web_accessible/nonaccessible_link_resource.html"));
   ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
       browser(), nonaccessible_linked_resource, 1);
-  ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-      web_contents, "window.domAutomationController.send(document.URL)",
-      &result));
+  EXPECT_EQ("chrome-error://chromewebdata/",
+            content::EvalJs(web_contents, "document.URL"));
   EXPECT_EQ(content::PAGE_TYPE_ERROR,
             controller.GetLastCommittedEntry()->GetPageType());
-  EXPECT_EQ("chrome-error://chromewebdata/", result);
   GURL invalid_url("chrome-extension://invalid/");
   EXPECT_EQ(invalid_url,
             web_contents->GetPrimaryMainFrame()->GetLastCommittedURL());
 
   // Redirects can sometimes occur before the load event, so use a
   // UrlLoadObserver instead of blocking waiting for two load events.
-  ui_test_utils::UrlLoadObserver accessible_observer(
-      accessible_url, content::NotificationService::AllSources());
+  ui_test_utils::UrlLoadObserver accessible_observer(accessible_url);
   GURL accessible_client_redirect_resource(embedded_test_server()->GetURL(
       "/extensions/api_test/extension_resource_request_policy/"
       "web_accessible/accessible_redirect_resource.html"));
@@ -369,8 +347,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest,
             controller.GetLastCommittedEntry()->GetPageType());
   EXPECT_EQ(accessible_url, web_contents->GetLastCommittedURL());
 
-  ui_test_utils::UrlLoadObserver nonaccessible_observer(
-      invalid_url, content::NotificationService::AllSources());
+  ui_test_utils::UrlLoadObserver nonaccessible_observer(invalid_url);
   GURL nonaccessible_client_redirect_resource(embedded_test_server()->GetURL(
       "/extensions/api_test/extension_resource_request_policy/"
       "web_accessible/nonaccessible_redirect_resource.html"));
@@ -384,7 +361,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest,
 
 IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest,
                        WebAccessibleResourcesWithCSP) {
-  std::string result;
   ASSERT_TRUE(LoadExtension(test_data_dir_
       .AppendASCII("extension_resource_request_policy")
       .AppendASCII("web_accessible")));
@@ -394,11 +370,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest,
       "web_accessible/accessible_resource_with_csp.html"));
   ASSERT_TRUE(
       ui_test_utils::NavigateToURL(browser(), accessible_resource_with_csp));
-  ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-      browser()->tab_strip_model()->GetActiveWebContents(),
-      "window.domAutomationController.send(document.title)",
-      &result));
-  EXPECT_EQ("Loaded", result);
+  EXPECT_EQ("Loaded", content::EvalJs(
+                          browser()->tab_strip_model()->GetActiveWebContents(),
+                          "document.title"));
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest, Iframe) {
@@ -409,7 +383,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest, Iframe) {
       .AppendASCII("inaccessible")));
   EXPECT_TRUE(
       RunExtensionTest("extension_resource_request_policy/web_accessible",
-                       {.page_url = "iframe.html"}))
+                       {.extension_url = "iframe.html"}))
       << message_;
 }
 
@@ -430,20 +404,18 @@ IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest,
 
   GURL private_page(
       "chrome-extension://kegmjfcnjamahdnldjmlpachmpielcdk/private.html");
-  ASSERT_TRUE(content::ExecuteScript(web_contents, "navigateFrameNow()"));
+  ASSERT_TRUE(content::ExecJs(web_contents, "navigateFrameNow()"));
   EXPECT_TRUE(WaitForLoadStop(web_contents));
   EXPECT_NE(private_page, web_contents->GetLastCommittedURL());
-  std::string content;
-  EXPECT_TRUE(ExecuteScriptAndExtractString(
-      ChildFrameAt(web_contents->GetPrimaryMainFrame(), 0),
-      "domAutomationController.send(document.body.innerText)", &content));
 
   // The iframe should not load |private_page|, which is not web-accessible.
   //
   // TODO(alexmos): Make this check stricter, as extensions are now fully
   // isolated. The failure mode is that the request is canceled and we stay on
   // public.html (see https://crbug.com/656752).
-  EXPECT_NE("Private", content);
+  EXPECT_NE("Private",
+            EvalJs(ChildFrameAt(web_contents->GetPrimaryMainFrame(), 0),
+                   "document.body.innerText"));
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest,
@@ -681,10 +653,7 @@ IN_PROC_BROWSER_TEST_F(
     notification_data.body = base::UTF8ToUTF16(target_url.spec());
 
     GURL scope_url = embedded_test_server()->GetURL("/service_worker/");
-    content::StoragePartition* storage_partition =
-        browser()->profile()->GetDefaultStoragePartition();
-    content::ServiceWorkerContext* context =
-        storage_partition->GetServiceWorkerContext();
+    content::ServiceWorkerContext* context = GetServiceWorkerContext();
 
     content::WebContentsAddedObserver new_window_observer;
     content::DispatchServiceWorkerNotificationClick(context, scope_url,
@@ -804,12 +773,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest,
                          crx_file::id_util::GenerateId("foo").c_str());
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), GURL(url)));
 
-  std::string body;
   content::WebContents* tab =
       browser()->tab_strip_model()->GetActiveWebContents();
-  ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-      tab, "window.domAutomationController.send(document.body.textContent)",
-      &body));
+  std::string body =
+      content::EvalJs(tab, "document.body.textContent").ExtractString();
 
   std::string expected_error;
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)

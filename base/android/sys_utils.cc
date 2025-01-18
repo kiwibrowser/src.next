@@ -7,10 +7,12 @@
 #include <memory>
 
 #include "base/android/build_info.h"
-#include "base/base_jni_headers/SysUtils_jni.h"
 #include "base/process/process_metrics.h"
 #include "base/system/sys_info.h"
 #include "base/trace_event/base_tracing.h"
+
+// Must come after all headers that specialize FromJniType() / ToJniType().
+#include "base/sys_utils_jni/SysUtils_jni.h"
 
 namespace base {
 namespace android {
@@ -38,8 +40,9 @@ static void JNI_SysUtils_LogPageFaultCountToTracing(JNIEnv* env) {
   // expensive (reading and parsing a file).
   bool enabled;
   TRACE_EVENT_CATEGORY_GROUP_ENABLED("startup", &enabled);
-  if (!enabled)
+  if (!enabled) {
     return;
+  }
   TRACE_EVENT_BEGIN2("memory", "CollectPageFaultCount", "minor", 0, "major", 0);
   std::unique_ptr<base::ProcessMetrics> process_metrics(
       base::ProcessMetrics::CreateProcessMetrics(

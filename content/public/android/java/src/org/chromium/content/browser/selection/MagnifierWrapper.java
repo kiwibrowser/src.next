@@ -4,22 +4,20 @@
 
 package org.chromium.content.browser.selection;
 
-/**
- * A wrapper interface of Magnifier class.
- */
+import org.chromium.build.annotations.NullMarked;
+
+/** A wrapper interface of Magnifier class. */
+@NullMarked
 public interface MagnifierWrapper {
-    /**
-     * Wrapper of {@link Magnifier#show()}.
-     */
+    /** Wrapper of {@link Magnifier#show()}. */
     public void show(float x, float y);
 
-    /**
-     * Wrapper of {@link Magnifier#dismiss()}.
-     */
+    /** Wrapper of {@link Magnifier#dismiss()}. */
     public void dismiss();
 
-    /**
-     * To check if this MagnifierWrapper is available to show.
-     */
+    /** To check if this MagnifierWrapper is available to show. */
     public boolean isAvailable();
+
+    /** Only implemented on MagnifierSurfaceControl. */
+    public void childLocalSurfaceIdChanged();
 }

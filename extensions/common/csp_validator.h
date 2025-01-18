@@ -6,9 +6,9 @@
 #define EXTENSIONS_COMMON_CSP_VALIDATOR_H_
 
 #include <string>
+#include <string_view>
 #include <vector>
 
-#include "base/strings/string_piece_forward.h"
 #include "extensions/common/manifest.h"
 
 namespace extensions {
@@ -41,9 +41,9 @@ class CSPParser {
   // |directive_name| is "script_src".
   // |directive_values| is ["'self'", "www.google.com"].
   struct Directive {
-    Directive(base::StringPiece directive_string,
+    Directive(std::string_view directive_string,
               std::string directive_name,
-              std::vector<base::StringPiece> directive_values);
+              std::vector<std::string_view> directive_values);
 
     Directive(const Directive&) = delete;
     Directive& operator=(const Directive&) = delete;
@@ -52,12 +52,12 @@ class CSPParser {
     Directive(Directive&&);
     Directive& operator=(Directive&&);
 
-    base::StringPiece directive_string;
+    std::string_view directive_string;
 
     // Must be lower case.
     std::string directive_name;
 
-    std::vector<base::StringPiece> directive_values;
+    std::vector<std::string_view> directive_values;
   };
 
   using DirectiveList = std::vector<Directive>;
@@ -110,18 +110,17 @@ std::string SanitizeContentSecurityPolicy(
     int options,
     std::vector<InstallWarning>* warnings);
 
-// Given the Content Security Policy of an app sandbox page, returns the
-// effective CSP for that sandbox page.
-//
-// The effective policy restricts the page from loading external web content
+// Given a `policy`, returns a sandboxed page CSP that disallows remote sources.
+// The returned policy restricts the page from loading external web content
 // (frames and scripts) within the page. This is done through adding 'self'
 // directive source to relevant CSP directive names.
 //
 // If |warnings| is not nullptr, any validation errors are appended to
 // |warnings|.
-std::string GetEffectiveSandoxedPageCSP(const std::string& policy,
-                                        std::string manifest_key,
-                                        std::vector<InstallWarning>* warnings);
+std::string GetSandboxedPageCSPDisallowingRemoteSources(
+    const std::string& policy,
+    std::string manifest_key,
+    std::vector<InstallWarning>* warnings);
 
 // Checks whether the given |policy| enforces a unique origin sandbox as
 // defined by http://www.whatwg.org/specs/web-apps/current-work/multipage/
@@ -135,7 +134,7 @@ bool ContentSecurityPolicyIsSandboxed(
 // Returns whether the given |content_security_policy| prevents remote scripts.
 // If not, populates |error|.
 bool DoesCSPDisallowRemoteCode(const std::string& content_security_policy,
-                               base::StringPiece manifest_key,
+                               std::string_view manifest_key,
                                std::u16string* error);
 
 }  // namespace csp_validator

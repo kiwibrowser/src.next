@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_linked_hash_set.h"
-#include "third_party/blink/renderer/platform/mojo/heap_mojo_receiver.h"
+#include "third_party/blink/renderer/platform/mojo/heap_mojo_receiver_set.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -72,7 +72,11 @@ class CORE_EXPORT ReportingContext : public GarbageCollected<ReportingContext>,
   mutable HeapMojoRemote<mojom::blink::ReportingServiceProxy>
       reporting_service_;
 
-  HeapMojoReceiver<mojom::blink::ReportingObserver, ReportingContext> receiver_;
+  // There might be up to two ReportingObservers stored here: one that is called
+  // from the CrossOriginEmbedderPolicyReporter and one that is called from the
+  // DocumentIsolationPolicyReporter.
+  HeapMojoReceiverSet<mojom::blink::ReportingObserver, ReportingContext>
+      receivers_;
 };
 
 }  // namespace blink

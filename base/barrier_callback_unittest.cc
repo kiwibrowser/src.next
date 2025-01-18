@@ -4,8 +4,8 @@
 
 #include "base/barrier_callback.h"
 
-#include "base/bind.h"
-#include "base/callback.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/test/bind.h"
 #include "base/test/gtest_util.h"
@@ -29,7 +29,7 @@ TEST(BarrierCallbackTest, ErrorToCallCallbackWithZeroCallbacks) {
       base::BarrierCallback<int>(0, base::BindOnce([](std::vector<int>) {}));
   EXPECT_FALSE(barrier_callback.is_null());
 
-  EXPECT_CHECK_DEATH(barrier_callback.Run(3));
+  EXPECT_NOTREACHED_DEATH(barrier_callback.Run(3));
 }
 
 TEST(BarrierCallbackTest, RunAfterNumCallbacks) {

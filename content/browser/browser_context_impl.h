@@ -10,9 +10,12 @@
 
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/memory/weak_ptr.h"
+#include "base/run_loop.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
+#include "content/browser/dips/dips_service_impl.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/resource_context.h"
 #include "content/public/browser/shared_cors_origin_access_list.h"
 
 namespace media {
@@ -36,18 +39,19 @@ namespace content {
 
 class BackgroundSyncScheduler;
 class BrowserContextImpl;
-class BrowsingDataRemover;
 class BrowsingDataRemoverImpl;
 class DownloadManager;
+class InMemoryFederatedPermissionContext;
+class NavigationEntryScreenshotManager;
 class PermissionController;
 class PrefetchService;
 class StoragePartitionImplMap;
 
 // content-internal parts of BrowserContext.
 //
-// TODO(https://crbug.com/1179776): Make BrowserContextImpl to implement
+// TODO(crbug.com/40169693): Make BrowserContextImpl to implement
 // BrowserContext, instead of being a member.
-class BrowserContextImpl {
+class CONTENT_EXPORT BrowserContextImpl {
  public:
   static BrowserContextImpl* From(BrowserContext* self);
   ~BrowserContextImpl();
@@ -69,7 +73,7 @@ class BrowserContextImpl {
     return shared_cors_origin_access_list_.get();
   }
 
-  BrowsingDataRemover* GetBrowsingDataRemover();
+  BrowsingDataRemoverImpl* GetBrowsingDataRemover();
 
   media::learning::LearningSession* GetLearningSession();
 
@@ -97,10 +101,32 @@ class BrowserContextImpl {
   }
 
   PrefetchService* GetPrefetchService();
+  void SetPrefetchServiceForTesting(
+      std::unique_ptr<PrefetchService> prefetch_service);
+
+  NavigationEntryScreenshotManager* GetNavigationEntryScreenshotManager();
+
+  InMemoryFederatedPermissionContext* GetFederatedPermissionContext();
+  void ResetFederatedPermissionContext();
 
   using TraceProto = perfetto::protos::pbzero::ChromeBrowserContext;
   // Write a representation of this object into a trace.
   void WriteIntoTrace(perfetto::TracedProto<TraceProto> context) const;
+
+  ResourceContext* GetResourceContext() const {
+    return resource_context_.get();
+  }
+
+  BtmServiceImpl* GetDipsService();
+  // If the DIPS database file should be deleted, wait for it. Otherwise, return
+  // immediately.
+  //
+  // TODO: crbug.com/356624038 - delete this method when the DIPS feature flag
+  // is removed.
+  void WaitForDipsCleanupForTesting();
+
+  // (See BrowserContext::BackfillPopupHeuristicGrants().)
+  void BackfillPopupHeuristicGrants(base::OnceCallback<void(bool)> callback);
 
  private:
   // Creates the media service for storing/retrieving WebRTC encoding and
@@ -109,8 +135,15 @@ class BrowserContextImpl {
   // exposed to the web directly, so privacy is not compromised.
   std::unique_ptr<media::WebrtcVideoPerfHistory> CreateWebrtcVideoPerfHistory();
 
+  // Delete any existing DIPS database file if DIPS is disabled (because it's
+  // not possible for the user to clear it through the browser UI).
+  //
+  // TODO: crbug.com/356624038 - delete this method when the DIPS feature flag
+  // is removed.
+  void MaybeCleanupDips();
+
   // BrowserContextImpl is owned and build from BrowserContext constructor.
-  // TODO(https://crbug.com/1179776): Invert the dependency. Make BrowserContext
+  // TODO(crbug.com/40169693): Invert the dependency. Make BrowserContext
   // a pure interface and BrowserContextImpl implements it. Remove the `self_`
   // field and 'friend' declaration.
   friend BrowserContext;
@@ -128,14 +161,38 @@ class BrowserContextImpl {
   std::unique_ptr<PermissionController> permission_controller_;
   scoped_refptr<BackgroundSyncScheduler> background_sync_scheduler_;
   std::unique_ptr<PrefetchService> prefetch_service_;
+  std::unique_ptr<NavigationEntryScreenshotManager>
+      nav_entry_screenshot_manager_;
+  std::unique_ptr<InMemoryFederatedPermissionContext>
+      federated_permission_context_;
 
   std::unique_ptr<media::learning::LearningSessionImpl> learning_session_;
   std::unique_ptr<media::VideoDecodePerfHistory> video_decode_perf_history_;
   std::unique_ptr<media::WebrtcVideoPerfHistory> webrtc_video_perf_history_;
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+  // Manages DIPS for all WebContentses using this browser context.
+  std::unique_ptr<BtmServiceImpl> dips_service_;
+  // If DIPS is disabled, any existing database file is asynchronously deleted
+  // when the BrowserContextImpl is created. This RunLoop allows tests to wait
+  // for the deletion to complete.
+  //
+  // TODO: crbug.com/356624038 - delete this when the DIPS feature flag is
+  // removed.
+  base::RunLoop dips_cleanup_loop_;
+
+  // TODO(crbug.com/40604019): Get rid of ResourceContext.
+  // Created on the UI thread, otherwise lives on and is destroyed on the IO
+  // thread.
+  std::unique_ptr<ResourceContext> resource_context_ =
+      std::make_unique<ResourceContext>();
+
+#if BUILDFLAG(IS_CHROMEOS)
   scoped_refptr<storage::ExternalMountPoints> external_mount_points_;
 #endif
+
+  // TODO: crbug.com/40169693 - BrowserContext and BrowserContextImpl both have
+  // WeakPtrFactories. Remove one once the inheritance is sorted out.
+  base::WeakPtrFactory<BrowserContextImpl> weak_factory_{this};
 };
 
 }  // namespace content

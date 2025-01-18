@@ -12,40 +12,35 @@ import android.content.ContextWrapper;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
-import android.content.res.AssetManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Process;
 import android.preference.PreferenceManager;
 
-import androidx.annotation.Nullable;
-import androidx.annotation.VisibleForTesting;
+import org.jni_zero.JNINamespace;
 
-import org.chromium.base.annotations.JNINamespace;
-import org.chromium.base.compat.ApiHelperForM;
-import org.chromium.base.compat.ApiHelperForO;
 import org.chromium.build.BuildConfig;
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
 
-/**
- * This class provides Android application context related utility methods.
- */
+/** This class provides Android application context related utility methods. */
 @JNINamespace("base::android")
+@NullMarked
 public class ContextUtils {
     private static final String TAG = "ContextUtils";
-    private static Context sApplicationContext;
+    private static @Nullable Context sApplicationContext;
 
     /**
      * Flag for {@link Context#registerReceiver}: The receiver can receive broadcasts from other
      * Apps. Has the same behavior as marking a statically registered receiver with "exported=true".
      *
-     * TODO(mthiesse): Move to ApiHelperForT when we build against T SDK.
+     * <p>TODO(mthiesse): Move to ApiHelperForT when we build against T SDK.
      */
     public static final int RECEIVER_EXPORTED = 0x2;
+
     public static final int RECEIVER_NOT_EXPORTED = 0x4;
 
-    /**
-     * Initialization-on-demand holder. This exists for thread-safe lazy initialization.
-     */
+    /** Initialization-on-demand holder. This exists for thread-safe lazy initialization. */
     private static class Holder {
         // Not final for tests.
         private static SharedPreferences sSharedPreferences = fetchAppSharedPreferences();
@@ -54,16 +49,18 @@ public class ContextUtils {
     /**
      * Get the Android application context.
      *
-     * Under normal circumstances there is only one application context in a process, so it's safe
-     * to treat this as a global. In WebView it's possible for more than one app using WebView to be
-     * running in a single process, but this mechanism is rarely used and this is not the only
+     * <p>Under normal circumstances there is only one application context in a process, so it's
+     * safe to treat this as a global. In WebView it's possible for more than one app using WebView
+     * to be running in a single process, but this mechanism is rarely used and this is not the only
      * problem in that scenario, so we don't currently forbid using it as a global.
      *
-     * Do not downcast the context returned by this method to Application (or any subclass). It may
-     * not be an Application object; it may be wrapped in a ContextWrapper. The only assumption you
-     * may make is that it is a Context whose lifetime is the same as the lifetime of the process.
+     * <p>Do not downcast the context returned by this method to Application (or any subclass). It
+     * may not be an Application object; it may be wrapped in a ContextWrapper. The only assumption
+     * you may make is that it is a Context whose lifetime is the same as the lifetime of the
+     * process.
      */
     public static Context getApplicationContext() {
+        assert sApplicationContext != null;
         return sApplicationContext;
     }
 
@@ -78,7 +75,8 @@ public class ContextUtils {
     public static void initApplicationContext(Context appContext) {
         // Conceding that occasionally in tests, native is loaded before the browser process is
         // started, in which case the browser process re-sets the application context.
-        assert sApplicationContext == null || sApplicationContext == appContext
+        assert sApplicationContext == null
+                || sApplicationContext == appContext
                 || ((ContextWrapper) sApplicationContext).getBaseContext() == appContext;
         initJavaSideApplicationContext(appContext);
     }
@@ -93,7 +91,7 @@ public class ContextUtils {
         // This may need to create the prefs directory if we've never used shared prefs before, so
         // allow disk writes. This is rare but can happen if code used early in startup reads prefs.
         try (StrictModeContext ignored = StrictModeContext.allowDiskWrites()) {
-            return PreferenceManager.getDefaultSharedPreferences(sApplicationContext);
+            return PreferenceManager.getDefaultSharedPreferences(getApplicationContext());
         }
     }
 
@@ -115,20 +113,20 @@ public class ContextUtils {
      *
      * @param appContext The new application context.
      */
-    @VisibleForTesting
     public static void initApplicationContextForTests(Context appContext) {
+        Context prevValue = sApplicationContext;
         initJavaSideApplicationContext(appContext);
-        Holder.sSharedPreferences = fetchAppSharedPreferences();
-    }
 
-    /**
-     * Tests that use the applicationContext may unintentionally use the Context
-     * set by a previously run test.
-     */
-    @VisibleForTesting
-    public static void clearApplicationContextForTests() {
-        sApplicationContext = null;
-        Holder.sSharedPreferences = null;
+        // initApplicationContext() lets <clinit> create sSharedPreferences, but that does not work
+        // when setting it multiple times.
+        SharedPreferences prevPrefs = Holder.sSharedPreferences;
+        Holder.sSharedPreferences = fetchAppSharedPreferences();
+
+        ResettersForTesting.register(
+                () -> {
+                    sApplicationContext = prevValue;
+                    Holder.sSharedPreferences = prevPrefs;
+                });
     }
 
     private static void initJavaSideApplicationContext(Context appContext) {
@@ -138,23 +136,6 @@ public class ContextUtils {
             appContext = new ContextWrapper(appContext);
         }
         sApplicationContext = appContext;
-    }
-
-    /**
-     * In most cases, {@link Context#getAssets()} can be used directly. Modified resources are
-     * used downstream and are set up on application startup, and this method provides access to
-     * regular assets before that initialization is complete.
-     *
-     * This method should ONLY be used for accessing files within the assets folder.
-     *
-     * @return Application assets.
-     */
-    public static AssetManager getApplicationAssets() {
-        Context context = getApplicationContext();
-        while (context instanceof ContextWrapper) {
-            context = ((ContextWrapper) context).getBaseContext();
-        }
-        return context.getAssets();
     }
 
     /**
@@ -177,21 +158,28 @@ public class ContextUtils {
         }
     }
 
-    /** @return The name of the current process. E.g. "org.chromium.chrome:privileged_process0". */
+    /**
+     * @return The name of the current process. E.g. "org.chromium.chrome:privileged_process0".
+     */
     public static String getProcessName() {
-        return ApiCompatibilityUtils.getProcessName();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            return Application.getProcessName();
+        }
+        try {
+            Class<?> activityThreadClazz = Class.forName("android.app.ActivityThread");
+            return (String) activityThreadClazz.getMethod("currentProcessName").invoke(null);
+        } catch (Exception e) {
+            // If fallback logic is ever needed, refer to:
+            // https://chromium-review.googlesource.com/c/chromium/src/+/905563/1
+            throw JavaUtils.throwUnchecked(e);
+        }
     }
 
-    /** @return Whether the current process is 64-bit. */
+    /**
+     * @return Whether the current process is 64-bit.
+     */
     public static boolean isProcess64Bit() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            return ApiHelperForM.isProcess64Bit();
-        } else {
-            // Android sets CPU_ABI to the first supported ABI for the current process bitness
-            // (for compat reasons), so we can use this to infer our bitness.
-            return Build.SUPPORTED_64_BIT_ABIS.length > 0
-                    && Build.SUPPORTED_64_BIT_ABIS[0].equals(Build.CPU_ABI);
-        }
+        return Process.is64Bit();
     }
 
     /**
@@ -213,32 +201,126 @@ public class ContextUtils {
     }
 
     /**
-     * As to Exported V.S. NonExported receiver, please refer to
-     * https://developer.android.com/reference/android/content/Context#registerReceiver(android.content.BroadcastReceiver,%20android.content.IntentFilter,%20int)
+     * Register a broadcast receiver that may only accept protected broadcasts.
+     *
+     * You should (only) use this method when:
+     * <p><ul>
+     * <li>You need to receive protected broadcasts.
+     * </ul><p>
+     * This method does not presently verify that the provided IntentFilter covers only protected
+     * broadcasts, so you should make sure that the broadcasts you register for are in fact
+     * protected broadcasts. The Android platform's <a
+     * href="https://android.googlesource.com/platform/frameworks/base/+/refs/heads/master/core/res/AndroidManifest.xml">
+     * AndroidManifest.xml</a> contains a list of broadcasts which should be common to all devices.
+     * You should be careful about using broadcasts which appear to be protected, but are not listed
+     * in the platform's manifest, as they may not be protected on all devices. Different versions
+     * or builds of Android may have different sets of protected broadcasts, so add appropriate
+     * guards if needed.
+     * <p>
+     * You can unregister receivers using the normal {@link Context#unregisterReceiver} method.
      */
-    public static Intent registerExportedBroadcastReceiver(
-            Context context, BroadcastReceiver receiver, IntentFilter filter, String permission) {
+    public static @Nullable Intent registerProtectedBroadcastReceiver(
+            Context context, @Nullable BroadcastReceiver receiver, IntentFilter filter) {
         return registerBroadcastReceiver(
-                context, receiver, filter, permission, /*scheduler=*/null, RECEIVER_EXPORTED);
+                context, receiver, filter, /* permission= */ null, /* scheduler= */ null, 0);
     }
 
-    public static Intent registerNonExportedBroadcastReceiver(
-            Context context, BroadcastReceiver receiver, IntentFilter filter) {
-        return registerBroadcastReceiver(context, receiver, filter, /*permission=*/null,
-                /*scheduler=*/null, RECEIVER_NOT_EXPORTED);
-    }
-
-    public static Intent registerNonExportedBroadcastReceiver(
-            Context context, BroadcastReceiver receiver, IntentFilter filter, Handler scheduler) {
+    public static @Nullable Intent registerProtectedBroadcastReceiver(
+            Context context,
+            @Nullable BroadcastReceiver receiver,
+            IntentFilter filter,
+            Handler scheduler) {
         return registerBroadcastReceiver(
-                context, receiver, filter, /*permission=*/null, scheduler, RECEIVER_NOT_EXPORTED);
+                context, receiver, filter, /* permission= */ null, scheduler, 0);
     }
 
-    private static Intent registerBroadcastReceiver(Context context, BroadcastReceiver receiver,
-            IntentFilter filter, String permission, Handler scheduler, int flags) {
+    /**
+     * Register a broadcast receiver that may accept broadcasts from any UID.
+     *
+     * You should (only) use exported receivers when:
+     * <p><ul>
+     * <li>You need to receive unprotected broadcasts from other applications.
+     * <li>Using unprotected sticky broadcasts - either from this application or another.
+     * </ul><p>
+     * Broadcasts received by exported receivers are untrustworthy and must be treated with caution.
+     * <p>
+     * You can unregister receivers using the normal {@link Context#unregisterReceiver} method.
+     */
+    public static @Nullable Intent registerExportedBroadcastReceiver(
+            Context context,
+            @Nullable BroadcastReceiver receiver,
+            IntentFilter filter,
+            @Nullable String permission) {
+        return registerBroadcastReceiver(
+                context, receiver, filter, permission, /* scheduler= */ null, RECEIVER_EXPORTED);
+    }
+
+    /**
+     * Register a broadcast receiver that may only accept broadcasts coming from the root, system,
+     * or this app's own UIDs.
+     *
+     * You should generally prefer using this over the exported counterpart,
+     * {@link #registerExportedBroadcastReceiver(Context, BroadcastReceiver, IntentFilter, String)},
+     * unless you meet a specific requirement specified in that method's documentation.
+     * <p>
+     * Even though most protected broadcasts come from the system UID, and could thus be received by
+     * a non-exported receiver, you should instead use registerProtectedBroadcastReceiver for all
+     * protected broadcasts.
+     * <p>
+     * You should (only) use non-exported receivers when:
+     * <p><ul>
+     * <li>You want to send and receive (non-sticky) broadcasts solely within the same application.
+     * <li>You want to receive the result of a PendingIntent that you have provided to some other
+     * application or service.
+     * </ul><p>
+     * Note that older versions of Android do not enforce non-exported receivers, so you should
+     * still not trust received Intents without some additional authentication mechanism. Note that
+     * you generally cannot use Android permissions for this because embedded WebViews will only
+     * inherit the permissions of the embedding application. Consider using
+     * {@link org.chromium.base.IntentUtils#addTrustedIntentExtras} and
+     * {@link org.chromium.base.IntentUtils#isTrustedIntentFromSelf} to verify the Intent's sender.
+     * <p>
+     * Usually, when working with non-exported receivers, you should also make sure that any related
+     * Intents that you send are not broadcast to other apps. This can be done using
+     * {@link Intent#setPackage} with {@link Context#getPackageName}, and must be done before
+     * calling {@link org.chromium.base.IntentUtils#addTrustedIntentExtras}.
+     * <p>
+     * You can unregister receivers using the normal {@link Context#unregisterReceiver} method.
+     */
+    public static @Nullable Intent registerNonExportedBroadcastReceiver(
+            Context context, @Nullable BroadcastReceiver receiver, IntentFilter filter) {
+        return registerBroadcastReceiver(
+                context,
+                receiver,
+                filter,
+                /* permission= */ null,
+                /* scheduler= */ null,
+                RECEIVER_NOT_EXPORTED);
+    }
+
+    public static @Nullable Intent registerNonExportedBroadcastReceiver(
+            Context context,
+            @Nullable BroadcastReceiver receiver,
+            IntentFilter filter,
+            @Nullable Handler scheduler) {
+        return registerBroadcastReceiver(
+                context,
+                receiver,
+                filter,
+                /* permission= */ null,
+                scheduler,
+                RECEIVER_NOT_EXPORTED);
+    }
+
+    private static @Nullable Intent registerBroadcastReceiver(
+            Context context,
+            @Nullable BroadcastReceiver receiver,
+            IntentFilter filter,
+            @Nullable String permission,
+            @Nullable Handler scheduler,
+            int flags) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            return ApiHelperForO.registerReceiver(
-                    context, receiver, filter, permission, scheduler, flags);
+            return context.registerReceiver(receiver, filter, permission, scheduler, flags);
         } else {
             return context.registerReceiver(receiver, filter, permission, scheduler);
         }

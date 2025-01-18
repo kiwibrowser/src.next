@@ -10,10 +10,10 @@
 #include <set>
 #include <string>
 
-#include "base/bind.h"
+#include "base/apple/foundation_util.h"
 #include "base/file_version_info.h"
 #include "base/files/file_path.h"
-#include "base/mac/foundation_util.h"
+#include "base/functional/bind.h"
 #include "base/process/process_iterator.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -21,7 +21,7 @@
 #include "base/threading/thread.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/branded_strings.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -113,7 +113,7 @@ void MemoryDetails::CollectProcessData(
   // Get PIDs of the helper.
   {
     base::NamedProcessIterator helper_it(chrome::kHelperProcessExecutableName,
-                                         NULL);
+                                         NULL, /*use_prefix_match=*/true);
     while (const base::ProcessEntry* entry = helper_it.NextProcessEntry()) {
       all_pids.push_back(entry->pid());
     }

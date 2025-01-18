@@ -13,6 +13,8 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/check.h"
 #include "base/strings/utf_string_conversions.h"
+
+// Must come after all headers that specialize FromJniType() / ToJniType().
 #include "chrome/android/chrome_jni_headers/ChromeHttpAuthHandler_jni.h"
 
 using base::android::AttachCurrentThread;
@@ -34,7 +36,7 @@ ChromeHttpAuthHandler::ChromeHttpAuthHandler(
                                      : nullptr) {
   if (login_model_data) {
     auth_manager_->SetObserverAndDeliverCredentials(this,
-                                                    login_model_data->form);
+                                                    *login_model_data->form);
   }
 }
 
@@ -49,15 +51,13 @@ ChromeHttpAuthHandler::~ChromeHttpAuthHandler() {
   }
 }
 
-void ChromeHttpAuthHandler::Init() {
+void ChromeHttpAuthHandler::Init(LoginHandler* observer) {
+  observer_ = observer;
+
   DCHECK(java_chrome_http_auth_handler_.is_null());
   JNIEnv* env = AttachCurrentThread();
   java_chrome_http_auth_handler_.Reset(
       Java_ChromeHttpAuthHandler_create(env, reinterpret_cast<intptr_t>(this)));
-}
-
-void ChromeHttpAuthHandler::SetObserver(LoginHandler* observer) {
-  observer_ = observer;
 }
 
 void ChromeHttpAuthHandler::ShowDialog(const JavaRef<jobject>& tab_android,
@@ -77,12 +77,8 @@ void ChromeHttpAuthHandler::OnAutofillDataAvailable(
     const std::u16string& password) {
   DCHECK(java_chrome_http_auth_handler_.obj() != NULL);
   JNIEnv* env = base::android::AttachCurrentThread();
-  ScopedJavaLocalRef<jstring> j_username =
-      ConvertUTF16ToJavaString(env, username);
-  ScopedJavaLocalRef<jstring> j_password =
-      ConvertUTF16ToJavaString(env, password);
   Java_ChromeHttpAuthHandler_onAutofillDataAvailable(
-      env, java_chrome_http_auth_handler_, j_username, j_password);
+      env, java_chrome_http_auth_handler_, username, password);
 }
 
 void ChromeHttpAuthHandler::OnLoginModelDestroying() {
@@ -92,25 +88,39 @@ void ChromeHttpAuthHandler::OnLoginModelDestroying() {
 
 void ChromeHttpAuthHandler::SetAuth(JNIEnv* env,
                                     const JavaParamRef<jobject>&,
-                                    const JavaParamRef<jstring>& username,
-                                    const JavaParamRef<jstring>& password) {
-  if (observer_) {
-    std::u16string username16 = ConvertJavaStringToUTF16(env, username);
-    std::u16string password16 = ConvertJavaStringToUTF16(env, password);
-    observer_->SetAuth(username16, password16);
-  }
+                                    std::u16string& username,
+                                    std::u16string& password) {
+  // SetAuthSync can result in destruction of `this`. We post task to make
+  // destruction asynchronous and avoid re-entrancy.
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&ChromeHttpAuthHandler::SetAuthSync,
+                     weak_factory_.GetWeakPtr(), username, password));
 }
 
 void ChromeHttpAuthHandler::CancelAuth(JNIEnv* env,
                                        const JavaParamRef<jobject>&) {
-  if (observer_)
-    observer_->CancelAuth();
+  // CancelAuthSync can result in destruction of `this`. We post task to make
+  // destruction asynchronous and avoid re-entrancy.
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(&ChromeHttpAuthHandler::CancelAuthSync,
+                                weak_factory_.GetWeakPtr()));
 }
 
-ScopedJavaLocalRef<jstring> ChromeHttpAuthHandler::GetMessageBody(
+std::u16string ChromeHttpAuthHandler::GetMessageBody(
     JNIEnv* env,
     const JavaParamRef<jobject>&) {
-  if (explanation_.empty())
-    return ConvertUTF16ToJavaString(env, authority_);
-  return ConvertUTF16ToJavaString(env, authority_ + u" " + explanation_);
+  if (explanation_.empty()) {
+    return authority_;
+  }
+  return authority_ + u" " + explanation_;
+}
+
+void ChromeHttpAuthHandler::SetAuthSync(const std::u16string& username,
+                                        const std::u16string& password) {
+  observer_->SetAuth(username, password);
+}
+
+void ChromeHttpAuthHandler::CancelAuthSync() {
+  observer_->CancelAuth(/*notify_others=*/true);
 }

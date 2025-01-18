@@ -4,7 +4,9 @@
 
 #include "chrome/browser/download/download_manager_utils.h"
 
-#include "base/bind.h"
+#include <utility>
+
+#include "base/functional/bind.h"
 #include "base/no_destructor.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -76,14 +78,14 @@ void BindWakeLockProvider(
 }  // namespace
 
 // static
-download::InProgressDownloadManager*
+std::unique_ptr<download::InProgressDownloadManager>
 DownloadManagerUtils::RetrieveInProgressDownloadManager(Profile* profile) {
   ProfileKey* key = profile->GetProfileKey();
   GetInProgressDownloadManager(key);
   auto& map = GetInProgressManagerMap();
   if (GetRetrieveInProgressDownloadManagerCallback())
     GetRetrieveInProgressDownloadManagerCallback().Run(map[key].get());
-  return map[key].release();
+  return std::move(map[key]);
 }
 
 // static

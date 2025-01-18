@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,9 @@
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller_test.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_record_builder.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/testing/paint_test_configurations.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 
 using testing::ElementsAre;
@@ -79,6 +81,7 @@ class FrameOverlayTest : public testing::Test, public PaintTestConfigurations {
   void RunFrameOverlayTestWithAcceleratedCompositing();
 
  private:
+  test::TaskEnvironment task_environment_;
   frame_test_helpers::WebViewHelper helper_;
 };
 
@@ -103,9 +106,9 @@ TEST_P(FrameOverlayTest, AcceleratedCompositing) {
               onDrawRect(SkRect::MakeWH(kViewportWidth, kViewportHeight),
                          Property(&SkPaint::getColor, SK_ColorYELLOW)));
 
-  auto* builder = MakeGarbageCollected<PaintRecordBuilder>();
-  frame_overlay->Paint(builder->Context());
-  builder->EndRecording()->Playback(&canvas);
+  PaintRecordBuilder builder;
+  frame_overlay->Paint(builder.Context());
+  builder.EndRecording().Playback(&canvas);
   frame_overlay->Destroy();
 }
 
@@ -125,32 +128,26 @@ TEST_P(FrameOverlayTest, DeviceEmulationScale) {
                         ->GetPage()
                         ->GetVisualViewport()
                         .GetDeviceEmulationTransformNode();
-  EXPECT_EQ(TransformationMatrix().Scale(1.5), transform->Matrix());
+  EXPECT_EQ(gfx::Transform::MakeScale(1.5), transform->Matrix());
   const auto& state = frame_overlay->DefaultPropertyTreeState();
   EXPECT_EQ(transform, &state.Transform());
   EXPECT_EQ(&ClipPaintPropertyNode::Root(), &state.Clip());
   EXPECT_EQ(&EffectPaintPropertyNode::Root(), &state.Effect());
 
-  auto check_paint_results = [&frame_overlay,
-                              &state](PaintController& paint_controller) {
-    EXPECT_THAT(
-        paint_controller.GetDisplayItemList(),
-        ElementsAre(IsSameId(frame_overlay->Id(), DisplayItem::kFrameOverlay)));
-    EXPECT_EQ(gfx::Rect(0, 0, 800, 600),
-              paint_controller.GetDisplayItemList()[0].VisualRect());
-    EXPECT_THAT(
-        paint_controller.PaintChunks(),
-        ElementsAre(IsPaintChunk(
-            0, 1,
-            PaintChunk::Id(frame_overlay->Id(), DisplayItem::kFrameOverlay),
-            state, nullptr, gfx::Rect(0, 0, 800, 600))));
-  };
-
-  PaintController paint_controller(PaintController::kTransient);
+  PaintController paint_controller;
   GraphicsContext context(paint_controller);
   frame_overlay->Paint(context);
-  paint_controller.CommitNewDisplayItems();
-  check_paint_results(paint_controller);
+  auto& paint_artifact = paint_controller.CommitNewDisplayItems();
+  EXPECT_THAT(
+      paint_artifact.GetDisplayItemList(),
+      ElementsAre(IsSameId(frame_overlay->Id(), DisplayItem::kFrameOverlay)));
+  EXPECT_EQ(gfx::Rect(0, 0, 800, 600),
+            paint_artifact.GetDisplayItemList()[0].VisualRect());
+  EXPECT_THAT(
+      paint_artifact.GetPaintChunks(),
+      ElementsAre(IsPaintChunk(
+          0, 1, PaintChunk::Id(frame_overlay->Id(), DisplayItem::kFrameOverlay),
+          state, nullptr, gfx::Rect(0, 0, 800, 600))));
   frame_overlay->Destroy();
 }
 

@@ -25,10 +25,13 @@
 
 #include "third_party/blink/renderer/platform/graphics/image_frame_generator.h"
 
+#include <array>
 #include <memory>
 #include <utility>
 
+#include "base/not_fatal_until.h"
 #include "base/synchronization/lock.h"
+#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/platform/graphics/image_decoder_wrapper.h"
 #include "third_party/blink/renderer/platform/graphics/image_decoding_store.h"
 #include "third_party/blink/renderer/platform/image-decoders/image_decoder.h"
@@ -61,7 +64,7 @@ SkYUVAInfo::Subsampling SubsamplingToSkiaSubsampling(
 static bool UpdateYUVAInfoSubsamplingAndWidthBytes(
     ImageDecoder* decoder,
     SkYUVAInfo::Subsampling* subsampling,
-    size_t component_width_bytes[SkYUVAInfo::kMaxPlanes]) {
+    base::span<size_t, SkYUVAInfo::kMaxPlanes> component_width_bytes) {
   SkYUVAInfo::Subsampling tempSubsampling =
       SubsamplingToSkiaSubsampling(decoder->GetYUVSubsampling());
   if (tempSubsampling == SkYUVAInfo::Subsampling::kUnknown) {
@@ -78,10 +81,12 @@ static bool UpdateYUVAInfoSubsamplingAndWidthBytes(
 
 ImageFrameGenerator::ImageFrameGenerator(const SkISize& full_size,
                                          bool is_multi_frame,
-                                         const ColorBehavior& color_behavior,
+                                         ColorBehavior color_behavior,
+                                         cc::AuxImage aux_image,
                                          Vector<SkISize> supported_sizes)
     : full_size_(full_size),
       decoder_color_behavior_(color_behavior),
+      aux_image_(aux_image),
       is_multi_frame_(is_multi_frame),
       supported_sizes_(std::move(supported_sizes)) {
 #if DCHECK_IS_ON()
@@ -104,10 +109,7 @@ bool ImageFrameGenerator::DecodeAndScale(
     SegmentReader* data,
     bool all_data_received,
     wtf_size_t index,
-    const SkImageInfo& info,
-    void* pixels,
-    size_t row_bytes,
-    ImageDecoder::AlphaOption alpha_option,
+    const SkPixmap& pixmap,
     cc::PaintImage::GeneratorClientId client_id) {
   {
     base::AutoLock lock(generator_lock_);
@@ -121,14 +123,8 @@ bool ImageFrameGenerator::DecodeAndScale(
 
   // This implementation does not support arbitrary scaling so check the
   // requested size.
-  SkISize scaled_size = SkISize::Make(info.width(), info.height());
+  const SkISize scaled_size = pixmap.dimensions();
   CHECK(GetSupportedDecodeSize(scaled_size) == scaled_size);
-
-  ImageDecoder::HighBitDepthDecodingOption high_bit_depth_decoding_option =
-      ImageDecoder::kDefaultBitDepth;
-  if (info.colorType() == kRGBA_F16_SkColorType) {
-    high_bit_depth_decoding_option = ImageDecoder::kHighBitDepthToHalfFloat;
-  }
 
   wtf_size_t frame_count = 0u;
   bool has_alpha = true;
@@ -142,10 +138,9 @@ bool ImageFrameGenerator::DecodeAndScale(
   {
     // Lock the mutex, so only one thread can use the decoder at once.
     ClientAutoLock lock(this, client_id);
-    ImageDecoderWrapper decoder_wrapper(
-        this, data, scaled_size, alpha_option, decoder_color_behavior_,
-        high_bit_depth_decoding_option, index, info, pixels, row_bytes,
-        all_data_received, client_id);
+    ImageDecoderWrapper decoder_wrapper(this, data, pixmap,
+                                        decoder_color_behavior_, aux_image_,
+                                        index, all_data_received, client_id);
     current_decode_succeeded = decoder_wrapper.Decode(
         image_decoder_factory_.get(), &frame_count, &has_alpha);
     decode_failed = decoder_wrapper.decode_failed();
@@ -172,9 +167,9 @@ bool ImageFrameGenerator::DecodeToYUV(
     SegmentReader* data,
     wtf_size_t index,
     SkColorType color_type,
-    const SkISize component_sizes[cc::kNumYUVPlanes],
-    void* planes[cc::kNumYUVPlanes],
-    const wtf_size_t row_bytes[cc::kNumYUVPlanes],
+    base::span<const SkISize, cc::kNumYUVPlanes> component_sizes,
+    base::span<void*, cc::kNumYUVPlanes> planes,
+    base::span<const wtf_size_t, cc::kNumYUVPlanes> row_bytes,
     cc::PaintImage::GeneratorClientId client_id) {
   base::AutoLock lock(generator_lock_);
   DCHECK_EQ(index, 0u);
@@ -187,19 +182,20 @@ bool ImageFrameGenerator::DecodeToYUV(
   if (decode_failed_ || yuv_decoding_failed_)
     return false;
 
-  if (!planes || !planes[0] || !planes[1] || !planes[2] || !row_bytes ||
-      !row_bytes[0] || !row_bytes[1] || !row_bytes[2]) {
+  if (!planes.data() || !planes[0] || !planes[1] || !planes[2] ||
+      !row_bytes.data() || !row_bytes[0] || !row_bytes[1] || !row_bytes[2]) {
     return false;
   }
   const bool all_data_received = true;
   std::unique_ptr<ImageDecoder> decoder = ImageDecoder::Create(
       data, all_data_received, ImageDecoder::kAlphaPremultiplied,
-      ImageDecoder::kDefaultBitDepth, decoder_color_behavior_);
+      ImageDecoder::kDefaultBitDepth, decoder_color_behavior_, aux_image_,
+      Platform::GetMaxDecodedImageBytes());
   // getYUVComponentSizes was already called and was successful, so
   // ImageDecoder::create must succeed.
   DCHECK(decoder);
 
-  std::unique_ptr<ImagePlanes> image_planes =
+  auto image_planes =
       std::make_unique<ImagePlanes>(planes, row_bytes, color_type);
   // TODO(crbug.com/943519): Don't forget to initialize planes to black or
   // transparent for incremental decoding.
@@ -283,13 +279,15 @@ bool ImageFrameGenerator::GetYUVAInfo(
   if (yuv_decoding_failed_)
     return false;
   std::unique_ptr<ImageDecoder> decoder = ImageDecoder::Create(
-      data, true /* data_complete */, ImageDecoder::kAlphaPremultiplied,
-      ImageDecoder::kDefaultBitDepth, decoder_color_behavior_);
+      data, /*data_complete=*/true, ImageDecoder::kAlphaPremultiplied,
+      ImageDecoder::kDefaultBitDepth, decoder_color_behavior_, aux_image_,
+      Platform::GetMaxDecodedImageBytes());
   DCHECK(decoder);
 
-  DCHECK(decoder->CanDecodeToYUV());
+  DCHECK(decoder->CanDecodeToYUV())
+      << decoder->FilenameExtension() << " image decoder";
   SkYUVAInfo::Subsampling subsampling;
-  size_t width_bytes[SkYUVAInfo::kMaxPlanes];
+  std::array<size_t, SkYUVAInfo::kMaxPlanes> width_bytes;
   if (!UpdateYUVAInfoSubsamplingAndWidthBytes(decoder.get(), &subsampling,
                                               width_bytes)) {
     return false;
@@ -315,7 +313,7 @@ bool ImageFrameGenerator::GetYUVAInfo(
   } else {
     return false;
   }
-  *info = SkYUVAPixmapInfo(yuva_info, dataType, width_bytes);
+  *info = SkYUVAPixmapInfo(yuva_info, dataType, width_bytes.data());
   DCHECK(info->isSupported(supported_data_types));
 
   return true;
@@ -359,7 +357,7 @@ ImageFrameGenerator::ClientAutoLock::~ClientAutoLock() {
 
   base::AutoLock lock(generator_->generator_lock_);
   auto it = generator_->lock_map_.find(client_id_);
-  DCHECK(it != generator_->lock_map_.end());
+  CHECK(it != generator_->lock_map_.end(), base::NotFatalUntil::M130);
   it->value->ref_count--;
 
   if (it->value->ref_count == 0)

@@ -12,7 +12,7 @@
 #include <set>
 #include <string>
 
-#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
 #include "net/base/net_export.h"
 #include "net/base/request_priority.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
@@ -20,16 +20,19 @@
 
 namespace net {
 
-class ClientSocketHandle;
+class StreamSocketHandle;
 class GrowableIOBuffer;
+class IPEndPoint;
 class HttpStreamParser;
 struct HttpRequestInfo;
+struct LoadTimingInfo;
 class NetLogWithSource;
+class SSLInfo;
 
 class NET_EXPORT_PRIVATE HttpBasicState {
  public:
-  HttpBasicState(std::unique_ptr<ClientSocketHandle> connection,
-                 bool using_proxy);
+  HttpBasicState(std::unique_ptr<StreamSocketHandle> connection,
+                 bool is_for_get_to_http_proxy);
 
   HttpBasicState(const HttpBasicState&) = delete;
   HttpBasicState& operator=(const HttpBasicState&) = delete;
@@ -41,21 +44,22 @@ class NET_EXPORT_PRIVATE HttpBasicState {
                   RequestPriority priority,
                   const NetLogWithSource& net_log);
 
+  // Called when the owner of `this` is closed.
+  void Close(bool not_reusable);
+
   HttpStreamParser* parser() const { return parser_.get(); }
 
-  bool using_proxy() const { return using_proxy_; }
+  // Returns true if this request is a non-tunneled HTTP request via a proxy.
+  bool is_for_get_to_http_proxy() const { return is_for_get_to_http_proxy_; }
 
-  // Deletes |parser_| and sets it to NULL.
-  void DeleteParser();
+  StreamSocketHandle* connection() const { return connection_.get(); }
 
-  ClientSocketHandle* connection() const { return connection_.get(); }
-
-  std::unique_ptr<ClientSocketHandle> ReleaseConnection();
+  std::unique_ptr<StreamSocketHandle> ReleaseConnection();
 
   scoped_refptr<GrowableIOBuffer> read_buf() const;
 
   // Generates a string of the form "METHOD PATH HTTP/1.1\r\n", based on the
-  // values of request_info_ and using_proxy_.
+  // values of request_info_ and is_for_get_to_http_proxy_.
   std::string GenerateRequestLine() const;
 
   MutableNetworkTrafficAnnotationTag traffic_annotation() {
@@ -69,6 +73,20 @@ class NET_EXPORT_PRIVATE HttpBasicState {
   // TODO(mmenke): Consider renaming this concept, to avoid confusion with
   // ClientSocketHandle::is_reused().
   bool IsConnectionReused() const;
+  void SetConnectionReused();
+
+  // Returns true if the connection can be "reused" as defined by
+  // HttpStreamParser.
+  //
+  // TODO(crbug.com/346835898): Consider renaming this concept, to avoid
+  // confusion with above IsConnectionReused() and ClientSocketHandle.
+  bool CanReuseConnection() const;
+
+  bool GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const;
+
+  void GetSSLInfo(SSLInfo* ssl_info);
+
+  int GetRemoteEndpoint(IPEndPoint* endpoint);
 
   // Retrieves any DNS aliases for the remote endpoint. Includes all known
   // aliases, e.g. from A, AAAA, or HTTPS, not just from the address used for
@@ -78,14 +96,11 @@ class NET_EXPORT_PRIVATE HttpBasicState {
  private:
   scoped_refptr<GrowableIOBuffer> read_buf_;
 
-  std::unique_ptr<ClientSocketHandle> connection_;
+  std::unique_ptr<StreamSocketHandle> connection_;
 
   std::unique_ptr<HttpStreamParser> parser_;
 
-  const bool using_proxy_;
-
-  GURL url_;
-  std::string request_method_;
+  const bool is_for_get_to_http_proxy_;
 
   MutableNetworkTrafficAnnotationTag traffic_annotation_;
 };

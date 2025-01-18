@@ -4,8 +4,8 @@
 
 #include "content/browser/bad_message.h"
 
-#include "base/bind.h"
 #include "base/debug/dump_without_crashing.h"
+#include "base/functional/bind.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/string_number_conversions.h"
@@ -32,7 +32,7 @@ void LogBadMessage(BadMessageReason reason) {
                                  base::NumberToString(reason));
 }
 
-void ReceivedBadMessageOnUIThread(int render_process_id,
+void ReceivedBadMessageOnUIThread(ChildProcessId render_process_id,
                                   BadMessageReason reason) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   RenderProcessHost* host = RenderProcessHost::FromID(render_process_id);
@@ -53,6 +53,11 @@ void ReceivedBadMessage(RenderProcessHost* host, BadMessageReason reason) {
 }
 
 void ReceivedBadMessage(int render_process_id, BadMessageReason reason) {
+  ReceivedBadMessage(ChildProcessId(render_process_id), reason);
+}
+
+void ReceivedBadMessage(ChildProcessId render_process_id,
+                        BadMessageReason reason) {
   // We generate a crash dump here since generating one after posting to the UI
   // thread is less useful.
   LogBadMessage(reason);
@@ -67,10 +72,12 @@ void ReceivedBadMessage(int render_process_id, BadMessageReason reason) {
   ReceivedBadMessageOnUIThread(render_process_id, reason);
 }
 
+#if BUILDFLAG(CONTENT_ENABLE_LEGACY_IPC)
 void ReceivedBadMessage(BrowserMessageFilter* filter, BadMessageReason reason) {
   LogBadMessage(reason);
   filter->ShutdownForBadMessage();
 }
+#endif
 
 base::debug::CrashKeyString* GetRequestedSiteInfoKey() {
   static auto* const crash_key = base::debug::AllocateCrashKeyString(

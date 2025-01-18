@@ -23,6 +23,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
+#include "content/public/test/fake_frame_widget.h"
 #include "content/public/test/test_utils.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -87,11 +88,7 @@ IN_PROC_BROWSER_TEST_F(ActiveRenderWidgetHostBrowserTest,
   // return true only iff document is  active and focused.
   auto document_is_active_and_focused =
       [](content::RenderFrameHost* rfh) -> bool {
-    bool has_focus = false;
-    EXPECT_TRUE(ExecuteScriptAndExtractBool(
-        rfh, "window.domAutomationController.send(document.hasFocus())",
-        &has_focus));
-    return has_focus;
+    return EvalJs(rfh, "document.hasFocus()").ExtractBool();
   };
 
   // Helper function to check a property of document.activeElement in the
@@ -114,7 +111,7 @@ IN_PROC_BROWSER_TEST_F(ActiveRenderWidgetHostBrowserTest,
 
   // After focusing child_frame_b, document.hasFocus() should return
   // true for child_frame_b and all its ancestor frames.
-  EXPECT_TRUE(ExecuteScript(child_frame_b, "window.focus();"));
+  EXPECT_TRUE(ExecJs(child_frame_b, "window.focus();"));
   EXPECT_EQ(child_frame_b, web_contents->GetFocusedFrame());
   EXPECT_TRUE(document_is_active_and_focused(main_frame_a));
   EXPECT_TRUE(document_is_active_and_focused(child_frame_b));
@@ -126,7 +123,7 @@ IN_PROC_BROWSER_TEST_F(ActiveRenderWidgetHostBrowserTest,
 
   // After focusing child_frame_c, document.hasFocus() should return
   // true for child_frame_c and all its ancestor frames.
-  EXPECT_TRUE(ExecuteScript(child_frame_c, "window.focus();"));
+  EXPECT_TRUE(ExecJs(child_frame_c, "window.focus();"));
   EXPECT_EQ(child_frame_c, web_contents->GetFocusedFrame());
   EXPECT_TRUE(document_is_active_and_focused(main_frame_a));
   EXPECT_TRUE(document_is_active_and_focused(child_frame_b));
@@ -143,7 +140,7 @@ IN_PROC_BROWSER_TEST_F(ActiveRenderWidgetHostBrowserTest,
 
   // After focusing child_frame_d, document.hasFocus() should return
   // true for child_frame_d and all its ancestor frames.
-  EXPECT_TRUE(ExecuteScript(child_frame_d, "window.focus();"));
+  EXPECT_TRUE(ExecJs(child_frame_d, "window.focus();"));
   EXPECT_EQ(child_frame_d, web_contents->GetFocusedFrame());
   EXPECT_TRUE(document_is_active_and_focused(main_frame_a));
   EXPECT_FALSE(document_is_active_and_focused(child_frame_b));
@@ -158,7 +155,7 @@ IN_PROC_BROWSER_TEST_F(ActiveRenderWidgetHostBrowserTest,
   // descendants should return false. On the renderer side, both the
   // 'active' and 'focus' states for blink::FocusController will be
   // true.
-  EXPECT_TRUE(ExecuteScript(main_frame_a, "window.focus();"));
+  EXPECT_TRUE(ExecJs(main_frame_a, "window.focus();"));
   EXPECT_EQ(main_frame_a, web_contents->GetFocusedFrame());
   EXPECT_TRUE(document_is_active_and_focused(main_frame_a));
   EXPECT_FALSE(document_is_active_and_focused(child_frame_b));
@@ -244,7 +241,7 @@ IN_PROC_BROWSER_TEST_F(ActiveRenderWidgetHostBrowserTest, FocusOmniBox) {
   // On MacOS, calling omnibox->SetFocus function doesn't invoke
   // RWHI::SetActive. Hence there is no IPC call to renderer and
   // FakeFrameWidget's 'active' state remains uninitialised.
-  EXPECT_EQ(fake_frame_widget.GetActive(), absl::nullopt);
+  EXPECT_EQ(fake_frame_widget.GetActive(), std::nullopt);
 #else
   EXPECT_EQ(fake_frame_widget.GetActive(), false);
 #endif

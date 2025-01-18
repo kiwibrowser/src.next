@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,12 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
+#include "third_party/blink/renderer/platform/heap/prefinalizer.h"
 
 namespace blink {
 
 class AbortSignal;
-class ExecutionContext;
+class ScriptState;
 class ScriptValue;
 
 // Implementation of https://dom.spec.whatwg.org/#interface-abortcontroller
@@ -20,9 +21,10 @@ class ScriptValue;
 // https://docs.google.com/document/d/1OuoCG2uiijbAwbCw9jaS7tHEO0LBO_4gMNio1ox0qlY/edit
 class CORE_EXPORT AbortController : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
+  USING_PRE_FINALIZER(AbortController, Dispose);
 
  public:
-  static AbortController* Create(ExecutionContext*);
+  static AbortController* Create(ScriptState*);
 
   explicit AbortController(AbortSignal*);
   ~AbortController() override;
@@ -35,6 +37,8 @@ class CORE_EXPORT AbortController : public ScriptWrappable {
   // https://dom.spec.whatwg.org/#dom-abortcontroller-abort
   void abort(ScriptState*);
   void abort(ScriptState*, ScriptValue reason);
+
+  void Dispose();
 
   void Trace(Visitor*) const override;
 

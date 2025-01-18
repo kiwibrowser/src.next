@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/extensions/extension_installed_waiter.h"
 
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/task/single_thread_task_runner.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -24,12 +24,14 @@ void ExtensionInstalledWaiter::WaitForInstall(
 
 void ExtensionInstalledWaiter::SetGivingUpCallbackForTesting(
     base::RepeatingClosure callback) {
-  if (g_giving_up_callback)
+  if (g_giving_up_callback) {
     delete g_giving_up_callback;
-  if (!callback.is_null())
+  }
+  if (!callback.is_null()) {
     g_giving_up_callback = new base::RepeatingClosure(callback);
-  else
+  } else {
     g_giving_up_callback = nullptr;
+  }
 }
 
 ExtensionInstalledWaiter::ExtensionInstalledWaiter(
@@ -41,16 +43,14 @@ ExtensionInstalledWaiter::ExtensionInstalledWaiter(
       done_callback_(std::move(done_callback)) {
   extension_registry_observation_.Observe(
       extensions::ExtensionRegistry::Get(browser->profile()));
-  removal_watcher_ = std::make_unique<ExtensionRemovalWatcher>(
-      browser, extension,
-      base::BindOnce(
-          &ExtensionInstalledWaiter::OnExtensionRemovedOrBrowserClosed,
-          weak_factory_.GetWeakPtr()));
+  BrowserList::AddObserver(this);
 }
 
 ExtensionInstalledWaiter::~ExtensionInstalledWaiter() {
-  if (done_callback_ && g_giving_up_callback)
+  if (done_callback_ && g_giving_up_callback) {
     g_giving_up_callback->Run();
+  }
+  BrowserList::RemoveObserver(this);
 }
 
 void ExtensionInstalledWaiter::RunCallbackIfExtensionInstalled() {
@@ -70,17 +70,29 @@ bool ExtensionInstalledWaiter::IsExtensionInstalled() const {
 void ExtensionInstalledWaiter::OnExtensionLoaded(
     content::BrowserContext* browser_context,
     const extensions::Extension* extension) {
-  if (extension != extension_.get())
+  if (extension != extension_.get()) {
     return;
+  }
 
   // Only call Wait() after all the other extension observers have had a chance
   // to run.
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE,
       base::BindOnce(&ExtensionInstalledWaiter::RunCallbackIfExtensionInstalled,
                      weak_factory_.GetWeakPtr()));
 }
 
-void ExtensionInstalledWaiter::OnExtensionRemovedOrBrowserClosed() {
-  delete this;
+void ExtensionInstalledWaiter::OnExtensionUnloaded(
+    content::BrowserContext* browser_context,
+    const extensions::Extension* extension,
+    extensions::UnloadedExtensionReason reason) {
+  if (extension == extension_.get()) {
+    delete this;
+  }
+}
+
+void ExtensionInstalledWaiter::OnBrowserRemoved(Browser* browser) {
+  if (browser == browser_) {
+    delete this;
+  }
 }

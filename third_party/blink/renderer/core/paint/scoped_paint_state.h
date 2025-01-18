@@ -1,13 +1,14 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_SCOPED_PAINT_STATE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_SCOPED_PAINT_STATE_H_
 
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include <optional>
+
 #include "third_party/blink/renderer/core/layout/layout_box.h"
-#include "third_party/blink/renderer/core/layout/ng/ng_physical_fragment.h"
+#include "third_party/blink/renderer/core/layout/physical_box_fragment.h"
 #include "third_party/blink/renderer/core/mobile_metrics/mobile_friendliness_checker.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
 #include "third_party/blink/renderer/platform/graphics/paint/scoped_paint_chunk_properties.h"
@@ -28,30 +29,18 @@ class ScopedPaintState {
   STACK_ALLOCATED();
 
  public:
-  // If |paint_legacy_table_part_in_ancestor_layer| is true, we'll
-  // unconditionally apply PaintOffsetTranslation adjustment. For self-painting
-  // layers, this adjustment is typically applied by PaintLayerPainter rather
-  // than ScopedPaintState, but legacy tables table parts sometimes paint into
-  // ancestor's self-painting layer instead of their own.
-  // TODO(layout-dev): Remove this parameter when removing legacy table classes.
-  ScopedPaintState(const LayoutObject&,
-                   const PaintInfo&,
-                   const FragmentData*,
-                   bool painting_legacy_table_part_in_ancestor_layer = false);
+  ScopedPaintState(const LayoutObject&, const PaintInfo&, const FragmentData*);
 
-  ScopedPaintState(const LayoutObject& object,
-                   const PaintInfo& paint_info,
-                   bool painting_legacy_table_part_in_ancestor_layer = false)
+  ScopedPaintState(const LayoutObject& object, const PaintInfo& paint_info)
       : ScopedPaintState(object,
                          paint_info,
-                         paint_info.FragmentToPaint(object),
-                         painting_legacy_table_part_in_ancestor_layer) {}
+                         DetermineFragmentToPaint(object, paint_info)) {}
 
-  ScopedPaintState(const NGPhysicalFragment& fragment,
+  ScopedPaintState(const PhysicalBoxFragment& fragment,
                    const PaintInfo& paint_info)
       : ScopedPaintState(*fragment.GetLayoutObject(),
                          paint_info,
-                         paint_info.FragmentToPaint(fragment)) {}
+                         fragment.GetFragmentData()) {}
 
   ~ScopedPaintState() {
     if (paint_offset_translation_as_drawing_)
@@ -84,10 +73,23 @@ class ScopedPaintState {
         paint_offset_(input.PaintOffset()) {}
   ScopedPaintState(const PaintInfo& paint_info,
                    const PhysicalOffset& paint_offset,
-                   const LayoutObject& object)
-      : fragment_to_paint_(paint_info.FragmentToPaint(object)),
+                   const LayoutObject& object,
+                   const FragmentData* fragment_data)
+      : fragment_to_paint_(fragment_data),
         input_paint_info_(paint_info),
         paint_offset_(paint_offset) {}
+
+  const FragmentData* DetermineFragmentToPaint(const LayoutObject& object,
+                                               const PaintInfo& paint_info) {
+    if (const auto* data = paint_info.FragmentDataOverride()) {
+      return data;
+    }
+    // TODO(mstensho): There may actually be more than one fragment, and code
+    // that wants to take the legacy path should really have a
+    // FragmentDataOverride() (so we shouldn't really be here). This is
+    // currently not the case for e.g. frameset children, though.
+    return &object.FirstFragment();
+  }
 
  private:
   void AdjustForPaintProperties(const LayoutObject&);
@@ -98,8 +100,8 @@ class ScopedPaintState {
   const FragmentData* fragment_to_paint_;
   const PaintInfo& input_paint_info_;
   PhysicalOffset paint_offset_;
-  absl::optional<PaintInfo> adjusted_paint_info_;
-  absl::optional<ScopedPaintChunkProperties> chunk_properties_;
+  std::optional<PaintInfo> adjusted_paint_info_;
+  std::optional<ScopedPaintChunkProperties> chunk_properties_;
   bool paint_offset_translation_as_drawing_ = false;
 };
 
@@ -115,14 +117,15 @@ class ScopedBoxContentsPaintState : public ScopedPaintState {
 
   ScopedBoxContentsPaintState(const PaintInfo& paint_info,
                               const PhysicalOffset& paint_offset,
-                              const LayoutBox& box)
-      : ScopedPaintState(paint_info, paint_offset, box) {
+                              const LayoutBox& box,
+                              const FragmentData* fragment_data)
+      : ScopedPaintState(paint_info, paint_offset, box, fragment_data) {
     AdjustForBoxContents(box);
   }
 
  private:
   void AdjustForBoxContents(const LayoutBox&);
-  absl::optional<MobileFriendlinessChecker::IgnoreBeyondViewportScope>
+  std::optional<MobileFriendlinessChecker::IgnoreBeyondViewportScope>
       mf_ignore_scope_;
 };
 

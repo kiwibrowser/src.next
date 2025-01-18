@@ -1,4 +1,4 @@
-// Copyright 2022 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,6 +30,11 @@ struct OldDocumentInfoForCommit : GarbageCollected<OldDocumentInfoForCommit> {
   // Whether the previous document in the frame had sticky activation before
   // the commit.
   bool had_sticky_activation_before_navigation = false;
+  // The `unreported_task_time` accumulated by the FrameSchedulerImpl, which
+  // needs to be carried over in case of subframe navigations.
+  base::TimeDelta frame_scheduler_unreported_task_time;
+  // Whether the previous LocalFrame is the focused frame or not.
+  bool was_focused_frame = false;
 };
 
 // Owns the OldDocumentInfoForCommit and exposes it through `info_`
@@ -61,4 +66,4 @@ class ScopedOldDocumentInfoForCommitCapturer {
 
 }  // namespace blink
 
-#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_FRAME_LOADER_H_
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_OLD_DOCUMENT_INFO_FOR_COMMIT_H_

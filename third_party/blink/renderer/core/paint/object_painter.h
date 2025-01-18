@@ -1,15 +1,22 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_OBJECT_PAINTER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_OBJECT_PAINTER_H_
 
+#include "base/auto_reset.h"
+#include "cc/input/hit_test_opaqueness.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
+namespace gfx {
+class Rect;
+}
+
 namespace blink {
 
+class DisplayItemClient;
 class LayoutObject;
 struct PaintInfo;
 struct PhysicalOffset;
@@ -41,6 +48,26 @@ class ObjectPainter {
   // paint phases) according to paintInfo.phase.
   void PaintAllPhasesAtomically(const PaintInfo&);
 
+  // Hit test data has two purposes:
+  // 1. Expands the bounds of the current paint chunk for hit test;
+  // 2. Stores special hit test data, e.g. special touch action.
+  // This should be called in the proper paint phase (background for
+  // LayoutBoxes, foreground for line boxes and SVG) even if there is no other
+  // painted content.
+  void RecordHitTestData(const PaintInfo&,
+                         const gfx::Rect& paint_rect,
+                         const DisplayItemClient&);
+
+  cc::HitTestOpaqueness GetHitTestOpaqueness() const;
+
+  // If true, we should record hit test data for the second purpose described
+  // above. As an optimization, some callers of RecordHitTestData() doesn't
+  // need to call it just for the first purpose. For example, a text fragment
+  // is always contained by some line box, thus the painter checks this
+  // function before calling RecordHitTestData().
+  bool ShouldRecordSpecialHitTestData(const PaintInfo&);
+
+ private:
   const LayoutObject& layout_object_;
 };
 

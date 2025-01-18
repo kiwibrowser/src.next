@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,23 +14,28 @@ class Rect;
 namespace blink {
 
 struct PaintInfo;
+struct PhysicalRect;
 class DisplayItemClient;
 class Document;
 class LayoutView;
+class PhysicalBoxFragment;
 class PropertyTreeStateOrAlias;
 
 class ViewPainter {
   STACK_ALLOCATED();
 
  public:
-  ViewPainter(const LayoutView& layout_view) : layout_view_(layout_view) {}
+  // The box fragment specified may be:
+  // * The one and only LayoutView fragment (this is always the case when not
+  //   printing)
+  // * A page container fragment (for a given page), to fill the entire page,
+  //   including the margin area, with an @page background
+  explicit ViewPainter(const PhysicalBoxFragment& box_fragment)
+      : box_fragment_(box_fragment) {}
 
-  void Paint(const PaintInfo&);
   void PaintBoxDecorationBackground(const PaintInfo&);
 
  private:
-  const LayoutView& layout_view_;
-
   void PaintRootElementGroup(
       const PaintInfo&,
       const gfx::Rect& pixel_snapped_background_rect,
@@ -44,6 +49,11 @@ class ViewPainter {
                       const Document&,
                       const DisplayItemClient& background_client,
                       const PropertyTreeStateOrAlias& state);
+
+  const LayoutView& GetLayoutView() const;
+  PhysicalRect BackgroundRect() const;
+
+  const PhysicalBoxFragment& box_fragment_;
 };
 
 }  // namespace blink

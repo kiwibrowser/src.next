@@ -6,9 +6,10 @@
 
 #include <memory>
 
-#include "base/bind.h"
 #include "base/files/file_path.h"
+#include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
+#include "base/not_fatal_until.h"
 #include "base/process/process.h"
 #include "base/ranges/algorithm.h"
 #include "build/build_config.h"
@@ -75,8 +76,9 @@ void HungPluginTabHelper::PluginCrashed(const base::FilePath& plugin_path,
     if (i->second->infobar) {
       infobars::ContentInfoBarManager* infobar_manager =
           infobars::ContentInfoBarManager::FromWebContents(web_contents());
-      if (infobar_manager)
+      if (infobar_manager) {
         infobar_manager->RemoveInfoBar(i->second->infobar);
+      }
     }
     hung_plugins_.erase(i);
   }
@@ -93,17 +95,20 @@ void HungPluginTabHelper::PluginHungStatusChanged(
   if (found != hung_plugins_.end()) {
     if (!is_hung) {
       // Hung plugin became un-hung, close the infobar and delete our info.
-      if (found->second->infobar && infobar_manager)
+      if (found->second->infobar && infobar_manager) {
         infobar_manager->RemoveInfoBar(found->second->infobar);
+      }
       hung_plugins_.erase(found);
     }
     return;
   }
 
-  if (!infobar_manager)
+  if (!infobar_manager) {
     return;
-  if (!infobar_observations_.IsObservingSource(infobar_manager))
+  }
+  if (!infobar_observations_.IsObservingSource(infobar_manager)) {
     infobar_observations_.AddObservation(infobar_manager);
+  }
 
   std::u16string plugin_name =
       content::PluginService::GetInstance()->GetPluginDisplayNameByPath(
@@ -164,7 +169,7 @@ void HungPluginTabHelper::OnReshowTimer(int child_id) {
   // The timer should have been cancelled if the record isn't in our map
   // anymore.
   auto found = hung_plugins_.find(child_id);
-  DCHECK(found != hung_plugins_.end());
+  CHECK(found != hung_plugins_.end(), base::NotFatalUntil::M130);
   DCHECK(!found->second->infobar);
   ShowBar(child_id, found->second.get());
 }
@@ -172,8 +177,9 @@ void HungPluginTabHelper::OnReshowTimer(int child_id) {
 void HungPluginTabHelper::ShowBar(int child_id, PluginState* state) {
   infobars::ContentInfoBarManager* infobar_manager =
       infobars::ContentInfoBarManager::FromWebContents(web_contents());
-  if (!infobar_manager)
+  if (!infobar_manager) {
     return;
+  }
 
   DCHECK(!state->infobar);
   state->infobar = HungPluginInfoBarDelegate::Create(infobar_manager, this,

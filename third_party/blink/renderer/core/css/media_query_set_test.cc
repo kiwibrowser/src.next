@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/css/media_list.h"
-#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -26,19 +25,22 @@ static void TestMediaQuery(const char* input,
   wtf_size_t j = 0;
   while (j < query_set.QueryVector().size()) {
     const MediaQuery& query = *query_set.QueryVector()[j];
-    if (!unknown_substitute.IsNull() && query.HasUnknown())
+    if (!unknown_substitute.IsNull() && query.HasUnknown()) {
       actual.Append(unknown_substitute);
-    else
+    } else {
       actual.Append(query.CssText());
+    }
     ++j;
-    if (j >= query_set.QueryVector().size())
+    if (j >= query_set.QueryVector().size()) {
       break;
+    }
     actual.Append(", ");
   }
-  if (output)
-    ASSERT_EQ(output, actual.ToString());
-  else
-    ASSERT_EQ(input, actual.ToString());
+  if (output) {
+    ASSERT_EQ(String(output), actual.ToString());
+  } else {
+    ASSERT_EQ(String(input), actual.ToString());
+  }
 }
 
 TEST(MediaQuerySetTest, Basic) {
@@ -62,7 +64,7 @@ TEST(MediaQuerySetTest, Basic) {
       {"example", nullptr},
       {"screen and (max-weight: 3kg) and (color), (monochrome)",
        "not all, (monochrome)"},
-      {"(min-width: -100px)", "not all"},
+      {"(min-width: -100px)", "(min-width: -100px)"},
       {"(width:100gil)", "not all"},
       {"(example, all,), speech", "not all, speech"},
       {"&test, screen", "not all, screen"},
@@ -73,7 +75,8 @@ TEST(MediaQuerySetTest, Basic) {
       {"screen and (device-height: 60rem)", nullptr},
       {"screen and (device-height: 60ch)", nullptr},
       {"screen and (device-aspect-ratio: 16 / 9)", nullptr},
-      {"(device-aspect-ratio: 16.0/9.0)", "not all"},
+      {"(device-aspect-ratio: 16.1/9.0)", "(device-aspect-ratio: 16.1 / 9)"},
+      {"(device-aspect-ratio: 16.0)", "(device-aspect-ratio: 16 / 1)"},
       {"(device-aspect-ratio: 16/ 9)", "(device-aspect-ratio: 16 / 9)"},
       {"(device-aspect-ratio: 16/\r9)", "(device-aspect-ratio: 16 / 9)"},
       {"all and (color)", "(color)"},
@@ -94,15 +97,22 @@ TEST(MediaQuerySetTest, Basic) {
       {"screen and (max-width: 24.4EM)", "screen and (max-width: 24.4em)"},
       {"screen and (max-width: blabla)", "not all"},
       {"screen and (max-width: 1)", "not all"},
-      {"screen and (max-width: 0)", nullptr},
+      {"screen and (max-width: 0)", "screen and (max-width: 0)"},
       {"screen and (max-width: 1deg)", "not all"},
       {"handheld and (min-width: 20em), \nscreen and (min-width: 20em)",
        "handheld and (min-width: 20em), screen and (min-width: 20em)"},
       {"print and (min-resolution: 300dpi)", nullptr},
       {"print and (min-resolution: 118dpcm)", nullptr},
       {"(resolution: 0.83333333333333333333dppx)",
-       "(resolution: 0.833333333333333dppx)"},
+       "(resolution: 0.833333dppx)"},
       {"(resolution: 2.4dppx)", nullptr},
+      {"(resolution: calc(1dppx))", "(resolution: calc(1dppx))"},
+      {"(resolution: calc(1x))", "(resolution: calc(1dppx))"},
+      {"(resolution: calc(96dpi))", "(resolution: calc(1dppx))"},
+      {"(resolution: calc(1x + 2x))", "(resolution: calc(3dppx))"},
+      {"(resolution: calc(3x - 2x))", "(resolution: calc(1dppx))"},
+      {"(resolution: calc(1x * 3))", "(resolution: calc(3dppx))"},
+      {"(resolution: calc(6x / 2))", "(resolution: calc(3dppx))"},
       {"all and(color)", "not all"},
       {"all and (", "not all"},
       {"test;,all", "not all, all"},
@@ -229,6 +239,10 @@ TEST(MediaQuerySetTest, Basic) {
       {"(block-size > 0px)", "not all"},
       {"(min-block-size: 0px)", "not all"},
       {"(max-block-size: 0px)", "not all"},
+      {"(device-aspect-ratio: calc(16.1)/calc(9.0))",
+       "(device-aspect-ratio: calc(16.1) / calc(9))"},
+      {"(device-aspect-ratio: calc(16.1)/9.0)",
+       "(device-aspect-ratio: calc(16.1) / 9)"},
   };
 
   for (const MediaQuerySetTestCase& test : test_cases) {
@@ -242,8 +256,6 @@ TEST(MediaQuerySetTest, Basic) {
 }
 
 TEST(MediaQuerySetTest, CSSMediaQueries4) {
-  ScopedCSSMediaQueries4ForTest media_queries_4_flag(true);
-
   MediaQuerySetTestCase test_cases[] = {
       {"(width: 100px) or (width: 200px)", nullptr},
       {"(width: 100px)or (width: 200px)", "(width: 100px) or (width: 200px)"},
@@ -307,8 +319,6 @@ TEST(MediaQuerySetTest, CSSMediaQueries4) {
 
 // https://drafts.csswg.org/mediaqueries-4/#typedef-general-enclosed
 TEST(MediaQuerySetTest, GeneralEnclosed) {
-  ScopedCSSMediaQueries4ForTest media_queries_4_flag(true);
-
   const char* unknown_cases[] = {
       "()",
       "( )",
@@ -387,50 +397,6 @@ TEST(MediaQuerySetTest, GeneralEnclosed) {
   for (const char* input : invalid_cases) {
     SCOPED_TRACE(String(input));
     TestMediaQuery(input, "not all", *MediaQuerySet::Create(input, nullptr));
-  }
-}
-
-TEST(MediaQuerySetTest, BehindRuntimeFlag) {
-  ScopedForcedColorsForTest forced_colors_flag(false);
-  ScopedMediaQueryNavigationControlsForTest navigation_controls_flag(false);
-  ScopedCSSFoldablesForTest foldables_flag(false);
-  ScopedDevicePostureForTest device_posture_flag(false);
-  ScopedCSSMediaQueries4ForTest media_queries_4_flag(false);
-
-  // The first string represents the input string, the second string represents
-  // the output string.
-  MediaQuerySetTestCase test_cases[] = {
-      {"(forced-colors)", "not all"},
-      {"(navigation-controls)", "not all"},
-      {"(horizontal-viewport-segments)", "not all"},
-      {"(vertical-viewport-segments)", "not all"},
-      {"(device-posture)", "not all"},
-      {"(shape: rect)", "not all"},
-      {"(forced-colors: none)", "not all"},
-      {"(navigation-controls: none)", "not all"},
-      {"(horizontal-viewport-segments: 1)", "not all"},
-      {"(vertical-viewport-segments: 1)", "not all"},
-      {"(device-posture:none)", "not all"},
-      {"(width: 100px) or (width: 200px)", "not all"},
-      {"((width: 100px))", "not all"},
-      {"not (orientation)", "not all"},
-      {"(width < 10px)", "not all"},
-      {"(width <= 10px)", "not all"},
-      {"(width = 10px)", "not all"},
-      {"(width > 10px)", "not all"},
-      {"(width >= 10px)", "not all"},
-      {"(10px < width)", "not all"},
-      {"(10px < width < 20px)", "not all"},
-      {"()", "not all"},
-      {"(unknown)", "not all"},
-      {"unknown()", "not all"},
-      {"(1px)", "not all"},
-  };
-
-  for (const MediaQuerySetTestCase& test : test_cases) {
-    SCOPED_TRACE(String(test.input));
-    TestMediaQuery(test.input, test.output,
-                   *MediaQuerySet::Create(test.input, nullptr));
   }
 }
 

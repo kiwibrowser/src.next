@@ -16,10 +16,12 @@ import org.chromium.base.ApplicationState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ObserverList;
+import org.chromium.base.task.PostTask;
+import org.chromium.base.task.TaskRunner;
+import org.chromium.base.task.TaskTraits;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 
-/**
- * Observes and keeps a record of whether the system power saving mode is on.
- */
+/** Observes and keeps a record of whether the system power saving mode is on. */
 public class PowerSavingModeMonitor {
     private static PowerSavingModeMonitor sInstance;
 
@@ -32,12 +34,17 @@ public class PowerSavingModeMonitor {
     }
 
     private final ObserverList<Runnable> mObservers = new ObserverList<>();
-    @Nullable
-    private final PowerManager mPowerManager;
-    @Nullable
-    private BroadcastReceiver mPowerModeReceiver;
+    @Nullable private final PowerManager mPowerManager;
+    @Nullable private BroadcastReceiver mPowerModeReceiver;
 
     private boolean mPowerSavingIsOn;
+
+    private boolean mUnregisterRequested;
+
+    private volatile boolean mBroadcastReceiverRegistered;
+
+    private static final TaskRunner sSequencedTaskRunner =
+            PostTask.createSequencedTaskRunner(TaskTraits.USER_VISIBLE);
 
     /** Returns whether power saving mode is currently on. */
     public boolean powerSavingIsOn() {
@@ -55,9 +62,10 @@ public class PowerSavingModeMonitor {
     }
 
     private PowerSavingModeMonitor() {
-        mPowerManager = (PowerManager) ContextUtils.getApplicationContext().getSystemService(
-                Context.POWER_SERVICE);
-
+        mPowerManager =
+                (PowerManager)
+                        ContextUtils.getApplicationContext()
+                                .getSystemService(Context.POWER_SERVICE);
         updatePowerSaveMode();
         updateAccordingToAppState();
         ApplicationStatus.registerApplicationStateListener(state -> updateAccordingToAppState());
@@ -74,24 +82,64 @@ public class PowerSavingModeMonitor {
     }
 
     private void start() {
-        if (mPowerModeReceiver == null) {
-            mPowerModeReceiver = new BroadcastReceiver() {
-                @Override
-                public void onReceive(Context context, Intent intent) {
-                    updatePowerSaveMode();
-                }
-            };
-            ContextUtils.getApplicationContext().registerReceiver(mPowerModeReceiver,
-                    new IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED));
+        if (mBroadcastReceiverRegistered || mPowerModeReceiver != null) {
+            return;
+        }
+
+        mPowerModeReceiver =
+                new BroadcastReceiver() {
+                    @Override
+                    public void onReceive(Context context, Intent intent) {
+                        updatePowerSaveMode();
+                    }
+                };
+
+        if (ChromeFeatureList.sPowerSavingModeBroadcastReceiverInBackground.isEnabled()) {
+            sSequencedTaskRunner.execute(this::registerPowerSavingModeMonitorBroadcastReceiver);
+        } else {
+            registerPowerSavingModeMonitorBroadcastReceiver();
         }
         updatePowerSaveMode();
     }
 
-    private void stop() {
-        if (mPowerModeReceiver != null) {
-            ContextUtils.getApplicationContext().unregisterReceiver(mPowerModeReceiver);
-            mPowerModeReceiver = null;
+    private void registerPowerSavingModeMonitorBroadcastReceiver() {
+        if (ChromeFeatureList.sPowerSavingModeBroadcastReceiverInBackground.isEnabled()) {
+            PostTask.postTask(TaskTraits.UI_DEFAULT, () -> updatePowerSaveMode());
+            // If #stop is called before we're able to register the receiver, return early.
+            if (mPowerModeReceiver == null) return;
         }
+
+        ContextUtils.registerProtectedBroadcastReceiver(
+                ContextUtils.getApplicationContext(),
+                mPowerModeReceiver,
+                new IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED));
+        mBroadcastReceiverRegistered = true;
+    }
+
+    private void stop() {
+        if (mUnregisterRequested) return;
+        if (!mBroadcastReceiverRegistered) {
+            // A #register has been queued up, but the receiver hasn't been registered yet so null
+            // it out to return early.
+            if (mPowerModeReceiver != null) {
+                mPowerModeReceiver = null;
+            }
+            return;
+        }
+        mUnregisterRequested = true;
+
+        if (ChromeFeatureList.sPowerSavingModeBroadcastReceiverInBackground.isEnabled()) {
+            sSequencedTaskRunner.execute(this::unregisterPowerSavingModeMonitorBroadcastReceiver);
+        } else {
+            unregisterPowerSavingModeMonitorBroadcastReceiver();
+        }
+    }
+
+    private void unregisterPowerSavingModeMonitorBroadcastReceiver() {
+        mUnregisterRequested = false;
+        mBroadcastReceiverRegistered = false;
+        ContextUtils.getApplicationContext().unregisterReceiver(mPowerModeReceiver);
+        mPowerModeReceiver = null;
     }
 
     private void updatePowerSaveMode() {

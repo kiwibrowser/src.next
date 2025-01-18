@@ -1,13 +1,14 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_LINK_LOAD_PARAMETERS_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_LINK_LOAD_PARAMETERS_H_
 
+#include <optional>
+
 #include "base/unguessable_token.h"
 #include "services/network/public/mojom/referrer_policy.mojom-blink-forward.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/html/cross_origin_attribute.h"
 #include "third_party/blink/renderer/core/html/link_rel_attribute.h"
@@ -50,7 +51,14 @@ struct CORE_EXPORT LinkLoadParameters {
   String image_srcset;
   String image_sizes;
   String blocking;
-  absl::optional<base::UnguessableToken> recursive_prefetch_token;
+  // `recursive_prefetch_token` is set for preloads that were promoted to
+  // prefetches because the Link preload header was received on a prefetch
+  // response, recursively. The `base::UnguessableToken` value corresponds to
+  // the initial top-level document prefetch and is used to ensure that the
+  // prefetched resources get stored in the correct HTTP cache partition (which
+  // is required for them to actually be used if the top-level document gets
+  // navigated to).
+  std::optional<base::UnguessableToken> recursive_prefetch_token;
   Reason reason;
 };
 

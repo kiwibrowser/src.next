@@ -6,14 +6,14 @@
 #define EXTENSIONS_BROWSER_EXTENSION_HOST_TEST_HELPER_H_
 
 #include <map>
+#include <optional>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/scoped_observation.h"
 #include "extensions/browser/extension_host_registry.h"
 #include "extensions/common/extension_id.h"
 #include "extensions/common/mojom/view_type.mojom.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace content {
 class BrowserContext;
@@ -109,13 +109,14 @@ class ExtensionHostTestHelper : public ExtensionHostRegistry::Observer {
   void EventSeen(ExtensionHost* host, HostEvent event);
 
   // The event we're currently waiting for, if any.
-  absl::optional<HostEvent> waiting_for_;
+  std::optional<HostEvent> waiting_for_;
 
   // A closure to quit an active run loop, if we're waiting on a given event.
   base::OnceClosure quit_loop_;
 
   // The associated browser context.
-  const raw_ptr<content::BrowserContext> browser_context_;
+  const raw_ptr<content::BrowserContext, AcrossTasksDanglingUntriaged>
+      browser_context_;
 
   // The ID of the extension whose hosts this helper is watching, if it is
   // restricted to a given ID.
@@ -123,16 +124,17 @@ class ExtensionHostTestHelper : public ExtensionHostRegistry::Observer {
 
   // The specific type of host this helper is waiting on, if any (nullopt
   // implies waiting on any kind of ExtensionHost).
-  absl::optional<mojom::ViewType> restrict_to_type_;
+  std::optional<mojom::ViewType> restrict_to_type_;
 
   // The specific host this helper is waiting on, if any (null implies
   // waiting on any host).
-  raw_ptr<const ExtensionHost> restrict_to_host_ = nullptr;
+  raw_ptr<const ExtensionHost, AcrossTasksDanglingUntriaged> restrict_to_host_ =
+      nullptr;
 
   // The set of all events this helper has seen and their corresponding
   // ExtensionHosts. ExtensionHosts are nulled out when they are destroyed, but
   // the events stay in the map.
-  std::map<HostEvent, ExtensionHost*> observed_events_;
+  std::map<HostEvent, raw_ptr<ExtensionHost, CtnExperimental>> observed_events_;
 
   base::ScopedObservation<ExtensionHostRegistry,
                           ExtensionHostRegistry::Observer>

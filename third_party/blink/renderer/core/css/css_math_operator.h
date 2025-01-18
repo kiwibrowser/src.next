@@ -1,11 +1,13 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_MATH_OPERATOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_MATH_OPERATOR_H_
 
-#include "third_party/blink/renderer/platform/wtf/forward.h"
+namespace WTF {
+class StringView;
+}  // namespace WTF
 
 namespace blink {
 
@@ -19,11 +21,25 @@ enum class CSSMathOperator {
   kMin,
   kMax,
   kClamp,
+  kRoundNearest,
+  kRoundUp,
+  kRoundDown,
+  kRoundToZero,
+  kMod,
+  kRem,
+  kHypot,
+  kAbs,
+  kSign,
+  kProgress,
+  kCalcSize,
+  kMediaProgress,
+  kContainerProgress,
   kInvalid
 };
 
 CSSMathOperator ParseCSSArithmeticOperator(const CSSParserToken& token);
-String ToString(CSSMathOperator);
+WTF::StringView ToString(CSSMathOperator);
+WTF::StringView ToRoundingStrategyString(CSSMathOperator);
 
 bool IsComparison(CSSMathOperator);
 

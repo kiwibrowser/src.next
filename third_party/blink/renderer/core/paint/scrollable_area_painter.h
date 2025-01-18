@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,12 +9,12 @@
 
 namespace gfx {
 class Rect;
-class Vector2d;
 }
 
 namespace blink {
 
 class CullRect;
+class FragmentData;
 class GraphicsContext;
 class Scrollbar;
 struct PaintInfo;
@@ -26,16 +26,17 @@ class ScrollableAreaPainter {
 
  public:
   explicit ScrollableAreaPainter(
-      PaintLayerScrollableArea& paint_layer_scrollable_area)
-      : scrollable_area_(&paint_layer_scrollable_area) {}
+      const PaintLayerScrollableArea& paint_layer_scrollable_area)
+      : scrollable_area_(paint_layer_scrollable_area) {}
   ScrollableAreaPainter(const ScrollableAreaPainter&) = delete;
   ScrollableAreaPainter& operator=(const ScrollableAreaPainter&) = delete;
 
   // Returns true if the overflow controls are painted.
   bool PaintOverflowControls(const PaintInfo&,
-                             const gfx::Vector2d& paint_offset);
+                             const PhysicalOffset& paint_offset,
+                             const FragmentData*);
   void PaintResizer(GraphicsContext&,
-                    const gfx::Vector2d& paint_offset,
+                    const PhysicalOffset& paint_offset,
                     const CullRect&);
 
   // Records a scroll hit test data to force main thread handling of events
@@ -46,10 +47,10 @@ class ScrollableAreaPainter {
  private:
   void PaintScrollbar(GraphicsContext&,
                       Scrollbar&,
-                      const gfx::Vector2d& paint_offset,
+                      const PhysicalOffset& paint_offset,
                       const CullRect&);
   void PaintScrollCorner(GraphicsContext&,
-                         const gfx::Vector2d& paint_offset,
+                         const PhysicalOffset& paint_offset,
                          const CullRect&);
 
   void DrawPlatformResizerImage(GraphicsContext&,
@@ -59,9 +60,7 @@ class ScrollableAreaPainter {
                             Scrollbar& scrollbar,
                             gfx::Rect visual_rect);
 
-  PaintLayerScrollableArea& GetScrollableArea() const;
-
-  PaintLayerScrollableArea* scrollable_area_;
+  const PaintLayerScrollableArea& scrollable_area_;
 };
 
 }  // namespace blink

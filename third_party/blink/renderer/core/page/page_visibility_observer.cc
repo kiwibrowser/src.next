@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,12 +21,12 @@ void PageVisibilityObserver::SetPage(Page* page) {
     return;
 
   if (page_)
-    page_->PageVisibilityObserverSet().RemoveObserver(this);
+    page_->PageVisibilityObserverSet().erase(this);
 
   page_ = page;
 
   if (page_)
-    page_->PageVisibilityObserverSet().AddObserver(this);
+    page_->PageVisibilityObserverSet().insert(this);
 }
 
 void PageVisibilityObserver::Trace(Visitor* visitor) const {

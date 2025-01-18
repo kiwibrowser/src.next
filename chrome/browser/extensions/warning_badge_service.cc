@@ -48,15 +48,14 @@ class ErrorBadge : public GlobalError {
   static int GetMenuItemCommandID();
 
  private:
-  raw_ptr<WarningBadgeService> badge_service_;
+  raw_ptr<WarningBadgeService, DanglingUntriaged> badge_service_;
 };
 
 ErrorBadge::ErrorBadge(WarningBadgeService* badge_service)
     : badge_service_(badge_service) {
 }
 
-ErrorBadge::~ErrorBadge() {
-}
+ErrorBadge::~ErrorBadge() = default;
 
 bool ErrorBadge::HasMenuItem() {
   return true;

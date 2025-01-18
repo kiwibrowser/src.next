@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,6 +41,10 @@ class CORE_EXPORT DeviceSingleWindowEventController
   virtual Event* LastEvent() const = 0;
   virtual const AtomicString& EventTypeName() const = 0;
   virtual bool IsNullEvent(Event*) const = 0;
+
+  void set_needs_checking_null_events(bool enabled) {
+    needs_checking_null_events_ = enabled;
+  }
 
  private:
   bool needs_checking_null_events_;

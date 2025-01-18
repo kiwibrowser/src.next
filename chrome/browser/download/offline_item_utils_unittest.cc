@@ -4,6 +4,7 @@
 
 #include "chrome/browser/download/offline_item_utils.h"
 
+#include <array>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -18,7 +19,6 @@ using OfflineItemFilter = offline_items_collection::OfflineItemFilter;
 using OfflineItemState = offline_items_collection::OfflineItemState;
 using OfflineItemProgressUnit =
     offline_items_collection::OfflineItemProgressUnit;
-using OfflineItemSchedule = offline_items_collection::OfflineItemSchedule;
 using FailState = offline_items_collection::FailState;
 using PendingState = offline_items_collection::PendingState;
 using DownloadItem = download::DownloadItem;
@@ -32,6 +32,7 @@ namespace {
 constexpr char kNameSpace[] = "LEGACY_DOWNLOAD";
 constexpr char kTestUrl[] = "http://www.example.com";
 constexpr char kTestOriginalUrl[] = "http://www.exampleoriginalurl.com";
+constexpr char kTestReferrerUrl[] = "http://www.examplereferrerurl.com";
 
 }  // namespace
 
@@ -86,6 +87,8 @@ OfflineItemUtilsTest::CreateDownloadItem(
   ON_CALL(*item, GetTabUrl()).WillByDefault(ReturnRefOfCopy(GURL(kTestUrl)));
   ON_CALL(*item, GetOriginalUrl())
       .WillByDefault(ReturnRefOfCopy(GURL(kTestOriginalUrl)));
+  ON_CALL(*item, GetReferrerUrl())
+      .WillByDefault(ReturnRefOfCopy(GURL(kTestReferrerUrl)));
   ON_CALL(*item, GetDangerType())
       .WillByDefault(Return(download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS));
   ON_CALL(*item, GetId()).WillByDefault(Return(0));
@@ -187,6 +190,7 @@ TEST_F(OfflineItemUtilsTest, BasicConversions) {
 
   EXPECT_EQ(GURL(kTestUrl), offline_item.url);
   EXPECT_EQ(GURL(kTestOriginalUrl), offline_item.original_url);
+  EXPECT_EQ(GURL(kTestReferrerUrl), offline_item.referrer_url);
   EXPECT_FALSE(offline_item.is_off_the_record);
   EXPECT_EQ("", offline_item.attribution);
 
@@ -297,12 +301,18 @@ TEST_F(OfflineItemUtilsTest, StateConversions) {
 }
 
 TEST_F(OfflineItemUtilsTest, MimeTypeToFilterConversion) {
-  std::string mime_type[5] = {"text/html", "image/png", "video/webm",
-                              "audio/aac", "application/octet-stream"};
-  OfflineItemFilter filter[5] = {
+  std::array<std::string, 5> mime_type = {
+      "text/html",
+      "image/png",
+      "video/webm",
+      "audio/aac",
+      "application/octet-stream",
+  };
+  std::array<OfflineItemFilter, 5> filter = {
       OfflineItemFilter::FILTER_DOCUMENT, OfflineItemFilter::FILTER_IMAGE,
-      OfflineItemFilter::FILTER_VIDEO, OfflineItemFilter::FILTER_AUDIO,
-      OfflineItemFilter::FILTER_OTHER};
+      OfflineItemFilter::FILTER_VIDEO,    OfflineItemFilter::FILTER_AUDIO,
+      OfflineItemFilter::FILTER_OTHER,
+  };
 
   for (int i = 0; i < 5; i++) {
     std::unique_ptr<download::MockDownloadItem> download =

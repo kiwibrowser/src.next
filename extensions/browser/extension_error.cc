@@ -7,6 +7,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/extension_id.h"
 #include "url/gurl.h"
 
 namespace extensions {
@@ -15,7 +16,7 @@ namespace extensions {
 // ExtensionError
 
 ExtensionError::ExtensionError(Type type,
-                               const std::string& extension_id,
+                               const ExtensionId& extension_id,
                                bool from_incognito,
                                logging::LogSeverity level,
                                const std::u16string& source,
@@ -53,16 +54,17 @@ bool ExtensionError::IsEqual(const ExtensionError* rhs) const {
 ////////////////////////////////////////////////////////////////////////////////
 // ManifestError
 
-ManifestError::ManifestError(const std::string& extension_id,
+ManifestError::ManifestError(const ExtensionId& extension_id,
                              const std::u16string& message,
-                             const std::u16string& manifest_key,
+                             const std::string& manifest_key,
                              const std::u16string& manifest_specific)
-    : ExtensionError(ExtensionError::MANIFEST_ERROR,
-                     extension_id,
-                     false,  // extensions can't be installed while incognito.
-                     logging::LOG_WARNING,  // All manifest errors are warnings.
-                     base::FilePath(kManifestFilename).AsUTF16Unsafe(),
-                     message),
+    : ExtensionError(
+          ExtensionError::Type::kManifestError,
+          extension_id,
+          false,  // extensions can't be installed while incognito.
+          logging::LOGGING_WARNING,  // All manifest errors are warnings.
+          base::FilePath(kManifestFilename).AsUTF16Unsafe(),
+          message),
       manifest_key_(manifest_key),
       manifest_specific_(manifest_specific) {}
 
@@ -83,7 +85,7 @@ bool ManifestError::IsEqualImpl(const ExtensionError* rhs) const {
 ////////////////////////////////////////////////////////////////////////////////
 // RuntimeError
 
-RuntimeError::RuntimeError(const std::string& extension_id,
+RuntimeError::RuntimeError(const ExtensionId& extension_id,
                            bool from_incognito,
                            const std::u16string& source,
                            const std::u16string& message,
@@ -92,7 +94,7 @@ RuntimeError::RuntimeError(const std::string& extension_id,
                            logging::LogSeverity level,
                            int render_frame_id,
                            int render_process_id)
-    : ExtensionError(ExtensionError::RUNTIME_ERROR,
+    : ExtensionError(ExtensionError::Type::kRuntimeError,
                      !extension_id.empty() ? extension_id : GURL(source).host(),
                      from_incognito,
                      level,
@@ -154,17 +156,18 @@ void RuntimeError::CleanUpInit() {
   // sometimes the background page - but the error is thrown from the script.)
   // Make the source match the stack trace, since that is more likely the cause
   // of the error.
-  if (!stack_trace_.empty() && source_ != stack_trace_[0].source)
+  if (!stack_trace_.empty() && source_ != stack_trace_[0].source) {
     source_ = stack_trace_[0].source;
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // InternalError
 
-InternalError::InternalError(const std::string& extension_id,
+InternalError::InternalError(const ExtensionId& extension_id,
                              const std::u16string& message,
                              logging::LogSeverity level)
-    : ExtensionError(ExtensionError::INTERNAL_ERROR,
+    : ExtensionError(ExtensionError::Type::kInternalError,
                      extension_id,
                      false,  // not incognito.
                      level,

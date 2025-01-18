@@ -24,19 +24,38 @@ than one part of the Chromium codebase.
 
 Note that the above list is meant to be exhaustive. A component should not be
 added just to separate it from other code in the same layer that is the only
-consumer; that can be done with strict DEPS or GN visibility rules.
+consumer; that can be done with strict `DEPS` or GN `visibility` rules.
+
+## Before adding a new component
+
+  * Is there an existing component that you can leverage instead of introducing
+    a new component?
+      * Can you restructure an existing component to logically encompass the
+        proposed new code?
+      * As a general rule, we prefer fewer top level components. So, consider
+        whether adding sub-features within an existing component is more
+        appropriate for your use case.
+      * Historically, dependency issues were simply addressed by adding new
+        components. But, you can (and it is preferred to) solve that by
+        restructing an existing component and its dependencies where possible.
 
 ## Guidelines for adding a new component
 
-  * You will be added to an OWNERS file under `//components/{your component}`
+  * You will be added to an `OWNERS` file under `//components/{your component}`
     and be responsible for maintaining your addition.
+      * You must specify at least two OWNERS for any new component.
   * A `//components/OWNER` must approve of the location of your code.
+  * The CL (either commit message or comment) must explicitly specify what [use
+    case(s)](#use-cases) justify the new component.
   * Code must be needed in at least 2 places in Chrome that don't have a "higher
     layered" directory that could facilitate sharing (e.g. `//content/common`,
     `//chrome/utility`, etc.).
   * The CL adding a new component should be substantial enough so that
     //components/OWNERS can see its basic intended structure and usage before
     approving the addition (e.g., it should not just be an empty shell).
+  * You must add a [`DIR_METADATA`](https://source.chromium.org/chromium/infra/infra/+/main:go/src/infra/tools/dirmd/README.md)
+    file under `//components/{your component}` with an appropriately specified
+    bug-component.
 
 ## Dependencies of a component
 
@@ -65,7 +84,13 @@ Components **can** depend on `//content/public`, `//ipc`, and
 `//third_party/blink/public`. This must be made explicit in the `DEPS` file of
 the component. If such a component is used by Chrome for iOS (which does not
 use content or IPC), the component will have to be in the form of a [layered
-component](http://www.chromium.org/developers/design-documents/layered-components-design).
+component](https://www.chromium.org/developers/design-documents/layered-components-design).
+In particular, code that is shared with iOS *cannot* depend on any of the
+above modules; those dependencies must be injected into the shared code (either via
+a layered component structure or directly from the embedder for simple dependencies
+such as booleans that can be passed as constructor parameters). It is not
+an acceptable solution to conditionally depend on the above modules in code shared
+with iOS.
 
 `//chrome`, `//ios/chrome`, `//content` and `//ios/web` **can** depend on
 individual components. The dependency might have to be made explicit in the
@@ -85,12 +110,12 @@ separate the code into different subdirectories. Hence for a component named
 'foo' you might end up with a structure like the following (assuming that foo is
 not used by iOS and thus does not need to be a layered component):
 
-  * `components/foo`          - DEPS, OWNERS, BUILD.gn
+  * `components/foo`          - `BUILD.gn`, `DEPS`, `DIR_METADATA`, `OWNERS`, `README.md`
   * `components/foo/browser`  - code that needs the browser process
   * `components/foo/common`   - for e.g. Mojo interfaces and such
   * `components/foo/renderer` - code that needs renderer process
 
-These subdirectories should have DEPS files with the relevant restrictions in
+These subdirectories should have `DEPS` files with the relevant restrictions in
 place, i.e. only `components/foo/browser` should be allowed to #include from
 `content/public/browser`. Note that `third_party/blink/public` is a
 renderer process directory except for `third_party/blink/public/common` which
@@ -101,7 +126,7 @@ structure underneath it where the package name is org.chromium.components.foo,
 and with subdirs after 'foo' to illustrate process, e.g. 'browser' or
 'renderer':
 
-  * `components/foo/android/OWNERS`, `DEPS`
+  * `components/foo/android/`{`OWNERS`, `DEPS`}
   * `components/foo/android/java/src/org/chromium/components/foo/browser/`
   * `components/foo/android/javatests/src/org/chromium/components/foo/browser/`
 

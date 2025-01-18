@@ -10,8 +10,9 @@
 #include <string>
 #include <type_traits>
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/observer_list.h"
+#include "base/scoped_observation_traits.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/event_router_factory.h"
 #include "extensions/common/extension_id.h"
@@ -27,7 +28,7 @@ class TestEventRouter : public EventRouter {
    public:
     // These functions correspond to the ones in EventRouter.
     virtual void OnBroadcastEvent(const Event& event);
-    virtual void OnDispatchEventToExtension(const std::string& extension_id,
+    virtual void OnDispatchEventToExtension(const ExtensionId& extension_id,
                                             const Event& event);
 
    protected:
@@ -54,7 +55,7 @@ class TestEventRouter : public EventRouter {
 
   // EventRouter:
   void BroadcastEvent(std::unique_ptr<Event> event) override;
-  void DispatchEventToExtension(const std::string& extension_id,
+  void DispatchEventToExtension(const ExtensionId& extension_id,
                                 std::unique_ptr<Event> event) override;
 
  private:
@@ -66,7 +67,8 @@ class TestEventRouter : public EventRouter {
   // Count of dispatched and broadcasted events by event name.
   std::map<std::string, int> seen_events_;
 
-  base::ObserverList<EventObserver, false>::Unchecked observers_;
+  base::ObserverList<EventObserver, false>::UncheckedAndDanglingUntriaged
+      observers_;
 };
 
 // Creates and enables a TestEventRouter for testing. Callers can override T to
@@ -86,5 +88,24 @@ T* CreateAndUseTestEventRouter(content::BrowserContext* context) {
 }
 
 }  // namespace extensions
+
+namespace base {
+
+template <>
+struct ScopedObservationTraits<extensions::TestEventRouter,
+                               extensions::TestEventRouter::EventObserver> {
+  static void AddObserver(
+      extensions::TestEventRouter* source,
+      extensions::TestEventRouter::EventObserver* observer) {
+    source->AddEventObserver(observer);
+  }
+  static void RemoveObserver(
+      extensions::TestEventRouter* source,
+      extensions::TestEventRouter::EventObserver* observer) {
+    source->RemoveEventObserver(observer);
+  }
+};
+
+}  // namespace base
 
 #endif  // EXTENSIONS_BROWSER_TEST_EVENT_ROUTER_H_

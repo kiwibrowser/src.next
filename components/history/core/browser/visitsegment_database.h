@@ -8,7 +8,7 @@
 #include <memory>
 #include <string>
 
-#include "base/callback_forward.h"
+#include "base/functional/callback_forward.h"
 #include "components/history/core/browser/history_types.h"
 
 namespace sql {
@@ -48,10 +48,9 @@ class VisitSegmentDatabase {
   // ID of the newly created segment, or 0 on failure.
   SegmentID CreateSegment(URLID url_id, const std::string& segment_name);
 
-  // Increase the segment visit count by the provided amount. Return true on
+  // Update the segment visit count by the provided amount. Return true on
   // success.
-  bool IncreaseSegmentVisitCount(SegmentID segment_id, base::Time ts,
-                                 int amount);
+  bool UpdateSegmentVisitCount(SegmentID segment_id, base::Time ts, int amount);
 
   // Returns the highest-scored segments up to `max_result_count`. If
   // `url_filter` is non-null, then only URLs for which it returns true will be
@@ -59,6 +58,9 @@ class VisitSegmentDatabase {
   std::vector<std::unique_ptr<PageUsageData>> QuerySegmentUsage(
       int max_result_count,
       const base::RepeatingCallback<bool(const GURL&)>& url_filter);
+
+  // Deletes all segment data older than `older_than`.
+  bool DeleteSegmentDataOlderThan(base::Time older_than);
 
   // Delete the segment currently using the provided url for representation.
   // This will also delete any associated segment usage data.

@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
@@ -245,7 +245,7 @@ class DownloadRequestLimiter
   void CanDownload(const content::WebContents::Getter& web_contents_getter,
                    const GURL& url,
                    const std::string& request_method,
-                   absl::optional<url::Origin> request_initiator,
+                   std::optional<url::Origin> request_initiator,
                    bool from_download_cross_origin_redirect,
                    Callback callback);
 
@@ -286,17 +286,19 @@ class DownloadRequestLimiter
 
   // Does the work of updating the download status on the UI thread and
   // potentially prompting the user.
-  void CanDownloadImpl(content::WebContents* originating_contents,
+  void CanDownloadImpl(const GURL& url,
+                       content::WebContents* originating_contents,
                        const std::string& request_method,
-                       absl::optional<url::Origin> request_initiator,
+                       std::optional<url::Origin> request_initiator,
                        bool from_download_cross_origin_redirect,
                        Callback callback);
 
   // Invoked when decision to download has been made.
   void OnCanDownloadDecided(
+      const GURL& url,
       const content::WebContents::Getter& web_contents_getter,
       const std::string& request_method,
-      absl::optional<url::Origin> request_initiator,
+      std::optional<url::Origin> request_initiator,
       bool from_download_cross_origin_redirect,
       Callback orig_callback,
       bool allow);
@@ -325,7 +327,9 @@ class DownloadRequestLimiter
   // if the state is other than ALLOW_ONE_DOWNLOAD. Similarly once the state
   // transitions from anything but ALLOW_ONE_DOWNLOAD back to ALLOW_ONE_DOWNLOAD
   // the TabDownloadState is removed and deleted (by way of Remove).
-  typedef std::map<content::WebContents*, TabDownloadState*> StateMap;
+  typedef std::map<content::WebContents*,
+                   raw_ptr<TabDownloadState, CtnExperimental>>
+      StateMap;
   StateMap state_map_;
 
   CanDownloadDecidedCallback on_can_download_decided_callback_;

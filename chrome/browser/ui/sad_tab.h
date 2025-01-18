@@ -33,7 +33,7 @@ class SadTab {
   SadTab(const SadTab&) = delete;
   SadTab& operator=(const SadTab&) = delete;
 
-  virtual ~SadTab() {}
+  virtual ~SadTab() = default;
 
   // Called when the sad tab needs to be reinstalled in its window,
   // for example because an inactive tab was activated, or because a tab was
@@ -75,6 +75,7 @@ class SadTab {
   // may suggest additional troubleshooting steps.
   bool is_repeatedly_crashing_;
   // True if repeatedly crashing and the browser is Google Chrome branded.
+  // Always false for the ChromeOS kiosk mode.
   bool show_feedback_button_;
   bool recorded_paint_;
 };

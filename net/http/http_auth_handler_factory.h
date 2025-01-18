@@ -7,8 +7,10 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "base/memory/raw_ptr.h"
@@ -19,7 +21,6 @@
 #include "net/http/http_auth_scheme.h"
 #include "net/http/url_security_manager.h"
 #include "net/net_buildflags.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace url {
 class SchemeHostPort;
@@ -33,7 +34,7 @@ class HttpAuthHandler;
 class HttpAuthHandlerRegistryFactory;
 class HttpAuthPreferences;
 class NetLogWithSource;
-class NetworkIsolationKey;
+class NetworkAnonymizationKey;
 
 // An HttpAuthHandlerFactory is used to create HttpAuthHandler objects.
 // The HttpAuthHandlerFactory object _must_ outlive any of the HttpAuthHandler
@@ -104,7 +105,7 @@ class NET_EXPORT HttpAuthHandlerFactory {
       HttpAuthChallengeTokenizer* challenge,
       HttpAuth::Target target,
       const SSLInfo& ssl_info,
-      const NetworkIsolationKey& network_isolation_key,
+      const NetworkAnonymizationKey& network_anonymization_key,
       const url::SchemeHostPort& scheme_host_port,
       CreateReason create_reason,
       int digest_nonce_count,
@@ -118,10 +119,10 @@ class NET_EXPORT HttpAuthHandlerFactory {
   // |challenge| and calls |CreateAuthHandler|. See |CreateAuthHandler| for
   // more details on return values.
   int CreateAuthHandlerFromString(
-      const std::string& challenge,
+      std::string_view challenge,
       HttpAuth::Target target,
       const SSLInfo& ssl_info,
-      const NetworkIsolationKey& network_isolation_key,
+      const NetworkAnonymizationKey& network_anonymization_key,
       const url::SchemeHostPort& scheme_host_port,
       const NetLogWithSource& net_log,
       HostResolver* host_resolver,
@@ -135,7 +136,7 @@ class NET_EXPORT HttpAuthHandlerFactory {
   int CreatePreemptiveAuthHandlerFromString(
       const std::string& challenge,
       HttpAuth::Target target,
-      const NetworkIsolationKey& network_isolation_key,
+      const NetworkAnonymizationKey& network_anonymization_key,
       const url::SchemeHostPort& scheme_host_port,
       int digest_nonce_count,
       const NetLogWithSource& net_log,
@@ -225,19 +226,20 @@ class NET_EXPORT HttpAuthHandlerRegistryFactory
   // scheme is used and the factory was created with
   // |negotiate_disable_cname_lookup| false, |host_resolver| must not be null,
   // and it must remain valid for the lifetime of the created |handler|.
-  int CreateAuthHandler(HttpAuthChallengeTokenizer* challenge,
-                        HttpAuth::Target target,
-                        const SSLInfo& ssl_info,
-                        const NetworkIsolationKey& network_isolation_key,
-                        const url::SchemeHostPort& scheme_host_port,
-                        CreateReason reason,
-                        int digest_nonce_count,
-                        const NetLogWithSource& net_log,
-                        HostResolver* host_resolver,
-                        std::unique_ptr<HttpAuthHandler>* handler) override;
+  int CreateAuthHandler(
+      HttpAuthChallengeTokenizer* challenge,
+      HttpAuth::Target target,
+      const SSLInfo& ssl_info,
+      const NetworkAnonymizationKey& network_anonymization_key,
+      const url::SchemeHostPort& scheme_host_port,
+      CreateReason reason,
+      int digest_nonce_count,
+      const NetLogWithSource& net_log,
+      HostResolver* host_resolver,
+      std::unique_ptr<HttpAuthHandler>* handler) override;
 
 #if BUILDFLAG(USE_KERBEROS) && !BUILDFLAG(IS_ANDROID) && BUILDFLAG(IS_POSIX)
-  absl::optional<std::string> GetNegotiateLibraryNameForTesting() const;
+  std::optional<std::string> GetNegotiateLibraryNameForTesting() const;
 #endif
 
   // Returns true if the scheme is allowed to be used for all origins. An auth

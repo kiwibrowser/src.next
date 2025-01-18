@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
 #include "chrome/common/chrome_render_frame.mojom.h"
 #include "components/safe_browsing/buildflags.h"
@@ -29,6 +30,7 @@ class PageTextAgent;
 
 namespace safe_browsing {
 class PhishingClassifierDelegate;
+class PhishingImageEmbedderDelegate;
 }
 
 namespace translate {
@@ -61,7 +63,8 @@ class ChromeRenderFrameObserver : public content::RenderFrameObserver,
 #if BUILDFLAG(IS_ANDROID)
   // This is called on the main thread for subresources or worker threads for
   // dedicated workers.
-  static std::string GetCCTClientHeader(int render_frame_id);
+  static std::string GetCCTClientHeader(
+      const blink::LocalFrameToken& frame_token);
 #endif
 
  private:
@@ -76,13 +79,14 @@ class ChromeRenderFrameObserver : public content::RenderFrameObserver,
       mojo::ScopedInterfaceEndpointHandle* handle) override;
   void ReadyToCommitNavigation(
       blink::WebDocumentLoader* document_loader) override;
+  void DidSetPageLifecycleState(bool restoring_from_bfcache) override;
   void DidFinishLoad() override;
   void DidCreateNewDocument() override;
   void DidCommitProvisionalLoad(ui::PageTransition transition) override;
   void DidClearWindowObject() override;
   void DidMeaningfulLayout(blink::WebMeaningfulLayout layout_type) override;
   void OnDestruct() override;
-  void DraggableRegionsChanged() override;
+  void WillDetach(blink::DetachReason detach_reason) override;
 
   // chrome::mojom::ChromeRenderFrame:
   void SetWindowFeatures(
@@ -92,13 +96,24 @@ class ChromeRenderFrameObserver : public content::RenderFrameObserver,
       int32_t thumbnail_min_area_pixels,
       const gfx::Size& thumbnail_max_size_pixels,
       chrome::mojom::ImageFormat image_format,
+      int32_t quality,
       RequestImageForContextNodeCallback callback) override;
+  void RequestBitmapForContextNode(
+      RequestBitmapForContextNodeCallback callback) override;
+  void RequestBitmapForContextNodeWithBoundsHint(
+      RequestBitmapForContextNodeWithBoundsHintCallback callback) override;
+  void RequestBoundsHintForAllImages(
+      RequestBoundsHintForAllImagesCallback callback) override;
+  void FindImageElements(blink::WebElement element,
+                         std::vector<blink::WebElement>& images);
   void RequestReloadImageForContextNode() override;
 #if BUILDFLAG(IS_ANDROID)
   void SetCCTClientHeader(const std::string& header) override;
 #endif
   void GetMediaFeedURL(GetMediaFeedURLCallback callback) override;
   void LoadBlockedPlugins(const std::string& identifier) override;
+  void SetSupportsDraggableRegions(bool supports_draggable_regions) override;
+  void SetShouldDeferMediaLoad(bool should_defer) override;
 
   // Initialize a |phishing_classifier_delegate_|.
   void SetClientSidePhishingDetection();
@@ -134,15 +149,22 @@ class ChromeRenderFrameObserver : public content::RenderFrameObserver,
   static bool NeedsEncodeImage(const std::string& image_extension,
                                chrome::mojom::ImageFormat image_format);
 
+  // Check if the image is an animated Webp image by looking for animation
+  // feature flag
+  static bool IsAnimatedWebp(const std::vector<uint8_t>& image_data);
+
   // Have the same lifetime as us.
-  translate::TranslateAgent* translate_agent_;
-  optimization_guide::PageTextAgent* page_text_agent_;
+  raw_ptr<translate::TranslateAgent> translate_agent_;
+  raw_ptr<optimization_guide::PageTextAgent> page_text_agent_;
 #if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
-  safe_browsing::PhishingClassifierDelegate* phishing_classifier_ = nullptr;
+  raw_ptr<safe_browsing::PhishingClassifierDelegate> phishing_classifier_ =
+      nullptr;
+  raw_ptr<safe_browsing::PhishingImageEmbedderDelegate>
+      phishing_image_embedder_ = nullptr;
 #endif
 
   // Owned by ChromeContentRendererClient and outlive us.
-  web_cache::WebCacheImpl* web_cache_impl_;
+  raw_ptr<web_cache::WebCacheImpl> web_cache_impl_;
 
 #if !BUILDFLAG(IS_ANDROID)
   // Save the JavaScript to preload if ExecuteWebUIJavaScript is invoked.

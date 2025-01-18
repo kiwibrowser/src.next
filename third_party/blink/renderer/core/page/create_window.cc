@@ -26,20 +26,20 @@
 
 #include "third_party/blink/renderer/core/page/create_window.h"
 
+#include "base/check.h"
 #include "base/check_op.h"
 #include "base/feature_list.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "third_party/blink/public/common/dom_storage/session_storage_namespace_id.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/loader/request_context_frame_type.mojom-blink.h"
-#include "third_party/blink/public/mojom/window_features/window_features.mojom-blink.h"
+#include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/web_view_client.h"
 #include "third_party/blink/public/web/web_window_features.h"
 #include "third_party/blink/renderer/core/core_initializer.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
 #include "third_party/blink/renderer/core/frame/ad_tracker.h"
-#include "third_party/blink/renderer/core/frame/attribution_src_loader.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/frame/frame_client.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
@@ -56,31 +56,39 @@
 #include "third_party/blink/renderer/platform/wtf/text/number_parsing_options.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_to_number.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_view.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
-// Though isspace() considers \t and \v to be whitespace, Win IE doesn't when
-// parsing window features.
+// Though absl::ascii_isspace() considers \t and \v to be whitespace, Win IE
+// doesn't when parsing window features.
 static bool IsWindowFeaturesSeparator(UChar c) {
   return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '=' ||
          c == ',' || c == '\f';
 }
 
 WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
-                                              LocalDOMWindow* dom_window,
-                                              const KURL& url) {
+                                              LocalDOMWindow* dom_window) {
   WebWindowFeatures window_features;
 
-  bool attribution_reporting_enabled =
+  const bool attribution_reporting_enabled =
       dom_window &&
-      RuntimeEnabledFeatures::AttributionReportingEnabled(dom_window);
+      (RuntimeEnabledFeatures::AttributionReportingEnabled(dom_window) ||
+       RuntimeEnabledFeatures::AttributionReportingCrossAppWebEnabled(
+           dom_window));
+  const bool explicit_opener_enabled =
+      RuntimeEnabledFeatures::RelOpenerBcgDependencyHintEnabled(dom_window);
 
   // This code follows the HTML spec, specifically
   // https://html.spec.whatwg.org/C/#concept-window-open-features-tokenize
-  if (feature_string.IsEmpty())
+  if (feature_string.empty())
     return window_features;
 
   bool ui_features_were_disabled = false;
+  bool menu_bar = true;
+  bool status_bar = true;
+  bool tool_bar = true;
+  bool scrollbars = true;
   enum class PopupState { kUnknown, kPopup, kWindow };
   PopupState popup_state = PopupState::kUnknown;
   unsigned key_begin, key_end;
@@ -147,26 +155,23 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
 
     // Listing a key with no value is shorthand for key=yes
     int value;
-    constexpr auto kLoose = WTF::NumberParsingOptions::Loose();
-    if (value_string.IsEmpty() || value_string == "yes" ||
+    if (value_string.empty() || value_string == "yes" ||
         value_string == "true") {
       value = 1;
-    } else if (value_string.Is8Bit()) {
-      value = CharactersToInt(value_string.Characters8(), value_string.length(),
-                              kLoose, nullptr);
     } else {
-      value = CharactersToInt(value_string.Characters16(),
-                              value_string.length(), kLoose, nullptr);
+      value = CharactersToInt(value_string, WTF::NumberParsingOptions::Loose(),
+                              /*ok=*/nullptr);
     }
 
     if (!ui_features_were_disabled && key_string != "noopener" &&
+        (!explicit_opener_enabled || key_string != "opener") &&
         key_string != "noreferrer" &&
         (!attribution_reporting_enabled || key_string != "attributionsrc")) {
       ui_features_were_disabled = true;
-      window_features.menu_bar_visible = false;
-      window_features.status_bar_visible = false;
-      window_features.tool_bar_visible = false;
-      window_features.scrollbars_visible = false;
+      menu_bar = false;
+      status_bar = false;
+      tool_bar = false;
+      scrollbars = false;
     }
 
     if (key_string == "left" || key_string == "screenx") {
@@ -185,76 +190,66 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string,
       window_features.height_set = true;
       window_features.height = value;
     } else if (key_string == "menubar") {
-      window_features.menu_bar_visible = value;
+      menu_bar = value;
     } else if (key_string == "toolbar" || key_string == "location") {
-      window_features.tool_bar_visible |= static_cast<bool>(value);
+      tool_bar |= static_cast<bool>(value);
     } else if (key_string == "status") {
-      window_features.status_bar_visible = value;
+      status_bar = value;
     } else if (key_string == "scrollbars") {
-      window_features.scrollbars_visible = value;
+      scrollbars = value;
     } else if (key_string == "resizable") {
       window_features.resizable = value;
     } else if (key_string == "noopener") {
       window_features.noopener = value;
+    } else if (explicit_opener_enabled && key_string == "opener") {
+      window_features.explicit_opener = value;
     } else if (key_string == "noreferrer") {
       window_features.noreferrer = value;
     } else if (key_string == "background") {
       window_features.background = true;
     } else if (key_string == "persistent") {
       window_features.persistent = true;
+    } else if (RuntimeEnabledFeatures::PartitionedPopinsEnabled(dom_window) &&
+               key_string == "popin") {
+      window_features.is_partitioned_popin = true;
     } else if (attribution_reporting_enabled &&
                key_string == "attributionsrc") {
-      // attributionsrc values are URLs, and as such their original case needs
-      // to be retained for correctness. Positions in both `feature_string` and
-      // `buffer` correspond because ASCII-lowercasing doesn't add, remove, or
-      // swap character positions; it only does in-place transformations of
-      // capital ASCII characters. See crbug.com/1338698 for details.
-      DCHECK_EQ(feature_string.length(), buffer.length());
-      const StringView original_case_value_string(feature_string, value_begin,
-                                                  value_end - value_begin);
-
-      // attributionsrc values are encoded in order to support embedded special
-      // characters, such as '='.
-      const String decoded = DecodeURLEscapeSequences(
-          original_case_value_string.ToString(), DecodeURLMode::kUTF8);
-
-      if (!decoded.IsEmpty()) {
-        window_features.impression =
-            dom_window->GetFrame()
-                ->GetAttributionSrcLoader()
-                ->RegisterNavigation(dom_window->CompleteURL(decoded));
+      if (!window_features.attribution_srcs.has_value()) {
+        window_features.attribution_srcs.emplace();
       }
 
-      // If the impression could not be set, or if the value was empty, mark
-      // attribution eligibility by adding an impression.
-      if (!window_features.impression &&
-          dom_window->GetFrame()->GetAttributionSrcLoader()->CanRegister(
-              url,
-              /*element=*/nullptr,
-              /*request_id=*/absl::nullopt)) {
-        window_features.impression = blink::Impression();
+      if (!value_string.empty()) {
+        // attributionsrc values are URLs, and as such their original case needs
+        // to be retained for correctness. Positions in both `feature_string`
+        // and `buffer` correspond because ASCII-lowercasing doesn't add,
+        // remove, or swap character positions; it only does in-place
+        // transformations of capital ASCII characters. See crbug.com/1338698
+        // for details.
+        DCHECK_EQ(feature_string.length(), buffer.length());
+        const StringView original_case_value_string(feature_string, value_begin,
+                                                    value_end - value_begin);
+
+        // attributionsrc values are encoded in order to support embedded
+        // special characters, such as '='.
+        window_features.attribution_srcs->emplace_back(DecodeURLEscapeSequences(
+            original_case_value_string.ToString(), DecodeURLMode::kUTF8));
       }
     }
   }
 
-  if (RuntimeEnabledFeatures::WindowOpenNewPopupBehaviorEnabled()) {
-    bool is_popup = popup_state == PopupState::kPopup;
-    if (popup_state == PopupState::kUnknown) {
-      is_popup = !window_features.tool_bar_visible ||
-                 !window_features.menu_bar_visible ||
-                 !window_features.resizable ||
-                 !window_features.scrollbars_visible ||
-                 !window_features.status_bar_visible;
-    }
-    // If this is a popup, set all BarProps to false, and vice versa.
-    window_features.tool_bar_visible = !is_popup;
-    window_features.menu_bar_visible = !is_popup;
-    window_features.scrollbars_visible = !is_popup;
-    window_features.status_bar_visible = !is_popup;
+  window_features.is_popup =
+      popup_state == PopupState::kPopup || window_features.is_partitioned_popin;
+  if (popup_state == PopupState::kUnknown) {
+    window_features.is_popup = !tool_bar || !menu_bar || !scrollbars ||
+                               !status_bar || !window_features.resizable;
   }
 
   if (window_features.noreferrer)
     window_features.noopener = true;
+
+  if (window_features.noopener) {
+    window_features.explicit_opener = false;
+  }
 
   return window_features;
 }
@@ -295,15 +290,11 @@ Frame* CreateNewWindow(LocalFrame& opener_frame,
   request.SetFrameType(mojom::RequestContextFrameType::kAuxiliary);
 
   const KURL& url = request.GetResourceRequest().Url();
-  auto* csp_for_world = opener_window.GetContentSecurityPolicyForCurrentWorld();
-  if (url.ProtocolIsJavaScript() && csp_for_world) {
-    String script_source = DecodeURLEscapeSequences(
-        url.GetString(), DecodeURLMode::kUTF8OrIsomorphic);
-
-    if (!csp_for_world->AllowInline(
-            ContentSecurityPolicy::InlineType::kNavigation,
-            nullptr /* element */, script_source, String() /* nonce */,
-            opener_window.Url(), OrdinalNumber::First())) {
+  if (url.ProtocolIsJavaScript()) {
+    if (opener_window
+            .CheckAndGetJavascriptUrl(request.JavascriptWorld(), url,
+                                      nullptr /* element */)
+            .empty()) {
       return nullptr;
     }
   }
@@ -377,23 +368,10 @@ Frame* CreateNewWindow(LocalFrame& opener_frame,
 
   page->SetWindowFeatures(features);
 
-  frame.View()->SetCanHaveScrollbars(features.scrollbars_visible);
-
-  mojom::blink::WindowFeaturesPtr window_features =
-      mojom::blink::WindowFeatures::New();
-  window_features->bounds = page->GetChromeClient().RootWindowRect(frame);
-  gfx::Rect& window_rect = window_features->bounds;
-  if (features.x_set)
-    window_rect.set_x(features.x);
-  if (features.y_set)
-    window_rect.set_y(features.y);
-  if (features.width_set)
-    window_rect.set_width(features.width);
-  if (features.height_set)
-    window_rect.set_height(features.height);
+  frame.View()->SetCanHaveScrollbars(!features.is_popup);
 
   page->GetChromeClient().Show(frame, opener_frame,
-                               request.GetNavigationPolicy(), *window_features,
+                               request.GetNavigationPolicy(),
                                consumed_user_gesture);
   MaybeLogWindowOpen(opener_frame);
   return &frame;

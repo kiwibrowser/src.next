@@ -10,7 +10,6 @@
 
 #include "base/memory/ptr_util.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/profiles/keep_alive/profile_keep_alive_types.h"
 #include "chrome/browser/profiles/keep_alive/scoped_profile_keep_alive.h"
@@ -53,11 +52,9 @@ const char WasInProgressData::kKey[] =
 
 }  // anonymous namespace
 
-DownloadStatusUpdater::DownloadStatusUpdater() {
-}
+DownloadStatusUpdater::DownloadStatusUpdater() = default;
 
-DownloadStatusUpdater::~DownloadStatusUpdater() {
-}
+DownloadStatusUpdater::~DownloadStatusUpdater() = default;
 
 bool DownloadStatusUpdater::GetProgress(float* progress,
                                         int* download_count) const {
@@ -71,7 +68,7 @@ bool DownloadStatusUpdater::GetProgress(float* progress,
     if (notifier->GetManager()) {
       content::DownloadManager::DownloadVector items;
       notifier->GetManager()->GetAllDownloads(&items);
-      for (auto* item : items) {
+      for (download::DownloadItem* item : items) {
         if (item->GetState() == download::DownloadItem::IN_PROGRESS) {
           ++*download_count;
           if (item->GetTotalBytes() <= 0) {
@@ -96,8 +93,9 @@ void DownloadStatusUpdater::AddManager(content::DownloadManager* manager) {
       std::make_unique<download::AllDownloadItemNotifier>(manager, this));
   content::DownloadManager::DownloadVector items;
   manager->GetAllDownloads(&items);
-  for (auto* item : items)
+  for (download::DownloadItem* item : items) {
     OnDownloadCreated(manager, item);
+  }
 }
 
 void DownloadStatusUpdater::OnDownloadCreated(content::DownloadManager* manager,
@@ -116,7 +114,6 @@ void DownloadStatusUpdater::OnDownloadCreated(content::DownloadManager* manager,
 
 void DownloadStatusUpdater::OnDownloadUpdated(content::DownloadManager* manager,
                                               download::DownloadItem* item) {
-  UpdatePrefsOnDownloadUpdated(manager, item);
   if (item->GetState() == download::DownloadItem::IN_PROGRESS &&
       !item->IsTransient()) {
     // If the item was interrupted/cancelled and then resumed/restarted, then
@@ -187,18 +184,3 @@ void DownloadStatusUpdater::UpdateAppIconDownloadProgress(
   // TODO(avi): Implement for Android?
 }
 #endif
-
-void DownloadStatusUpdater::UpdatePrefsOnDownloadUpdated(
-    content::DownloadManager* manager,
-    download::DownloadItem* download) {
-  if (!manager) {
-    // Can be null in tests.
-    return;
-  }
-
-  if (download->GetState() == download::DownloadItem::COMPLETE &&
-      !download->IsTransient()) {
-    DownloadPrefs::FromDownloadManager(manager)->SetLastCompleteTime(
-        base::Time::Now());
-  }
-}

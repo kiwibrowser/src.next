@@ -2,6 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
+#pragma allow_unsafe_buffers
+#endif
+
 #include "net/base/sockaddr_util_posix.h"
 
 #include <string.h>
@@ -40,7 +45,7 @@ TEST(FillUnixAddressTest, SimpleAddress) {
             (unsigned int)storage.addr_len);
 
   struct sockaddr_un* socket_addr =
-      reinterpret_cast<struct sockaddr_un*>(storage.addr);
+      reinterpret_cast<struct sockaddr_un*>(storage.addr());
   EXPECT_EQ(socket_addr->sun_family, AF_UNIX);
 
   // Implicit conversion to std::string for comparison is fine since the path
@@ -64,7 +69,7 @@ TEST(FillUnixAddressTest, AddressMaxLength) {
       FillUnixAddress(path, /*use_abstract_namespace=*/false, &storage));
 
   struct sockaddr_un* socket_addr =
-      reinterpret_cast<struct sockaddr_un*>(storage.addr);
+      reinterpret_cast<struct sockaddr_un*>(storage.addr());
   EXPECT_EQ(socket_addr->sun_family, AF_UNIX);
   EXPECT_EQ(socket_addr->sun_path, path);
 }
@@ -90,7 +95,7 @@ TEST(FillUnixAddressTest, AbstractLinuxAddress) {
             (unsigned int)storage.addr_len);
 
   struct sockaddr_un* socket_addr =
-      reinterpret_cast<struct sockaddr_un*>(storage.addr);
+      reinterpret_cast<struct sockaddr_un*>(storage.addr());
   EXPECT_EQ(socket_addr->sun_family, AF_UNIX);
 
   // The path buffer is preceded by a NUL character for abstract Linux

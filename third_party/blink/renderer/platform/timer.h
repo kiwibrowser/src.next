@@ -29,6 +29,7 @@
 #include "base/check_op.h"
 #include "base/dcheck_is_on.h"
 #include "base/location.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/task/delay_policy.h"
 #include "base/task/delayed_task_handle.h"
@@ -104,7 +105,7 @@ class PLATFORM_EXPORT TimerBase {
   virtual void Fired() = 0;
 
   virtual base::OnceClosure BindTimerClosure() {
-    return WTF::Bind(&TimerBase::RunInternal, WTF::Unretained(this));
+    return WTF::BindOnce(&TimerBase::RunInternal, WTF::Unretained(this));
   }
 
   void RunInternal();
@@ -120,7 +121,7 @@ class PLATFORM_EXPORT TimerBase {
   base::Location location_;
   scoped_refptr<base::SingleThreadTaskRunner> web_task_runner_;
   // The tick clock used to calculate the run time for scheduled tasks.
-  const base::TickClock* tick_clock_ = nullptr;
+  raw_ptr<const base::TickClock> tick_clock_ = nullptr;
   base::subtle::DelayPolicy delay_policy_;
 
 #if DCHECK_IS_ON()
@@ -149,7 +150,7 @@ class TaskRunnerTimer : public TimerBase {
   void Fired() override { (object_->*function_)(this); }
 
  private:
-  TimerFiredClass* object_;
+  raw_ptr<TimerFiredClass> object_;
   TimerFiredFunction function_;
 };
 
@@ -180,8 +181,9 @@ class HeapTaskRunnerTimer final : public TimerBase {
   void Fired() final { (object_->*function_)(this); }
 
   base::OnceClosure BindTimerClosure() final {
-    return WTF::Bind(&HeapTaskRunnerTimer::RunInternalTrampoline,
-                     WTF::Unretained(this), WrapWeakPersistent(object_.Get()));
+    return WTF::BindOnce(&HeapTaskRunnerTimer::RunInternalTrampoline,
+                         WTF::Unretained(this),
+                         WrapWeakPersistent(object_.Get()));
   }
 
  private:

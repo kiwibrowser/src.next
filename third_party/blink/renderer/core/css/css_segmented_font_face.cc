@@ -25,8 +25,8 @@
 
 #include "third_party/blink/renderer/core/css/css_segmented_font_face.h"
 
-#include "base/bind.h"
-#include "base/callback.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
 #include "third_party/blink/renderer/core/css/cascade_layer_map.h"
 #include "third_party/blink/renderer/core/css/css_font_face.h"
 #include "third_party/blink/renderer/core/css/css_font_selector.h"
@@ -38,74 +38,49 @@
 #include "third_party/blink/renderer/platform/fonts/segmented_font_data.h"
 #include "third_party/blink/renderer/platform/fonts/simple_font_data.h"
 
-// See comment below in CSSSegmentedFontFace::GetFontData - the cache from
-// CSSSegmentedFontFace (which represents a group of @font-face declarations
-// with identical FontSelectionCapabilities but differing by unicode-range) to
-// FontData/SegmentedFontData, (i.e. the actual font blobs that can be used for
-// shaping and painting retrieved from a CSSFontFaceSource) is usually small
-// (less than a dozen, up to tens) for non-animation-cases, but grows fast to
-// thousands when animating variable font parameters. Set a limit until we start
-// dropping cache entries in animation scenarios.
-static constexpr size_t kFontDataTableMaxSize = 250;
-
 namespace blink {
-
-// static
-CSSSegmentedFontFace* CSSSegmentedFontFace::Create(
-    FontSelectionCapabilities capabilities) {
-  return MakeGarbageCollected<CSSSegmentedFontFace>(capabilities);
-}
 
 CSSSegmentedFontFace::CSSSegmentedFontFace(
     FontSelectionCapabilities font_selection_capabilities)
     : font_selection_capabilities_(font_selection_capabilities),
-      font_data_table_(kFontDataTableMaxSize),
       font_faces_(MakeGarbageCollected<FontFaceList>()),
       approximate_character_count_(0) {}
 
 CSSSegmentedFontFace::~CSSSegmentedFontFace() = default;
 
-void CSSSegmentedFontFace::PruneTable() {
-  // Make sure the glyph page tree prunes out all uses of this custom font.
-  if (!font_data_table_.size())
-    return;
-
-  font_data_table_.Clear();
-}
-
 bool CSSSegmentedFontFace::IsValid() const {
   // Valid if at least one font face is valid.
   return font_faces_->ForEachUntilTrue(
-      WTF::BindRepeating([](Member<FontFace> font_face) -> bool {
-        if (font_face->CssFontFace()->IsValid())
-          return true;
-        return false;
-      }));
+      [](const Member<FontFace>& font_face) -> bool {
+        return font_face->CssFontFace()->IsValid();
+      });
 }
 
 void CSSSegmentedFontFace::FontFaceInvalidated() {
-  PruneTable();
+  font_data_table_.clear();
 }
 
 void CSSSegmentedFontFace::AddFontFace(FontFace* font_face,
                                        bool css_connected) {
-  PruneTable();
+  font_data_table_.clear();
   font_face->CssFontFace()->AddSegmentedFontFace(this);
   font_faces_->Insert(font_face, css_connected);
 }
 
 void CSSSegmentedFontFace::RemoveFontFace(FontFace* font_face) {
-  if (!font_faces_->Erase(font_face))
+  if (!font_faces_->Erase(font_face)) {
     return;
+  }
 
-  PruneTable();
+  font_data_table_.clear();
   font_face->CssFontFace()->RemoveSegmentedFontFace(this);
 }
 
-scoped_refptr<FontData> CSSSegmentedFontFace::GetFontData(
+const FontData* CSSSegmentedFontFace::GetFontData(
     const FontDescription& font_description) {
-  if (!IsValid())
+  if (!IsValid()) {
     return nullptr;
+  }
 
   bool is_unique_match = false;
   FontCacheKey key =
@@ -123,57 +98,44 @@ scoped_refptr<FontData> CSSSegmentedFontFace::GetFontData(
   // usually only a small number of FontData/SegmentedFontData instances created
   // per CSSSegmentedFontFace. Whereas in variable font animations, this number
   // grows rapidly.
-  auto it = font_data_table_.Get(key);
+  auto it = font_data_table_.find(key);
   if (it != font_data_table_.end()) {
-    scoped_refptr<SegmentedFontData> cached_font_data = it->second;
-    if (cached_font_data && cached_font_data->NumFaces())
+    const SegmentedFontData* cached_font_data = it->value.Get();
+    if (cached_font_data && cached_font_data->NumFaces()) {
       return cached_font_data;
+    }
   }
 
-  scoped_refptr<SegmentedFontData> created_font_data =
-      SegmentedFontData::Create();
+  SegmentedFontData* created_font_data =
+      MakeGarbageCollected<SegmentedFontData>();
 
   FontDescription requested_font_description(font_description);
   const FontSelectionRequest& font_selection_request =
       font_description.GetFontSelectionRequest();
   requested_font_description.SetSyntheticBold(
-      font_selection_capabilities_.weight.maximum < BoldThreshold() &&
-      font_selection_request.weight >= BoldThreshold() &&
+      font_selection_capabilities_.weight.maximum < kBoldThreshold &&
+      font_selection_request.weight >= kBoldThreshold &&
       font_description.SyntheticBoldAllowed());
   requested_font_description.SetSyntheticItalic(
-      font_selection_capabilities_.slope.maximum < ItalicSlopeValue() &&
-      font_selection_request.slope >= ItalicSlopeValue() &&
+      font_selection_capabilities_.slope.maximum < kItalicSlopeValue &&
+      font_selection_request.slope >= kItalicSlopeValue &&
       font_description.SyntheticItalicAllowed());
 
-  font_faces_->ForEachReverse(WTF::BindRepeating(
-      [](const FontDescription& requested_font_description,
-         scoped_refptr<SegmentedFontData> created_font_data,
-         Member<FontFace> font_face) {
-        if (!font_face->CssFontFace()->IsValid())
-          return;
-        if (scoped_refptr<SimpleFontData> face_font_data =
-                font_face->CssFontFace()->GetFontData(
-                    requested_font_description)) {
-          DCHECK(!face_font_data->IsSegmented());
-          if (face_font_data->IsCustomFont()) {
-            created_font_data->AppendFace(base::AdoptRef(
-                new FontDataForRangeSet(std::move(face_font_data),
-                                        font_face->CssFontFace()->Ranges())));
-          } else {
-            created_font_data->AppendFace(
-                base::AdoptRef(new FontDataForRangeSetFromCache(
-                    std::move(face_font_data),
-                    font_face->CssFontFace()->Ranges())));
-          }
-        }
-      },
-      requested_font_description, created_font_data));
+  font_faces_->ForEachReverse([&requested_font_description, &created_font_data](
+                                  const Member<FontFace>& font_face) {
+    if (!font_face->CssFontFace()->IsValid()) {
+      return;
+    }
+    if (const SimpleFontData* face_font_data =
+            font_face->CssFontFace()->GetFontData(requested_font_description)) {
+      DCHECK(!face_font_data->IsSegmented());
+      created_font_data->AppendFace(MakeGarbageCollected<FontDataForRangeSet>(
+          std::move(face_font_data), font_face->CssFontFace()->Ranges()));
+    }
+  });
 
   if (created_font_data->NumFaces()) {
-    scoped_refptr<SegmentedFontData> put_to_cache(created_font_data);
-    font_data_table_.Put(std::move(key), std::move(put_to_cache));
-    // No release, we have a reference to an object in the cache which should
-    // retain the ref count it has.
+    font_data_table_.insert(std::move(key), created_font_data);
     return created_font_data;
   }
 
@@ -184,16 +146,12 @@ void CSSSegmentedFontFace::WillUseFontData(
     const FontDescription& font_description,
     const String& text) {
   approximate_character_count_ += text.length();
-  font_faces_->ForEachReverseUntilTrue(WTF::BindRepeating(
-      [](const FontDescription& font_description, const String& text,
-         Member<FontFace> font_face) -> bool {
-        if (font_face->LoadStatus() != FontFace::kUnloaded)
-          return true;
-        if (font_face->CssFontFace()->MaybeLoadFont(font_description, text))
-          return true;
-        return false;
-      },
-      font_description, text));
+
+  font_faces_->ForEachReverseUntilTrue(
+      [&font_description, &text](const Member<FontFace>& font_face) -> bool {
+        return font_face->LoadStatus() != FontFace::kUnloaded ||
+               font_face->CssFontFace()->MaybeLoadFont(font_description, text);
+      });
 }
 
 void CSSSegmentedFontFace::WillUseRange(
@@ -202,48 +160,38 @@ void CSSSegmentedFontFace::WillUseRange(
   // Iterating backwards since later defined unicode-range faces override
   // previously defined ones, according to the CSS3 fonts module.
   // https://drafts.csswg.org/css-fonts/#composite-fonts
-  font_faces_->ForEachReverseUntilTrue(WTF::BindRepeating(
-      [](const blink::FontDescription& font_description,
-         const blink::FontDataForRangeSet& range_set,
-         Member<FontFace> font_face) -> bool {
-        CSSFontFace* css_font_face = font_face->CssFontFace();
-        if (css_font_face->MaybeLoadFont(font_description, range_set))
-          return true;
-        return false;
-      },
-      font_description, range_set));
+  font_faces_->ForEachReverseUntilTrue(
+      [&font_description,
+       &range_set](const Member<FontFace>& font_face) -> bool {
+        return font_face->CssFontFace()->MaybeLoadFont(font_description,
+                                                       range_set);
+      });
 }
 
-bool CSSSegmentedFontFace::CheckFont(const String& text) const {
-  return font_faces_->ForEachUntilFalse(WTF::BindRepeating(
-      [](const String& text, Member<FontFace> font_face) -> bool {
-        if (font_face->LoadStatus() != FontFace::kLoaded &&
-            font_face->CssFontFace()->Ranges()->IntersectsWith(text))
-          return false;
-        return true;
-      },
-      text));
+bool CSSSegmentedFontFace::CheckFont(UChar32 c) const {
+  return !font_faces_->ForEachUntilTrue(
+      [&c](const Member<FontFace>& font_face) -> bool {
+        return font_face->LoadStatus() != FontFace::kLoaded &&
+               font_face->CssFontFace()->Ranges()->Contains(c);
+      });
 }
 
 void CSSSegmentedFontFace::Match(const String& text,
                                  HeapVector<Member<FontFace>>* faces) const {
-  // WTF::BindRepeating requires WrapPersistent around |faces|, which is fine,
-  // because the wrap's lifetime is contained to this function.
-  font_faces_->ForEach(WTF::BindRepeating(
-      [](const String& text, HeapVector<Member<FontFace>>* faces,
-         Member<FontFace> font_face) {
-        if (font_face->CssFontFace()->Ranges()->IntersectsWith(text))
-          faces->push_back(font_face);
-      },
-      text, WrapPersistent(faces)));
+  font_faces_->ForEach([&text, &faces](const Member<FontFace>& font_face) {
+    if (font_face->CssFontFace()->Ranges()->IntersectsWith(text)) {
+      faces->push_back(font_face);
+    }
+  });
 }
 
 void CSSSegmentedFontFace::Trace(Visitor* visitor) const {
+  visitor->Trace(font_data_table_);
   visitor->Trace(font_faces_);
 }
 
 bool FontFaceList::IsEmpty() const {
-  return css_connected_face_.IsEmpty() && non_css_connected_face_.IsEmpty();
+  return css_connected_face_.empty() && non_css_connected_face_.empty();
 }
 
 namespace {
@@ -254,8 +202,9 @@ bool CascadePriorityHigherThan(const FontFace& new_font_face,
   // owner document. However, there are cases where we don't have a document
   // here, possibly caused by ExecutionContext or Document lifecycle issues.
   // TODO(crbug.com/1250831): Find out the root cause and fix it.
+  // Used to have base::debug::DumpWithoutCrashing(), but caused a lot of
+  // crashes, particularly on Android (crbug.com/1468721).
   if (!new_font_face.GetDocument() || !existing_font_face.GetDocument()) {
-    NOTREACHED();
     // In the buggy case, to ensure a stable ordering, font faces without a
     // document are considered higher priority.
     return !new_font_face.GetDocument();
@@ -263,8 +212,9 @@ bool CascadePriorityHigherThan(const FontFace& new_font_face,
   DCHECK_EQ(new_font_face.GetDocument(), existing_font_face.GetDocument());
   DCHECK(new_font_face.GetStyleRule());
   DCHECK(existing_font_face.GetStyleRule());
-  if (new_font_face.IsUserStyle() != existing_font_face.IsUserStyle())
+  if (new_font_face.IsUserStyle() != existing_font_face.IsUserStyle()) {
     return existing_font_face.IsUserStyle();
+  }
   const CascadeLayerMap* map = nullptr;
   if (new_font_face.IsUserStyle()) {
     map =
@@ -274,8 +224,9 @@ bool CascadePriorityHigherThan(const FontFace& new_font_face,
               ->GetScopedStyleResolver()
               ->GetCascadeLayerMap();
   }
-  if (!map)
+  if (!map) {
     return true;
+  }
   return map->CompareLayerOrder(
              existing_font_face.GetStyleRule()->GetCascadeLayer(),
              new_font_face.GetStyleRule()->GetCascadeLayer()) <= 0;
@@ -293,8 +244,9 @@ void FontFaceList::Insert(FontFace* font_face, bool css_connected) {
   while (it != css_connected_face_.begin()) {
     auto prev = it;
     --prev;
-    if (CascadePriorityHigherThan(*font_face, **prev))
+    if (CascadePriorityHigherThan(*font_face, **prev)) {
       break;
+    }
     it = prev;
   }
 
@@ -315,84 +267,53 @@ bool FontFaceList::Erase(FontFace* font_face) {
   return false;
 }
 
-// A callback that will be fed into |ForEach*UntilTrue|.
-// |callback| wants the |ForEach*UntilFalse| operation to stop iterating on
-// false, so its return value has to be negated in order for it to work with
-// |ForEach*UntilTrue|.
-static bool NegatingCallback(
-    const base::RepeatingCallback<bool(Member<FontFace>)>& callback,
-    Member<FontFace> font_face) {
-  return !callback.Run(font_face);
-}
-
-// A callback that will be fed into |ForEach*UntilTrue|, when we want it to
-// always continue iterating, so false has to be always returned.
-static bool FalseReturningCallback(
-    const base::RepeatingCallback<void(Member<FontFace>)>& callback,
-    Member<FontFace> font_face) {
-  callback.Run(font_face);
-  return false;
-}
-
 bool FontFaceList::ForEachUntilTrue(
-    const base::RepeatingCallback<bool(Member<FontFace>)>& callback) const {
-  for (Member<FontFace> font_face : css_connected_face_) {
-    if (callback.Run(font_face))
+    base::FunctionRef<bool(const Member<FontFace>&)> func) const {
+  for (auto& font_face : css_connected_face_) {
+    if (func(font_face)) {
       return true;
+    }
   }
-  for (Member<FontFace> font_face : non_css_connected_face_) {
-    if (callback.Run(font_face))
+  for (auto& font_face : non_css_connected_face_) {
+    if (func(font_face)) {
       return true;
+    }
   }
   return false;
-}
-
-bool FontFaceList::ForEachUntilFalse(
-    const base::RepeatingCallback<bool(Member<FontFace>)>& callback) const {
-  base::RepeatingCallback<bool(Member<FontFace>)> negating_callback =
-      WTF::BindRepeating(NegatingCallback, callback);
-  // When |callback| returns |false|, |ForEachUntilTrue(negating_callback)| will
-  // stop iterating and return |true|, so negate it.
-  return !ForEachUntilTrue(negating_callback);
 }
 
 void FontFaceList::ForEach(
-    const base::RepeatingCallback<void(Member<FontFace>)>& func) const {
-  base::RepeatingCallback<bool(Member<FontFace>)> false_returning_callback =
-      WTF::BindRepeating(FalseReturningCallback, func);
-  ForEachUntilTrue(false_returning_callback);
+    base::FunctionRef<void(const Member<FontFace>&)> func) const {
+  for (auto& font_face : css_connected_face_) {
+    func(font_face);
+  }
+  for (auto& font_face : non_css_connected_face_) {
+    func(font_face);
+  }
 }
 
-bool FontFaceList::ForEachReverseUntilTrue(
-    const base::RepeatingCallback<bool(Member<FontFace>)>& func) const {
-  for (auto it = non_css_connected_face_.rbegin();
-       it != non_css_connected_face_.rend(); ++it) {
-    if (func.Run(*it))
-      return true;
+void FontFaceList::ForEachReverseUntilTrue(
+    base::FunctionRef<bool(const Member<FontFace>&)> func) const {
+  for (auto& font_face : base::Reversed(non_css_connected_face_)) {
+    if (func(font_face)) {
+      return;
+    }
   }
-  for (auto it = css_connected_face_.rbegin(); it != css_connected_face_.rend();
-       ++it) {
-    if (func.Run(*it))
-      return true;
+  for (auto& font_face : base::Reversed(css_connected_face_)) {
+    if (func(font_face)) {
+      return;
+    }
   }
-  return false;
-}
-
-bool FontFaceList::ForEachReverseUntilFalse(
-    const base::RepeatingCallback<bool(Member<FontFace>)>& callback) const {
-  base::RepeatingCallback<bool(Member<FontFace>)> negating_callback =
-      WTF::BindRepeating(NegatingCallback, callback);
-  // When |callback| returns |false|,
-  // |ForEachReverseUntilTrue(negating_callback)| will stop iterating and return
-  // |true|, so negate it.
-  return !ForEachReverseUntilTrue(negating_callback);
 }
 
 void FontFaceList::ForEachReverse(
-    const base::RepeatingCallback<void(Member<FontFace>)>& callback) const {
-  base::RepeatingCallback<bool(Member<FontFace>)> false_returning_callback =
-      WTF::BindRepeating(FalseReturningCallback, callback);
-  ForEachReverseUntilTrue(false_returning_callback);
+    base::FunctionRef<void(const Member<FontFace>&)> func) const {
+  for (auto& font_face : base::Reversed(non_css_connected_face_)) {
+    func(font_face);
+  }
+  for (auto& font_face : base::Reversed(css_connected_face_)) {
+    func(font_face);
+  }
 }
 
 void FontFaceList::Trace(Visitor* visitor) const {

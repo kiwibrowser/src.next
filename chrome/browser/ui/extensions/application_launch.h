@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_UI_EXTENSIONS_APPLICATION_LAUNCH_H_
 #define CHROME_BROWSER_UI_EXTENSIONS_APPLICATION_LAUNCH_H_
 
+#include "base/functional/callback.h"
+#include "build/chromeos_buildflags.h"
 #include "chrome/browser/apps/app_service/app_launch_params.h"
 #include "components/services/app_service/public/cpp/app_launch_util.h"
 #include "url/gurl.h"
@@ -19,11 +21,11 @@ class FilePath;
 
 namespace content {
 class WebContents;
-}
+}  // namespace content
 
 namespace extensions {
 class Extension;
-}
+}  // namespace extensions
 
 enum class WindowOpenDisposition;
 
@@ -60,8 +62,7 @@ content::WebContents* OpenApplicationWindow(Profile* profile,
 // and shortcuts that open an installed application.  This function
 // is used to open the former.  To open the latter, use
 // application_launch::OpenApplication().
-content::WebContents* OpenAppShortcutWindow(Profile* profile,
-                                            const GURL& url);
+content::WebContents* OpenAppShortcutWindow(Profile* profile, const GURL& url);
 
 // Whether the extension can be launched by sending a
 // chrome.app.runtime.onLaunched event.
@@ -79,11 +80,5 @@ void LaunchAppWithCallback(
     const base::FilePath& current_directory,
     base::OnceCallback<void(Browser* browser, apps::LaunchContainer container)>
         callback);
-
-// Shows the browser for |profile| if existent, otherwise attempts to open it.
-// Returns true if browser window already exists or if it was successfully
-// launched.
-bool ShowBrowserForProfile(Profile* profile,
-                           const apps::AppLaunchParams& params);
 
 #endif  // CHROME_BROWSER_UI_EXTENSIONS_APPLICATION_LAUNCH_H_

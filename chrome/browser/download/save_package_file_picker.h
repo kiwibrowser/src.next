@@ -36,21 +36,23 @@ class SavePackageFilePicker : public ui::SelectFileDialog::Listener {
 
  private:
   // SelectFileDialog::Listener implementation.
-  void FileSelected(const base::FilePath& path,
-                    int index,
-                    void* unused_params) override;
-  void FileSelectionCanceled(void* unused_params) override;
+  void FileSelected(const ui::SelectedFileInfo& file, int index) override;
+  void FileSelectionCanceled() override;
 
   bool ShouldSaveAsOnlyHTML(content::WebContents* web_contents) const;
-  bool ShouldSaveAsMHTML() const;
+  bool ShouldSaveAsMHTMLByDefault() const;
 
   // Used to look up the renderer process for this request to get the context.
-  int render_process_id_;
+  const int render_process_id_;
 
   // Whether the web page can be saved as a complete HTML file.
-  bool can_save_as_complete_;
+  const bool can_save_as_complete_;
 
-  raw_ptr<DownloadPrefs> download_prefs_;
+  // TODO(crbug.com/40280922): `download_prefs_` points to
+  // `ChromeDownloadManagerDelegate::download_prefs_`.
+  // `ChromeDownloadManagerDelegate` is destroyed on shutdown but dialogs are
+  // not, causing this to dangle.
+  raw_ptr<DownloadPrefs, DanglingUntriaged> download_prefs_;
 
   content::SavePackagePathPickedCallback callback_;
 

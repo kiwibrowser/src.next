@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,18 +19,10 @@ CSSContainerRule::~CSSContainerRule() = default;
 
 String CSSContainerRule::cssText() const {
   StringBuilder result;
-  result.Append("@container ");
-
-  String name = ContainerQuery().Selector().Name();
-  if (!name.IsEmpty()) {
-    SerializeIdentifier(name, result);
-    result.Append(' ');
-  }
-  result.Append(ContainerQuery().ToString());
+  result.Append("@container");
   result.Append(' ');
-  result.Append("{\n");
+  result.Append(ContainerQuery().ToString());
   AppendCSSTextForItems(result);
-  result.Append('}');
   return result.ReleaseString();
 }
 
@@ -48,6 +40,19 @@ void CSSContainerRule::SetConditionText(
   CSSStyleSheet::RuleMutationScope mutation_scope(this);
   To<StyleRuleContainer>(group_rule_.Get())
       ->SetConditionText(execution_context, value);
+}
+
+String CSSContainerRule::containerName() const {
+  StringBuilder result;
+  String name = ContainerQuery().Selector().Name();
+  if (!name.empty()) {
+    SerializeIdentifier(name, result);
+  }
+  return result.ReleaseString();
+}
+
+String CSSContainerRule::containerQuery() const {
+  return ContainerQuery().Query().Serialize();
 }
 
 const ContainerQuery& CSSContainerRule::ContainerQuery() const {

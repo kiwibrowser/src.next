@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,14 +20,6 @@ CSSPendingSystemFontValue::CSSPendingSystemFontValue(CSSValueID system_font_id)
 CSSPendingSystemFontValue* CSSPendingSystemFontValue::Create(
     CSSValueID system_font_id) {
   return MakeGarbageCollected<CSSPendingSystemFontValue>(system_font_id);
-}
-
-const FontSelectionValue& CSSPendingSystemFontValue::ResolveFontStyle() const {
-  return LayoutThemeFontProvider::SystemFontStyle(system_font_id_);
-}
-
-const FontSelectionValue& CSSPendingSystemFontValue::ResolveFontWeight() const {
-  return LayoutThemeFontProvider::SystemFontWeight(system_font_id_);
 }
 
 const AtomicString& CSSPendingSystemFontValue::ResolveFontFamily() const {

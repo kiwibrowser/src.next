@@ -9,28 +9,32 @@
 #include <string>
 #include <vector>
 
+#include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/net/convert_explicitly_allowed_network_ports_pref.h"
+#include "chrome/browser/privacy_sandbox/tracking_protection_settings_factory.h"
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/browser/ash/login/demo_mode/demo_session.h"
 #endif
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
+#include "components/autofill/core/common/autofill_prefs.h"
 #include "components/language/core/browser/language_prefs.h"
 #include "components/language/core/browser/pref_names.h"
 #include "components/prefs/pref_service.h"
-#include "content/public/browser/browser_accessibility_state.h"
+#include "components/privacy_sandbox/tracking_protection_settings.h"
 #include "content/public/browser/renderer_preferences_util.h"
 #include "media/media_buildflags.h"
 #include "third_party/blink/public/common/peerconnection/webrtc_ip_handling_policy.h"
 #include "third_party/blink/public/common/renderer_preferences/renderer_preferences.h"
+#include "third_party/blink/public/mojom/peerconnection/webrtc_ip_handling_policy.mojom.h"
 #include "third_party/blink/public/public_buildflags.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/accessibility/platform/ax_platform.h"
 #include "ui/base/ui_base_features.h"
 
 #if defined(TOOLKIT_VIEWS)
@@ -96,12 +100,6 @@ std::string GetLanguageListForProfile(Profile* profile,
     // In incognito mode return only the first language.
     return language::GetFirstLanguage(language_list);
   }
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  // On Chrome OS, if in demo mode, add the demo mode private language list.
-  if (ash::DemoSession::IsDeviceInDemoMode()) {
-    return language_list + "," + ash::DemoSession::GetAdditionalLanguageList();
-  }
-#endif
   return language_list;
 }
 
@@ -116,21 +114,50 @@ void UpdateFromSystemSettings(blink::RendererPreferences* prefs,
       profile, pref_service->GetString(language::prefs::kAcceptLanguages));
   prefs->enable_referrers = pref_service->GetBoolean(prefs::kEnableReferrers);
   prefs->enable_do_not_track =
-      pref_service->GetBoolean(prefs::kEnableDoNotTrack);
+      TrackingProtectionSettingsFactory::GetForProfile(profile)
+          ->IsDoNotTrackEnabled();
   prefs->enable_encrypted_media =
       pref_service->GetBoolean(prefs::kEnableEncryptedMedia);
-  prefs->webrtc_ip_handling_policy = std::string();
-#if !BUILDFLAG(IS_ANDROID)
+
+#if BUILDFLAG(IS_ANDROID)
+  prefs->uses_platform_autofill = pref_service->GetBoolean(
+      autofill::prefs::kAutofillUsingVirtualViewStructure);
+#else  // if !BUILDFLAG(IS_ANDROID)
   prefs->caret_browsing_enabled =
       pref_service->GetBoolean(prefs::kCaretBrowsingEnabled);
-  content::BrowserAccessibilityState::GetInstance()->SetCaretBrowsingState(
+  ui::AXPlatform::GetInstance().SetCaretBrowsingState(
       prefs->caret_browsing_enabled);
 #endif
 
-  if (prefs->webrtc_ip_handling_policy.empty()) {
-    prefs->webrtc_ip_handling_policy =
-        pref_service->GetString(prefs::kWebRTCIPHandlingPolicy);
+  prefs->webrtc_ip_handling_policy = blink::ToWebRTCIPHandlingPolicy(
+      pref_service->GetString(prefs::kWebRTCIPHandlingPolicy));
+
+  const base::Value::List& webrtc_ip_handling_urls =
+      pref_service->GetList(prefs::kWebRTCIPHandlingUrl);
+  for (const base::Value& entry : webrtc_ip_handling_urls) {
+    const base::Value::Dict& dict = entry.GetDict();
+    const std::string* url = dict.FindString("url");
+    if (!url) {
+      DVLOG(1) << "Malformed WebRtcIPHandlingUrl entry: Missing 'url' value.";
+      continue;
+    }
+    ContentSettingsPattern pattern = ContentSettingsPattern::FromString(*url);
+    if (!pattern.IsValid()) {
+      DVLOG(1)
+          << "Malformed WebRtcIPHandlingUrl entry: Invalid pattern found: '"
+          << *url << "'.";
+      continue;
+    }
+    const std::string* handling = dict.FindString("handling");
+    if (!handling) {
+      DVLOG(1)
+          << "Malformed WebRtcIPHandlingUrl entry: Missing 'handling' value.";
+      continue;
+    }
+    prefs->webrtc_ip_handling_urls.push_back(
+        {pattern, blink::ToWebRTCIPHandlingPolicy(*handling)});
   }
+
   std::string webrtc_udp_port_range =
       pref_service->GetString(prefs::kWebRTCUDPPortRange);
   ParsePortRange(webrtc_udp_port_range, &prefs->webrtc_udp_min_port,
@@ -139,8 +166,6 @@ void UpdateFromSystemSettings(blink::RendererPreferences* prefs,
   const base::Value::List& allowed_urls =
       pref_service->GetList(prefs::kWebRtcLocalIpsAllowedUrls);
   prefs->webrtc_local_ips_allowed_urls = GetLocalIpsAllowedUrls(allowed_urls);
-  prefs->webrtc_allow_legacy_tls_protocols =
-      pref_service->GetBoolean(prefs::kWebRTCAllowLegacyTLSProtocols);
 #if defined(USE_AURA)
   prefs->focus_ring_color = SkColorSetRGB(0x4D, 0x90, 0xFE);
 #if BUILDFLAG(IS_CHROMEOS)
@@ -160,15 +185,15 @@ void UpdateFromSystemSettings(blink::RendererPreferences* prefs,
   auto* linux_ui_theme = ui::LinuxUiTheme::GetForProfile(profile);
   if (linux_ui_theme) {
     if (ThemeServiceFactory::GetForProfile(profile)->UsingSystemTheme()) {
-      prefs->focus_ring_color = linux_ui_theme->GetFocusRingColor();
-      prefs->active_selection_bg_color =
-          linux_ui_theme->GetActiveSelectionBgColor();
-      prefs->active_selection_fg_color =
-          linux_ui_theme->GetActiveSelectionFgColor();
-      prefs->inactive_selection_bg_color =
-          linux_ui_theme->GetInactiveSelectionBgColor();
-      prefs->inactive_selection_fg_color =
-          linux_ui_theme->GetInactiveSelectionFgColor();
+      linux_ui_theme->GetFocusRingColor(&prefs->focus_ring_color);
+      linux_ui_theme->GetActiveSelectionBgColor(
+          &prefs->active_selection_bg_color);
+      linux_ui_theme->GetActiveSelectionFgColor(
+          &prefs->active_selection_fg_color);
+      linux_ui_theme->GetInactiveSelectionBgColor(
+          &prefs->inactive_selection_bg_color);
+      linux_ui_theme->GetInactiveSelectionFgColor(
+          &prefs->inactive_selection_fg_color);
     }
   }
 

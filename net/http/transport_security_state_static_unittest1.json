@@ -7,29 +7,12 @@
 // transport_security_state_static.json.
 
 {
-  "pinsets": [
-    {
-      "name": "test1",
-      "static_spki_hashes": [
-        "TestSPKI1"
-      ],
-      "bad_static_spki_hashes": [
-        "TestSPKI2"
-      ]
-    }, {
-      "name": "test2",
-      "static_spki_hashes": [
-        "TestSPKI2"
-      ]
-    }
-  ],
   "entries": [
     {
       "name": "hsts.example.com",
       "policy": "test",
       "mode": "force-https",
-      "include_subdomains": true,
-      "pins": "test1"
+      "include_subdomains": true
     }
   ]
 }

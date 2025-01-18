@@ -8,15 +8,14 @@
 #include <map>
 #include <vector>
 
-#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/containers/contains.h"
+#include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
@@ -47,14 +46,14 @@ static const char kCanvasPageString[] =
     "    function fillWithColor(color) {"
     "      ctx.fillStyle = color;"
     "      ctx.fillRect(0, 0, 64, 64);"
-    "      window.domAutomationController.send(color);"
+    "      return color;"
     "    }"
     "    var offset = 150;"
     "    function openNewWindow() {"
     "      window.open(\"/test\", \"\", "
     "          \"top=\"+offset+\",left=\"+offset+\",width=200,height=200\");"
     "      offset += 50;"
-    "      window.domAutomationController.send(true);"
+    "      return true;"
     "    }"
     "    window.document.title = \"Ready\";"
     "  </script>"
@@ -215,7 +214,7 @@ class SnapshotBrowserTest : public ContentBrowserTest {
 #if !BUILDFLAG(IS_ANDROID)
 
 #if BUILDFLAG(IS_MAC)
-// TODO(crbug.com/1347296): This test is flakey on macOS.
+// TODO(crbug.com/40854618): This test is flakey on macOS.
 #define MAYBE_SingleWindowTest DISABLED_SingleWindowTest
 #else
 #define MAYBE_SingleWindowTest SingleWindowTest
@@ -233,8 +232,7 @@ IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, MAYBE_SingleWindowTest) {
     std::string colorString = base::StringPrintf(
         "#%02x%02x%02x", expected.color.r, expected.color.g, expected.color.b);
     std::string script = std::string("fillWithColor(\"") + colorString + "\");";
-    EXPECT_EQ(colorString, EvalJs(GetWebContents(shell()), script,
-                                  EXECUTE_SCRIPT_USE_MANUAL_REPLY));
+    EXPECT_EQ(colorString, EvalJs(GetWebContents(shell()), script));
 
     expected_snapshots_.push_back(expected);
 
@@ -255,14 +253,13 @@ IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, MAYBE_SingleWindowTest) {
 // Timing out either all the time, or infrequently, apparently because
 // they're too slow, on the following configurations:
 //   Windows Debug
+//   Windows Release (https://crbug.com/1376441)
 //   Linux Chromium OS ASAN LSAN Tests (1)
 //   Linux TSAN Tests
 // See crbug.com/771119
-// TODO(https://crbug.com/1317446): Fix and enable on Fuchsia.
-#if (BUILDFLAG(IS_WIN) && !defined(NDEBUG)) || BUILDFLAG(IS_CHROMEOS_ASH) || \
-    ((BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)) &&                      \
-     defined(THREAD_SANITIZER)) ||                                           \
-    BUILDFLAG(IS_FUCHSIA)
+// TODO(crbug.com/40834774): Fix and enable on Fuchsia.
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA) || \
+    (BUILDFLAG(IS_LINUX) && defined(THREAD_SANITIZER))
 #define MAYBE_SyncMultiWindowTest DISABLED_SyncMultiWindowTest
 #else
 #define MAYBE_SyncMultiWindowTest SyncMultiWindowTest
@@ -271,8 +268,7 @@ IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, MAYBE_SyncMultiWindowTest) {
   SetupTestServer();
 
   for (int i = 0; i < 3; ++i) {
-    EXPECT_EQ(true, EvalJs(GetWebContents(shell()), "openNewWindow()",
-                           EXECUTE_SCRIPT_USE_MANUAL_REPLY));
+    EXPECT_EQ(true, EvalJs(GetWebContents(shell()), "openNewWindow()"));
   }
 
   base::RunLoop().RunUntilIdle();
@@ -299,8 +295,7 @@ IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, MAYBE_SyncMultiWindowTest) {
                              expected.color.g, expected.color.b);
       std::string script =
           std::string("fillWithColor(\"") + colorString + "\");";
-      EXPECT_EQ(colorString, EvalJs(GetWebContents(browser), script,
-                                    EXECUTE_SCRIPT_USE_MANUAL_REPLY));
+      EXPECT_EQ(colorString, EvalJs(GetWebContents(browser), script));
       expected_snapshots_.push_back(expected);
       // Get the snapshot from the surface rather than the window. The
       // on-screen display path is verified by the GPU tests, and it
@@ -324,11 +319,10 @@ IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, MAYBE_SyncMultiWindowTest) {
 //   Linux Chromium OS ASAN LSAN Tests (1)
 //   Linux TSAN Tests
 // See crbug.com/771119
-// TODO(crbug.com/1164581): recently crashes flakily on
+// TODO(crbug.com/40740836): recently crashes flakily on
 // linux_chromium_asan_rel_ng and linux-rel.
-// TODO(https://crbug.com/1317446): Fix and enable on Fuchsia.
-#if (BUILDFLAG(IS_WIN) && !defined(NDEBUG)) || BUILDFLAG(IS_CHROMEOS_ASH) || \
-    (BUILDFLAG(IS_CHROMEOS) && defined(THREAD_SANITIZER)) ||                 \
+// TODO(crbug.com/40834774): Fix and enable on Fuchsia.
+#if (BUILDFLAG(IS_WIN) && !defined(NDEBUG)) || BUILDFLAG(IS_CHROMEOS) || \
     BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_FUCHSIA)
 #define MAYBE_AsyncMultiWindowTest DISABLED_AsyncMultiWindowTest
 #else
@@ -338,8 +332,7 @@ IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, MAYBE_AsyncMultiWindowTest) {
   SetupTestServer();
 
   for (int i = 0; i < 3; ++i) {
-    EXPECT_EQ(true, EvalJs(GetWebContents(shell()), "openNewWindow()",
-                           EXECUTE_SCRIPT_USE_MANUAL_REPLY));
+    EXPECT_EQ(true, EvalJs(GetWebContents(shell()), "openNewWindow()"));
   }
 
   base::RunLoop().RunUntilIdle();
@@ -378,8 +371,7 @@ IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, MAYBE_AsyncMultiWindowTest) {
                                                    expected.g, expected.b);
       std::string script =
           std::string("fillWithColor(\"") + colorString + "\");";
-      EXPECT_EQ(colorString, EvalJs(GetWebContents(browser), script,
-                                    EXECUTE_SCRIPT_USE_MANUAL_REPLY));
+      EXPECT_EQ(colorString, EvalJs(GetWebContents(browser), script));
       // Get the snapshot from the surface rather than the window. The
       // on-screen display path is verified by the GPU tests, and it
       // seems difficult to figure out the colorspace transformation

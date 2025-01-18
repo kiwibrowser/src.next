@@ -9,6 +9,8 @@
 #include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_management.h"
+#include "chrome/browser/extensions/manifest_v2_experiment_manager.h"
+#include "chrome/grit/generated_resources.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest.h"
@@ -35,7 +37,7 @@ bool AdminPolicyIsModifiable(const Extension* source_extension,
   // extensions even though it is a component extension, because it doesn't
   // need this capability and it can open up interesting attacks if it's
   // leveraged via bookmarklets or devtools.
-  // TODO(crbug.com/1365660): This protection should be expanded by also
+  // TODO(crbug.com/40239460): This protection should be expanded by also
   // blocking bookmarklets on the Webstore Origin through checks on the Blink
   // side.
   const bool is_webstore_hosted_app =
@@ -65,18 +67,18 @@ bool AdminPolicyIsModifiable(const Extension* source_extension,
 }  // namespace
 
 StandardManagementPolicyProvider::StandardManagementPolicyProvider(
-    ExtensionManagement* settings)
-    : settings_(settings) {}
+    ExtensionManagement* settings,
+    Profile* profile)
+    : profile_(profile), settings_(settings) {}
 
-StandardManagementPolicyProvider::~StandardManagementPolicyProvider() {
-}
+StandardManagementPolicyProvider::~StandardManagementPolicyProvider() = default;
 
 std::string
     StandardManagementPolicyProvider::GetDebugPolicyProviderName() const {
 #if DCHECK_IS_ON()
   return "extension management policy controlled settings";
 #else
-  IMMEDIATE_CRASH();
+  base::ImmediateCrash();
 #endif
 }
 
@@ -128,6 +130,15 @@ bool StandardManagementPolicyProvider::UserMayLoad(
     return ReturnLoadError(extension, error);
   }
 
+  if (!settings_->IsAllowedManifestVersion(extension)) {
+    if (error) {
+      *error = l10n_util::GetStringFUTF16(
+          IDS_EXTENSION_MANIFEST_VERSION_NOT_SUPPORTED,
+          base::UTF8ToUTF16(extension->name()));
+    }
+    return false;
+  }
+
   return true;
 }
 
@@ -141,6 +152,16 @@ bool StandardManagementPolicyProvider::UserMayInstall(
   if (!Manifest::IsPolicyLocation(extension->location()) &&
       installation_mode == ExtensionManagement::INSTALLATION_FORCED) {
     return ReturnLoadError(extension, error);
+  }
+
+  // Check if the extension would be force-disabled once it's installed. If it
+  // would, block the new installation.
+  auto* mv2_experiment_manager = ManifestV2ExperimentManager::Get(profile_);
+  if (mv2_experiment_manager &&
+      mv2_experiment_manager->ShouldBlockExtensionEnable(*extension)) {
+    *error =
+        l10n_util::GetStringUTF16(IDS_EXTENSIONS_CANT_INSTALL_MV2_EXTENSION);
+    return false;
   }
 
   return UserMayLoad(extension, error);
@@ -167,20 +188,49 @@ bool StandardManagementPolicyProvider::MustRemainEnabled(
 
 bool StandardManagementPolicyProvider::MustRemainDisabled(
     const Extension* extension,
-    disable_reason::DisableReason* reason,
-    std::u16string* error) const {
+    disable_reason::DisableReason* reason) const {
   std::string required_version;
   if (!settings_->CheckMinimumVersion(extension, &required_version)) {
-    if (reason)
+    if (reason) {
       *reason = disable_reason::DISABLE_UPDATE_REQUIRED_BY_POLICY;
-    if (error) {
-      *error = l10n_util::GetStringFUTF16(
-          IDS_EXTENSION_DISABLED_UPDATE_REQUIRED_BY_POLICY,
-          base::UTF8ToUTF16(extension->name()),
-          base::ASCIIToUTF16(required_version));
     }
     return true;
   }
+
+  if (!settings_->IsAllowedByUnpublishedAvailabilityPolicy(extension)) {
+    if (reason) {
+      *reason = disable_reason::DISABLE_PUBLISHED_IN_STORE_REQUIRED_BY_POLICY;
+    }
+    return true;
+  }
+
+  if (!settings_->IsAllowedByUnpackedDeveloperModePolicy(*extension)) {
+    if (reason) {
+      *reason = disable_reason::DISABLE_UNSUPPORTED_DEVELOPER_EXTENSION;
+    }
+    return true;
+  }
+
+  if (settings_->ShouldBlockForceInstalledOffstoreExtension(*extension)) {
+    if (reason) {
+      *reason = disable_reason::DISABLE_NOT_VERIFIED;
+    }
+    return true;
+  }
+
+  // Note: `mv2_experiment_manager` may be null for certain types of profiles
+  // (such as the sign-in profile). We can ignore this check in this case, since
+  // users can't install extensions in these profiles.
+  auto* mv2_experiment_manager = ManifestV2ExperimentManager::Get(profile_);
+  if (mv2_experiment_manager &&
+      mv2_experiment_manager->ShouldBlockExtensionEnable(*extension)) {
+    if (reason) {
+      *reason = disable_reason::DISABLE_UNSUPPORTED_MANIFEST_VERSION;
+    }
+
+    return true;
+  }
+
   return false;
 }
 

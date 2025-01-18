@@ -12,6 +12,7 @@ compiled_action("generate_transport_security_state") {
   # Inputs in order expected by the command line of the tool.
   inputs = [
     "transport_security_state_static.json",
+    "transport_security_state_static_pins.json",
     "transport_security_state_static.pins",
     "transport_security_state_static.template",
   ]
@@ -27,6 +28,7 @@ compiled_action("transport_security_state_unittest_data_default") {
   # Inputs in order expected by the command line of the tool.
   inputs = [
     "transport_security_state_static_unittest_default.json",
+    "transport_security_state_static_unittest_default_pins.json",
     "transport_security_state_static_unittest_default.pins",
     "transport_security_state_static_unittest.template",
   ]
@@ -47,14 +49,24 @@ compiled_action_foreach("transport_security_state_unittest_data") {
   ]
 
   # Inputs in order expected by the command line of the tool.
-  inputs = [
+  source_independent_inputs = [
     "transport_security_state_static_unittest.pins",
     "transport_security_state_static_unittest.template",
   ]
+
+  # All possible inputs to ensure correctness when files change.
+  # TODO(crbug.com/41481512): Use {{source_name_part}}_pins.json.
+  inputs = [
+             "transport_security_state_static_unittest1_pins.json",
+             "transport_security_state_static_unittest2_pins.json",
+             "transport_security_state_static_unittest3_pins.json",
+           ] + source_independent_inputs
+
   outputs = [ "$target_gen_dir/{{source_name_part}}.h" ]
-  args =
-      [ rebase_path("{{source_name_part}}.json", root_build_dir) ] +
-      rebase_path(inputs, root_build_dir) + rebase_path(outputs, root_build_dir)
+  args = [ rebase_path("{{source_name_part}}.json", root_build_dir) ] +
+         [ rebase_path("{{source_name_part}}_pins.json", root_build_dir) ] +
+         rebase_path(source_independent_inputs, root_build_dir) +
+         rebase_path(outputs, root_build_dir)
 }
 
 # This has separated source_set not to let other compiles wait for the
@@ -63,7 +75,13 @@ source_set("transport_security_state_generated_files") {
   # Do not publicize any header to remove build dependency.
   public = []
 
-  sources = [ "transport_security_state.cc" ]
+  sources = [
+    "transport_security_state.cc",
+    # transport_security_state.h is intentionally specified in net/BUILD.gn
+    # rather than in this source_set. See this review comment thread for
+    # details:
+    # https://chromium-review.googlesource.com/c/chromium/src/+/1460639/comment/b781034b_5794ab47/
+  ]
 
   deps = [
     "//build:branding_buildflags",

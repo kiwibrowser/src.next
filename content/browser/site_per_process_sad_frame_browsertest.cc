@@ -8,6 +8,7 @@
 #include "content/browser/renderer_host/cross_process_frame_connector.h"
 #include "content/browser/renderer_host/frame_tree.h"
 #include "content/browser/renderer_host/render_frame_proxy_host.h"
+#include "content/common/features.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
@@ -68,7 +69,7 @@ class SitePerProcessBrowserTestWithoutSadFrameTabReload
 };
 
 // This test is flaky on all platforms.
-// TODO(crbug.com/1179074): Deflake it and enable this test back.
+// TODO(crbug.com/40749527): Deflake it and enable this test back.
 IN_PROC_BROWSER_TEST_P(
     SitePerProcessBrowserTestWithoutSadFrameTabReload,
     DISABLED_ChildFrameCrashMetrics_KilledWhileHiddenThenShown) {
@@ -356,7 +357,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTestWithSadFrameTabReload,
                                   1);
 
     // Ensure no new metrics are logged after the reload completes.
-    manager.WaitForNavigationFinished();
+    ASSERT_TRUE(manager.WaitForNavigationFinished());
     EXPECT_TRUE(manager.was_successful());
     EXPECT_FALSE(controller.NeedsReload());
     EXPECT_EQ(1, controller.GetEntryCount());
@@ -410,7 +411,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTestWithSadFrameTabReload,
                                   1);
 
     // Ensure no new metrics are logged after the navigation completes.
-    manager.WaitForNavigationFinished();
+    ASSERT_TRUE(manager.WaitForNavigationFinished());
     EXPECT_TRUE(manager.was_successful());
     histograms.ExpectUniqueSample("Stability.ChildFrameCrash.Visibility",
                                   CrashVisibility::kShownWhileAncestorIsLoading,
@@ -423,7 +424,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTestWithSadFrameTabReload,
 // kShownAfterCrashing. See https://crbug.com/1132938.
 IN_PROC_BROWSER_TEST_P(
     SitePerProcessBrowserTestWithSadFrameTabReload,
-    // TODO(crbug.com/1325478): Re-enable this test
+    // TODO(crbug.com/40839850): Re-enable this test
     DISABLED_CrashedFencedframeVisibilityMetricsDuringParentLoad) {
   GURL primary_url(embedded_test_server()->GetURL("a.com", "/title1.html"));
   GURL child_url(
@@ -490,7 +491,7 @@ IN_PROC_BROWSER_TEST_P(
                                   1);
 
     // Ensure no new metrics are logged after the navigation completes.
-    manager.WaitForNavigationFinished();
+    ASSERT_TRUE(manager.WaitForNavigationFinished());
     EXPECT_TRUE(manager.was_successful());
     histograms.ExpectUniqueSample("Stability.ChildFrameCrash.Visibility",
                                   CrashVisibility::kShownWhileAncestorIsLoading,
@@ -503,7 +504,8 @@ IN_PROC_BROWSER_TEST_P(
 // shown. Similar to the test above, except that the crashed subframe is
 // scrolled out of view.
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTestWithSadFrameTabReload,
-                       ReloadHiddenTabWithCrashedSubframeOutOfView) {
+                       // TODO(crbug.com/40870019): Re-enable this test
+                       DISABLED_ReloadHiddenTabWithCrashedSubframeOutOfView) {
   // Set WebContents to VISIBLE to avoid hitting the |!did_first_set_visible_|
   // case when we hide it later.
   web_contents()->UpdateWebContentsVisibility(Visibility::VISIBLE);
@@ -512,8 +514,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTestWithSadFrameTabReload,
   GURL out_of_view_url(
       embedded_test_server()->GetURL("a.com", "/iframe_out_of_view.html"));
   EXPECT_TRUE(NavigateToURL(shell(), out_of_view_url));
-  EXPECT_EQ("LOADED", EvalJs(shell(), "notifyWhenLoaded();",
-                             EXECUTE_SCRIPT_USE_MANUAL_REPLY));
+  EXPECT_EQ("LOADED", EvalJs(shell(), "notifyWhenLoaded();"));
   NavigateIframeToURL(web_contents(), "test_iframe",
                       embedded_test_server()->GetURL("b.com", "/title1.html"));
 
@@ -631,7 +632,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTestWithSadFrameTabReload,
 }
 
 IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
-                       ChildFrameCrashMetrics_KilledWhileVisible) {
+                       // TODO(crbug.com/40870019): Re-enable this test
+                       DISABLED_ChildFrameCrashMetrics_KilledWhileVisible) {
   // Set-up a frame tree that helps verify what the metrics tracks:
   // 1) frames (12 frames are affected if B process gets killed) or
   // 2) crashes (simply 1 crash if B process gets killed)?

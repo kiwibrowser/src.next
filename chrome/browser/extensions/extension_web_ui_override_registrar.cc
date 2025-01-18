@@ -4,7 +4,7 @@
 
 #include "chrome/browser/extensions/extension_web_ui_override_registrar.h"
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/lazy_instance.h"
 #include "base/one_shot_event.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
@@ -24,8 +24,7 @@ ExtensionWebUIOverrideRegistrar::ExtensionWebUIOverrideRegistrar(
                      weak_factory_.GetWeakPtr(), context));
 }
 
-ExtensionWebUIOverrideRegistrar::~ExtensionWebUIOverrideRegistrar() {
-}
+ExtensionWebUIOverrideRegistrar::~ExtensionWebUIOverrideRegistrar() = default;
 
 void ExtensionWebUIOverrideRegistrar::OnExtensionLoaded(
     content::BrowserContext* browser_context,

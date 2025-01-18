@@ -7,7 +7,9 @@
 #include <utility>
 
 #include "base/run_loop.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
+#include "net/base/features.h"
 #include "net/http/http_stream_factory.h"
 #include "net/http/http_stream_factory_job.h"
 #include "net/http/http_stream_factory_job_controller.h"
@@ -22,6 +24,13 @@ namespace net {
 
 // Make sure that Request passes on its priority updates to its jobs.
 TEST(HttpStreamRequestTest, SetPriority) {
+  // Explicitly disable HappyEyeballsV3 because this test depends on
+  // HttpStreamFactory::Job, which isn't used by HappyEyeballsV3.
+  // HttpStreamPoolAttemptManagerTest.SetPriority covers updating priority
+  // for in-flight connection attempts.
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndDisableFeature(features::kHappyEyeballsV3);
+
   base::test::TaskEnvironment task_environment;
 
   SequencedSocketData data;
@@ -41,12 +50,12 @@ TEST(HttpStreamRequestTest, SetPriority) {
   request_info.url = GURL("http://www.example.com/");
   auto job_controller = std::make_unique<HttpStreamFactory::JobController>(
       factory, &request_delegate, session.get(), &job_factory, request_info,
-      /* is_preconnect = */ false,
-      /* is_websocket = */ false,
-      /* enable_ip_based_pooling = */ true,
-      /* enable_alternative_services = */ true,
-      /* delay_main_job_with_available_spdy_session = */ true, SSLConfig(),
-      SSLConfig());
+      /*is_preconnect=*/false,
+      /*is_websocket=*/false,
+      /*enable_ip_based_pooling=*/true,
+      /*enable_alternative_services=*/true,
+      /*delay_main_job_with_available_spdy_session=*/true,
+      /*allowed_bad_certs=*/std::vector<SSLConfig::CertAndStatus>());
   HttpStreamFactory::JobController* job_controller_raw_ptr =
       job_controller.get();
   factory->job_controller_set_.insert(std::move(job_controller));
@@ -60,13 +69,13 @@ TEST(HttpStreamRequestTest, SetPriority) {
   request->SetPriority(MEDIUM);
   EXPECT_EQ(MEDIUM, job_controller_raw_ptr->main_job()->priority());
 
-  EXPECT_CALL(request_delegate, OnStreamFailed(_, _, _, _, _)).Times(1);
-  job_controller_raw_ptr->OnStreamFailed(job_factory.main_job(), ERR_FAILED,
-                                         SSLConfig());
+  EXPECT_CALL(request_delegate, OnStreamFailed(_, _, _, _)).Times(1);
+  job_controller_raw_ptr->OnStreamFailed(job_factory.main_job(), ERR_FAILED);
 
   request->SetPriority(IDLE);
   EXPECT_EQ(IDLE, job_controller_raw_ptr->main_job()->priority());
   EXPECT_TRUE(data.AllReadDataConsumed());
   EXPECT_TRUE(data.AllWriteDataConsumed());
 }
+
 }  // namespace net

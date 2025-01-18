@@ -5,16 +5,28 @@
 #ifndef CONTENT_BROWSER_BACK_FORWARD_CACHE_TEST_UTIL_H_
 #define CONTENT_BROWSER_BACK_FORWARD_CACHE_TEST_UTIL_H_
 
+#include <string_view>
 #include <vector>
 
 #include "base/location.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "components/ukm/test_ukm_recorder.h"
 #include "content/browser/renderer_host/back_forward_cache_metrics.h"
+#include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/public/browser/back_forward_cache.h"
 #include "third_party/blink/public/common/scheduler/web_scheduler_tracked_feature.h"
 
 namespace content {
+
+namespace {
+// TODO(yuzus): Make a way to use a non sticky dummy feature.
+constexpr auto* kBlockingPagePath =
+    "/back_forward_cache/page_with_blocking_feature.html";
+constexpr auto* kBlockingReasonString = "webxrdevice";
+constexpr auto kBlockingReasonEnum =
+    blink::scheduler::WebSchedulerTrackedFeature::kWebXR;
+constexpr auto* kBlockingScript = "navigator.xr.isSessionSupported('inline');";
+}  // namespace
 
 // `BackForwardCacheMetricsTestMatcher` provides common matchers and
 // expectations to help make test assertions on BackForwardCache-related
@@ -82,7 +94,7 @@ class BackForwardCacheMetricsTestMatcher {
       base::Location location);
 
   template <typename T>
-  void ExpectBucketCount(base::StringPiece name,
+  void ExpectBucketCount(std::string_view name,
                          T sample,
                          base::HistogramBase::Count expected_count) {
     histogram_tester().ExpectBucketCount(name, sample, expected_count);
@@ -99,8 +111,10 @@ class BackForwardCacheMetricsTestMatcher {
  private:
   // Adds a new outcome to the set of expected outcomes (restored or not) and
   // tests that it occurred.
-  void ExpectOutcome(BackForwardCacheMetrics::HistoryNavigationOutcome outcome,
-                     base::Location location);
+  void ExpectOutcome(
+      BackForwardCacheMetrics::HistoryNavigationOutcome outcome,
+      std::vector<BackForwardCacheMetrics::NotRestoredReason> not_restored,
+      base::Location location);
 
   void ExpectReasons(
       std::vector<BackForwardCacheMetrics::NotRestoredReason> not_restored,

@@ -13,7 +13,7 @@ class FilePath;
 }
 
 namespace sandbox {
-class SeatbeltExecClient;
+class SandboxCompiler;
 namespace mojom {
 enum class Sandbox;
 }  // namespace mojom
@@ -23,10 +23,10 @@ namespace content {
 
 // This populates the sandbox parameters in the client for the given
 // |sandbox_type|. Some parameters may be extracted from the |command_line|.
-CONTENT_EXPORT void SetupSandboxParameters(
+CONTENT_EXPORT bool SetupSandboxParameters(
     sandbox::mojom::Sandbox sandbox_type,
     const base::CommandLine& command_line,
-    sandbox::SeatbeltExecClient* client);
+    sandbox::SandboxCompiler* compiler);
 
 // Expands the SandboxType::kNetwork policy to allow reading files from
 // the specified |path|, which stores TLS certificates used by the browser

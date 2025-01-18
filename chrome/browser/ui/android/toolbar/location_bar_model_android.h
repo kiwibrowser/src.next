@@ -36,9 +36,10 @@ class LocationBarModelAndroid : public ChromeLocationBarModelDelegate {
   base::android::ScopedJavaLocalRef<jstring> GetURLForDisplay(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
-  jint GetPageClassification(JNIEnv* env,
-                             const base::android::JavaParamRef<jobject>& obj,
-                             bool is_focused_from_fakebox);
+  base::android::ScopedJavaLocalRef<jobject> GetUrlOfVisibleNavigationEntry(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
+  jint GetPageClassification(JNIEnv* env, bool is_prefetch) const;
 
   // ChromeLocationBarModelDelegate:
   content::WebContents* GetActiveWebContents() const override;

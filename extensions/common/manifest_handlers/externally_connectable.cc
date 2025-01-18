@@ -29,6 +29,9 @@ const char kErrorInvalidId[] = "Invalid ID '*'";
 const char kErrorNothingSpecified[] =
     "'externally_connectable' specifies neither 'matches' nor 'ids'; "
     "nothing will be able to connect";
+const char kErrorUnusedAcceptsTlsChannelId[] =
+    "'externally_connectable' specifies 'accepts_tls_channel_id' but not "
+    "'matches'; 'accepts_tls_channel_id' has no efect";
 }  // namespace externally_connectable_errors
 
 namespace keys = extensions::manifest_keys;
@@ -47,11 +50,9 @@ std::vector<T> Sorted(const std::vector<T>& in) {
 
 }  // namespace
 
-ExternallyConnectableHandler::ExternallyConnectableHandler() {
-}
+ExternallyConnectableHandler::ExternallyConnectableHandler() = default;
 
-ExternallyConnectableHandler::~ExternallyConnectableHandler() {
-}
+ExternallyConnectableHandler::~ExternallyConnectableHandler() = default;
 
 bool ExternallyConnectableHandler::Parse(Extension* extension,
                                          std::u16string* error) {
@@ -88,10 +89,11 @@ std::unique_ptr<ExternallyConnectableInfo> ExternallyConnectableInfo::FromValue(
     const base::Value& value,
     std::vector<InstallWarning>* install_warnings,
     std::u16string* error) {
-  std::unique_ptr<ExternallyConnectable> externally_connectable =
-      ExternallyConnectable::FromValue(value, error);
-  if (!externally_connectable)
+  auto externally_connectable = ExternallyConnectable::FromValue(value);
+  if (!externally_connectable.has_value()) {
+    *error = std::move(externally_connectable).error();
     return nullptr;
+  }
 
   URLPatternSet matches;
 
@@ -111,32 +113,39 @@ std::unique_ptr<ExternallyConnectableInfo> ExternallyConnectableInfo::FromValue(
     }
   }
 
-  std::vector<std::string> ids;
+  std::vector<ExtensionId> ids;
   bool all_ids = false;
 
   if (externally_connectable->ids) {
-    for (auto it = externally_connectable->ids->begin();
-         it != externally_connectable->ids->end(); ++it) {
-      if (*it == kAllIds) {
+    for (const auto& id : *externally_connectable->ids) {
+      if (id == kAllIds) {
         all_ids = true;
-      } else if (crx_file::id_util::IdIsValid(*it)) {
-        ids.push_back(*it);
+      } else if (crx_file::id_util::IdIsValid(id)) {
+        ids.push_back(id);
       } else {
         *error = ErrorUtils::FormatErrorMessageUTF16(
-            externally_connectable_errors::kErrorInvalidId, *it);
+            externally_connectable_errors::kErrorInvalidId, id);
         return nullptr;
       }
     }
   }
 
-  if (!externally_connectable->matches && !externally_connectable->ids) {
-    install_warnings->push_back(
-        InstallWarning(externally_connectable_errors::kErrorNothingSpecified,
-                       keys::kExternallyConnectable));
+  if (!all_ids && matches.is_empty() && ids.empty()) {
+    install_warnings->emplace_back(
+        externally_connectable_errors::kErrorNothingSpecified,
+        keys::kExternallyConnectable);
   }
 
   bool accepts_tls_channel_id =
       externally_connectable->accepts_tls_channel_id.value_or(false);
+
+  if (externally_connectable->accepts_tls_channel_id && matches.is_empty()) {
+    accepts_tls_channel_id = false;
+    install_warnings->emplace_back(
+        externally_connectable_errors::kErrorUnusedAcceptsTlsChannelId,
+        keys::kExternallyConnectable);
+  }
+
   return base::WrapUnique(new ExternallyConnectableInfo(
       std::move(matches), ids, all_ids, accepts_tls_channel_id));
 }
@@ -146,16 +155,15 @@ ExternallyConnectableInfo::~ExternallyConnectableInfo() {
 
 ExternallyConnectableInfo::ExternallyConnectableInfo(
     URLPatternSet matches,
-    const std::vector<std::string>& ids,
+    const std::vector<ExtensionId>& ids,
     bool all_ids,
     bool accepts_tls_channel_id)
     : matches(std::move(matches)),
       ids(Sorted(ids)),
       all_ids(all_ids),
-      accepts_tls_channel_id(accepts_tls_channel_id) {
-}
+      accepts_tls_channel_id(accepts_tls_channel_id) {}
 
-bool ExternallyConnectableInfo::IdCanConnect(const std::string& id) {
+bool ExternallyConnectableInfo::IdCanConnect(const ExtensionId& id) {
   if (all_ids)
     return true;
   DCHECK(base::ranges::is_sorted(ids));

@@ -20,9 +20,11 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#include "third_party/blink/renderer/core/css/css_rule.h"
-#include "third_party/blink/renderer/core/css/css_style_sheet.h"
 #include "third_party/blink/renderer/core/css/style_rule_css_style_declaration.h"
+#include "third_party/blink/renderer/core/css/css_rule.h"
+#include "third_party/blink/renderer/core/css/css_style_rule.h"
+#include "third_party/blink/renderer/core/css/css_style_sheet.h"
+#include "third_party/blink/renderer/core/css/style_sheet_contents.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/node.h"
 
@@ -44,14 +46,23 @@ StyleRuleCSSStyleDeclaration::StyleRuleCSSStyleDeclaration(
 StyleRuleCSSStyleDeclaration::~StyleRuleCSSStyleDeclaration() = default;
 
 void StyleRuleCSSStyleDeclaration::WillMutate() {
-  if (parent_rule_ && parent_rule_->parentStyleSheet())
+  if (parent_rule_ && parent_rule_->parentStyleSheet()) {
     parent_rule_->parentStyleSheet()->WillMutateRules();
+  }
 }
 
 void StyleRuleCSSStyleDeclaration::DidMutate(MutationType type) {
   // Style sheet mutation needs to be signaled even if the change failed.
-  // willMutateRules/didMutateRules must pair.
+  // WillMutate/DidMutate must pair.
   if (parent_rule_ && parent_rule_->parentStyleSheet()) {
+    StyleSheetContents* parent_contents =
+        parent_rule_->parentStyleSheet()->Contents();
+    if (parent_rule_->GetType() == CSSRule::kStyleRule) {
+      parent_contents->NotifyRuleChanged(
+          static_cast<CSSStyleRule*>(parent_rule_.Get())->GetStyleRule());
+    } else {
+      parent_contents->NotifyDiffUnrepresentable();
+    }
     parent_rule_->parentStyleSheet()->DidMutate(
         CSSStyleSheet::Mutation::kRules);
   }

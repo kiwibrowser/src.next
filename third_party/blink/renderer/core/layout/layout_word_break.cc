@@ -31,10 +31,8 @@
 
 namespace blink {
 
-LayoutWordBreak::LayoutWordBreak(Node* node)
-    : LayoutText(node, StringImpl::empty_) {
-  DCHECK(IsA<HTMLWBRElement>(node)) << node;
-}
+LayoutWordBreak::LayoutWordBreak(HTMLWBRElement& node)
+    : LayoutText(&node, StringImpl::empty_) {}
 
 bool LayoutWordBreak::IsWordBreak() const {
   NOT_DESTROYED();
@@ -51,11 +49,11 @@ Position LayoutWordBreak::PositionForCaretOffset(unsigned offset) const {
   return Position::BeforeNode(*GetNode());
 }
 
-absl::optional<unsigned> LayoutWordBreak::CaretOffsetForPosition(
+std::optional<unsigned> LayoutWordBreak::CaretOffsetForPosition(
     const Position& position) const {
   NOT_DESTROYED();
   if (position.IsNull() || position.AnchorNode() != GetNode())
-    return absl::nullopt;
+    return std::nullopt;
   DCHECK(position.IsBeforeAnchor() || position.IsAfterAnchor());
   // The only allowed caret offset is 0, since LayoutWordBreak always has
   // |TextLength() == 0|.

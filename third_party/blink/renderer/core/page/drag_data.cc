@@ -41,11 +41,13 @@ namespace blink {
 DragData::DragData(DataObject* data,
                    const gfx::PointF& client_position,
                    const gfx::PointF& global_position,
-                   DragOperationsMask source_operation_mask)
+                   DragOperationsMask source_operation_mask,
+                   bool force_default_action)
     : client_position_(client_position),
       global_position_(global_position),
       platform_drag_data_(data),
-      dragging_source_operation_mask_(source_operation_mask) {}
+      dragging_source_operation_mask_(source_operation_mask),
+      force_default_action_(force_default_action) {}
 
 bool DragData::ContainsHTML() const {
   return platform_drag_data_->Types().Contains(kMimeTypeTextHTML);
@@ -67,6 +69,25 @@ String DragData::AsURL(FilenameConversionPolicy filename_policy,
   return url;
 }
 
+Vector<String> DragData::AsURLs(
+    FilenameConversionPolicy filename_policy) const {
+  Vector<String> result;
+  if (platform_drag_data_->Types().Contains(kMimeTypeTextURIList)) {
+    const auto urls = platform_drag_data_->Urls();
+    result.reserve(urls.size());
+    for (const String& url : urls) {
+      result.push_back(url);
+    }
+  } else if (filename_policy == kConvertFilenames && ContainsFiles()) {
+    const auto filenames = platform_drag_data_->Filenames();
+    result.reserve(filenames.size());
+    for (const String& filename : filenames) {
+      result.push_back(FilePathToURL(filename));
+    }
+  }
+  return result;
+}
+
 bool DragData::ContainsFiles() const {
   return platform_drag_data_->ContainsFilenames();
 }
@@ -75,10 +96,14 @@ int DragData::GetModifiers() const {
   return platform_drag_data_->GetModifiers();
 }
 
+bool DragData::ForceDefaultAction() const {
+  return force_default_action_;
+}
+
 void DragData::AsFilePaths(Vector<String>& result) const {
   const Vector<String>& filenames = platform_drag_data_->Filenames();
   for (wtf_size_t i = 0; i < filenames.size(); ++i) {
-    if (!filenames[i].IsEmpty())
+    if (!filenames[i].empty())
       result.push_back(filenames[i]);
   }
 }
@@ -131,9 +156,10 @@ DocumentFragment* DragData::AsFragment(LocalFrame* frame) const {
     platform_drag_data_->HtmlAndBaseURL(html, base_url);
     DCHECK(frame->GetDocument());
     if (DocumentFragment* fragment =
-            CreateSanitizedFragmentFromMarkupWithContext(
-                *frame->GetDocument(), html, 0, html.length(), base_url))
+            CreateStrictlyProcessedFragmentFromMarkupWithContext(
+                *frame->GetDocument(), html, 0, html.length(), base_url)) {
       return fragment;
+    }
   }
 
   return nullptr;

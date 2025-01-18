@@ -32,6 +32,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_THREADABLE_LOADER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_THREADABLE_LOADER_H_
 
+#include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "services/network/public/mojom/fetch_api.mojom-blink.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink-forward.h"
@@ -120,6 +121,9 @@ class CORE_EXPORT ThreadableLoader final
 
   void SetDefersLoading(bool);
 
+  // Return the task runner this class uses for processing network data.
+  scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner();
+
   void Trace(Visitor* visitor) const override;
 
  private:
@@ -140,7 +144,7 @@ class CORE_EXPORT ThreadableLoader final
   void ResponseReceived(Resource*, const ResourceResponse&) override;
   void ResponseBodyReceived(Resource*, BytesConsumer& body) override;
   void CachedMetadataReceived(Resource*, mojo_base::BigBuffer) override;
-  void DataReceived(Resource*, const char* data, size_t data_length) override;
+  void DataReceived(Resource*, base::span<const char> data) override;
   bool RedirectReceived(Resource*,
                         const ResourceRequest&,
                         const ResourceResponse&) override;
@@ -148,11 +152,11 @@ class CORE_EXPORT ThreadableLoader final
   void DataDownloaded(Resource*, uint64_t) override;
   void DidDownloadToBlob(Resource*, scoped_refptr<BlobDataHandle>) override;
 
+  const ResourceLoaderOptions resource_loader_options_;
+
   Member<ThreadableLoaderClient> client_;
   Member<ExecutionContext> execution_context_;
   Member<ResourceFetcher> resource_fetcher_;
-
-  const ResourceLoaderOptions resource_loader_options_;
 
   // Saved so that we can use the original mode in ResponseReceived() where
   // |resource| might be a reused one (e.g. preloaded resource) which can have a

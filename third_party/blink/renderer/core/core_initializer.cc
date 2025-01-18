@@ -30,15 +30,14 @@
 
 #include "third_party/blink/renderer/core/core_initializer.h"
 
-#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/web/blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/binding_security.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_state_impl.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_throw_dom_exception.h"
 #include "third_party/blink/renderer/core/css/css_default_style_sheets.h"
 #include "third_party/blink/renderer/core/css/media_feature_names.h"
 #include "third_party/blink/renderer/core/css/media_query_evaluator.h"
-#include "third_party/blink/renderer/core/css/parser/css_parser_token_range.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/event_interface_names.h"
@@ -51,10 +50,13 @@
 #include "third_party/blink/renderer/core/html_tokenizer_names.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
 #include "third_party/blink/renderer/core/keywords.h"
+#include "third_party/blink/renderer/core/lcp_critical_path_predictor/element_locator.h"
 #include "third_party/blink/renderer/core/mathml_names.h"
 #include "third_party/blink/renderer/core/media_type_names.h"
 #include "third_party/blink/renderer/core/performance_entry_names.h"
 #include "third_party/blink/renderer/core/pointer_type_names.h"
+#include "third_party/blink/renderer/core/preferences/preference_names.h"
+#include "third_party/blink/renderer/core/preferences/preference_values.h"
 #include "third_party/blink/renderer/core/script_type_names.h"
 #include "third_party/blink/renderer/core/securitypolicyviolation_disposition_names.h"
 #include "third_party/blink/renderer/core/svg_names.h"
@@ -64,6 +66,7 @@
 #include "third_party/blink/renderer/core/xml_names.h"
 #include "third_party/blink/renderer/core/xmlns_names.h"
 #include "third_party/blink/renderer/platform/fonts/font_global_context.h"
+#include "third_party/blink/renderer/platform/loader/fetch/delivery_type_names.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
 #include "third_party/blink/renderer/platform/network/http_names.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
@@ -107,14 +110,15 @@ void CoreInitializer::Initialize() {
       xmlns_names::kAttrsCount;
 
   const unsigned kCoreStaticStringsCount =
-      kQualifiedNamesCount + event_interface_names::kNamesCount +
-      event_target_names::kNamesCount + event_type_names::kNamesCount +
-      fetch_initiator_type_names::kNamesCount + font_family_names::kNamesCount +
-      html_tokenizer_names::kNamesCount + http_names::kNamesCount +
-      input_type_names::kNamesCount + keywords::kNamesCount +
-      media_feature_names::kNamesCount + media_type_names::kNamesCount +
-      performance_entry_names::kNamesCount + pointer_type_names::kNamesCount +
-      shadow_element_names::kNamesCount;
+      kQualifiedNamesCount + delivery_type_names::kNamesCount +
+      event_interface_names::kNamesCount + event_target_names::kNamesCount +
+      event_type_names::kNamesCount + fetch_initiator_type_names::kNamesCount +
+      font_family_names::kNamesCount + html_tokenizer_names::kNamesCount +
+      http_names::kNamesCount + input_type_names::kNamesCount +
+      keywords::kNamesCount + media_feature_names::kNamesCount +
+      media_type_names::kNamesCount + performance_entry_names::kNamesCount +
+      pointer_type_names::kNamesCount + shadow_element_names::kNamesCount +
+      preference_names::kNamesCount + preference_values::kNamesCount;
 
   StringImpl::ReserveStaticStringsCapacityForSize(
       kCoreStaticStringsCount + StringImpl::AllStaticStrings().size());
@@ -129,6 +133,7 @@ void CoreInitializer::Initialize() {
   xml_names::Init();
   xmlns_names::Init();
 
+  delivery_type_names::Init();
   event_interface_names::Init();
   event_target_names::Init();
   event_type_names::Init();
@@ -142,12 +147,13 @@ void CoreInitializer::Initialize() {
   media_type_names::Init();
   performance_entry_names::Init();
   pointer_type_names::Init();
+  preference_names::Init();
+  preference_values::Init();
   shadow_element_names::Init();
   script_type_names::Init();
   securitypolicyviolation_disposition_names::Init();
 
   MediaQueryEvaluator::Init();
-  CSSParserTokenRange::InitStaticEOFToken();
 
   style_change_extra_data::Init();
 
@@ -158,13 +164,15 @@ void CoreInitializer::Initialize() {
   V8ThrowDOMException::Init();
 
   BindingSecurity::Init();
+  ScriptStateImpl::Init();
 
   TimeZoneController::Init();
 
   FontGlobalContext::Init();
 
-  if (base::FeatureList::IsEnabled(features::kDefaultStyleSheetsEarlyInit))
-    CSSDefaultStyleSheets::Init();
+  CSSDefaultStyleSheets::Init();
+
+  element_locator::TokenStreamMatcher::InitSets();
 }
 
 }  // namespace blink

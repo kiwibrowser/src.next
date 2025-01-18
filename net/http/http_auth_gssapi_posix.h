@@ -6,11 +6,11 @@
 #define NET_HTTP_HTTP_AUTH_GSSAPI_POSIX_H_
 
 #include <string>
+#include <string_view>
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/native_library.h"
-#include "base/strings/string_piece_forward.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "net/base/completion_once_callback.h"
@@ -178,7 +178,7 @@ class NET_EXPORT_PRIVATE GSSAPISharedLibrary : public GSSAPILibrary {
   //   2. The library must export the functions we need.
   base::NativeLibrary LoadSharedLibrary(const NetLogWithSource& net_log);
   bool BindMethods(base::NativeLibrary lib,
-                   base::StringPiece library_name,
+                   std::string_view library_name,
                    const NetLogWithSource& net_log);
 
   bool initialized_ = false;
@@ -283,7 +283,7 @@ NET_EXPORT_PRIVATE base::Value::Dict GetGssStatusCodeValue(
 // encapsulating the codes as well as their meanings as expanded via
 // gss_display_status().
 //
-// The base::Value has the following structure:
+// The base::Value::Dict has the following structure:
 //   {
 //     "function": <name of GSSAPI function that returned the error>
 //     "major_status": {
@@ -306,7 +306,7 @@ NET_EXPORT_PRIVATE base::Value::Dict GetGssStatusCodeValue(
 // yielded an empty message.
 NET_EXPORT_PRIVATE base::Value::Dict GetGssStatusValue(
     GSSAPILibrary* gssapi_lib,
-    base::StringPiece method,
+    std::string_view method,
     OM_uint32 major_status,
     OM_uint32 minor_status);
 
@@ -341,8 +341,8 @@ NET_EXPORT_PRIVATE base::Value::Dict GetDisplayNameValue(
     GSSAPILibrary* gssapi_lib,
     const gss_name_t gss_name);
 
-// GetContextStateAsValue returns a base::Value that describes the state of a
-// GSSAPI context. The structure of the value is:
+// GetContextStateAsValue returns a base::Value::Dict that describes the state
+// of a GSSAPI context. The structure of the value is:
 //
 //   {
 //     "source": {
@@ -364,7 +364,7 @@ NET_EXPORT_PRIVATE base::Value::Dict GetDisplayNameValue(
 //   {
 //     "error": <error. See GetGssStatusValue() for structure.>
 //   }
-NET_EXPORT_PRIVATE base::Value GetContextStateAsValue(
+NET_EXPORT_PRIVATE base::Value::Dict GetContextStateAsValue(
     GSSAPILibrary* gssapi_lib,
     const gss_ctx_id_t context_handle);
 }  // namespace net

@@ -4,7 +4,7 @@
 
 #include "chrome/browser/signin/account_investigator_factory.h"
 
-#include "base/memory/singleton.h"
+#include "base/no_destructor.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "components/pref_registry/pref_registry_syncable.h"
@@ -14,7 +14,8 @@
 
 // static
 AccountInvestigatorFactory* AccountInvestigatorFactory::GetInstance() {
-  return base::Singleton<AccountInvestigatorFactory>::get();
+  static base::NoDestructor<AccountInvestigatorFactory> instance;
+  return instance.get();
 }
 
 // static
@@ -25,17 +26,24 @@ AccountInvestigator* AccountInvestigatorFactory::GetForProfile(
 }
 
 AccountInvestigatorFactory::AccountInvestigatorFactory()
-    : ProfileKeyedServiceFactory("AccountInvestigator") {
+    : ProfileKeyedServiceFactory(
+          "AccountInvestigator",
+          ProfileSelections::Builder()
+              .WithRegular(ProfileSelection::kOriginalOnly)
+              .WithAshInternals(ProfileSelection::kNone)
+              .Build()) {
   DependsOn(IdentityManagerFactory::GetInstance());
 }
 
-AccountInvestigatorFactory::~AccountInvestigatorFactory() {}
+AccountInvestigatorFactory::~AccountInvestigatorFactory() = default;
 
-KeyedService* AccountInvestigatorFactory::BuildServiceInstanceFor(
+std::unique_ptr<KeyedService>
+AccountInvestigatorFactory::BuildServiceInstanceForBrowserContext(
     content::BrowserContext* context) const {
   Profile* profile(Profile::FromBrowserContext(context));
-  AccountInvestigator* investigator = new AccountInvestigator(
-      profile->GetPrefs(), IdentityManagerFactory::GetForProfile(profile));
+  std::unique_ptr<AccountInvestigator> investigator =
+      std::make_unique<AccountInvestigator>(
+          profile->GetPrefs(), IdentityManagerFactory::GetForProfile(profile));
   investigator->Initialize();
   return investigator;
 }

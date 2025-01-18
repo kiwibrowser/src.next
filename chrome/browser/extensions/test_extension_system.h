@@ -10,8 +10,13 @@
 #include "base/memory/raw_ptr.h"
 #include "base/one_shot_event.h"
 #include "build/chromeos_buildflags.h"
+#include "extensions/browser/content_verifier/content_verifier.h"
 #include "extensions/browser/extension_system.h"
 #include "services/data_decoder/public/cpp/test_support/in_process_data_decoder.h"
+
+#if BUILDFLAG(IS_CHROMEOS)
+#include "components/user_manager/scoped_user_manager.h"
+#endif
 
 class Profile;
 
@@ -23,12 +28,6 @@ class FilePath;
 namespace content {
 class BrowserContext;
 }
-
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-namespace user_manager {
-class ScopedUserManager;
-}  // namespace user_manager
-#endif
 
 namespace value_store {
 class TestingValueStore;
@@ -55,6 +54,15 @@ class TestExtensionSystem : public ExtensionSystem {
       bool autoupdate_enabled,
       bool enable_extensions = true);
 
+  // Similar to the above, but also allows specifying unpacked install directory
+  // if needed.
+  ExtensionService* CreateExtensionService(
+      const base::CommandLine* command_line,
+      const base::FilePath& install_directory,
+      const base::FilePath& unpacked_install_directory,
+      bool autoupdate_enabled,
+      bool enable_extensions = true);
+
   void CreateSocketManager();
 
   // Creates a UserScriptManager initialized with the testing profile,
@@ -71,7 +79,6 @@ class TestExtensionSystem : public ExtensionSystem {
   StateStore* dynamic_user_scripts_store() override;
   scoped_refptr<value_store::ValueStoreFactory> store_factory() override;
   value_store::TestingValueStore* value_store();
-  InfoMap* info_map() override;
   QuotaService* quota_service() override;
   AppSorting* app_sorting() override;
   const base::OneShotEvent& ready() const override;
@@ -86,7 +93,7 @@ class TestExtensionSystem : public ExtensionSystem {
                      InstallUpdateCallback install_update_callback) override;
   void PerformActionBasedOnOmahaAttributes(
       const std::string& extension_id,
-      const base::Value& attributes) override;
+      const base::Value::Dict& attributes) override;
   bool FinishDelayedInstallationIfReady(const std::string& extension_id,
                                         bool install_immediately) override;
 
@@ -102,6 +109,10 @@ class TestExtensionSystem : public ExtensionSystem {
   // code).
   void RecreateAppSorting();
 
+  void set_content_verifier(ContentVerifier* verifier) {
+    content_verifier_ = verifier;
+  }
+
  protected:
   raw_ptr<Profile> profile_;
 
@@ -111,7 +122,6 @@ class TestExtensionSystem : public ExtensionSystem {
   std::unique_ptr<StateStore> state_store_;
   std::unique_ptr<ManagementPolicy> management_policy_;
   std::unique_ptr<ExtensionService> extension_service_;
-  scoped_refptr<InfoMap> info_map_;
   std::unique_ptr<QuotaService> quota_service_;
   std::unique_ptr<AppSorting> app_sorting_;
   std::unique_ptr<UserScriptManager> user_script_manager_;
@@ -120,9 +130,7 @@ class TestExtensionSystem : public ExtensionSystem {
   std::unique_ptr<data_decoder::test::InProcessDataDecoder>
       in_process_data_decoder_;
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  std::unique_ptr<user_manager::ScopedUserManager> scoped_user_manager_;
-#endif
+  scoped_refptr<ContentVerifier> content_verifier_;
 };
 
 }  // namespace extensions

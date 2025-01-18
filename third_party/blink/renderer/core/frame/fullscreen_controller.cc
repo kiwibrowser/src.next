@@ -48,7 +48,6 @@
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/spatial_navigation.h"
 #include "third_party/blink/renderer/core/page/spatial_navigation_controller.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -61,10 +60,9 @@ mojom::blink::FullscreenOptionsPtr ToMojoOptions(
   auto fullscreen_options = mojom::blink::FullscreenOptions::New();
   fullscreen_options->prefers_navigation_bar =
       options->navigationUI() == "show";
-  if (options->hasScreen()) {
-    DCHECK(RuntimeEnabledFeatures::WindowPlacementEnabled(frame->DomWindow()));
-    if (options->screen()->DisplayId() != Screen::kInvalidDisplayId)
-      fullscreen_options->display_id = options->screen()->DisplayId();
+  if (options->hasScreen() &&
+      options->screen()->DisplayId() != Screen::kInvalidDisplayId) {
+    fullscreen_options->display_id = options->screen()->DisplayId();
   }
 
   // Propagate the type of fullscreen request (prefixed or unprefixed) to
@@ -210,8 +208,8 @@ void FullscreenController::EnterFullscreen(LocalFrame& frame,
   if (!(request_type & FullscreenRequestType::kForCrossProcessDescendant)) {
     frame.GetLocalFrameHostRemote().EnterFullscreen(
         std::move(fullscreen_options),
-        WTF::Bind(&FullscreenController::EnterFullscreenCallback,
-                  WTF::Unretained(this)));
+        WTF::BindOnce(&FullscreenController::EnterFullscreenCallback,
+                      WTF::Unretained(this)));
   }
 
   if (state_ == State::kInitial)
@@ -272,17 +270,13 @@ void FullscreenController::FullscreenElementChanged(
 
       frame->GetLocalFrameHostRemote().FullscreenStateChanged(
           in_fullscreen, std::move(mojo_options));
-      if (IsSpatialNavigationEnabled(frame)) {
-        doc.GetPage()->GetSpatialNavigationController().FullscreenStateChanged(
-            new_element);
-      }
     }
   }
 }
 
 void FullscreenController::RestoreBackgroundColorOverride() {
   web_view_base_->SetBackgroundColorOverrideForFullscreenController(
-      absl::nullopt);
+      std::nullopt);
 }
 
 void FullscreenController::NotifyFramesOfFullscreenEntry(bool granted) {

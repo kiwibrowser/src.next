@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,16 @@ void ClipPathPaintImageGenerator::Init(
     ClipPathPaintImageGeneratorCreateFunction* create_function) {
   DCHECK(!g_create_function);
   g_create_function = create_function;
+}
+
+// static
+gfx::RectF ClipPathPaintImageGenerator::GetAnimationBoundingRect() {
+  // Similar to InfiniteIntRect() but shifted by 4 bits to decrease floating
+  // point precision errors. This rect size is still large enough to encompass
+  // and reasonable paint area but not so large as to cause errors.
+  constexpr int kInfiniteXY = LayoutUnit::Min().ToInt() / 64;
+  constexpr int kInfiniteWH = LayoutUnit::Max().ToInt() / 32;
+  return gfx::RectF(kInfiniteXY, kInfiniteXY, kInfiniteWH, kInfiniteWH);
 }
 
 ClipPathPaintImageGenerator* ClipPathPaintImageGenerator::Create(

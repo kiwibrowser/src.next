@@ -2,22 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "components/search_engines/template_url_fetcher.h"
+
 #include <stddef.h>
 
+#include <array>
 #include <memory>
 #include <string>
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/search_engines/template_url_service_test_util.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/search_engines/template_url.h"
-#include "components/search_engines/template_url_fetcher.h"
 #include "components/search_engines/template_url_service.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/storage_partition.h"
@@ -32,8 +34,9 @@ namespace {
 constexpr int32_t kRequestID = 10;
 
 bool GetTestFilePath(const std::string& file_name, base::FilePath* path) {
-  if (!base::PathService::Get(base::DIR_SOURCE_ROOT, path))
+  if (!base::PathService::Get(base::DIR_SRC_TEST_DATA_ROOT, path)) {
     return false;
+  }
   *path = path->AppendASCII("components")
               .AppendASCII("test")
               .AppendASCII("data")
@@ -53,7 +56,7 @@ class TestTemplateUrlFetcher : public TemplateURLFetcher {
   TestTemplateUrlFetcher(const TestTemplateUrlFetcher&) = delete;
   TestTemplateUrlFetcher& operator=(const TestTemplateUrlFetcher&) = delete;
 
-  ~TestTemplateUrlFetcher() override {}
+  ~TestTemplateUrlFetcher() override = default;
 
  protected:
   void RequestCompleted(RequestDelegate* request) override {
@@ -120,6 +123,7 @@ class TemplateURLFetcherTest : public testing::Test {
   // Is the code in WaitForDownloadToFinish in a message loop waiting for a
   // callback to finish?
   bool waiting_for_download_;
+  base::RunLoop loop_;
 };
 
 TemplateURLFetcherTest::TemplateURLFetcherTest()
@@ -133,7 +137,7 @@ TemplateURLFetcherTest::TemplateURLFetcherTest()
 void TemplateURLFetcherTest::RequestCompletedCallback() {
   requests_completed_++;
   if (waiting_for_download_)
-    base::RunLoop::QuitCurrentWhenIdleDeprecated();
+    loop_.QuitWhenIdle();
 }
 
 void TemplateURLFetcherTest::StartDownload(const std::u16string& keyword,
@@ -162,7 +166,7 @@ void TemplateURLFetcherTest::StartDownload(const std::u16string& keyword,
 void TemplateURLFetcherTest::WaitForDownloadToFinish() {
   ASSERT_FALSE(waiting_for_download_);
   waiting_for_download_ = true;
-  base::RunLoop().Run();
+  loop_.Run();
   waiting_for_download_ = false;
 }
 
@@ -218,16 +222,17 @@ TEST_F(TemplateURLFetcherTest, DuplicatesThrownAway) {
   StartDownload(keyword, osdd_file_name, true);
   EXPECT_EQ(0, requests_completed());
 
-  struct {
+  struct TestCases {
     std::string description;
     std::string osdd_file_name;
     std::u16string keyword;
-  } test_cases[] = {
+  };
+  auto test_cases = std::to_array<TestCases>({
       {"Duplicate osdd url with autodetected provider.", osdd_file_name,
        keyword + u"1"},
       {"Duplicate keyword with autodetected provider.", osdd_file_name + "1",
        keyword},
-  };
+  });
 
   for (size_t i = 0; i < std::size(test_cases); ++i) {
     StartDownload(test_cases[i].keyword, test_cases[i].osdd_file_name, false);

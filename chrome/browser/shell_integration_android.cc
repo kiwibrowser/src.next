@@ -2,34 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/notreached.h"
 #include "chrome/browser/shell_integration.h"
 
 namespace shell_integration {
 
 // TODO: crbug/115375 to track implementation for following methods.
 bool SetAsDefaultBrowser() {
-  NOTIMPLEMENTED();
   return false;
 }
 
-bool SetAsDefaultProtocolClient(const std::string& protocol) {
-  NOTIMPLEMENTED();
+bool SetAsDefaultClientForScheme(const std::string& scheme) {
   return false;
 }
 
-DefaultWebClientSetPermission GetDefaultWebClientSetPermission() {
-  NOTIMPLEMENTED();
-  return SET_DEFAULT_NOT_ALLOWED;
-}
-
-std::u16string GetApplicationNameForProtocol(const GURL& url) {
-  NOTIMPLEMENTED();
+std::u16string GetApplicationNameForScheme(const GURL& url) {
   return std::u16string();
 }
 
 DefaultWebClientState GetDefaultBrowser() {
-  NOTIMPLEMENTED();
   return UNKNOWN_DEFAULT;
 }
 
@@ -37,9 +27,17 @@ bool IsFirefoxDefaultBrowser() {
   return false;
 }
 
-DefaultWebClientState IsDefaultProtocolClient(const std::string& protocol) {
-  NOTIMPLEMENTED();
+DefaultWebClientState IsDefaultClientForScheme(const std::string& scheme) {
   return UNKNOWN_DEFAULT;
 }
+
+namespace internal {
+
+DefaultWebClientSetPermission GetPlatformSpecificDefaultWebClientSetPermission(
+    WebClientSetMethod method) {
+  return SET_DEFAULT_NOT_ALLOWED;
+}
+
+}  // namespace internal
 
 }  // namespace shell_integration

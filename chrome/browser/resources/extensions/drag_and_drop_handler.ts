@@ -2,14 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {DragWrapperDelegate} from 'chrome://resources/js/cr/ui/drag_wrapper.js';
+import type {DragWrapperDelegate} from 'chrome://resources/js/drag_wrapper.js';
 
 import {Service} from './service.js';
 
 
 declare global {
   interface HTMLElementEventMap {
-    'drag-and-drop-load-error': CustomEvent<chrome.developerPrivate.LoadError>;
+    'drag-and-drop-load-error':
+        CustomEvent<Error|chrome.developerPrivate.LoadError>;
   }
 }
 
@@ -60,11 +61,11 @@ export class DragAndDropHandler implements DragWrapperDelegate {
 
     // Files lack a check if they're a directory, but we can find out through
     // its item entry.
-    const item = e.dataTransfer!.items[0];
+    const item = e.dataTransfer!.items[0]!;
     if (item.kind === 'file' && item.webkitGetAsEntry()!.isDirectory) {
       handled = true;
       this.handleDirectoryDrop_();
-    } else if (/\.(crx|user\.js|zip)$/i.test(e.dataTransfer!.files[0].name)) {
+    } else if (/\.(crx|user\.js|zip)$/i.test(e.dataTransfer!.files[0]!.name)) {
       // Only process files that look like extensions. Other files should
       // navigate the browser normally.
       handled = true;

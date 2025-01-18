@@ -44,11 +44,13 @@ class Mapper : public QuotaLimitHeuristic::BucketMapper {
   void GetBucketsForArgs(const base::Value::List& args,
                          BucketList* buckets) override {
     for (const auto& val : args) {
-      absl::optional<int> id = val.GetIfInt();
+      std::optional<int> id = val.GetIfInt();
       ASSERT_TRUE(id.has_value());
-      if (buckets_.find(*id) == buckets_.end())
-        buckets_[*id] = std::make_unique<Bucket>();
-      buckets->push_back(buckets_[*id].get());
+      auto& entry = buckets_[*id];
+      if (!entry) {
+        entry = std::make_unique<Bucket>();
+      }
+      buckets->push_back(entry.get());
     }
   }
 
@@ -129,8 +131,9 @@ class QuotaLimitHeuristicTest : public testing::Test {
       EXPECT_TRUE(lim->Apply(b, start_time + base::Seconds(10 + m)));
       EXPECT_TRUE(b->has_tokens());
 
-      if (i == an_unexhausted_minute)
+      if (i == an_unexhausted_minute) {
         continue;  // Don't exhaust all tokens this minute.
+      }
 
       EXPECT_TRUE(lim->Apply(b, start_time + base::Seconds(15 + m)));
       EXPECT_FALSE(b->has_tokens());

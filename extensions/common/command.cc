@@ -6,17 +6,20 @@
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "base/check.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "build/android_buildflags.h"
 #include "build/build_config.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_constants.h"
+#include "ui/base/accelerators/command.h"
 #include "ui/base/accelerators/media_keys_listener.h"
 
 namespace extensions {
@@ -40,15 +43,7 @@ static const int kMaxTokenSize = 4;
 static const int kMaxTokenSize = 3;
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
-// TODO(devlin): Expose this on Command, since many places implicitly check
-// this.
-bool IsNamedCommand(const std::string& command_name) {
-  return command_name != values::kPageActionCommandEvent &&
-         command_name != values::kBrowserActionCommandEvent &&
-         command_name != values::kActionCommandEvent;
-}
-
-bool DoesRequireModifier(const std::string& accelerator) {
+bool DoesRequireModifier(std::string_view accelerator) {
   return accelerator != values::kKeyMediaNextTrack &&
          accelerator != values::kKeyMediaPlayPause &&
          accelerator != values::kKeyMediaPrevTrack &&
@@ -63,8 +58,8 @@ bool DoesRequireModifier(const std::string& accelerator) {
 // Note: If the parsing rules here are changed, make sure to update the
 // corresponding extension_command_list.js validation, which validates the user
 // input for chrome://extensions/configureCommands.
-ui::Accelerator ParseImpl(const std::string& accelerator,
-                          const std::string& platform_key,
+ui::Accelerator ParseImpl(std::string_view accelerator,
+                          std::string_view platform_key,
                           int index,
                           bool should_parse_media_keys,
                           std::u16string* error) {
@@ -237,8 +232,8 @@ ui::Accelerator ParseImpl(const std::string& accelerator,
 
 // For Mac, we convert "Ctrl" to "Command" and "MacCtrl" to "Ctrl". Other
 // platforms leave the shortcut untouched.
-std::string NormalizeShortcutSuggestion(const std::string& suggestion,
-                                        const std::string& platform) {
+std::string NormalizeShortcutSuggestion(std::string_view suggestion,
+                                        std::string_view platform) {
   bool normalize = false;
   if (platform == values::kKeybindingPlatformMac) {
     normalize = true;
@@ -248,37 +243,35 @@ std::string NormalizeShortcutSuggestion(const std::string& suggestion,
 #endif
   }
 
-  if (!normalize)
-    return suggestion;
+  if (!normalize) {
+    return std::string{suggestion};
+  }
 
-  std::vector<base::StringPiece> tokens = base::SplitStringPiece(
+  std::vector<std::string_view> tokens = base::SplitStringPiece(
       suggestion, "+", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
-  for (size_t i = 0; i < tokens.size(); i++) {
-    if (tokens[i] == values::kKeyCtrl)
-      tokens[i] = values::kKeyCommand;
-    else if (tokens[i] == values::kKeyMacCtrl)
-      tokens[i] = values::kKeyCtrl;
+  for (auto& token : tokens) {
+    if (token == values::kKeyCtrl) {
+      token = values::kKeyCommand;
+    } else if (token == values::kKeyMacCtrl) {
+      token = values::kKeyCtrl;
+    }
   }
   return base::JoinString(tokens, "+");
 }
 
 }  // namespace
 
-Command::Command() : global_(false) {}
-
-Command::Command(const std::string& command_name,
-                 const std::u16string& description,
-                 const std::string& accelerator,
+Command::Command(std::string_view command_name,
+                 std::u16string_view description,
+                 std::string_view accelerator,
                  bool global)
-    : command_name_(command_name), description_(description), global_(global) {
-  std::u16string error;
-  accelerator_ = ParseImpl(accelerator, CommandPlatform(), 0,
-                           IsNamedCommand(command_name), &error);
+    : ui::Command(command_name, description, global) {
+  if (!accelerator.empty()) {
+    std::u16string error;
+    set_accelerator(ParseImpl(accelerator, CommandPlatform(), 0,
+                              !IsActionRelatedCommand(command_name), &error));
+  }
 }
-
-Command::Command(const Command& other) = default;
-
-Command::~Command() {}
 
 // static
 std::string Command::CommandPlatform() {
@@ -291,8 +284,12 @@ std::string Command::CommandPlatform() {
 #elif BUILDFLAG(IS_LINUX)
   return values::kKeybindingPlatformLinux;
 #elif BUILDFLAG(IS_FUCHSIA)
-  // TODO(crbug.com/1312215): Change this once we decide what string should be
+  // TODO(crbug.com/40220501): Change this once we decide what string should be
   // used for Fuchsia.
+  return values::kKeybindingPlatformLinux;
+#elif BUILDFLAG(IS_DESKTOP_ANDROID)
+  // For now, we use linux keybindings on desktop android.
+  // TODO(https://crbug.com/356905053): Should this be ChromeOS keybindings?
   return values::kKeybindingPlatformLinux;
 #else
 #error Unsupported platform
@@ -300,11 +297,12 @@ std::string Command::CommandPlatform() {
 }
 
 // static
-ui::Accelerator Command::StringToAccelerator(const std::string& accelerator,
-                                             const std::string& command_name) {
+ui::Accelerator Command::StringToAccelerator(std::string_view accelerator,
+                                             std::string_view command_name) {
   std::u16string error;
-  ui::Accelerator parsed = ParseImpl(accelerator, Command::CommandPlatform(), 0,
-                                     IsNamedCommand(command_name), &error);
+  ui::Accelerator parsed =
+      ParseImpl(accelerator, Command::CommandPlatform(), 0,
+                !IsActionRelatedCommand(command_name), &error);
   return parsed;
 }
 
@@ -313,12 +311,14 @@ std::string Command::AcceleratorToString(const ui::Accelerator& accelerator) {
   std::string shortcut;
 
   // Ctrl and Alt are mutually exclusive.
-  if (accelerator.IsCtrlDown())
+  if (accelerator.IsCtrlDown()) {
     shortcut += values::kKeyCtrl;
-  else if (accelerator.IsAltDown())
+  } else if (accelerator.IsAltDown()) {
     shortcut += values::kKeyAlt;
-  if (!shortcut.empty())
+  }
+  if (!shortcut.empty()) {
     shortcut += values::kKeySeparator;
+  }
 
   if (accelerator.IsCmdDown()) {
 #if BUILDFLAG(IS_CHROMEOS)
@@ -405,23 +405,21 @@ std::string Command::AcceleratorToString(const ui::Accelerator& accelerator) {
 }
 
 // static
-bool Command::IsMediaKey(const ui::Accelerator& accelerator) {
-  if (accelerator.modifiers() != 0)
-    return false;
-
-  return ui::MediaKeysListener::IsMediaKeycode(accelerator.key_code());
+bool Command::IsActionRelatedCommand(std::string_view command_name) {
+  return command_name == values::kActionCommandEvent ||
+         command_name == values::kBrowserActionCommandEvent ||
+         command_name == values::kPageActionCommandEvent;
 }
 
-bool Command::Parse(const base::DictionaryValue* command,
-                    const std::string& command_name,
+bool Command::Parse(const base::Value::Dict& command,
+                    std::string_view command_name,
                     int index,
                     std::u16string* error) {
   DCHECK(!command_name.empty());
 
   std::u16string description;
-  if (IsNamedCommand(command_name)) {
-    const std::string* description_ptr =
-        command->FindStringKey(keys::kDescription);
+  if (!IsActionRelatedCommand(command_name)) {
+    const std::string* description_ptr = command.FindString(keys::kDescription);
     if (!description_ptr || description_ptr->empty()) {
       *error = ErrorUtils::FormatErrorMessageUTF16(
           errors::kInvalidKeyBindingDescription, base::NumberToString(index));
@@ -431,13 +429,14 @@ bool Command::Parse(const base::DictionaryValue* command,
   }
 
   // We'll build up a map of platform-to-shortcut suggestions.
-  typedef std::map<const std::string, std::string> SuggestionMap;
+  using SuggestionMap = std::map<const std::string, std::string>;
   SuggestionMap suggestions;
 
   // First try to parse the |suggested_key| as a dictionary.
-  const base::DictionaryValue* suggested_key_dict;
-  if (command->GetDictionary(keys::kSuggestedKey, &suggested_key_dict)) {
-    for (const auto item : suggested_key_dict->GetDict()) {
+
+  if (const base::Value::Dict* suggested_key_dict =
+          command.FindDict(keys::kSuggestedKey)) {
+    for (const auto item : *suggested_key_dict) {
       // For each item in the dictionary, extract the platforms specified.
       const std::string* suggested_key_string = item.second.GetIfString();
       if (suggested_key_string && !suggested_key_string->empty()) {
@@ -455,7 +454,7 @@ bool Command::Parse(const base::DictionaryValue* command,
     // don't have to specify a dictionary if they just want to use one default
     // for all platforms.
     const std::string* suggested_key_string =
-        command->FindStringKey(keys::kSuggestedKey);
+        command.FindString(keys::kSuggestedKey);
     if (suggested_key_string && !suggested_key_string->empty()) {
       // If only a single string is provided, it must be default for all.
       suggestions[values::kKeybindingPlatformDefault] = *suggested_key_string;
@@ -465,7 +464,7 @@ bool Command::Parse(const base::DictionaryValue* command,
   }
 
   // Check if this is a global or a regular shortcut.
-  bool global = command->FindBoolPath(keys::kGlobal).value_or(false);
+  bool global = command.FindBoolByDottedPath(keys::kGlobal).value_or(false);
 
   // Normalize the suggestions.
   for (auto iter = suggestions.begin(); iter != suggestions.end(); ++iter) {
@@ -487,8 +486,9 @@ bool Command::Parse(const base::DictionaryValue* command,
 
   std::string platform = CommandPlatform();
   std::string key = platform;
-  if (suggestions.find(key) == suggestions.end())
+  if (suggestions.find(key) == suggestions.end()) {
     key = values::kKeybindingPlatformDefault;
+  }
   if (suggestions.find(key) == suggestions.end()) {
     *error = ErrorUtils::FormatErrorMessageUTF16(
         errors::kInvalidKeyBindingMissingPlatform, base::NumberToString(index),
@@ -506,7 +506,7 @@ bool Command::Parse(const base::DictionaryValue* command,
       // Note that we pass iter->first to pretend we are on a platform we're not
       // on.
       accelerator = ParseImpl(iter->second, iter->first, index,
-                              IsNamedCommand(command_name), error);
+                              !IsActionRelatedCommand(command_name), error);
       if (accelerator.key_code() == ui::VKEY_UNKNOWN) {
         if (error->empty()) {
           *error = ErrorUtils::FormatErrorMessageUTF16(
@@ -519,10 +519,10 @@ bool Command::Parse(const base::DictionaryValue* command,
 
     if (iter->first == key) {
       // This platform is our platform, so grab this key.
-      accelerator_ = accelerator;
-      command_name_ = command_name;
-      description_ = description;
-      global_ = global;
+      set_accelerator(accelerator);
+      set_command_name(command_name);
+      set_description(description);
+      set_global(global);
     }
   }
   return true;

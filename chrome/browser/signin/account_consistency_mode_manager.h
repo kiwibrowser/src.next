@@ -19,14 +19,11 @@ class PrefRegistrySyncable;
 }
 
 class Profile;
+class ProfileAttributesEntry;
 
 // Manages the account consistency mode for each profile.
 class AccountConsistencyModeManager : public KeyedService {
  public:
-  // Returns the AccountConsistencyModeManager associated with this profile.
-  // May return nullptr if there is none (e.g. in incognito).
-  static AccountConsistencyModeManager* GetForProfile(Profile* profile);
-
   explicit AccountConsistencyModeManager(Profile* profile);
 
   AccountConsistencyModeManager(const AccountConsistencyModeManager&) = delete;
@@ -38,14 +35,18 @@ class AccountConsistencyModeManager : public KeyedService {
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   // Helper method, shorthand for calling GetAccountConsistencyMethod().
-  // TODO(crbug.com/1232361): Migrate usages to
+  // TODO(crbug.com/40780204): Migrate usages to
   // `IdentityManager::GetAccountConsistency`.
   static signin::AccountConsistencyMethod GetMethodForProfile(Profile* profile);
 
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
   // This is a pre-requisite of IsDiceEnabledForProfile(), independent of
   // particular profile type or profile prefs.
-  static bool IsDiceSignInAllowed();
+  // `entry` should be nullptr for profiles that are not registered in the
+  // `ProfileAttributesStorage` (e.g. the system profile). Profiles with a
+  // managed using a profile-level management token are not allowed to sign in
+  // with a Google account.
+  static bool IsDiceSignInAllowed(ProfileAttributesEntry* entry = nullptr);
 #endif
 
   // If true, then account management is done through Gaia webpages.

@@ -206,6 +206,8 @@ class CORE_EXPORT Range final : public AbstractRange {
   void ScheduleVisualUpdateIfInRegisteredHighlight(Document& document);
   void RemoveFromSelectionIfInDifferentRoot(Document& old_document);
 
+  void CollapseIfNeeded(bool did_move_document, bool collapse_to_start);
+
   Member<Document> owner_document_;  // Cannot be null.
   RangeBoundaryPoint start_;
   RangeBoundaryPoint end_;

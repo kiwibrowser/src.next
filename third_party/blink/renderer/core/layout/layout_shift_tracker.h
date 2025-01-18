@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,12 +40,12 @@ class CORE_EXPORT LayoutShiftTracker final
 
   bool NeedsToTrack(const LayoutObject&) const;
 
-  // |old_rect| and |new_rect| are border box rects, united with layout overflow
-  // rects if the box has layout overflow and doesn't clip overflow, in the
-  // local transform space (property_tree_state.Transform()). |old_paint_offset|
-  // and |new_paint_offset| are the offsets of the border box rect in the local
-  // transform space, which are the same as |old_rect.offset| and
-  // |new_rect.offset| respectively if the rects are border box rects.
+  // |old_rect| and |new_rect| are border box rects, united with scrollable
+  // overflow rects if the box has scrollable overflow and doesn't clip
+  // overflow, in the local transform space (property_tree_state.Transform()).
+  // |old_paint_offset| and |new_paint_offset| are the offsets of the border box
+  // rect in the local transform space, which are the same as |old_rect.offset|
+  // and |new_rect.offset| respectively if the rects are border box rects.
   // As we don't save the old property tree state, the caller should adjust
   // |old_rect| and |old_paint_offset| so that we can calculate the correct old
   // visual representation and old starting point in the initial containing
@@ -90,7 +90,7 @@ class CORE_EXPORT LayoutShiftTracker final
   double WeightedScore() const { return weighted_score_; }
   float OverallMaxDistance() const { return overall_max_distance_; }
   bool ObservedInputOrScroll() const { return observed_input_or_scroll_; }
-  void Dispose() { timer_.Stop(); }
+  void Dispose();
   base::TimeTicks MostRecentInputTimestamp() {
     return most_recent_input_timestamp_;
   }
@@ -117,7 +117,7 @@ class CORE_EXPORT LayoutShiftTracker final
     static ReattachHookScope* top_;
     struct Geometry {
       PhysicalOffset paint_offset;
-      LayoutSize size;
+      PhysicalSize size;
       PhysicalRect visual_overflow_rect;
       bool has_paint_offset_translation;
     };
@@ -184,7 +184,9 @@ class CORE_EXPORT LayoutShiftTracker final
   // "Layout Shift Regions" option).
   void SendLayoutShiftRectsToHud(const Vector<gfx::Rect>& rects);
 
-  void UpdateInputTimestamp(base::TimeTicks timestamp);
+  void UpdateInputTimestamps(base::TimeTicks timestamp);
+  bool HasRecentInput();
+
   LayoutShift::AttributionList CreateAttributionList() const;
   void SubmitPerformanceEntry(double score_delta, bool input_detected) const;
   void NotifyPrePaintFinishedInternal();
@@ -246,6 +248,10 @@ class CORE_EXPORT LayoutShiftTracker final
   // User input includes window resizing but not scrolling.
   base::TimeTicks most_recent_input_timestamp_;
   bool most_recent_input_timestamp_initialized_;
+
+  // Timestamp used to run an imaginary timer for tracking period since last
+  // input processed. It resets 500ms after the most recent input is processed.
+  base::TimeTicks most_recent_input_processing_timestamp_;
 
   struct Attribution {
     DOMNodeId node_id = kInvalidDOMNodeId;

@@ -6,16 +6,13 @@
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_API_UNITTEST_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
 #include "base/memory/ref_counted.h"
+#include "base/values.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
-
-namespace base {
-class Value;
-class DictionaryValue;
-}
 
 class ExtensionFunction;
 
@@ -26,11 +23,8 @@ namespace extensions {
 // which will be used in all API function calls. This extension can be
 // overridden using set_extension().
 // By default, this class does not create a WebContents for the API functions.
-// If a WebContents is needed, calling CreateBackgroundPage() will create a
-// background page for the extension and use it in API function calls. (If
-// needed, this could be expanded to allow for alternate WebContents).
 // When calling RunFunction[AndReturn*], |args| should be in JSON format,
-// wrapped in a list. See also RunFunction* in extension_function_test_utils.h.
+// wrapped in a list. See also RunFunction* in api_test_utils.h.
 // TODO(yoz): Move users of this base class to use the equivalent base class
 // in extensions/browser/api_unittest.h.
 class ExtensionApiUnittest : public BrowserWithTestWindowTest {
@@ -53,32 +47,36 @@ class ExtensionApiUnittest : public BrowserWithTestWindowTest {
 
   // Various ways of running an API function. These methods take ownership of
   // |function|. |args| should be in JSON format, wrapped in a list.
-  // See also the RunFunction* methods in extension_function_test_utils.h.
+  // See also the RunFunction* methods in api_test_utils.h.
 
-  // Return the function result as a base::Value.
-  std::unique_ptr<base::Value> RunFunctionAndReturnValue(
-      ExtensionFunction* function,
+  // Return the function result as a base::Value, if successful, or nullopt on
+  // failure.
+  std::optional<base::Value> RunFunctionAndReturnValue(
+      scoped_refptr<ExtensionFunction> function,
       const std::string& args);
 
-  // Return the function result as a base::DictionaryValue, or NULL.
-  // This will EXPECT-fail if the result is not a DictionaryValue.
-  std::unique_ptr<base::DictionaryValue> RunFunctionAndReturnDictionary(
-      ExtensionFunction* function,
+  // Return the function result as a base::Value::Dict, if successful, or
+  // nullopt on failure. This will EXPECT-fail if the result is not a
+  // base::Value::Dict.
+  std::optional<base::Value::Dict> RunFunctionAndReturnDictionary(
+      scoped_refptr<ExtensionFunction> function,
       const std::string& args);
 
-  // Return the function result as a base::Value, or NULL.
-  // This will EXPECT-fail if the result is not a list.
-  std::unique_ptr<base::Value> RunFunctionAndReturnList(
-      ExtensionFunction* function,
+  // Return the function result as a base::Value::List, if successful, or
+  // nullopt on failure. This will EXPECT-fail if the result is not a list.
+  std::optional<base::Value::List> RunFunctionAndReturnList(
+      scoped_refptr<ExtensionFunction> function,
       const std::string& args);
 
   // Return an error thrown from the function, if one exists.
   // This will EXPECT-fail if any result is returned from the function.
-  std::string RunFunctionAndReturnError(ExtensionFunction* function,
-                                        const std::string& args);
+  std::string RunFunctionAndReturnError(
+      scoped_refptr<ExtensionFunction> function,
+      const std::string& args);
 
   // Run the function and ignore any result.
-  void RunFunction(ExtensionFunction* function, const std::string& args);
+  void RunFunction(scoped_refptr<ExtensionFunction> function,
+                   const std::string& args);
 
  private:
   // The Extension used when running API function calls.

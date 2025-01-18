@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,14 +42,12 @@ class CORE_EXPORT FrameResourceFetcherProperties final
   bool ShouldBlockLoadingSubResource() const override;
   bool IsSubframeDeprioritizationEnabled() const override;
   scheduler::FrameStatus GetFrameStatus() const override;
-  const KURL& WebBundlePhysicalUrl() const override;
   int GetOutstandingThrottledLimit() const override;
 
  private:
   const Member<DocumentLoader> document_loader_;
   const Member<Document> document_;
   Member<const FetchClientSettingsObject> fetch_client_settings_object_;
-  const KURL web_bundle_physical_url_;
 };
 
 }  // namespace blink

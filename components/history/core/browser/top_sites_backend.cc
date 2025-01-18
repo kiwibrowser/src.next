@@ -8,9 +8,9 @@
 
 #include <memory>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
@@ -55,11 +55,10 @@ void TopSitesBackend::GetMostVisitedSites(
       std::move(callback));
 }
 
-void TopSitesBackend::UpdateTopSites(const TopSitesDelta& delta,
-                                     const RecordHistogram record_or_not) {
+void TopSitesBackend::UpdateTopSites(const TopSitesDelta& delta) {
   db_task_runner_->PostTask(
-      FROM_HERE, base::BindOnce(&TopSitesBackend::UpdateTopSitesOnDBThread,
-                                this, delta, record_or_not));
+      FROM_HERE,
+      base::BindOnce(&TopSitesBackend::UpdateTopSitesOnDBThread, this, delta));
 }
 
 void TopSitesBackend::ResetDatabase() {
@@ -88,27 +87,16 @@ void TopSitesBackend::ShutdownDBOnDBThread() {
 
 MostVisitedURLList TopSitesBackend::GetMostVisitedSitesOnDBThread() {
   DCHECK(db_task_runner_->RunsTasksInCurrentSequence());
-  MostVisitedURLList list;
-  if (db_)
-    db_->GetSites(&list);
-  return list;
+  return db_ ? db_->GetSites() : MostVisitedURLList();
 }
 
-void TopSitesBackend::UpdateTopSitesOnDBThread(
-    const TopSitesDelta& delta, const RecordHistogram record_or_not) {
+void TopSitesBackend::UpdateTopSitesOnDBThread(const TopSitesDelta& delta) {
   TRACE_EVENT0("startup", "history::TopSitesBackend::UpdateTopSitesOnDBThread");
 
   if (!db_)
     return;
 
-  base::TimeTicks begin_time = base::TimeTicks::Now();
-
   db_->ApplyDelta(delta);
-
-  if (record_or_not == RECORD_HISTOGRAM_YES) {
-    UMA_HISTOGRAM_TIMES("History.FirstUpdateTime",
-                        base::TimeTicks::Now() - begin_time);
-  }
 }
 
 void TopSitesBackend::ResetDatabaseOnDBThread(const base::FilePath& file_path) {

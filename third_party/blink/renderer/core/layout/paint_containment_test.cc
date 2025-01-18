@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,21 +33,21 @@ static void CheckIsClippingStackingContextAndContainer(
 
 TEST_F(PaintContainmentTest, BlockPaintContainment) {
   SetBodyInnerHTML("<div id='div' style='contain: paint'></div>");
-  Element* div = GetDocument().getElementById(AtomicString("div"));
+  Element* div = GetElementById("div");
   DCHECK(div);
   LayoutObject* obj = div->GetLayoutObject();
   DCHECK(obj);
   DCHECK(obj->IsLayoutBlock());
   auto& block = To<LayoutBlock>(*obj);
   EXPECT_TRUE(block.CreatesNewFormattingContext());
-  EXPECT_FALSE(block.CanBeScrolledAndHasScrollableArea());
+  EXPECT_FALSE(block.IsUserScrollable());
   CheckIsClippingStackingContextAndContainer(block);
 }
 
 TEST_F(PaintContainmentTest, InlinePaintContainment) {
   SetBodyInnerHTML(
       "<div><span id='test' style='contain: paint'>Foo</span></div>");
-  Element* span = GetDocument().getElementById(AtomicString("test"));
+  Element* span = GetElementById("test");
   DCHECK(span);
   // Paint containment shouldn't apply to non-atomic inlines.
   LayoutObject* obj = span->GetLayoutObject();

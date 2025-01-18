@@ -89,6 +89,9 @@ class CORE_EXPORT Location final : public ScriptWrappable {
 
   String toString() const;
 
+  // ScriptWrappable override:
+  v8::Local<v8::Value> Wrap(ScriptState*) final;
+
   void Trace(Visitor*) const override;
 
  private:

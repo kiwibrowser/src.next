@@ -5,6 +5,7 @@
 #ifndef COMPONENTS_EMBEDDER_SUPPORT_USER_AGENT_UTILS_H_
 #define COMPONENTS_EMBEDDER_SUPPORT_USER_AGENT_UTILS_H_
 
+#include <optional>
 #include <string>
 
 #include "build/build_config.h"
@@ -22,89 +23,92 @@ class WebContents;
 
 namespace embedder_support {
 
-// TODO(crbug.com/1290820): Remove this enum along with policy.
-enum class ForceMajorVersionToMinorPosition {
-  kDefault = 0,
-  kForceDisabled = 1,
-  kForceEnabled = 2,
-};
-
-// TODO(crbug.com/1330890): Remove this enum along with policy.
+// TODO(crbug.com/40843535): Remove this enum along with policy.
 enum class UserAgentReductionEnterprisePolicyState {
   kDefault = 0,
   kForceDisabled = 1,
   kForceEnabled = 2,
 };
 
-struct UserAgentOptions {
-  bool force_major_version_100 = false;
-  ForceMajorVersionToMinorPosition force_major_to_minor =
-      ForceMajorVersionToMinorPosition::kDefault;
-};
-
 // Returns the product & version string.  Examples:
-//   "Chrome/101.0.0.0"       - if UA reduction is enabled w/o major to minor
-//   "Chrome/101.0.4698.0"    - if UA reduction isn't enabled w/o major to minor
-//   "Chrome/99.101.0.0"      - if UA reduction is enabled w/ major to minor
-//   "Chrome/99.101.0.4698.0" - if UA reduction isn'n enabled w/ major to minor
-// TODO(crbug.com/1291612): modify to accept an optional PrefService*.
+//   "Chrome/101.0.0.0"       - if UA reduction is enabled
+//   "Chrome/101.0.4698.0"    - if UA reduction isn't enabled
+// TODO(crbug.com/40212812): modify to accept an optional PrefService*.
 std::string GetProductAndVersion(
-    ForceMajorVersionToMinorPosition force_major_to_minor =
-        ForceMajorVersionToMinorPosition::kDefault,
     UserAgentReductionEnterprisePolicyState user_agent_reduction =
         UserAgentReductionEnterprisePolicyState::kDefault);
 
-// Returns the full user agent string for Chrome.
-// TODO(crbug.com/1291612): modify to accept an optional PrefService*.
-std::string GetFullUserAgent(
-    ForceMajorVersionToMinorPosition force_major_to_minor =
-        ForceMajorVersionToMinorPosition::kDefault);
-
-// Returns the reduced user agent string for Chrome.
-// TODO(crbug.com/1291612): modify to accept an optional PrefService*.
-std::string GetReducedUserAgent(
-    ForceMajorVersionToMinorPosition force_major_to_minor =
-        ForceMajorVersionToMinorPosition::kDefault);
+// Returns a user agent string passed via the kUserAgent command-line argument
+// when it is valid, or std::nullopt if it is not valid.
+std::optional<std::string> GetUserAgentFromCommandLine();
 
 // Returns the full or "reduced" user agent string, depending on the following:
 // 1) UserAgentReduction enterprise policy.
-// 2) blink::features::kReduceUserAgent: reduced-user-agent about flag.
-// 3) blink::features::kFullUserAgent: full-user-agent about flag.
-// TODO(crbug.com/1291612): modify to accept an optional PrefService*.
+// 2) Reduce User-Agent reduction phase features.
+// TODO(crbug.com/40212812): modify to accept an optional PrefService*.
 std::string GetUserAgent(
-    ForceMajorVersionToMinorPosition force_major_to_minor =
-        ForceMajorVersionToMinorPosition::kDefault,
     UserAgentReductionEnterprisePolicyState user_agent_reduction =
         UserAgentReductionEnterprisePolicyState::kDefault);
 
-// Returns UserAgentMetadata per the default policy.
-// This override is currently used in fuchsia, where the enterprise policy
-// is not relevant.
-blink::UserAgentMetadata GetUserAgentMetadata();
+// Returns UserAgentMetadata per the default policy. This override is currently
+// used in fuchsia and headless_shell, where the enterprise policy is not
+// relevant.
+// `only_low_entropy_ch` indicates whether only populate the low entropy client
+// hints, the default is false.
+blink::UserAgentMetadata GetUserAgentMetadata(bool only_low_entropy_ch = false);
 
 // Return UserAgentMetadata, potentially overridden by policy.
 // Note that this override is likely to be removed once an enterprise
 // escape hatch is no longer needed. See https://crbug.com/1261908.
-blink::UserAgentMetadata GetUserAgentMetadata(const PrefService* local_state);
+// `only_low_entropy_ch` indicates whether only populate the low entropy client
+// hints.
+blink::UserAgentMetadata GetUserAgentMetadata(const PrefService* local_state,
+                                              bool only_low_entropy_ch = false);
 
 // Return UserAgentBrandList based on the expected output version type.
+// Only use when adding additional brand version pair and overriding the default
+// product brand version, otherwise prefer to
+// GetUserAgentBrandFullVersionList/GetUserAgentBrandMajorVersionList.
 blink::UserAgentBrandList GenerateBrandVersionList(
     int seed,
-    absl::optional<std::string> brand,
+    std::optional<std::string> brand,
     const std::string& version,
-    absl::optional<std::string> maybe_greasey_brand,
-    absl::optional<std::string> maybe_greasey_version,
     bool enable_updated_grease_by_policy,
-    blink::UserAgentBrandVersionType output_version_type);
+    blink::UserAgentBrandVersionType output_version_type,
+    std::optional<blink::UserAgentBrandVersion> additional_brand_version =
+        std::nullopt);
+
+// Return UserAgentBrandList with full versions based on the additional brand
+// version list if provided. It generates a pseudo-random permutation of the
+// following brand/full_version pairs:
+//   1. The base project (i.e. Chromium)
+//   2. The browser brand, if available
+//   3. A randomized string containing GREASE characters to ensure proper
+//      header parsing, along with an arbitrarily low version to ensure proper
+//      version checking.
+//   4. Additional brand/full_version pairs.
+const blink::UserAgentBrandList GetUserAgentBrandFullVersionList(
+    std::optional<blink::UserAgentBrandVersion> additional_brand_version =
+        std::nullopt);
+
+// Return UserAgentBrandList with major versions based on the additional brand
+// version list if provided. It generates a pseudo-random permutation of the
+// following brand/major_version pairs:
+//   1. The base project (i.e. Chromium)
+//   2. The browser brand, if available
+//   3. A randomized string containing GREASE characters to ensure proper
+//      header parsing, along with an arbitrarily low version to ensure proper
+//      version checking.
+//   4. Additional brand/major_version pairs.
+const blink::UserAgentBrandList GetUserAgentBrandMajorVersionList(
+    std::optional<blink::UserAgentBrandVersion> additional_brand_version =
+        std::nullopt);
 
 // Return greased UserAgentBrandVersion to prevent assumptions about the
 // current values being baked into implementations. See
 // https://wicg.github.io/ua-client-hints/#create-arbitrary-brands-section.
 blink::UserAgentBrandVersion GetGreasedUserAgentBrandVersion(
-    std::vector<int> permuted_order,
     int seed,
-    absl::optional<std::string> maybe_greasey_brand,
-    absl::optional<std::string> maybe_greasey_version,
     bool enable_updated_grease_by_policy,
     blink::UserAgentBrandVersionType output_version_type);
 
@@ -122,15 +126,9 @@ void SetDesktopUserAgentOverride(content::WebContents* web_contents,
 int GetHighestKnownUniversalApiContractVersionForTesting();
 #endif  // BUILDFLAG(IS_WIN)
 
-// Returns the ForcemajorVersionToMinorPosition enum value corresponding to
-// the provided integer policy value for ForceMajorVersionToMinorPosition.
-// TODO(crbug.com/1290820): Remove this function with policy.
-embedder_support::ForceMajorVersionToMinorPosition GetMajorToMinorFromPrefs(
-    const PrefService* pref_service);
-
 // Returns the UserAgentReductionEnterprisePolicyState enum value corresponding
 // to the provided integer policy value for UserAgentReduction.
-// TODO(crbug.com/1330890): Remove this function with policy.
+// TODO(crbug.com/40843535): Remove this function with policy.
 embedder_support::UserAgentReductionEnterprisePolicyState
 GetUserAgentReductionFromPrefs(const PrefService* pref_service);
 

@@ -4,9 +4,9 @@
 
 #include "chrome/browser/extensions/blocklist.h"
 
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/run_loop.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/task/single_thread_task_runner.h"
 #include "chrome/browser/extensions/blocklist_state_fetcher.h"
 #include "chrome/browser/extensions/fake_safe_browsing_database_manager.h"
 #include "chrome/browser/extensions/scoped_database_manager_for_test.h"
@@ -15,6 +15,7 @@
 #include "chrome/browser/extensions/test_extension_prefs.h"
 #include "content/public/test/browser_task_environment.h"
 #include "extensions/browser/extension_prefs.h"
+#include "extensions/common/extension_id.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace extensions {
@@ -22,12 +23,11 @@ namespace {
 
 class BlocklistTest : public testing::Test {
  public:
-  BlocklistTest() : test_prefs_(base::ThreadTaskRunnerHandle::Get()) {}
+  BlocklistTest()
+      : test_prefs_(base::SingleThreadTaskRunner::GetCurrentDefault()) {}
 
  protected:
-  ExtensionPrefs* prefs() { return test_prefs_.prefs(); }
-
-  std::string AddExtension(const std::string& id) {
+  ExtensionId AddExtension(const ExtensionId& id) {
     return test_prefs_.AddExtension(id)->id();
   }
 
@@ -45,11 +45,11 @@ void Assign(T* to, const T& from) {
 }  // namespace
 
 TEST_F(BlocklistTest, OnlyIncludesRequestedIDs) {
-  std::string a = AddExtension("a");
-  std::string b = AddExtension("b");
-  std::string c = AddExtension("c");
+  ExtensionId a = AddExtension("a");
+  ExtensionId b = AddExtension("b");
+  ExtensionId c = AddExtension("c");
 
-  Blocklist blocklist(prefs());
+  Blocklist blocklist;
   TestBlocklist tester(&blocklist);
   tester.SetBlocklistState(a, BLOCKLISTED_MALWARE, false);
   tester.SetBlocklistState(b, BLOCKLISTED_MALWARE, false);
@@ -58,18 +58,18 @@ TEST_F(BlocklistTest, OnlyIncludesRequestedIDs) {
   EXPECT_EQ(BLOCKLISTED_MALWARE, tester.GetBlocklistState(b));
   EXPECT_EQ(NOT_BLOCKLISTED, tester.GetBlocklistState(c));
 
-  std::set<std::string> blocklisted_ids;
+  std::set<ExtensionId> blocklisted_ids;
   blocklist.GetMalwareIDs(
-      {a, c}, base::BindOnce(&Assign<std::set<std::string>>, &blocklisted_ids));
+      {a, c}, base::BindOnce(&Assign<std::set<ExtensionId>>, &blocklisted_ids));
   base::RunLoop().RunUntilIdle();
 
-  EXPECT_EQ((std::set<std::string>{a}), blocklisted_ids);
+  EXPECT_EQ((std::set<ExtensionId>{a}), blocklisted_ids);
 }
 
 TEST_F(BlocklistTest, SafeBrowsing) {
-  std::string a = AddExtension("a");
+  ExtensionId a = AddExtension("a");
 
-  Blocklist blocklist(prefs());
+  Blocklist blocklist;
   TestBlocklist tester(&blocklist);
   tester.DisableSafeBrowsing();
 
@@ -92,14 +92,14 @@ TEST_F(BlocklistTest, SafeBrowsing) {
 
 // Test getting different blocklist states from Blocklist.
 TEST_F(BlocklistTest, GetBlocklistStates) {
-  Blocklist blocklist(prefs());
+  Blocklist blocklist;
   TestBlocklist tester(&blocklist);
 
-  std::string a = AddExtension("a");
-  std::string b = AddExtension("b");
-  std::string c = AddExtension("c");
-  std::string d = AddExtension("d");
-  std::string e = AddExtension("e");
+  ExtensionId a = AddExtension("a");
+  ExtensionId b = AddExtension("b");
+  ExtensionId c = AddExtension("c");
+  ExtensionId d = AddExtension("d");
+  ExtensionId e = AddExtension("e");
 
   tester.SetBlocklistState(a, BLOCKLISTED_MALWARE, false);
   tester.SetBlocklistState(b, BLOCKLISTED_SECURITY_VULNERABILITY, false);
@@ -140,14 +140,14 @@ TEST_F(BlocklistTest, GetBlocklistStates) {
 // Test both Blocklist and BlocklistStateFetcher by requesting the blocklist
 // states, sending fake requests and parsing the responses.
 TEST_F(BlocklistTest, FetchBlocklistStates) {
-  Blocklist blocklist(prefs());
+  Blocklist blocklist;
   scoped_refptr<FakeSafeBrowsingDatabaseManager> blocklist_db(
       new FakeSafeBrowsingDatabaseManager(true));
   ScopedDatabaseManagerForTest scoped_blocklist_db(blocklist_db);
 
-  std::string a = AddExtension("a");
-  std::string b = AddExtension("b");
-  std::string c = AddExtension("c");
+  ExtensionId a = AddExtension("a");
+  ExtensionId b = AddExtension("b");
+  ExtensionId c = AddExtension("c");
 
   blocklist_db->Enable();
   blocklist_db->SetUnsafe(a, b);

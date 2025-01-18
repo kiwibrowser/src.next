@@ -1,44 +1,34 @@
 /*
- * The default style sheet used for document transitions.
- * See third_party/blink/renderer/core/document_transition/README.md for details
- *
- * Copyright 2022 The Chromium Authors. All rights reserved.
+ * Copyright 2022 The Chromium Authors
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
+ *
+ * The default style sheet used for view transitions.
+ * See third_party/blink/renderer/core/view_transition/README.md for details
  */
 
 @namespace "http://www.w3.org/1999/xhtml";
 
-html::page-transition {
+html::view-transition {
   position: fixed;
   inset: 0;
-  pointer-events: none;
 }
 
-html::page-transition-container(*) {
+html::view-transition-group(*) {
   position: absolute;
   top: 0;
   left: 0;
-  will-change: transform;
-
-  /* The transform applied to the container includes any translation necessary
-     for the original element's transform-origin. */
-  transform-origin: top left;
-
-  pointer-events: auto;
 }
 
-::page-transition-image-wrapper(*) {
+::view-transition-image-pair(*) {
   position: absolute;
   inset: 0;
 }
 
-::page-transition-incoming-image(*),
-::page-transition-outgoing-image(*) {
+::view-transition-new(*),
+::view-transition-old(*) {
   position: absolute;
   inset-block-start: 0;
   inline-size: 100%;
   block-size: auto;
-  will-change: opacity;
 }
-

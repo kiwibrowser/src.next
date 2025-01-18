@@ -10,6 +10,7 @@
 #include <memory>
 #include <set>
 
+#include "base/compiler_specific.h"
 #include "net/base/network_interfaces.h"
 
 namespace net {
@@ -35,7 +36,8 @@ bool IsLoopbackOrUnspecifiedAddress(const sockaddr* addr) {
     const struct sockaddr_in6* addr_in6 =
         reinterpret_cast<const struct sockaddr_in6*>(addr);
     const struct in6_addr* sin6_addr = &addr_in6->sin6_addr;
-    if (IN6_IS_ADDR_LOOPBACK(sin6_addr) || IN6_IS_ADDR_UNSPECIFIED(sin6_addr)) {
+    if (UNSAFE_TODO(IN6_IS_ADDR_LOOPBACK(sin6_addr)) ||
+        UNSAFE_TODO(IN6_IS_ADDR_UNSPECIFIED(sin6_addr))) {
       return true;
     }
   } else if (addr->sa_family == AF_INET) {
@@ -53,10 +55,6 @@ bool IsLoopbackOrUnspecifiedAddress(const sockaddr* addr) {
 }
 
 }  // namespace internal
-
-WifiPHYLayerProtocol GetWifiPHYLayerProtocol() {
-  return WIFI_PHY_LAYER_PROTOCOL_UNKNOWN;
-}
 
 std::unique_ptr<ScopedWifiOptions> SetWifiOptions(int options) {
   return nullptr;

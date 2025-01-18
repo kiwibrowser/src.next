@@ -10,19 +10,23 @@
 
 #include "base/files/file_path.h"
 #include "base/memory/raw_ptr.h"
-#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/download/download_target_determiner_delegate.h"
-#include "chrome/browser/download/download_target_info.h"
 #include "components/download/public/common/download_danger_type.h"
 #include "components/download/public/common/download_item.h"
 #include "components/download/public/common/download_path_reservation_tracker.h"
+#include "components/download/public/common/download_target_info.h"
 #include "components/safe_browsing/content/common/proto/download_file_types.pb.h"
+#include "components/safe_browsing/core/common/features.h"
 #include "content/public/browser/download_manager_delegate.h"
 #include "ppapi/buildflags/buildflags.h"
+
+#if BUILDFLAG(IS_ANDROID)
+#include "components/safe_browsing/android/safe_browsing_api_handler_util.h"
+#endif
 
 class Profile;
 class DownloadPrefs;
@@ -52,13 +56,43 @@ class DownloadPrefs;
 // instance of DownloadTargetDeterminer.
 class DownloadTargetDeterminer : public download::DownloadItem::Observer {
  public:
-  using CompletionCallback =
-      base::OnceCallback<void(std::unique_ptr<DownloadTargetInfo>)>;
+  // A callback to convey the information of the target once determined.
+  //
+  // |target_info| contains information about the paths, as well as other
+  // information about the target.
+  //
+  // |target_info.danger_type| is set to MAYBE_DANGEROUS_CONTENT if the file
+  // type is handled by SafeBrowsing. However, if the SafeBrowsing service is
+  // unable to verify whether the file is safe or not, we are on our own. The
+  // value of |danger_level| indicates whether the download should be considered
+  // dangerous if SafeBrowsing returns an unknown verdict.
+  //
+  // Note that some downloads (e.g. "Save link as" on a link to a binary) would
+  // not be considered 'Dangerous' even if SafeBrowsing came back with an
+  // unknown verdict. So we can't always show a warning when SafeBrowsing fails.
+  //
+  // The value of |danger_level| should be interpreted as follows:
+  //
+  //   NOT_DANGEROUS : Unless flagged by SafeBrowsing, the file should be
+  //       considered safe.
+  //
+  //   ALLOW_ON_USER_GESTURE : If SafeBrowsing claims the file is safe, then the
+  //       file is safe. An UNKOWN verdict results in the file being marked as
+  //       DANGEROUS_FILE.
+  //
+  //   DANGEROUS : This type of file shouldn't be allowed to download without
+  //       any user action. Hence, if SafeBrowsing marks the file as SAFE, or
+  //       UNKNOWN, the file will still be considered a DANGEROUS_FILE. However,
+  //       SafeBrowsing may flag the file as being malicious, in which case the
+  //       malicious classification should take precedence.
+  using CompletionCallback = base::OnceCallback<void(
+      download::DownloadTargetInfo target_info,
+      safe_browsing::DownloadFileType::DangerLevel danger_level)>;
 
   DownloadTargetDeterminer(const DownloadTargetDeterminer&) = delete;
   DownloadTargetDeterminer& operator=(const DownloadTargetDeterminer&) = delete;
 
-  // Start the process of determing the target of |download|.
+  // Start the process of determining the target of |download|.
   //
   // |initial_virtual_path| if non-empty, defines the initial virtual path for
   //   the target determination process. If one isn't specified, one will be
@@ -86,13 +120,6 @@ class DownloadTargetDeterminer : public download::DownloadItem::Observer {
   // Returns a .crdownload intermediate path for the |suggested_path|.
   static base::FilePath GetCrDownloadPath(const base::FilePath& suggested_path);
 
-#if BUILDFLAG(IS_WIN)
-  // Returns true if Adobe Reader is up to date. This information refreshed
-  // only when Start() gets called for a PDF and Adobe Reader is the default
-  // System PDF viewer.
-  static bool IsAdobeReaderUpToDate();
-#endif
-
   // Determine if the file type can be handled safely by the browser if it were
   // to be opened via a file:// URL. Execute the callback with the determined
   // value.
@@ -102,6 +129,13 @@ class DownloadTargetDeterminer : public download::DownloadItem::Observer {
       const std::string& mime_type,
       base::OnceCallback<void(bool)> callback);
 
+  // Determine if the file type can be handled safely by the browser if it were
+  // to be opened via a file:// URL. Returns the determined value.
+  static bool DetermineIfHandledSafelyHelperSynchronous(
+      download::DownloadItem* download,
+      const base::FilePath& local_path,
+      const std::string& mime_type);
+
  private:
   // The main workflow is controlled via a set of state transitions. Each state
   // has an associated handler. The handler for STATE_FOO is DoFoo. Each handler
@@ -110,15 +144,17 @@ class DownloadTargetDeterminer : public download::DownloadItem::Observer {
   // handler returns COMPLETE.
   enum State {
     STATE_GENERATE_TARGET_PATH,
-    STATE_SET_MIXED_CONTENT_STATUS,
+    STATE_SET_INSECURE_DOWNLOAD_STATUS,
     STATE_NOTIFY_EXTENSIONS,
     STATE_RESERVE_VIRTUAL_PATH,
     STATE_PROMPT_USER_FOR_DOWNLOAD_PATH,
     STATE_DETERMINE_LOCAL_PATH,
     STATE_DETERMINE_MIME_TYPE,
     STATE_DETERMINE_IF_HANDLED_SAFELY_BY_BROWSER,
-    STATE_DETERMINE_IF_ADOBE_READER_UP_TO_DATE,
     STATE_CHECK_DOWNLOAD_URL,
+#if BUILDFLAG(IS_ANDROID)
+    STATE_CHECK_APP_VERIFICATION,
+#endif
     STATE_CHECK_VISITED_REFERRER_BEFORE,
     STATE_DETERMINE_INTERMEDIATE_PATH,
     STATE_NONE,
@@ -172,21 +208,21 @@ class DownloadTargetDeterminer : public download::DownloadItem::Observer {
   // the download item.
   // Next state:
   // - STATE_NONE : If the download is not in progress, returns COMPLETE.
-  // - STATE_SET_MIXED_CONTENT_STATUS : All other downloads.
+  // - STATE_SET_INSECURE_DOWNLOAD_STATUS : All other downloads.
   Result DoGenerateTargetPath();
 
-  // Determines the mixed content status of the download, so as to block it
+  // Determines the insecure download status of the download, so as to block it
   // prior to prompting the user for the file path.  This function relies on the
   // delegate for the actual determination.
   //
   // Next state:
   // - STATE_NOTIFY_EXTENSIONS
-  Result DoSetMixedContentStatus();
+  Result DoSetInsecureDownloadStatus();
 
-  // Callback invoked by delegate after mixed content status is determined.
+  // Callback invoked by delegate after insecure download status is determined.
   // Cancels the download if status indicates blocking is necessary.
-  void GetMixedContentStatusDone(
-      download::DownloadItem::MixedContentStatus status);
+  void GetInsecureDownloadStatusDone(
+      download::DownloadItem::InsecureDownloadStatus status);
 
   // Notifies downloads extensions. If any extension wishes to override the
   // download filename, it will respond to the OnDeterminingFilename()
@@ -220,7 +256,7 @@ class DownloadTargetDeterminer : public download::DownloadItem::Observer {
   // Callback invoked after the file picker completes. Cancels the download if
   // the user cancels the file picker.
   void RequestConfirmationDone(DownloadConfirmationResult result,
-                               const base::FilePath& virtual_path);
+                               const ui::SelectedFileInfo& selected_file_info);
 
 #if BUILDFLAG(IS_ANDROID)
   // Callback invoked after the incognito message has been accepted/rejected
@@ -258,24 +294,12 @@ class DownloadTargetDeterminer : public download::DownloadItem::Observer {
   // Determine if the file type can be handled safely by the browser if it were
   // to be opened via a file:// URL.
   // Next state:
-  // - STATE_DETERMINE_IF_ADOBE_READER_UP_TO_DATE.
+  // - STATE_CHECK_DOWNLOAD_URL.
   Result DoDetermineIfHandledSafely();
 
   // Callback invoked when a decision is available about whether the file type
   // can be handled safely by the browser.
   void DetermineIfHandledSafelyDone(bool is_handled_safely);
-
-  // Determine if Adobe Reader is up to date. Only do the check on Windows for
-  // .pdf file targets.
-  // Next state:
-  // - STATE_CHECK_DOWNLOAD_URL.
-  Result DoDetermineIfAdobeReaderUpToDate();
-
-#if BUILDFLAG(IS_WIN)
-  // Callback invoked when a decision is available about whether Adobe Reader
-  // is up to date.
-  void DetermineIfAdobeReaderUpToDateDone(bool adobe_reader_up_to_date);
-#endif
 
   // Checks whether the downloaded URL is malicious. Invokes the
   // DownloadProtectionService via the delegate.
@@ -286,6 +310,14 @@ class DownloadTargetDeterminer : public download::DownloadItem::Observer {
   // Callback invoked after the delegate has checked the download URL. Sets the
   // danger type of the download to |danger_type|.
   void CheckDownloadUrlDone(download::DownloadDangerType danger_type);
+
+#if BUILDFLAG(IS_ANDROID)
+  // Checks if app verification by Google Play Protect is enabled.
+  Result DoCheckAppVerification();
+
+  // Callback invoked after checking if app verification is enabled.
+  void CheckAppVerificationDone(safe_browsing::VerifyAppsEnabledResult result);
+#endif
 
   // Checks if the user has visited the referrer URL of the download prior to
   // today. The actual check is only performed if it would be needed to
@@ -313,7 +345,8 @@ class DownloadTargetDeterminer : public download::DownloadItem::Observer {
   // this object. The determined target info will be passed into the callback
   // if |interrupt_reason| is NONE. Otherwise, only the interrupt reason will be
   // passed on.
-  void ScheduleCallbackAndDeleteSelf(download::DownloadInterruptReason result);
+  void ScheduleCallbackAndDeleteSelf(
+      download::DownloadInterruptReason interrupt_reason);
 
   Profile* GetProfile() const;
 
@@ -325,6 +358,11 @@ class DownloadTargetDeterminer : public download::DownloadItem::Observer {
   // target determination is complete.
   DownloadConfirmationReason NeedsConfirmation(
       const base::FilePath& filename) const;
+
+  // Returns true if the DLP feature is enabled and downloading the item to
+  // `download_path` is blocked, in which case the user should be prompted
+  // regardless of the preferences.
+  bool IsDownloadDlpBlocked(const base::FilePath& download_path) const;
 
   // Returns true if the user has been prompted for this download at least once
   // prior to this target determination operation. This method is only expected
@@ -345,7 +383,7 @@ class DownloadTargetDeterminer : public download::DownloadItem::Observer {
       PriorVisitsToReferrer visits) const;
 
   // Returns the timestamp of the last download bypass.
-  absl::optional<base::Time> GetLastDownloadBypassTimestamp() const;
+  std::optional<base::Time> GetLastDownloadBypassTimestamp() const;
 
   // Generates the download file name based on information from URL, response
   // headers and sniffed mime type.
@@ -367,10 +405,19 @@ class DownloadTargetDeterminer : public download::DownloadItem::Observer {
   base::FilePath local_path_;
   base::FilePath intermediate_path_;
   std::string mime_type_;
-  bool is_filetype_handled_safely_;
-  download::DownloadItem::MixedContentStatus mixed_content_status_;
+  bool is_filetype_handled_safely_ = false;
+  download::DownloadItem::InsecureDownloadStatus insecure_download_status_;
 #if BUILDFLAG(IS_ANDROID)
   bool is_checking_dialog_confirmed_path_;
+  // Records whether app verification by Play Protect is enabled. When
+  // enabled, we suppress warning based only on the file type since Play
+  // Protect will give higher quality warnings.
+  bool is_app_verification_enabled_;
+#endif
+#if BUILDFLAG(IS_MAC)
+  // A list of tags specified by the user to be set on the file upon the
+  // completion of it being written to disk.
+  std::vector<std::string> file_tags_;
 #endif
 
   raw_ptr<download::DownloadItem> download_;

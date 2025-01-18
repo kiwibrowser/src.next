@@ -29,6 +29,7 @@
 
 #include <atomic>
 
+#include "base/numerics/wrapping_math.h"
 #include "build/build_config.h"
 
 namespace base {
@@ -51,9 +52,7 @@ inline Atomic32 NoBarrier_CompareAndSwap(volatile Atomic32* ptr,
                                          Atomic32 old_value,
                                          Atomic32 new_value) {
   ((AtomicLocation32)ptr)
-      ->compare_exchange_strong(old_value,
-                                new_value,
-                                std::memory_order_relaxed,
+      ->compare_exchange_strong(old_value, new_value, std::memory_order_relaxed,
                                 std::memory_order_relaxed);
   return old_value;
 }
@@ -66,23 +65,22 @@ inline Atomic32 NoBarrier_AtomicExchange(volatile Atomic32* ptr,
 
 inline Atomic32 NoBarrier_AtomicIncrement(volatile Atomic32* ptr,
                                           Atomic32 increment) {
-  return increment +
-         ((AtomicLocation32)ptr)
-             ->fetch_add(increment, std::memory_order_relaxed);
+  return base::WrappingAdd(
+      ((AtomicLocation32)ptr)->fetch_add(increment, std::memory_order_relaxed),
+      increment);
 }
 
 inline Atomic32 Barrier_AtomicIncrement(volatile Atomic32* ptr,
                                         Atomic32 increment) {
-  return increment + ((AtomicLocation32)ptr)->fetch_add(increment);
+  return base::WrappingAdd(((AtomicLocation32)ptr)->fetch_add(increment),
+                           increment);
 }
 
 inline Atomic32 Acquire_CompareAndSwap(volatile Atomic32* ptr,
                                        Atomic32 old_value,
                                        Atomic32 new_value) {
   ((AtomicLocation32)ptr)
-      ->compare_exchange_strong(old_value,
-                                new_value,
-                                std::memory_order_acquire,
+      ->compare_exchange_strong(old_value, new_value, std::memory_order_acquire,
                                 std::memory_order_acquire);
   return old_value;
 }
@@ -91,9 +89,7 @@ inline Atomic32 Release_CompareAndSwap(volatile Atomic32* ptr,
                                        Atomic32 old_value,
                                        Atomic32 new_value) {
   ((AtomicLocation32)ptr)
-      ->compare_exchange_strong(old_value,
-                                new_value,
-                                std::memory_order_release,
+      ->compare_exchange_strong(old_value, new_value, std::memory_order_release,
                                 std::memory_order_relaxed);
   return old_value;
 }
@@ -116,6 +112,8 @@ inline Atomic32 Acquire_Load(volatile const Atomic32* ptr) {
 
 #if defined(ARCH_CPU_64_BITS)
 
+using AtomicU64 = std::make_unsigned_t<Atomic64>;
+
 typedef volatile std::atomic<Atomic64>* AtomicLocation64;
 static_assert(sizeof(*(AtomicLocation64) nullptr) == sizeof(Atomic64),
               "incompatible 64-bit atomic layout");
@@ -124,9 +122,7 @@ inline Atomic64 NoBarrier_CompareAndSwap(volatile Atomic64* ptr,
                                          Atomic64 old_value,
                                          Atomic64 new_value) {
   ((AtomicLocation64)ptr)
-      ->compare_exchange_strong(old_value,
-                                new_value,
-                                std::memory_order_relaxed,
+      ->compare_exchange_strong(old_value, new_value, std::memory_order_relaxed,
                                 std::memory_order_relaxed);
   return old_value;
 }
@@ -139,23 +135,22 @@ inline Atomic64 NoBarrier_AtomicExchange(volatile Atomic64* ptr,
 
 inline Atomic64 NoBarrier_AtomicIncrement(volatile Atomic64* ptr,
                                           Atomic64 increment) {
-  return increment +
-         ((AtomicLocation64)ptr)
-             ->fetch_add(increment, std::memory_order_relaxed);
+  return base::WrappingAdd(
+      ((AtomicLocation64)ptr)->fetch_add(increment, std::memory_order_relaxed),
+      increment);
 }
 
 inline Atomic64 Barrier_AtomicIncrement(volatile Atomic64* ptr,
                                         Atomic64 increment) {
-  return increment + ((AtomicLocation64)ptr)->fetch_add(increment);
+  return base::WrappingAdd(((AtomicLocation64)ptr)->fetch_add(increment),
+                           increment);
 }
 
 inline Atomic64 Acquire_CompareAndSwap(volatile Atomic64* ptr,
                                        Atomic64 old_value,
                                        Atomic64 new_value) {
   ((AtomicLocation64)ptr)
-      ->compare_exchange_strong(old_value,
-                                new_value,
-                                std::memory_order_acquire,
+      ->compare_exchange_strong(old_value, new_value, std::memory_order_acquire,
                                 std::memory_order_acquire);
   return old_value;
 }
@@ -164,15 +159,9 @@ inline Atomic64 Release_CompareAndSwap(volatile Atomic64* ptr,
                                        Atomic64 old_value,
                                        Atomic64 new_value) {
   ((AtomicLocation64)ptr)
-      ->compare_exchange_strong(old_value,
-                                new_value,
-                                std::memory_order_release,
+      ->compare_exchange_strong(old_value, new_value, std::memory_order_release,
                                 std::memory_order_relaxed);
   return old_value;
-}
-
-inline void NoBarrier_Store(volatile Atomic64* ptr, Atomic64 value) {
-  ((AtomicLocation64)ptr)->store(value, std::memory_order_relaxed);
 }
 
 inline void Release_Store(volatile Atomic64* ptr, Atomic64 value) {

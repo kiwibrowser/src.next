@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,17 +34,22 @@ class WeakIdentifierMap final
 
     auto it = Instance().object_to_identifier_.find(object);
     if (it == Instance().object_to_identifier_.end()) {
-      do {
+      result = Next();
+      while (!Instance().Put(object, result)) [[unlikely]] {
         result = Next();
-      } while (!LIKELY(Instance().Put(object, result)));
+      }
     } else {
       result = it->value;
     }
     return result;
   }
 
+  // If the object is not found, returns 0 which is not a valid identifier.
   static IdentifierType ExistingIdentifier(T* object) {
-    return Instance().object_to_identifier_.at(object);
+    auto it_result = Instance().object_to_identifier_.find(object);
+    return it_result != Instance().object_to_identifier_.end()
+               ? it_result->value
+               : 0;
   }
 
   static T* Lookup(IdentifierType identifier) {
@@ -68,8 +73,10 @@ class WeakIdentifierMap final
   static IdentifierType Next() {
     // On overflow, skip negative values for signed IdentifierType, and 0 which
     // is not a valid key in HashMap by default.
-    if (UNLIKELY(LastIdRef() == std::numeric_limits<IdentifierType>::max()))
+    if (LastIdRef() == std::numeric_limits<IdentifierType>::max())
+        [[unlikely]] {
       LastIdRef() = 0;
+    }
     return ++LastIdRef();
   }
 
@@ -79,8 +86,10 @@ class WeakIdentifierMap final
   }
 
   bool Put(T* object, IdentifierType identifier) {
-    if (!LIKELY(identifier_to_object_.insert(identifier, object).is_new_entry))
+    if (!identifier_to_object_.insert(identifier, object).is_new_entry)
+        [[unlikely]] {
       return false;
+    }
     DCHECK(object && !object_to_identifier_.Contains(object));
     object_to_identifier_.Set(object, identifier);
     DCHECK_EQ(object_to_identifier_.size(), identifier_to_object_.size());

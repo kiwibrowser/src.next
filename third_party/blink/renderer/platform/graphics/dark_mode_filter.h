@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,18 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_DARK_MODE_FILTER_H_
 
 #include <memory>
+#include <optional>
 
 #include "cc/paint/paint_flags.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/platform/graphics/dark_mode_settings.h"
 #include "third_party/blink/renderer/platform/graphics/dark_mode_types.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 
-class SkColorFilter;
 class SkPixmap;
+
+namespace cc {
+class ColorFilter;
+}
 
 namespace blink {
 
@@ -36,19 +39,21 @@ class PLATFORM_EXPORT DarkModeFilter {
     kListSymbol,
     kBackground,
     kSVG,
-    kBorder
+    kBorder,
+    kSelection
   };
   enum class ImageType { kNone, kIcon, kSeparator, kPhoto };
 
-  SkColor InvertColorIfNeeded(SkColor color, ElementRole element_role);
-  SkColor InvertColorIfNeeded(SkColor color,
-                              ElementRole role,
-                              SkColor contrast_background);
+  SkColor4f InvertColorIfNeeded(const SkColor4f& color,
+                                ElementRole element_role);
+  SkColor4f InvertColorIfNeeded(const SkColor4f& color,
+                                ElementRole role,
+                                const SkColor4f& contrast_background);
 
-  absl::optional<cc::PaintFlags> ApplyToFlagsIfNeeded(
+  std::optional<cc::PaintFlags> ApplyToFlagsIfNeeded(
       const cc::PaintFlags& flags,
       ElementRole role,
-      SkColor contrast_background);
+      SkColor4f contrast_background);
 
   size_t GetInvertedColorCacheSizeForTesting();
 
@@ -60,8 +65,8 @@ class PLATFORM_EXPORT DarkModeFilter {
   // empty or |src| is larger than pixmap bounds. This function should be called
   // only if image policy is set to DarkModeImagePolicy::kFilterSmart and image
   // is classified as ImageType::kIcon or kSeparator. This API is thread-safe.
-  sk_sp<SkColorFilter> GenerateImageFilter(const SkPixmap& pixmap,
-                                           const SkIRect& src) const;
+  sk_sp<cc::ColorFilter> GenerateImageFilter(const SkPixmap& pixmap,
+                                             const SkIRect& src) const;
 
   void ApplyFilterToImage(Image* image,
                           cc::PaintFlags* flags,
@@ -76,19 +81,19 @@ class PLATFORM_EXPORT DarkModeFilter {
     std::unique_ptr<DarkModeColorClassifier> background_classifier;
     std::unique_ptr<DarkModeImageClassifier> image_classifier;
     std::unique_ptr<DarkModeColorFilter> color_filter;
-    sk_sp<SkColorFilter> image_filter;
+    sk_sp<cc::ColorFilter> image_filter;
   };
 
-  SkColor AdjustDarkenColor(SkColor color,
-                            DarkModeFilter::ElementRole role,
-                            SkColor contrast_background);
+  SkColor4f AdjustDarkenColor(const SkColor4f& color,
+                              DarkModeFilter::ElementRole role,
+                              const SkColor4f& contrast_background);
 
-  bool ShouldApplyToColor(SkColor color, ElementRole role);
+  bool ShouldApplyToColor(const SkColor4f& color, ElementRole role);
 
   // Returns dark mode color filter for images. This function should be called
   // only if image policy is set to DarkModeImagePolicy::kFilterAll or image is
   // classified as ImageType::kIcon or kSeparator. This API is thread-safe.
-  sk_sp<SkColorFilter> GetImageFilter() const;
+  sk_sp<cc::ColorFilter> GetImageFilter() const;
 
   DarkModeImagePolicy GetDarkModeImagePolicy() const;
 

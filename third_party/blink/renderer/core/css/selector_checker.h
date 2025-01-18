@@ -31,11 +31,15 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_SELECTOR_CHECKER_H_
 
 #include <limits>
+
 #include "base/dcheck_is_on.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_selector.h"
+#include "third_party/blink/renderer/core/css/resolver/element_resolve_context.h"
+#include "third_party/blink/renderer/core/css/resolver/match_flags.h"
 #include "third_party/blink/renderer/core/css/style_request.h"
 #include "third_party/blink/renderer/core/css/style_scope.h"
+#include "third_party/blink/renderer/core/css/style_scope_frame.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/scroll/scroll_types.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
@@ -49,7 +53,6 @@ namespace blink {
 class CSSSelector;
 class ContainerNode;
 class CustomScrollbar;
-class ComputedStyle;
 class Element;
 class PartNames;
 
@@ -84,22 +87,20 @@ class CORE_EXPORT SelectorChecker {
   };
 
   explicit inline SelectorChecker(const Mode& mode)
-      : element_style_(nullptr),
-        scrollbar_(nullptr),
+      : scrollbar_(nullptr),
         part_names_(nullptr),
         pseudo_argument_(g_null_atom),
         scrollbar_part_(kNoPart),
         mode_(mode),
         is_ua_rule_(false) {}
-  inline SelectorChecker(ComputedStyle* element_style,
-                         PartNames* part_names,
+  inline SelectorChecker(PartNames* part_names,
                          const StyleRequest& style_request,
                          const Mode& mode,
                          const bool& is_ua_rule)
-      : element_style_(element_style),
-        scrollbar_(style_request.scrollbar),
+      : scrollbar_(style_request.scrollbar),
         part_names_(part_names),
         pseudo_argument_(style_request.pseudo_argument),
+        pseudo_ident_list_(style_request.pseudo_ident_list),
         scrollbar_part_(style_request.scrollbar_part),
         mode_(mode),
         is_ua_rule_(is_ua_rule) {}
@@ -107,44 +108,24 @@ class CORE_EXPORT SelectorChecker {
   SelectorChecker(const SelectorChecker&) = delete;
   SelectorChecker& operator=(const SelectorChecker&) = delete;
 
-  struct StyleScopeActivation {
-    DISALLOW_NEW();
-
-   public:
-    void Trace(blink::Visitor*) const;
-
-    // The root is the element when the activation happened. In other words,
-    // the element that matched <scope-start>.
-    //
-    // https://drafts.csswg.org/css-cascade-6/#typedef-scope-start
-    Member<Element> root;
-    // The distance to the root, in terms of number of inclusive ancestors
-    // between some subject element and the root.
-    unsigned proximity = 0;
-    // True if some subject element matches <scope-end>.
-    //
-    // https://drafts.csswg.org/css-cascade-6/#typedef-scope-end
-    bool limit = false;
-  };
-
-  // Stores the current @scope activations for a given subject element.
-  //
-  // See documentation near EnsureActivations for more information.
-  //
-  // TODO(crbug.com/1280240): Provide a parent frame in the future.
-  class StyleScopeFrame {
-    STACK_ALLOCATED();
-
-   public:
-    using Activations = HeapVector<StyleScopeActivation>;
-
-    explicit StyleScopeFrame(Element& element) : element_(element) {}
-
-   private:
-    friend class SelectorChecker;
-
-    Element& element_;
-    HeapHashMap<Member<const StyleScope>, Member<const Activations>> data_;
+  // When matching certain selectors (e.g :hover), we sometimes want to mark the
+  // relevant element(s) as being affected by that selector to aid some
+  // invalidation process later. We also typically need a distinction between
+  // elements that are affected themselves and elements that are *related* to
+  // affected elements (e.g. has an affected ancestor or sibling). The impact of
+  // a given SelectorCheckingContext tells us which invalidation flags to set.
+  enum class Impact {
+    // Invalidation
+    // flags on to the element itself should be set.
+    kSubject = 0b01,
+    // Ancestors or previous siblings
+    // should have their invalidation flags set.
+    kNonSubject = 0b10,
+    // Invalidation flags should be set as if both subject and non-subjects are
+    // impacted. This can be used defensively in situations where we don't know
+    // the full impact of a given selector at the time that selector is
+    // evaluated, e.g. '@scope (:hover) { ... }'.
+    kBoth = 0b11
   };
 
   // Wraps the current element and a CSSSelector and stores some other state of
@@ -155,17 +136,85 @@ class CORE_EXPORT SelectorChecker {
    public:
     // Initial selector constructor
     explicit SelectorCheckingContext(Element* element) : element(element) {}
+    explicit SelectorCheckingContext(
+        const ElementResolveContext& element_context)
+        : element(&element_context.GetUltimateOriginatingElementOrSelf()),
+          pseudo_element(element_context.GetPseudoElement()),
+          pseudo_element_ancestors(
+              element_context.GetPseudoElementAncestors()) {}
+
+    // If matching for real element, returns that element;
+    // Otherwise, matching is for pseudo element, returns
+    // pseudo element ancestor at `index`, or the last pseudo element ancestor,
+    // if `index` is greater than the size of ancestors array (to collect
+    // pseudo elements styles).
+    // Note: `index` == kNotFound means matching is yet being done for real
+    // element.
+    Element& GetElementForMatching(wtf_size_t index) const;
 
     // Group fields by type to avoid perf test regression.
     // https://crrev.com/c/3362008
     const CSSSelector* selector = nullptr;
 
-    // Used to match the :scope pseudo-class.
+    // The "tree context" [1] whenever the selector is "matched against
+    // a tree" [2].
+    //
+    // This can most easily be understood as "where a given selector
+    // comes from":
+    //
+    //  - For style rules at the document level, this is a Document.
+    //  - For style rules inside a shadow tree, this is a ShadowRoot.
+    //  - For querySelector, this is the root [3] of the node querySelector
+    //    was called on, meaning it can either be a Document, ShadowRoot,
+    //    or DocumentFragment.
+    //
+    // Some selector matching in Blink takes place with tree_scope==nullptr,
+    // for example UA rules. This should be functionally identical to providing
+    // the Document associated with `element` as the tree scope.
+    //
+    // [1] https://drafts.csswg.org/selectors-4/#match-a-selector-against-a-tree
+    // [2] https://drafts.csswg.org/css-scoping-1/#tree-context
+    // [3] https://dom.spec.whatwg.org/#concept-tree-root
+    const TreeScope* tree_scope = nullptr;
+    // The scoping root [1], whenever the selector is scoped [2].
+    //
+    // This is often the same node as `tree_scope`, but differs when selectors
+    // are scoped to some specific Element within that tree. For example,
+    // for Element.querySelector, `scope` is set to the element querySelector
+    // is invoked on.
+    //
+    // If `scope` is an element, the :scope pseudo-class matches that element,
+    // and only that element. Otherwise, it matches what :root matches.
+    // This behavior is different from what specs expect, see discussion
+    // in Issue 7261 [3].
+    //
+    // See also documentation on `style_scope` below, as it is relevant for
+    // how `scope` is used throughout the evaluation of the selector.
+    //
+    // [1] https://drafts.csswg.org/selectors-4/#scoping-root
+    // [2] https://drafts.csswg.org/selectors-4/#scoped-selector
+    // [3] https://github.com/w3c/csswg-drafts/issues/7261
     const ContainerNode* scope = nullptr;
-    // If `style_scope` is specified, that is used to match the :scope
-    // pseudo-class instead (and `scope` is ignored).
+    // The StyleScope (i.e. @scope) associated with the selector.
+    //
+    // This points to the innermost StyleScope, i.e. the StyleScope holding
+    // on to the style rule directly.
+    //
+    // A non-nullptr `style_scope` causes "scope activation" [1] at some point
+    // during selector matching, which is basically lazy evaluation of what
+    // the scoping roots are. For each found scoping root, we'll match the
+    // selector (perhaps partially) with `scope` set to that root.
+    //
+    // Both `scope` and `style_scope` may be specified on the
+    // SelectorCheckingContext passed to SelectorChecker::Match,
+    // but if `style_scope` is non-nullptr, then `scope` is effectively ignored:
+    // `scope` will be assigned a value by the "scope activation" process
+    // referenced above.
+    //
+    // [1] SelectorChecker::MatchForScopeActivation
     const StyleScope* style_scope = nullptr;
-    // StyleScopeFrame is required if style_scope is non-nullptr.
+    // A cache used to carry out the work described for `style_scope`.
+    // Must be non-nullptr when `style_scope` is non-nullptr.
     StyleScopeFrame* style_scope_frame = nullptr;
 
     Element* element = nullptr;
@@ -173,24 +222,71 @@ class CORE_EXPORT SelectorChecker {
     Element* vtt_originating_element = nullptr;
     ContainerNode* relative_anchor_element = nullptr;
 
+    AtomicString* pseudo_argument = nullptr;
+    // The pseudo element type of pseudo element we are matching styles for.
     PseudoId pseudo_id = kPseudoIdNone;
+    // The last pseudo element selector we saw. This is not necessarily the
+    // pseudo_id above since we may have nested pseudo elements. Also, this may
+    // be the pseudo element selector we are looking at while matching styles
+    // for the originating element.
+    PseudoId previously_matched_pseudo_element = kPseudoIdNone;
+    Impact impact = Impact::kSubject;
 
     bool is_sub_selector = false;
     bool in_rightmost_compound = true;
     bool has_scrollbar_pseudo = false;
-    bool has_selection_pseudo = false;
-    bool treat_shadow_host_as_normal_scope = false;
     bool in_nested_complex_selector = false;
-    bool is_inside_visited_link = false;
+    // If true, elements that are links will match :visited. Otherwise,
+    // they will match :link.
+    bool match_visited = false;
+    // The `match_visited` flag can become false during selector matching
+    // for various reasons (see DisallowMatchVisited and its call sites).
+    // The `had_match_visited` flag tracks whether was initially true or not.
+    // This is needed by @scope (CalculateActivations), which needs to evaluate
+    // visited-dependent selectors according to the original `match_visited`
+    // setting.
+    bool had_match_visited = false;
     bool pseudo_has_in_rightmost_compound = true;
     bool is_inside_has_pseudo_class = false;
+    // Affects whether or not :current matches after a ::search-text.
+    bool search_text_request_is_current = false;
+    // Real PseudoElement that we match for. `element` will be its originating
+    // element, but `element` is only needed for matching. The rules will be
+    // saved on `pseudo_element`.
+    // Is null if matching is for real element.
+    Element* pseudo_element = nullptr;
+    // Pseudo element ancestors array for PseudoElement rule matching (including
+    // the nested ones), read more in ElementResolveContext.
+    // Includes the pseudo_element as last entry and all originating pseudo
+    // elements up the tree (doesn't include real originating element, which
+    // would be `element`). Is empty if matching is for real element.
+    base::span<Element* const> pseudo_element_ancestors;
   };
 
   struct MatchResult {
     STACK_ALLOCATED();
 
    public:
+    void SetFlag(MatchFlag flag) { flags |= static_cast<MatchFlags>(flag); }
+    bool HasFlag(MatchFlag flag) const {
+      return flags & static_cast<MatchFlags>(flag);
+    }
+
     PseudoId dynamic_pseudo{kPseudoIdNone};
+
+    // Index of the current pseudo element ancestor, used for PseudoElement
+    // matching. See comments above for pseudo_element_ancestors.
+    // kNotFound means matching is yet being done for real element.
+    // When matching for e.g. div::column::scroll-marker, ::column is index 0
+    // and ::scroll-marker is index 1.
+    wtf_size_t pseudo_ancestor_index{kNotFound};
+    // Note: can become equal to ancestors array size, meaning we match
+    // pseudo style for pseudo_element. If increased further, selector
+    // matching is failed in SelectorChecker code.
+    void DescendToNextPseudoElement() {
+      pseudo_ancestor_index =
+          pseudo_ancestor_index == kNotFound ? 0u : pseudo_ancestor_index + 1u;
+    }
 
     // Comes from an AtomicString, but not stored as one to avoid
     // the cost of checking the refcount on cleaning up from every
@@ -244,6 +340,41 @@ class CORE_EXPORT SelectorChecker {
     HeapVector<Member<Element>>* has_argument_leftmost_compound_matches{
         nullptr};
     unsigned proximity{std::numeric_limits<unsigned>::max()};
+    MatchFlags flags{0};
+  };
+
+  // Used for situations where we have "inner" selector matching, such as
+  // :is(...). Ensures that we propagate the necessary sub-result data
+  // to the outer MatchResult.
+  class SubResult : public MatchResult {
+    STACK_ALLOCATED();
+
+   public:
+    explicit SubResult(MatchResult& parent) : parent_(parent) {
+      pseudo_ancestor_index = parent_.pseudo_ancestor_index;
+    }
+    ~SubResult() {
+      parent_.flags |= flags;
+      PropagatePseudoAncestorIndex();
+    }
+    void PropagatePseudoAncestorIndex() {
+      // Propagate only useful change in index, which is either:
+      // a) kNotFound -> 0;
+      // b) increasing index value.
+      // Propagating is needed to later check that we've reached the end of
+      // the ancestors array, meaning that the selector matches the full
+      // ancestors chain.
+      if (pseudo_ancestor_index != kNotFound) {
+        parent_.pseudo_ancestor_index =
+            parent_.pseudo_ancestor_index == kNotFound
+                ? pseudo_ancestor_index
+                : std::max(pseudo_ancestor_index,
+                           parent_.pseudo_ancestor_index);
+      }
+    }
+
+   private:
+    MatchResult& parent_;
   };
 
   bool Match(const SelectorCheckingContext& context, MatchResult& result) const;
@@ -253,16 +384,17 @@ class CORE_EXPORT SelectorChecker {
     return Match(context, ignore_result);
   }
 
-  static bool MatchesFocusPseudoClass(const Element&);
+  static bool MatchesFocusPseudoClass(const Element&,
+                                      PseudoId matching_for_pseudo_element);
   static bool MatchesFocusVisiblePseudoClass(const Element&);
-  static bool MatchesSpatialNavigationInterestPseudoClass(const Element&);
   static bool MatchesSelectorFragmentAnchorPseudoClass(const Element&);
 
  private:
   // Does the work of checking whether the simple selector and element pointed
   // to by the context are a match. Delegates most of the work to the Check*
   // methods below.
-  bool CheckOne(const SelectorCheckingContext&, MatchResult&) const;
+  ALWAYS_INLINE bool CheckOne(const SelectorCheckingContext&,
+                              MatchResult&) const;
 
   enum MatchStatus {
     kSelectorMatches,
@@ -291,6 +423,8 @@ class CORE_EXPORT SelectorChecker {
   MatchStatus MatchSelector(const SelectorCheckingContext&, MatchResult&) const;
   MatchStatus MatchForSubSelector(const SelectorCheckingContext&,
                                   MatchResult&) const;
+  MatchStatus MatchForScopeActivation(const SelectorCheckingContext&,
+                                      MatchResult&) const;
   MatchStatus MatchForRelation(const SelectorCheckingContext&,
                                MatchResult&) const;
   MatchStatus MatchForPseudoContent(const SelectorCheckingContext&,
@@ -300,6 +434,7 @@ class CORE_EXPORT SelectorChecker {
                                    const ContainerNode*,
                                    MatchResult&) const;
   bool CheckPseudoClass(const SelectorCheckingContext&, MatchResult&) const;
+  bool CheckPseudoAutofill(CSSSelector::PseudoType, Element&) const;
   bool CheckPseudoElement(const SelectorCheckingContext&, MatchResult&) const;
   bool CheckScrollbarPseudoClass(const SelectorCheckingContext&,
                                  MatchResult&) const;
@@ -307,43 +442,111 @@ class CORE_EXPORT SelectorChecker {
   bool CheckPseudoScope(const SelectorCheckingContext&, MatchResult&) const;
   bool CheckPseudoNot(const SelectorCheckingContext&, MatchResult&) const;
   bool CheckPseudoHas(const SelectorCheckingContext&, MatchResult&) const;
+  bool MatchesAnyInList(const SelectorCheckingContext& context,
+                        const CSSSelector* selector_list,
+                        MatchResult& result) const;
 
-  // The *activations* for a given StyleScope/element, is a list of active
-  // scopes found in the ancestor chain, their roots (Element*), and the
-  // proximities to those roots.
-  //
-  // The idea is that, if we're matching a selector ':scope' within some
-  // StyleScope, we look up the activations for that StyleScope, and
-  // and check if the current element (`SelectorCheckingContext.element`)
-  // matches any of the activation roots.
-  using Activations = StyleScopeFrame::Activations;
-
-  const Activations& EnsureActivations(const SelectorCheckingContext&,
-                                       const StyleScope&) const;
-  const Activations* CalculateActivations(
+  const StyleScopeActivations& EnsureActivations(const SelectorCheckingContext&,
+                                                 const StyleScope&) const;
+  const StyleScopeActivations* CalculateActivations(
+      const TreeScope*,
       Element&,
       const StyleScope&,
-      const Activations& outer_activations) const;
-  bool CheckInStyleScope(const SelectorCheckingContext&, MatchResult&) const;
-  bool MatchesWithScope(Element&, const CSSSelectorList&, Element* scope) const;
+      const StyleScopeActivations& outer_activations,
+      StyleScopeFrame*,
+      bool match_visited) const;
+  bool MatchesWithScope(Element&,
+                        const CSSSelector& selector_list,
+                        const TreeScope*,
+                        const ContainerNode* scope,
+                        bool match_visited,
+                        MatchFlags&) const;
+  // https://drafts.csswg.org/css-cascade-6/#scoping-limit
+  bool ElementIsScopingLimit(const TreeScope*,
+                             const StyleScope&,
+                             const StyleScopeActivation&,
+                             Element& element,
+                             bool match_visited,
+                             MatchFlags&) const;
 
-  ComputedStyle* element_style_;
   CustomScrollbar* scrollbar_;
   PartNames* part_names_;
   const String pseudo_argument_;
+  const Vector<AtomicString> pseudo_ident_list_;
   ScrollbarPart scrollbar_part_;
   Mode mode_;
   bool is_ua_rule_;
 #if DCHECK_IS_ON()
   mutable bool inside_match_ = false;
 #endif
+
+  friend class NthIndexCache;
+};
+
+// An accelerated selector checker that matches only selectors with a
+// certain set of restrictions, informally called “easy” selectors.
+// (Not to be confused with simple selectors, which is a standards-defined
+// term.) Easy selectors support only a very small subset of the full
+// CSS selector machinery, but does so much faster than SelectorChecker
+// (typically a bit over twice as fast), and that subset tends to be enough
+// for ~80% of actual selectors checks on a typical web page. (It is also
+// ree from the complexities of Shadow DOM and does not check whether
+// the query exceeds the scope, so it cannot be used for querySelector().)
+//
+// The set of supported selectors is formally given as “anything IsEasy()
+// returns true for”, but roughly encompasses the following:
+//
+//  - Tag matches (e.g. div).
+//  - ID matches (e.g. #id).
+//  - Class matches (e.g. .c).
+//  - Case-sensitive attribute is-set and exact matches ([foo] and [foo="bar"]).
+//  - Subselector and descendant combinators.
+//  - Anything that does not need further checking
+//    (CSSSelector::IsCoveredByBucketing()).
+//
+// Given this, it does not need to set up any context, do recursion,
+// backtracking, have large switch/cases for pseudos, or the similar.
+//
+// You must include selector_checker-inl.h to use this class;
+// its functions are declared ALWAYS_INLINE because the call overhead
+// is so large compared to what the functions are actually doing.
+class CORE_EXPORT EasySelectorChecker {
+ public:
+  // Returns true iff the given selector is easy and can be given to Match().
+  // Should be precomputed for the given selector.
+  //
+  // If IsEasy() is true, this selector can never return any match flags,
+  // or match (dynamic) pseudos.
+  ALWAYS_INLINE static bool IsEasy(const CSSSelector* selector);
+
+  // Returns whether the given selector matches the given element.
+  // The following preconditions apply:
+  //
+  //  - The selector must be easy (see IsEasy()).
+  //  - Tag matching must be case-sensitive in the current context,
+  //    i.e., that the element is _not_ a non-HTML element in an
+  //    HTML document.
+  //
+  // Unlike SelectorChecker, does not check style_scope; the caller
+  // will need to do that if desired.
+  ALWAYS_INLINE static bool Match(const CSSSelector* selector,
+                                  const Element* element);
+
+ private:
+  ALWAYS_INLINE static bool MatchOne(const CSSSelector* selector,
+                                     const Element* element);
+  ALWAYS_INLINE static bool AttributeIsSet(const Element& element,
+                                           const QualifiedName& attr);
+  ALWAYS_INLINE static bool AttributeMatches(const Element& element,
+                                             const QualifiedName& attr,
+                                             const AtomicString& value,
+                                             bool insensitive_match);
+  ALWAYS_INLINE static bool AttributeItemHasName(
+      const Attribute& attribute_item,
+      const Element& element,
+      const QualifiedName& name);
 };
 
 }  // namespace blink
-
-WTF_ALLOW_MOVE_INIT_AND_COMPARE_WITH_MEM_FUNCTIONS(
-    blink::SelectorChecker::StyleScopeActivation)
-WTF_ALLOW_MOVE_INIT_AND_COMPARE_WITH_MEM_FUNCTIONS(
-    blink::SelectorChecker::StyleScopeFrame)
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CSS_SELECTOR_CHECKER_H_

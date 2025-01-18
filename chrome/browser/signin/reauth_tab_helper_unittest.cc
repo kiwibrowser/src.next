@@ -5,6 +5,7 @@
 #include "chrome/browser/signin/reauth_tab_helper.h"
 
 #include "base/memory/raw_ptr.h"
+#include "base/run_loop.h"
 #include "base/test/mock_callback.h"
 #include "chrome/browser/signin/reauth_result.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
@@ -40,7 +41,7 @@ class ReauthTabHelperTest : public ChromeRenderViewHostTestHarness {
   const GURL& reauth_url() { return reauth_url_; }
 
  private:
-  raw_ptr<ReauthTabHelper> tab_helper_ = nullptr;
+  raw_ptr<ReauthTabHelper, DanglingUntriaged> tab_helper_ = nullptr;
   base::MockOnceCallback<void(signin::ReauthResult)> mock_callback_;
   const GURL reauth_url_;
 };
@@ -75,6 +76,7 @@ TEST_F(ReauthTabHelperTest, MultipleNavigationReauth) {
   auto simulator = content::NavigationSimulator::CreateBrowserInitiated(
       reauth_url(), web_contents());
   simulator->Start();
+  base::RunLoop().RunUntilIdle();
   simulator->Redirect(
       reauth_url().DeprecatedGetOriginAsURL().Resolve("/login"));
   simulator->Commit();
@@ -87,12 +89,13 @@ TEST_F(ReauthTabHelperTest, MultipleNavigationReauth) {
 }
 
 // Tests the reauth flow with multiple navigations across two different origins.
-// TODO(https://crbug.com/1045515): update this test once navigations outside of
+// TODO(crbug.com/40116065): update this test once navigations outside of
 // reauth_url() are blocked.
 TEST_F(ReauthTabHelperTest, MultipleNavigationReauthThroughExternalOrigin) {
   auto simulator = content::NavigationSimulator::CreateBrowserInitiated(
       reauth_url(), web_contents());
   simulator->Start();
+  base::RunLoop().RunUntilIdle();
   simulator->Redirect(GURL("https://other-identity-provider.com/login"));
   simulator->Commit();
 
@@ -129,6 +132,7 @@ TEST_F(ReauthTabHelperTest, NavigationToExternalOriginFailed) {
   auto simulator = content::NavigationSimulator::CreateBrowserInitiated(
       reauth_url(), web_contents());
   simulator->Start();
+  base::RunLoop().RunUntilIdle();
   simulator->Redirect(GURL("https://other-identity-provider.com/login"));
   simulator->Fail(net::ERR_TIMED_OUT);
   simulator->CommitErrorPage();
@@ -153,16 +157,10 @@ TEST_F(ReauthTabHelperTest, WebContentsDestroyed) {
 
 class ReauthTabHelperPrerenderTest : public ReauthTabHelperTest {
  public:
-  ReauthTabHelperPrerenderTest() {
-    feature_list_.InitWithFeatures(
-        {blink::features::kPrerender2},
-        // Disable the memory requirement of Prerender2 so the test can run on
-        // any bot.
-        {blink::features::kPrerender2MemoryControls});
-  }
+  ReauthTabHelperPrerenderTest() = default;
 
  private:
-  base::test::ScopedFeatureList feature_list_;
+  content::test::ScopedPrerenderFeatureList prerender_feature_list_;
 };
 
 TEST_F(ReauthTabHelperPrerenderTest,

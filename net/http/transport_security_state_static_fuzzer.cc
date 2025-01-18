@@ -2,6 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
+#pragma allow_unsafe_buffers
+#endif
+
 #include <string>
 
 #include "net/http/transport_security_state.h"
@@ -18,13 +23,6 @@ class TransportSecurityStateStaticFuzzer {
     return state->GetStaticSTSState(input, &sts_result) ||
            state->GetStaticPKPState(input, &pkp_result);
   }
-
-  bool FuzzStaticExpectCTState(TransportSecurityState* state,
-                               const std::string& input) {
-    state->enable_static_expect_ct_ = true;
-    TransportSecurityState::ExpectCTState result;
-    return state->GetStaticExpectCTState(input, &result);
-  }
 };
 
 }  // namespace net
@@ -36,7 +34,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   net::TransportSecurityState state;
 
   helper.FuzzStaticDomainState(&state, input);
-  helper.FuzzStaticExpectCTState(&state, input);
 
   return 0;
 }

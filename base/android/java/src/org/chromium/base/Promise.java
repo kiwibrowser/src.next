@@ -8,17 +8,23 @@ import android.os.Handler;
 
 import androidx.annotation.IntDef;
 
+import org.chromium.build.annotations.NullMarked;
+import org.chromium.build.annotations.Nullable;
+
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.function.Function;
 
 /**
- * A Promise class to be used as a placeholder for a result that will be provided asynchronously.
- * It must only be accessed from a single thread.
+ * A Promise class to be used as a placeholder for a result that will be provided asynchronously. It
+ * must only be accessed from a single thread.
+ *
  * @param <T> The type the Promise will be fulfilled with.
  */
-public class Promise<T> {
+@NullMarked
+public class Promise<T extends @Nullable Object> {
     // TODO(peconn): Implement rejection handlers that can recover from rejection.
 
     @IntDef({PromiseState.UNFULFILLED, PromiseState.FULFILLED, PromiseState.REJECTED})
@@ -29,13 +35,12 @@ public class Promise<T> {
         int REJECTED = 2;
     }
 
-    @PromiseState
-    private int mState = PromiseState.UNFULFILLED;
+    @PromiseState private int mState = PromiseState.UNFULFILLED;
 
-    private T mResult;
+    private @Nullable T mResult;
     private final List<Callback<T>> mFulfillCallbacks = new LinkedList<>();
 
-    private Exception mRejectReason;
+    private @Nullable Exception mRejectReason;
     private final List<Callback<Exception>> mRejectCallbacks = new LinkedList<>();
 
     private final Thread mThread = Thread.currentThread();
@@ -55,7 +60,7 @@ public class Promise<T> {
      * to a subsequent Promise.
      */
     public static class UnhandledRejectionException extends RuntimeException {
-        public UnhandledRejectionException(String message, Throwable cause) {
+        public UnhandledRejectionException(String message, @Nullable Throwable cause) {
             super(message, cause);
         }
     }
@@ -75,13 +80,15 @@ public class Promise<T> {
             return;
         }
 
-        assert mRejectCallbacks.size() == 0 : "Do not call the single argument "
-            + "Promise.then(Callback) on a Promise that already has a rejection handler.";
+        assert mRejectCallbacks.size() == 0
+                : "Do not call the single argument Promise.then(Callback) on a Promise that already"
+                        + " has a rejection handler.";
 
-        Callback<Exception> onReject = reason -> {
-            throw new UnhandledRejectionException(
-                    "Promise was rejected without a rejection handler.", reason);
-        };
+        Callback<Exception> onReject =
+                reason -> {
+                    throw new UnhandledRejectionException(
+                            "Promise was rejected without a rejection handler.", reason);
+                };
 
         then(onFulfill, onReject);
         mThrowingRejectionHandler = true;
@@ -122,8 +129,9 @@ public class Promise<T> {
     }
 
     private void exceptInner(Callback<Exception> onReject) {
-        assert !mThrowingRejectionHandler : "Do not add an exception handler to a Promise you have "
-            + "called the single argument Promise.then(Callback) on.";
+        assert !mThrowingRejectionHandler
+                : "Do not add an exception handler to a Promise you have "
+                        + "called the single argument Promise.then(Callback) on.";
 
         if (mState == PromiseState.REJECTED) {
             postCallbackToLooper(onReject, mRejectReason);
@@ -136,7 +144,7 @@ public class Promise<T> {
      * Queues a {@link Function} to be run when the Promise is fulfilled. When this Promise is
      * fulfilled, the function will be run and its result will be place in the returned Promise.
      */
-    public <RT> Promise<RT> then(final Function<T, RT> function) {
+    public <RT extends @Nullable Object> Promise<RT> then(Function<T, RT> function) {
         checkThread();
 
         // Create a new Promise to store the result of the function.
@@ -145,14 +153,15 @@ public class Promise<T> {
         // Once this Promise is fulfilled:
         // - Apply the given function to the result.
         // - Fulfill the new Promise.
-        thenInner(result -> {
-            try {
-                promise.fulfill(function.apply(result));
-            } catch (Exception e) {
-                // If function application fails, reject the next Promise.
-                promise.reject(e);
-            }
-        });
+        thenInner(
+                result -> {
+                    try {
+                        promise.fulfill(function.apply(result));
+                    } catch (Exception e) {
+                        // If function application fails, reject the next Promise.
+                        promise.reject(e);
+                    }
+                });
 
         // If this Promise is rejected, reject the next Promise.
         exceptInner(promise::reject);
@@ -165,7 +174,7 @@ public class Promise<T> {
      * Promise is fulfilled, the AsyncFunction will be run. When the result of the AsyncFunction is
      * available, it will be placed in the returned Promise.
      */
-    public <RT> Promise<RT> then(final AsyncFunction<T, RT> function) {
+    public <RT extends @Nullable Object> Promise<RT> then(AsyncFunction<T, RT> function) {
         checkThread();
 
         // Create a new Promise to be returned.
@@ -174,16 +183,18 @@ public class Promise<T> {
         // Once this Promise is fulfilled:
         // - Apply the given function to the result (giving us an inner Promise).
         // - On fulfillment of this inner Promise, fulfill our return Promise.
-        thenInner(result -> {
-            try {
-                // When the inner Promise is fulfilled, fulfill the return Promise.
-                // Alternatively, if the inner Promise is rejected, reject the return Promise.
-                function.apply(result).then(promise::fulfill, promise::reject);
-            } catch (Exception e) {
-                // If creating the inner Promise failed, reject the next Promise.
-                promise.reject(e);
-            }
-        });
+        thenInner(
+                result -> {
+                    try {
+                        // When the inner Promise is fulfilled, fulfill the return Promise.
+                        // Alternatively, if the inner Promise is rejected, reject the return
+                        // Promise.
+                        function.apply(result).then(promise::fulfill, promise::reject);
+                    } catch (Exception e) {
+                        // If creating the inner Promise failed, reject the next Promise.
+                        promise.reject(e);
+                    }
+                });
 
         // If this Promise is rejected, reject the next Promise.
         exceptInner(promise::reject);
@@ -192,10 +203,23 @@ public class Promise<T> {
     }
 
     /**
+     * Queues a {@link Runnable} to be run when the Promise is fulfilled or rejected. This allow to
+     * chain the promise while avoiding duplicating code in both the Promise's {@link #then} and
+     * {@link #except} handlers.
+     */
+    @SuppressWarnings("unchecked")
+    public Promise<T> andFinally(Runnable runnable) {
+        Callback<?> asCallback = unused -> runnable.run();
+        thenInner((Callback<T>) asCallback);
+        exceptInner((Callback<Exception>) asCallback);
+        return this;
+    }
+
+    /**
      * Fulfills the Promise with the result and passes it to any {@link Callback}s previously queued
      * on the next iteration of the message loop.
      */
-    public void fulfill(final T result) {
+    public void fulfill(T result) {
         checkThread();
         assert mState == PromiseState.UNFULFILLED;
 
@@ -216,7 +240,7 @@ public class Promise<T> {
      * important to make it explicit when a Promise may be rejected, so that users of that Promise
      * know to provide rejection handling.
      */
-    public void reject(final Exception reason) {
+    public void reject(final @Nullable Exception reason) {
         checkThread();
         assert mState == PromiseState.UNFULFILLED;
 
@@ -229,27 +253,27 @@ public class Promise<T> {
         mRejectCallbacks.clear();
     }
 
-    /**
-     * Rejects a Promise, see {@link #reject(Exception)}.
-     */
+    /** Rejects a Promise, see {@link #reject(Exception)}. */
     public void reject() {
         reject(null);
     }
 
-    /**
-     * Returns whether the promise is fulfilled.
-     */
+    /** Returns whether the promise is fulfilled. */
     public boolean isFulfilled() {
         checkThread();
         return mState == PromiseState.FULFILLED;
     }
 
-    /**
-     * Returns whether the promise is rejected.
-     */
+    /** Returns whether the promise is rejected. */
     public boolean isRejected() {
         checkThread();
         return mState == PromiseState.REJECTED;
+    }
+
+    /** Returns whether the promise is in none of the fulfilled nor rejected states. */
+    public boolean isPending() {
+        checkThread();
+        return mState == PromiseState.UNFULFILLED;
     }
 
     /**
@@ -257,23 +281,22 @@ public class Promise<T> {
      *
      * @return The promised result.
      */
+    @SuppressWarnings("NullAway")
     public T getResult() {
         assert isFulfilled();
+        // SuppressWarnings necessary since mResult is @Nullable, but we cannot check that it's
+        // non-null because T might be @Nullable.
         return mResult;
     }
 
-    /**
-     * Convenience method to return a Promise fulfilled with the given result.
-     */
+    /** Convenience method to return a Promise fulfilled with the given result. */
     public static <T> Promise<T> fulfilled(T result) {
         Promise<T> promise = new Promise<>();
         promise.fulfill(result);
         return promise;
     }
 
-    /**
-     * Convenience method to return a rejected Promise.
-     */
+    /** Convenience method to return a rejected Promise. */
     public static <T> Promise<T> rejected() {
         Promise<T> promise = new Promise<>();
         promise.reject();
@@ -285,7 +308,8 @@ public class Promise<T> {
     }
 
     // We use a different template parameter here so this can be used for both T and Throwables.
-    private <S> void postCallbackToLooper(final Callback<S> callback, final S result) {
+    private <S extends @Nullable Object> void postCallbackToLooper(
+            final Callback<@Nullable S> callback, @Nullable S result) {
         // Post the callbacks to the Thread looper so we don't get a long chain of callbacks
         // holding up the thread.
         mHandler.post(callback.bind(result));

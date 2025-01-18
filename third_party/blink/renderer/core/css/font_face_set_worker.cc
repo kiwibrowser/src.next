@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,19 +27,12 @@ namespace blink {
 const char FontFaceSetWorker::kSupplementName[] = "FontFaceSetWorker";
 
 FontFaceSetWorker::FontFaceSetWorker(WorkerGlobalScope& worker)
-    : FontFaceSet(worker), Supplement<WorkerGlobalScope>(worker) {
-}
+    : FontFaceSet(worker), Supplement<WorkerGlobalScope>(worker) {}
 
 FontFaceSetWorker::~FontFaceSetWorker() = default;
 
 WorkerGlobalScope* FontFaceSetWorker::GetWorker() const {
   return To<WorkerGlobalScope>(GetExecutionContext());
-}
-
-AtomicString FontFaceSetWorker::status() const {
-  DEFINE_STATIC_LOCAL(AtomicString, loading, ("loading"));
-  DEFINE_STATIC_LOCAL(AtomicString, loaded, ("loaded"));
-  return is_loading_ ? loading : loaded;
 }
 
 void FontFaceSetWorker::BeginFontLoading(FontFace* font_face) {
@@ -56,37 +49,38 @@ void FontFaceSetWorker::NotifyError(FontFace* font_face) {
   RemoveFromLoadingFonts(font_face);
 }
 
-ScriptPromise FontFaceSetWorker::ready(ScriptState* script_state) {
+ScriptPromise<FontFaceSet> FontFaceSetWorker::ready(ScriptState* script_state) {
   return ready_->Promise(script_state->World());
 }
 
 void FontFaceSetWorker::FireDoneEventIfPossible() {
-  if (should_fire_loading_event_)
+  if (should_fire_loading_event_) {
     return;
-  if (!ShouldSignalReady())
+  }
+  if (!ShouldSignalReady()) {
     return;
+  }
 
   FireDoneEvent();
 }
 
 bool FontFaceSetWorker::ResolveFontStyle(const String& font_string,
                                          Font& font) {
-  if (font_string.IsEmpty())
+  if (font_string.empty()) {
     return false;
+  }
 
   // Interpret fontString in the same way as the 'font' attribute of
   // CanvasRenderingContext2D.
   auto* parsed_style = CSSParser::ParseFont(font_string, GetExecutionContext());
-  if (!parsed_style)
+  if (!parsed_style) {
     return false;
-
-  FontFamily font_family;
-  font_family.SetFamily(
-      FontFaceSet::kDefaultFontFamily,
-      FontFamily::InferredTypeFor(FontFaceSet::kDefaultFontFamily));
+  }
 
   FontDescription default_font_description;
-  default_font_description.SetFamily(font_family);
+  default_font_description.SetFamily(FontFamily(
+      FontFaceSet::DefaultFontFamily(),
+      FontFamily::InferredTypeFor(FontFaceSet::DefaultFontFamily())));
   default_font_description.SetSpecifiedSize(FontFaceSet::kDefaultFontSize);
   default_font_description.SetComputedSize(FontFaceSet::kDefaultFontSize);
 

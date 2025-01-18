@@ -8,19 +8,16 @@
 #include <memory>
 #include <string>
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/load_error_reporter.h"
-#include "chrome/common/buildflags.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
-
-#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
 #include "extensions/browser/supervised_user_extensions_delegate.h"
-#endif  // BUILDFLAG(ENABLE_SUPERVISED_USERS)
+#include "extensions/common/extension_id.h"
 
 class ExtensionEnableFlowDelegate;
 
@@ -58,7 +55,7 @@ class ExtensionEnableFlow : public extensions::LoadErrorReporter::Observer,
   void StartForNativeWindow(gfx::NativeWindow parent_window);
   void Start();
 
-  const std::string& extension_id() const { return extension_id_; }
+  const extensions::ExtensionId& extension_id() const { return extension_id_; }
 
   // LoadErrorReporter::Observer:
   void OnLoadFailure(content::BrowserContext* browser_context,
@@ -81,16 +78,10 @@ class ExtensionEnableFlow : public extensions::LoadErrorReporter::Observer,
   // Creates an ExtensionInstallPrompt in |prompt_|.
   void CreatePrompt();
 
-#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
-  // Called when the user dismisses the Parent Permission Dialog.
-  void OnParentPermissionDialogDone(
-      extensions::SupervisedUserExtensionsDelegate::ParentPermissionDialogResult
+  // Called when the extension approval flow is complete.
+  void OnExtensionApprovalDone(
+      extensions::SupervisedUserExtensionsDelegate::ExtensionApprovalResult
           result);
-
-  // Called when the user dismisses the Extension Install Blocked By Parent
-  // Dialog.
-  void OnBlockedByParentDialogDone();
-#endif  // BUILDFLAG(ENABLE_SUPERVISED_USERS)
 
   // Starts/stops observing extension load notifications.
   void StartObserving();
@@ -108,7 +99,7 @@ class ExtensionEnableFlow : public extensions::LoadErrorReporter::Observer,
   void InstallPromptDone(ExtensionInstallPrompt::DoneCallbackPayload payload);
 
   const raw_ptr<Profile> profile_;
-  const std::string extension_id_;
+  const extensions::ExtensionId extension_id_;
   const raw_ptr<ExtensionEnableFlowDelegate> delegate_;  // Not owned.
 
   // Parent web contents for ExtensionInstallPrompt that may be created during
@@ -117,7 +108,7 @@ class ExtensionEnableFlow : public extensions::LoadErrorReporter::Observer,
 
   // Parent native window for ExtensionInstallPrompt. Note this is mutually
   // exclusive with |parent_contents_| above.
-  gfx::NativeWindow parent_window_ = nullptr;
+  gfx::NativeWindow parent_window_ = gfx::NativeWindow();
 
   std::unique_ptr<ExtensionInstallPrompt> prompt_;
 

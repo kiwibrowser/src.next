@@ -1,220 +1,297 @@
-/*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
- *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Library General Public
- * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Library General Public License for more details.
- *
- * You should have received a copy of the GNU Library General Public License
- * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
- *
- */
+// Copyright 2021 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/layout/layout_text_combine.h"
 
-#include "third_party/blink/renderer/platform/graphics/graphics_context.h"
+#include "third_party/blink/renderer/core/css/resolver/style_adjuster.h"
+#include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
+#include "third_party/blink/renderer/core/layout/geometry/logical_rect.h"
+#include "third_party/blink/renderer/core/layout/geometry/physical_rect.h"
+#include "third_party/blink/renderer/core/layout/geometry/writing_mode_converter.h"
+#include "third_party/blink/renderer/core/layout/ink_overflow.h"
+#include "third_party/blink/renderer/core/layout/inline/fragment_item.h"
+#include "third_party/blink/renderer/core/layout/inline/inline_node_data.h"
+#include "third_party/blink/renderer/core/layout/layout_text.h"
+#include "third_party/blink/renderer/core/layout/physical_box_fragment.h"
+#include "third_party/blink/renderer/core/paint/inline_paint_context.h"
+#include "third_party/blink/renderer/core/paint/line_relative_rect.h"
+#include "third_party/blink/renderer/platform/fonts/font.h"
+#include "third_party/blink/renderer/platform/fonts/font_description.h"
+#include "third_party/blink/renderer/platform/transforms/affine_transform.h"
 
 namespace blink {
 
-const float kTextCombineMargin = 1.1f;  // Allow em + 10% margin
-
-LayoutTextCombine::LayoutTextCombine(Node* node,
-                                     scoped_refptr<StringImpl> string)
-    : LayoutText(node, std::move(string)),
-      combined_text_width_(0),
-      scale_x_(1.0f),
-      is_combined_(false) {}
-
-void LayoutTextCombine::StyleDidChange(StyleDifference diff,
-                                       const ComputedStyle* old_style) {
-  NOT_DESTROYED();
-  LayoutText::StyleDidChange(diff, old_style);
-  UpdateIsCombined();
-  if (!IsCombined())
-    return;
-
-  // We need to call LayoutText::StyleDidChange before updating combined text
-  // font because StyleDidChange may change the text through text-transform.
-  UpdateFontStyleForCombinedText();
+LayoutTextCombine::LayoutTextCombine() : LayoutBlockFlow(nullptr) {
+  SetIsAtomicInlineLevel(true);
 }
 
-void LayoutTextCombine::TextDidChange() {
-  NOT_DESTROYED();
-  LayoutText::TextDidChange();
+LayoutTextCombine::~LayoutTextCombine() = default;
 
-  bool was_combined = IsCombined();
-  UpdateIsCombined();
+// static
+LayoutTextCombine* LayoutTextCombine::CreateAnonymous(LayoutText* text_child) {
+  DCHECK(ShouldBeParentOf(*text_child)) << text_child;
+  auto* const layout_object = MakeGarbageCollected<LayoutTextCombine>();
+  auto& document = text_child->GetDocument();
+  layout_object->SetDocumentForAnonymous(&document);
+  ComputedStyleBuilder new_style_builder =
+      document.GetStyleResolver().CreateAnonymousStyleBuilderWithDisplay(
+          text_child->StyleRef(), EDisplay::kInlineBlock);
+  StyleAdjuster::AdjustStyleForTextCombine(new_style_builder);
+  layout_object->SetStyle(new_style_builder.TakeStyle());
+  layout_object->AddChild(text_child);
+  LayoutTextCombine::AssertStyleIsValid(text_child->StyleRef());
+  return layout_object;
+}
 
-  // SetTextInternal may be called on construction for applying text-transform
-  // in which case Parent() is nullptr. However, was_combined should be false
-  // since it initially is.
-  DCHECK(!was_combined || Parent());
+String LayoutTextCombine::GetTextContent() const {
+  DCHECK(!NeedsCollectInlines() && GetInlineNodeData()) << this;
+  return GetInlineNodeData()->ItemsData(false).text_content;
+}
 
-  if (was_combined) {
-    // Re-set the ComputedStyle from the parent to base the measurements in
-    // UpdateFontStyleForCombinedText on the original font and not what was
-    // previously set for combined text. If IsCombined() is now false, we are
-    // simply resetting the style to the parent style.
-    SetStyle(Parent()->Style());
-  } else if (IsCombined()) {
-    // If the text was previously not combined, SetStyle would have been a no-op
-    // since the before and after style would be the same ComputedStyle
-    // instance and StyleDidChange would not be called. Instead, call
-    // UpdateFontStyleForCombinedText directly.
-    UpdateFontStyleForCombinedText();
+// static
+void LayoutTextCombine::AssertStyleIsValid(const ComputedStyle& style) {
+  // See also |StyleAdjuster::AdjustStyleForTextCombine()|.
+#if DCHECK_IS_ON()
+  DCHECK_EQ(style.GetTextDecorationLine(), TextDecorationLine::kNone);
+  DCHECK_EQ(style.GetTextEmphasisMark(), TextEmphasisMark::kNone);
+  DCHECK_EQ(style.GetWritingMode(), WritingMode::kHorizontalTb);
+  DCHECK_EQ(style.LetterSpacing(), 0.0f);
+  DCHECK(!style.HasAppliedTextDecorations());
+  DCHECK_EQ(style.TextIndent(), Length::Fixed());
+  DCHECK_EQ(style.GetFont().GetFontDescription().Orientation(),
+            FontOrientation::kHorizontal);
+#endif
+}
+
+float LayoutTextCombine::DesiredWidth() const {
+  DCHECK_EQ(StyleRef().GetFont().GetFontDescription().Orientation(),
+            FontOrientation::kHorizontal);
+  const float one_em = StyleRef().ComputedFontSize();
+  if (EnumHasFlags(
+          Parent()->StyleRef().TextDecorationsInEffect(),
+          TextDecorationLine::kUnderline | TextDecorationLine::kOverline)) {
+    return one_em;
   }
+  // Allow em + 10% margin if there are no underline and overeline for
+  // better looking. This isn't specified in the spec[1], but EPUB group
+  // wants this.
+  // [1] https://www.w3.org/TR/css-writing-modes-3/
+  constexpr float kTextCombineMargin = 1.1f;
+  return one_em * kTextCombineMargin;
 }
 
-float LayoutTextCombine::Width(unsigned from,
-                               unsigned length,
-                               const Font& font,
-                               LayoutUnit x_position,
-                               TextDirection direction,
-                               HashSet<const SimpleFontData*>* fallback_fonts,
-                               gfx::RectF* glyph_bounds,
-                               float) const {
-  NOT_DESTROYED();
-  if (!length)
-    return 0;
-
-  if (HasEmptyText())
-    return 0;
-
-  if (is_combined_)
-    return font.GetFontDescription().ComputedSize();
-
-  return LayoutText::Width(from, length, font, x_position, direction,
-                           fallback_fonts, glyph_bounds);
+float LayoutTextCombine::ComputeInlineSpacing() const {
+  DCHECK_EQ(StyleRef().GetFont().GetFontDescription().Orientation(),
+            FontOrientation::kHorizontal);
+  DCHECK(scale_x_);
+  const LayoutUnit line_height = StyleRef().GetFontHeight().LineHeight();
+  return (line_height - DesiredWidth()) / 2;
 }
 
-void ScaleHorizontallyAndTranslate(GraphicsContext& context,
-                                   float scale_x,
-                                   float center_x,
-                                   float offset_x,
-                                   float offset_y) {
-  context.ConcatCTM(AffineTransform(
-      scale_x, 0, 0, 1, center_x * (1.0f - scale_x) + offset_x * scale_x,
-      offset_y));
+PhysicalOffset LayoutTextCombine::ApplyScaleX(
+    const PhysicalOffset& offset) const {
+  DCHECK(scale_x_.has_value());
+  const float spacing = ComputeInlineSpacing();
+  return PhysicalOffset(LayoutUnit(offset.left * *scale_x_ + spacing),
+                        offset.top);
 }
 
-void LayoutTextCombine::TransformToInlineCoordinates(
-    GraphicsContext& context,
-    const PhysicalRect& box_rect,
-    bool clip) const {
-  NOT_DESTROYED();
-  DCHECK(is_combined_);
+PhysicalRect LayoutTextCombine::ApplyScaleX(const PhysicalRect& rect) const {
+  DCHECK(scale_x_.has_value());
+  return PhysicalRect(ApplyScaleX(rect.offset), ApplyScaleX(rect.size));
+}
 
-  // No transform needed if we don't have a font.
-  if (!StyleRef().GetFont().PrimaryFont())
-    return;
+PhysicalSize LayoutTextCombine::ApplyScaleX(const PhysicalSize& size) const {
+  DCHECK(scale_x_.has_value());
+  return PhysicalSize(LayoutUnit(size.width * *scale_x_), size.height);
+}
 
-  // On input, the |boxRect| is:
-  // 1. Horizontal flow, rotated from the main vertical flow coordinate using
-  //    TextPainter::rotation().
-  // 2. height() is cell-height, which includes internal leading. This equals
-  //    to A+D, and to em+internal leading.
-  // 3. width() is the same as m_combinedTextWidth.
-  // 4. Left is (right-edge - height()).
-  // 5. Top is where char-top (not include internal leading) should be.
-  // See https://support.microsoft.com/en-us/kb/32667.
-  // We move it so that it comes to the center of em excluding internal
-  // leading.
+PhysicalOffset LayoutTextCombine::UnapplyScaleX(
+    const PhysicalOffset& offset) const {
+  DCHECK(scale_x_.has_value());
+  const float spacing = ComputeInlineSpacing();
+  return PhysicalOffset(LayoutUnit((offset.left - spacing) / *scale_x_),
+                        offset.top);
+}
 
-  float cell_height = box_rect.Height();
-  float internal_leading =
-      StyleRef().GetFont().PrimaryFont()->InternalLeading();
-  float offset_y = -internal_leading / 2;
-  float width;
-  if (scale_x_ >= 1.0f) {
-    // Fast path, more than 90% of cases
-    DCHECK_EQ(scale_x_, 1.0f);
-    float offset_x = (cell_height - combined_text_width_) / 2;
-    context.ConcatCTM(AffineTransform::Translation(offset_x, offset_y));
-    width = box_rect.Width();
-  } else {
-    DCHECK_GE(scale_x_, 0.0f);
-    float center_x = box_rect.X() + cell_height / 2;
-    width = combined_text_width_ / scale_x_;
-    float offset_x = (cell_height - width) / 2;
-    ScaleHorizontallyAndTranslate(context, scale_x_, center_x, offset_x,
-                                  offset_y);
+PhysicalOffset LayoutTextCombine::AdjustOffsetForHitTest(
+    const PhysicalOffset& offset_in_container) const {
+  if (!scale_x_) {
+    return offset_in_container;
+  }
+  return UnapplyScaleX(offset_in_container);
+}
+
+PhysicalOffset LayoutTextCombine::AdjustOffsetForLocalCaretRect(
+    const PhysicalOffset& offset_in_container) const {
+  if (!scale_x_) {
+    return offset_in_container;
+  }
+  return ApplyScaleX(offset_in_container);
+}
+
+PhysicalRect LayoutTextCombine::AdjustRectForBoundingBox(
+    const PhysicalRect& rect) const {
+  if (!scale_x_) {
+    return rect;
+  }
+  // See "text-combine-upright-compression-007.html"
+  return ApplyScaleX(rect);
+}
+
+PhysicalRect LayoutTextCombine::ComputeTextBoundsRectForHitTest(
+    const FragmentItem& text_item,
+    const PhysicalOffset& inline_root_offset) const {
+  DCHECK(text_item.IsText()) << text_item;
+  PhysicalRect rect = text_item.SelfInkOverflowRect();
+  rect.Move(text_item.OffsetInContainerFragment());
+  rect = AdjustRectForBoundingBox(rect);
+  rect.Move(inline_root_offset);
+  return rect;
+}
+
+void LayoutTextCombine::ResetLayout() {
+  compressed_font_ = Font();
+  has_compressed_font_ = false;
+  scale_x_.reset();
+}
+
+LayoutUnit LayoutTextCombine::AdjustTextLeftForPaint(
+    LayoutUnit position) const {
+  if (!scale_x_) {
+    return position;
+  }
+  const float spacing = ComputeInlineSpacing();
+  return LayoutUnit(position + spacing / *scale_x_);
+}
+
+LayoutUnit LayoutTextCombine::AdjustTextTopForPaint(LayoutUnit text_top) const {
+  DCHECK_EQ(StyleRef().GetFont().GetFontDescription().Orientation(),
+            FontOrientation::kHorizontal);
+  const SimpleFontData& font_data = *StyleRef().GetFont().PrimaryFont();
+  const float internal_leading = font_data.InternalLeading();
+  const float half_leading = internal_leading / 2;
+  const int ascent = font_data.GetFontMetrics().Ascent();
+  return LayoutUnit(text_top + ascent - half_leading);
+}
+
+AffineTransform LayoutTextCombine::ComputeAffineTransformForPaint(
+    const PhysicalOffset& paint_offset) const {
+  DCHECK(NeedsAffineTransformInPaint());
+  AffineTransform matrix;
+  if (UsingSyntheticOblique()) {
+    const LayoutUnit text_left = AdjustTextLeftForPaint(paint_offset.left);
+    const LayoutUnit text_top = AdjustTextTopForPaint(paint_offset.top);
+    matrix.Translate(text_left, text_top);
+    // TODO(yosin): We should use angle specified in CSS instead of
+    // constant value -15deg. See also |DrawBlobs()| in [1] for vertical
+    // upright oblique.
+    // [1] "third_party/blink/renderer/platform/fonts/font.cc"
+    constexpr float kSlantAngle = -15.0f;
+    matrix.SkewY(kSlantAngle);
+    matrix.Translate(-text_left, -text_top);
+  }
+  if (scale_x_.has_value()) {
+    matrix.Translate(paint_offset.left, paint_offset.top);
+    matrix.Scale(*scale_x_, 1.0f);
+    matrix.Translate(-paint_offset.left, -paint_offset.top);
+  }
+  return matrix;
+}
+
+bool LayoutTextCombine::NeedsAffineTransformInPaint() const {
+  return scale_x_.has_value() || UsingSyntheticOblique();
+}
+
+LineRelativeRect LayoutTextCombine::ComputeTextFrameRect(
+    const PhysicalOffset paint_offset) const {
+  const ComputedStyle& style = Parent()->StyleRef();
+  DCHECK(style.GetFont().GetFontDescription().IsVerticalBaseline());
+
+  const LayoutUnit one_em = style.ComputedFontSizeAsFixed();
+  const FontHeight text_metrics = style.GetFontHeight();
+  const LayoutUnit line_height = text_metrics.LineHeight();
+  return {LineRelativeOffset::CreateFromBoxOrigin(paint_offset),
+          LogicalSize(one_em, line_height)};
+}
+
+PhysicalRect LayoutTextCombine::RecalcContentsInkOverflow(
+    const InlineCursor& cursor) const {
+  const ComputedStyle& style = Parent()->StyleRef();
+  DCHECK(style.GetFont().GetFontDescription().IsVerticalBaseline());
+
+  const LineRelativeRect line_relative_text_rect =
+      ComputeTextFrameRect(PhysicalOffset());
+
+  // Note: |text_rect| and |ink_overflow| are both in logical direction.
+  // It is unusual for a PhysicalRect to be in a logical direction, typically
+  // a LineRelativeRect will be used instead, but the TextCombine case
+  // requires it.
+  const PhysicalRect text_rect{
+      PhysicalOffset(), PhysicalSize{line_relative_text_rect.size.inline_size,
+                                     line_relative_text_rect.size.block_size}};
+  LogicalRect ink_overflow(text_rect.offset.left, text_rect.offset.top,
+                           text_rect.size.width, text_rect.size.height);
+
+  const WritingMode writing_mode = style.GetWritingMode();
+  if (style.HasAppliedTextDecorations()) {
+    // |LayoutTextCombine| does not support decorating box, as it is not
+    // supported in vertical flow and text-combine is only for vertical flow.
+    const LogicalRect decoration_rect = InkOverflow::ComputeDecorationOverflow(
+        cursor, style, style.GetFont(),
+        /* offset_in_container */ PhysicalOffset(), ink_overflow,
+        /* inline_context */ nullptr, writing_mode);
+    ink_overflow.Unite(decoration_rect);
   }
 
-  if (clip)
-    context.Clip(gfx::RectF(box_rect.X(), box_rect.Y(), width, cell_height));
-}
-
-void LayoutTextCombine::UpdateIsCombined() {
-  NOT_DESTROYED();
-  // CSS3 spec says text-combine works only in vertical writing mode.
-  is_combined_ = !StyleRef().IsHorizontalWritingMode()
-                 // Nothing to combine.
-                 && !HasEmptyText();
-}
-
-void LayoutTextCombine::UpdateFontStyleForCombinedText() {
-  NOT_DESTROYED();
-  DCHECK(is_combined_);
-
-  scoped_refptr<ComputedStyle> style = ComputedStyle::Clone(StyleRef());
-  SetStyleInternal(style);
-
-  unsigned offset = 0;
-  TextRun run = ConstructTextRun(style->GetFont(), this, offset, TextLength(),
-                                 *style, style->Direction());
-  FontDescription description = style->GetFont().GetFontDescription();
-  float em_width = description.ComputedSize();
-  if (!EnumHasFlags(
-          style->TextDecorationsInEffect(),
-          TextDecorationLine::kUnderline | TextDecorationLine::kOverline))
-    em_width *= kTextCombineMargin;
-
-  // We are going to draw combined text horizontally.
-  description.SetOrientation(FontOrientation::kHorizontal);
-  combined_text_width_ = style->GetFont().Width(run);
-
-  FontSelector* font_selector = style->GetFont().GetFontSelector();
-
-  // Need to change font orientation to horizontal.
-  style->SetFontDescription(description);
-
-  if (combined_text_width_ <= em_width) {
-    scale_x_ = 1.0f;
-  } else {
-    // Need to try compressed glyphs.
-    static const FontWidthVariant kWidthVariants[] = {kHalfWidth, kThirdWidth,
-                                                      kQuarterWidth};
-    for (size_t i = 0; i < std::size(kWidthVariants); ++i) {
-      description.SetWidthVariant(kWidthVariants[i]);
-      Font compressed_font(description, font_selector);
-      float run_width = compressed_font.Width(run);
-      if (run_width <= em_width) {
-        combined_text_width_ = run_width;
-
-        // Replace my font with the new one.
-        style->SetFontDescription(description);
-        break;
-      }
-    }
-
-    // If width > ~1em, shrink to fit within ~1em, otherwise render without
-    // scaling (no expansion).
-    // https://drafts.csswg.org/css-writing-modes/#text-combine-compression
-    if (combined_text_width_ > em_width) {
-      scale_x_ = em_width / combined_text_width_;
-      combined_text_width_ = em_width;
-    } else {
-      scale_x_ = 1.0f;
-    }
+  if (style.GetTextEmphasisMark() != TextEmphasisMark::kNone) {
+    ink_overflow = InkOverflow::ComputeEmphasisMarkOverflow(
+        style, text_rect.size, ink_overflow);
   }
+
+  if (const ShadowList* text_shadow = style.TextShadow()) {
+    InkOverflow::ExpandForShadowOverflow(ink_overflow, *text_shadow,
+                                         writing_mode);
+  }
+
+  PhysicalRect local_ink_overflow =
+      WritingModeConverter({writing_mode, TextDirection::kLtr}, text_rect.size)
+          .ToPhysical(ink_overflow);
+  local_ink_overflow.ExpandEdgesToPixelBoundaries();
+  return local_ink_overflow;
+}
+
+gfx::Rect LayoutTextCombine::VisualRectForPaint(
+    const PhysicalOffset& paint_offset) const {
+  DCHECK_EQ(PhysicalFragmentCount(), 1u);
+  PhysicalRect ink_overflow = GetPhysicalFragment(0)->InkOverflowRect();
+  ink_overflow.Move(paint_offset);
+  return ToEnclosingRect(ink_overflow);
+}
+
+void LayoutTextCombine::SetScaleX(float new_scale_x) {
+  DCHECK_GT(new_scale_x, 0.0f);
+  DCHECK(!scale_x_.has_value());
+  DCHECK(!has_compressed_font_);
+  // Note: Even if rounding, e.g. LayoutUnit::FromFloatRound(), we still have
+  // gap between painted characters in text-combine-upright-value-all-002.html
+  scale_x_ = new_scale_x;
+}
+
+void LayoutTextCombine::SetCompressedFont(const Font& font) {
+  DCHECK(!has_compressed_font_);
+  DCHECK(!scale_x_.has_value());
+  compressed_font_ = font;
+  has_compressed_font_ = true;
+}
+
+bool LayoutTextCombine::UsingSyntheticOblique() const {
+  return Parent()
+      ->StyleRef()
+      .GetFont()
+      .GetFontDescription()
+      .IsSyntheticOblique();
 }
 
 }  // namespace blink

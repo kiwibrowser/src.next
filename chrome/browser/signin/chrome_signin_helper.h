@@ -14,6 +14,7 @@
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "components/signin/core/browser/signin_header_helper.h"
 #include "content/public/browser/web_contents.h"
+#include "google_apis/gaia/gaia_id.h"
 #include "services/network/public/mojom/fetch_api.mojom-shared.h"
 
 namespace content_settings {
@@ -22,6 +23,10 @@ class CookieSettings;
 
 namespace net {
 class HttpResponseHeaders;
+}
+
+namespace url {
+class Origin;
 }
 
 class GURL;
@@ -80,7 +85,9 @@ class ResponseAdapter {
 
   virtual content::WebContents::Getter GetWebContentsGetter() const = 0;
   virtual bool IsOutermostMainFrame() const = 0;
-  virtual GURL GetURL() const = 0;
+  virtual GURL GetUrl() const = 0;
+  virtual std::optional<url::Origin> GetRequestInitiator() const = 0;
+  virtual const url::Origin* GetRequestTopFrameOrigin() const = 0;
   virtual const net::HttpResponseHeaders* GetHeaders() const = 0;
   virtual void RemoveHeader(const std::string& name) = 0;
 
@@ -103,7 +110,7 @@ void FixAccountConsistencyRequestHeader(
     bool is_off_the_record,
     int incognito_availibility,
     AccountConsistencyMethod account_consistency,
-    const std::string& gaia_id,
+    const GaiaId& gaia_id,
     signin::Tribool is_child_account,
 #if BUILDFLAG(IS_CHROMEOS_ASH)
     bool is_secondary_account_addition_allowed,
@@ -123,7 +130,7 @@ void ProcessAccountConsistencyResponseHeaders(ResponseAdapter* response,
 // Parses and returns an account ID (Gaia ID) from HTTP response header
 // Google-Accounts-RemoveLocalAccount. Returns an empty string if parsing
 // failed. Exposed for testing purposes.
-std::string ParseGaiaIdFromRemoveLocalAccountResponseHeaderForTesting(
+GaiaId ParseGaiaIdFromRemoveLocalAccountResponseHeaderForTesting(
     const net::HttpResponseHeaders* response_headers);
 
 }  // namespace signin

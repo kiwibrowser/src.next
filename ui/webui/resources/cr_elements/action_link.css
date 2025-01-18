@@ -4,30 +4,9 @@
 
 /* #css_wrapper_metadata_start
  * #type=style
+ * #scheme=relative
  * #import=./cr_shared_vars.css.js
- * #import=//resources/polymer/v3_0/paper-styles/color.js
  * #css_wrapper_metadata_end */
 
-[is='action-link'] {
-  cursor: pointer;
-  display: inline-block;
-  text-decoration: underline;
-}
-
-[is='action-link'],
-[is='action-link']:active,
-[is='action-link']:hover,
-[is='action-link']:visited {
-  color: var(--cr-link-color);
-}
-
-[is='action-link'][disabled] {
-  color: var(--paper-grey-600);  /* TODO(dbeam): update for dark mode. */
-  cursor: default;
-  opacity: 0.65;
-  pointer-events: none;
-}
-
-[is='action-link'].no-outline {
-  outline: none;
-}
+/* Intentionally left empty as it is generated at build time from the equivalent
+ * Lit version. */

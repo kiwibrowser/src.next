@@ -48,27 +48,34 @@ ShadowTreeStyleSheetCollection::ShadowTreeStyleSheetCollection(
 void ShadowTreeStyleSheetCollection::CollectStyleSheets(
     StyleEngine& engine,
     StyleSheetCollection& collection) {
+  StyleEngine::RuleSetScope rule_set_scope;
+
   for (Node* n : style_sheet_candidate_nodes_) {
     StyleSheetCandidate candidate(*n);
     DCHECK(!candidate.IsXSL());
 
     StyleSheet* sheet = candidate.Sheet();
-    if (!sheet)
+    if (!sheet) {
       continue;
+    }
 
     collection.AppendSheetForList(sheet);
     if (candidate.CanBeActivated(g_null_atom)) {
       CSSStyleSheet* css_sheet = To<CSSStyleSheet>(sheet);
-      collection.AppendActiveStyleSheet(
-          std::make_pair(css_sheet, engine.RuleSetForSheet(*css_sheet)));
+      collection.AppendActiveStyleSheet(std::make_pair(
+          css_sheet, rule_set_scope.RuleSetForSheet(engine, css_sheet)));
     }
   }
-  if (!GetTreeScope().HasAdoptedStyleSheets())
-    return;
 
-  for (CSSStyleSheet* sheet : *GetTreeScope().AdoptedStyleSheets()) {
-    if (!sheet || !sheet->CanBeActivated(g_null_atom))
+  const TreeScope& tree_scope = GetTreeScope();
+  if (!tree_scope.HasAdoptedStyleSheets()) {
+    return;
+  }
+
+  for (CSSStyleSheet* sheet : *tree_scope.AdoptedStyleSheets()) {
+    if (!sheet || !sheet->CanBeActivated(g_null_atom)) {
       continue;
+    }
     DCHECK_EQ(GetTreeScope().GetDocument(), sheet->ConstructorDocument());
     collection.AppendActiveStyleSheet(
         std::make_pair(sheet, engine.RuleSetForSheet(*sheet)));

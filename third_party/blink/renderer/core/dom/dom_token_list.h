@@ -26,6 +26,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_DOM_TOKEN_LIST_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/dom/element_rare_data_field.h"
 #include "third_party/blink/renderer/core/dom/qualified_name.h"
 #include "third_party/blink/renderer/core/dom/space_split_string.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
@@ -39,12 +40,13 @@ namespace blink {
 class Element;
 class ExceptionState;
 
-class CORE_EXPORT DOMTokenList : public ScriptWrappable {
+class CORE_EXPORT DOMTokenList : public ScriptWrappable,
+                                 public ElementRareDataField {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   DOMTokenList(Element& element, const QualifiedName& attr)
-      : element_(element), attribute_name_(attr) {}
+      : attribute_name_(attr), element_(element) {}
   DOMTokenList(const DOMTokenList&) = delete;
   DOMTokenList& operator=(const DOMTokenList&) = delete;
   ~DOMTokenList() override = default;
@@ -86,12 +88,12 @@ class CORE_EXPORT DOMTokenList : public ScriptWrappable {
   void UpdateWithTokenSet(const SpaceSplitString&);
 
   SpaceSplitString token_set_;
-  const Member<Element> element_;
   // Normal DOMTokenList instances is associated to an attribute name.
   // So |attribute_name_| is typically an html_names::kFooAttr.
   // CustomStateTokenList is associated to no attribute name.
   // |attribute_name_| is |g_null_name| in that case.
   const QualifiedName attribute_name_;
+  const Member<Element> element_;
   bool is_in_update_step_ = false;
 };
 

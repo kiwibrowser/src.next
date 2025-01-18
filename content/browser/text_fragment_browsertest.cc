@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_timeouts.h"
@@ -43,18 +44,12 @@
 namespace content {
 
 class TextFragmentAnchorBrowserTest : public ContentBrowserTest {
- public:
-  TextFragmentAnchorBrowserTest() {
-    feature_list_.InitAndEnableFeature(features::kDocumentPolicy);
-  }
-
  protected:
   void SetUpOnMainThread() override {
     host_resolver()->AddRule("*", "127.0.0.1");
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    ContentBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(switches::kEnableBlinkFeatures,
                                     "TextFragmentIdentifiers");
     // Slow bots are flaky due to slower loading interacting with
@@ -97,8 +92,6 @@ class TextFragmentAnchorBrowserTest : public ContentBrowserTest {
                                           ->GetRenderViewHost()
                                           ->GetWidget());
   }
-
-  base::test::ScopedFeatureList feature_list_;
 };
 
 IN_PROC_BROWSER_TEST_F(TextFragmentAnchorBrowserTest, EnabledOnUserNavigation) {
@@ -261,7 +254,7 @@ IN_PROC_BROWSER_TEST_F(TextFragmentAnchorBrowserTest, UserGestureConsumed) {
 
     // Wait a short amount of time to ensure the page does not scroll.
     base::RunLoop run_loop;
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE, run_loop.QuitClosure(), TestTimeouts::tiny_timeout());
     run_loop.Run();
     EXPECT_DID_SCROLL(false);
@@ -309,7 +302,7 @@ IN_PROC_BROWSER_TEST_F(TextFragmentAnchorBrowserTest,
 
   // Wait a short amount of time to ensure the page does not scroll.
   base::RunLoop run_loop;
-  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
       FROM_HERE, run_loop.QuitClosure(), TestTimeouts::tiny_timeout());
   run_loop.Run();
 
@@ -321,10 +314,17 @@ IN_PROC_BROWSER_TEST_F(TextFragmentAnchorBrowserTest,
   EXPECT_DID_SCROLL(false);
 }
 
+// crbug.com/1470712: Flaky on CrOS Debug
+#if BUILDFLAG(IS_CHROMEOS) && !defined(NDEBUG)
+#define MAYBE_SameDocumentBrowserNavigation \
+  DISABLED_SameDocumentBrowserNavigation
+#else
+#define MAYBE_SameDocumentBrowserNavigation SameDocumentBrowserNavigation
+#endif
 // Ensure a same-document navigation from browser UI scrolls to the text
 // fragment.
 IN_PROC_BROWSER_TEST_F(TextFragmentAnchorBrowserTest,
-                       SameDocumentBrowserNavigation) {
+                       MAYBE_SameDocumentBrowserNavigation) {
   ASSERT_TRUE(embedded_test_server()->Start());
   GURL url(embedded_test_server()->GetURL(
       "/scrollable_page_with_content.html#:~:text=text"));
@@ -355,11 +355,19 @@ IN_PROC_BROWSER_TEST_F(TextFragmentAnchorBrowserTest,
   EXPECT_DID_SCROLL(true);
 }
 
-IN_PROC_BROWSER_TEST_F(TextFragmentAnchorBrowserTest,
-                       SameDocumentBrowserNavigationOnScriptNavigatedDocument) {
+// crbug.com/1470712: Flaky on CrOS Debug
+#if BUILDFLAG(IS_CHROMEOS) && !defined(NDEBUG)
+#define MAYBE_SameDocumentBrowserNavigationOnScriptNavigatedDocument \
+  DISABLED_SameDocumentBrowserNavigationOnScriptNavigatedDocument
+#else
+#define MAYBE_SameDocumentBrowserNavigationOnScriptNavigatedDocument \
+  SameDocumentBrowserNavigationOnScriptNavigatedDocument
+#endif
+IN_PROC_BROWSER_TEST_F(
+    TextFragmentAnchorBrowserTest,
+    MAYBE_SameDocumentBrowserNavigationOnScriptNavigatedDocument) {
   ASSERT_TRUE(embedded_test_server()->Start());
   WebContents* main_contents = shell()->web_contents();
-  RenderFrameSubmissionObserver frame_observer(main_contents);
   // The test assumes the RenderWidgetHost stays the same after navigation,
   // which won't happen if same-site back/forward-cache is enabled. Disable it
   // so that we will keep RenderWidgetHost even after navigation.
@@ -384,6 +392,8 @@ IN_PROC_BROWSER_TEST_F(TextFragmentAnchorBrowserTest,
     EXPECT_TRUE(ExecJs(main_contents, "location = '" + target_url.spec() + "';",
                        EXECUTE_SCRIPT_NO_USER_GESTURE));
     observer.Wait();
+
+    RenderFrameSubmissionObserver frame_observer(main_contents);
     EXPECT_EQ(target_url, main_contents->GetLastCommittedURL());
     frame_observer.WaitForScrollOffsetAtTop(false);
     EXPECT_DID_SCROLL(true);
@@ -393,6 +403,7 @@ IN_PROC_BROWSER_TEST_F(TextFragmentAnchorBrowserTest,
   // we'll use below to ensure the same-document navigation invokes the text
   // fragment.
   {
+    RenderFrameSubmissionObserver frame_observer(main_contents);
     EXPECT_TRUE(ExecJs(main_contents, "window.scrollTo(0, 0)"));
     frame_observer.WaitForScrollOffsetAtTop(true);
     RunUntilInputProcessed(GetWidgetHost());
@@ -407,6 +418,7 @@ IN_PROC_BROWSER_TEST_F(TextFragmentAnchorBrowserTest,
         "/scrollable_page_with_content.html#:~:text=some"));
     EXPECT_TRUE(NavigateToURL(shell(), same_doc_url));
 
+    RenderFrameSubmissionObserver frame_observer(main_contents);
     WaitForPageLoad(main_contents);
 
     frame_observer.WaitForScrollOffsetAtTop(
@@ -487,7 +499,7 @@ IN_PROC_BROWSER_TEST_F(TextFragmentAnchorBrowserTest,
     observer.Wait();
     EXPECT_EQ(new_url, main_contents->GetLastCommittedURL());
     base::RunLoop run_loop;
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE, run_loop.QuitClosure(), TestTimeouts::tiny_timeout());
     run_loop.Run();
     EXPECT_DID_SCROLL(false);
@@ -666,7 +678,7 @@ IN_PROC_BROWSER_TEST_F(TextFragmentAnchorBrowserTest, EnabledByDocumentPolicy) {
 
   EXPECT_TRUE(navigation_manager.WaitForResponse());
   navigation_manager.ResumeNavigation();
-  navigation_manager.WaitForNavigationFinished();
+  ASSERT_TRUE(navigation_manager.WaitForNavigationFinished());
 
   WaitForPageLoad(main_contents);
   frame_observer.WaitForScrollOffsetAtTop(
@@ -711,12 +723,12 @@ IN_PROC_BROWSER_TEST_F(TextFragmentAnchorBrowserTest,
 
   EXPECT_TRUE(navigation_manager.WaitForResponse());
   navigation_manager.ResumeNavigation();
-  navigation_manager.WaitForNavigationFinished();
+  ASSERT_TRUE(navigation_manager.WaitForNavigationFinished());
 
   WaitForPageLoad(main_contents);
   // Wait a short amount of time to ensure the page does not scroll.
   base::RunLoop run_loop;
-  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
       FROM_HERE, run_loop.QuitClosure(), TestTimeouts::tiny_timeout());
   run_loop.Run();
   EXPECT_DID_SCROLL(false);
@@ -807,7 +819,7 @@ class ForceLoadAtTopBrowserTest : public TextFragmentAnchorBrowserTest {
 
     ASSERT_TRUE(navigation_manager.WaitForResponse());
     navigation_manager.ResumeNavigation();
-    navigation_manager.WaitForNavigationFinished();
+    ASSERT_TRUE(navigation_manager.WaitForNavigationFinished());
 
     WaitForPageLoad(shell()->web_contents());
   }
@@ -837,7 +849,7 @@ IN_PROC_BROWSER_TEST_F(ForceLoadAtTopBrowserTest, ScrollRestorationDisabled) {
 
   // Wait a short amount of time to ensure the page does not scroll.
   base::RunLoop run_loop;
-  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
       FROM_HERE, run_loop.QuitClosure(), TestTimeouts::tiny_timeout());
   run_loop.Run();
   RunUntilInputProcessed(GetWidgetHost());
@@ -851,7 +863,7 @@ IN_PROC_BROWSER_TEST_F(ForceLoadAtTopBrowserTest, FragmentAnchorDisabled) {
 
   // Wait a short amount of time to ensure the page does not scroll.
   base::RunLoop run_loop;
-  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
       FROM_HERE, run_loop.QuitClosure(), TestTimeouts::tiny_timeout());
   run_loop.Run();
   RunUntilInputProcessed(GetWidgetHost());
@@ -882,7 +894,7 @@ IN_PROC_BROWSER_TEST_F(ForceLoadAtTopBrowserTest, TextFragmentAnchorDisabled) {
 
   // Wait a short amount of time to ensure the page does not scroll.
   base::RunLoop run_loop;
-  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
       FROM_HERE, run_loop.QuitClosure(), TestTimeouts::tiny_timeout());
   run_loop.Run();
   RunUntilInputProcessed(GetWidgetHost());

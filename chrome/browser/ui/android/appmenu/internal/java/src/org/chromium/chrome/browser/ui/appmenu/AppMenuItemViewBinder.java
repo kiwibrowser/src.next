@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.ui.appmenu;
 
+import android.content.res.ColorStateList;
 import android.graphics.drawable.Drawable;
 import android.text.TextUtils;
 import android.view.View;
@@ -14,26 +15,26 @@ import android.widget.TextView;
 import androidx.annotation.ColorRes;
 import androidx.appcompat.content.res.AppCompatResources;
 import androidx.core.graphics.drawable.DrawableCompat;
+import androidx.core.widget.ImageViewCompat;
 
-import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.browser.ui.appmenu.internal.R;
 import org.chromium.components.browser_ui.widget.highlight.ViewHighlighter;
 import org.chromium.components.browser_ui.widget.highlight.ViewHighlighter.HighlightParams;
 import org.chromium.components.browser_ui.widget.highlight.ViewHighlighter.HighlightShape;
 import org.chromium.components.browser_ui.widget.text.TextViewWithCompoundDrawables;
+import org.chromium.ui.UiUtils;
 import org.chromium.ui.modelutil.MVCListAdapter.ModelList;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.widget.ChromeImageButton;
 import org.chromium.ui.widget.ChromeImageView;
 
-/**
- * The binder to bind the app menu  {@link PropertyModel} with the view.
- */
+/** The binder to bind the app menu {@link PropertyModel} with the view. */
 class AppMenuItemViewBinder {
     /** IDs of all of the buttons in icon_row_menu_item.xml. */
-    private static final int[] BUTTON_IDS = {R.id.button_one, R.id.button_two, R.id.button_three,
-            R.id.button_four, R.id.button_five};
+    private static final int[] BUTTON_IDS = {
+        R.id.button_one, R.id.button_two, R.id.button_three, R.id.button_four, R.id.button_five
+    };
 
     public static void bindStandardItem(PropertyModel model, View view, PropertyKey key) {
         AppMenuUtil.bindStandardItemEnterAnimation(model, view, key);
@@ -59,18 +60,36 @@ class AppMenuItemViewBinder {
         } else if (key == AppMenuItemProperties.ICON) {
             Drawable icon = model.get(AppMenuItemProperties.ICON);
             ChromeImageView imageView = (ChromeImageView) view.findViewById(R.id.menu_item_icon);
-            imageView.setImageDrawable(icon);
-            imageView.setVisibility(icon == null ? View.GONE : View.VISIBLE);
 
-            // tint the icon
-            @ColorRes
-            int colorResId = model.get(AppMenuItemProperties.ICON_COLOR_RES);
+            @ColorRes int colorResId = model.get(AppMenuItemProperties.ICON_COLOR_RES);
             if (colorResId == 0) {
                 // If there is no color assigned to the icon, use the default color.
                 colorResId = R.color.default_icon_color_secondary_tint_list;
             }
-            ApiCompatibilityUtils.setImageTintList(imageView,
-                    AppCompatResources.getColorStateList(imageView.getContext(), colorResId));
+            ColorStateList tintList =
+                    AppCompatResources.getColorStateList(imageView.getContext(), colorResId);
+
+            if (model.get(AppMenuItemProperties.ICON_SHOW_BADGE)) {
+                // Draw the icon with a red badge on top.
+                icon =
+                        UiUtils.drawIconWithBadge(
+                                imageView.getContext(),
+                                icon,
+                                colorResId,
+                                R.dimen.menu_item_icon_badge_size,
+                                R.dimen.menu_item_icon_badge_border_size,
+                                R.color.default_red);
+                // `colorResId` has already been applied by `drawIconWithBadge` and thus, passing
+                // `tintList` is not required.
+                // Note that tint is set to null to clear any tint previously set via XML.
+                tintList = null;
+            }
+
+            imageView.setImageDrawable(icon);
+            imageView.setVisibility(icon == null ? View.GONE : View.VISIBLE);
+
+            // tint the icon
+            ImageViewCompat.setImageTintList(imageView, tintList);
         } else if (key == AppMenuItemProperties.CLICK_HANDLER) {
             view.setOnClickListener(
                     v -> model.get(AppMenuItemProperties.CLICK_HANDLER).onItemClick(model));
@@ -126,7 +145,8 @@ class AppMenuItemViewBinder {
                 button.setVisibility(View.GONE);
                 checkbox.setVisibility(View.VISIBLE);
                 checkbox.setChecked(checked);
-                ApiCompatibilityUtils.setImageTintList(checkbox,
+                ImageViewCompat.setImageTintList(
+                        checkbox,
                         AppCompatResources.getColorStateList(
                                 checkbox.getContext(), R.color.selection_control_button_tint_list));
                 setupMenuButton(checkbox, buttonModel, appMenuClickHandler);
@@ -138,8 +158,10 @@ class AppMenuItemViewBinder {
                     // Only grey out the icon when disabled. When the menu is enabled, use the
                     // icon's original color.
                     Drawable icon = buttonModel.get(AppMenuItemProperties.ICON);
-                    DrawableCompat.setTintList(icon,
-                            AppCompatResources.getColorStateList(button.getContext(),
+                    DrawableCompat.setTintList(
+                            icon,
+                            AppCompatResources.getColorStateList(
+                                    button.getContext(),
                                     R.color.default_icon_color_secondary_tint_list));
                     buttonModel.set(AppMenuItemProperties.ICON, icon);
                 }
@@ -182,7 +204,8 @@ class AppMenuItemViewBinder {
             }
 
             boolean isMenuIconAtStart = model.get(AppMenuItemProperties.MENU_ICON_AT_START);
-            view.setTag(R.id.menu_item_enter_anim_id,
+            view.setTag(
+                    R.id.menu_item_enter_anim_id,
                     AppMenuUtil.buildIconItemEnterAnimator(buttons, isMenuIconAtStart));
 
             // Tint action bar's background.
@@ -201,7 +224,9 @@ class AppMenuItemViewBinder {
         }
     }
 
-    private static void setupImageButton(ImageButton button, final PropertyModel model,
+    private static void setupImageButton(
+            ImageButton button,
+            final PropertyModel model,
             AppMenuClickHandler appMenuClickHandler) {
         // Store and recover the level of image as button.setimageDrawable
         // resets drawable to default level.
@@ -213,7 +238,8 @@ class AppMenuItemViewBinder {
         // TODO(gangwu): Resetting this tint if we go from checked -> not checked while the menu is
         // visible.
         if (model.get(AppMenuItemProperties.CHECKED)) {
-            ApiCompatibilityUtils.setImageTintList(button,
+            ImageViewCompat.setImageTintList(
+                    button,
                     AppCompatResources.getColorStateList(
                             button.getContext(), R.color.default_icon_color_accent1_tint_list));
         }

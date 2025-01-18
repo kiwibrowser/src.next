@@ -31,7 +31,7 @@ void BeaconString::Serialize(ResourceRequest& request) const {
 
 BeaconBlob::BeaconBlob(Blob* data) : data_(data) {
   const String& blob_type = data_->type();
-  if (!blob_type.IsEmpty() && ParsedContentType(blob_type).IsValid())
+  if (!blob_type.empty() && ParsedContentType(blob_type).IsValid())
     content_type_ = AtomicString(blob_type);
 }
 
@@ -47,7 +47,7 @@ scoped_refptr<EncodedFormData> BeaconBlob::GetEncodedFormData() const {
     entity_body->AppendFile(To<File>(data_)->GetPath(),
                             To<File>(data_)->LastModifiedTime());
   } else {
-    entity_body->AppendBlob(data_->Uuid(), data_->GetBlobDataHandle());
+    entity_body->AppendBlob(data_->GetBlobDataHandle());
   }
 
   return entity_body;
@@ -56,7 +56,7 @@ scoped_refptr<EncodedFormData> BeaconBlob::GetEncodedFormData() const {
 void BeaconBlob::Serialize(ResourceRequest& request) const {
   request.SetHttpBody(GetEncodedFormData());
 
-  if (!GetContentType().IsEmpty()) {
+  if (!GetContentType().empty()) {
     if (!cors::IsCorsSafelistedContentType(GetContentType())) {
       request.SetMode(network::mojom::blink::RequestMode::kCors);
     }
@@ -78,9 +78,7 @@ scoped_refptr<EncodedFormData> BeaconDOMArrayBufferView::GetEncodedFormData()
     const {
   DCHECK(data_);
 
-  return EncodedFormData::Create(
-      data_->BaseAddress(),
-      base::checked_cast<wtf_size_t>(data_->byteLength()));
+  return EncodedFormData::Create(data_->ByteSpan());
 }
 
 void BeaconDOMArrayBufferView::Serialize(ResourceRequest& request) const {
@@ -100,8 +98,7 @@ scoped_refptr<EncodedFormData> BeaconDOMArrayBuffer::GetEncodedFormData()
     const {
   DCHECK(data_);
 
-  return EncodedFormData::Create(
-      data_->Data(), base::checked_cast<wtf_size_t>(data_->ByteLength()));
+  return EncodedFormData::Create(data_->ByteSpan());
 }
 
 void BeaconDOMArrayBuffer::Serialize(ResourceRequest& request) const {

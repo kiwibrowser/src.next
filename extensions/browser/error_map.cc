@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/lazy_instance.h"
+#include "extensions/common/extension_id.h"
 
 namespace extensions {
 
@@ -26,15 +27,14 @@ int g_next_error_id = 1;
 
 ////////////////////////////////////////////////////////////////////////////////
 // ErrorMap::Filter
-ErrorMap::Filter::Filter(const std::string& restrict_to_extension_id,
+ErrorMap::Filter::Filter(const ExtensionId& restrict_to_extension_id,
                          int restrict_to_type,
                          const std::set<int>& restrict_to_ids,
                          bool restrict_to_incognito)
     : restrict_to_extension_id(restrict_to_extension_id),
       restrict_to_type(restrict_to_type),
       restrict_to_ids(restrict_to_ids),
-      restrict_to_incognito(restrict_to_incognito) {
-}
+      restrict_to_incognito(restrict_to_incognito) {}
 
 ErrorMap::Filter::Filter(const Filter& other) = default;
 
@@ -42,27 +42,27 @@ ErrorMap::Filter::~Filter() {
 }
 
 ErrorMap::Filter ErrorMap::Filter::ErrorsForExtension(
-    const std::string& extension_id) {
+    const ExtensionId& extension_id) {
   return Filter(extension_id, -1, std::set<int>(), false);
 }
 
 ErrorMap::Filter ErrorMap::Filter::ErrorsForExtensionWithType(
-    const std::string& extension_id,
+    const ExtensionId& extension_id,
     ExtensionError::Type type) {
-  return Filter(extension_id, type, std::set<int>(), false);
+  return Filter(extension_id, static_cast<int>(type), std::set<int>(), false);
 }
 
 ErrorMap::Filter ErrorMap::Filter::ErrorsForExtensionWithIds(
-    const std::string& extension_id,
+    const ExtensionId& extension_id,
     const std::set<int>& ids) {
   return Filter(extension_id, -1, ids, false);
 }
 
 ErrorMap::Filter ErrorMap::Filter::ErrorsForExtensionWithTypeAndIds(
-    const std::string& extension_id,
+    const ExtensionId& extension_id,
     ExtensionError::Type type,
     const std::set<int>& ids) {
-  return Filter(extension_id, type, ids, false);
+  return Filter(extension_id, static_cast<int>(type), ids, false);
 }
 
 ErrorMap::Filter ErrorMap::Filter::IncognitoErrors() {
@@ -70,15 +70,20 @@ ErrorMap::Filter ErrorMap::Filter::IncognitoErrors() {
 }
 
 bool ErrorMap::Filter::Matches(const ExtensionError* error) const {
-  if (restrict_to_type != -1 && restrict_to_type != error->type())
+  if (restrict_to_type != -1 &&
+      restrict_to_type != static_cast<int>(error->type())) {
     return false;
-  if (restrict_to_incognito && !error->from_incognito())
+  }
+  if (restrict_to_incognito && !error->from_incognito()) {
     return false;
+  }
   if (!restrict_to_extension_id.empty() &&
-      error->extension_id() != restrict_to_extension_id)
+      error->extension_id() != restrict_to_extension_id) {
     return false;
-  if (!restrict_to_ids.empty() && restrict_to_ids.count(error->id()) == 0)
+  }
+  if (!restrict_to_ids.empty() && restrict_to_ids.count(error->id()) == 0) {
     return false;
+  }
   return true;
 }
 
@@ -153,11 +158,13 @@ const ExtensionError* ErrorMap::ExtensionEntry::AddError(
 
   // If there are too many errors for an extension already, limit ourselves to
   // the most recent ones.
-  if (list_.size() >= kMaxErrorsPerExtension)
+  if (list_.size() >= kMaxErrorsPerExtension) {
     list_.pop_front();
+  }
 
-  if (error->id() == 0)
+  if (error->id() == 0) {
     error->set_id(g_next_error_id++);
+  }
 
   list_.push_back(std::move(error));
   return list_.back().get();
@@ -165,15 +172,14 @@ const ExtensionError* ErrorMap::ExtensionEntry::AddError(
 
 ////////////////////////////////////////////////////////////////////////////////
 // ErrorMap
-ErrorMap::ErrorMap() {
-}
+ErrorMap::ErrorMap() = default;
 
 ErrorMap::~ErrorMap() {
   RemoveAllErrors();
 }
 
 const ErrorList& ErrorMap::GetErrorsForExtension(
-    const std::string& extension_id) const {
+    const ExtensionId& extension_id) const {
   auto iter = map_.find(extension_id);
   return iter != map_.end() ? *iter->second->list() : g_empty_error_list.Get();
 }
@@ -181,24 +187,27 @@ const ErrorList& ErrorMap::GetErrorsForExtension(
 const ExtensionError* ErrorMap::AddError(
     std::unique_ptr<ExtensionError> error) {
   std::unique_ptr<ExtensionEntry>& entry = map_[error->extension_id()];
-  if (!entry)
+  if (!entry) {
     entry = std::make_unique<ExtensionEntry>();
+  }
 
   return entry->AddError(std::move(error));
 }
 
 void ErrorMap::RemoveErrors(const Filter& filter,
-                            std::set<std::string>* affected_ids) {
+                            std::set<ExtensionId>* affected_ids) {
   if (!filter.restrict_to_extension_id.empty()) {
     auto iter = map_.find(filter.restrict_to_extension_id);
     if (iter != map_.end()) {
-      if (iter->second->DeleteErrors(filter) && affected_ids)
+      if (iter->second->DeleteErrors(filter) && affected_ids) {
         affected_ids->insert(filter.restrict_to_extension_id);
+      }
     }
   } else {
     for (auto& key_val : map_) {
-      if (key_val.second->DeleteErrors(filter) && affected_ids)
+      if (key_val.second->DeleteErrors(filter) && affected_ids) {
         affected_ids->insert(key_val.first);
+      }
     }
   }
 }

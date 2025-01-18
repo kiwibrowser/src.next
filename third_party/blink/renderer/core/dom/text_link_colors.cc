@@ -30,12 +30,6 @@
 #include "third_party/blink/renderer/core/dom/text_link_colors.h"
 
 #include "third_party/blink/public/mojom/frame/color_scheme.mojom-blink.h"
-#include "third_party/blink/renderer/core/css/css_color.h"
-#include "third_party/blink/renderer/core/css/css_identifier_value.h"
-#include "third_party/blink/renderer/core/css/css_light_dark_value_pair.h"
-#include "third_party/blink/renderer/core/css/style_color.h"
-#include "third_party/blink/renderer/core/layout/layout_theme.h"
-#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
@@ -121,42 +115,6 @@ const Color& TextLinkColors::ActiveLinkColor(
              : color_scheme == mojom::blink::ColorScheme::kLight
                    ? kDefaultActiveLinkColorLight
                    : kDefaultActiveLinkColorDark;
-}
-
-Color TextLinkColors::ColorFromCSSValue(const CSSValue& value,
-                                        Color current_color,
-                                        mojom::blink::ColorScheme color_scheme,
-                                        bool for_visited_link) const {
-  if (auto* color_value = DynamicTo<cssvalue::CSSColor>(value))
-    return color_value->Value();
-
-  if (auto* pair = DynamicTo<CSSLightDarkValuePair>(value)) {
-    const CSSValue& color_value =
-        color_scheme == mojom::blink::ColorScheme::kLight ? pair->First()
-                                                          : pair->Second();
-    return ColorFromCSSValue(color_value, current_color, color_scheme,
-                             for_visited_link);
-  }
-
-  CSSValueID value_id = To<CSSIdentifierValue>(value).GetValueID();
-  switch (value_id) {
-    case CSSValueID::kInvalid:
-      NOTREACHED();
-      return Color();
-    case CSSValueID::kInternalQuirkInherit:
-      return TextColor(color_scheme);
-    case CSSValueID::kWebkitLink:
-      return for_visited_link ? VisitedLinkColor(color_scheme)
-                              : LinkColor(color_scheme);
-    case CSSValueID::kWebkitActivelink:
-      return ActiveLinkColor(color_scheme);
-    case CSSValueID::kWebkitFocusRingColor:
-      return LayoutTheme::GetTheme().FocusRingColor(color_scheme);
-    case CSSValueID::kCurrentcolor:
-      return current_color;
-    default:
-      return StyleColor::ColorFromKeyword(value_id, color_scheme);
-  }
 }
 
 }  // namespace blink

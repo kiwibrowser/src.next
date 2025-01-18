@@ -4,8 +4,8 @@
 
 #include "components/search_engines/template_url_parser.h"
 
-#include "base/bind.h"
 #include "base/files/file_util.h"
+#include "base/functional/bind.h"
 #include "base/path_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/task_environment.h"
@@ -57,10 +57,9 @@ class TemplateURLParserTest : public testing::Test {
   data_decoder::test::InProcessDataDecoder data_decoder_;
 };
 
-TemplateURLParserTest::TemplateURLParserTest() {}
+TemplateURLParserTest::TemplateURLParserTest() = default;
 
-TemplateURLParserTest::~TemplateURLParserTest() {
-}
+TemplateURLParserTest::~TemplateURLParserTest() = default;
 
 void TemplateURLParserTest::SetUp() {
   ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &osdd_dir_));

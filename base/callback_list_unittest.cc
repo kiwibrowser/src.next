@@ -7,8 +7,8 @@
 #include <memory>
 #include <utility>
 
-#include "base/bind.h"
-#include "base/callback_helpers.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -98,7 +98,7 @@ class Summer {
   void AddFiveParam(int a, int b, int c, int d, int e) {
     value_ = a + b + c + d + e;
   }
-  void AddSixParam(int a, int b, int c, int d, int e , int f) {
+  void AddSixParam(int a, int b, int c, int d, int e, int f) {
     value_ = a + b + c + d + e + f;
   }
 

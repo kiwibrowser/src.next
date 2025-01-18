@@ -4,6 +4,8 @@
 
 #include "net/base/schemeful_site.h"
 
+#include <array>
+
 #include "base/test/metrics/histogram_tester.h"
 #include "net/base/url_util.h"
 #include "testing/gmock/include/gmock/gmock-matchers.h"
@@ -32,7 +34,7 @@ TEST(SchemefulSiteTest, DifferentOriginSameRegisterableDomain) {
 TEST(SchemefulSiteTest, Operators) {
   // Create a list of origins that should all have different schemeful sites.
   // These are in ascending order.
-  url::Origin kTestOrigins[] = {
+  auto kTestOrigins = std::to_array<url::Origin>({
       url::Origin::Create(GURL("data:text/html,<body>Hello World</body>")),
       url::Origin::Create(GURL("file://foo")),
       url::Origin::Create(GURL("http://a.bar.test")),
@@ -42,7 +44,8 @@ TEST(SchemefulSiteTest, Operators) {
       url::Origin::Create(GURL("https://a.bar.test")),
       url::Origin::Create(GURL("https://c.test")),
       url::Origin::Create(GURL("https://d.test")),
-      url::Origin::Create(GURL("https://a.foo.test"))};
+      url::Origin::Create(GURL("https://a.foo.test")),
+  });
 
   // Compare each origin to every other origin and ensure the operators work as
   // expected.
@@ -129,6 +132,19 @@ TEST(SchemefulSiteTest, IPBasedOriginsRemovePort) {
             SchemefulSite(origin_ipv6).GetInternalOriginForTesting());
 }
 
+TEST(SchemefulSiteTest, LocalhostOriginsRemovePort) {
+  // Localhost origins should not be modified, except for removing their ports.
+  url::Origin localhost_http =
+      url::Origin::Create(GURL("http://localhost:1234"));
+  EXPECT_EQ(url::Origin::Create(GURL("http://localhost")),
+            SchemefulSite(localhost_http).GetInternalOriginForTesting());
+
+  url::Origin localhost_https =
+      url::Origin::Create(GURL("https://localhost:1234"));
+  EXPECT_EQ(url::Origin::Create(GURL("https://localhost")),
+            SchemefulSite(localhost_https).GetInternalOriginForTesting());
+}
+
 TEST(SchemefulSiteTest, OpaqueOrigins) {
   url::Origin opaque_origin_a =
       url::Origin::Create(GURL("data:text/html,<body>Hello World</body>"));
@@ -160,7 +176,7 @@ TEST(SchemefulSiteTest, SchemeWithNetworkHost) {
   ASSERT_TRUE(IsStandardSchemeWithNetworkHost("network"));
   ASSERT_FALSE(IsStandardSchemeWithNetworkHost("non-network"));
 
-  absl::optional<SchemefulSite> network_host_site =
+  std::optional<SchemefulSite> network_host_site =
       SchemefulSite::CreateIfHasRegisterableDomain(
           url::Origin::Create(GURL("network://site.example.test:1337")));
   EXPECT_TRUE(network_host_site.has_value());
@@ -169,7 +185,7 @@ TEST(SchemefulSiteTest, SchemeWithNetworkHost) {
   EXPECT_EQ("example.test",
             network_host_site->GetInternalOriginForTesting().host());
 
-  absl::optional<SchemefulSite> non_network_host_site_null =
+  std::optional<SchemefulSite> non_network_host_site_null =
       SchemefulSite::CreateIfHasRegisterableDomain(
           url::Origin::Create(GURL("non-network://site.example.test")));
   EXPECT_FALSE(non_network_host_site_null.has_value());
@@ -227,7 +243,7 @@ TEST(SchemefulSiteTest, SerializationConsistent) {
     SCOPED_TRACE(site.GetDebugString());
     EXPECT_FALSE(site.GetInternalOriginForTesting().opaque());
 
-    absl::optional<SchemefulSite> deserialized_site =
+    std::optional<SchemefulSite> deserialized_site =
         SchemefulSite::Deserialize(site.Serialize());
     EXPECT_TRUE(deserialized_site);
     EXPECT_EQ(site, deserialized_site);
@@ -249,7 +265,7 @@ TEST(SchemefulSiteTest, SerializationFileSiteWithHost) {
     SCOPED_TRACE(test_case.site.GetDebugString());
     std::string serialized_site = test_case.site.SerializeFileSiteWithHost();
     EXPECT_EQ(test_case.expected, serialized_site);
-    absl::optional<SchemefulSite> deserialized_site =
+    std::optional<SchemefulSite> deserialized_site =
         SchemefulSite::Deserialize(serialized_site);
     EXPECT_TRUE(deserialized_site);
     EXPECT_EQ(test_case.site, deserialized_site);
@@ -274,7 +290,7 @@ TEST(SchemefulSiteTest, OpaqueSerialization) {
       SchemefulSite(GURL("data:text/html,<body>Hello World</body>"))};
 
   for (auto& site : kTestSites) {
-    absl::optional<SchemefulSite> deserialized_site =
+    std::optional<SchemefulSite> deserialized_site =
         SchemefulSite::DeserializeWithNonce(*site.SerializeWithNonce());
     EXPECT_TRUE(deserialized_site);
     EXPECT_EQ(site, *deserialized_site);
@@ -327,7 +343,7 @@ TEST(SchemefulSiteTest, CreateIfHasRegisterableDomain) {
        }) {
     url::Origin origin = url::Origin::Create(GURL(site));
     EXPECT_EQ(SchemefulSite::CreateIfHasRegisterableDomain(origin),
-              absl::nullopt)
+              std::nullopt)
         << "site = \"" << site << "\"";
   }
 }
@@ -395,6 +411,15 @@ TEST(SchemefulSiteTest, GetGURL) {
     SchemefulSite site(testcase.origin);
     EXPECT_EQ(site.GetURL(), testcase.wantGURL);
   }
+}
+
+TEST(SchemefulSiteTest, InternalValue) {
+  url::Origin origin = url::Origin::Create(GURL("https://example.com"));
+  SchemefulSite site(origin);
+  EXPECT_EQ(site.internal_value(), origin);
+  url::Origin opaque_origin;
+  SchemefulSite opaque_site(opaque_origin);
+  EXPECT_EQ(opaque_site.internal_value(), opaque_origin);
 }
 
 }  // namespace net

@@ -10,7 +10,7 @@
 #include <utility>
 
 #include "base/base64.h"
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "extensions/browser/extension_action_manager.h"
@@ -18,7 +18,7 @@
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/state_store.h"
 #include "extensions/common/constants.h"
-#include "ui/base/layout.h"
+#include "extensions/common/extension_id.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
@@ -65,31 +65,24 @@ std::string SkColorToRawString(SkColor color) {
 }
 
 // Conversion function for reading/writing to storage.
-bool StringToSkBitmap(const std::string& str, SkBitmap* bitmap) {
-  // TODO(mpcomplete): Remove the base64 encode/decode step when
-  // http://crbug.com/140546 is fixed.
-  std::string raw_str;
-  if (!base::Base64Decode(str, &raw_str))
-    return false;
+SkBitmap StringToSkBitmap(const std::string& str) {
+  std::optional<std::vector<uint8_t>> decoded = base::Base64Decode(str);
+  if (!decoded) {
+    return SkBitmap();
+  }
 
-  bool success = gfx::PNGCodec::Decode(
-      reinterpret_cast<unsigned const char*>(raw_str.data()), raw_str.size(),
-      bitmap);
-  return success;
+  return gfx::PNGCodec::Decode(decoded.value());
 }
 
 // Conversion function for reading/writing to storage.
 std::string BitmapToString(const SkBitmap& bitmap) {
-  std::vector<unsigned char> data;
-  bool success = gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, false, &data);
-  if (!success)
+  std::optional<std::vector<uint8_t>> data =
+      gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, /*discard_transparency=*/false);
+  if (!data) {
     return std::string();
+  }
 
-  base::StringPiece raw_str(
-      reinterpret_cast<const char*>(&data[0]), data.size());
-  std::string base64_str;
-  base::Base64Encode(raw_str, &base64_str);
-  return base64_str;
+  return base::Base64Encode(data.value());
 }
 
 // Set |action|'s default values to those specified in |dict|.
@@ -124,7 +117,7 @@ void SetDefaultsFromValue(const base::Value::Dict& dict,
                               RawStringToSkColor(*badge_text_color));
   }
 
-  absl::optional<int> appearance_storage = dict.FindInt(kAppearanceStorageKey);
+  std::optional<int> appearance_storage = dict.FindInt(kAppearanceStorageKey);
   if (appearance_storage && !action->HasIsVisible(kDefaultTabId)) {
     switch (*appearance_storage) {
       case INVISIBLE:
@@ -140,23 +133,23 @@ void SetDefaultsFromValue(const base::Value::Dict& dict,
   const base::Value::Dict* icon_dict = dict.FindDict(kIconStorageKey);
   if (icon_dict && !action->HasIcon(kDefaultTabId)) {
     gfx::ImageSkia icon;
-    SkBitmap bitmap;
     for (const auto iter : *icon_dict) {
       int icon_size = 0;
       if (base::StringToInt(iter.first, &icon_size) &&
-          iter.second.is_string() &&
-          StringToSkBitmap(iter.second.GetString(), &bitmap)) {
-        CHECK(!bitmap.isNull());
-        float scale =
-            static_cast<float>(icon_size) / ExtensionAction::ActionIconSize();
-        icon.AddRepresentation(gfx::ImageSkiaRep(bitmap, scale));
+          iter.second.is_string()) {
+        SkBitmap bitmap = StringToSkBitmap(iter.second.GetString());
+        if (!bitmap.isNull()) {
+          float scale =
+              static_cast<float>(icon_size) / ExtensionAction::ActionIconSize();
+          icon.AddRepresentation(gfx::ImageSkiaRep(bitmap, scale));
+        }
       }
     }
     action->SetIcon(kDefaultTabId, gfx::Image(icon));
   }
 }
 
-// Store |action|'s default values in a DictionaryValue for use in storing to
+// Store |action|'s default values in a base::Value::Dict for use in storing to
 // disk.
 base::Value::Dict DefaultsToValue(ExtensionAction* action) {
   const int kDefaultTabId = ExtensionAction::kDefaultTabId;
@@ -193,8 +186,8 @@ base::Value::Dict DefaultsToValue(ExtensionAction* action) {
 ExtensionActionStorageManager::ExtensionActionStorageManager(
     content::BrowserContext* context)
     : browser_context_(context) {
-  extension_action_observation_.Observe(
-      ExtensionActionAPI::Get(browser_context_));
+  extension_action_dispatcher_observation_.Observe(
+      ExtensionActionDispatcher::Get(browser_context_));
   extension_registry_observation_.Observe(
       ExtensionRegistry::Get(browser_context_));
 
@@ -203,16 +196,16 @@ ExtensionActionStorageManager::ExtensionActionStorageManager(
     store->RegisterKey(kBrowserActionStorageKey);
 }
 
-ExtensionActionStorageManager::~ExtensionActionStorageManager() {
-}
+ExtensionActionStorageManager::~ExtensionActionStorageManager() = default;
 
 void ExtensionActionStorageManager::OnExtensionLoaded(
     content::BrowserContext* browser_context,
     const Extension* extension) {
   ExtensionAction* action = ExtensionActionManager::Get(browser_context_)
                                 ->GetExtensionAction(*extension);
-  if (!action || action->action_type() != ActionInfo::TYPE_BROWSER)
+  if (!action || action->action_type() != ActionInfo::Type::kBrowser) {
     return;
+  }
 
   StateStore* store = GetStateStore();
   if (store) {
@@ -232,14 +225,14 @@ void ExtensionActionStorageManager::OnExtensionActionUpdated(
   // settings can't be persisted across browser sessions.
   bool for_default_tab = !web_contents;
   if (browser_context_ == browser_context &&
-      extension_action->action_type() == ActionInfo::TYPE_BROWSER &&
+      extension_action->action_type() == ActionInfo::Type::kBrowser &&
       for_default_tab) {
     WriteToStorage(extension_action);
   }
 }
 
-void ExtensionActionStorageManager::OnExtensionActionAPIShuttingDown() {
-  extension_action_observation_.Reset();
+void ExtensionActionStorageManager::OnShuttingDown() {
+  extension_action_dispatcher_observation_.Reset();
 }
 
 void ExtensionActionStorageManager::WriteToStorage(
@@ -254,8 +247,8 @@ void ExtensionActionStorageManager::WriteToStorage(
 }
 
 void ExtensionActionStorageManager::ReadFromStorage(
-    const std::string& extension_id,
-    absl::optional<base::Value> value) {
+    const ExtensionId& extension_id,
+    std::optional<base::Value> value) {
   const Extension* extension = ExtensionRegistry::Get(browser_context_)->
       enabled_extensions().GetByID(extension_id);
   if (!extension)
@@ -263,7 +256,7 @@ void ExtensionActionStorageManager::ReadFromStorage(
 
   ExtensionAction* action = ExtensionActionManager::Get(browser_context_)
                                 ->GetExtensionAction(*extension);
-  if (!action || action->action_type() != ActionInfo::TYPE_BROWSER) {
+  if (!action || action->action_type() != ActionInfo::Type::kBrowser) {
     // This can happen if the extension is updated between startup and when the
     // storage read comes back, and the update removes the browser action.
     // http://crbug.com/349371

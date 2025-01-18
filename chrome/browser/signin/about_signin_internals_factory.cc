@@ -15,7 +15,14 @@
 #include "components/signin/core/browser/about_signin_internals.h"
 
 AboutSigninInternalsFactory::AboutSigninInternalsFactory()
-    : ProfileKeyedServiceFactory("AboutSigninInternals") {
+    : ProfileKeyedServiceFactory(
+          "AboutSigninInternals",
+          ProfileSelections::Builder()
+              .WithRegular(ProfileSelection::kOriginalOnly)
+              // TODO(crbug.com/40257657): Check if this service is needed in
+              // Guest mode.
+              .WithGuest(ProfileSelection::kOriginalOnly)
+              .Build()) {
   DependsOn(ChromeSigninClientFactory::GetInstance());
   DependsOn(SigninErrorControllerFactory::GetInstance());
   DependsOn(AccountReconcilorFactory::GetInstance());
@@ -23,7 +30,7 @@ AboutSigninInternalsFactory::AboutSigninInternalsFactory()
   DependsOn(AccountConsistencyModeManagerFactory::GetInstance());
 }
 
-AboutSigninInternalsFactory::~AboutSigninInternalsFactory() {}
+AboutSigninInternalsFactory::~AboutSigninInternalsFactory() = default;
 
 // static
 AboutSigninInternals* AboutSigninInternalsFactory::GetForProfile(
@@ -34,7 +41,8 @@ AboutSigninInternals* AboutSigninInternalsFactory::GetForProfile(
 
 // static
 AboutSigninInternalsFactory* AboutSigninInternalsFactory::GetInstance() {
-  return base::Singleton<AboutSigninInternalsFactory>::get();
+  static base::NoDestructor<AboutSigninInternalsFactory> instance;
+  return instance.get();
 }
 
 void AboutSigninInternalsFactory::RegisterProfilePrefs(
@@ -42,14 +50,14 @@ void AboutSigninInternalsFactory::RegisterProfilePrefs(
   AboutSigninInternals::RegisterPrefs(user_prefs);
 }
 
-KeyedService* AboutSigninInternalsFactory::BuildServiceInstanceFor(
+std::unique_ptr<KeyedService>
+AboutSigninInternalsFactory::BuildServiceInstanceForBrowserContext(
     content::BrowserContext* context) const {
   Profile* profile = Profile::FromBrowserContext(context);
-  AboutSigninInternals* service = new AboutSigninInternals(
+  return std::make_unique<AboutSigninInternals>(
       IdentityManagerFactory::GetForProfile(profile),
       SigninErrorControllerFactory::GetForProfile(profile),
       AccountConsistencyModeManager::GetMethodForProfile(profile),
       ChromeSigninClientFactory::GetForProfile(profile),
       AccountReconcilorFactory::GetForProfile(profile));
-  return service;
 }

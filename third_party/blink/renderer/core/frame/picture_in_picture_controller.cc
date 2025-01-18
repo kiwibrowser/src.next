@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,6 +39,30 @@ bool PictureInPictureController::IsElementInPictureInPicture(
   PictureInPictureController* controller =
       Supplement<Document>::From<PictureInPictureController>(document);
   return controller && controller->IsPictureInPictureElement(element);
+}
+
+// static
+LocalDOMWindow* PictureInPictureController::GetDocumentPictureInPictureWindow(
+    const Document& document) {
+#if !BUILDFLAG(TARGET_OS_IS_ANDROID)
+  PictureInPictureController* controller =
+      Supplement<Document>::From<PictureInPictureController>(document);
+  return controller ? controller->GetDocumentPictureInPictureWindow() : nullptr;
+#else
+  return nullptr;
+#endif  // !BUILDFLAG(TARGET_OS_IS_ANDROID)
+}
+
+// static
+LocalDOMWindow* PictureInPictureController::GetDocumentPictureInPictureOwner(
+    const Document& document) {
+#if !BUILDFLAG(TARGET_OS_IS_ANDROID)
+  PictureInPictureController* controller =
+      Supplement<Document>::From<PictureInPictureController>(document);
+  return controller ? controller->GetDocumentPictureInPictureOwner() : nullptr;
+#else
+  return nullptr;
+#endif  // !BUILDFLAG(TARGET_OS_IS_ANDROID)
 }
 
 void PictureInPictureController::Trace(Visitor* visitor) const {

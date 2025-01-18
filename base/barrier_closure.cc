@@ -7,8 +7,9 @@
 #include <utility>
 
 #include "base/atomic_ref_count.h"
-#include "base/bind.h"
+#include "base/functional/bind.h"
 #include "base/memory/ptr_util.h"
+#include "base/notreached.h"
 #include "base/numerics/safe_conversions.h"
 
 namespace base {
@@ -18,6 +19,8 @@ namespace {
 class BarrierInfo {
  public:
   BarrierInfo(size_t num_callbacks_left, OnceClosure done_closure);
+  BarrierInfo(const BarrierInfo&) = delete;
+  BarrierInfo& operator=(const BarrierInfo&) = delete;
   void Run();
 
  private:
@@ -31,12 +34,13 @@ BarrierInfo::BarrierInfo(size_t num_callbacks, OnceClosure done_closure)
 
 void BarrierInfo::Run() {
   DCHECK(!num_callbacks_left_.IsZero());
-  if (!num_callbacks_left_.Decrement())
+  if (!num_callbacks_left_.Decrement()) {
     std::move(done_closure_).Run();
+  }
 }
 
 void ShouldNeverRun() {
-  CHECK(false);
+  NOTREACHED();
 }
 
 }  // namespace

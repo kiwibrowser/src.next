@@ -2,14 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/notreached.h"
 #include "chrome/browser/ui/screen_capture_notification_ui.h"
+
+#include "base/notreached.h"
 
 // Stub implementation of the ScreenCaptureNotificationUI interface.
 class ScreenCaptureNotificationUIStub : public ScreenCaptureNotificationUI {
  public:
-  ScreenCaptureNotificationUIStub() {}
-  ~ScreenCaptureNotificationUIStub() override {}
+  ScreenCaptureNotificationUIStub() = default;
+  ~ScreenCaptureNotificationUIStub() override = default;
 
   gfx::NativeViewId OnStarted(
       base::OnceClosure stop_callback,
@@ -22,7 +23,8 @@ class ScreenCaptureNotificationUIStub : public ScreenCaptureNotificationUI {
 
 // static
 std::unique_ptr<ScreenCaptureNotificationUI>
-ScreenCaptureNotificationUI::Create(const std::u16string& title) {
-  return std::unique_ptr<ScreenCaptureNotificationUI>(
-      new ScreenCaptureNotificationUIStub());
+ScreenCaptureNotificationUI::Create(
+    const std::u16string& title,
+    content::WebContents* capturing_web_contents) {
+  return std::make_unique<ScreenCaptureNotificationUIStub>();
 }

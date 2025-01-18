@@ -6,8 +6,8 @@
 
 #include <utility>
 
-#include "base/callback.h"
 #include "base/check.h"
+#include "base/functional/callback.h"
 #include "net/http/bidirectional_stream_impl.h"
 #include "net/log/net_log_event_type.h"
 #include "net/spdy/bidirectional_stream_spdy_impl.h"
@@ -17,15 +17,12 @@
 namespace net {
 
 HttpStreamRequest::HttpStreamRequest(
-    const GURL& url,
     Helper* helper,
-    HttpStreamRequest::Delegate* delegate,
     WebSocketHandshakeStreamBase::CreateHelper*
         websocket_handshake_stream_create_helper,
     const NetLogWithSource& net_log,
     StreamType stream_type)
-    : url_(url),
-      helper_(helper),
+    : helper_(helper),
       websocket_handshake_stream_create_helper_(
           websocket_handshake_stream_create_helper),
       net_log_(net_log),
@@ -38,14 +35,13 @@ HttpStreamRequest::~HttpStreamRequest() {
   helper_.ExtractAsDangling()->OnRequestComplete();  // May delete `*helper_`;
 }
 
-void HttpStreamRequest::Complete(bool was_alpn_negotiated,
-                                 NextProto negotiated_protocol,
-                                 bool using_spdy) {
+void HttpStreamRequest::Complete(
+    NextProto negotiated_protocol,
+    AlternateProtocolUsage alternate_protocol_usage) {
   DCHECK(!completed_);
   completed_ = true;
-  was_alpn_negotiated_ = was_alpn_negotiated;
   negotiated_protocol_ = negotiated_protocol;
-  using_spdy_ = using_spdy;
+  alternate_protocol_usage_ = alternate_protocol_usage;
 }
 
 int HttpStreamRequest::RestartTunnelWithProxyAuth() {
@@ -60,19 +56,14 @@ LoadState HttpStreamRequest::GetLoadState() const {
   return helper_->GetLoadState();
 }
 
-bool HttpStreamRequest::was_alpn_negotiated() const {
-  DCHECK(completed_);
-  return was_alpn_negotiated_;
-}
-
 NextProto HttpStreamRequest::negotiated_protocol() const {
   DCHECK(completed_);
   return negotiated_protocol_;
 }
 
-bool HttpStreamRequest::using_spdy() const {
+AlternateProtocolUsage HttpStreamRequest::alternate_protocol_usage() const {
   DCHECK(completed_);
-  return using_spdy_;
+  return alternate_protocol_usage_;
 }
 
 const ConnectionAttempts& HttpStreamRequest::connection_attempts() const {
@@ -81,13 +72,30 @@ const ConnectionAttempts& HttpStreamRequest::connection_attempts() const {
 
 void HttpStreamRequest::AddConnectionAttempts(
     const ConnectionAttempts& attempts) {
-  for (const auto& attempt : attempts)
+  for (const auto& attempt : attempts) {
     connection_attempts_.push_back(attempt);
+  }
 }
 
 WebSocketHandshakeStreamBase::CreateHelper*
 HttpStreamRequest::websocket_handshake_stream_create_helper() const {
   return websocket_handshake_stream_create_helper_;
+}
+
+void HttpStreamRequest::SetDnsResolutionTimeOverrides(
+    base::TimeTicks dns_resolution_start_time_override,
+    base::TimeTicks dns_resolution_end_time_override) {
+  CHECK(!dns_resolution_start_time_override.is_null());
+  CHECK(!dns_resolution_end_time_override.is_null());
+  if (dns_resolution_start_time_override_.is_null() ||
+      (dns_resolution_start_time_override <
+       dns_resolution_start_time_override_)) {
+    dns_resolution_start_time_override_ = dns_resolution_start_time_override;
+  }
+  if (dns_resolution_end_time_override_.is_null() ||
+      (dns_resolution_end_time_override < dns_resolution_end_time_override_)) {
+    dns_resolution_end_time_override_ = dns_resolution_end_time_override;
+  }
 }
 
 }  // namespace net

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,16 +11,21 @@
 
 namespace blink {
 
+class ScriptObject;
+
 // The constants are implemented as static members of a class to have an unique
 // address and not violate ODR.
 struct CORE_EXPORT ReportType {
   static constexpr const char kCSPViolation[] = "csp-violation";
+  static constexpr const char kCSPHash[] = "csp-hash";
   static constexpr const char kCoopAccessViolation[] = "coop-access-violation";
   static constexpr const char kDeprecation[] = "deprecation";
   static constexpr const char kDocumentPolicyViolation[] =
       "document-policy-violation";
   static constexpr const char kPermissionsPolicyViolation[] =
       "permissions-policy-violation";
+  static constexpr const char kPotentialPermissionsPolicyViolation[] =
+      "potential-permissions-policy-violation";
   static constexpr const char kIntervention[] = "intervention";
 };
 
@@ -37,18 +42,24 @@ class CORE_EXPORT Report : public ScriptWrappable {
 
   String type() const { return type_; }
   String url() const { return url_; }
-  ReportBody* body() const { return body_; }
+  ReportBody* body() const { return body_.Get(); }
 
   void Trace(Visitor* visitor) const override {
     visitor->Trace(body_);
     ScriptWrappable::Trace(visitor);
   }
 
-  ScriptValue toJSON(ScriptState* script_state) const;
+  ScriptObject toJSON(ScriptState* script_state) const;
 
   // Provides a hash-like value for identifying reports with same content.
   // Collision of match id is possible.
   unsigned MatchId() const;
+
+  // Determines whether this report is allowed to be sent to observers or the
+  // reporting endpoints. This should return false if the report should not be
+  // sent, for example, if the body of the report would reveal private
+  // information, such as extension URLs.
+  bool ShouldSendReport() const;
 
  private:
   const String type_;

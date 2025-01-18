@@ -54,12 +54,33 @@ class TestExtensionEnvironment {
     kInheritExistingTaskEnvironment,
   };
 
-  explicit TestExtensionEnvironment(Type type = Type::kWithTaskEnvironment);
+  enum class ProfileCreationType {
+    kNoCreate,
+    kCreate,
+  };
+
+#if BUILDFLAG(IS_CHROMEOS)
+  enum class OSSetupType {
+    kNoSetUp,
+    kSetUp,
+  };
+#endif
+
+  explicit TestExtensionEnvironment(
+      Type type = Type::kWithTaskEnvironment,
+      ProfileCreationType profile_creation_type = ProfileCreationType::kCreate
+#if BUILDFLAG(IS_CHROMEOS)
+      ,
+      OSSetupType os_setup_type = OSSetupType::kSetUp
+#endif
+  );
 
   TestExtensionEnvironment(const TestExtensionEnvironment&) = delete;
   TestExtensionEnvironment& operator=(const TestExtensionEnvironment&) = delete;
 
   ~TestExtensionEnvironment();
+
+  void SetProfile(TestingProfile* profile);
 
   TestingProfile* profile() const;
 
@@ -78,11 +99,11 @@ class TestExtensionEnvironment {
   // The Extension has a default manifest of {name: "Extension",
   // version: "1.0", manifest_version: 2}, and values in
   // manifest_extra override these defaults.
-  const Extension* MakeExtension(const base::Value& manifest_extra);
+  const Extension* MakeExtension(const base::Value::Dict& manifest_extra);
 
   // Use a specific extension ID instead of the default generated in
   // Extension::Create.
-  const Extension* MakeExtension(const base::Value& manifest_extra,
+  const Extension* MakeExtension(const base::Value::Dict& manifest_extra,
                                  const std::string& id);
 
   // Generates a valid packaged app manifest with the given ID. If |install|
@@ -105,7 +126,7 @@ class TestExtensionEnvironment {
   // |profile_| and destroyed after |profile_|.
   const std::unique_ptr<content::BrowserTaskEnvironment> task_environment_;
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
   const std::unique_ptr<ChromeOSEnv> chromeos_env_;
 #endif
 
@@ -113,8 +134,16 @@ class TestExtensionEnvironment {
   ui::ScopedOleInitializer ole_initializer_;
 #endif
 
+  // TestingProfile may be created or not, depending on the caller's
+  // configuration passed to the constructor. This member keeps the ownership
+  // if the mode is kCreate.
   std::unique_ptr<TestingProfile> profile_;
-  raw_ptr<ExtensionService> extension_service_ = nullptr;
+
+  // Unowned pointer of Profile for this test environment. May be the pointer
+  // to `profile_`, or may be injected by SetProfile().
+  raw_ptr<TestingProfile, DanglingUntriaged> profile_ptr_;
+
+  raw_ptr<ExtensionService, DanglingUntriaged> extension_service_ = nullptr;
 };
 
 }  // namespace extensions

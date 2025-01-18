@@ -12,10 +12,10 @@
 #include "base/win/windows_types.h"
 #endif  // BUILDFLAG(IS_WIN)
 
-#include "base/callback.h"
 #include "base/check.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/functional/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/process/process.h"
 #include "ui/gfx/native_widget_types.h"
@@ -99,7 +99,7 @@ class ProcessSingleton {
   // handled within the current browser instance or false if the remote process
   // should handle it (i.e., because the current process is shutting down).
   using NotificationCallback =
-      base::RepeatingCallback<bool(const base::CommandLine& command_line,
+      base::RepeatingCallback<bool(base::CommandLine command_line,
                                    const base::FilePath& current_directory)>;
 
   ProcessSingleton(const base::FilePath& user_data_dir,

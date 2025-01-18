@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_content.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
@@ -34,13 +33,13 @@ TEST_F(CSSImageValueTest, BlockPotentiallyDanglingMarkup) {
   test::RunPendingTasks();
   Compositor().BeginFrame();
 
-  auto* t1 = GetDocument().getElementById("t1");
+  auto* t1 = GetDocument().getElementById(AtomicString("t1"));
   ImageResourceContent* content1 =
       t1->ComputedStyleRef().BackgroundLayers().GetImage()->CachedImage();
   ASSERT_TRUE(content1);
   EXPECT_TRUE(content1->ErrorOccurred());
 
-  auto* t2 = GetDocument().getElementById("t2");
+  auto* t2 = GetDocument().getElementById(AtomicString("t2"));
   ImageResourceContent* content2 =
       t2->ComputedStyleRef().BackgroundLayers().GetImage()->CachedImage();
   ASSERT_TRUE(content2);

@@ -20,6 +20,7 @@
 
 #if BUILDFLAG(ENABLE_LIBRARY_CDMS)
 #include "media/cdm/cdm_paths.h"
+#include "media/cdm/clear_key_cdm_common.h"
 #endif
 
 namespace {
@@ -46,15 +47,16 @@ void MeasureSizeAndTimeToLoadNativeLibrary(
   // test data even though one is production code.
   base::FilePath output_dir;
   ASSERT_TRUE(
-      base::PathService::Get(base::DIR_GEN_TEST_DATA_ROOT, &output_dir));
+      base::PathService::Get(base::DIR_OUT_TEST_DATA_ROOT, &output_dir));
   output_dir = output_dir.Append(library_relative_dir);
   base::FilePath library_path = output_dir.Append(library_name);
   ASSERT_TRUE(base::PathExists(library_path)) << library_path.value();
 
-  int64_t size = 0;
-  ASSERT_TRUE(base::GetFileSize(library_path, &size));
+  std::optional<int64_t> size = base::GetFileSize(library_path);
+  ASSERT_TRUE(size.has_value());
   auto reporter = SetUpReporter(library_name.AsUTF8Unsafe());
-  reporter.AddResult(kMetricLibrarySizeBytes, static_cast<size_t>(size));
+  reporter.AddResult(kMetricLibrarySizeBytes,
+                     static_cast<size_t>(size.value()));
 
   base::NativeLibraryLoadError error;
   base::TimeTicks start = base::TimeTicks::Now();

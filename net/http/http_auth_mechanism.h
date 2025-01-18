@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "base/callback_forward.h"
+#include "base/functional/callback_forward.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/net_export.h"
 #include "net/http/http_auth.h"
@@ -28,7 +28,8 @@ class NET_EXPORT_PRIVATE HttpAuthMechanism {
   // True if authentication needs the identity of the user from Chrome.
   virtual bool NeedsIdentity() const = 0;
 
-  // True authentication can use explicit credentials included in the URL.
+  // True if authentication can use explicit credentials included in the URL or
+  // the user may be prompted for credentials.
   virtual bool AllowsExplicitCredentials() const = 0;
 
   // Parse a received Negotiate challenge.

@@ -5,7 +5,7 @@
 #ifndef EXTENSIONS_BROWSER_NETWORK_PERMISSIONS_UPDATER_H_
 #define EXTENSIONS_BROWSER_NETWORK_PERMISSIONS_UPDATER_H_
 
-#include "base/callback.h"
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/types/pass_key.h"
 
@@ -84,7 +84,7 @@ class NetworkPermissionsUpdater {
       std::unique_ptr<NetworkPermissionsUpdater> updater);
 
   // The associated BrowserContext.
-  raw_ptr<content::BrowserContext> const browser_context_;
+  raw_ptr<content::BrowserContext, DanglingUntriaged> const browser_context_;
 
   // A callback to invoke upon completion.
   base::OnceClosure completion_callback_;

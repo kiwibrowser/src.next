@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,7 @@ void OpenedFrameTracker::Trace(Visitor* visitor) const {
 }
 
 bool OpenedFrameTracker::IsEmpty() const {
-  return opened_frames_.IsEmpty();
+  return opened_frames_.empty();
 }
 
 void OpenedFrameTracker::Add(Frame* frame) {

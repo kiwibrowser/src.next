@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,8 +19,14 @@ LayoutTheme& LayoutTheme::NativeTheme() {
 }
 
 String LayoutThemeLinux::ExtraDefaultStyleSheet() {
-  return LayoutThemeDefault::ExtraDefaultStyleSheet() +
-         UncompressResourceAsASCIIString(IDR_UASTYLE_THEME_CHROMIUM_LINUX_CSS);
+  String stylesheet =
+      LayoutThemeDefault::ExtraDefaultStyleSheet() +
+      UncompressResourceAsASCIIString(IDR_UASTYLE_THEME_CHROMIUM_LINUX_CSS);
+  if (RuntimeEnabledFeatures::CustomizableSelectEnabled()) {
+    stylesheet = stylesheet + UncompressResourceAsASCIIString(
+                                  IDR_UASTYLE_CUSTOMIZABLE_SELECT_LINUX_CSS);
+  }
+  return stylesheet;
 }
 
 }  // namespace blink

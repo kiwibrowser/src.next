@@ -6,6 +6,7 @@
 #define EXTENSIONS_BROWSER_MOCK_DISPLAY_INFO_PROVIDER_H_
 
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
@@ -50,7 +51,7 @@ class MockDisplayInfoProvider : public DisplayInfoProvider {
                      ErrorCallback callback) override;
 
   // Helpers, accessors.
-  std::unique_ptr<base::DictionaryValue> GetSetInfoValue() {
+  std::optional<base::Value::Dict> GetSetInfoValue() {
     return std::move(set_info_value_);
   }
 
@@ -72,13 +73,13 @@ class MockDisplayInfoProvider : public DisplayInfoProvider {
 
  private:
   // DisplayInfoProvider override.
-  // Update the content of the |unit| obtained for |display| using
-  // platform specific method.
+  // Update the content of each unit in `units` obtained from the corresponding
+  // display in `displays` using a platform specific method.
   void UpdateDisplayUnitInfoForPlatform(
-      const display::Display& display,
-      extensions::api::system_display::DisplayUnitInfo* unit) override;
+      const std::vector<display::Display>& displays,
+      DisplayUnitInfoList& units) const override;
 
-  std::unique_ptr<base::DictionaryValue> set_info_value_;
+  std::optional<base::Value::Dict> set_info_value_;
   std::string set_info_display_id_;
   bool unified_desktop_enabled_ = false;
   std::set<std::string> overscan_started_;
@@ -89,7 +90,7 @@ class MockDisplayInfoProvider : public DisplayInfoProvider {
   MockScreen screen_;
 
   api::system_display::MirrorMode mirror_mode_ =
-      api::system_display::MIRROR_MODE_OFF;
+      api::system_display::MirrorMode::kOff;
 };
 
 }  // namespace extensions

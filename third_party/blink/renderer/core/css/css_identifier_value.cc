@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,13 +22,19 @@ CSSIdentifierValue* CSSIdentifierValue::Create(CSSValueID value_id) {
 }
 
 String CSSIdentifierValue::CustomCSSText() const {
-  return AtomicString(getValueName(value_id_));
+  return GetCSSValueNameAs<AtomicString>(value_id_);
 }
 
 CSSIdentifierValue::CSSIdentifierValue(CSSValueID value_id)
     : CSSValue(kIdentifierClass), value_id_(value_id) {
   // TODO(sashab): Add a DCHECK_NE(valueID, CSSValueID::kInvalid) once no code
   // paths cause this to happen.
+}
+
+CSSIdentifierValue::CSSIdentifierValue(CSSValueID value_id, bool was_quirky)
+    : CSSValue(kIdentifierClass), value_id_(value_id) {
+  DCHECK_NE(value_id, CSSValueID::kInvalid);
+  was_quirky_ = was_quirky;
 }
 
 CSSIdentifierValue::CSSIdentifierValue(const Length& length)
@@ -42,6 +48,9 @@ CSSIdentifierValue::CSSIdentifierValue(const Length& length)
       break;
     case Length::kMaxContent:
       value_id_ = CSSValueID::kMaxContent;
+      break;
+    case Length::kStretch:
+      value_id_ = CSSValueID::kStretch;
       break;
     case Length::kFillAvailable:
       value_id_ = CSSValueID::kWebkitFillAvailable;
@@ -58,12 +67,12 @@ CSSIdentifierValue::CSSIdentifierValue(const Length& length)
     case Length::kPercent:
     case Length::kFixed:
     case Length::kCalculated:
+    case Length::kFlex:
     case Length::kDeviceWidth:
     case Length::kDeviceHeight:
     case Length::kMinIntrinsic:
     case Length::kNone:
       NOTREACHED();
-      break;
   }
 }
 

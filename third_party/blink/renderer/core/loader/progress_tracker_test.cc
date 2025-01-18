@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/testing/fake_local_frame_host.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
+#include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
 namespace blink {
@@ -20,7 +21,7 @@ class ProgressTrackerTest : public testing::Test, public FakeLocalFrameHost {
  public:
   ProgressTrackerTest()
       : response_(KURL("http://example.com")), last_progress_(0.0) {
-    response_.SetMimeType("text/html");
+    response_.SetMimeType(AtomicString("text/html"));
     response_.SetExpectedContentLength(1024);
   }
 
@@ -74,6 +75,7 @@ class ProgressTrackerTest : public testing::Test, public FakeLocalFrameHost {
   }
 
  private:
+  test::TaskEnvironment task_environment_;
   mutable base::RunLoop* current_run_loop_ = nullptr;
   frame_test_helpers::TestWebFrameClient web_frame_client_;
   frame_test_helpers::WebViewHelper web_view_helper_;

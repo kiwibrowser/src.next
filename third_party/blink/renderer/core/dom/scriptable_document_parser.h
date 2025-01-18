@@ -34,25 +34,18 @@
 #include "third_party/blink/renderer/core/dom/parser_content_policy.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_position.h"
 
 namespace blink {
 
-class SourceKeyedCachedMetadataHandler;
-
 class CORE_EXPORT ScriptableDocumentParser : public DecodedDataDocumentParser {
  public:
-  void Trace(Visitor*) const override;
-
   // Only used by Document::open for deciding if its safe to act on a
   // JavaScript document.open() call right now, or it should be ignored.
   virtual bool IsExecutingScript() const { return false; }
 
   virtual void ExecuteScriptsWaitingForResources() = 0;
-  // |NotifyNoRemainingAsyncScripts()| is only used for
-  // |kDOMContentLoadedWaitForAsyncScript|. Notify the parser that it might be
-  // ready to proceed to |end()| because now we might have no async scripts.
-  virtual void NotifyNoRemainingAsyncScripts() = 0;
 
   virtual bool IsWaitingForScripts() const = 0;
   virtual void DidAddPendingParserBlockingStylesheet() = 0;
@@ -72,14 +65,6 @@ class CORE_EXPORT ScriptableDocumentParser : public DecodedDataDocumentParser {
     return parser_content_policy_;
   }
 
-  void SetInlineScriptCacheHandler(
-      SourceKeyedCachedMetadataHandler* cache_handler) {
-    inline_script_cache_handler_ = cache_handler;
-  }
-  SourceKeyedCachedMetadataHandler* GetInlineScriptCacheHandler() const {
-    return inline_script_cache_handler_;
-  }
-
   // Adds a script streamer for |source| which can be later retrieved with
   // TakeInlineScriptStreamer(). This may be called on any thread.
   void AddInlineScriptStreamer(
@@ -90,16 +75,7 @@ class CORE_EXPORT ScriptableDocumentParser : public DecodedDataDocumentParser {
   // The returned streamer is guaranteed to be correct for script text that
   // matches the passed in |source|.
   InlineScriptStreamer* TakeInlineScriptStreamer(const String& source);
-
-  // Adds a tokenizer for |source| which can be later retrieved with
-  // TakeCSSTokenizer(). This may be called on any thread.
-  void AddCSSTokenizer(const String& source,
-                       std::unique_ptr<CachedCSSTokenizer> tokenizer);
-
-  // Takes ownership of a tokenizer previously added with AddCSSTokenizer().
-  // The returned tokenizer is guaranteed to be correct for CSS text that
-  // matches the passed in |source|.
-  std::unique_ptr<CachedCSSTokenizer> TakeCSSTokenizer(const String& source);
+  bool HasInlineScriptStreamerForTesting(const String& source);
 
  protected:
   explicit ScriptableDocumentParser(
@@ -109,8 +85,6 @@ class CORE_EXPORT ScriptableDocumentParser : public DecodedDataDocumentParser {
  private:
   ScriptableDocumentParser* AsScriptableDocumentParser() final { return this; }
 
-  Member<SourceKeyedCachedMetadataHandler> inline_script_cache_handler_;
-
   // http://www.whatwg.org/specs/web-apps/current-work/#script-created-parser
   bool was_created_by_script_;
   ParserContentPolicy parser_content_policy_;
@@ -118,10 +92,6 @@ class CORE_EXPORT ScriptableDocumentParser : public DecodedDataDocumentParser {
   base::Lock streamers_lock_;
   HashMap<String, scoped_refptr<BackgroundInlineScriptStreamer>>
       inline_script_streamers_ GUARDED_BY(streamers_lock_);
-
-  base::Lock tokenizers_lock_;
-  HashMap<String, std::unique_ptr<CachedCSSTokenizer>> inline_css_tokenizers_
-      GUARDED_BY(tokenizers_lock_);
 };
 
 }  // namespace blink

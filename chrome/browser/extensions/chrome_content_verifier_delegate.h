@@ -7,12 +7,13 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 
 #include "base/memory/raw_ptr.h"
-#include "extensions/browser/content_verifier_delegate.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "extensions/browser/content_verifier/content_verifier_delegate.h"
+#include "extensions/common/extension_id.h"
 
 namespace content {
 class BrowserContext;
@@ -63,7 +64,7 @@ class ChromeContentVerifierDelegate : public ContentVerifierDelegate {
   };
 
   static VerifyInfo::Mode GetDefaultMode();
-  static void SetDefaultModeForTesting(absl::optional<VerifyInfo::Mode> mode);
+  static void SetDefaultModeForTesting(std::optional<VerifyInfo::Mode> mode);
 
   explicit ChromeContentVerifierDelegate(content::BrowserContext* context);
 
@@ -76,13 +77,31 @@ class ChromeContentVerifierDelegate : public ContentVerifierDelegate {
   // ContentVerifierDelegate:
   VerifierSourceType GetVerifierSourceType(const Extension& extension) override;
   ContentVerifierKey GetPublicKey() override;
-  GURL GetSignatureFetchUrl(const std::string& extension_id,
+  GURL GetSignatureFetchUrl(const ExtensionId& extension_id,
                             const base::Version& version) override;
   std::set<base::FilePath> GetBrowserImagePaths(
       const extensions::Extension* extension) override;
-  void VerifyFailed(const std::string& extension_id,
+  void VerifyFailed(const ExtensionId& extension_id,
                     ContentVerifyJob::FailureReason reason) override;
   void Shutdown() override;
+
+  // A helper class to allow tests to provide their own `VerifyInfo` for
+  // different extensions. The included callback will be called for each check
+  // of `GetVerifyInfo()`.
+  class GetVerifyInfoTestOverride {
+   public:
+    using VerifyInfoCallback =
+        base::RepeatingCallback<VerifyInfo(const Extension& extension)>;
+
+    explicit GetVerifyInfoTestOverride(VerifyInfoCallback callback);
+    GetVerifyInfoTestOverride(const GetVerifyInfoTestOverride&) = delete;
+    GetVerifyInfoTestOverride& operator=(const GetVerifyInfoTestOverride&) =
+        delete;
+    ~GetVerifyInfoTestOverride();
+
+   private:
+    VerifyInfoCallback callback_;
+  };
 
  private:
   // Returns true iff |extension| is considered extension from Chrome Web Store
@@ -92,22 +111,22 @@ class ChromeContentVerifierDelegate : public ContentVerifierDelegate {
   // Returns information needed for content verification of |extension|.
   VerifyInfo GetVerifyInfo(const Extension& extension) const;
 
-  raw_ptr<content::BrowserContext> context_;
+  raw_ptr<content::BrowserContext, AcrossTasksDanglingUntriaged> context_;
   VerifyInfo::Mode default_mode_;
 
   // This maps an extension id to a backoff entry for slowing down
   // redownload/reinstall of corrupt policy extensions if it keeps happening
   // in a loop (eg crbug.com/661738).
-  std::map<std::string, std::unique_ptr<net::BackoffEntry>>
+  std::map<ExtensionId, std::unique_ptr<net::BackoffEntry>>
       policy_reinstall_backoff_;
 
   // For reporting metrics in BOOTSTRAP mode, when an extension would be
   // disabled if content verification was in ENFORCE mode.
-  std::set<std::string> would_be_disabled_ids_;
+  std::set<ExtensionId> would_be_disabled_ids_;
 
   // For reporting metrics about extensions without hashes, which we want to
   // reinstall in the future. See https://crbug.com/958794#c22 for details.
-  std::set<std::string> would_be_reinstalled_ids_;
+  std::set<ExtensionId> would_be_reinstalled_ids_;
 };
 
 }  // namespace extensions

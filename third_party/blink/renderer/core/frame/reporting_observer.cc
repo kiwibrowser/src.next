@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,8 @@ ReportingObserver* ReportingObserver::Create(
 ReportingObserver::ReportingObserver(ExecutionContext* execution_context,
                                      V8ReportingObserverCallback* callback,
                                      ReportingObserverOptions* options)
-    : ExecutionContextClient(execution_context),
+    : ActiveScriptWrappable<ReportingObserver>({}),
+      ExecutionContextClient(execution_context),
       execution_context_(execution_context),
       callback_(callback),
       options_(options),
@@ -54,13 +55,14 @@ void ReportingObserver::QueueReport(Report* report) {
   // batch.
   if (report_queue_.size() == 1) {
     execution_context_->GetTaskRunner(TaskType::kMiscPlatformAPI)
-        ->PostTask(FROM_HERE, WTF::Bind(&ReportingObserver::ReportToCallback,
-                                        WrapWeakPersistent(this)));
+        ->PostTask(FROM_HERE,
+                   WTF::BindOnce(&ReportingObserver::ReportToCallback,
+                                 WrapWeakPersistent(this)));
   }
 }
 
 bool ReportingObserver::ObservedType(const String& type) {
-  return !options_->hasTypesNonNull() || options_->typesNonNull().IsEmpty() ||
+  return !options_->hasTypesNonNull() || options_->typesNonNull().empty() ||
          options_->typesNonNull().Find(type) != kNotFound;
 }
 

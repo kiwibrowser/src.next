@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,10 @@
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/loader/fetch/client_hints_preferences.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
+
+namespace ukm {
+class UkmRecorder;
+}  // namespace ukm
 
 namespace blink {
 
@@ -21,6 +25,8 @@ class FrameClientHintsPreferencesContext final
  public:
   explicit FrameClientHintsPreferencesContext(LocalFrame*);
 
+  ukm::SourceId GetUkmSourceId() override;
+  ukm::UkmRecorder* GetUkmRecorder() override;
   void CountClientHints(network::mojom::WebClientHintsType) override;
 
  private:

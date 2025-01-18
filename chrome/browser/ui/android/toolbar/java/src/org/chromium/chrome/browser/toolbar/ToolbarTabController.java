@@ -4,23 +4,21 @@
 
 package org.chromium.chrome.browser.toolbar;
 
-import org.chromium.base.lifetime.Destroyable;
-import org.chromium.components.browser_ui.widget.gesture.BackPressHandler;
-
-/**
- * Handles toolbar triggered actions on the specific tab.
- */
-public interface ToolbarTabController extends BackPressHandler, Destroyable {
+/** Handles toolbar triggered actions on the specific tab. */
+public interface ToolbarTabController {
     /**
-     * If the page is currently loading, this will trigger the tab to stop.  If the page is fully
+     * If the page is currently loading, this will trigger the tab to stop. If the page is fully
      * loaded, this will trigger a refresh.
      *
      * <p>The buttons of the toolbar will be updated as a result of making this call.
+     *
+     * @param ignoreCache Whether a reload should ignore the cache (hard-reload).
      */
-    void stopOrReloadCurrentTab();
+    void stopOrReloadCurrentTab(boolean ignoreCache);
 
     /**
      * Handles a back press action in tab page.
+     *
      * @return True if back press event is consumed here.
      */
     boolean back();
@@ -31,8 +29,6 @@ public interface ToolbarTabController extends BackPressHandler, Destroyable {
      */
     boolean forward();
 
-    /**
-     * Opens hompage in the current tab.
-     */
+    /** Opens hompage in the current tab. */
     void openHomepage();
 }
