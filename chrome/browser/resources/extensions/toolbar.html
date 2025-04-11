@@ -68,6 +68,13 @@
     --cr-toolbar-field-max-width: var(--cr-toolbar-center-basis);
     --cr-toolbar-field-width: 100%;
   }
+
+  /* On small screens hide the toggle label so to live space for toggle itself. */
+  @media (max-width: 400px) {
+    #devModeLabel {
+      display: none;
+    }
+  }
 </style>
 <cr-toolbar page-name="$i18n{toolbarTitle}" search-prompt="$i18n{search}"
     clear-label="$i18n{clearSearch}" menu-label="$i18n{mainMenu}" show-menu

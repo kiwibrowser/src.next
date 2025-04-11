@@ -34,7 +34,8 @@
     display: grid;
     grid-column-gap: var(--grid-gutter);
     grid-row-gap: var(--grid-gutter);
-    grid-template-columns: repeat(auto-fill, var(--extensions-card-width));
+    /* Grid column width can not be larger than screen width. */
+    grid-template-columns: repeat(auto-fill, min(var(--extensions-card-width), 100vw));
     justify-content: center;
     margin: auto;
     max-width: calc(var(--extensions-card-width) * var(--max-columns) +

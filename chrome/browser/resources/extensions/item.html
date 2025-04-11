@@ -44,6 +44,8 @@
     display: flex;
     flex-direction: column;
     height: var(--extensions-card-height);
+    /* Card can not we wider than the screen size. */
+    max-width: 100vw;
     /* Duration matches --drawer-transition from toolbar.html. */
     transition: height 300ms cubic-bezier(.25, .1, .25, 1);
   }
