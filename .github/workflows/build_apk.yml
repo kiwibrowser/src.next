@@ -50,7 +50,9 @@ jobs:
         run: |
           if [ -f "src/CHROMIUM_VERSION" ]; then
             source src/CHROMIUM_VERSION
-            export $(cut -d= -f1 src/CHROMIUM_VERSION | grep -vF '#')
+            while IFS= read -r var; do
+              export "$var"
+            done < <(cut -d= -f1 src/CHROMIUM_VERSION | grep -vF '#')
             env | grep -F CHROMIUM_ >> "$GITHUB_ENV"
             echo "Building Chromium ${CHROMIUM_MAJOR}.${CHROMIUM_MINOR}.${CHROMIUM_BUILD}.${CHROMIUM_PATCH}"
           fi
