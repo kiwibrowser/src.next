@@ -117,44 +117,28 @@ jobs:
       - name: Apply Kiwi modifications
         run: |
           # Copy Kiwi-specific modifications over Chromium base
-          rsync -avz --progress --exclude=".git" kiwi-patches/ src/
+          echo "Applying Kiwi patches from kiwi-patches/ to src/"
+          rsync -av --progress --exclude=".git" --exclude=".github" kiwi-patches/ src/
+          echo "Checking if Kiwi files were applied:"
+          ls -la src/.build/ || echo "No .build directory found"
+          ls -la src/chrome/android/java/res_chromium/ || echo "No Kiwi chrome resources found"
 
       - name: Configure build
         run: |
           export PATH="${GITHUB_WORKSPACE}/depot_tools:$PATH"
           cd src
-          # Copy args from production reference or use simplified config
-          if [ -f ".build/production_build_reference/args.gn" ]; then
-            echo "Using production build args"
-            mkdir -p out/Default
-            cp .build/production_build_reference/args.gn out/Default/args.gn
-            # Override keystore settings for CI
-            echo 'android_keystore_path = "//android_keystore"' >> out/Default/args.gn
-            echo 'android_keystore_name = "dev"' >> out/Default/args.gn
-            echo 'android_keystore_password = "public_password"' >> out/Default/args.gn
-            gn gen out/Default
-          else
-            echo "Using simplified build args"
-            gn gen out/Default --args='
-              target_os="android"
-              target_cpu="arm64"
-              is_debug=false
-              is_java_debug=false
-              android_channel="dev"
-              is_official_build=false
-              is_component_build=false
-              is_chrome_branded=false
-              symbol_level=0
-              ffmpeg_branding="Chrome"
-              proprietary_codecs=true
-              enable_nacl=false
-              enable_widevine=true
-              enable_extensions=true
-              enable_pdf=false
-              disable_android_lint=true
-              treat_warnings_as_errors=false
-            '
-          fi
+          # Use minimal working configuration for Android
+          gn gen out/Default --args='
+            target_os="android"
+            target_cpu="arm64"
+            is_debug=false
+            is_component_build=false
+            symbol_level=0
+            ffmpeg_branding="Chrome"
+            proprietary_codecs=true
+            enable_nacl=false
+            android_channel="stable"
+          '
 
       - name: Build APK
         run: |
