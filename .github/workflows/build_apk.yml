@@ -82,9 +82,8 @@ jobs:
       - name: Configure gclient
         run: |
           export PATH="${GITHUB_WORKSPACE}/depot_tools:$PATH"
-          cd src
           # Create .gclient file for Chromium Android build
-          cat > ../.gclient << 'EOF'
+          cat > .gclient << 'EOF'
           solutions = [
             {
               "name": "src",
@@ -102,7 +101,6 @@ jobs:
       - name: Run gclient sync
         run: |
           export PATH="${GITHUB_WORKSPACE}/depot_tools:$PATH"
-          cd src
           gclient sync --no-history --shallow
 
       - name: Configure build
