@@ -77,6 +77,10 @@ jobs:
       - name: Configure gclient for Chromium
         run: |
           export PATH="${GITHUB_WORKSPACE}/depot_tools:$PATH"
+          # Ensure required directories exist
+          mkdir -p src/build/config
+          mkdir -p src/third_party
+          
           # Create .gclient file - source already checked out, just need dependencies
           cat > .gclient << 'EOF'
           solutions = [
@@ -113,45 +117,55 @@ jobs:
 
       - name: Apply Kiwi modifications
         run: |
-          # Copy only Kiwi-specific modifications, not entire Chromium
+          # Copy Kiwi-specific modifications including extensions support
           echo "Applying Kiwi modifications from kiwi branch to latest chromium"
           
           # Copy Kiwi-only directories (not in vanilla Chromium)
+          echo "Copying Kiwi-specific directories..."
           cp -r kiwi-src/.build src/ 2>/dev/null || echo ".build not found"
           cp -r kiwi-src/toolbox src/ 2>/dev/null || echo "toolbox not found"
           cp -r kiwi-src/local_scripts src/ 2>/dev/null || echo "local_scripts not found"
           
-          # Create a diff and apply only changed files
-          cd kiwi-src
+          # Copy entire extensions directory (Kiwi's main feature)
+          echo "Copying extensions support..."
+          rsync -av --progress kiwi-src/extensions/ src/extensions/ 2>/dev/null || echo "extensions not found"
           
-          # Find files that exist in kiwi but are modifications of Chromium files
-          # Copy only specific Kiwi-modified files
-          find chrome components content extensions ui net base services third_party \
-            -type f \( -name "*.java" -o -name "*.xml" -o -name "*.gn" -o -name "*.gni" \
-            -o -name "*.cc" -o -name "*.h" -o -name "*.mm" -o -name "*.py" \) \
-            2>/dev/null | while read file; do
-              # Check if file exists in both and is different
-              if [ -f "../src/$file" ]; then
-                if ! cmp -s "$file" "../src/$file"; then
-                  echo "Copying modified: $file"
-                  mkdir -p "../src/$(dirname "$file")"
-                  cp "$file" "../src/$file"
-                fi
-              else
-                # New file added by Kiwi
-                echo "Adding new: $file"
-                mkdir -p "../src/$(dirname "$file")"
-                cp "$file" "../src/$file"
-              fi
-            done
+          # Copy chrome modifications (includes Android extensions UI)
+          echo "Copying Chrome modifications..."
+          rsync -av --progress kiwi-src/chrome/android/ src/chrome/android/ 2>/dev/null || echo "chrome/android not found"
+          rsync -av --progress kiwi-src/chrome/browser/extensions/ src/chrome/browser/extensions/ 2>/dev/null || echo "chrome/browser/extensions not found"
+          rsync -av --progress kiwi-src/chrome/browser/ui/android/ src/chrome/browser/ui/android/ 2>/dev/null || echo "chrome/browser/ui/android not found"
           
-          cd ..
+          # Copy components modifications
+          echo "Copying components modifications..."
+          rsync -av --progress kiwi-src/components/ src/components/ 2>/dev/null || echo "components not found"
+          
+          # Copy content modifications
+          echo "Copying content modifications..."
+          rsync -av --progress kiwi-src/content/ src/content/ 2>/dev/null || echo "content not found"
+          
+          # Copy UI modifications
+          echo "Copying UI modifications..."
+          rsync -av --progress kiwi-src/ui/ src/ui/ 2>/dev/null || echo "ui not found"
+          
+          # Copy build files and configurations
+          echo "Copying build configurations..."
+          find kiwi-src -maxdepth 2 -name "BUILD.gn" -o -name "*.gni" | while read file; do
+            rel_path="${file#kiwi-src/}"
+            if [ -f "$file" ]; then
+              mkdir -p "src/$(dirname "$rel_path")"
+              cp "$file" "src/$rel_path"
+            fi
+          done
           
           # Copy version files
           cp kiwi-src/KIWI_VERSION src/ 2>/dev/null || echo "KIWI_VERSION not found"
           cp kiwi-src/VERSION src/ 2>/dev/null || echo "VERSION not found"
           
-          echo "Kiwi modifications applied"
+          echo "Kiwi modifications applied successfully"
+          echo "Checking extensions support:"
+          ls -la src/extensions/ | head -20
+          ls -la src/.build/ 2>/dev/null || echo "No .build directory"
 
       - name: Configure build
         run: |
