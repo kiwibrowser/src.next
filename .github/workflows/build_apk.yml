@@ -27,10 +27,33 @@ jobs:
           echo "After cleanup:"
           df -h
 
-      - name: Checkout code
+      - name: Checkout Kiwi code
         uses: actions/checkout@v4
         with:
+          ref: kiwi
+          path: kiwi-patches
           fetch-depth: 0
+
+      - name: Checkout Chromium base
+        uses: actions/checkout@v4
+        with:
+          ref: chromium
+          path: src
+          fetch-depth: 0
+
+      - name: Apply Kiwi modifications
+        run: |
+          # Copy Kiwi-specific modifications over Chromium base
+          rsync -avz --progress --exclude=".git" kiwi-patches/ src/
+          
+      - name: Load Chromium version
+        run: |
+          if [ -f "src/CHROMIUM_VERSION" ]; then
+            source src/CHROMIUM_VERSION
+            export $(cut -d= -f1 src/CHROMIUM_VERSION | grep -vF '#')
+            env | grep -F CHROMIUM_ >> "$GITHUB_ENV"
+            echo "Building Chromium ${CHROMIUM_MAJOR}.${CHROMIUM_MINOR}.${CHROMIUM_BUILD}.${CHROMIUM_PATCH}"
+          fi
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -54,29 +77,10 @@ jobs:
           git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
           echo "${GITHUB_WORKSPACE}/depot_tools" >> "$GITHUB_PATH"
 
-      - name: Configure gclient
-        run: |
-          cat > .gclient << 'EOF'
-          solutions = [
-            {
-              "name": "src",
-              "url": "https://github.com/${{ github.repository_owner }}/${{ github.event.repository.name }}.git",
-              "managed": False,
-              "custom_deps": {},
-            },
-          ]
-          target_os = ["android"]
-          EOF
-          cat .gclient
-
-      - name: Sync dependencies
+      - name: Run gclient hooks
         run: |
           export PATH="${GITHUB_WORKSPACE}/depot_tools:$PATH"
-          gclient sync --nohooks --no-history
-
-      - name: Run hooks
-        run: |
-          export PATH="${GITHUB_WORKSPACE}/depot_tools:$PATH"
+          cd src
           gclient runhooks
 
       - name: Configure build
@@ -150,6 +154,7 @@ jobs:
         run: |
           {
             echo "### Build Summary :rocket:"
+            echo "- **Chromium Version:** ${CHROMIUM_MAJOR}.${CHROMIUM_MINOR}.${CHROMIUM_BUILD}.${CHROMIUM_PATCH}"
             echo "- **Branch:** ${{ steps.branch-name.outputs.current_branch }}"
             echo "- **Commit:** ${{ github.sha }}"
             echo "- **Run ID:** ${{ github.run_id }}"
