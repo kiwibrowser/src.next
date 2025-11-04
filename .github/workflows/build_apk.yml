@@ -33,18 +33,6 @@ jobs:
           ref: kiwi
           path: kiwi-patches
           fetch-depth: 0
-
-      - name: Checkout Chromium base
-        uses: actions/checkout@v4
-        with:
-          ref: chromium
-          path: src
-          fetch-depth: 0
-
-      - name: Apply Kiwi modifications
-        run: |
-          # Copy Kiwi-specific modifications over Chromium base
-          rsync -avz --progress --exclude=".git" kiwi-patches/ src/
           
       - name: Load Chromium version
         run: |
@@ -79,21 +67,26 @@ jobs:
           git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
           echo "${GITHUB_WORKSPACE}/depot_tools" >> "$GITHUB_PATH"
 
-      - name: Ensure build directories exist
-        run: |
-          mkdir -p src/build/config
-          mkdir -p src/third_party
-
-      - name: Configure gclient
+      - name: Configure gclient for Chromium
         run: |
           export PATH="${GITHUB_WORKSPACE}/depot_tools:$PATH"
+          # Determine Chromium version from kiwi-patches
+          if [ -f "kiwi-patches/CHROMIUM_VERSION" ]; then
+            source kiwi-patches/CHROMIUM_VERSION
+            CHROMIUM_TAG="${CHROMIUM_MAJOR}.${CHROMIUM_MINOR}.${CHROMIUM_BUILD}.${CHROMIUM_PATCH}"
+            echo "Fetching Chromium version: ${CHROMIUM_TAG}"
+          else
+            echo "Warning: CHROMIUM_VERSION not found, using latest"
+            CHROMIUM_TAG="105.0.5195.24"
+          fi
+          
           # Create .gclient file for Chromium Android build
-          cat > .gclient << 'EOF'
+          cat > .gclient << EOF
           solutions = [
             {
               "name": "src",
-              "url": "https://chromium.googlesource.com/chromium/src.git",
-              "managed": False,
+              "url": "https://chromium.googlesource.com/chromium/src.git@${CHROMIUM_TAG}",
+              "managed": True,
               "custom_deps": {},
               "custom_vars": {
                 "checkout_android": True,
@@ -103,11 +96,15 @@ jobs:
           target_os = ["android"]
           EOF
 
-      - name: Run gclient sync
+      - name: Sync Chromium source
         run: |
           export PATH="${GITHUB_WORKSPACE}/depot_tools:$PATH"
-          gclient sync --no-history --shallow --nohooks || true
-          gclient runhooks
+          gclient sync --no-history --shallow
+
+      - name: Apply Kiwi modifications
+        run: |
+          # Copy Kiwi-specific modifications over Chromium base
+          rsync -avz --progress --exclude=".git" kiwi-patches/ src/
 
       - name: Configure build
         run: |
