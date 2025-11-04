@@ -79,6 +79,11 @@ jobs:
           git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
           echo "${GITHUB_WORKSPACE}/depot_tools" >> "$GITHUB_PATH"
 
+      - name: Ensure build directories exist
+        run: |
+          mkdir -p src/build/config
+          mkdir -p src/third_party
+
       - name: Configure gclient
         run: |
           export PATH="${GITHUB_WORKSPACE}/depot_tools:$PATH"
@@ -101,7 +106,8 @@ jobs:
       - name: Run gclient sync
         run: |
           export PATH="${GITHUB_WORKSPACE}/depot_tools:$PATH"
-          gclient sync --no-history --shallow
+          gclient sync --no-history --shallow --nohooks || true
+          gclient runhooks
 
       - name: Configure build
         run: |
