@@ -17,23 +17,55 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 1
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v3
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-pip git curl wget
+          
+      - name: Setup depot_tools
+        run: |
+          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          echo "$GITHUB_WORKSPACE/depot_tools" >> $GITHUB_PATH
+
+      - name: Sync Chromium dependencies
+        run: |
+          gclient sync --nohooks
+
+      - name: Run hooks
+        run: |
+          gclient runhooks
+
+      - name: Build APK
+        run: |
+          cd $GITHUB_WORKSPACE
+          gn gen out/Release --args='target_os="android" target_cpu="arm64" is_debug=false is_official_build=true'
+          autoninja -C out/Release chrome_public_apk
+
+      - name: Rename APK
+        run: |
+          cp out/Release/apks/ChromePublic.apk out.apk
+
+      - name: Upload APK as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: kiwi-browser-apk
+          path: out.apk
+          retention-days: 30
+
       - name: Get branch name
         id: branch-name
         uses: tj-actions/branch-names@v4.8
-    
-      - name: Building APK (if manually triggered)
-        if: github.event_name != 'pull_request'
-        run: curl --http1.0 --no-buffer -s 'http://longbuild.find.kiwi/build_apk.php?build_key=${{ secrets.BUILD_KEY }}&git_user=${{ github.repository_owner }}&git_repository=${{ github.event.repository.name }}&git_runid=${{ github.run_id }}&git_branch=${{ steps.branch-name.outputs.current_branch }}'
-
-      # Variables are from: https://docs.github.com/en/developers/webhooks-and-events/webhooks/webhook-events-and-payloads#pullrequestevent
-      # and https://docs.github.com/en/rest/reference/pulls
-      - name: Building APK (if pull request)
-        if: github.event_name == 'pull_request'
-        run: curl --http1.0 --no-buffer -s 'http://longbuild.find.kiwi/build_apk.php?build_key=${{ secrets.BUILD_KEY }}&git_user=${{ github.event.pull_request.head.repo.owner.login }}&git_repository=${{ github.event.pull_request.head.repo.name }}&git_runid=${{ github.run_id }}&git_branch=${{ github.event.pull_request.head.ref }}'
-
-      - name: Downloading APK
-        if: github.event_name != 'pull_request'
-        run: wget -q 'https://build.find.kiwi/apks/${{ github.run_id }}/out.apk'
 
       - name: Creating release
         if: github.event_name != 'pull_request'
@@ -48,6 +80,7 @@ jobs:
           prerelease: true
           body: |
             This is a test build initiated by ${{ github.actor }}.
+            Built on GitHub Actions runners.
 
       - name: Uploading test apk (arm64)
         if: github.event_name != 'pull_request'
@@ -60,6 +93,6 @@ jobs:
           asset_name: ${{ github.repository_owner }}.${{ github.event.repository.name }}.${{ steps.branch-name.outputs.current_branch }}.${{ github.run_id }}-unofficial-arm64.apk
           asset_content_type: application/vnd.android.package-archive
 
-      - name: Displaying download link
-        run: echo "Build can be downloaded at https://build.find.kiwi/apks/${{ github.run_id }}/out.apk"
+      - name: Displaying result
+        run: echo "Build completed successfully! APK available in artifacts and release."
 
