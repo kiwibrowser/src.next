@@ -36,7 +36,7 @@ jobs:
       - name: Setup depot_tools
         run: |
           git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
-          echo "$GITHUB_WORKSPACE/depot_tools" >> $GITHUB_PATH
+          echo "${GITHUB_WORKSPACE}/depot_tools" >> "$GITHUB_PATH"
 
       - name: Sync Chromium dependencies
         run: |
@@ -48,7 +48,7 @@ jobs:
 
       - name: Build APK
         run: |
-          cd $GITHUB_WORKSPACE
+          cd "${GITHUB_WORKSPACE}"
           gn gen out/Release --args='target_os="android" target_cpu="arm64" is_debug=false is_official_build=true'
           autoninja -C out/Release chrome_public_apk
 
