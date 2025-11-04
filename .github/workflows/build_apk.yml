@@ -151,9 +151,11 @@ jobs:
 
       - name: Build summary
         run: |
-          echo "### Build Summary :rocket:" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Branch:** ${{ steps.branch-name.outputs.current_branch }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Commit:** ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Run ID:** ${{ github.run_id }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Artifacts:** Available in workflow artifacts" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### Build Summary :rocket:"
+            echo "- **Branch:** ${{ steps.branch-name.outputs.current_branch }}"
+            echo "- **Commit:** ${{ github.sha }}"
+            echo "- **Run ID:** ${{ github.run_id }}"
+            echo "- **Artifacts:** Available in workflow artifacts"
+          } >> "$GITHUB_STEP_SUMMARY"
 
