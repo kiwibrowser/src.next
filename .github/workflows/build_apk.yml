@@ -1,7 +1,7 @@
 # Build APKs for Kiwi Browser Next
 name: 'Any branch: Build APK'
 
-# Controls when the action will run. Triggers the workflow on pull request events or manual trigger
+# Controls when the action will run
 on:
   pull_request:
     branches:
@@ -10,89 +10,150 @@ on:
 
 concurrency: build_test_apk
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   build:
-    # The type of runner that the job will run on
     runs-on: ubuntu-latest
-
+    
     steps:
+      - name: Maximize build space
+        run: |
+          echo "Before cleanup:"
+          df -h
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          echo "After cleanup:"
+          df -h
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
 
-      - name: Set up JDK 11
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '11'
+          java-version: '17'
           distribution: 'temurin'
 
-      - name: Install dependencies
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3 python3-pip git curl wget
-          
+          sudo apt-get install -y \
+            python3 python3-pip git curl wget \
+            build-essential ninja-build pkg-config \
+            libnss3-dev libglib2.0-dev libgtk-3-dev \
+            libatk1.0-dev libatk-bridge2.0-dev \
+            libcups2-dev libdrm-dev libxkbcommon-dev \
+            libgbm-dev libasound2-dev
+
       - name: Setup depot_tools
         run: |
           git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
           echo "${GITHUB_WORKSPACE}/depot_tools" >> "$GITHUB_PATH"
 
-      - name: Sync Chromium dependencies
+      - name: Configure gclient
         run: |
-          gclient sync --nohooks
+          cat > .gclient << 'EOF'
+          solutions = [
+            {
+              "name": "src",
+              "url": "https://github.com/${{ github.repository_owner }}/${{ github.event.repository.name }}.git",
+              "managed": False,
+              "custom_deps": {},
+            },
+          ]
+          target_os = ["android"]
+          EOF
+          cat .gclient
+
+      - name: Sync dependencies
+        run: |
+          export PATH="${GITHUB_WORKSPACE}/depot_tools:$PATH"
+          gclient sync --nohooks --no-history
 
       - name: Run hooks
         run: |
+          export PATH="${GITHUB_WORKSPACE}/depot_tools:$PATH"
           gclient runhooks
+
+      - name: Configure build
+        run: |
+          export PATH="${GITHUB_WORKSPACE}/depot_tools:$PATH"
+          cd src
+          gn gen out/Default --args='
+            target_os="android"
+            target_cpu="arm64"
+            is_debug=false
+            is_official_build=false
+            is_component_build=false
+            symbol_level=0
+            enable_nacl=false
+            remove_webcore_debug_symbols=true
+          '
 
       - name: Build APK
         run: |
-          cd "${GITHUB_WORKSPACE}"
-          gn gen out/Release --args='target_os="android" target_cpu="arm64" is_debug=false is_official_build=true'
-          autoninja -C out/Release chrome_public_apk
+          export PATH="${GITHUB_WORKSPACE}/depot_tools:$PATH"
+          cd src
+          autoninja -C out/Default chrome_public_apk
 
-      - name: Rename APK
+      - name: Prepare artifacts
         run: |
-          cp out/Release/apks/ChromePublic.apk out.apk
+          mkdir -p artifacts
+          cp src/out/Default/apks/*.apk artifacts/ || true
+          ls -lah artifacts/
 
       - name: Upload APK as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kiwi-browser-apk
-          path: out.apk
+          name: kiwi-browser-apk-${{ github.run_id }}
+          path: artifacts/*.apk
           retention-days: 30
+          if-no-files-found: error
 
       - name: Get branch name
         id: branch-name
         uses: tj-actions/branch-names@v4.8
 
-      - name: Creating release
+      - name: Create release
         if: github.event_name != 'pull_request'
         id: create_release
         uses: actions/create-release@v1.1.4
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ github.run_id }}
-          release_name: Test build ${{ github.run_id }} initiated by ${{ github.actor }}
+          tag_name: build-${{ github.run_id }}
+          release_name: Build ${{ github.run_id }} by ${{ github.actor }}
           draft: true
           prerelease: true
           body: |
-            This is a test build initiated by ${{ github.actor }}.
-            Built on GitHub Actions runners.
+            Automated build initiated by ${{ github.actor }}
+            Branch: ${{ steps.branch-name.outputs.current_branch }}
+            Commit: ${{ github.sha }}
+            Built on GitHub Actions
 
-      - name: Uploading test apk (arm64)
+      - name: Upload release asset
         if: github.event_name != 'pull_request'
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./out.apk
-          asset_name: ${{ github.repository_owner }}.${{ github.event.repository.name }}.${{ steps.branch-name.outputs.current_branch }}.${{ github.run_id }}-unofficial-arm64.apk
+          asset_path: artifacts/ChromePublic.apk
+          asset_name: KiwiBrowser-${{ steps.branch-name.outputs.current_branch }}-${{ github.run_id }}-arm64.apk
           asset_content_type: application/vnd.android.package-archive
 
-      - name: Displaying result
-        run: echo "Build completed successfully! APK available in artifacts and release."
+      - name: Build summary
+        run: |
+          echo "### Build Summary :rocket:" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Branch:** ${{ steps.branch-name.outputs.current_branch }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Commit:** ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Run ID:** ${{ github.run_id }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Artifacts:** Available in workflow artifacts" >> "$GITHUB_STEP_SUMMARY"
 
