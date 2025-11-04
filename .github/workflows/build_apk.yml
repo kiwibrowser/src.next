@@ -40,7 +40,19 @@ jobs:
           ref: kiwi
           path: kiwi-src
           fetch-depth: 1
-          
+
+      - name: Create .gn file for GN build system
+        run: |
+          # Create .gn file in src directory (required by GN to identify source root)
+          cat > src/.gn << 'EOF'
+          buildconfig = "//build/config/BUILDCONFIG.gn"
+
+          script_executable = "python3"
+
+          root = "//"
+          EOF
+          echo "Created .gn file in src directory"
+
       - name: Load Chromium version
         run: |
           if [ -f "src/CHROMIUM_VERSION" ]; then
