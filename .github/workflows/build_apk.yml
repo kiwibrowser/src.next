@@ -27,12 +27,19 @@ jobs:
           echo "After cleanup:"
           df -h
 
-      - name: Checkout Kiwi code
+      - name: Checkout latest Chromium
+        uses: actions/checkout@v4
+        with:
+          ref: chromium
+          path: src
+          fetch-depth: 1
+
+      - name: Checkout Kiwi modifications
         uses: actions/checkout@v4
         with:
           ref: kiwi
-          path: kiwi-patches
-          fetch-depth: 0
+          path: kiwi-src
+          fetch-depth: 1
           
       - name: Load Chromium version
         run: |
@@ -70,23 +77,13 @@ jobs:
       - name: Configure gclient for Chromium
         run: |
           export PATH="${GITHUB_WORKSPACE}/depot_tools:$PATH"
-          # Determine Chromium version from kiwi-patches
-          if [ -f "kiwi-patches/CHROMIUM_VERSION" ]; then
-            source kiwi-patches/CHROMIUM_VERSION
-            CHROMIUM_TAG="${CHROMIUM_MAJOR}.${CHROMIUM_MINOR}.${CHROMIUM_BUILD}.${CHROMIUM_PATCH}"
-            echo "Fetching Chromium version: ${CHROMIUM_TAG}"
-          else
-            echo "Warning: CHROMIUM_VERSION not found, using latest"
-            CHROMIUM_TAG="105.0.5195.24"
-          fi
-          
-          # Create .gclient file for Chromium Android build
-          cat > .gclient << EOF
+          # Create .gclient file - source already checked out, just need dependencies
+          cat > .gclient << 'EOF'
           solutions = [
             {
               "name": "src",
-              "url": "https://chromium.googlesource.com/chromium/src.git@${CHROMIUM_TAG}",
-              "managed": True,
+              "url": "https://chromium.googlesource.com/chromium/src.git",
+              "managed": False,
               "custom_deps": {},
               "custom_vars": {
                 "checkout_android": True,
@@ -96,11 +93,11 @@ jobs:
           target_os = ["android"]
           EOF
 
-      - name: Sync Chromium source
+      - name: Sync Chromium dependencies
         run: |
           export PATH="${GITHUB_WORKSPACE}/depot_tools:$PATH"
-          # Sync with --nohooks to avoid optional tool download failures
-          gclient sync --no-history --shallow --nohooks
+          # Sync only dependencies (source already checked out from chromium branch)
+          gclient sync -D --no-history --shallow --nohooks
           
       - name: Run essential build hooks
         run: |
@@ -116,12 +113,45 @@ jobs:
 
       - name: Apply Kiwi modifications
         run: |
-          # Copy Kiwi-specific modifications over Chromium base
-          echo "Applying Kiwi patches from kiwi-patches/ to src/"
-          rsync -av --progress --exclude=".git" --exclude=".github" kiwi-patches/ src/
-          echo "Checking if Kiwi files were applied:"
-          ls -la src/.build/ || echo "No .build directory found"
-          ls -la src/chrome/android/java/res_chromium/ || echo "No Kiwi chrome resources found"
+          # Copy only Kiwi-specific modifications, not entire Chromium
+          echo "Applying Kiwi modifications from kiwi branch to latest chromium"
+          
+          # Copy Kiwi-only directories (not in vanilla Chromium)
+          cp -r kiwi-src/.build src/ 2>/dev/null || echo ".build not found"
+          cp -r kiwi-src/toolbox src/ 2>/dev/null || echo "toolbox not found"
+          cp -r kiwi-src/local_scripts src/ 2>/dev/null || echo "local_scripts not found"
+          
+          # Create a diff and apply only changed files
+          cd kiwi-src
+          
+          # Find files that exist in kiwi but are modifications of Chromium files
+          # Copy only specific Kiwi-modified files
+          find chrome components content extensions ui net base services third_party \
+            -type f \( -name "*.java" -o -name "*.xml" -o -name "*.gn" -o -name "*.gni" \
+            -o -name "*.cc" -o -name "*.h" -o -name "*.mm" -o -name "*.py" \) \
+            2>/dev/null | while read file; do
+              # Check if file exists in both and is different
+              if [ -f "../src/$file" ]; then
+                if ! cmp -s "$file" "../src/$file"; then
+                  echo "Copying modified: $file"
+                  mkdir -p "../src/$(dirname "$file")"
+                  cp "$file" "../src/$file"
+                fi
+              else
+                # New file added by Kiwi
+                echo "Adding new: $file"
+                mkdir -p "../src/$(dirname "$file")"
+                cp "$file" "../src/$file"
+              fi
+            done
+          
+          cd ..
+          
+          # Copy version files
+          cp kiwi-src/KIWI_VERSION src/ 2>/dev/null || echo "KIWI_VERSION not found"
+          cp kiwi-src/VERSION src/ 2>/dev/null || echo "VERSION not found"
+          
+          echo "Kiwi modifications applied"
 
       - name: Configure build
         run: |
