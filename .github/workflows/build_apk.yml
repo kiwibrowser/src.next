@@ -109,6 +109,8 @@ jobs:
           cd src
           python3 build/landmines.py || true
           python3 build/util/lastchange.py -o build/util/LASTCHANGE || true
+          # Install sysroots for both host (amd64) and target (arm64)
+          python3 build/linux/sysroot_scripts/install-sysroot.py --arch=amd64 || true
           python3 build/linux/sysroot_scripts/install-sysroot.py --arch=arm64 || true
           python3 tools/clang/scripts/update.py || true
 
