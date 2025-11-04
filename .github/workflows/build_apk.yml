@@ -99,7 +99,18 @@ jobs:
       - name: Sync Chromium source
         run: |
           export PATH="${GITHUB_WORKSPACE}/depot_tools:$PATH"
-          gclient sync --no-history --shallow
+          # Sync with --nohooks to avoid optional tool download failures
+          gclient sync --no-history --shallow --nohooks
+          
+      - name: Run essential build hooks
+        run: |
+          export PATH="${GITHUB_WORKSPACE}/depot_tools:$PATH"
+          # Run hooks but allow non-critical failures
+          cd src
+          python3 build/landmines.py || true
+          python3 build/util/lastchange.py -o build/util/LASTCHANGE || true
+          python3 build/linux/sysroot_scripts/install-sysroot.py --arch=arm64 || true
+          python3 tools/clang/scripts/update.py || true
 
       - name: Apply Kiwi modifications
         run: |
