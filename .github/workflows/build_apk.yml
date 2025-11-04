@@ -123,15 +123,41 @@ jobs:
         run: |
           export PATH="${GITHUB_WORKSPACE}/depot_tools:$PATH"
           cd src
+          # Use Kiwi's production build args as reference
           gn gen out/Default --args='
             target_os="android"
             target_cpu="arm64"
             is_debug=false
-            is_official_build=false
+            is_java_debug=false
+            android_channel="dev"
+            is_official_build=true
             is_component_build=false
-            symbol_level=0
+            is_chrome_branded=false
+            is_clang=true
+            symbol_level=1
+            use_unofficial_version_number=false
+            android_default_version_code="1"
+            android_default_version_name="Git"
+            fieldtrial_testing_like_official_build=true
+            icu_use_data_file=false
+            enable_iterator_debugging=false
+            google_api_key="KIWIBROWSER"
+            google_default_client_id="42.apps.kiwibrowser.com"
+            google_default_client_secret="KIWIBROWSER_NOT_SO_SECRET"
+            use_official_google_api_keys=false
+            ffmpeg_branding="Chrome"
+            proprietary_codecs=true
             enable_nacl=false
-            remove_webcore_debug_symbols=true
+            enable_widevine=true
+            enable_mse_mpeg2ts_stream_parser=true
+            enable_remoting=false
+            rtc_use_h264=false
+            v8_use_external_startup_data=true
+            enable_extensions=true
+            enable_pdf=false
+            enable_plugins=false
+            disable_android_lint=true
+            treat_warnings_as_errors=false
           '
 
       - name: Build APK
